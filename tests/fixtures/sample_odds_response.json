@@ -1,0 +1,110 @@
+{
+  "id": "abc123def456",
+  "sport_key": "basketball_nba",
+  "sport_title": "NBA",
+  "commence_time": "2024-10-20T00:00:00Z",
+  "home_team": "Los Angeles Lakers",
+  "away_team": "Boston Celtics",
+  "bookmakers": [
+    {
+      "key": "fanduel",
+      "title": "FanDuel",
+      "last_update": "2024-10-19T18:30:00Z",
+      "markets": [
+        {
+          "key": "h2h",
+          "outcomes": [
+            {
+              "name": "Los Angeles Lakers",
+              "price": -110
+            },
+            {
+              "name": "Boston Celtics",
+              "price": -110
+            }
+          ]
+        },
+        {
+          "key": "spreads",
+          "outcomes": [
+            {
+              "name": "Los Angeles Lakers",
+              "price": -110,
+              "point": -2.5
+            },
+            {
+              "name": "Boston Celtics",
+              "price": -110,
+              "point": 2.5
+            }
+          ]
+        },
+        {
+          "key": "totals",
+          "outcomes": [
+            {
+              "name": "Over",
+              "price": -110,
+              "point": 218.5
+            },
+            {
+              "name": "Under",
+              "price": -110,
+              "point": 218.5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "draftkings",
+      "title": "DraftKings",
+      "last_update": "2024-10-19T18:32:00Z",
+      "markets": [
+        {
+          "key": "h2h",
+          "outcomes": [
+            {
+              "name": "Los Angeles Lakers",
+              "price": -115
+            },
+            {
+              "name": "Boston Celtics",
+              "price": -105
+            }
+          ]
+        },
+        {
+          "key": "spreads",
+          "outcomes": [
+            {
+              "name": "Los Angeles Lakers",
+              "price": -108,
+              "point": -2.5
+            },
+            {
+              "name": "Boston Celtics",
+              "price": -112,
+              "point": 2.5
+            }
+          ]
+        },
+        {
+          "key": "totals",
+          "outcomes": [
+            {
+              "name": "Over",
+              "price": -112,
+              "point": 219.0
+            },
+            {
+              "name": "Under",
+              "price": -108,
+              "point": 219.0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

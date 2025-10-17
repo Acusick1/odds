@@ -1,0 +1,20 @@
+{
+  "id": "abc123def456",
+  "sport_key": "basketball_nba",
+  "sport_title": "NBA",
+  "commence_time": "2024-10-19T00:00:00Z",
+  "completed": true,
+  "home_team": "Los Angeles Lakers",
+  "away_team": "Boston Celtics",
+  "scores": [
+    {
+      "name": "Los Angeles Lakers",
+      "score": "112"
+    },
+    {
+      "name": "Boston Celtics",
+      "score": "108"
+    }
+  ],
+  "last_update": "2024-10-19T02:45:00Z"
+}

@@ -1,6 +1,6 @@
 # Betting Odds Data Pipeline - Technical Specification
 
-IMPORTANT (LLM agents): This document is read-only and should only be modified by the user.
+IMPORTANT (LLM agents): This document is read-only and should only be modified by the user. Do not create additional documentation files (outside of README.md) without confirming with the user first, only make a case for additional documentation files when you believe they are absolutely necessary.
 
 ## System Overview
 
@@ -32,12 +32,15 @@ A single-user betting odds data collection and analysis system focused on NBA ga
 - **asyncio + aiohttp**: Asynchronous API calls and operations
 
 ### Key Libraries
+- **uv**: Fast Python package installer and dependency management
 - **APScheduler**: Job scheduling for periodic data collection
 - **Typer + Rich**: CLI interface with formatted output
 - **Pydantic Settings**: Configuration management via environment variables
 - **Alembic**: Database migrations
+- **tenacity**: Retry logic with exponential backoff
 - **pytest + pytest-asyncio**: Testing framework
 - **structlog**: Structured logging
+- **ruff**: Fast Python linter and formatter (used in pre-commit hooks)
 
 ### Deployment
 - **Docker + docker-compose**: Local development containerization
@@ -132,8 +135,8 @@ class OddsSnapshot(SQLModel, table=True):
     event_id: str = Field(foreign_key="events.id", index=True)
     snapshot_time: datetime = Field(index=True)
     
-    # Full API response stored as JSONB
-    raw_data: dict = Field(sa_column=Column(JSONB))
+    # Full API response stored as JSON
+    raw_data: dict = Field(sa_column=Column(JSON))
     
     # Quick statistics
     bookmaker_count: int
@@ -190,7 +193,7 @@ class DataQualityLog(SQLModel, table=True):
     severity: str  # warning, error, critical
     issue_type: str  # missing_data, suspicious_odds, stale_timestamp, etc.
     description: str
-    raw_data: dict | None = Field(sa_column=Column(JSONB))
+    raw_data: dict | None = Field(sa_column=Column(JSON))
     
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 ```
@@ -217,10 +220,11 @@ class FetchLog(SQLModel, table=True):
 
 ### Storage Strategy: Hybrid Approach
 
-**Raw Data (OddsSnapshot)**: Complete API responses stored as JSONB for:
+**Raw Data (OddsSnapshot)**: Complete API responses stored as JSON for:
 - Debugging and auditing
 - Schema flexibility
 - Exact data preservation
+- Note: PostgreSQL JSON type is used; consider migrating to JSONB for better query performance
 
 **Normalized Data (Odds)**: Individual odds records for:
 - Efficient querying and filtering
@@ -240,7 +244,9 @@ betting-odds-system/
 │   ├── models.py              # SQLModel schema definitions
 │   ├── database.py            # Database connection & session management
 │   ├── data_fetcher.py        # The Odds API client
-│   └── config.py              # Configuration management
+│   ├── config.py              # Configuration management
+│   ├── backfill_executor.py   # Backfill execution logic
+│   └── game_selector.py       # Strategic game selection for backfill
 │
 ├── storage/
 │   ├── writers.py             # Write operations (inserts, updates)
@@ -252,7 +258,7 @@ betting-odds-system/
 │   └── jobs.py                # Job definitions
 │
 ├── analytics/
-│   └── queries.py             # Common query patterns
+│   └── __init__.py            # Analytics module (queries.py not yet implemented)
 │
 ├── alerts/
 │   └── base.py                # Alert infrastructure (for future use)
@@ -262,14 +268,14 @@ betting-odds-system/
 │   └── commands/
 │       ├── fetch.py           # Data collection commands
 │       ├── status.py          # System health monitoring
-│       ├── backfill.py        # Historical data collection
-│       └── validate.py        # Data quality checks
+│       └── backfill.py        # Historical data collection
 │
 ├── migrations/                # Alembic database migrations
 ├── tests/                     # Test suite
 ├── docker-compose.yml         # Local development setup
 ├── Dockerfile                 # Container definition
-└── requirements.txt           # Python dependencies
+├── pyproject.toml             # uv dependency management
+└── requirements.txt           # Python dependencies (exported)
 ```
 
 ### Data Collection Pipeline
@@ -287,17 +293,18 @@ betting-odds-system/
 class TheOddsAPIClient:
     """
     Handles all interactions with The Odds API
-    
+
     Features:
     - Rate limiting to respect quota
-    - Retry logic with exponential backoff
+    - Retry logic with exponential backoff (using tenacity)
     - Error handling and logging
     - Quota tracking
     """
-    
+
     async def get_odds(sport, regions, markets, odds_format) -> dict
     async def get_scores(sport, days_from) -> dict
     async def get_historical_odds(sport, date, regions, markets) -> dict
+    async def get_historical_events(sport, date) -> dict  # Discover games without full odds
 ```
 
 ### Data Validation
@@ -356,7 +363,7 @@ class OddsReader:
 
 The system supports two sampling modes with easy switching:
 
-#### Fixed Sampling (Default)
+#### Fixed Sampling
 - Fetch odds at regular intervals regardless of game timing
 - **Default interval**: 30 minutes
 - Simpler logic, predictable API usage
@@ -366,17 +373,18 @@ The system supports two sampling modes with easy switching:
   FIXED_INTERVAL_MINUTES = 30
   ```
 
-#### Adaptive Sampling (Built-in, Disabled by Default)
+#### Adaptive Sampling (Default)
 - Adjust frequency based on proximity to game time
 - More frequent as games approach
 - Configuration:
   ```python
   SAMPLING_MODE = "adaptive"
   ADAPTIVE_INTERVALS = {
-      "far": 30,      # >24h from game: every 30 minutes
-      "medium": 15,   # 3-24h from game: every 15 minutes
-      "near": 5,      # 1-3h from game: every 5 minutes
-      "imminent": 1   # <1h from game: every 1 minute
+      "opening": 72.0,    # 3 days before game: every 72 hours
+      "early": 24.0,      # 24 hours before: every 24 hours
+      "sharp": 12.0,      # 12 hours before: every 12 hours
+      "pregame": 3.0,     # 3 hours before: every 3 hours
+      "closing": 0.5,     # 30 minutes before: every 30 minutes
   }
   ```
 
@@ -438,12 +446,14 @@ class Settings(BaseSettings):
     regions: list[str] = ["us"]
     
     # Sampling Configuration
-    sampling_mode: str = "fixed"  # "fixed" or "adaptive"
+    sampling_mode: str = "adaptive"  # "fixed" or "adaptive"
     fixed_interval_minutes: int = 30
     adaptive_intervals: dict = {
-        "far": 30,
-        "medium": 15,
-        "near": 5
+        "opening": 72.0,
+        "early": 24.0,
+        "sharp": 12.0,
+        "pregame": 3.0,
+        "closing": 0.5,
     }
     
     # Data Quality
@@ -474,7 +484,7 @@ ODDS_API_BASE_URL=https://api.the-odds-api.com/v4
 DATABASE_URL=postgresql://user:password@host:port/database
 
 # Sampling
-SAMPLING_MODE=fixed
+SAMPLING_MODE=adaptive
 FIXED_INTERVAL_MINUTES=30
 
 # Logging
@@ -491,47 +501,52 @@ ALERT_ENABLED=false
 
 ### Command Structure
 
-**Data Collection**:
+**Data Collection** (Implemented):
 ```bash
-odds fetch                              # Manual fetch current odds
-odds fetch --sport basketball_nba       # Specific sport
-odds backfill --start YYYY-MM-DD --end YYYY-MM-DD --sample N
+odds fetch current                      # Manual fetch current odds
+odds fetch current --sport basketball_nba
+odds fetch scores                       # Fetch scores
+odds fetch scores --sport basketball_nba --days 3
 ```
 
-**Status & Monitoring**:
+**Backfill Commands** (Implemented):
 ```bash
-odds status                             # System health overview
-odds status --verbose                   # Detailed statistics
+odds backfill plan --start YYYY-MM-DD --end YYYY-MM-DD --games N
+odds backfill execute --plan backfill_plan.json
+odds backfill status                    # Show backfill progress
+```
+
+**Status & Monitoring** (Implemented):
+```bash
+odds status show                        # System health overview
+odds status show --verbose              # Detailed statistics
+odds status quota                       # Check API usage remaining
+odds status events --days 7             # List recent events
+odds status events --team "Lakers"      # Filter by team
+```
+
+**Future Commands** (Not Yet Implemented):
+```bash
+# Data validation
 odds validate                           # Run data quality checks
-odds quota                              # Check API usage remaining
-```
 
-**Data Inspection**:
-```bash
-odds events --days 7                    # List recent events
-odds events --team "Lakers"             # Filter by team
+# Odds inspection
 odds show-odds --event-id abc123        # View odds for specific event
 odds line-movement --event-id abc123 --bookmaker fanduel
-```
 
-**Configuration**:
-```bash
+# Configuration management
 odds config show                        # Display current config
 odds config set-mode adaptive           # Switch sampling mode
 odds config test-alerts                 # Test alert delivery
-```
 
-**Database Management**:
-```bash
+# Database management
 odds db migrate                         # Run pending migrations
 odds db stats                           # Database statistics
 odds db clean --older-than 90           # Archive old data
-```
 
-**Scheduler Control**:
-```bash
+# Scheduler control
 odds scheduler start                    # Start background jobs
-odds scheduler stop                     # Stop background jobs  
+odds scheduler stop                     # Stop background jobs
 odds scheduler status                   # Check if running
 ```
 
@@ -557,14 +572,17 @@ Use **Rich** library for:
 - Mix of different matchup types
 - ~20% sample rate (every 5th game)
 
-**Selection Criteria**:
+**Selection Criteria** (Implemented in core/game_selector.py):
 ```python
-def select_sample_games(season_games: list, sample_rate: float = 0.2):
+class GameSelector:
     """
+    Strategic game selection for backfill operations
+
     Criteria:
     - Even distribution across season dates
     - Proportional team representation
     - Variety in matchups and game importance
+    - Multiple selection strategies (uniform, random, weighted)
     """
 ```
 
@@ -634,9 +652,11 @@ When alerts are enabled, they could trigger on:
 
 ---
 
-## Backtesting Infrastructure
+## Backtesting Infrastructure (Not Yet Implemented)
 
-### Strategy Pattern
+**Status**: The backtesting system is planned but not yet implemented. The data collection and storage infrastructure is in place to support backtesting once implemented.
+
+### Strategy Pattern (Future Implementation)
 
 ```python
 class BettingStrategy(ABC):
@@ -756,11 +776,11 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:dev_password@postgres:5432/odds
       ODDS_API_KEY: ${ODDS_API_KEY}
-      SAMPLING_MODE: fixed
+      SAMPLING_MODE: adaptive
       FIXED_INTERVAL_MINUTES: 30
     volumes:
       - .:/app
-    command: python scheduler/main.py
+    command: python -m scheduler.main
 
 volumes:
   postgres_data:
@@ -774,16 +794,59 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application
 COPY . .
 
+# Create logs directory
+RUN mkdir -p logs
+
 # Default command (can be overridden)
-CMD ["python", "scheduler/main.py"]
+CMD ["python", "-m", "scheduler.main"]
 ```
+
+---
+
+## Development Workflow
+
+### Dependency Management
+
+The project uses **uv** for fast and reliable Python package management. Use a `toml` file for development and export to a `requirements.txt` for containerization.
+
+### Code Quality
+
+**Ruff** is used for linting and formatting, configured to run automatically via pre-commit hooks:
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+```
+
+**Pre-commit setup**:
+```bash
+# Install pre-commit hooks
+pre-commit install
+
+# Manually run all hooks
+pre-commit run --all-files
+```
+
+Agents/developers do not need to manually run `ruff check` or `ruff format` as these are enforced automatically on commit. Aim for zero type errors in the repository.
 
 ---
 
@@ -857,20 +920,25 @@ Storage scales linearly but remains negligible (~50-100 MB/month).
 ```
 tests/
 ├── unit/
-│   ├── test_models.py           # SQLModel validation
-│   ├── test_validators.py       # Data quality checks
-│   ├── test_parsers.py          # API response parsing
-│   └── test_config.py           # Configuration loading
+│   ├── test_models.py           # SQLModel validation (implemented)
+│   ├── test_validators.py       # Data quality checks (implemented)
+│   ├── test_config.py           # Configuration loading (implemented)
+│   └── test_backfill_executor.py # Backfill executor tests (implemented)
 ├── integration/
-│   ├── test_database.py         # DB operations
-│   ├── test_api_client.py       # API client with mocking
-│   ├── test_scheduler.py        # Job execution
-│   └── test_backtest.py         # Backtesting engine
-└── fixtures/
-    ├── sample_odds_response.json
-    ├── sample_scores_response.json
-    └── historical_data.json
+│   ├── test_database.py         # DB operations (implemented)
+│   └── test_backfill_integration.py # Backfill integration tests (implemented)
+├── fixtures/
+│   ├── sample_odds_response.json     # Implemented
+│   └── sample_scores_response.json   # Implemented
+└── conftest.py                  # Pytest configuration (implemented)
 ```
+
+**Not Yet Implemented**:
+- test_parsers.py
+- test_api_client.py
+- test_scheduler.py
+- test_backtest.py
+- historical_data.json fixture
 
 ### Key Test Areas
 
@@ -933,28 +1001,24 @@ All validation issues logged to `DataQualityLog` table with:
 
 ### Common Analytics Queries
 
-**Line Movement**:
-```python
-async def get_line_movement(event_id: str, bookmaker: str, market: str) -> pd.DataFrame:
-    """
-    Return time series of odds changes for visualization
-    Columns: timestamp, outcome, price, point
-    """
-```
+**Note**: Basic query functions are implemented in `storage/readers.py`. Advanced analytics with pandas DataFrame support planned for future `analytics/queries.py` module.
 
-**Best Odds**:
+**Implemented in OddsReader**:
 ```python
+async def get_line_movement(event_id: str, bookmaker: str, market: str) -> list[Odds]:
+    """
+    Return time series of odds changes
+    Currently returns list of Odds objects (not DataFrame)
+    """
+
 async def get_best_odds(event_id: str, market: str, outcome: str) -> Odds:
     """
     Find highest odds across all bookmakers for specific outcome
     Useful for line shopping
     """
-```
 
-**Odds at Decision Time**:
-```python
 async def get_odds_at_time(
-    event_id: str, 
+    event_id: str,
     timestamp: datetime,
     tolerance_minutes: int = 5
 ) -> list[Odds]:
@@ -964,7 +1028,7 @@ async def get_odds_at_time(
     """
 ```
 
-**Market Comparison**:
+**Planned for analytics/queries.py**:
 ```python
 async def compare_bookmakers(
     event_id: str,
@@ -1131,7 +1195,7 @@ logger.info(
 - Automatic throttling near limit
 
 **Backoff Strategy**:
-- Exponential backoff on API errors
+- Exponential backoff on API errors (using tenacity)
 - Max retry attempts: 3
 - Jitter to prevent thundering herd
 
