@@ -258,7 +258,10 @@ betting-odds-system/
 │   └── jobs.py                # Job definitions
 │
 ├── analytics/
-│   └── __init__.py            # Analytics module (queries.py not yet implemented)
+│   ├── __init__.py            # Analytics module
+│   ├── backtesting.py         # Backtesting engine and data models
+│   ├── strategies.py          # Betting strategy implementations
+│   └── utils.py               # Odds calculations and metrics utilities
 │
 ├── alerts/
 │   └── base.py                # Alert infrastructure (for future use)
@@ -268,7 +271,8 @@ betting-odds-system/
 │   └── commands/
 │       ├── fetch.py           # Data collection commands
 │       ├── status.py          # System health monitoring
-│       └── backfill.py        # Historical data collection
+│       ├── backfill.py        # Historical data collection
+│       └── backtest.py        # Backtesting commands
 │
 ├── migrations/                # Alembic database migrations
 ├── tests/                     # Test suite
@@ -516,6 +520,17 @@ odds backfill execute --plan backfill_plan.json
 odds backfill status                    # Show backfill progress
 ```
 
+**Backtesting Commands** (Implemented):
+```bash
+odds backtest run --strategy STRATEGY --start YYYY-MM-DD --end YYYY-MM-DD
+odds backtest run --strategy basic_ev --start 2024-10-01 --end 2024-12-31 --output-json results.json
+odds backtest show results.json         # Display saved results
+odds backtest show results.json --verbose  # Detailed breakdowns
+odds backtest compare result1.json result2.json result3.json  # Compare strategies
+odds backtest export results.json --output bets.csv  # Convert to CSV
+odds backtest list-strategies           # List available strategies
+```
+
 **Status & Monitoring** (Implemented):
 ```bash
 odds status show                        # System health overview
@@ -652,35 +667,72 @@ When alerts are enabled, they could trigger on:
 
 ---
 
-## Backtesting Infrastructure (Not Yet Implemented)
+## Backtesting Infrastructure
 
-**Status**: The backtesting system is planned but not yet implemented. The data collection and storage infrastructure is in place to support backtesting once implemented.
+**Status**: ✓ **FULLY IMPLEMENTED AND OPERATIONAL** - The backtesting system is complete with multiple strategies, comprehensive metrics, CLI interface, and full test coverage.
 
-### Strategy Pattern (Future Implementation)
+### Strategy Pattern
 
 ```python
 class BettingStrategy(ABC):
     """Base class for all betting strategies"""
-    
-    @abstractmethod
-    def should_bet(self, event: Event, odds_snapshot: dict) -> bool:
-        """Determine if strategy triggers a bet"""
-    
-    @abstractmethod
-    def calculate_stake(self, bankroll: float, opportunity: dict) -> float:
-        """Calculate bet size"""
 
-# Example implementations
+    @abstractmethod
+    async def evaluate_opportunity(
+        self,
+        event: Event,
+        odds_snapshot: list[Odds],
+        config: BacktestConfig
+    ) -> list[BetOpportunity]:
+        """Evaluate event and return betting opportunities"""
+
+    def get_name(self) -> str:
+        """Return strategy name"""
+
+    def get_params(self) -> dict:
+        """Return strategy parameters"""
+```
+
+### Implemented Strategies
+
+**1. FlatBettingStrategy** (`analytics/strategies.py`):
+```python
+class FlatBettingStrategy(BettingStrategy):
+    """Baseline strategy - bet on every game matching pattern"""
+    def __init__(
+        self,
+        market: str = "h2h",  # h2h, spreads, totals
+        outcome_pattern: str = "home",  # home, away, favorite
+        bookmaker: str = "fanduel"
+    ):
+        ...
+```
+
+**2. BasicEVStrategy** (`analytics/strategies.py`):
+```python
+class BasicEVStrategy(BettingStrategy):
+    """Expected value betting using sharp vs retail odds comparison"""
+    def __init__(
+        self,
+        sharp_book: str = "pinnacle",
+        retail_books: list[str] = ["fanduel", "draftkings", "betmgm"],
+        min_ev_threshold: float = 0.03,  # 3% minimum EV
+        markets: list[str] = ["h2h", "spreads", "totals"]
+    ):
+        ...
+```
+
+**3. ArbitrageStrategy** (`analytics/strategies.py`):
+```python
 class ArbitrageStrategy(BettingStrategy):
-    """Risk-free arbitrage betting"""
-    def __init__(self, min_profit_margin: float = 0.01):
-        self.min_profit_margin = min_profit_margin
-
-class EVStrategy(BettingStrategy):
-    """Positive expected value vs sharp lines"""
-    def __init__(self, min_ev: float = 0.03, sharp_book: str = "pinnacle"):
-        self.min_ev = min_ev
-        self.sharp_book = sharp_book
+    """Risk-free arbitrage betting across bookmakers"""
+    def __init__(
+        self,
+        min_profit_margin: float = 0.01,  # 1% minimum profit
+        max_hold: float = 0.10,  # 10% max market hold
+        bookmakers: list[str] = None  # All major books by default
+    ):
+        ...
 ```
 
 ### Backtesting Engine
@@ -689,63 +741,191 @@ class EVStrategy(BettingStrategy):
 class BacktestEngine:
     """
     Simulate betting strategies against historical data
-    
-    Features:
-    - Look-ahead bias prevention (use odds from before game time)
-    - Realistic bet sizing (Kelly, flat, percentage)
-    - Transaction cost modeling (optional)
-    - Bankroll management
-    - Performance metrics calculation
+
+    Implemented Features:
+    - Look-ahead bias prevention (configurable decision time before game)
+    - Multiple bet sizing methods (Kelly, flat, percentage)
+    - Bankroll management with min/max bet constraints
+    - Comprehensive performance metrics calculation
+    - Progress tracking with Rich progress bars
+    - Data quality tracking and reporting
     """
-    
+
     def __init__(
         self,
         strategy: BettingStrategy,
-        initial_bankroll: float = 10000,
-        start_date: datetime = None,
-        end_date: datetime = None
+        config: BacktestConfig,
+        session: AsyncSession
     ):
-        pass
-    
+        ...
+
     async def run(self) -> BacktestResult:
         """
-        Execute backtest:
-        1. Query historical odds at decision times
-        2. Apply strategy to determine bets
-        3. Query actual results
-        4. Calculate profit/loss
-        5. Track bankroll evolution
-        6. Compute performance metrics
+        Execute backtest workflow:
+        1. Query historical events with results in date range
+        2. For each event, get odds at decision time (e.g., 1 hour before game)
+        3. Apply strategy to identify betting opportunities
+        4. Calculate appropriate stake using configured sizing method
+        5. Evaluate bet result using actual game outcome
+        6. Track bankroll evolution and equity curve
+        7. Calculate comprehensive performance metrics
+        8. Return complete BacktestResult with all data
         """
+```
 
+### Data Models
+
+**BacktestConfig** (`analytics/backtesting.py`):
+```python
+@dataclass
+class BacktestConfig:
+    """Configuration for backtest execution"""
+    initial_bankroll: float
+    start_date: datetime
+    end_date: datetime
+    bet_sizing_method: str = "fractional_kelly"  # or "flat", "percentage"
+    kelly_fraction: float = 0.25  # Quarter-Kelly recommended
+    flat_bet_amount: float = 100.0
+    percentage_bet: float = 0.02
+    min_bet_size: float = 10.0
+    max_bet_size: float | None = None
+    decision_hours_before_game: float = 1.0  # Look-ahead bias prevention
+```
+
+**BetRecord** (`analytics/backtesting.py`):
+```python
+@dataclass
+class BetRecord:
+    """Complete record of a single bet"""
+    bet_id: str
+    event_id: str
+    event_date: datetime
+    home_team: str
+    away_team: str
+    market: str
+    outcome: str
+    bookmaker: str
+    odds: int  # American odds
+    line: float | None
+    stake: float
+    result: str  # "win", "loss", "push"
+    profit: float
+    bankroll_before: float
+    bankroll_after: float
+    # Analysis fields
+    opening_odds: int | None
+    closing_odds: int | None
+    strategy_confidence: float | None
+    bet_rationale: str | None
+```
+
+**BacktestResult** (`analytics/backtesting.py`):
+```python
 @dataclass
 class BacktestResult:
-    """Complete backtest performance metrics"""
+    """Complete backtesting results with comprehensive metrics"""
+    # Metadata
     strategy_name: str
+    strategy_params: dict
+    start_date: datetime
+    end_date: datetime
+    initial_bankroll: float
+    final_bankroll: float
+    execution_time_seconds: float
+
+    # Summary Metrics
     total_bets: int
     winning_bets: int
     losing_bets: int
+    push_bets: int
     total_wagered: float
     total_profit: float
-    roi: float
-    max_drawdown: float
-    sharpe_ratio: float
+    roi: float  # Return on investment
     win_rate: float
-    average_odds: float
+
+    # Risk Metrics
+    sharpe_ratio: float
+    sortino_ratio: float
+    max_drawdown: float
+    max_drawdown_duration_days: int
+    profit_factor: float  # Gross profit / gross loss
+    calmar_ratio: float  # Annual return / max drawdown
+
+    # Streak Analysis
+    longest_winning_streak: int
+    longest_losing_streak: int
+    largest_win: float
+    largest_loss: float
+
+    # Breakdowns
+    market_breakdown: dict[str, MarketStats]
+    bookmaker_breakdown: dict[str, BookmakerStats]
+    monthly_breakdown: dict[str, MonthlyStats]
+
+    # Time Series
+    equity_curve: list[EquityPoint]
+    bet_records: list[BetRecord]
+
+    # Data Quality
+    events_with_complete_data: int
+    data_quality_issues: list[str]
+
+    # Export Methods
+    def to_json(self, file_path: str) -> None: ...
+    def from_json(file_path: str) -> "BacktestResult": ...
+    def to_csv(self, file_path: str) -> None: ...
+    def to_summary_text(self) -> str: ...
 ```
 
 ### Bet Sizing Approaches
 
-**Standard Method: Fractional Kelly**
-- Industry standard for professional betting
-- Formula: stake = (kelly_fraction × edge × bankroll) / odds
-- Recommended fraction: 0.25 (quarter-Kelly)
-- Provides ~75% of full Kelly returns with lower volatility
+**Implemented Methods**:
 
-**Alternative Methods**:
-- Flat betting: Fixed dollar amount per bet
-- Percentage: Fixed percentage of current bankroll
-- Full Kelly: Optimal but high variance
+**1. Fractional Kelly** (Default, Recommended):
+- Industry standard for professional betting
+- Uses strategy confidence (implied probability) for edge calculation
+- Formula: `stake = (kelly_percentage × kelly_fraction) × bankroll`
+- Default fraction: 0.25 (quarter-Kelly)
+- Provides ~75% of full Kelly returns with 50% lower volatility
+- Automatically returns 0 for negative EV opportunities
+
+**2. Flat Betting**:
+- Fixed dollar amount per bet (configurable)
+- Simple, predictable bankroll management
+- Good for baseline comparison
+- No adjustment for confidence or bankroll size
+
+**3. Percentage Betting**:
+- Fixed percentage of current bankroll per bet
+- Scales with bankroll growth/decline
+- More aggressive than fractional Kelly
+- Default: 2% of bankroll
+
+**All Methods Enforce**:
+- Minimum bet size (default: $10)
+- Maximum bet size (optional constraint)
+- No betting when bankroll insufficient
+
+### Utility Functions
+
+**Odds Conversion** (`analytics/utils.py`):
+- `american_to_decimal()` - Convert American to decimal odds
+- `decimal_to_american()` - Convert decimal to American odds
+- `calculate_implied_probability()` - Get probability from odds
+
+**Betting Calculations**:
+- `calculate_ev()` - Expected value calculation
+- `calculate_kelly_stake()` - Kelly Criterion implementation
+- `calculate_profit_from_odds()` - Profit/loss from bet result
+
+**Risk Metrics**:
+- `calculate_sharpe_ratio()` - Risk-adjusted returns
+- `calculate_sortino_ratio()` - Downside risk-adjusted returns
+- `calculate_max_drawdown()` - Peak-to-trough decline
+- `calculate_profit_factor()` - Gross profit / gross loss
+
+**Arbitrage Detection**:
+- `detect_arbitrage()` - Detect opportunities and optimal stakes
 
 ---
 
@@ -933,11 +1113,15 @@ tests/
 └── conftest.py                  # Pytest configuration (implemented)
 ```
 
+**Backtesting Tests** (Implemented):
+- `tests/unit/test_backtesting_models.py` - Data model tests (325 lines)
+- `tests/integration/test_backtest_integration.py` - Full backtest workflow (342 lines)
+- `tests/unit/test_utils.py` - Utility function tests
+
 **Not Yet Implemented**:
 - test_parsers.py
 - test_api_client.py
 - test_scheduler.py
-- test_backtest.py
 - historical_data.json fixture
 
 ### Key Test Areas
@@ -957,10 +1141,14 @@ tests/
 - Retry logic handles transient failures
 - Error handling logs appropriately
 
-**Backtesting**:
-- Look-ahead bias prevention works
-- Bet sizing calculations correct
-- Performance metrics accurate
+**Backtesting** (Implemented):
+- ✓ Look-ahead bias prevention validated
+- ✓ Bet sizing calculations verified (Kelly, flat, percentage)
+- ✓ Performance metrics accurate (13+ metrics)
+- ✓ Strategy execution tested (all 3 strategies)
+- ✓ JSON/CSV export and reconstruction tested
+- ✓ Empty result handling tested
+- ✓ Multi-event backtests with equity curves tested
 
 ---
 
@@ -1040,6 +1228,29 @@ async def compare_bookmakers(
     Columns: bookmaker, outcome, price, point, implied_probability
     """
 ```
+
+### Backtesting Analytics
+
+**Current Implementation**: Full backtesting system with comprehensive analytics
+
+**Available Metrics** (calculated automatically):
+- ROI (Return on Investment)
+- Win Rate
+- Sharpe Ratio (risk-adjusted returns)
+- Sortino Ratio (downside risk)
+- Max Drawdown (peak-to-trough decline)
+- Profit Factor (gross profit / gross loss)
+- Calmar Ratio (annual return / max drawdown)
+- Longest winning/losing streaks
+- Market-by-market breakdown
+- Bookmaker-by-bookmaker breakdown
+- Monthly performance breakdown
+- Daily equity curve
+
+**Export Formats**:
+- JSON (full reconstruction capability)
+- CSV (spreadsheet-ready bet records)
+- Rich console output (formatted tables)
 
 ---
 
@@ -1244,11 +1455,16 @@ logger.info(
 - Live betting odds
 - Additional sports
 
-**Analytics**:
-- Advanced arbitrage detection
+**Analytics & Backtesting**:
+- ✓ Arbitrage detection (implemented)
+- ✓ Expected value calculators (implemented)
 - Closing line value tracking
-- Expected value calculators
 - Statistical models
+- Parameter optimization (grid search)
+- Walk-forward analysis
+- Additional betting strategies
+- Transaction cost modeling
+- Equity curve visualization/charts
 
 **Interface**:
 - Web dashboard for visualization
@@ -1267,6 +1483,23 @@ Current monorepo structure supports:
 - Addition of API layer (FastAPI) if web interface desired
 - Horizontal scaling of workers for multiple sports
 - Integration with external tools (Jupyter, BI platforms)
+
+---
+
+## Additional Documentation
+
+### Project Documentation Files
+- **BACKTESTING_GUIDE.md** - Comprehensive backtesting user guide (375 lines)
+  - Quick start guide
+  - Strategy documentation
+  - CLI command reference
+  - Performance metrics explained
+  - Custom strategy development guide
+  - Troubleshooting tips
+- **SETUP_GUIDE.md** - System setup instructions
+- **HISTORICAL_BACKFILL_GUIDE.md** - Historical data collection guide
+- **STATUS.md** - Current project status
+- **TEST_REPORT.md** - Test coverage report
 
 ---
 

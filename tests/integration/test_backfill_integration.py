@@ -1,11 +1,30 @@
 """Integration tests for backfill functionality with real database."""
 
+from datetime import datetime
+
 import pytest
 from sqlalchemy import select
 
 from core.backfill_executor import BackfillExecutor
-from core.models import Event, Odds, OddsSnapshot
+from core.models import Event, EventStatus, Odds, OddsSnapshot
 from storage.readers import OddsReader
+
+
+def _api_dict_to_event(event_data: dict) -> Event:
+    """Convert API response dict to Event instance for testing."""
+    # Parse commence_time
+    commence_time_str = event_data["commence_time"].replace("Z", "+00:00")
+    commence_time = datetime.fromisoformat(commence_time_str).replace(tzinfo=None)
+
+    return Event(
+        id=event_data["id"],
+        sport_key=event_data["sport_key"],
+        sport_title=event_data.get("sport_title", event_data["sport_key"]),
+        commence_time=commence_time,
+        home_team=event_data["home_team"],
+        away_team=event_data["away_team"],
+        status=EventStatus.SCHEDULED,
+    )
 
 
 @pytest.fixture
@@ -141,16 +160,16 @@ class TestBackfillIntegration:
 
         # Create event with old data
         writer = OddsWriter(test_session)
-        await writer.upsert_event(
-            {
-                "id": "integration_test_1",
-                "sport_key": "basketball_nba",
-                "sport_title": "NBA",
-                "commence_time": "2024-01-15T19:00:00Z",
-                "home_team": "Old Lakers",
-                "away_team": "Old Celtics",
-            }
-        )
+        event_data = {
+            "id": "integration_test_1",
+            "sport_key": "basketball_nba",
+            "sport_title": "NBA",
+            "commence_time": "2024-01-15T19:00:00Z",
+            "home_team": "Old Lakers",
+            "away_team": "Old Celtics",
+        }
+        event = _api_dict_to_event(event_data)
+        await writer.upsert_event(event)
         await test_session.commit()
 
         # Run backfill - should update event

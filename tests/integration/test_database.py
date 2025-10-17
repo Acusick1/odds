@@ -4,9 +4,26 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from core.models import EventStatus, Odds
+from core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds
 from storage.readers import OddsReader
 from storage.writers import OddsWriter
+
+
+def _api_dict_to_event(event_data: dict) -> Event:
+    """Convert API response dict to Event instance for testing."""
+    # Parse commence_time
+    commence_time_str = event_data["commence_time"].replace("Z", "+00:00")
+    commence_time = datetime.fromisoformat(commence_time_str).replace(tzinfo=None)
+
+    return Event(
+        id=event_data["id"],
+        sport_key=event_data["sport_key"],
+        sport_title=event_data.get("sport_title", event_data["sport_key"]),
+        commence_time=commence_time,
+        home_team=event_data["home_team"],
+        away_team=event_data["away_team"],
+        status=EventStatus.SCHEDULED,
+    )
 
 
 class TestDatabaseIntegration:
@@ -16,22 +33,21 @@ class TestDatabaseIntegration:
     async def test_create_event(self, test_session):
         """Test creating an event in database."""
         writer = OddsWriter(test_session)
+        event = Event(
+            id="test123",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime.utcnow(),
+            home_team="Lakers",
+            away_team="Celtics",
+        )
 
-        event_data = {
-            "id": "test123",
-            "sport_key": "basketball_nba",
-            "sport_title": "NBA",
-            "commence_time": datetime.utcnow().isoformat() + "Z",
-            "home_team": "Lakers",
-            "away_team": "Celtics",
-        }
-
-        event = await writer.upsert_event(event_data)
+        result = await writer.upsert_event(event)
         await test_session.commit()
 
-        assert event.id == "test123"
-        assert event.home_team == "Lakers"
-        assert event.status == EventStatus.SCHEDULED
+        assert result.id == "test123"
+        assert result.home_team == "Lakers"
+        assert result.status == EventStatus.SCHEDULED
 
     @pytest.mark.asyncio
     async def test_update_event(self, test_session):
@@ -39,41 +55,42 @@ class TestDatabaseIntegration:
         writer = OddsWriter(test_session)
 
         # Create event
-        event_data = {
-            "id": "test123",
-            "sport_key": "basketball_nba",
-            "sport_title": "NBA",
-            "commence_time": datetime.utcnow().isoformat() + "Z",
-            "home_team": "Lakers",
-            "away_team": "Celtics",
-        }
+        event = Event(
+            id="test123",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime.utcnow(),
+            home_team="Lakers",
+            away_team="Celtics",
+        )
 
-        await writer.upsert_event(event_data)
+        await writer.upsert_event(event)
         await test_session.commit()
 
         # Update event
-        event_data["home_team"] = "Golden State Warriors"
-        updated_event = await writer.upsert_event(event_data)
+        updated_event = event.model_copy()
+        updated_event.home_team = "Golden State Warriors"
+        result = await writer.upsert_event(updated_event)
         await test_session.commit()
 
-        assert updated_event.home_team == "Golden State Warriors"
-        assert updated_event.id == "test123"
+        assert result.home_team == "Golden State Warriors"
+        assert result.id == "test123"
 
     @pytest.mark.asyncio
     async def test_store_odds_snapshot(self, test_session, sample_odds_data):
         """Test storing odds snapshot with hybrid storage."""
         writer = OddsWriter(test_session)
 
-        # First create the event
-        event_data = {
-            "id": sample_odds_data["id"],
-            "sport_key": sample_odds_data["sport_key"],
-            "sport_title": sample_odds_data["sport_title"],
-            "commence_time": sample_odds_data["commence_time"],
-            "home_team": sample_odds_data["home_team"],
-            "away_team": sample_odds_data["away_team"],
-        }
-        await writer.upsert_event(event_data)
+        # Create event
+        event = Event(
+            id=sample_odds_data["id"],
+            sport_key=sample_odds_data["sport_key"],
+            sport_title=sample_odds_data["sport_title"],
+            commence_time=datetime.utcnow(),
+            home_team=sample_odds_data["home_team"],
+            away_team=sample_odds_data["away_team"],
+        )
+        await writer.upsert_event(event)
 
         # Store snapshot
         snapshot, odds_records = await writer.store_odds_snapshot(
@@ -101,16 +118,16 @@ class TestDatabaseIntegration:
         reader = OddsReader(test_session)
 
         # Create event
-        event_data = {
-            "id": "test123",
-            "sport_key": "basketball_nba",
-            "sport_title": "NBA",
-            "commence_time": datetime.utcnow().isoformat() + "Z",
-            "home_team": "Lakers",
-            "away_team": "Celtics",
-        }
-
-        await writer.upsert_event(event_data)
+        event = Event(
+            id="test123",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime.utcnow(),
+            home_team="Lakers",
+            away_team="Celtics",
+            status=EventStatus.SCHEDULED,
+        )
+        await writer.upsert_event(event)
         await test_session.commit()
 
         # Update to final with scores
@@ -124,6 +141,7 @@ class TestDatabaseIntegration:
 
         # Verify update
         event = await reader.get_event_by_id("test123")
+        assert event is not None
         assert event.status == EventStatus.FINAL
         assert event.home_score == 112
         assert event.away_score == 108
@@ -134,7 +152,7 @@ class TestDatabaseIntegration:
         """Test logging fetch operations."""
         writer = OddsWriter(test_session)
 
-        log = await writer.log_fetch(
+        fetch_log = FetchLog(
             sport_key="basketball_nba",
             events_count=10,
             bookmakers_count=8,
@@ -142,6 +160,7 @@ class TestDatabaseIntegration:
             api_quota_remaining=19950,
             response_time_ms=234,
         )
+        log = await writer.log_fetch(fetch_log)
 
         await test_session.commit()
 
@@ -154,13 +173,14 @@ class TestDatabaseIntegration:
         """Test logging data quality issues."""
         writer = OddsWriter(test_session)
 
-        log = await writer.log_data_quality_issue(
+        quality_log = DataQualityLog(
             event_id="test123",
             severity="warning",
             issue_type="suspicious_odds",
             description="Vig too high",
             raw_data={"vig": 20.5},
         )
+        log = await writer.log_data_quality_issue(quality_log)
 
         await test_session.commit()
 
@@ -186,7 +206,8 @@ class TestDatabaseIntegration:
                 "home_team": f"Team{i}",
                 "away_team": f"Team{i+1}",
             }
-            await writer.upsert_event(event_data)
+            event = _api_dict_to_event(event_data)
+            await writer.upsert_event(event)
 
         await test_session.commit()
 
@@ -205,26 +226,25 @@ class TestDatabaseIntegration:
         reader = OddsReader(test_session)
 
         # Create events
-        event_data_1 = {
-            "id": "test1",
-            "sport_key": "basketball_nba",
-            "sport_title": "NBA",
-            "commence_time": datetime.utcnow().isoformat() + "Z",
-            "home_team": "Los Angeles Lakers",
-            "away_team": "Boston Celtics",
-        }
+        event1 = Event(
+            id="test1",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime.utcnow(),
+            home_team="Los Angeles Lakers",
+            away_team="Boston Celtics",
+        )
+        event2 = Event(
+            id="test2",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime.utcnow(),
+            home_team="Golden State Warriors",
+            away_team="Los Angeles Lakers",
+        )
 
-        event_data_2 = {
-            "id": "test2",
-            "sport_key": "basketball_nba",
-            "sport_title": "NBA",
-            "commence_time": datetime.utcnow().isoformat() + "Z",
-            "home_team": "Golden State Warriors",
-            "away_team": "Los Angeles Lakers",
-        }
-
-        await writer.upsert_event(event_data_1)
-        await writer.upsert_event(event_data_2)
+        await writer.upsert_event(event1)
+        await writer.upsert_event(event2)
         await test_session.commit()
 
         # Query by team
@@ -240,15 +260,15 @@ class TestDatabaseIntegration:
         reader = OddsReader(test_session)
 
         # Create event
-        event_data = {
-            "id": sample_odds_data["id"],
-            "sport_key": sample_odds_data["sport_key"],
-            "sport_title": sample_odds_data["sport_title"],
-            "commence_time": sample_odds_data["commence_time"],
-            "home_team": sample_odds_data["home_team"],
-            "away_team": sample_odds_data["away_team"],
-        }
-        await writer.upsert_event(event_data)
+        event = Event(
+            id=sample_odds_data["id"],
+            sport_key=sample_odds_data["sport_key"],
+            sport_title=sample_odds_data["sport_title"],
+            commence_time=datetime.utcnow(),
+            home_team=sample_odds_data["home_team"],
+            away_team=sample_odds_data["away_team"],
+        )
+        await writer.upsert_event(event)
 
         # Store snapshot at specific time
         snapshot_time = datetime.utcnow()
@@ -278,15 +298,15 @@ class TestDatabaseIntegration:
         reader = OddsReader(test_session)
 
         # Create some data
-        event_data = {
-            "id": sample_odds_data["id"],
-            "sport_key": sample_odds_data["sport_key"],
-            "sport_title": sample_odds_data["sport_title"],
-            "commence_time": sample_odds_data["commence_time"],
-            "home_team": sample_odds_data["home_team"],
-            "away_team": sample_odds_data["away_team"],
-        }
-        await writer.upsert_event(event_data)
+        event = Event(
+            id=sample_odds_data["id"],
+            sport_key=sample_odds_data["sport_key"],
+            sport_title=sample_odds_data["sport_title"],
+            commence_time=datetime.utcnow(),
+            home_team=sample_odds_data["home_team"],
+            away_team=sample_odds_data["away_team"],
+        )
+        await writer.upsert_event(event)
 
         await writer.store_odds_snapshot(
             event_id=sample_odds_data["id"],
@@ -294,13 +314,14 @@ class TestDatabaseIntegration:
             validate=False,
         )
 
-        await writer.log_fetch(
+        fetch_log = FetchLog(
             sport_key="basketball_nba",
             events_count=1,
             bookmakers_count=2,
             success=True,
             api_quota_remaining=19950,
         )
+        await writer.log_fetch(fetch_log)
 
         await test_session.commit()
 

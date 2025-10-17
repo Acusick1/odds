@@ -3,6 +3,7 @@
 from datetime import datetime
 from enum import Enum
 
+from pydantic import field_validator
 from sqlalchemy import JSON, Column, Index
 from sqlmodel import Field, SQLModel
 
@@ -45,6 +46,14 @@ class Event(SQLModel, table=True):
     updated_at: datetime = Field(
         default_factory=datetime.utcnow, description="Record last update time"
     )
+
+    @field_validator("commence_time", mode="before")
+    def parse_commence_time(cls, v):
+        # TODO: Temporary fix for tests - ensure datetime is naive UTC
+        if isinstance(v, str):
+            v = v.replace("Z", "+00:00")
+            v = datetime.fromisoformat(v).replace(tzinfo=None)
+        return v
 
 
 class OddsSnapshot(SQLModel, table=True):

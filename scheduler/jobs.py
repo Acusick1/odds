@@ -7,7 +7,7 @@ import structlog
 from core.config import settings
 from core.data_fetcher import TheOddsAPIClient
 from core.database import async_session_maker
-from core.models import EventStatus
+from core.models import EventStatus, FetchLog
 from storage.readers import OddsReader
 from storage.writers import OddsWriter
 
@@ -30,7 +30,7 @@ async def fetch_odds_job():
             logger.info("fetching_odds", sport=sport_key)
 
             async with TheOddsAPIClient() as client:
-                # Fetch current odds
+                # Fetch current odds - API client returns parsed Event instances
                 response = await client.get_odds(
                     sport=sport_key,
                     regions=settings.regions,
@@ -38,28 +38,26 @@ async def fetch_odds_job():
                     bookmakers=settings.bookmakers,
                 )
 
-                events_data = response.get("data", [])
-                if not isinstance(events_data, list):
-                    events_data = [events_data] if events_data else []
-
                 # Process each event in its own transaction
                 processed_count = 0
-                for event_data in events_data:
+                for event, event_data in zip(
+                    response.events, response.raw_events_data, strict=True
+                ):
                     try:
                         async with async_session_maker() as event_session:
                             event_writer = OddsWriter(event_session)
 
-                            # Upsert event
-                            await event_writer.upsert_event(event_data)
+                            # Upsert event - already parsed by API client
+                            await event_writer.upsert_event(event)
 
                             # Flush to ensure event exists before quality logging
                             await event_session.flush()
 
-                            # Store odds snapshot
+                            # Store odds snapshot with raw data
                             await event_writer.store_odds_snapshot(
-                                event_id=event_data["id"],
+                                event_id=event.id,
                                 raw_data=event_data,
-                                snapshot_time=response["timestamp"],
+                                snapshot_time=response.timestamp,
                                 validate=settings.enable_validation,
                             )
 
@@ -69,7 +67,7 @@ async def fetch_odds_job():
                     except Exception as e:
                         logger.error(
                             "event_processing_failed",
-                            event_id=event_data.get("id"),
+                            event_id=event.id,
                             error=str(e),
                         )
                         continue
@@ -77,31 +75,35 @@ async def fetch_odds_job():
                 # Log successful fetch in separate transaction
                 async with async_session_maker() as log_session:
                     log_writer = OddsWriter(log_session)
-                    await log_writer.log_fetch(
+                    fetch_log = FetchLog(
                         sport_key=sport_key,
-                        events_count=len(events_data),
+                        events_count=len(response.events),
                         bookmakers_count=len(settings.bookmakers),
                         success=True,
-                        api_quota_remaining=response.get("quota_remaining"),
-                        response_time_ms=response.get("response_time_ms"),
+                        api_quota_remaining=response.quota_remaining,
+                        response_time_ms=response.response_time_ms,
                     )
+                    await log_writer.log_fetch(fetch_log)
                     await log_session.commit()
 
                 logger.info(
                     "fetch_odds_job_completed",
                     sport=sport_key,
                     events=processed_count,
-                    quota_remaining=response.get("quota_remaining"),
+                    quota_remaining=response.quota_remaining,
                 )
 
                 # Warn if quota is running low
-                quota_remaining = response.get("quota_remaining")
-                if quota_remaining and quota_remaining < (settings.odds_api_quota * 0.2):
+                if response.quota_remaining and response.quota_remaining < (
+                    settings.odds_api_quota * 0.2
+                ):
                     logger.warning(
                         "api_quota_low",
-                        remaining=quota_remaining,
+                        remaining=response.quota_remaining,
                         quota=settings.odds_api_quota,
-                        percentage=round(quota_remaining / settings.odds_api_quota * 100, 1),
+                        percentage=round(
+                            response.quota_remaining / settings.odds_api_quota * 100, 1
+                        ),
                     )
 
     except Exception as e:
@@ -111,13 +113,14 @@ async def fetch_odds_job():
         try:
             async with async_session_maker() as fail_session:
                 fail_writer = OddsWriter(fail_session)
-                await fail_writer.log_fetch(
+                fetch_log = FetchLog(
                     sport_key=settings.sports[0] if settings.sports else "unknown",
                     events_count=0,
                     bookmakers_count=0,
                     success=False,
                     error_message=str(e),
                 )
+                await fail_writer.log_fetch(fetch_log)
                 await fail_session.commit()
         except Exception:
             pass
@@ -145,12 +148,8 @@ async def fetch_scores_job():
                     # Fetch scores from last 3 days
                     response = await client.get_scores(sport=sport_key, days_from=3)
 
-                    scores_data = response.get("data", [])
-                    if not isinstance(scores_data, list):
-                        scores_data = [scores_data] if scores_data else []
-
                     updated_count = 0
-                    for score_data in scores_data:
+                    for score_data in response.scores_data:
                         try:
                             event_id = score_data.get("id")
                             completed = score_data.get("completed", False)

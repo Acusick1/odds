@@ -118,61 +118,69 @@ def sample_backfill_plan():
 @pytest.fixture
 def mock_api_response_factory():
     """Factory to create mock API responses for different events."""
+    from datetime import datetime
+
+    from core.api_models import HistoricalOddsResponse, api_dict_to_event
 
     def _create_response(event_id="test_event_1", home_team="Lakers", away_team="Celtics"):
-        return {
-            "data": {
-                "data": [
-                    {
-                        "id": event_id,
-                        "sport_key": "basketball_nba",
-                        "sport_title": "NBA",
-                        "commence_time": "2024-01-15T19:00:00Z",
-                        "home_team": home_team,
-                        "away_team": away_team,
-                        "bookmakers": [
-                            {
-                                "key": "fanduel",
-                                "title": "FanDuel",
-                                "last_update": "2024-01-15T18:00:00Z",
-                                "markets": [
-                                    {
-                                        "key": "h2h",
-                                        "outcomes": [
-                                            {"name": home_team, "price": -150},
-                                            {"name": away_team, "price": 130},
-                                        ],
-                                    },
-                                    {
-                                        "key": "spreads",
-                                        "outcomes": [
-                                            {"name": home_team, "price": -110, "point": -3.5},
-                                            {"name": away_team, "price": -110, "point": 3.5},
-                                        ],
-                                    },
-                                ],
-                            },
-                            {
-                                "key": "draftkings",
-                                "title": "DraftKings",
-                                "last_update": "2024-01-15T18:00:00Z",
-                                "markets": [
-                                    {
-                                        "key": "h2h",
-                                        "outcomes": [
-                                            {"name": home_team, "price": -145},
-                                            {"name": away_team, "price": 125},
-                                        ],
-                                    }
-                                ],
-                            },
-                        ],
-                    }
-                ],
-                "timestamp": "2024-01-15T18:00:00Z",
-            },
-            "quota_remaining": 19950,
+        # Create raw event data dict
+        event_dict = {
+            "id": event_id,
+            "sport_key": "basketball_nba",
+            "sport_title": "NBA",
+            "commence_time": "2024-01-15T19:00:00Z",
+            "home_team": home_team,
+            "away_team": away_team,
+            "bookmakers": [
+                {
+                    "key": "fanduel",
+                    "title": "FanDuel",
+                    "last_update": "2024-01-15T18:00:00Z",
+                    "markets": [
+                        {
+                            "key": "h2h",
+                            "outcomes": [
+                                {"name": home_team, "price": -150},
+                                {"name": away_team, "price": 130},
+                            ],
+                        },
+                        {
+                            "key": "spreads",
+                            "outcomes": [
+                                {"name": home_team, "price": -110, "point": -3.5},
+                                {"name": away_team, "price": -110, "point": 3.5},
+                            ],
+                        },
+                    ],
+                },
+                {
+                    "key": "draftkings",
+                    "title": "DraftKings",
+                    "last_update": "2024-01-15T18:00:00Z",
+                    "markets": [
+                        {
+                            "key": "h2h",
+                            "outcomes": [
+                                {"name": home_team, "price": -145},
+                                {"name": away_team, "price": 125},
+                            ],
+                        }
+                    ],
+                },
+            ],
         }
+
+        # Convert to Event instance
+        event = api_dict_to_event(event_dict)
+
+        # Return HistoricalOddsResponse
+        return HistoricalOddsResponse(
+            events=[event],
+            raw_events_data=[event_dict],
+            response_time_ms=100,
+            quota_remaining=19950,
+            timestamp=datetime(2024, 1, 15, 18, 0, 0),
+        )
 
     return _create_response
 

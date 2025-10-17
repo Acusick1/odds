@@ -30,7 +30,7 @@ class TestSettings:
             assert len(settings.bookmakers) == 8
             assert settings.markets == ["h2h", "spreads", "totals"]
             assert settings.regions == ["us"]
-            assert settings.sampling_mode == "fixed"
+            assert settings.sampling_mode == "adaptive"
             assert settings.fixed_interval_minutes == 30
             assert settings.enable_validation is True
             assert settings.reject_invalid_odds is False
@@ -82,10 +82,10 @@ class TestSettings:
         with patch.dict(os.environ, {"ODDS_API_KEY": "test_key", "DATABASE_URL": "test_url"}):
             settings = Settings()
 
-            assert "far" in settings.adaptive_intervals
-            assert "medium" in settings.adaptive_intervals
-            assert "near" in settings.adaptive_intervals
-            assert "imminent" in settings.adaptive_intervals
-            assert settings.adaptive_intervals["far"] == 30
-            assert settings.adaptive_intervals["medium"] == 15
-            assert settings.adaptive_intervals["near"] == 5
+            assert settings.adaptive_intervals == {
+                "opening": 72.0,
+                "early": 24.0,
+                "sharp": 12.0,
+                "pregame": 3.0,
+                "closing": 0.5,
+            }

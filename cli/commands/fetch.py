@@ -10,6 +10,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from core.config import settings
 from core.data_fetcher import TheOddsAPIClient
 from core.database import async_session_maker
+from core.models import FetchLog
 from storage.writers import OddsWriter
 
 app = typer.Typer()
@@ -40,7 +41,7 @@ async def _fetch_current(sport: str):
             async with TheOddsAPIClient() as client:
                 progress.update(task, description="Fetching odds data...")
 
-                # Fetch odds
+                # Fetch odds - API client returns parsed Event instances
                 response = await client.get_odds(
                     sport=sport,
                     regions=settings.regions,
@@ -48,33 +49,31 @@ async def _fetch_current(sport: str):
                     bookmakers=settings.bookmakers,
                 )
 
-                events_data = response.get("data", [])
-                if not isinstance(events_data, list):
-                    events_data = [events_data] if events_data else []
-
                 progress.update(
                     task,
-                    description=f"Processing {len(events_data)} events...",
+                    description=f"Processing {len(response.events)} events...",
                 )
 
                 # Store to database (each event in its own transaction for isolation)
                 processed = 0
-                for event_data in events_data:
+                for event, event_data in zip(
+                    response.events, response.raw_events_data, strict=True
+                ):
                     try:
                         async with async_session_maker() as session:
                             writer = OddsWriter(session)
 
-                            # Upsert event
-                            await writer.upsert_event(event_data)
+                            # Upsert event - already parsed by API client
+                            await writer.upsert_event(event)
 
                             # Flush to ensure event exists before logging quality issues
                             await session.flush()
 
-                            # Store odds snapshot
+                            # Store odds snapshot with raw data
                             await writer.store_odds_snapshot(
-                                event_id=event_data["id"],
+                                event_id=event.id,
                                 raw_data=event_data,
-                                snapshot_time=response["timestamp"],
+                                snapshot_time=response.timestamp,
                                 validate=settings.enable_validation,
                             )
 
@@ -84,21 +83,22 @@ async def _fetch_current(sport: str):
                     except Exception as e:
                         console.print(
                             f"[yellow]Warning: Failed to process event "
-                            f"{event_data.get('id')}: {str(e)}[/yellow]"
+                            f"{event.id}: {str(e)}[/yellow]"
                         )
                         continue
 
                 # Log fetch in separate transaction
                 async with async_session_maker() as session:
                     writer = OddsWriter(session)
-                    await writer.log_fetch(
+                    fetch_log = FetchLog(
                         sport_key=sport,
-                        events_count=len(events_data),
+                        events_count=len(response.events),
                         bookmakers_count=len(settings.bookmakers),
                         success=True,
-                        api_quota_remaining=response.get("quota_remaining"),
-                        response_time_ms=response.get("response_time_ms"),
+                        api_quota_remaining=response.quota_remaining,
+                        response_time_ms=response.response_time_ms,
                     )
+                    await writer.log_fetch(fetch_log)
                     await session.commit()
 
                 progress.update(task, description="Complete!", completed=True)
@@ -109,13 +109,10 @@ async def _fetch_current(sport: str):
             console.print(f"  Bookmakers: {len(settings.bookmakers)}")
             console.print(f"  Markets: {', '.join(settings.markets)}")
 
-            quota_remaining = response.get("quota_remaining")
-            if quota_remaining:
-                console.print(f"  API quota remaining: {quota_remaining:,}")
+            if response.quota_remaining:
+                console.print(f"  API quota remaining: {response.quota_remaining:,}")
 
-            response_time = response.get("response_time_ms")
-            if response_time:
-                console.print(f"  Response time: {response_time}ms")
+            console.print(f"  Response time: {response.response_time_ms}ms")
 
         except Exception as e:
             progress.update(task, description="Failed!", completed=True)
@@ -150,13 +147,9 @@ async def _fetch_scores(sport: str, days: int):
                 # Fetch scores
                 response = await client.get_scores(sport=sport, days_from=days)
 
-                scores_data = response.get("data", [])
-                if not isinstance(scores_data, list):
-                    scores_data = [scores_data] if scores_data else []
-
                 progress.update(
                     task,
-                    description=f"Processing {len(scores_data)} events...",
+                    description=f"Processing {len(response.scores_data)} events...",
                 )
 
                 # Update database
@@ -164,7 +157,7 @@ async def _fetch_scores(sport: str, days: int):
                     writer = OddsWriter(session)
                     updated = 0
 
-                    for score_data in scores_data:
+                    for score_data in response.scores_data:
                         try:
                             event_id = score_data.get("id")
                             completed = score_data.get("completed", False)
@@ -206,7 +199,7 @@ async def _fetch_scores(sport: str, days: int):
             # Summary
             console.print("\n[bold green]✓ Scores fetch completed![/bold green]")
             console.print(f"  Events updated: {updated}")
-            console.print(f"  Total events: {len(scores_data)}")
+            console.print(f"  Total events: {len(response.scores_data)}")
 
         except Exception as e:
             progress.update(task, description="Failed!", completed=True)

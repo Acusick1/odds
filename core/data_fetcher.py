@@ -12,6 +12,12 @@ from tenacity import (
     wait_exponential,
 )
 
+from core.api_models import (
+    HistoricalOddsResponse,
+    OddsResponse,
+    ScoresResponse,
+    api_dict_to_event,
+)
 from core.config import settings
 
 logger = structlog.get_logger()
@@ -122,7 +128,7 @@ class TheOddsAPIClient:
         markets: list[str] | None = None,
         odds_format: str = "american",
         bookmakers: list[str] | None = None,
-    ) -> dict:
+    ) -> OddsResponse:
         """
         Fetch current odds for a sport.
 
@@ -134,11 +140,13 @@ class TheOddsAPIClient:
             bookmakers: List of bookmakers (defaults to settings)
 
         Returns:
-            API response with odds data
+            OddsResponse with parsed Event instances and raw data
 
         Example:
             async with TheOddsAPIClient() as client:
-                odds = await client.get_odds('basketball_nba')
+                response = await client.get_odds('basketball_nba')
+                for event in response.events:
+                    print(f"{event.home_team} vs {event.away_team}")
         """
         regions = regions or settings.regions
         markets = markets or settings.markets
@@ -153,21 +161,28 @@ class TheOddsAPIClient:
 
         data, response_time = await self._make_request(f"sports/{sport}/odds", params=params)
 
+        # Ensure data is a list
+        raw_events_data = data if isinstance(data, list) else [data] if data else []
+
+        # Convert API dicts to Event instances
+        events = [api_dict_to_event(event_dict) for event_dict in raw_events_data]
+
         logger.info(
             "odds_fetched",
             sport=sport,
-            events_count=len(data) if isinstance(data, list) else 0,
+            events_count=len(events),
             response_time_ms=response_time,
         )
 
-        return {
-            "data": data,
-            "response_time_ms": response_time,
-            "quota_remaining": self._quota_remaining,
-            "timestamp": datetime.utcnow(),
-        }
+        return OddsResponse(
+            events=events,
+            raw_events_data=raw_events_data,
+            response_time_ms=response_time,
+            quota_remaining=self._quota_remaining,
+            timestamp=datetime.utcnow(),
+        )
 
-    async def get_scores(self, sport: str, days_from: int = 1) -> dict:
+    async def get_scores(self, sport: str, days_from: int = 1) -> ScoresResponse:
         """
         Fetch scores for completed games.
 
@@ -176,25 +191,30 @@ class TheOddsAPIClient:
             days_from: Number of days from present to fetch scores
 
         Returns:
-            API response with scores data
+            ScoresResponse with scores data
+
+        Note:
+            Scores are kept as dicts since we only extract scores, not full Event objects
         """
         params = {"daysFrom": days_from}
 
         data, response_time = await self._make_request(f"sports/{sport}/scores", params=params)
 
+        scores_data = data if isinstance(data, list) else [data] if data else []
+
         logger.info(
             "scores_fetched",
             sport=sport,
-            events_count=len(data) if isinstance(data, list) else 0,
+            events_count=len(scores_data),
             response_time_ms=response_time,
         )
 
-        return {
-            "data": data,
-            "response_time_ms": response_time,
-            "quota_remaining": self._quota_remaining,
-            "timestamp": datetime.utcnow(),
-        }
+        return ScoresResponse(
+            scores_data=scores_data,
+            response_time_ms=response_time,
+            quota_remaining=self._quota_remaining,
+            timestamp=datetime.utcnow(),
+        )
 
     async def get_historical_odds(
         self,
@@ -204,7 +224,7 @@ class TheOddsAPIClient:
         markets: list[str] | None = None,
         odds_format: str = "american",
         bookmakers: list[str] | None = None,
-    ) -> dict:
+    ) -> HistoricalOddsResponse:
         """
         Fetch historical odds for a specific date.
 
@@ -217,7 +237,7 @@ class TheOddsAPIClient:
             bookmakers: List of bookmakers (defaults to settings)
 
         Returns:
-            API response with historical odds data
+            HistoricalOddsResponse with parsed Event instances and raw data
         """
         regions = regions or settings.regions
         markets = markets or settings.markets
@@ -235,20 +255,28 @@ class TheOddsAPIClient:
             f"historical/sports/{sport}/odds", params=params
         )
 
+        # Historical endpoint returns {"data": [...]}
+        response_data = data.get("data", []) if isinstance(data, dict) else []
+        raw_events_data = response_data if isinstance(response_data, list) else []
+
+        # Convert API dicts to Event instances
+        events = [api_dict_to_event(event_dict) for event_dict in raw_events_data]
+
         logger.info(
             "historical_odds_fetched",
             sport=sport,
             date=date,
-            events_count=len(data) if isinstance(data, list) else 0,
+            events_count=len(events),
             response_time_ms=response_time,
         )
 
-        return {
-            "data": data,
-            "response_time_ms": response_time,
-            "quota_remaining": self._quota_remaining,
-            "timestamp": datetime.utcnow(),
-        }
+        return HistoricalOddsResponse(
+            events=events,
+            raw_events_data=raw_events_data,
+            response_time_ms=response_time,
+            quota_remaining=self._quota_remaining,
+            timestamp=datetime.utcnow(),
+        )
 
     async def get_historical_events(
         self,

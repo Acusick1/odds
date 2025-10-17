@@ -238,24 +238,22 @@ class BackfillExecutor:
                         message="Already exists",
                     )
 
-        # Fetch historical odds
+        # Fetch historical odds - API client returns parsed Event instances
         response = await self._client.get_historical_odds(
             sport="basketball_nba",
             date=snapshot_time,
         )
 
-        # Parse response
-        response_data = response.get("data", {})
-        events_data = response_data.get("data", []) if isinstance(response_data, dict) else []
-
         # Find our specific event in the response
+        event = None
         event_data = None
-        for evt in events_data:
-            if evt.get("id") == event_id:
-                event_data = evt
+        for evt, raw_evt in zip(response.events, response.raw_events_data, strict=True):
+            if evt.id == event_id:
+                event = evt
+                event_data = raw_evt
                 break
 
-        if not event_data:
+        if not event:
             return BackfillProgress(
                 event_id=event_id,
                 home_team=home_team,
@@ -273,15 +271,15 @@ class BackfillExecutor:
         async with self._session_factory() as session:
             writer = OddsWriter(session)
 
-            # Upsert event and store snapshot
-            await writer.upsert_event(event_data)
+            # Upsert event - already parsed by API client
+            await writer.upsert_event(event)
             await session.flush()
             await writer.store_odds_snapshot(
-                event_id=event_data["id"], raw_data=event_data, snapshot_time=snapshot_dt
+                event_id=event.id, raw_data=event_data, snapshot_time=snapshot_dt
             )
             await session.commit()
 
-        quota_remaining = response.get("quota_remaining", 0)
+        quota_remaining = response.quota_remaining or 0
 
         logger.info(
             "snapshot_stored",

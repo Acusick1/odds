@@ -126,12 +126,21 @@ class TestBackfillExecutor:
     @pytest.mark.asyncio
     async def test_event_not_found_in_response(self, sample_backfill_plan):
         """Test handling when event is not in API response."""
+        from datetime import datetime
         from unittest.mock import AsyncMock
+
+        from core.api_models import HistoricalOddsResponse
 
         # Client returns empty response
         empty_client = AsyncMock()
         empty_client.get_historical_odds = AsyncMock(
-            return_value={"data": {"data": []}, "quota_remaining": 19000}
+            return_value=HistoricalOddsResponse(
+                events=[],
+                raw_events_data=[],
+                response_time_ms=100,
+                quota_remaining=19000,
+                timestamp=datetime(2024, 1, 15, 18, 0, 0),
+            )
         )
 
         progress_updates = []

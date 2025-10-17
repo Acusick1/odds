@@ -26,66 +26,46 @@ class OddsWriter:
         self.session = session
         self.validator = OddsValidator()
 
-    async def upsert_event(self, event_data: dict) -> Event:
+    async def upsert_event(self, event: Event) -> Event:
         """
         Insert or update an event.
 
         Args:
-            event_data: Event data from API
+            event: Event instance to upsert
 
         Returns:
             Created or updated Event instance
 
         Example:
-            event = await writer.upsert_event({
-                "id": "abc123",
-                "sport_key": "basketball_nba",
-                "commence_time": "2024-10-20T00:00:00Z",
-                "home_team": "Lakers",
-                "away_team": "Celtics"
-            })
+            event = Event(
+                id="abc123",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 10, 20),
+                home_team="Lakers",
+                away_team="Celtics"
+            )
+            result = await writer.upsert_event(event)
         """
-        event_id = event_data["id"]
-
         # Check if event exists
-        result = await self.session.execute(select(Event).where(Event.id == event_id))
+        result = await self.session.execute(select(Event).where(Event.id == event.id))
         existing_event = result.scalar_one_or_none()
 
         if existing_event:
-            # Update existing event
-            existing_event.sport_key = event_data.get("sport_key", existing_event.sport_key)
-            existing_event.sport_title = event_data.get("sport_title", existing_event.sport_title)
-            existing_event.home_team = event_data.get("home_team", existing_event.home_team)
-            existing_event.away_team = event_data.get("away_team", existing_event.away_team)
-
-            # Parse commence_time
-            if "commence_time" in event_data:
-                commence_time_str = event_data["commence_time"].replace("Z", "+00:00")
-                existing_event.commence_time = datetime.fromisoformat(commence_time_str).replace(
-                    tzinfo=None
-                )
-
+            # Update existing event with new data
+            existing_event.sport_key = event.sport_key
+            existing_event.sport_title = event.sport_title
+            existing_event.home_team = event.home_team
+            existing_event.away_team = event.away_team
+            existing_event.commence_time = event.commence_time
             existing_event.updated_at = datetime.utcnow()
 
-            logger.info("event_updated", event_id=event_id)
+            logger.info("event_updated", event_id=event.id)
             return existing_event
         else:
             # Create new event
-            commence_time_str = event_data["commence_time"].replace("Z", "+00:00")
-            commence_time = datetime.fromisoformat(commence_time_str).replace(tzinfo=None)
-
-            event = Event(
-                id=event_id,
-                sport_key=event_data["sport_key"],
-                sport_title=event_data.get("sport_title", event_data["sport_key"]),
-                commence_time=commence_time,
-                home_team=event_data["home_team"],
-                away_team=event_data["away_team"],
-                status=EventStatus.SCHEDULED,
-            )
-
             self.session.add(event)
-            logger.info("event_created", event_id=event_id)
+            logger.info("event_created", event_id=event.id)
             return event
 
     async def store_odds_snapshot(
@@ -117,13 +97,14 @@ class OddsWriter:
         if validate:
             is_valid, warnings = self.validator.validate_odds_snapshot(raw_data, event_id)
             if warnings:
-                await self.log_data_quality_issue(
+                quality_log = DataQualityLog(
                     event_id=event_id,
                     severity="warning" if is_valid else "error",
                     issue_type="validation_warnings",
                     description=f"Validation found {len(warnings)} issues",
                     raw_data={"warnings": warnings[:10]},  # Store first 10
                 )
+                await self.log_data_quality_issue(quality_log)
 
         # Store raw snapshot
         bookmakers = raw_data.get("bookmakers", [])
@@ -255,111 +236,96 @@ class OddsWriter:
 
         return event
 
-    async def log_fetch(
-        self,
-        sport_key: str,
-        events_count: int,
-        bookmakers_count: int,
-        success: bool,
-        error_message: str | None = None,
-        api_quota_remaining: int | None = None,
-        response_time_ms: int | None = None,
-    ) -> FetchLog:
+    async def log_fetch(self, fetch_log: FetchLog) -> FetchLog:
         """
         Log an API fetch operation.
 
         Args:
-            sport_key: Sport that was fetched
-            events_count: Number of events received
-            bookmakers_count: Number of bookmakers in response
-            success: Whether fetch succeeded
-            error_message: Error message if failed
-            api_quota_remaining: Remaining API quota
-            response_time_ms: Response time in milliseconds
+            fetch_log: FetchLog instance to persist
 
         Returns:
             Created FetchLog record
-        """
-        fetch_log = FetchLog(
-            sport_key=sport_key,
-            events_count=events_count,
-            bookmakers_count=bookmakers_count,
-            success=success,
-            error_message=error_message,
-            api_quota_remaining=api_quota_remaining,
-            response_time_ms=response_time_ms,
-        )
 
+        Example:
+            fetch_log = FetchLog(
+                sport_key="basketball_nba",
+                events_count=10,
+                bookmakers_count=8,
+                success=True,
+                api_quota_remaining=15000
+            )
+            result = await writer.log_fetch(fetch_log)
+        """
         self.session.add(fetch_log)
 
         logger.info(
             "fetch_logged",
-            sport_key=sport_key,
-            events_count=events_count,
-            success=success,
-            quota_remaining=api_quota_remaining,
+            sport_key=fetch_log.sport_key,
+            events_count=fetch_log.events_count,
+            success=fetch_log.success,
+            quota_remaining=fetch_log.api_quota_remaining,
         )
 
         return fetch_log
 
-    async def log_data_quality_issue(
-        self,
-        severity: str,
-        issue_type: str,
-        description: str,
-        event_id: str | None = None,
-        raw_data: dict | None = None,
-    ) -> DataQualityLog:
+    async def log_data_quality_issue(self, quality_log: DataQualityLog) -> DataQualityLog:
         """
         Log a data quality issue.
 
         Args:
-            severity: Severity level: warning, error, critical
-            issue_type: Issue type: missing_data, suspicious_odds, etc.
-            description: Human-readable description
-            event_id: Related event ID (optional)
-            raw_data: Context data (optional)
+            quality_log: DataQualityLog instance to persist
 
         Returns:
             Created DataQualityLog record
-        """
-        quality_log = DataQualityLog(
-            event_id=event_id,
-            severity=severity,
-            issue_type=issue_type,
-            description=description,
-            raw_data=raw_data,
-        )
 
+        Example:
+            quality_log = DataQualityLog(
+                event_id="abc123",
+                severity="warning",
+                issue_type="missing_data",
+                description="Bookmaker X missing from response"
+            )
+            result = await writer.log_data_quality_issue(quality_log)
+        """
         self.session.add(quality_log)
 
         logger.warning(
             "data_quality_issue",
-            event_id=event_id,
-            severity=severity,
-            issue_type=issue_type,
-            description=description,
+            event_id=quality_log.event_id,
+            severity=quality_log.severity,
+            issue_type=quality_log.issue_type,
+            description=quality_log.description,
         )
 
         return quality_log
 
-    async def bulk_insert_odds(self, odds_records: list[dict]) -> int:
+    async def bulk_insert_odds(self, odds_records: list[Odds]) -> int:
         """
         Bulk insert odds records for efficient backfill.
 
         Args:
-            odds_records: List of odds dictionaries
+            odds_records: List of Odds instances
 
         Returns:
             Number of records inserted
 
         Note:
             Uses PostgreSQL INSERT ... ON CONFLICT DO NOTHING for efficiency
+
+        Example:
+            odds = [
+                Odds(event_id="abc", bookmaker_key="fanduel", ...),
+                Odds(event_id="abc", bookmaker_key="draftkings", ...),
+            ]
+            count = await writer.bulk_insert_odds(odds)
         """
         if not odds_records:
             return 0
 
-        stmt = insert(Odds).values(odds_records)
+        # Convert Odds instances to dicts for bulk insert
+        odds_dicts = [odd.model_dump(exclude_unset=True) for odd in odds_records]
+
+        stmt = insert(Odds).values(odds_dicts)
         stmt = stmt.on_conflict_do_nothing()
 
         result = await self.session.execute(stmt)
