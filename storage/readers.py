@@ -127,21 +127,22 @@ class OddsReader:
         time_lower = timestamp - timedelta(minutes=tolerance_minutes)
         time_upper = timestamp + timedelta(minutes=tolerance_minutes)
 
-        # Find closest snapshot time
-        snapshot_query = (
-            select(OddsSnapshot.snapshot_time)
+        # Find closest odds_timestamp directly from Odds table
+        closest_time_query = (
+            select(Odds.odds_timestamp)
             .where(
                 and_(
-                    OddsSnapshot.event_id == event_id,
-                    OddsSnapshot.snapshot_time >= time_lower,
-                    OddsSnapshot.snapshot_time <= time_upper,
+                    Odds.event_id == event_id,
+                    Odds.odds_timestamp >= time_lower,
+                    Odds.odds_timestamp <= time_upper,
                 )
             )
-            .order_by(func.abs(func.extract("epoch", OddsSnapshot.snapshot_time - timestamp)))
+            .distinct()
+            .order_by(func.abs(func.extract("epoch", Odds.odds_timestamp - timestamp)))
             .limit(1)
         )
 
-        result = await self.session.execute(snapshot_query)
+        result = await self.session.execute(closest_time_query)
         closest_time = result.scalar_one_or_none()
 
         if not closest_time:
@@ -153,7 +154,7 @@ class OddsReader:
             )
             return []
 
-        # Get all odds at that snapshot time
+        # Get all odds at that timestamp
         odds_query = select(Odds).where(
             and_(
                 Odds.event_id == event_id,

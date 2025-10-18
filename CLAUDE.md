@@ -674,13 +674,23 @@ When alerts are enabled, they could trigger on:
 ### Strategy Pattern
 
 ```python
+class BacktestEvent(BaseModel):
+    """Event validated for backtesting - guaranteed to have final scores."""
+    id: str
+    commence_time: datetime
+    home_team: str
+    away_team: str
+    home_score: int
+    away_score: int
+    status: EventStatus
+
 class BettingStrategy(ABC):
     """Base class for all betting strategies"""
 
     @abstractmethod
     async def evaluate_opportunity(
         self,
-        event: Event,
+        event: BacktestEvent,
         odds_snapshot: list[Odds],
         config: BacktestConfig
     ) -> list[BetOpportunity]:
