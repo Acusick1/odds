@@ -40,22 +40,20 @@ class Settings(BaseSettings):
     )
     regions: list[str] = Field(default=["us"], description="Regions for odds data")
 
-    # Sampling Configuration
-    sampling_mode: str = Field(
-        default="adaptive", description="Sampling mode: 'fixed' or 'adaptive'"
+    # Scheduler Configuration
+    scheduler_backend: str = Field(
+        default="local",
+        description="Scheduler backend: 'aws', 'railway', or 'local'",
     )
-    fixed_interval_minutes: int = Field(
-        default=30, description="Fixed sampling interval in minutes"
+    scheduling_lookahead_days: int = Field(
+        default=7,
+        description="How many days ahead to check for games when scheduling",
     )
-    adaptive_intervals: dict[str, float] = Field(
-        default={
-            "opening": 72.0,  # 3 days before game
-            "early": 24.0,  # 24 hours before
-            "sharp": 12.0,  # 12 hours before
-            "pregame": 3.0,  # 3 hours before
-            "closing": 0.5,  # 30 minutes before
-        },
-        description="Adaptive sampling intervals in hours before game",
+
+    # AWS Configuration (only needed when scheduler_backend='aws')
+    aws_region: str | None = Field(default=None, description="AWS region")
+    lambda_arn: str | None = Field(
+        default=None, description="Lambda function ARN (for self-scheduling)"
     )
 
     # Data Quality
