@@ -49,7 +49,7 @@ class Event(SQLModel, table=True):
 
     @field_validator("commence_time", mode="before")
     def parse_commence_time(cls, v):
-        # TODO: Temporary fix for tests - ensure datetime is naive UTC
+        """Parse commence_time from ISO string to naive UTC datetime."""
         if isinstance(v, str):
             v = v.replace("Z", "+00:00")
             v = datetime.fromisoformat(v).replace(tzinfo=None)

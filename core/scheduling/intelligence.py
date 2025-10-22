@@ -72,14 +72,16 @@ class SchedulingIntelligence:
     - Self-adjusting based on actual database state
     """
 
-    def __init__(self, lookahead_days: int = 7):
+    def __init__(self, lookahead_days: int = 7, session_factory=None):
         """
         Initialize scheduling intelligence.
 
         Args:
             lookahead_days: How many days ahead to check for games
+            session_factory: Optional session factory for testing (defaults to async_session_maker)
         """
         self.lookahead_days = lookahead_days
+        self.session_factory = session_factory or async_session_maker
 
     async def should_execute_fetch(self) -> ScheduleDecision:
         """
@@ -138,7 +140,7 @@ class SchedulingIntelligence:
         Returns:
             ScheduleDecision for scores fetch
         """
-        async with async_session_maker() as session:
+        async with self.session_factory() as session:
             reader = OddsReader(session)
 
             now = datetime.utcnow()
@@ -177,7 +179,7 @@ class SchedulingIntelligence:
         Returns:
             ScheduleDecision for status update
         """
-        async with async_session_maker() as session:
+        async with self.session_factory() as session:
             reader = OddsReader(session)
 
             now = datetime.utcnow()
@@ -212,7 +214,7 @@ class SchedulingIntelligence:
         Returns:
             Event object for closest game, or None if no games scheduled
         """
-        async with async_session_maker() as session:
+        async with self.session_factory() as session:
             reader = OddsReader(session)
 
             now = datetime.utcnow()
@@ -237,7 +239,7 @@ class SchedulingIntelligence:
         Returns:
             True if games scheduled in next 30 days
         """
-        async with async_session_maker() as session:
+        async with self.session_factory() as session:
             reader = OddsReader(session)
 
             now = datetime.utcnow()

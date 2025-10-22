@@ -48,7 +48,7 @@ async def main():
 
         # Still schedule next check even if not executing
         if decision.next_execution:
-            backend = get_scheduler_backend()
+            backend = get_scheduler_backend(dry_run=settings.scheduler_dry_run)
             await backend.schedule_next_execution(
                 job_name="fetch-odds", next_time=decision.next_execution
             )
@@ -74,7 +74,7 @@ async def main():
     # Self-schedule next execution
     if decision.next_execution:
         try:
-            backend = get_scheduler_backend()
+            backend = get_scheduler_backend(dry_run=settings.scheduler_dry_run)
             await backend.schedule_next_execution(
                 job_name="fetch-odds", next_time=decision.next_execution
             )

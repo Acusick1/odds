@@ -30,8 +30,9 @@ class TestSettings:
             assert len(settings.bookmakers) == 8
             assert settings.markets == ["h2h", "spreads", "totals"]
             assert settings.regions == ["us"]
-            assert settings.sampling_mode == "adaptive"
-            assert settings.fixed_interval_minutes == 30
+            assert settings.scheduler_backend == "local"
+            assert settings.scheduler_dry_run is False
+            assert settings.scheduling_lookahead_days == 7
             assert settings.enable_validation is True
             assert settings.reject_invalid_odds is False
             assert settings.alert_enabled is False
@@ -44,8 +45,9 @@ class TestSettings:
             {
                 "ODDS_API_KEY": "custom_key",
                 "DATABASE_URL": "postgresql://custom",
-                "SAMPLING_MODE": "adaptive",
-                "FIXED_INTERVAL_MINUTES": "15",
+                "SCHEDULER_BACKEND": "aws",
+                "SCHEDULER_DRY_RUN": "true",
+                "SCHEDULING_LOOKAHEAD_DAYS": "14",
                 "ENABLE_VALIDATION": "false",
                 "LOG_LEVEL": "DEBUG",
             },
@@ -54,8 +56,9 @@ class TestSettings:
 
             assert settings.odds_api_key == "custom_key"
             assert settings.database_url == "postgresql://custom"
-            assert settings.sampling_mode == "adaptive"
-            assert settings.fixed_interval_minutes == 15
+            assert settings.scheduler_backend == "aws"
+            assert settings.scheduler_dry_run is True
+            assert settings.scheduling_lookahead_days == 14
             assert settings.enable_validation is False
             assert settings.log_level == "DEBUG"
 
@@ -77,15 +80,20 @@ class TestSettings:
 
             assert settings.bookmakers == expected_bookmakers
 
-    def test_settings_adaptive_intervals(self):
-        """Test adaptive sampling interval configuration."""
-        with patch.dict(os.environ, {"ODDS_API_KEY": "test_key", "DATABASE_URL": "test_url"}):
+    def test_settings_aws_configuration(self):
+        """Test AWS-specific configuration fields."""
+        with patch.dict(
+            os.environ,
+            {
+                "ODDS_API_KEY": "test_key",
+                "DATABASE_URL": "test_url",
+                "SCHEDULER_BACKEND": "aws",
+                "AWS_REGION": "us-east-1",
+                "LAMBDA_ARN": "arn:aws:lambda:us-east-1:123456789:function:fetch-odds",
+            },
+        ):
             settings = Settings()
 
-            assert settings.adaptive_intervals == {
-                "opening": 72.0,
-                "early": 24.0,
-                "sharp": 12.0,
-                "pregame": 3.0,
-                "closing": 0.5,
-            }
+            assert settings.scheduler_backend == "aws"
+            assert settings.aws_region == "us-east-1"
+            assert settings.lambda_arn == "arn:aws:lambda:us-east-1:123456789:function:fetch-odds"

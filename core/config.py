@@ -45,6 +45,10 @@ class Settings(BaseSettings):
         default="local",
         description="Scheduler backend: 'aws', 'railway', or 'local'",
     )
+    scheduler_dry_run: bool = Field(
+        default=False,
+        description="Enable dry-run mode for scheduler (log operations without executing)",
+    )
     scheduling_lookahead_days: int = Field(
         default=7,
         description="How many days ahead to check for games when scheduling",

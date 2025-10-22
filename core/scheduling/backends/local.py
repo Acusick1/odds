@@ -6,7 +6,20 @@ from datetime import datetime
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from core.scheduling.backends.base import SchedulerBackend
+from core.scheduling.backends.base import (
+    BackendHealth,
+    JobStatus,
+    RetryConfig,
+    ScheduledJob,
+    SchedulerBackend,
+    ValidationResult,
+)
+from core.scheduling.exceptions import (
+    BackendUnavailableError,
+    CancellationFailedError,
+    JobNotFoundError,
+    SchedulingFailedError,
+)
 
 logger = structlog.get_logger()
 
@@ -23,32 +36,159 @@ class LocalSchedulerBackend(SchedulerBackend):
     - Full testing without AWS account
     - Identical job behavior to production
     - APScheduler date triggers for one-time execution
+    - Context manager support for clean lifecycle management
+    - Health checks and status queries
+    - Dry-run mode for testing
 
     Usage:
     Set SCHEDULER_BACKEND=local in .env and run:
         python -m cli.main scheduler start
 
-    This will start a local scheduler that keeps running and executes
-    jobs at their scheduled times, just like AWS Lambda.
+    Or use as async context manager:
+        async with LocalSchedulerBackend() as backend:
+            # Bootstrap jobs
+            await some_job.main()
+            # Keep running
+            await asyncio.sleep(float('inf'))
     """
 
-    def __init__(self):
-        """Initialize APScheduler."""
+    def __init__(self, dry_run: bool = False, retry_config: RetryConfig | None = None):
+        """
+        Initialize APScheduler.
+
+        Args:
+            dry_run: If True, log operations without executing them
+            retry_config: Retry configuration (uses defaults if None)
+        """
+        super().__init__(dry_run=dry_run, retry_config=retry_config)
+
         self.scheduler = AsyncIOScheduler(timezone="UTC")
         self._started = False
-        logger.info("local_scheduler_initialized")
 
-    def _ensure_started(self):
-        """Start scheduler if not already running."""
+        logger.info("local_scheduler_initialized", dry_run=self.dry_run)
+
+    def validate_configuration(self) -> ValidationResult:
+        """Validate local backend configuration."""
+        from core.scheduling.health_check import ValidationBuilder
+
+        builder = ValidationBuilder()
+
+        # Check APScheduler availability
+        try:
+            from apscheduler.schedulers.asyncio import AsyncIOScheduler  # noqa: F401
+        except ImportError:
+            builder.add_error("APScheduler not installed (pip install apscheduler)")
+
+        # Check that job registry can be loaded
+        try:
+            from core.scheduling.jobs import get_job_registry
+
+            registry = get_job_registry()
+            if not registry:
+                builder.add_warning("Job registry is empty")
+        except ImportError as e:
+            builder.add_warning(f"Job registry import warning: {e}")
+
+        return builder.build()
+
+    async def health_check(self) -> BackendHealth:
+        """
+        Perform comprehensive health check of local backend.
+
+        Note: Backend is considered healthy if configuration is valid,
+        regardless of whether scheduler is started. "Not started" is a
+        valid state, not a failure.
+        """
+        from core.scheduling.health_check import HealthCheckBuilder
+
+        builder = HealthCheckBuilder(self.get_backend_name())
+
+        # Check configuration
+        validation = self.validate_configuration()
+        builder.check_condition(
+            validation.is_valid,
+            "Configuration valid",
+            f"Configuration invalid: {', '.join(validation.errors)}",
+        )
+
+        # Check scheduler state (informational, not a failure)
+        if self._started:
+            builder.pass_check("Scheduler running")
+            builder.add_detail("scheduler_state", "running")
+
+            # Check number of scheduled jobs
+            jobs = self.scheduler.get_jobs()
+            builder.add_detail("scheduled_jobs_count", len(jobs))
+            builder.pass_check(f"{len(jobs)} jobs scheduled")
+        else:
+            # Not started is OK - just report the state
+            builder.pass_check("Scheduler initialized (not started)")
+            builder.add_detail("scheduler_state", "stopped")
+            builder.add_detail("note", "Call start() or use as context manager to begin scheduling")
+
+        # Check event loop availability (informational)
+        try:
+            asyncio.get_running_loop()
+            builder.pass_check("Event loop available")
+            builder.add_detail("event_loop_running", True)
+        except RuntimeError:
+            # No event loop is OK if scheduler isn't started
+            builder.add_detail("event_loop_running", False)
+            if not self._started:
+                builder.pass_check("No event loop (expected when stopped)")
+            else:
+                # This would be weird - scheduler running but no loop
+                builder.fail_check("Scheduler started but no event loop detected")
+
+        return builder.build()
+
+    async def get_scheduled_jobs(self) -> list[ScheduledJob]:
+        """Get list of all currently scheduled jobs."""
+        if self.dry_run:
+            logger.info("dry_run_get_scheduled_jobs")
+            return []
+
         if not self._started:
-            try:
-                # Try to get running loop (will fail if not in async context)
-                asyncio.get_running_loop()
-                self.scheduler.start()
-                self._started = True
-            except RuntimeError:
-                # No event loop running - scheduler will start when keep_alive() is called
-                pass
+            logger.warning("local_scheduler_not_started")
+            return []
+
+        jobs = []
+        for job in self.scheduler.get_jobs():
+            # Extract job name from APScheduler job ID
+            job_name = job.id
+
+            # Get next run time
+            next_run = job.next_run_time
+
+            jobs.append(
+                ScheduledJob(
+                    job_name=job_name,
+                    next_run_time=next_run,
+                    status=JobStatus.SCHEDULED,
+                )
+            )
+
+        return jobs
+
+    async def get_job_status(self, job_name: str) -> ScheduledJob | None:
+        """Get status of a specific job."""
+        if self.dry_run:
+            logger.info("dry_run_get_job_status", job=job_name)
+            return None
+
+        if not self._started:
+            logger.warning("local_scheduler_not_started")
+            return None
+
+        job = self.scheduler.get_job(job_name)
+        if not job:
+            return None
+
+        return ScheduledJob(
+            job_name=job_name,
+            next_run_time=job.next_run_time,
+            status=JobStatus.SCHEDULED,
+        )
 
     async def schedule_next_execution(self, job_name: str, next_time: datetime) -> None:
         """
@@ -59,22 +199,24 @@ class LocalSchedulerBackend(SchedulerBackend):
             next_time: UTC datetime for next execution
 
         Raises:
-            Exception: If scheduling fails
+            SchedulingFailedError: If scheduling fails
         """
+        if self.dry_run:
+            logger.info(
+                "dry_run_schedule",
+                job=job_name,
+                next_time=next_time.isoformat(),
+                backend="local_apscheduler",
+            )
+            return
+
         self._ensure_started()
 
         try:
-            # Import job modules
-            from jobs import fetch_odds, fetch_scores, update_status
+            # Get job function from centralized registry
+            from core.scheduling.jobs import get_job_function
 
-            job_map = {
-                "fetch-odds": fetch_odds.main,
-                "fetch-scores": fetch_scores.main,
-                "update-status": update_status.main,
-            }
-
-            if job_name not in job_map:
-                raise ValueError(f"Unknown job: {job_name}")
+            job_func = get_job_function(job_name)
 
             # Remove existing job if present (replace with new schedule)
             if self.scheduler.get_job(job_name):
@@ -83,7 +225,7 @@ class LocalSchedulerBackend(SchedulerBackend):
 
             # Add new scheduled job with date trigger (one-time execution)
             self.scheduler.add_job(
-                func=job_map[job_name],
+                func=job_func,
                 trigger="date",
                 run_date=next_time,
                 id=job_name,
@@ -97,6 +239,9 @@ class LocalSchedulerBackend(SchedulerBackend):
                 next_time=next_time.isoformat(),
             )
 
+        except KeyError as e:
+            # Job not found in registry
+            raise SchedulingFailedError(str(e)) from e
         except Exception as e:
             logger.error(
                 "local_scheduling_failed",
@@ -105,7 +250,7 @@ class LocalSchedulerBackend(SchedulerBackend):
                 error=str(e),
                 exc_info=True,
             )
-            raise
+            raise SchedulingFailedError(f"Failed to schedule {job_name}: {e}") from e
 
     async def cancel_scheduled_execution(self, job_name: str) -> None:
         """
@@ -113,14 +258,24 @@ class LocalSchedulerBackend(SchedulerBackend):
 
         Args:
             job_name: Job identifier to cancel
+
+        Raises:
+            JobNotFoundError: If job doesn't exist
+            CancellationFailedError: If cancellation fails
         """
+        if self.dry_run:
+            logger.info("dry_run_cancel", job=job_name, backend="local_apscheduler")
+            return
+
         try:
             if self.scheduler.get_job(job_name):
                 self.scheduler.remove_job(job_name)
                 logger.info("local_job_cancelled", job=job_name)
             else:
-                logger.warning("local_job_not_found", job=job_name)
+                raise JobNotFoundError(f"Job {job_name} not found")
 
+        except JobNotFoundError:
+            raise
         except Exception as e:
             logger.error(
                 "local_cancel_failed",
@@ -128,38 +283,37 @@ class LocalSchedulerBackend(SchedulerBackend):
                 error=str(e),
                 exc_info=True,
             )
-            raise
+            raise CancellationFailedError(f"Failed to cancel {job_name}: {e}") from e
 
     def get_backend_name(self) -> str:
         """Return backend identifier."""
         return "local_apscheduler"
 
-    def keep_alive(self):
-        """
-        Block to keep scheduler running (for local testing).
-
-        Call this from CLI to start the scheduler and keep it running
-        until interrupted with Ctrl+C.
-        """
-        # Create new event loop if needed
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No event loop running, create one
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        # Ensure scheduler is started within the event loop context
+    def _ensure_started(self):
+        """Start scheduler if not already running."""
         if not self._started:
-            # Set the event loop for APScheduler before starting
-            self.scheduler._eventloop = loop
-            self.scheduler.start()
-            self._started = True
+            try:
+                # Try to get running loop (will fail if not in async context)
+                asyncio.get_running_loop()
+                self.scheduler.start()
+                self._started = True
+                logger.info("local_scheduler_started")
+            except RuntimeError as e:
+                # No event loop running
+                raise BackendUnavailableError(
+                    "Cannot start scheduler: No event loop running. "
+                    "Use LocalSchedulerBackend as async context manager or ensure running in async context."
+                ) from e
 
-        try:
-            logger.info("local_scheduler_running", message="Press Ctrl+C to stop")
-            loop.run_forever()
-        except KeyboardInterrupt:
-            logger.info("local_scheduler_shutdown")
+    async def __aenter__(self):
+        """Start scheduler when entering context."""
+        self._ensure_started()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Shutdown scheduler when exiting context."""
+        if self._started:
             self.scheduler.shutdown()
-            loop.close()
+            self._started = False
+            logger.info("local_scheduler_shutdown")
+        return False  # Don't suppress exceptions
