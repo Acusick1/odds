@@ -290,7 +290,7 @@ class GameSelector:
                     "home_team": event.get("home_team"),
                     "away_team": event.get("away_team"),
                     "commence_time": commence_time,
-                    "snapshots": [s.isoformat() + "Z" for s in snapshots],
+                    "snapshots": [s.isoformat() for s in snapshots],
                     "snapshot_count": len(snapshots),
                 }
 

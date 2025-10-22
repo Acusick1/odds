@@ -3,7 +3,7 @@
 import json
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from tenacity import (
@@ -164,7 +164,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
         # Return cached result if fresh
         if self._health_check_cache:
             result, timestamp = self._health_check_cache
-            age = datetime.utcnow() - timestamp
+            age = datetime.now(UTC) - timestamp
             if age < self._health_check_cache_ttl:
                 logger.debug(
                     "health_check_cache_hit",
@@ -177,7 +177,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
         result = await self._perform_health_check()
 
         # Cache result
-        self._health_check_cache = (result, datetime.utcnow())
+        self._health_check_cache = (result, datetime.now(UTC))
 
         return result
 

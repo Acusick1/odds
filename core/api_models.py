@@ -62,7 +62,7 @@ def api_dict_to_event(event_data: dict) -> Event:
     """
     # Parse commence_time
     commence_time_str = event_data["commence_time"].replace("Z", "+00:00")
-    commence_time = datetime.fromisoformat(commence_time_str).replace(tzinfo=None)
+    commence_time = datetime.fromisoformat(commence_time_str)
 
     return Event(
         id=event_data["id"],

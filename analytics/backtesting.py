@@ -5,7 +5,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from pydantic import BaseModel
@@ -1415,7 +1415,7 @@ class BacktestEngine:
             total_events=len(events),
             events_with_complete_data=events_with_complete_data,
             data_quality_issues=data_quality_issues,
-            run_timestamp=datetime.utcnow(),
+            run_timestamp=datetime.now(UTC),
             execution_time_seconds=execution_time,
         )
 
@@ -1642,6 +1642,6 @@ class BacktestEngine:
             total_events=0,
             events_with_complete_data=0,
             data_quality_issues=["No bets placed"],
-            run_timestamp=datetime.utcnow(),
+            run_timestamp=datetime.now(UTC),
             execution_time_seconds=execution_time,
         )

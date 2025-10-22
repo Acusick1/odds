@@ -1,6 +1,6 @@
 """Integration tests for database operations."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -13,7 +13,7 @@ def _api_dict_to_event(event_data: dict) -> Event:
     """Convert API response dict to Event instance for testing."""
     # Parse commence_time
     commence_time_str = event_data["commence_time"].replace("Z", "+00:00")
-    commence_time = datetime.fromisoformat(commence_time_str).replace(tzinfo=None)
+    commence_time = datetime.fromisoformat(commence_time_str)
 
     return Event(
         id=event_data["id"],
@@ -37,7 +37,7 @@ class TestDatabaseIntegration:
             id="test123",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow(),
+            commence_time=datetime.now(UTC),
             home_team="Lakers",
             away_team="Celtics",
         )
@@ -59,7 +59,7 @@ class TestDatabaseIntegration:
             id="test123",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow(),
+            commence_time=datetime.now(UTC),
             home_team="Lakers",
             away_team="Celtics",
         )
@@ -86,7 +86,7 @@ class TestDatabaseIntegration:
             id=sample_odds_data["id"],
             sport_key=sample_odds_data["sport_key"],
             sport_title=sample_odds_data["sport_title"],
-            commence_time=datetime.utcnow(),
+            commence_time=datetime.now(UTC),
             home_team=sample_odds_data["home_team"],
             away_team=sample_odds_data["away_team"],
         )
@@ -122,7 +122,7 @@ class TestDatabaseIntegration:
             id="test123",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow(),
+            commence_time=datetime.now(UTC),
             home_team="Lakers",
             away_team="Celtics",
             status=EventStatus.SCHEDULED,
@@ -173,8 +173,9 @@ class TestDatabaseIntegration:
         """Test logging data quality issues."""
         writer = OddsWriter(test_session)
 
+        # Test with no event_id (event_id is nullable)
         quality_log = DataQualityLog(
-            event_id="test123",
+            event_id=None,
             severity="warning",
             issue_type="suspicious_odds",
             description="Vig too high",
@@ -184,7 +185,7 @@ class TestDatabaseIntegration:
 
         await test_session.commit()
 
-        assert log.event_id == "test123"
+        assert log.event_id is None
         assert log.severity == "warning"
         assert log.issue_type == "suspicious_odds"
 
@@ -195,14 +196,14 @@ class TestDatabaseIntegration:
         reader = OddsReader(test_session)
 
         # Create events with different dates
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         for i in range(3):
             event_data = {
                 "id": f"test{i}",
                 "sport_key": "basketball_nba",
                 "sport_title": "NBA",
-                "commence_time": (now + timedelta(days=i)).isoformat() + "Z",
+                "commence_time": (now + timedelta(days=i)).isoformat(),
                 "home_team": f"Team{i}",
                 "away_team": f"Team{i+1}",
             }
@@ -230,7 +231,7 @@ class TestDatabaseIntegration:
             id="test1",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow(),
+            commence_time=datetime.now(UTC),
             home_team="Los Angeles Lakers",
             away_team="Boston Celtics",
         )
@@ -238,7 +239,7 @@ class TestDatabaseIntegration:
             id="test2",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow(),
+            commence_time=datetime.now(UTC),
             home_team="Golden State Warriors",
             away_team="Los Angeles Lakers",
         )
@@ -264,14 +265,14 @@ class TestDatabaseIntegration:
             id=sample_odds_data["id"],
             sport_key=sample_odds_data["sport_key"],
             sport_title=sample_odds_data["sport_title"],
-            commence_time=datetime.utcnow(),
+            commence_time=datetime.now(UTC),
             home_team=sample_odds_data["home_team"],
             away_team=sample_odds_data["away_team"],
         )
         await writer.upsert_event(event)
 
         # Store snapshot at specific time
-        snapshot_time = datetime.utcnow()
+        snapshot_time = datetime.now(UTC)
         await writer.store_odds_snapshot(
             event_id=sample_odds_data["id"],
             raw_data=sample_odds_data,
@@ -302,7 +303,7 @@ class TestDatabaseIntegration:
             id=sample_odds_data["id"],
             sport_key=sample_odds_data["sport_key"],
             sport_title=sample_odds_data["sport_title"],
-            commence_time=datetime.utcnow(),
+            commence_time=datetime.now(UTC),
             home_team=sample_odds_data["home_team"],
             away_team=sample_odds_data["away_team"],
         )

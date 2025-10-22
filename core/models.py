@@ -1,11 +1,20 @@
 """SQLModel database schema definitions."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 
-from pydantic import field_validator
-from sqlalchemy import JSON, Column, Index
+from sqlalchemy import JSON, Column, DateTime, Index
 from sqlmodel import Field, SQLModel
+
+
+def utc_now() -> datetime:
+    """
+    Return current UTC time as timezone-aware datetime.
+
+    The system stores all datetimes as timezone-aware UTC for type safety and best practices.
+    Using datetime.now(UTC) instead of deprecated datetime.utcnow().
+    """
+    return datetime.now(UTC)
 
 
 class EventStatus(str, Enum):
@@ -29,7 +38,9 @@ class Event(SQLModel, table=True):
     sport_title: str = Field(description="Sport display name")
 
     # Event details
-    commence_time: datetime = Field(index=True, description="Game start time")
+    commence_time: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), index=True), description="Game start time"
+    )
     home_team: str = Field(index=True, description="Home team name")
     away_team: str = Field(index=True, description="Away team name")
     status: EventStatus = Field(default=EventStatus.SCHEDULED, description="Event status")
@@ -37,23 +48,21 @@ class Event(SQLModel, table=True):
     # Results (populated after game completion)
     home_score: int | None = Field(default=None, description="Final home team score")
     away_score: int | None = Field(default=None, description="Final away team score")
-    completed_at: datetime | None = Field(default=None, description="Completion timestamp")
+    completed_at: datetime | None = Field(
+        sa_column=Column(DateTime(timezone=True)), default=None, description="Completion timestamp"
+    )
 
     # Metadata
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Record creation time"
+        sa_column=Column(DateTime(timezone=True)),
+        default_factory=utc_now,
+        description="Record creation time",
     )
     updated_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Record last update time"
+        sa_column=Column(DateTime(timezone=True)),
+        default_factory=utc_now,
+        description="Record last update time",
     )
-
-    @field_validator("commence_time", mode="before")
-    def parse_commence_time(cls, v):
-        """Parse commence_time from ISO string to naive UTC datetime."""
-        if isinstance(v, str):
-            v = v.replace("Z", "+00:00")
-            v = datetime.fromisoformat(v).replace(tzinfo=None)
-        return v
 
 
 class OddsSnapshot(SQLModel, table=True):
@@ -63,7 +72,10 @@ class OddsSnapshot(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     event_id: str = Field(foreign_key="events.id", index=True, description="Event reference")
-    snapshot_time: datetime = Field(index=True, description="Time of snapshot capture")
+    snapshot_time: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), index=True),
+        description="Time of snapshot capture",
+    )
 
     # Full API response stored as JSON
     raw_data: dict = Field(sa_column=Column(JSON), description="Complete API response")
@@ -73,7 +85,9 @@ class OddsSnapshot(SQLModel, table=True):
     api_request_id: str | None = Field(default=None, description="API request ID for debugging")
 
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Record creation time"
+        sa_column=Column(DateTime(timezone=True)),
+        default_factory=utc_now,
+        description="Record creation time",
     )
 
     __table_args__ = (Index("ix_event_snapshot_time", "event_id", "snapshot_time"),)
@@ -98,10 +112,16 @@ class Odds(SQLModel, table=True):
     point: float | None = Field(default=None, description="Spread/total line (e.g., -2.5, 218.5)")
 
     # Timestamps
-    odds_timestamp: datetime = Field(index=True, description="When odds were valid")
-    last_update: datetime = Field(description="Bookmaker's last update time")
+    odds_timestamp: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), index=True), description="When odds were valid"
+    )
+    last_update: datetime = Field(
+        sa_column=Column(DateTime(timezone=True)), description="Bookmaker's last update time"
+    )
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Record creation time"
+        sa_column=Column(DateTime(timezone=True)),
+        default_factory=utc_now,
+        description="Record creation time",
     )
 
     # Data quality
@@ -128,7 +148,9 @@ class DataQualityLog(SQLModel, table=True):
     raw_data: dict | None = Field(sa_column=Column(JSON), default=None, description="Context data")
 
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, index=True, description="Issue timestamp"
+        sa_column=Column(DateTime(timezone=True), index=True),
+        default_factory=utc_now,
+        description="Issue timestamp",
     )
 
 
@@ -139,7 +161,9 @@ class FetchLog(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     fetch_time: datetime = Field(
-        default_factory=datetime.utcnow, index=True, description="Fetch timestamp"
+        sa_column=Column(DateTime(timezone=True), index=True),
+        default_factory=utc_now,
+        description="Fetch timestamp",
     )
 
     sport_key: str = Field(description="Sport that was fetched")

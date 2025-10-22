@@ -1,6 +1,6 @@
 """Database read operations for odds data."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from sqlalchemy import and_, func, select
@@ -128,7 +128,8 @@ class OddsReader:
         time_upper = timestamp + timedelta(minutes=tolerance_minutes)
 
         # Find closest odds_timestamp directly from Odds table
-        closest_time_query = (
+        # First get all distinct timestamps in the window, then find the closest one
+        distinct_timestamps_query = (
             select(Odds.odds_timestamp)
             .where(
                 and_(
@@ -138,14 +139,12 @@ class OddsReader:
                 )
             )
             .distinct()
-            .order_by(func.abs(func.extract("epoch", Odds.odds_timestamp - timestamp)))
-            .limit(1)
         )
 
-        result = await self.session.execute(closest_time_query)
-        closest_time = result.scalar_one_or_none()
+        result = await self.session.execute(distinct_timestamps_query)
+        all_timestamps = list(result.scalars().all())
 
-        if not closest_time:
+        if not all_timestamps:
             logger.warning(
                 "no_odds_at_time",
                 event_id=event_id,
@@ -153,6 +152,9 @@ class OddsReader:
                 tolerance_minutes=tolerance_minutes,
             )
             return []
+
+        # Find the closest timestamp in Python
+        closest_time = min(all_timestamps, key=lambda t: abs((t - timestamp).total_seconds()))
 
         # Get all odds at that timestamp
         odds_query = select(Odds).where(
@@ -394,7 +396,7 @@ class OddsReader:
         total_snapshots = snapshots_result.scalar_one()
 
         # Recent fetch success rate (last 24h)
-        day_ago = datetime.utcnow() - timedelta(hours=24)
+        day_ago = datetime.now(UTC) - timedelta(hours=24)
 
         # Count all fetches
         total_fetches_query = select(func.count(FetchLog.id)).where(FetchLog.fetch_time >= day_ago)

@@ -1,6 +1,6 @@
 """Unit tests for data validators."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from storage.validators import OddsValidator
 
@@ -127,7 +127,7 @@ class TestOddsValidator:
         event_data = {
             "id": "test123",
             "sport_key": "basketball_nba",
-            "commence_time": (datetime.utcnow() + timedelta(hours=24)).isoformat() + "Z",
+            "commence_time": (datetime.now(UTC) + timedelta(hours=24)).isoformat(),
             "home_team": "Lakers",
             "away_team": "Celtics",
         }
@@ -153,7 +153,7 @@ class TestOddsValidator:
         event_data = {
             "id": "test123",
             "sport_key": "basketball_nba",
-            "commence_time": (datetime.utcnow() - timedelta(days=2)).isoformat() + "Z",
+            "commence_time": (datetime.now(UTC) - timedelta(days=2)).isoformat(),
             "home_team": "Lakers",
             "away_team": "Celtics",
         }
@@ -181,7 +181,7 @@ class TestOddsValidator:
         data = {
             "id": "test123",
             "sport_key": "basketball_nba",
-            "commence_time": datetime.utcnow().isoformat() + "Z",
+            "commence_time": datetime.now(UTC).isoformat(),
             "home_team": "Lakers",
             "away_team": "Celtics",
             "bookmakers": [],
@@ -196,14 +196,14 @@ class TestOddsValidator:
         data = {
             "id": "test123",
             "sport_key": "basketball_nba",
-            "commence_time": datetime.utcnow().isoformat() + "Z",
+            "commence_time": datetime.now(UTC).isoformat(),
             "home_team": "Lakers",
             "away_team": "Celtics",
             "bookmakers": [
                 {
                     "key": "fanduel",
                     "title": "FanDuel",
-                    "last_update": (datetime.utcnow() + timedelta(days=1)).isoformat() + "Z",
+                    "last_update": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
                     "markets": [
                         {
                             "key": "h2h",

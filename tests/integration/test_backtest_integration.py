@@ -1,7 +1,7 @@
 """Integration tests for backtesting system."""
 
 import tempfile
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -24,7 +24,7 @@ async def test_full_backtest_with_flat_strategy(test_session):
     reader = OddsReader(test_session)
 
     # Create test event with final result
-    event_date = datetime.utcnow() - timedelta(days=10)
+    event_date = datetime.now(UTC) - timedelta(days=10)
     event = Event(
         id="test_backtest_1",
         sport_key="basketball_nba",
@@ -118,7 +118,7 @@ async def test_backtest_with_multiple_events(test_session):
     writer = OddsWriter(test_session)
     reader = OddsReader(test_session)
 
-    base_date = datetime.utcnow() - timedelta(days=30)
+    base_date = datetime.now(UTC) - timedelta(days=30)
 
     # Create 3 test events
     events = []
@@ -214,7 +214,7 @@ async def test_backtest_json_export_and_reconstruction(test_session):
     reader = OddsReader(test_session)
 
     # Create simple test event
-    event_date = datetime.utcnow() - timedelta(days=5)
+    event_date = datetime.now(UTC) - timedelta(days=5)
     event = Event(
         id="test_export_1",
         sport_key="basketball_nba",
@@ -313,7 +313,7 @@ async def test_backtest_csv_export(test_session):
     reader = OddsReader(test_session)
 
     # Create test event
-    event_date = datetime.utcnow() - timedelta(days=5)
+    event_date = datetime.now(UTC) - timedelta(days=5)
     event = Event(
         id="test_csv_1",
         sport_key="basketball_nba",
@@ -379,7 +379,7 @@ async def test_arbitrage_strategy_max_hold_filter(test_session):
     reader = OddsReader(test_session)
 
     # Create test event
-    event_date = datetime.utcnow() - timedelta(days=5)
+    event_date = datetime.now(UTC) - timedelta(days=5)
     event = Event(
         id="test_arb_hold_1",
         sport_key="basketball_nba",

@@ -1,7 +1,7 @@
 """CLI commands for system status and monitoring."""
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import typer
 from rich.console import Console
@@ -45,7 +45,7 @@ async def _show_status(verbose: bool):
 
             # Last fetch
             if latest_fetch:
-                time_ago = datetime.utcnow() - latest_fetch.fetch_time
+                time_ago = datetime.now(UTC) - latest_fetch.fetch_time
                 minutes_ago = int(time_ago.total_seconds() / 60)
                 status_icon = "✓" if latest_fetch.success else "✗"
                 status_color = "green" if latest_fetch.success else "red"
@@ -102,7 +102,7 @@ async def _show_status(verbose: bool):
 
                 # Recent data quality issues
                 console.print("\n[bold]Recent Data Quality Issues (last 24h):[/bold]")
-                day_ago = datetime.utcnow() - timedelta(hours=24)
+                day_ago = datetime.now(UTC) - timedelta(hours=24)
                 quality_logs = await reader.get_data_quality_logs(start_time=day_ago, limit=10)
 
                 if quality_logs:
@@ -113,7 +113,7 @@ async def _show_status(verbose: bool):
                     quality_table.add_column("Description")
 
                     for log in quality_logs:
-                        time_ago = datetime.utcnow() - log.created_at
+                        time_ago = datetime.now(UTC) - log.created_at
                         minutes_ago = int(time_ago.total_seconds() / 60)
 
                         severity_color = {
@@ -193,7 +193,7 @@ async def _show_quota():
 
                 for log in fetch_logs:
                     if log.api_quota_remaining is not None:
-                        time_ago = datetime.utcnow() - log.fetch_time
+                        time_ago = datetime.now(UTC) - log.fetch_time
                         minutes_ago = int(time_ago.total_seconds() / 60)
                         used = settings.odds_api_quota - log.api_quota_remaining
 
@@ -231,11 +231,11 @@ async def _show_events(days: int, team: str | None):
 
             if team:
                 # Filter by team
-                start_date = datetime.utcnow() - timedelta(days=days)
+                start_date = datetime.now(UTC) - timedelta(days=days)
                 events = await reader.get_events_by_team(team_name=team, start_date=start_date)
             else:
                 # Get all events in range
-                end_date = datetime.utcnow() + timedelta(days=1)
+                end_date = datetime.now(UTC) + timedelta(days=1)
                 start_date = end_date - timedelta(days=days)
                 events = await reader.get_events_by_date_range(
                     start_date=start_date, end_date=end_date

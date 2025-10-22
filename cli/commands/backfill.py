@@ -92,7 +92,7 @@ async def _create_plan_async(
 
             for sample_date in sample_dates:
                 # Query for events around this date
-                date_str = sample_date.isoformat() + "Z"
+                date_str = sample_date.isoformat()
 
                 try:
                     response = await client.get_historical_events(

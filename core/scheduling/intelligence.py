@@ -1,7 +1,7 @@
 """Game-aware scheduling intelligence for adaptive data collection."""
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 
 import structlog
@@ -103,11 +103,11 @@ class SchedulingIntelligence:
             return ScheduleDecision(
                 should_execute=False,
                 reason="No games scheduled in next 7 days",
-                next_execution=datetime.utcnow() + timedelta(hours=24),
+                next_execution=datetime.now(UTC) + timedelta(hours=24),
                 tier=None,
             )
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         hours_until = (closest_game.commence_time - now).total_seconds() / 3600
 
         # Don't fetch for games that already started
@@ -143,7 +143,7 @@ class SchedulingIntelligence:
         async with self.session_factory() as session:
             reader = OddsReader(session)
 
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
             start_date = now - timedelta(days=3)
 
             # Check for games that might need score updates
@@ -182,7 +182,7 @@ class SchedulingIntelligence:
         async with self.session_factory() as session:
             reader = OddsReader(session)
 
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
 
             # Check for games that should be live (started in last 4 hours)
             start_range = now - timedelta(hours=4)
@@ -217,7 +217,7 @@ class SchedulingIntelligence:
         async with self.session_factory() as session:
             reader = OddsReader(session)
 
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
             end_date = now + timedelta(days=self.lookahead_days)
 
             events = await reader.get_events_by_date_range(
@@ -242,7 +242,7 @@ class SchedulingIntelligence:
         async with self.session_factory() as session:
             reader = OddsReader(session)
 
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
             end_date = now + timedelta(days=30)
 
             events = await reader.get_events_by_date_range(

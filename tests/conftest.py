@@ -1,6 +1,7 @@
 """Pytest configuration and fixtures."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -8,8 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 
-# Test database URL (use in-memory or test database)
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+# Test database URL - use PostgreSQL for timezone-aware datetime support
+# Can be overridden with TEST_DATABASE_URL environment variable
+TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL", "postgresql+asyncpg://postgres:dev_password@localhost:5432/odds_test"
+)
 
 
 @pytest.fixture

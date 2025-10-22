@@ -1,6 +1,6 @@
 """Unit tests for scheduling intelligence."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -38,7 +38,7 @@ class TestSchedulingIntelligence:
         assert decision.tier is None
         # Next execution should be ~24 hours from now
         assert decision.next_execution is not None
-        hours_until_next = (decision.next_execution - datetime.utcnow()).total_seconds() / 3600
+        hours_until_next = (decision.next_execution - datetime.now(UTC)).total_seconds() / 3600
         assert 23.9 < hours_until_next < 24.1
 
     @pytest.mark.asyncio
@@ -46,7 +46,7 @@ class TestSchedulingIntelligence:
         """Game 2 hours away should trigger CLOSING tier (30min interval)."""
         # Create game 2 hours in future
         writer = OddsWriter(test_session)
-        commence_time = datetime.utcnow() + timedelta(hours=2)
+        commence_time = datetime.now(UTC) + timedelta(hours=2)
 
         event = Event(
             id="closing_game",
@@ -67,14 +67,14 @@ class TestSchedulingIntelligence:
         assert decision.tier == FetchTier.CLOSING
         assert "closing" in decision.reason.lower()
         # Next execution should be ~30 minutes (0.5 hours)
-        hours_until_next = (decision.next_execution - datetime.utcnow()).total_seconds() / 3600
+        hours_until_next = (decision.next_execution - datetime.now(UTC)).total_seconds() / 3600
         assert 0.45 < hours_until_next < 0.55
 
     @pytest.mark.asyncio
     async def test_pregame_tier_game(self, test_session, mock_session_factory):
         """Game 8 hours away should trigger PREGAME tier (3h interval)."""
         writer = OddsWriter(test_session)
-        commence_time = datetime.utcnow() + timedelta(hours=8)
+        commence_time = datetime.now(UTC) + timedelta(hours=8)
 
         event = Event(
             id="pregame_game",
@@ -95,14 +95,14 @@ class TestSchedulingIntelligence:
         assert decision.tier == FetchTier.PREGAME
         assert "pregame" in decision.reason.lower()
         # Next execution should be ~3 hours
-        hours_until_next = (decision.next_execution - datetime.utcnow()).total_seconds() / 3600
+        hours_until_next = (decision.next_execution - datetime.now(UTC)).total_seconds() / 3600
         assert 2.9 < hours_until_next < 3.1
 
     @pytest.mark.asyncio
     async def test_sharp_tier_game(self, test_session, mock_session_factory):
         """Game 18 hours away should trigger SHARP tier (12h interval)."""
         writer = OddsWriter(test_session)
-        commence_time = datetime.utcnow() + timedelta(hours=18)
+        commence_time = datetime.now(UTC) + timedelta(hours=18)
 
         event = Event(
             id="sharp_game",
@@ -122,14 +122,14 @@ class TestSchedulingIntelligence:
         assert decision.should_execute is True
         assert decision.tier == FetchTier.SHARP
         # Next execution should be ~12 hours
-        hours_until_next = (decision.next_execution - datetime.utcnow()).total_seconds() / 3600
+        hours_until_next = (decision.next_execution - datetime.now(UTC)).total_seconds() / 3600
         assert 11.9 < hours_until_next < 12.1
 
     @pytest.mark.asyncio
     async def test_early_tier_game(self, test_session, mock_session_factory):
         """Game 2 days away should trigger EARLY tier (24h interval)."""
         writer = OddsWriter(test_session)
-        commence_time = datetime.utcnow() + timedelta(days=2)
+        commence_time = datetime.now(UTC) + timedelta(days=2)
 
         event = Event(
             id="early_game",
@@ -149,14 +149,14 @@ class TestSchedulingIntelligence:
         assert decision.should_execute is True
         assert decision.tier == FetchTier.EARLY
         # Next execution should be ~24 hours
-        hours_until_next = (decision.next_execution - datetime.utcnow()).total_seconds() / 3600
+        hours_until_next = (decision.next_execution - datetime.now(UTC)).total_seconds() / 3600
         assert 23.9 < hours_until_next < 24.1
 
     @pytest.mark.asyncio
     async def test_opening_tier_game(self, test_session, mock_session_factory):
         """Game 5 days away should trigger OPENING tier (48h interval)."""
         writer = OddsWriter(test_session)
-        commence_time = datetime.utcnow() + timedelta(days=5)
+        commence_time = datetime.now(UTC) + timedelta(days=5)
 
         event = Event(
             id="opening_game",
@@ -176,7 +176,7 @@ class TestSchedulingIntelligence:
         assert decision.should_execute is True
         assert decision.tier == FetchTier.OPENING
         # Next execution should be ~48 hours
-        hours_until_next = (decision.next_execution - datetime.utcnow()).total_seconds() / 3600
+        hours_until_next = (decision.next_execution - datetime.now(UTC)).total_seconds() / 3600
         assert 47.9 < hours_until_next < 48.1
 
     @pytest.mark.asyncio
@@ -184,7 +184,7 @@ class TestSchedulingIntelligence:
         """Game that already started is not found (filtered out by date range query)."""
         writer = OddsWriter(test_session)
         # Game started 1 hour ago
-        commence_time = datetime.utcnow() - timedelta(hours=1)
+        commence_time = datetime.now(UTC) - timedelta(hours=1)
 
         event = Event(
             id="started_game",
@@ -207,7 +207,7 @@ class TestSchedulingIntelligence:
         assert "No games scheduled" in decision.reason
         assert decision.tier is None
         # Should check again in 24 hours
-        hours_until_next = (decision.next_execution - datetime.utcnow()).total_seconds() / 3600
+        hours_until_next = (decision.next_execution - datetime.now(UTC)).total_seconds() / 3600
         assert 23.9 < hours_until_next < 24.1
 
     @pytest.mark.asyncio
@@ -220,7 +220,7 @@ class TestSchedulingIntelligence:
             id="far_game",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow() + timedelta(days=5),
+            commence_time=datetime.now(UTC) + timedelta(days=5),
             home_team="Team A",
             away_team="Team B",
             status=EventStatus.SCHEDULED,
@@ -229,7 +229,7 @@ class TestSchedulingIntelligence:
             id="closest_game",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow() + timedelta(hours=4),
+            commence_time=datetime.now(UTC) + timedelta(hours=4),
             home_team="Lakers",
             away_team="Celtics",
             status=EventStatus.SCHEDULED,
@@ -238,7 +238,7 @@ class TestSchedulingIntelligence:
             id="middle_game",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow() + timedelta(days=2),
+            commence_time=datetime.now(UTC) + timedelta(days=2),
             home_team="Team C",
             away_team="Team D",
             status=EventStatus.SCHEDULED,
@@ -265,7 +265,7 @@ class TestSchedulingIntelligence:
         writer = OddsWriter(test_session)
 
         # Create game from yesterday without final status
-        yesterday = datetime.utcnow() - timedelta(days=1)
+        yesterday = datetime.now(UTC) - timedelta(days=1)
         event = Event(
             id="incomplete_game",
             sport_key="basketball_nba",
@@ -285,7 +285,7 @@ class TestSchedulingIntelligence:
         assert "need score updates" in decision.reason
         assert decision.tier is None
         # Should check again in 6 hours
-        hours_until_next = (decision.next_execution - datetime.utcnow()).total_seconds() / 3600
+        hours_until_next = (decision.next_execution - datetime.now(UTC)).total_seconds() / 3600
         assert 5.9 < hours_until_next < 6.1
 
     @pytest.mark.asyncio
@@ -294,7 +294,7 @@ class TestSchedulingIntelligence:
         writer = OddsWriter(test_session)
 
         # Create game from yesterday with final status
-        yesterday = datetime.utcnow() - timedelta(days=1)
+        yesterday = datetime.now(UTC) - timedelta(days=1)
         event = Event(
             id="final_game",
             sport_key="basketball_nba",
@@ -315,7 +315,7 @@ class TestSchedulingIntelligence:
         assert decision.should_execute is False
         assert "No games need score updates" in decision.reason
         # Should check again in 12 hours
-        hours_until_next = (decision.next_execution - datetime.utcnow()).total_seconds() / 3600
+        hours_until_next = (decision.next_execution - datetime.now(UTC)).total_seconds() / 3600
         assert 11.9 < hours_until_next < 12.1
 
     @pytest.mark.asyncio
@@ -326,7 +326,7 @@ class TestSchedulingIntelligence:
         writer = OddsWriter(test_session)
 
         # Create game that started 2 hours ago but still marked scheduled
-        two_hours_ago = datetime.utcnow() - timedelta(hours=2)
+        two_hours_ago = datetime.now(UTC) - timedelta(hours=2)
         event = Event(
             id="should_be_live",
             sport_key="basketball_nba",
@@ -345,7 +345,7 @@ class TestSchedulingIntelligence:
         assert decision.should_execute is True
         assert "may have started" in decision.reason
         # Should check again in 1 hour
-        hours_until_next = (decision.next_execution - datetime.utcnow()).total_seconds() / 3600
+        hours_until_next = (decision.next_execution - datetime.now(UTC)).total_seconds() / 3600
         assert 0.9 < hours_until_next < 1.1
 
     @pytest.mark.asyncio
@@ -357,7 +357,7 @@ class TestSchedulingIntelligence:
         assert decision.should_execute is False
         assert "No games to update" in decision.reason
         # Should check again in 6 hours
-        hours_until_next = (decision.next_execution - datetime.utcnow()).total_seconds() / 3600
+        hours_until_next = (decision.next_execution - datetime.now(UTC)).total_seconds() / 3600
         assert 5.9 < hours_until_next < 6.1
 
     @pytest.mark.asyncio
@@ -370,7 +370,7 @@ class TestSchedulingIntelligence:
             id="future_game",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow() + timedelta(days=15),
+            commence_time=datetime.now(UTC) + timedelta(days=15),
             home_team="Lakers",
             away_team="Celtics",
             status=EventStatus.SCHEDULED,
@@ -408,7 +408,7 @@ class TestSchedulingIntelligence:
             id="game1",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow() + timedelta(days=3),
+            commence_time=datetime.now(UTC) + timedelta(days=3),
             home_team="Team A",
             away_team="Team B",
             status=EventStatus.SCHEDULED,
@@ -417,7 +417,7 @@ class TestSchedulingIntelligence:
             id="game2",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow() + timedelta(hours=6),  # Earliest
+            commence_time=datetime.now(UTC) + timedelta(hours=6),  # Earliest
             home_team="Lakers",
             away_team="Celtics",
             status=EventStatus.SCHEDULED,
@@ -426,7 +426,7 @@ class TestSchedulingIntelligence:
             id="game3",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow() + timedelta(days=1),
+            commence_time=datetime.now(UTC) + timedelta(days=1),
             home_team="Team C",
             away_team="Team D",
             status=EventStatus.SCHEDULED,

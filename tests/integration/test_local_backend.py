@@ -1,7 +1,7 @@
 """Integration tests for local scheduler backend."""
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -73,7 +73,7 @@ class TestLocalSchedulerBackend:
         # Patch job registry to return our mock
         with patch("core.scheduling.jobs.get_job_function", return_value=mock_job):
             async with LocalSchedulerBackend() as backend:
-                next_time = datetime.utcnow() + timedelta(hours=1)
+                next_time = datetime.now(UTC) + timedelta(hours=1)
 
                 await backend.schedule_next_execution(job_name="test-job", next_time=next_time)
 
@@ -90,8 +90,8 @@ class TestLocalSchedulerBackend:
 
         with patch("core.scheduling.jobs.get_job_function", return_value=mock_job):
             async with LocalSchedulerBackend() as backend:
-                time1 = datetime.utcnow() + timedelta(hours=1)
-                time2 = datetime.utcnow() + timedelta(hours=2)
+                time1 = datetime.now(UTC) + timedelta(hours=1)
+                time2 = datetime.now(UTC) + timedelta(hours=2)
 
                 # Schedule first time
                 await backend.schedule_next_execution(job_name="test-job", next_time=time1)
@@ -111,7 +111,7 @@ class TestLocalSchedulerBackend:
 
         with patch("core.scheduling.jobs.get_job_function", return_value=mock_job):
             async with LocalSchedulerBackend() as backend:
-                next_time = datetime.utcnow() + timedelta(hours=1)
+                next_time = datetime.now(UTC) + timedelta(hours=1)
 
                 # Schedule job
                 await backend.schedule_next_execution(job_name="test-job", next_time=next_time)
@@ -141,7 +141,7 @@ class TestLocalSchedulerBackend:
 
         with patch("core.scheduling.jobs.get_job_function", return_value=mock_job):
             async with LocalSchedulerBackend() as backend:
-                next_time = datetime.utcnow() + timedelta(hours=1)
+                next_time = datetime.now(UTC) + timedelta(hours=1)
 
                 await backend.schedule_next_execution(job_name="test-job", next_time=next_time)
 
@@ -175,13 +175,13 @@ class TestLocalSchedulerBackend:
             async with LocalSchedulerBackend() as backend:
                 # Schedule multiple jobs
                 await backend.schedule_next_execution(
-                    job_name="job1", next_time=datetime.utcnow() + timedelta(hours=1)
+                    job_name="job1", next_time=datetime.now(UTC) + timedelta(hours=1)
                 )
                 await backend.schedule_next_execution(
-                    job_name="job2", next_time=datetime.utcnow() + timedelta(hours=2)
+                    job_name="job2", next_time=datetime.now(UTC) + timedelta(hours=2)
                 )
                 await backend.schedule_next_execution(
-                    job_name="job3", next_time=datetime.utcnow() + timedelta(hours=3)
+                    job_name="job3", next_time=datetime.now(UTC) + timedelta(hours=3)
                 )
 
                 jobs = await backend.get_scheduled_jobs()
@@ -196,7 +196,7 @@ class TestLocalSchedulerBackend:
         backend = LocalSchedulerBackend(dry_run=True)
 
         # Don't need to start backend in dry-run
-        next_time = datetime.utcnow() + timedelta(hours=1)
+        next_time = datetime.now(UTC) + timedelta(hours=1)
 
         # Should not raise error and should log
         await backend.schedule_next_execution(job_name="test-job", next_time=next_time)
@@ -229,7 +229,7 @@ class TestLocalSchedulerBackend:
             side_effect=KeyError("Unknown job 'invalid-job'"),
         ):
             async with LocalSchedulerBackend() as backend:
-                next_time = datetime.utcnow() + timedelta(hours=1)
+                next_time = datetime.now(UTC) + timedelta(hours=1)
 
                 with pytest.raises(SchedulingFailedError):
                     await backend.schedule_next_execution(
@@ -248,7 +248,7 @@ class TestLocalSchedulerBackend:
         with patch("core.scheduling.jobs.get_job_function", return_value=test_job):
             async with LocalSchedulerBackend() as backend:
                 # Schedule job to run very soon (100ms)
-                next_time = datetime.utcnow() + timedelta(milliseconds=100)
+                next_time = datetime.now(UTC) + timedelta(milliseconds=100)
 
                 await backend.schedule_next_execution(job_name="test-job", next_time=next_time)
 
@@ -278,10 +278,10 @@ class TestLocalSchedulerBackend:
             async with LocalSchedulerBackend() as backend:
                 # Schedule both jobs
                 await backend.schedule_next_execution(
-                    job_name="job1", next_time=datetime.utcnow() + timedelta(milliseconds=100)
+                    job_name="job1", next_time=datetime.now(UTC) + timedelta(milliseconds=100)
                 )
                 await backend.schedule_next_execution(
-                    job_name="job2", next_time=datetime.utcnow() + timedelta(milliseconds=150)
+                    job_name="job2", next_time=datetime.now(UTC) + timedelta(milliseconds=150)
                 )
 
                 # Wait for both to execute

@@ -9,7 +9,7 @@ This job:
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import structlog
 
@@ -93,7 +93,7 @@ async def _update_event_statuses():
         writer = OddsWriter(session)
         reader = OddsReader(session)
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         # Find events that should be live (within last 4 hours)
         start_range = now - timedelta(hours=4)

@@ -1,6 +1,6 @@
 """Database write operations for odds data."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import select
@@ -58,7 +58,7 @@ class OddsWriter:
             existing_event.home_team = event.home_team
             existing_event.away_team = event.away_team
             existing_event.commence_time = event.commence_time
-            existing_event.updated_at = datetime.utcnow()
+            existing_event.updated_at = datetime.now(UTC)
 
             logger.info("event_updated", event_id=event.id)
             return existing_event
@@ -91,7 +91,7 @@ class OddsWriter:
             - Raw JSONB snapshot for debugging
             - Normalized odds records for querying
         """
-        snapshot_time = snapshot_time or datetime.utcnow()
+        snapshot_time = snapshot_time or datetime.now(UTC)
 
         # Validate if enabled
         if validate:
@@ -219,12 +219,12 @@ class OddsWriter:
             return None
 
         event.status = status
-        event.updated_at = datetime.utcnow()
+        event.updated_at = datetime.now(UTC)
 
         if status == EventStatus.FINAL and home_score is not None and away_score is not None:
             event.home_score = home_score
             event.away_score = away_score
-            event.completed_at = datetime.utcnow()
+            event.completed_at = datetime.now(UTC)
 
         logger.info(
             "event_status_updated",

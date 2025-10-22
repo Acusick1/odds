@@ -1,6 +1,6 @@
 """Unit tests for database models."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 
@@ -14,7 +14,7 @@ class TestEventModel:
             id="test123",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow(),
+            commence_time=datetime.now(UTC),
             home_team="Lakers",
             away_team="Celtics",
             status=EventStatus.SCHEDULED,
@@ -42,13 +42,13 @@ class TestEventModel:
             id="test123",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime.utcnow(),
+            commence_time=datetime.now(UTC),
             home_team="Lakers",
             away_team="Celtics",
             status=EventStatus.FINAL,
             home_score=112,
             away_score=108,
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(UTC),
         )
 
         assert event.status == EventStatus.FINAL
@@ -64,7 +64,7 @@ class TestOddsSnapshotModel:
         """Test creating an OddsSnapshot instance."""
         snapshot = OddsSnapshot(
             event_id="test123",
-            snapshot_time=datetime.utcnow(),
+            snapshot_time=datetime.now(UTC),
             raw_data=sample_odds_data,
             bookmaker_count=2,
         )
@@ -87,8 +87,8 @@ class TestOddsModel:
             market_key="h2h",
             outcome_name="Lakers",
             price=-110,
-            odds_timestamp=datetime.utcnow(),
-            last_update=datetime.utcnow(),
+            odds_timestamp=datetime.now(UTC),
+            last_update=datetime.now(UTC),
             is_valid=True,
         )
 
@@ -110,8 +110,8 @@ class TestOddsModel:
             outcome_name="Lakers",
             price=-110,
             point=-2.5,
-            odds_timestamp=datetime.utcnow(),
-            last_update=datetime.utcnow(),
+            odds_timestamp=datetime.now(UTC),
+            last_update=datetime.now(UTC),
         )
 
         assert odds.market_key == "spreads"
@@ -126,8 +126,8 @@ class TestOddsModel:
             market_key="h2h",
             outcome_name="Lakers",
             price=50000,  # Invalid odds
-            odds_timestamp=datetime.utcnow(),
-            last_update=datetime.utcnow(),
+            odds_timestamp=datetime.now(UTC),
+            last_update=datetime.now(UTC),
             is_valid=False,
             validation_notes="Price out of valid range",
         )

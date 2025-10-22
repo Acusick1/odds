@@ -1,7 +1,7 @@
 """The Odds API client for fetching odds and scores data."""
 
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 
 import aiohttp
 import structlog
@@ -179,7 +179,7 @@ class TheOddsAPIClient:
             raw_events_data=raw_events_data,
             response_time_ms=response_time,
             quota_remaining=self._quota_remaining,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
         )
 
     async def get_scores(self, sport: str, days_from: int = 1) -> ScoresResponse:
@@ -213,7 +213,7 @@ class TheOddsAPIClient:
             scores_data=scores_data,
             response_time_ms=response_time,
             quota_remaining=self._quota_remaining,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
         )
 
     async def get_historical_odds(
@@ -275,7 +275,7 @@ class TheOddsAPIClient:
             raw_events_data=raw_events_data,
             response_time_ms=response_time,
             quota_remaining=self._quota_remaining,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
         )
 
     async def get_historical_events(
@@ -315,5 +315,5 @@ class TheOddsAPIClient:
             "data": data,
             "response_time_ms": response_time,
             "quota_remaining": self._quota_remaining,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(UTC),
         }
