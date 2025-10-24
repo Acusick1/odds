@@ -26,15 +26,17 @@ class TestSchedulingIntelligence:
 
     @pytest.mark.asyncio
     async def test_no_games_scheduled(self, mock_session_factory):
-        """When no games exist, should not execute and check again in 24h."""
+        """When no games exist, should execute to fetch from API and discover new games."""
         intelligence = SchedulingIntelligence(
             lookahead_days=7, session_factory=mock_session_factory
         )
 
         decision = await intelligence.should_execute_fetch()
 
-        assert decision.should_execute is False
-        assert "No games scheduled" in decision.reason
+        # New behavior: Execute to fetch from API when no games in database
+        assert decision.should_execute is True
+        assert "No games in database" in decision.reason
+        assert "fetching from API" in decision.reason
         assert decision.tier is None
         # Next execution should be ~24 hours from now
         assert decision.next_execution is not None
@@ -202,9 +204,10 @@ class TestSchedulingIntelligence:
         decision = await intelligence.should_execute_fetch()
 
         # Game in the past won't be found by get_closest_game (queries from now forward)
-        # So it behaves same as no games scheduled
-        assert decision.should_execute is False
-        assert "No games scheduled" in decision.reason
+        # So it behaves same as no games in database - execute to discover new games
+        assert decision.should_execute is True
+        assert "No games in database" in decision.reason
+        assert "fetching from API" in decision.reason
         assert decision.tier is None
         # Should check again in 24 hours
         hours_until_next = (decision.next_execution - datetime.now(UTC)).total_seconds() / 3600

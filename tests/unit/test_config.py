@@ -6,8 +6,8 @@ from unittest.mock import patch
 # Set up minimal environment before importing Settings
 if "ODDS_API_KEY" not in os.environ:
     os.environ["ODDS_API_KEY"] = "test_key"
-if "LOCAL_DATABASE_URL" not in os.environ:
-    os.environ["LOCAL_DATABASE_URL"] = "test_url"
+if "DATABASE_URL" not in os.environ:
+    os.environ["DATABASE_URL"] = "postgresql://test:test@localhost/test"
 
 from core.config import Settings
 
@@ -19,7 +19,9 @@ class TestSettings:
         """Test default configuration values."""
         # Create fresh settings with minimal env (not loading .env file)
         with patch.dict(
-            os.environ, {"ODDS_API_KEY": "test_key", "LOCAL_DATABASE_URL": "test_url"}, clear=True
+            os.environ,
+            {"ODDS_API_KEY": "test_key", "DATABASE_URL": "postgresql://test:test@localhost/test"},
+            clear=True,
         ):
             settings = Settings(_env_file=None)  # Don't load .env file
 
@@ -44,7 +46,7 @@ class TestSettings:
             os.environ,
             {
                 "ODDS_API_KEY": "custom_key",
-                "LOCAL_DATABASE_URL": "postgresql://custom",
+                "DATABASE_URL": "postgresql://custom",
                 "SCHEDULER_BACKEND": "aws",
                 "SCHEDULER_DRY_RUN": "true",
                 "SCHEDULING_LOOKAHEAD_DAYS": "14",
@@ -55,7 +57,7 @@ class TestSettings:
             settings = Settings()
 
             assert settings.odds_api_key == "custom_key"
-            assert settings.LOCAL_database_url == "postgresql://custom"
+            assert settings.database_url == "postgresql://custom"
             assert settings.scheduler_backend == "aws"
             assert settings.scheduler_dry_run is True
             assert settings.scheduling_lookahead_days == 14
@@ -64,7 +66,10 @@ class TestSettings:
 
     def test_settings_bookmakers(self):
         """Test bookmaker configuration."""
-        with patch.dict(os.environ, {"ODDS_API_KEY": "test_key", "LOCAL_DATABASE_URL": "test_url"}):
+        with patch.dict(
+            os.environ,
+            {"ODDS_API_KEY": "test_key", "DATABASE_URL": "postgresql://test:test@localhost/test"},
+        ):
             settings = Settings()
 
             expected_bookmakers = [
@@ -86,7 +91,7 @@ class TestSettings:
             os.environ,
             {
                 "ODDS_API_KEY": "test_key",
-                "LOCAL_DATABASE_URL": "test_url",
+                "DATABASE_URL": "postgresql://test:test@localhost/test",
                 "SCHEDULER_BACKEND": "aws",
                 "AWS_REGION": "us-east-1",
                 "LAMBDA_ARN": "arn:aws:lambda:us-east-1:123456789:function:fetch-odds",
