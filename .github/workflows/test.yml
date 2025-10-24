@@ -33,6 +33,9 @@ jobs:
         run: uv pip install --system -r requirements.txt
 
       - name: Run unit tests
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: uv run pytest tests/unit -v
 
       - name: Configure AWS credentials
