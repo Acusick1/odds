@@ -158,10 +158,6 @@ class OddsValidator:
                 f"({cls.MIN_ODDS} to {cls.MAX_ODDS})"
             )
 
-        # Warn on odds that are too close to even (might indicate stale data)
-        if -105 < price < 105 and price != 100:
-            warnings.append(f"{bookmaker} {market} {outcome}: Suspicious odds near even: {price}")
-
         return warnings
 
     @classmethod

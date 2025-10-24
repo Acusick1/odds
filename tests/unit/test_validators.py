@@ -41,12 +41,6 @@ class TestOddsValidator:
         warnings = OddsValidator.validate_odds_value(-50000, "fanduel", "h2h", "Lakers")
         assert len(warnings) > 0
 
-    def test_validate_odds_value_suspicious(self):
-        """Test validation of suspicious odds near even."""
-        warnings = OddsValidator.validate_odds_value(101, "fanduel", "h2h", "Lakers")
-        assert len(warnings) > 0
-        assert "Suspicious odds" in warnings[0]
-
     def test_validate_vig_normal(self):
         """Test vig validation for normal two-way market."""
         outcomes = [
