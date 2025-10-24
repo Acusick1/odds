@@ -54,6 +54,11 @@ jobs:
             -var="odds_api_key=${{ secrets.ODDS_API_KEY }}" \
             -auto-approve
 
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run alembic upgrade head
+
       - name: Test Lambda functions
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
