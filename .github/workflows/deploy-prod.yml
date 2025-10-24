@@ -1,17 +1,18 @@
-name: Deploy to Dev
+name: Deploy to Production
 
 on:
-  workflow_call:
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger (primary method)
+  release:            # Also trigger on releases (for versioned deployments)
+    types: [published]
 
 env:
   AWS_REGION: eu-west-1
 
 jobs:
-  deploy-dev:
-    name: Deploy and Test on Dev Environment
+  deploy-prod:
+    name: Deploy to Production Environment
     runs-on: ubuntu-latest
-    environment: development
+    environment: production  # Requires manual approval
 
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -61,11 +62,13 @@ jobs:
           cd deployment/aws/terraform
           terraform plan \
             -var-file="terraform.tfvars.example" \
+            -var="environment=production" \
+            -var="project_name=odds-scheduler" \
             -var="database_url=$DATABASE_URL" \
             -var="odds_api_key=$ODDS_API_KEY" \
             -out=tfplan
 
-      - name: Deploy to Dev
+      - name: Deploy to Production
         run: |
           cd deployment/aws/terraform
           terraform apply -auto-approve tfplan
@@ -82,27 +85,20 @@ jobs:
       - name: Deployment Summary
         if: success()
         run: |
-          echo "✅ Development deployment completed successfully!"
-          echo "Environment: development"
+          echo "✅ Production deployment completed successfully!"
+          echo "Environment: production"
           echo "Region: ${{ env.AWS_REGION }}"
-          echo "Note: Infrastructure will be destroyed in cleanup step"
-
-      - name: Cleanup - Destroy dev infrastructure
-        if: always()
-        run: |
-          cd deployment/aws/terraform
-          terraform destroy \
-            -var-file="terraform.tfvars.example" \
-            -var="database_url=$DATABASE_URL" \
-            -var="odds_api_key=$ODDS_API_KEY" \
-            -auto-approve
-        continue-on-error: true
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "Triggered by: Release ${{ github.event.release.tag_name }}"
+          else
+            echo "Triggered by: Manual workflow dispatch"
+          fi
 
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: dev-deploy-logs
+          name: prod-deploy-logs
           path: |
             *.log
             *.txt
