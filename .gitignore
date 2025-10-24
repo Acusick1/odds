@@ -58,3 +58,15 @@ Thumbs.db
 # Alembic
 alembic/versions/*.py
 !alembic/versions/
+
+# Terraform
+deployment/aws/terraform/.terraform/
+deployment/aws/terraform/.terraform.lock.hcl
+deployment/aws/terraform/terraform.tfstate
+deployment/aws/terraform/terraform.tfstate.backup
+deployment/aws/terraform/*.tfvars
+!deployment/aws/terraform/*.tfvars.example
+
+# AWS Lambda
+deployment/aws/lambda_deployment.zip
+deployment/aws/build/

@@ -91,19 +91,21 @@ class SchedulingIntelligence:
             ScheduleDecision with execution recommendation and next schedule
 
         Logic:
-        1. Find closest upcoming game
-        2. If no games: don't execute, check again in 24 hours
-        3. If game exists: determine tier based on time until game
-        4. Calculate next execution based on tier interval
+        1. Find closest upcoming game in database
+        2. If no games: EXECUTE to discover new games from API (bootstrap/off-season)
+        3. If game already started: don't execute, check again soon
+        4. If game exists and upcoming: determine tier based on time until game
+        5. Calculate next execution based on tier interval
         """
         closest_game = await self.get_closest_game()
 
         if not closest_game:
-            # No upcoming games - check again tomorrow
+            # No upcoming games in database - fetch from API to discover new games
+            # This handles both initial bootstrap and end-of-season scenarios
             return ScheduleDecision(
-                should_execute=False,
-                reason="No games scheduled in next 7 days",
-                next_execution=datetime.now(UTC) + timedelta(hours=24),
+                should_execute=True,
+                reason="No games in database - fetching from API to discover new games",
+                next_execution=datetime.now(UTC) + timedelta(hours=24),  # Check daily for new games
                 tier=None,
             )
 

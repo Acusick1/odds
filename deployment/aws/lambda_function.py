@@ -13,7 +13,7 @@ Environment variables required:
 - DATABASE_URL: PostgreSQL connection string
 - ODDS_API_KEY: The Odds API key
 - SCHEDULER_BACKEND: Should be 'aws'
-- AWS_REGION: AWS region
+- AWS_REGION: AWS region (automatically provided by Lambda)
 - LAMBDA_ARN: This Lambda function's ARN
 """
 
@@ -43,6 +43,27 @@ if str(app_root) not in sys.path:
     sys.path.insert(0, str(app_root))
 
 
+async def _run_job_async(job_name: str):
+    """Run the job module's main function asynchronously."""
+    if job_name == "fetch-odds":
+        from jobs import fetch_odds
+
+        await fetch_odds.main()
+
+    elif job_name == "fetch-scores":
+        from jobs import fetch_scores
+
+        await fetch_scores.main()
+
+    elif job_name == "update-status":
+        from jobs import update_status
+
+        await update_status.main()
+
+    else:
+        raise ValueError(f"Unknown job: {job_name}")
+
+
 def lambda_handler(event, context):
     """
     AWS Lambda entry point.
@@ -63,7 +84,7 @@ def lambda_handler(event, context):
         logger.info(
             "lambda_invoked",
             job=job_name,
-            request_id=context.request_id,
+            request_id=context.aws_request_id,
             function_name=context.function_name,
             memory_limit=context.memory_limit_in_mb,
         )
@@ -72,29 +93,20 @@ def lambda_handler(event, context):
         if not job_name:
             raise ValueError("Missing 'job' in event payload")
 
-        # Route to appropriate job module
-        if job_name == "fetch-odds":
-            from jobs import fetch_odds
-
-            asyncio.run(fetch_odds.main())
-
-        elif job_name == "fetch-scores":
-            from jobs import fetch_scores
-
-            asyncio.run(fetch_scores.main())
-
-        elif job_name == "update-status":
-            from jobs import update_status
-
-            asyncio.run(update_status.main())
-
+        # Run async job - handle existing event loop in warm Lambda containers
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop - create new one
+            asyncio.run(_run_job_async(job_name))
         else:
-            raise ValueError(f"Unknown job: {job_name}")
+            # Running loop exists (warm container) - use it
+            loop.run_until_complete(_run_job_async(job_name))
 
         logger.info(
             "lambda_completed",
             job=job_name,
-            request_id=context.request_id,
+            request_id=context.aws_request_id,
         )
 
         return {
@@ -103,7 +115,7 @@ def lambda_handler(event, context):
                 {
                     "status": "success",
                     "job": job_name,
-                    "request_id": context.request_id,
+                    "request_id": context.aws_request_id,
                 }
             ),
         }
@@ -113,7 +125,7 @@ def lambda_handler(event, context):
             "lambda_failed",
             error=str(e),
             error_type=type(e).__name__,
-            request_id=context.request_id if context else None,
+            request_id=context.aws_request_id if context else None,
             exc_info=True,
         )
 

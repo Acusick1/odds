@@ -36,8 +36,23 @@ AWS_SCHEDULE_FORMAT = "at({timestamp})"
 
 
 def _format_aws_schedule(dt: datetime) -> str:
-    """Format datetime for AWS EventBridge at() expression."""
-    return f"at({dt.strftime('%Y-%m-%dT%H:%M:%S')})"
+    """
+    Format datetime for AWS EventBridge cron expression.
+
+    EventBridge Rules only support cron() and rate() expressions, NOT at().
+    We use cron for one-time execution at a specific time.
+
+    Format: cron(minute hour day month day-of-week year)
+    Example: cron(30 14 24 10 ? 2025) - runs at 14:30 UTC on Oct 24, 2025
+    """
+    # Convert to UTC and remove timezone info
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(UTC).replace(tzinfo=None)
+
+    # Format as cron expression
+    # cron(minute hour day-of-month month day-of-week year)
+    # Use ? for day-of-week since we specify day-of-month
+    return f"cron({dt.minute} {dt.hour} {dt.day} {dt.month} ? {dt.year})"
 
 
 class AWSEventBridgeBackend(SchedulerBackend):
@@ -357,6 +372,15 @@ class AWSEventBridgeBackend(SchedulerBackend):
             rule_name = f"odds-{job_name}"
             schedule_expression = _format_aws_schedule(next_time)
 
+            # Debug: Log the exact schedule expression
+            logger.info(
+                "eventbridge_scheduling_attempt",
+                job=job_name,
+                schedule_expression=schedule_expression,
+                next_time_raw=str(next_time),
+                next_time_iso=next_time.isoformat(),
+            )
+
             # Create/update one-time schedule
             self.events_client.put_rule(
                 Name=rule_name,
@@ -431,7 +455,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
         Parse EventBridge schedule expression to datetime.
 
         Args:
-            expression: Schedule expression like "at(2025-10-20T14:30:00)"
+            expression: Schedule expression like "cron(30 14 24 10 ? 2025)"
 
         Returns:
             Datetime if parseable, None otherwise
@@ -439,23 +463,29 @@ class AWSEventBridgeBackend(SchedulerBackend):
         if not expression:
             return None
 
-        # Use regex for robust parsing
-        match = re.match(r"at\((\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\)", expression)
+        # Parse cron expression: cron(minute hour day month day-of-week year)
+        match = re.match(r"cron\((\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+\?\s+(\d+)\)", expression)
         if not match:
             logger.warning(
                 "invalid_schedule_expression",
                 expression=expression,
-                expected_format="at(YYYY-MM-DDTHH:MM:SS)",
+                expected_format="cron(minute hour day month ? year)",
             )
             return None
 
         try:
-            return datetime.strptime(match.group(1), "%Y-%m-%dT%H:%M:%S")
+            minute, hour, day, month, year = match.groups()
+            return datetime(
+                year=int(year),
+                month=int(month),
+                day=int(day),
+                hour=int(hour),
+                minute=int(minute),
+            )
         except ValueError as e:
             logger.warning(
                 "schedule_parse_failed",
                 expression=expression,
-                timestamp=match.group(1),
                 error=str(e),
             )
             return None

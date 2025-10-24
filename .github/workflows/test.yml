@@ -1,0 +1,78 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-west-1
+
+jobs:
+  test:
+    name: Test on Dev Environment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: uv pip install --system -r requirements.txt
+
+      - name: Run unit tests
+        run: uv run pytest tests/unit -v
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.6.0"
+
+      - name: Build and deploy to dev
+        run: |
+          cd deployment/aws
+          ./build_lambda.sh
+          cd terraform
+          terraform init
+          terraform apply \
+            -var-file="terraform.tfvars.example" \
+            -var="database_url=${{ secrets.DATABASE_URL }}" \
+            -var="odds_api_key=${{ secrets.ODDS_API_KEY }}" \
+            -auto-approve
+
+      - name: Test Lambda functions
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run python scripts/ci/test_lambda.py
+
+      - name: Verify database writes
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run python scripts/ci/verify_database.py
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: |
+            *.log
+            *.txt

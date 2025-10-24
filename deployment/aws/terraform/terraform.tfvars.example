@@ -1,0 +1,56 @@
+# Terraform Variables - Example Template
+#
+# SETUP INSTRUCTIONS:
+# 1. Create environment-specific files from this template:
+#    cp terraform.tfvars.example terraform.dev.tfvars
+#    cp terraform.tfvars.example terraform.prod.tfvars
+#
+# 2. Fill in actual values in each file (these files are in .gitignore)
+#
+# 3. Apply with environment-specific file:
+#    terraform plan -var-file="terraform.dev.tfvars"
+#    terraform apply -var-file="terraform.dev.tfvars"
+#
+# ============================================================================
+# Environment Selection
+# ============================================================================
+aws_region  = "eu-west-1"  # or your preferred region
+environment = "development"  # "development" or "production"
+
+# ============================================================================
+# Project Configuration
+# ============================================================================
+# Development: "odds-scheduler-dev" (default)
+# Production:  "odds-scheduler"
+project_name = "odds-scheduler-dev"
+
+# ============================================================================
+# Lambda Configuration
+# ============================================================================
+lambda_timeout     = 300  # seconds (5 minutes)
+lambda_memory_size = 512  # MB
+
+# ============================================================================
+# Database Configuration
+# ============================================================================
+# Get connection string from Neon:
+#   neonctl connection-string <branch-name> --project-id <your-project-id>
+#
+# Development: Use Neon dev branch connection string
+# Production:  Use Neon main branch connection string
+#
+# Format: postgresql+asyncpg://user:pass@host/db?ssl=require
+database_url = "postgresql+asyncpg://USERNAME:PASSWORD@HOST/DATABASE?ssl=require"
+
+# ============================================================================
+# API Configuration
+# ============================================================================
+# Get from: https://the-odds-api.com/
+# You can use the same key for dev/prod or separate keys
+odds_api_key = "your-api-key-here"
+
+# ============================================================================
+# Optional: VPC Configuration (if database requires VPC access)
+# ============================================================================
+# subnet_ids         = ["subnet-xxx", "subnet-yyy"]
+# security_group_ids = ["sg-xxx"]
