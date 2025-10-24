@@ -13,6 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: development
 
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -50,23 +54,17 @@ jobs:
           terraform init
           terraform apply \
             -var-file="terraform.tfvars.example" \
-            -var="database_url=${{ secrets.DATABASE_URL }}" \
-            -var="odds_api_key=${{ secrets.ODDS_API_KEY }}" \
+            -var="database_url=$DATABASE_URL" \
+            -var="odds_api_key=$ODDS_API_KEY" \
             -auto-approve
 
       - name: Run database migrations
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: uv run alembic upgrade head
 
       - name: Test Lambda functions
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: uv run python scripts/ci/test_lambda.py
 
       - name: Verify database writes
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: uv run python scripts/ci/verify_database.py
 
       - name: Cleanup - Destroy dev infrastructure
@@ -75,8 +73,8 @@ jobs:
           cd deployment/aws/terraform
           terraform destroy \
             -var-file="terraform.tfvars.example" \
-            -var="database_url=${{ secrets.DATABASE_URL }}" \
-            -var="odds_api_key=${{ secrets.ODDS_API_KEY }}" \
+            -var="database_url=$DATABASE_URL" \
+            -var="odds_api_key=$ODDS_API_KEY" \
             -auto-approve
         continue-on-error: true
 
