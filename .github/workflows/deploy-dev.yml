@@ -42,25 +42,12 @@ jobs:
         with:
           terraform_version: "1.6.0"
 
-      - name: Build Lambda package
+      - name: Build and deploy to dev
         run: |
           cd deployment/aws
           ./build_lambda.sh
-
-      - name: Destroy existing infrastructure
-        run: |
-          cd deployment/aws/terraform
+          cd terraform
           terraform init
-          terraform destroy \
-            -var-file="terraform.tfvars.example" \
-            -var="database_url=${{ secrets.DATABASE_URL }}" \
-            -var="odds_api_key=${{ secrets.ODDS_API_KEY }}" \
-            -auto-approve
-        continue-on-error: true
-
-      - name: Deploy fresh infrastructure
-        run: |
-          cd deployment/aws/terraform
           terraform apply \
             -var-file="terraform.tfvars.example" \
             -var="database_url=${{ secrets.DATABASE_URL }}" \
@@ -76,6 +63,17 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: uv run python scripts/ci/verify_database.py
+
+      - name: Cleanup - Destroy dev infrastructure
+        if: always()
+        run: |
+          cd deployment/aws/terraform
+          terraform destroy \
+            -var-file="terraform.tfvars.example" \
+            -var="database_url=${{ secrets.DATABASE_URL }}" \
+            -var="odds_api_key=${{ secrets.ODDS_API_KEY }}" \
+            -auto-approve
+        continue-on-error: true
 
       - name: Upload logs on failure
         if: failure()
