@@ -42,12 +42,25 @@ jobs:
         with:
           terraform_version: "1.6.0"
 
-      - name: Build and deploy to dev
+      - name: Build Lambda package
         run: |
           cd deployment/aws
           ./build_lambda.sh
-          cd terraform
+
+      - name: Destroy existing infrastructure
+        run: |
+          cd deployment/aws/terraform
           terraform init
+          terraform destroy \
+            -var-file="terraform.tfvars.example" \
+            -var="database_url=${{ secrets.DATABASE_URL }}" \
+            -var="odds_api_key=${{ secrets.ODDS_API_KEY }}" \
+            -auto-approve
+        continue-on-error: true
+
+      - name: Deploy fresh infrastructure
+        run: |
+          cd deployment/aws/terraform
           terraform apply \
             -var-file="terraform.tfvars.example" \
             -var="database_url=${{ secrets.DATABASE_URL }}" \
