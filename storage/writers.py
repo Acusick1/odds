@@ -7,7 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.fetch_tier import FetchTier
 from core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
+from core.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 from storage.validators import OddsValidator
 
 logger = structlog.get_logger()
@@ -74,6 +76,7 @@ class OddsWriter:
         raw_data: dict,
         snapshot_time: datetime | None = None,
         validate: bool = True,
+        fetch_tier: FetchTier | None = None,
     ) -> tuple[OddsSnapshot, list[Odds]]:
         """
         Store odds snapshot with hybrid storage approach.
@@ -83,6 +86,7 @@ class OddsWriter:
             raw_data: Complete API response for the event
             snapshot_time: Time of snapshot (defaults to now)
             validate: Whether to run validation checks
+            fetch_tier: Fetch tier for this snapshot (computed if not provided)
 
         Returns:
             Tuple of (OddsSnapshot, list of normalized Odds records)
@@ -90,8 +94,24 @@ class OddsWriter:
         Storage:
             - Raw JSONB snapshot for debugging
             - Normalized odds records for querying
+            - Fetch tier and hours_until_commence for validation and ML features
         """
         snapshot_time = snapshot_time or datetime.now(UTC)
+
+        # Get event to calculate tier if not provided
+        result = await self.session.execute(select(Event).where(Event.id == event_id))
+        event = result.scalar_one_or_none()
+
+        # Calculate tier and hours_until_commence if event exists
+        tier_value = None
+        hours_until = None
+        if event:
+            hours_until = calculate_hours_until_commence(snapshot_time, event.commence_time)
+            if fetch_tier:
+                tier_value = fetch_tier.value
+            else:
+                calculated_tier = calculate_tier_from_timestamps(snapshot_time, event.commence_time)
+                tier_value = calculated_tier.value
 
         # Validate if enabled
         if validate:
@@ -118,6 +138,8 @@ class OddsWriter:
             snapshot_time=snapshot_time,
             raw_data=raw_data,
             bookmaker_count=len(bookmakers),
+            fetch_tier=tier_value,
+            hours_until_commence=hours_until,
         )
         self.session.add(snapshot)
 
@@ -133,6 +155,8 @@ class OddsWriter:
             event_id=event_id,
             bookmakers=len(bookmakers),
             odds_records=len(odds_records),
+            fetch_tier=tier_value,
+            hours_until_commence=hours_until,
         )
 
         return snapshot, odds_records

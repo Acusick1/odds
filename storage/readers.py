@@ -6,6 +6,7 @@ import structlog
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.fetch_tier import FetchTier
 from core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 
 logger = structlog.get_logger()
@@ -430,3 +431,110 @@ class OddsReader:
             "fetch_success_rate_24h": round(success_rate, 2),
             "api_quota_remaining": latest_quota,
         }
+
+    async def get_snapshots_by_tier(
+        self, event_id: str, tier: FetchTier | None = None
+    ) -> list[OddsSnapshot]:
+        """
+        Get odds snapshots for an event, optionally filtered by tier.
+
+        Args:
+            event_id: Event identifier
+            tier: Optional FetchTier to filter by
+
+        Returns:
+            List of OddsSnapshot records
+
+        Example:
+            # Get all CLOSING tier snapshots for an event
+            reader = OddsReader(session)
+            closing_snapshots = await reader.get_snapshots_by_tier(
+                event_id="abc123",
+                tier=FetchTier.CLOSING
+            )
+        """
+        query = select(OddsSnapshot).where(OddsSnapshot.event_id == event_id)
+
+        if tier:
+            query = query.where(OddsSnapshot.fetch_tier == tier.value)
+
+        query = query.order_by(OddsSnapshot.snapshot_time)
+
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_tier_coverage_for_event(self, event_id: str) -> dict[str, int]:
+        """
+        Get count of snapshots per tier for an event.
+
+        Args:
+            event_id: Event identifier
+
+        Returns:
+            Dictionary mapping tier name to snapshot count
+            Example: {"opening": 2, "closing": 5, "pregame": 3}
+
+        Example:
+            reader = OddsReader(session)
+            coverage = await reader.get_tier_coverage_for_event("abc123")
+            print(f"CLOSING snapshots: {coverage.get('closing', 0)}")
+        """
+        query = (
+            select(OddsSnapshot.fetch_tier, func.count(OddsSnapshot.id))
+            .where(OddsSnapshot.event_id == event_id)
+            .where(OddsSnapshot.fetch_tier.isnot(None))
+            .group_by(OddsSnapshot.fetch_tier)
+        )
+
+        result = await self.session.execute(query)
+        rows = result.all()
+
+        return dict(rows)
+
+    async def get_games_by_date(
+        self, target_date: datetime, status: EventStatus | None = EventStatus.FINAL
+    ) -> list[Event]:
+        """
+        Get all games for a specific date (by commence_time).
+
+        Args:
+            target_date: Date to query (only date part is used, time is ignored)
+            status: Optional status filter (defaults to FINAL for validation)
+
+        Returns:
+            List of Event records
+
+        Example:
+            from datetime import date
+            reader = OddsReader(session)
+            games = await reader.get_games_by_date(
+                target_date=date(2024, 10, 24),
+                status=EventStatus.FINAL
+            )
+
+        Note:
+            This uses the commence_time date, not the created_at or completed_at date.
+            A game starting at 11 PM on Oct 24 that ends at 1 AM on Oct 25 will be
+            returned for Oct 24.
+        """
+        # Convert to datetime if date object passed
+        if not isinstance(target_date, datetime):
+            target_date = datetime.combine(target_date, datetime.min.time())
+
+        # Start and end of the target date
+        start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=UTC)
+        end_of_day = target_date.replace(
+            hour=23, minute=59, second=59, microsecond=999999, tzinfo=UTC
+        )
+
+        query = select(Event).where(
+            and_(Event.commence_time >= start_of_day, Event.commence_time <= end_of_day)
+        )
+
+        if status:
+            query = query.where(Event.status == status)
+
+        query = query.order_by(Event.commence_time)
+
+        result = await self.session.execute(query)
+        return list(result.scalars().all())

@@ -63,7 +63,7 @@ async def main():
     )
 
     try:
-        await _fetch_and_store_odds()
+        await _fetch_and_store_odds(fetch_tier=decision.tier)
         logger.info("fetch_odds_completed")
 
     except Exception as e:
@@ -89,9 +89,12 @@ async def main():
             # Don't fail the job if scheduling fails - the fetch itself succeeded
 
 
-async def _fetch_and_store_odds():
+async def _fetch_and_store_odds(fetch_tier=None):
     """
     Core fetch and storage logic.
+
+    Args:
+        fetch_tier: Optional FetchTier to store with snapshots
 
     Adapted from scheduler/jobs.py:fetch_odds_job()
     """
@@ -121,12 +124,13 @@ async def _fetch_and_store_odds():
                         # Flush to ensure event exists before quality logging
                         await event_session.flush()
 
-                        # Store odds snapshot with raw data
+                        # Store odds snapshot with raw data and tier
                         await event_writer.store_odds_snapshot(
                             event_id=event.id,
                             raw_data=event_data,
                             snapshot_time=response.timestamp,
                             validate=settings.enable_validation,
+                            fetch_tier=fetch_tier,
                         )
 
                         await event_session.commit()

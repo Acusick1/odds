@@ -263,10 +263,8 @@ class BackfillExecutor:
                 message="Event not found in API response",
             )
 
-        # Store to database
-        snapshot_dt = datetime.fromisoformat(snapshot_time.replace("Z", "+00:00")).replace(
-            tzinfo=None
-        )
+        # Store to database - keep timezone-aware for tier calculation
+        snapshot_dt = datetime.fromisoformat(snapshot_time.replace("Z", "+00:00"))
 
         async with self._session_factory() as session:
             writer = OddsWriter(session)

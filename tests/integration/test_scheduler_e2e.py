@@ -19,8 +19,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from core.api_models import OddsResponse, api_dict_to_event
+from core.fetch_tier import FetchTier
 from core.models import Event, EventStatus, OddsSnapshot
-from core.scheduling.intelligence import FetchTier
 from storage.readers import OddsReader
 from storage.writers import OddsWriter
 
