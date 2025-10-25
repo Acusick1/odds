@@ -67,6 +67,10 @@ deployment/aws/terraform/terraform.tfstate.backup
 deployment/aws/terraform/*.tfvars
 !deployment/aws/terraform/*.tfvars.example
 
+# Terraform Bootstrap (state is committed for bootstrap only)
+deployment/aws/bootstrap/.terraform/
+deployment/aws/bootstrap/.terraform.lock.hcl
+
 # AWS Lambda
 deployment/aws/lambda_deployment.zip
 deployment/aws/build/
