@@ -93,15 +93,9 @@ def lambda_handler(event, context):
         if not job_name:
             raise ValueError("Missing 'job' in event payload")
 
-        # Run async job - handle existing event loop in warm Lambda containers
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No running loop - create new one
-            asyncio.run(_run_job_async(job_name))
-        else:
-            # Running loop exists (warm container) - use it
-            loop.run_until_complete(_run_job_async(job_name))
+        # Run async job
+        # Use asyncio.run() to ensure clean event loop per invocation
+        asyncio.run(_run_job_async(job_name))
 
         logger.info(
             "lambda_completed",
