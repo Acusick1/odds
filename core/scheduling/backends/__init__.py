@@ -96,7 +96,7 @@ def get_scheduler_backend(
 
     else:
         raise ConfigurationError(
-            f"Unknown scheduler backend: {backend}. " f"Supported: 'aws', 'railway', 'local'"
+            f"Unknown scheduler backend: {backend}. Supported: 'aws', 'railway', 'local'"
         )
 
 

@@ -205,7 +205,7 @@ class TestDatabaseIntegration:
                 "sport_title": "NBA",
                 "commence_time": (now + timedelta(days=i)).isoformat(),
                 "home_team": f"Team{i}",
-                "away_team": f"Team{i+1}",
+                "away_team": f"Team{i + 1}",
             }
             event = _api_dict_to_event(event_data)
             await writer.upsert_event(event)

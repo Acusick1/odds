@@ -52,7 +52,7 @@ async def _show_status(verbose: bool):
 
                 table.add_row(
                     "Last Fetch",
-                    f"[{status_color}]{status_icon}[/{status_color}] " f"{minutes_ago} minutes ago",
+                    f"[{status_color}]{status_icon}[/{status_color}] {minutes_ago} minutes ago",
                 )
             else:
                 table.add_row("Last Fetch", "[yellow]No fetches yet[/yellow]")

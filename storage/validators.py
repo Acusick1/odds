@@ -195,8 +195,7 @@ class OddsValidator:
                 )
             elif vig_percent > cls.MAX_VIG_PERCENT:
                 warnings.append(
-                    f"{bookmaker} {market}: Vig too high ({vig_percent:.2f}%), "
-                    "possible data error"
+                    f"{bookmaker} {market}: Vig too high ({vig_percent:.2f}%), possible data error"
                 )
 
         except Exception as e:
