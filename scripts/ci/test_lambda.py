@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""Test Lambda functions on dev environment."""
+"""Test Lambda functions."""
+import argparse
 import json
 import sys
 import time
 
 import boto3
 
-LAMBDA_NAME = "odds-scheduler-dev"
-REGION = "eu-west-1"
 
-
-def test_lambda_job(job_name: str) -> bool:
+def test_lambda_job(lambda_name: str, region: str, job_name: str) -> bool:
     """
     Test a specific Lambda job.
 
@@ -22,12 +20,12 @@ def test_lambda_job(job_name: str) -> bool:
     """
     print(f"\n→ Testing {job_name} job...")
 
-    lambda_client = boto3.client("lambda", region_name=REGION)
+    lambda_client = boto3.client("lambda", region_name=region)
 
     try:
         # Invoke Lambda
         response = lambda_client.invoke(
-            FunctionName=LAMBDA_NAME,
+            FunctionName=lambda_name,
             Payload=json.dumps({"job": job_name}).encode(),
         )
 
@@ -48,7 +46,7 @@ def test_lambda_job(job_name: str) -> bool:
         return False
 
 
-def check_logs() -> bool:
+def check_logs(lambda_name: str, region: str) -> bool:
     """
     Check for errors in recent Lambda logs.
 
@@ -57,8 +55,8 @@ def check_logs() -> bool:
     """
     print("\n→ Checking Lambda logs...")
 
-    logs_client = boto3.client("logs", region_name=REGION)
-    log_group = f"/aws/lambda/{LAMBDA_NAME}"
+    logs_client = boto3.client("logs", region_name=region)
+    log_group = f"/aws/lambda/{lambda_name}"
 
     try:
         # Get recent log events (last 2 minutes)
@@ -102,16 +100,29 @@ def check_logs() -> bool:
 
 def main():
     """Run all Lambda tests."""
+    parser = argparse.ArgumentParser(description="Test Lambda function")
+    parser.add_argument(
+        "--lambda-name",
+        required=True,
+        help="Name of the Lambda function to test (e.g., odds-scheduler or odds-scheduler-dev)",
+    )
+    parser.add_argument(
+        "--region",
+        default="eu-west-1",
+        help="AWS region (default: eu-west-1)",
+    )
+    args = parser.parse_args()
+
     print("=" * 60)
-    print("Testing Lambda on Dev Environment")
-    print(f"Lambda: {LAMBDA_NAME}")
-    print(f"Region: {REGION}")
+    print("Testing Lambda Function")
+    print(f"Lambda: {args.lambda_name}")
+    print(f"Region: {args.region}")
     print("=" * 60)
 
     success = True
 
     # Test fetch-odds job
-    if not test_lambda_job("fetch-odds"):
+    if not test_lambda_job(args.lambda_name, args.region, "fetch-odds"):
         success = False
 
     # Wait for execution to complete
@@ -119,7 +130,7 @@ def main():
     time.sleep(10)
 
     # Check logs
-    if not check_logs():
+    if not check_logs(args.lambda_name, args.region):
         success = False
 
     print("\n" + "=" * 60)
