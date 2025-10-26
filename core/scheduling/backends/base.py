@@ -1,5 +1,7 @@
 """Abstract base class for scheduler backend implementations."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,9 +19,9 @@ class JobStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
-@dataclass
+@dataclass(slots=True, frozen=True)
 class ScheduledJob:
-    """Information about a scheduled job."""
+    """Information about a scheduled job (immutable)."""
 
     job_name: str
     next_run_time: datetime | None
@@ -27,20 +29,20 @@ class ScheduledJob:
     error_message: str | None = None
 
 
-@dataclass
+@dataclass(slots=True, frozen=True)
 class BackendHealth:
-    """Health status of scheduler backend."""
+    """Health status of scheduler backend (immutable)."""
 
     is_healthy: bool
     backend_name: str
-    checks_passed: list[str]
-    checks_failed: list[str]
+    checks_passed: tuple[str, ...]
+    checks_failed: tuple[str, ...]
     details: dict | None = None
 
 
-@dataclass
+@dataclass(slots=True, frozen=True)
 class RetryConfig:
-    """Retry configuration for scheduling operations."""
+    """Retry configuration for scheduling operations (immutable)."""
 
     max_attempts: int = 3
     initial_delay_seconds: float = 1.0
@@ -49,13 +51,13 @@ class RetryConfig:
     jitter: bool = True
 
 
-@dataclass
+@dataclass(slots=True, frozen=True)
 class ValidationResult:
-    """Result of configuration validation."""
+    """Result of configuration validation (immutable)."""
 
     is_valid: bool
-    errors: list[str]
-    warnings: list[str]
+    errors: tuple[str, ...]
+    warnings: tuple[str, ...]
 
 
 class SchedulerBackend(ABC):

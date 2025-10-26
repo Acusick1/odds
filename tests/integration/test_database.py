@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds
+from core.time import parse_api_datetime
 from storage.readers import OddsReader
 from storage.writers import OddsWriter
 
@@ -12,8 +13,7 @@ from storage.writers import OddsWriter
 def _api_dict_to_event(event_data: dict) -> Event:
     """Convert API response dict to Event instance for testing."""
     # Parse commence_time
-    commence_time_str = event_data["commence_time"].replace("Z", "+00:00")
-    commence_time = datetime.fromisoformat(commence_time_str)
+    commence_time = parse_api_datetime(event_data["commence_time"])
 
     return Event(
         id=event_data["id"],

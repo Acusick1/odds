@@ -7,7 +7,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from core.config import settings
+from core.config import get_settings
 from core.database import async_session_maker
 from storage.readers import OddsReader
 
@@ -26,6 +26,7 @@ def show_status(
 async def _show_status(verbose: bool):
     """Async implementation of show status."""
     console.print("\n[bold blue]Odds Pipeline Status[/bold blue]\n")
+    app_settings = get_settings()
 
     try:
         async with async_session_maker() as session:
@@ -69,13 +70,13 @@ async def _show_status(verbose: bool):
             # API quota
             quota_remaining = stats.get("api_quota_remaining")
             if quota_remaining is not None:
-                quota_percent = (quota_remaining / settings.odds_api_quota) * 100
+                quota_percent = (quota_remaining / app_settings.odds_api_quota) * 100
                 quota_color = (
                     "green" if quota_percent > 50 else ("yellow" if quota_percent > 20 else "red")
                 )
                 table.add_row(
                     "API Quota",
-                    f"[{quota_color}]{quota_remaining:,} / {settings.odds_api_quota:,} "
+                    f"[{quota_color}]{quota_remaining:,} / {app_settings.odds_api_quota:,} "
                     f"({quota_percent:.1f}%)[/{quota_color}]",
                 )
 
@@ -149,6 +150,7 @@ def show_quota():
 async def _show_quota():
     """Async implementation of show quota."""
     console.print("\n[bold blue]API Quota Status[/bold blue]\n")
+    app_settings = get_settings()
 
     try:
         async with async_session_maker() as session:
@@ -164,8 +166,8 @@ async def _show_quota():
             # Current quota
             latest = fetch_logs[0]
             if latest.api_quota_remaining is not None:
-                quota_used = settings.odds_api_quota - latest.api_quota_remaining
-                quota_percent = (latest.api_quota_remaining / settings.odds_api_quota) * 100
+                quota_used = app_settings.odds_api_quota - latest.api_quota_remaining
+                quota_percent = (latest.api_quota_remaining / app_settings.odds_api_quota) * 100
 
                 table = Table(show_header=False, box=None)
                 table.add_column("Metric", style="cyan")
@@ -175,7 +177,7 @@ async def _show_quota():
                     "green" if quota_percent > 50 else ("yellow" if quota_percent > 20 else "red")
                 )
 
-                table.add_row("Total Quota", f"{settings.odds_api_quota:,}")
+                table.add_row("Total Quota", f"{app_settings.odds_api_quota:,}")
                 table.add_row("Used", f"{quota_used:,}")
                 table.add_row(
                     "Remaining",
@@ -195,7 +197,7 @@ async def _show_quota():
                     if log.api_quota_remaining is not None:
                         time_ago = datetime.now(UTC) - log.fetch_time
                         minutes_ago = int(time_ago.total_seconds() / 60)
-                        used = settings.odds_api_quota - log.api_quota_remaining
+                        used = app_settings.odds_api_quota - log.api_quota_remaining
 
                         trend_table.add_row(
                             f"{minutes_ago}m ago",

@@ -5,6 +5,8 @@ from typing import Any
 
 import structlog
 
+from core.time import ensure_utc, parse_api_datetime, utc_isoformat
+
 logger = structlog.get_logger()
 
 
@@ -240,12 +242,13 @@ class GameSelector:
         Returns:
             List of 5 datetime objects for snapshots (ordered earliest to latest)
         """
+        base_time = ensure_utc(commence_time)
         snapshots = [
-            commence_time - timedelta(days=3),  # Opening line (3 days before)
-            commence_time - timedelta(hours=24),  # Early action (24h before)
-            commence_time - timedelta(hours=12),  # Sharp action (12h before)
-            commence_time - timedelta(hours=3),  # Pre-game (3h before)
-            commence_time - timedelta(minutes=30),  # Closing line (30min before)
+            base_time - timedelta(days=3),  # Opening line (3 days before)
+            base_time - timedelta(hours=24),  # Early action (24h before)
+            base_time - timedelta(hours=12),  # Sharp action (12h before)
+            base_time - timedelta(hours=3),  # Pre-game (3h before)
+            base_time - timedelta(minutes=30),  # Closing line (30min before)
         ]
 
         return snapshots
@@ -278,9 +281,7 @@ class GameSelector:
                     continue
 
                 # Parse commence time
-                commence_time = datetime.fromisoformat(
-                    commence_time_str.replace("Z", "+00:00")
-                ).replace(tzinfo=None)
+                commence_time = parse_api_datetime(commence_time_str)
 
                 # Calculate snapshot times
                 snapshots = self.calculate_snapshot_times(commence_time)
@@ -289,8 +290,8 @@ class GameSelector:
                     "event_id": event.get("id"),
                     "home_team": event.get("home_team"),
                     "away_team": event.get("away_team"),
-                    "commence_time": commence_time,
-                    "snapshots": [s.isoformat() for s in snapshots],
+                    "commence_time": utc_isoformat(commence_time),
+                    "snapshots": [utc_isoformat(s) for s in snapshots],
                     "snapshot_count": len(snapshots),
                 }
 

@@ -2,11 +2,11 @@
 
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
 # Test database URL - use PostgreSQL for timezone-aware datetime support
@@ -57,7 +57,9 @@ async def test_engine():
 @pytest.fixture
 async def test_session(test_engine):
     """Create test database session."""
-    async_session_maker = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async_session_maker = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
 
     async with async_session_maker() as session:
         yield session
@@ -76,8 +78,6 @@ def mock_settings():
         bookmakers=["fanduel", "draftkings"],
         markets=["h2h", "spreads", "totals"],
         regions=["us"],
-        sampling_mode="fixed",
-        fixed_interval_minutes=30,
         enable_validation=True,
     )
 
@@ -95,9 +95,9 @@ def sample_backfill_plan():
                 "event_id": "test_event_1",
                 "home_team": "Lakers",
                 "away_team": "Celtics",
-                "commence_time": "2024-01-15T19:00:00",
+                "commence_time": "2024-01-15T19:00:00Z",
                 "snapshots": [
-                    "2024-01-14T19:00:00Z",
+                    "2024-01-12T19:00:00Z",
                     "2024-01-15T18:30:00Z",
                 ],
                 "snapshot_count": 2,
@@ -106,24 +106,22 @@ def sample_backfill_plan():
                 "event_id": "test_event_2",
                 "home_team": "Warriors",
                 "away_team": "Heat",
-                "commence_time": "2024-01-16T20:00:00",
+                "commence_time": "2024-01-16T20:00:00Z",
                 "snapshots": [
-                    "2024-01-15T20:00:00Z",
+                    "2024-01-13T20:00:00Z",
                     "2024-01-16T19:30:00Z",
                 ],
                 "snapshot_count": 2,
             },
         ],
-        "start_date": "2024-01-01T00:00:00",
-        "end_date": "2024-02-01T00:00:00",
+        "start_date": "2024-01-01T00:00:00Z",
+        "end_date": "2024-02-01T00:00:00Z",
     }
 
 
 @pytest.fixture
 def mock_api_response_factory():
     """Factory to create mock API responses for different events."""
-    from datetime import datetime
-
     from core.api_models import HistoricalOddsResponse, api_dict_to_event
 
     def _create_response(event_id="test_event_1", home_team="Lakers", away_team="Celtics"):
@@ -183,7 +181,7 @@ def mock_api_response_factory():
             raw_events_data=[event_dict],
             response_time_ms=100,
             quota_remaining=19950,
-            timestamp=datetime(2024, 1, 15, 18, 0, 0),
+            timestamp=datetime(2024, 1, 15, 18, 0, 0, tzinfo=UTC),
         )
 
     return _create_response

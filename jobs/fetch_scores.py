@@ -12,7 +12,7 @@ import asyncio
 
 import structlog
 
-from core.config import settings
+from core.config import get_settings
 from core.data_fetcher import TheOddsAPIClient
 from core.database import async_session_maker
 from core.models import EventStatus
@@ -33,10 +33,12 @@ async def main():
     3. Calculate next execution time
     4. Schedule next run via backend
     """
-    logger.info("fetch_scores_job_started", backend=settings.scheduler_backend)
+    app_settings = get_settings()
+
+    logger.info("fetch_scores_job_started", backend=app_settings.scheduler_backend)
 
     # Smart execution gating
-    intelligence = SchedulingIntelligence(lookahead_days=settings.scheduling_lookahead_days)
+    intelligence = SchedulingIntelligence(lookahead_days=app_settings.scheduling_lookahead_days)
     decision = await intelligence.should_execute_scores()
 
     if not decision.should_execute:
@@ -48,7 +50,7 @@ async def main():
 
         # Still schedule next check even if not executing
         if decision.next_execution:
-            backend = get_scheduler_backend(dry_run=settings.scheduler_dry_run)
+            backend = get_scheduler_backend(dry_run=app_settings.scheduler_dry_run)
             await backend.schedule_next_execution(
                 job_name="fetch-scores", next_time=decision.next_execution
             )
@@ -59,7 +61,7 @@ async def main():
     logger.info("fetch_scores_executing", reason=decision.reason)
 
     try:
-        await _fetch_and_update_scores()
+        await _fetch_and_update_scores(app_settings)
         logger.info("fetch_scores_completed")
 
     except Exception as e:
@@ -69,7 +71,7 @@ async def main():
     # Self-schedule next execution
     if decision.next_execution:
         try:
-            backend = get_scheduler_backend(dry_run=settings.scheduler_dry_run)
+            backend = get_scheduler_backend(dry_run=app_settings.scheduler_dry_run)
             await backend.schedule_next_execution(
                 job_name="fetch-scores", next_time=decision.next_execution
             )
@@ -82,7 +84,7 @@ async def main():
             logger.error("fetch_scores_scheduling_failed", error=str(e), exc_info=True)
 
 
-async def _fetch_and_update_scores():
+async def _fetch_and_update_scores(app_settings):
     """
     Core score fetching and update logic.
 
@@ -91,56 +93,56 @@ async def _fetch_and_update_scores():
     async with async_session_maker() as session:
         writer = OddsWriter(session)
 
-        for sport_key in settings.sports:
+        for sport_key in app_settings.sports:
             logger.info("fetching_scores", sport=sport_key)
 
             async with TheOddsAPIClient() as client:
                 # Fetch scores from last 3 days
                 response = await client.get_scores(sport=sport_key, days_from=3)
 
-                updated_count = 0
-                for score_data in response.scores_data:
-                    try:
-                        event_id = score_data.get("id")
-                        completed = score_data.get("completed", False)
+            updated_count = 0
+            for score_data in response.scores_data:
+                try:
+                    event_id = score_data.get("id")
+                    completed = score_data.get("completed", False)
 
-                        if completed and event_id:
-                            scores = score_data.get("scores", [])
+                    if completed and event_id:
+                        scores = score_data.get("scores", [])
 
-                            # Extract home and away scores
-                            home_score = None
-                            away_score = None
+                        # Extract home and away scores
+                        home_score = None
+                        away_score = None
 
-                            for score in scores:
-                                if score.get("name") == score_data.get("home_team"):
-                                    home_score = score.get("score")
-                                if score.get("name") == score_data.get("away_team"):
-                                    away_score = score.get("score")
+                        for score in scores:
+                            if score.get("name") == score_data.get("home_team"):
+                                home_score = score.get("score")
+                            if score.get("name") == score_data.get("away_team"):
+                                away_score = score.get("score")
 
-                            if home_score is not None and away_score is not None:
-                                await writer.update_event_status(
-                                    event_id=event_id,
-                                    status=EventStatus.FINAL,
-                                    home_score=int(home_score),
-                                    away_score=int(away_score),
-                                )
-                                updated_count += 1
+                        if home_score is not None and away_score is not None:
+                            await writer.update_event_status(
+                                event_id=event_id,
+                                status=EventStatus.FINAL,
+                                home_score=int(home_score),
+                                away_score=int(away_score),
+                            )
+                            updated_count += 1
 
-                    except Exception as e:
-                        logger.error(
-                            "score_update_failed",
-                            event_id=score_data.get("id"),
-                            error=str(e),
-                        )
-                        continue
+                except Exception as e:
+                    logger.error(
+                        "score_update_failed",
+                        event_id=score_data.get("id"),
+                        error=str(e),
+                    )
+                    continue
 
-                await session.commit()
+            await session.commit()
 
-                logger.info(
-                    "sport_scores_completed",
-                    sport=sport_key,
-                    updated=updated_count,
-                )
+            logger.info(
+                "sport_scores_completed",
+                sport=sport_key,
+                updated=updated_count,
+            )
 
 
 if __name__ == "__main__":

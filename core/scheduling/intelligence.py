@@ -1,5 +1,7 @@
 """Game-aware scheduling intelligence for adaptive data collection."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -14,10 +16,10 @@ from storage.readers import OddsReader
 logger = structlog.get_logger()
 
 
-@dataclass
+@dataclass(slots=True, frozen=True)
 class ScheduleDecision:
     """
-    Decision about whether to execute and when to run next.
+    Decision about whether to execute and when to run next (immutable).
 
     Attributes:
         should_execute: Whether job should run now

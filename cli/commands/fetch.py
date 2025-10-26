@@ -2,20 +2,18 @@
 
 import asyncio
 
-import structlog
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from core.config import settings
+from core.config import get_settings
 from core.data_fetcher import TheOddsAPIClient
 from core.database import async_session_maker
-from core.models import FetchLog
+from core.ingestion import OddsIngestionCallbacks, OddsIngestionService
 from storage.writers import OddsWriter
 
 app = typer.Typer()
 console = Console()
-logger = structlog.get_logger()
 
 
 @app.command("current")
@@ -38,81 +36,40 @@ async def _fetch_current(sport: str):
         task = progress.add_task(description="Connecting to API...", total=None)
 
         try:
-            async with TheOddsAPIClient() as client:
-                progress.update(task, description="Fetching odds data...")
+            app_settings = get_settings()
+            ingestion_service = OddsIngestionService(settings=app_settings)
 
-                # Fetch odds - API client returns parsed Event instances
-                response = await client.get_odds(
-                    sport=sport,
-                    regions=settings.regions,
-                    markets=settings.markets,
-                    bookmakers=settings.bookmakers,
-                )
-
+            def _on_fetch_complete(response):
                 progress.update(
                     task,
                     description=f"Processing {len(response.events)} events...",
                 )
 
-                # Store to database (each event in its own transaction for isolation)
-                processed = 0
-                for event, event_data in zip(
-                    response.events, response.raw_events_data, strict=True
-                ):
-                    try:
-                        async with async_session_maker() as session:
-                            writer = OddsWriter(session)
+            def _on_event_failed(event_id: str | None, exc: Exception) -> None:
+                identifier = event_id or "unknown"
+                console.print(
+                    f"[yellow]Warning: Failed to process event {identifier}: {exc}[/yellow]"
+                )
 
-                            # Upsert event - already parsed by API client
-                            await writer.upsert_event(event)
+            callbacks = OddsIngestionCallbacks(
+                on_fetch_complete=_on_fetch_complete,
+                on_event_failed=_on_event_failed,
+            )
 
-                            # Flush to ensure event exists before logging quality issues
-                            await session.flush()
+            result = await ingestion_service.ingest_sport(sport, callbacks=callbacks)
 
-                            # Store odds snapshot with raw data
-                            await writer.store_odds_snapshot(
-                                event_id=event.id,
-                                raw_data=event_data,
-                                snapshot_time=response.timestamp,
-                                validate=settings.enable_validation,
-                            )
-
-                            await session.commit()
-                            processed += 1
-
-                    except Exception as e:
-                        console.print(
-                            f"[yellow]Warning: Failed to process event "
-                            f"{event.id}: {str(e)}[/yellow]"
-                        )
-                        continue
-
-                # Log fetch in separate transaction
-                async with async_session_maker() as session:
-                    writer = OddsWriter(session)
-                    fetch_log = FetchLog(
-                        sport_key=sport,
-                        events_count=len(response.events),
-                        bookmakers_count=len(settings.bookmakers),
-                        success=True,
-                        api_quota_remaining=response.quota_remaining,
-                        response_time_ms=response.response_time_ms,
-                    )
-                    await writer.log_fetch(fetch_log)
-                    await session.commit()
-
-                progress.update(task, description="Complete!", completed=True)
+            progress.update(task, description="Complete!", completed=True)
 
             # Summary
             console.print("\n[bold green]✓ Fetch completed successfully![/bold green]")
-            console.print(f"  Events processed: {processed}")
-            console.print(f"  Bookmakers: {len(settings.bookmakers)}")
-            console.print(f"  Markets: {', '.join(settings.markets)}")
+            console.print(f"  Events processed: {result.processed_events} of {result.total_events}")
+            console.print(f"  Bookmakers: {len(app_settings.bookmakers)}")
+            console.print(f"  Markets: {', '.join(app_settings.markets)}")
 
-            if response.quota_remaining:
-                console.print(f"  API quota remaining: {response.quota_remaining:,}")
+            if result.quota_remaining is not None:
+                console.print(f"  API quota remaining: {result.quota_remaining:,}")
 
-            console.print(f"  Response time: {response.response_time_ms}ms")
+            console.print(f"  Response time: {result.response_time_ms}ms")
 
         except Exception as e:
             progress.update(task, description="Failed!", completed=True)

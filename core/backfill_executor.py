@@ -3,12 +3,12 @@
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
 
 import structlog
 
 from core.data_fetcher import TheOddsAPIClient
 from core.database import async_session_maker
+from core.time import parse_api_datetime
 from storage.readers import OddsReader
 from storage.writers import OddsWriter
 
@@ -220,9 +220,7 @@ class BackfillExecutor:
 
         # Check if snapshot already exists
         if self.skip_existing:
-            snapshot_dt = datetime.fromisoformat(snapshot_time.replace("Z", "+00:00")).replace(
-                tzinfo=None
-            )
+            snapshot_dt = parse_api_datetime(snapshot_time)
 
             async with self._session_factory() as check_session:
                 reader = OddsReader(check_session)
@@ -239,7 +237,11 @@ class BackfillExecutor:
                     )
 
         # Fetch historical odds - API client returns parsed Event instances
-        response = await self._client.get_historical_odds(
+        client = self._client
+        if client is None:
+            raise RuntimeError("BackfillExecutor client not initialized")
+
+        response = await client.get_historical_odds(
             sport="basketball_nba",
             date=snapshot_time,
         )
@@ -253,7 +255,7 @@ class BackfillExecutor:
                 event_data = raw_evt
                 break
 
-        if not event:
+        if not event or event_data is None:
             return BackfillProgress(
                 event_id=event_id,
                 home_team=home_team,
@@ -264,7 +266,7 @@ class BackfillExecutor:
             )
 
         # Store to database - keep timezone-aware for tier calculation
-        snapshot_dt = datetime.fromisoformat(snapshot_time.replace("Z", "+00:00"))
+        snapshot_dt = parse_api_datetime(snapshot_time)
 
         async with self._session_factory() as session:
             writer = OddsWriter(session)
@@ -273,7 +275,9 @@ class BackfillExecutor:
             await writer.upsert_event(event)
             await session.flush()
             await writer.store_odds_snapshot(
-                event_id=event.id, raw_data=event_data, snapshot_time=snapshot_dt
+                event_id=event.id,
+                raw_data=event_data,
+                snapshot_time=snapshot_dt,
             )
             await session.commit()
 

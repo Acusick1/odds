@@ -1,5 +1,7 @@
 """Configuration management using Pydantic Settings."""
 
+from functools import lru_cache
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -75,5 +77,12 @@ class Settings(BaseSettings):
     log_file: str = Field(default="logs/odds_pipeline.log", description="Log file path")
 
 
-# Global settings instance
-settings = Settings()
+@lru_cache
+def get_settings() -> "Settings":
+    """Return cached application settings instance."""
+    return Settings()  # type: ignore[call-arg]
+
+
+def reset_settings_cache() -> None:
+    """Clear cached settings; primarily for testing overrides."""
+    get_settings.cache_clear()

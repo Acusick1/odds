@@ -4,6 +4,8 @@ This module validates that all required fetch tiers have been collected for game
 ensuring ML-ready data completeness across the adaptive sampling spectrum.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
@@ -16,16 +18,16 @@ from storage.readers import OddsReader
 logger = structlog.get_logger()
 
 
-@dataclass
+@dataclass(slots=True, frozen=True)
 class TierCoverageReport:
-    """Coverage report for a single game."""
+    """Coverage report for a single game (immutable)."""
 
     event_id: str
     home_team: str
     away_team: str
     commence_time: datetime
-    tiers_present: set[FetchTier] = field(default_factory=set)
-    tiers_missing: set[FetchTier] = field(default_factory=set)
+    tiers_present: frozenset[FetchTier] = field(default_factory=frozenset)
+    tiers_missing: frozenset[FetchTier] = field(default_factory=frozenset)
     total_snapshots: int = 0
     snapshots_by_tier: dict[FetchTier, int] = field(default_factory=dict)
 
@@ -43,9 +45,9 @@ class TierCoverageReport:
         return (len(self.tiers_present) / total_required) * 100
 
 
-@dataclass
+@dataclass(slots=True, frozen=True)
 class DailyValidationReport:
-    """Aggregate validation report for a date."""
+    """Aggregate validation report for a date (immutable)."""
 
     target_date: date
     validation_time: datetime
@@ -58,7 +60,7 @@ class DailyValidationReport:
     missing_tier_breakdown: dict[FetchTier, int] = field(
         default_factory=dict
     )  # tier -> count of games missing it
-    game_reports: list[TierCoverageReport] = field(default_factory=list)
+    game_reports: tuple[TierCoverageReport, ...] = field(default_factory=tuple)
 
     @property
     def is_valid(self) -> bool:
@@ -132,12 +134,12 @@ class TierCoverageValidator:
 
         # Convert string tier names to FetchTier enum
         tiers_present = set()
-        snapshots_by_tier = {}
+        snapshots_by_tier_dict = {}
         for tier_str, count in tier_coverage.items():
             try:
                 tier = FetchTier(tier_str)
                 tiers_present.add(tier)
-                snapshots_by_tier[tier] = count
+                snapshots_by_tier_dict[tier] = count
             except ValueError:
                 logger.warning("invalid_tier_value", tier=tier_str, event_id=event_id)
 
@@ -149,10 +151,10 @@ class TierCoverageValidator:
             home_team=event.home_team,
             away_team=event.away_team,
             commence_time=event.commence_time,
-            tiers_present=tiers_present,
-            tiers_missing=tiers_missing,
+            tiers_present=frozenset(tiers_present),
+            tiers_missing=frozenset(tiers_missing),
             total_snapshots=len(all_snapshots),
-            snapshots_by_tier=snapshots_by_tier,
+            snapshots_by_tier=snapshots_by_tier_dict,
         )
 
     async def validate_date(
@@ -185,36 +187,32 @@ class TierCoverageValidator:
         # Get all final games for the date
         games = await self.reader.get_games_by_date(target_date)
 
-        # Initialize report
-        report = DailyValidationReport(
-            target_date=target_date if isinstance(target_date, date) else target_date.date(),
-            validation_time=datetime.now(UTC),
-            total_games=len(games),
-        )
+        # Temporary collections for building the report
+        game_reports_list = []
+        complete_count = 0
+        incomplete_count = 0
+        games_by_tier_dict = {}
+        missing_tier_dict = {}
 
         # Validate each game
         for game in games:
             try:
                 game_report = await self.validate_game(game.id, required_tiers)
-                report.game_reports.append(game_report)
+                game_reports_list.append(game_report)
 
                 # Update aggregate statistics
                 if game_report.is_complete:
-                    report.complete_games += 1
+                    complete_count += 1
                 else:
-                    report.incomplete_games += 1
+                    incomplete_count += 1
 
                 # Track games by tier coverage count
                 num_tiers = len(game_report.tiers_present)
-                report.games_by_tier_coverage[num_tiers] = (
-                    report.games_by_tier_coverage.get(num_tiers, 0) + 1
-                )
+                games_by_tier_dict[num_tiers] = games_by_tier_dict.get(num_tiers, 0) + 1
 
                 # Track which tiers are missing across all games
                 for missing_tier in game_report.tiers_missing:
-                    report.missing_tier_breakdown[missing_tier] = (
-                        report.missing_tier_breakdown.get(missing_tier, 0) + 1
-                    )
+                    missing_tier_dict[missing_tier] = missing_tier_dict.get(missing_tier, 0) + 1
 
             except Exception as e:
                 logger.error(
@@ -223,6 +221,18 @@ class TierCoverageValidator:
                     error=str(e),
                 )
                 continue
+
+        # Build immutable report
+        report = DailyValidationReport(
+            target_date=target_date if isinstance(target_date, date) else target_date.date(),
+            validation_time=datetime.now(UTC),
+            total_games=len(games),
+            complete_games=complete_count,
+            incomplete_games=incomplete_count,
+            games_by_tier_coverage=games_by_tier_dict,
+            missing_tier_breakdown=missing_tier_dict,
+            game_reports=tuple(game_reports_list),
+        )
 
         logger.info(
             "daily_validation_completed",

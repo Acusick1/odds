@@ -64,8 +64,9 @@ def get_scheduler_backend(
         )
     """
     # Import settings here to avoid circular imports
-    from core.config import settings
+    from core.config import get_settings
 
+    settings = get_settings()
     backend = backend_type or settings.scheduler_backend.lower()
 
     if backend == "aws":
