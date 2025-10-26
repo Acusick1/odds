@@ -331,7 +331,10 @@ def backfill_status():
 
 async def _backfill_status_async():
     """Async implementation of status check."""
+    from typing import Any, cast
+
     from sqlalchemy import func, select
+    from sqlalchemy.sql.elements import ColumnElement
 
     from core.models import OddsSnapshot
 
@@ -341,7 +344,7 @@ async def _backfill_status_async():
             func.count(func.distinct(OddsSnapshot.event_id)),
             func.min(OddsSnapshot.snapshot_time),
             func.max(OddsSnapshot.snapshot_time),
-            func.count(OddsSnapshot.id),
+            func.count(cast(ColumnElement[Any], OddsSnapshot.id)),
         )
 
         result = await session.execute(query)

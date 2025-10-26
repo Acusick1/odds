@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from core.scheduling.backends.base import BackendHealth, ValidationResult
 
@@ -26,7 +27,7 @@ class HealthCheckBuilder:
     backend_name: str
     _checks_passed: list[str] = field(default_factory=list)
     _checks_failed: list[str] = field(default_factory=list)
-    _details: dict = field(default_factory=dict)
+    _details: dict[str, Any] = field(default_factory=dict)
 
     def pass_check(self, message: str) -> HealthCheckBuilder:
         """
@@ -54,7 +55,7 @@ class HealthCheckBuilder:
         self._checks_failed.append(message)
         return self
 
-    def add_detail(self, key: str, value: any) -> HealthCheckBuilder:
+    def add_detail(self, key: str, value: Any) -> HealthCheckBuilder:
         """
         Add detail information to health check.
 
@@ -146,7 +147,7 @@ class ValidationBuilder:
         return self
 
     def check_required(
-        self, value: any, name: str, error_msg: str | None = None
+        self, value: Any, name: str, error_msg: str | None = None
     ) -> ValidationBuilder:
         """
         Check if required value is present.

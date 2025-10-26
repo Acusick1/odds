@@ -86,7 +86,8 @@ class TheOddsAPIClient:
         start_time = time.time()
 
         try:
-            async with self.session.get(url, params=params, timeout=30) as response:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with self.session.get(url, params=params, timeout=timeout) as response:
                 response.raise_for_status()
 
                 # Track quota from headers
