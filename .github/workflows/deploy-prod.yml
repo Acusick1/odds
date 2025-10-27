@@ -76,6 +76,9 @@ jobs:
       - name: Run database migrations
         run: uv run alembic upgrade head
 
+      - name: Run post-migration validation
+        run: uv run pytest tests/migration/test_post_migration.py -v -s
+
       - name: Test Lambda functions
         run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler --region ${{ env.AWS_REGION }}
 
