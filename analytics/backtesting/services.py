@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 
 import structlog
@@ -68,17 +69,41 @@ class BettingStrategy(ABC):
 
 
 class BacktestEngine:
-    """Execute backtests of betting strategies against historical data."""
+    """
+    Execute backtests of betting strategies against historical data.
 
-    def __init__(self, strategy: BettingStrategy, config: BacktestConfig, reader: OddsReader):
+    Supports dependency injection for better testability and flexibility.
+    """
+
+    def __init__(
+        self,
+        strategy: BettingStrategy,
+        config: BacktestConfig,
+        reader: OddsReader,
+        *,
+        progress_callback: Callable[[str], None] | None = None,
+        logger_instance: structlog.BoundLogger = logger,
+    ):
+        """
+        Initialize backtest engine.
+
+        Args:
+            strategy: Betting strategy to test
+            config: Backtest configuration
+            reader: Database reader for odds data
+            progress_callback: Optional callback for progress updates (for testing)
+            logger_instance: Optional logger instance (for testing)
+        """
         self.strategy = strategy
         self.config = config
         self.reader = reader
+        self._progress_callback = progress_callback
+        self._logger = logger_instance
 
     async def run(self) -> BacktestResult:
         start_time = time.time()
 
-        logger.info(
+        self._logger.info(
             "backtest_starting",
             strategy=self.strategy.get_name(),
             start_date=self.config.start_date,
@@ -88,7 +113,7 @@ class BacktestEngine:
         events = await self._get_events_with_results()
 
         if not events:
-            logger.warning("no_events_found")
+            self._logger.warning("no_events_found")
             return self._create_empty_result(time.time() - start_time)
 
         bets: list[BetRecord] = []
@@ -112,7 +137,7 @@ class BacktestEngine:
                 )
 
                 if not odds_snapshot:
-                    logger.debug(
+                    self._logger.debug(
                         "no_odds_at_decision_time",
                         event_id=event.id,
                         decision_time=decision_time,
@@ -128,7 +153,7 @@ class BacktestEngine:
                     stake = self._calculate_stake(opportunity, bankroll)
 
                     if stake < self.config.min_bet_size:
-                        logger.debug(
+                        self._logger.debug(
                             "stake_below_minimum", stake=stake, min_bet=self.config.min_bet_size
                         )
                         continue
@@ -173,7 +198,7 @@ class BacktestEngine:
 
         result = self._calculate_metrics(events, bets, execution_time=time.time() - start_time)
 
-        logger.info(
+        self._logger.info(
             "backtest_complete",
             total_bets=result.total_bets,
             final_bankroll=result.final_bankroll,
@@ -195,7 +220,7 @@ class BacktestEngine:
             if bt_event is not None:
                 backtest_events.append(bt_event)
 
-        logger.info(
+        self._logger.info(
             "events_loaded",
             total_events=len(events),
             events_with_results=len(backtest_events),
@@ -237,7 +262,7 @@ class BacktestEngine:
         elif opportunity.market == "totals":
             won = self._evaluate_total_outcome(opportunity.outcome, opportunity.line, event)
         else:
-            logger.warning("unknown_market", market=opportunity.market)
+            self._logger.warning("unknown_market", market=opportunity.market)
             return ("unknown", 0.0)
 
         if won is None:
@@ -257,7 +282,7 @@ class BacktestEngine:
         elif bet.market == "totals":
             won = self._evaluate_total_outcome(bet.outcome, bet.line, event)
         else:
-            logger.warning("unknown_market", market=bet.market)
+            self._logger.warning("unknown_market", market=bet.market)
             return ("unknown", 0.0)
 
         if won is None:

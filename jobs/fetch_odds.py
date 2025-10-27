@@ -37,10 +37,10 @@ async def main():
     """
     app_settings = get_settings()
 
-    logger.info("fetch_odds_job_started", backend=app_settings.scheduler_backend)
+    logger.info("fetch_odds_job_started", backend=app_settings.scheduler.backend)
 
     # Smart execution gating
-    intelligence = SchedulingIntelligence(lookahead_days=app_settings.scheduling_lookahead_days)
+    intelligence = SchedulingIntelligence(lookahead_days=app_settings.scheduler.lookahead_days)
     decision = await intelligence.should_execute_fetch()
 
     if not decision.should_execute:
@@ -52,7 +52,7 @@ async def main():
 
         # Still schedule next check even if not executing
         if decision.next_execution:
-            backend = get_scheduler_backend(dry_run=app_settings.scheduler_dry_run)
+            backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
             await backend.schedule_next_execution(
                 job_name="fetch-odds", next_time=decision.next_execution
             )
@@ -70,7 +70,7 @@ async def main():
 
     try:
         results = await ingestion_service.ingest_sports(
-            app_settings.sports,
+            app_settings.data_collection.sports,
             fetch_tier=decision.tier,
         )
 
@@ -92,17 +92,17 @@ async def main():
             )
 
             if sport_result.quota_remaining is not None and sport_result.quota_remaining < (
-                app_settings.odds_api_quota * 0.2
+                app_settings.api.quota * 0.2
             ):
                 percentage_remaining = round(
-                    sport_result.quota_remaining / app_settings.odds_api_quota * 100,
+                    sport_result.quota_remaining / app_settings.api.quota * 100,
                     1,
                 )
                 logger.warning(
                     "api_quota_low",
                     sport=sport_result.sport_key,
                     remaining=sport_result.quota_remaining,
-                    quota=app_settings.odds_api_quota,
+                    quota=app_settings.api.quota,
                     percentage=percentage_remaining,
                 )
 
@@ -121,7 +121,7 @@ async def main():
     # Self-schedule next execution
     if decision.next_execution:
         try:
-            backend = get_scheduler_backend(dry_run=app_settings.scheduler_dry_run)
+            backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
             await backend.schedule_next_execution(
                 job_name="fetch-odds", next_time=decision.next_execution
             )

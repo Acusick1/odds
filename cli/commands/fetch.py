@@ -63,8 +63,8 @@ async def _fetch_current(sport: str):
             # Summary
             console.print("\n[bold green]✓ Fetch completed successfully![/bold green]")
             console.print(f"  Events processed: {result.processed_events} of {result.total_events}")
-            console.print(f"  Bookmakers: {len(app_settings.bookmakers)}")
-            console.print(f"  Markets: {', '.join(app_settings.markets)}")
+            console.print(f"  Bookmakers: {len(app_settings.data_collection.bookmakers)}")
+            console.print(f"  Markets: {', '.join(app_settings.data_collection.markets)}")
 
             if result.quota_remaining is not None:
                 console.print(f"  API quota remaining: {result.quota_remaining:,}")

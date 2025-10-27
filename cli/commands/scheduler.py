@@ -37,9 +37,9 @@ def start_local():
     app_settings = get_settings()
 
     # Verify we're using local backend
-    if app_settings.scheduler_backend != "local":
+    if app_settings.scheduler.backend != "local":
         console.print(
-            f"[bold red]Error:[/bold red] SCHEDULER_BACKEND is '{app_settings.scheduler_backend}', "
+            f"[bold red]Error:[/bold red] SCHEDULER_BACKEND is '{app_settings.scheduler.backend}', "
             f"expected 'local'"
         )
         console.print(
@@ -115,7 +115,7 @@ def run_once(
     app_settings = get_settings()
 
     console.print(f"[bold blue]Executing {job}...[/bold blue]")
-    console.print(f"[dim]Backend: {app_settings.scheduler_backend}[/dim]\n")
+    console.print(f"[dim]Backend: {app_settings.scheduler.backend}[/dim]\n")
 
     try:
         # Use centralized job registry
@@ -162,37 +162,37 @@ def info():
     table.add_column("Setting", style="white")
     table.add_column("Value", style="yellow")
 
-    table.add_row("Scheduler Backend", app_settings.scheduler_backend)
-    table.add_row("Dry-Run Mode", "Enabled" if app_settings.scheduler_dry_run else "Disabled")
-    table.add_row("Lookahead Days", str(app_settings.scheduling_lookahead_days))
-    table.add_row("Sports", ", ".join(app_settings.sports))
-    table.add_row("Markets", ", ".join(app_settings.markets))
-    table.add_row("Bookmakers", f"{len(app_settings.bookmakers)} configured")
+    table.add_row("Scheduler Backend", app_settings.scheduler.backend)
+    table.add_row("Dry-Run Mode", "Enabled" if app_settings.scheduler.dry_run else "Disabled")
+    table.add_row("Lookahead Days", str(app_settings.scheduler.lookahead_days))
+    table.add_row("Sports", ", ".join(app_settings.data_collection.sports))
+    table.add_row("Markets", ", ".join(app_settings.data_collection.markets))
+    table.add_row("Bookmakers", f"{len(app_settings.data_collection.bookmakers)} configured")
 
-    if app_settings.scheduler_backend == "aws":
-        table.add_row("AWS Region", app_settings.aws_region or "[red]Not set[/red]")
-        table.add_row("Lambda ARN", app_settings.lambda_arn or "[red]Not set[/red]")
+    if app_settings.scheduler.backend == "aws":
+        table.add_row("AWS Region", app_settings.aws.region or "[red]Not set[/red]")
+        table.add_row("Lambda ARN", app_settings.aws.lambda_arn or "[red]Not set[/red]")
 
     console.print(table)
 
     # Backend-specific info
     console.print("\n[bold]Backend Info:[/bold]")
-    if app_settings.scheduler_backend == "local":
+    if app_settings.scheduler.backend == "local":
         console.print("  • Uses APScheduler for local testing")
         console.print("  • Jobs self-schedule dynamically")
         console.print("  • Start with: [cyan]odds scheduler start[/cyan]")
 
-    elif app_settings.scheduler_backend == "aws":
+    elif app_settings.scheduler.backend == "aws":
         console.print("  • Uses AWS Lambda + EventBridge")
         console.print("  • Dynamic one-time schedules")
         console.print("  • Deploy with: [cyan]terraform apply[/cyan]")
 
-    elif app_settings.scheduler_backend == "railway":
+    elif app_settings.scheduler.backend == "railway":
         console.print("  • Uses Railway cron (static schedules)")
         console.print("  • Configure in railway.json")
         console.print("  • Jobs use smart gating logic")
 
-    if app_settings.scheduler_dry_run:
+    if app_settings.scheduler.dry_run:
         console.print("\n[bold yellow]⚠ DRY-RUN MODE ENABLED[/bold yellow]")
         console.print("  Scheduling operations will be logged but not executed")
 
@@ -247,7 +247,7 @@ def list_jobs():
     except BackendUnavailableError as e:
         console.print(f"[yellow]⚠ Not supported:[/yellow] {e}")
         console.print(
-            f"\n[dim]Backend {app_settings.scheduler_backend} does not support job listing[/dim]"
+            f"\n[dim]Backend {app_settings.scheduler.backend} does not support job listing[/dim]"
         )
 
     except Exception as e:

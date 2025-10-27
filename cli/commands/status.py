@@ -70,13 +70,13 @@ async def _show_status(verbose: bool):
             # API quota
             quota_remaining = stats.get("api_quota_remaining")
             if quota_remaining is not None:
-                quota_percent = (quota_remaining / app_settings.odds_api_quota) * 100
+                quota_percent = (quota_remaining / app_settings.api.quota) * 100
                 quota_color = (
                     "green" if quota_percent > 50 else ("yellow" if quota_percent > 20 else "red")
                 )
                 table.add_row(
                     "API Quota",
-                    f"[{quota_color}]{quota_remaining:,} / {app_settings.odds_api_quota:,} "
+                    f"[{quota_color}]{quota_remaining:,} / {app_settings.api.quota:,} "
                     f"({quota_percent:.1f}%)[/{quota_color}]",
                 )
 
@@ -166,8 +166,8 @@ async def _show_quota():
             # Current quota
             latest = fetch_logs[0]
             if latest.api_quota_remaining is not None:
-                quota_used = app_settings.odds_api_quota - latest.api_quota_remaining
-                quota_percent = (latest.api_quota_remaining / app_settings.odds_api_quota) * 100
+                quota_used = app_settings.api.quota - latest.api_quota_remaining
+                quota_percent = (latest.api_quota_remaining / app_settings.api.quota) * 100
 
                 table = Table(show_header=False, box=None)
                 table.add_column("Metric", style="cyan")
@@ -177,7 +177,7 @@ async def _show_quota():
                     "green" if quota_percent > 50 else ("yellow" if quota_percent > 20 else "red")
                 )
 
-                table.add_row("Total Quota", f"{app_settings.odds_api_quota:,}")
+                table.add_row("Total Quota", f"{app_settings.api.quota:,}")
                 table.add_row("Used", f"{quota_used:,}")
                 table.add_row(
                     "Remaining",
@@ -197,7 +197,7 @@ async def _show_quota():
                     if log.api_quota_remaining is not None:
                         time_ago = datetime.now(UTC) - log.fetch_time
                         minutes_ago = int(time_ago.total_seconds() / 60)
-                        used = app_settings.odds_api_quota - log.api_quota_remaining
+                        used = app_settings.api.quota - log.api_quota_remaining
 
                         trend_table.add_row(
                             f"{minutes_ago}m ago",

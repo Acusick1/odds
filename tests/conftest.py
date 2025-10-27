@@ -9,6 +9,12 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
+# Set required environment variables for testing BEFORE any imports of Settings
+os.environ.setdefault("ODDS_API_KEY", "test_api_key")
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql+asyncpg://postgres:dev_password@localhost:5432/odds_test"
+)
+
 # Test database URL - use PostgreSQL for timezone-aware datetime support
 # Can be overridden with TEST_DATABASE_URL environment variable
 TEST_DATABASE_URL = os.getenv(
@@ -68,17 +74,24 @@ async def test_session(test_engine):
 @pytest.fixture
 def mock_settings():
     """Mock settings for testing."""
-    from core.config import Settings
+    from core.config import (
+        APIConfig,
+        DatabaseConfig,
+        DataCollectionConfig,
+        DataQualityConfig,
+        Settings,
+    )
 
     return Settings(
-        odds_api_key="test_api_key",
-        odds_api_base_url="https://api.test.com/v4",
-        database_url=TEST_DATABASE_URL,
-        sports=["basketball_nba"],
-        bookmakers=["fanduel", "draftkings"],
-        markets=["h2h", "spreads", "totals"],
-        regions=["us"],
-        enable_validation=True,
+        api=APIConfig(key="test_api_key", base_url="https://api.test.com/v4"),
+        database=DatabaseConfig(url=TEST_DATABASE_URL),
+        data_collection=DataCollectionConfig(
+            sports=["basketball_nba"],
+            bookmakers=["fanduel", "draftkings"],
+            markets=["h2h", "spreads", "totals"],
+            regions=["us"],
+        ),
+        data_quality=DataQualityConfig(enable_validation=True),
     )
 
 

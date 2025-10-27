@@ -35,8 +35,8 @@ class TheOddsAPIClient:
             base_url: Base URL (defaults to settings)
         """
         app_settings = get_settings()
-        self.api_key = api_key or app_settings.odds_api_key
-        self.base_url = base_url or app_settings.odds_api_base_url
+        self.api_key = api_key or app_settings.api.key
+        self.base_url = base_url or app_settings.api.base_url
         self.session: aiohttp.ClientSession | None = None
         self._quota_remaining: int | None = None
 
@@ -151,9 +151,9 @@ class TheOddsAPIClient:
                     print(f"{event.home_team} vs {event.away_team}")
         """
         app_settings = get_settings()
-        regions = regions or app_settings.regions
-        markets = markets or app_settings.markets
-        bookmakers = bookmakers or app_settings.bookmakers
+        regions = regions or app_settings.data_collection.regions
+        markets = markets or app_settings.data_collection.markets
+        bookmakers = bookmakers or app_settings.data_collection.bookmakers
 
         params = {
             "regions": ",".join(regions),
@@ -243,9 +243,9 @@ class TheOddsAPIClient:
             HistoricalOddsResponse with parsed Event instances and raw data
         """
         app_settings = get_settings()
-        regions = regions or app_settings.regions
-        markets = markets or app_settings.markets
-        bookmakers = bookmakers or app_settings.bookmakers
+        regions = regions or app_settings.data_collection.regions
+        markets = markets or app_settings.data_collection.markets
+        bookmakers = bookmakers or app_settings.data_collection.bookmakers
 
         params = {
             "regions": ",".join(regions),

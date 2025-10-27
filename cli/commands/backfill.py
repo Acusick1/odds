@@ -132,9 +132,7 @@ async def _create_plan_async(
     table.add_row("Total Snapshots", str(plan["total_snapshots"]))
     table.add_row("Estimated Quota Usage", f"{plan['estimated_quota_usage']:,}")
     app_settings = get_settings()
-    table.add_row(
-        "Quota Remaining", f"{app_settings.odds_api_quota - plan['estimated_quota_usage']:,}"
-    )
+    table.add_row("Quota Remaining", f"{app_settings.api.quota - plan['estimated_quota_usage']:,}")
     table.add_row("Date Range", f"{start_date_str} to {end_date_str}")
 
     console.print("\n")

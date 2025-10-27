@@ -113,15 +113,17 @@ class OddsIngestionService:
         callbacks: OddsIngestionCallbacks | None = None,
     ) -> SportIngestionResult:
         """Fetch and persist odds for a single sport."""
-        validation_enabled = self._settings.enable_validation if validate is None else validate
+        validation_enabled = (
+            self._settings.data_quality.enable_validation if validate is None else validate
+        )
         callback_bundle = callbacks or OddsIngestionCallbacks()
 
         async with self._client_factory() as client:
             response = await client.get_odds(
                 sport=sport_key,
-                regions=self._settings.regions,
-                markets=self._settings.markets,
-                bookmakers=self._settings.bookmakers,
+                regions=self._settings.data_collection.regions,
+                markets=self._settings.data_collection.markets,
+                bookmakers=self._settings.data_collection.bookmakers,
             )
 
         if callback_bundle.on_fetch_complete:
@@ -166,7 +168,7 @@ class OddsIngestionService:
             fetch_log = FetchLog(
                 sport_key=sport_key,
                 events_count=len(response.events),
-                bookmakers_count=len(self._settings.bookmakers),
+                bookmakers_count=len(self._settings.data_collection.bookmakers),
                 success=len(failures) == 0,
                 api_quota_remaining=response.quota_remaining,
                 response_time_ms=response.response_time_ms,
