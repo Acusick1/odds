@@ -8,6 +8,11 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
 
     steps:
       - uses: actions/checkout@v4
@@ -15,9 +20,6 @@ jobs:
       - uses: astral-sh/setup-uv@v5
 
       - name: Validate yesterday's data
-        env:
-          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           uv run python -m cli.main validate daily \
             --check-discovery \
