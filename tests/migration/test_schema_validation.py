@@ -23,9 +23,6 @@ from core.models import DataQualityLog, Event, FetchLog, Odds, OddsSnapshot  # n
 # Get the actual database URL from environment
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-if not DATABASE_URL:
-    pytest.skip("DATABASE_URL not set, skipping schema validation tests", allow_module_level=True)
-
 
 @pytest.fixture
 async def db_connection_for_inspection():

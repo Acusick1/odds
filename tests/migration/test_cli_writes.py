@@ -13,8 +13,6 @@ The main migration validation is handled by test_schema_validation.py.
 
 import os
 
-from typer.testing import CliRunner
-
 from cli.main import app
 
 # Get environment variables
@@ -25,17 +23,7 @@ ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 class TestWriteCLI:
     """Validates that write CLI commands work with migrated database."""
 
-    def setup_method(self):
-        """Setup environment and runner for CLI commands."""
-        # Create new CliRunner for each test to avoid event loop issues
-        self.runner = CliRunner()
-        self.env = {
-            **os.environ,
-            "DATABASE_URL": DATABASE_URL,
-            "ODDS_API_KEY": ODDS_API_KEY,
-        }
-
-    def test_fetch_current(self):
+    def test_fetch_current(self, runner):
         """
         Test that 'odds fetch current' command works.
 
@@ -45,10 +33,10 @@ class TestWriteCLI:
         - Writes odds data to database
         - Validates full write pipeline (CLI → API → DB)
         """
-        result = self.runner.invoke(
+        result = runner.invoke(
             app,
             ["fetch", "current"],
-            env=self.env,
+            env=os.environ,
         )
 
         assert result.exit_code == 0, (

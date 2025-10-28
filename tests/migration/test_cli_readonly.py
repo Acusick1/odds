@@ -12,8 +12,6 @@ They do NOT write to the database or use API quota.
 
 import os
 
-from typer.testing import CliRunner
-
 from cli.main import app
 
 # Get the actual database URL from environment
@@ -23,16 +21,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 class TestReadOnlyCLI:
     """Validates that read-only CLI commands work with migrated database."""
 
-    def setup_method(self):
-        """Setup environment and runner for CLI commands."""
-        # Create new CliRunner for each test to avoid event loop issues
-        self.runner = CliRunner()
-        self.env = {
-            **os.environ,
-            "DATABASE_URL": DATABASE_URL,
-        }
-
-    def test_status_show(self):
+    def test_status_show(self, runner):
         """
         Test that 'odds status show' command works.
 
@@ -41,10 +30,10 @@ class TestReadOnlyCLI:
         - Database queries work through full stack
         - ORM/SQLModel compatibility with migrated schema
         """
-        result = self.runner.invoke(
+        result = runner.invoke(
             app,
             ["status", "show"],
-            env=self.env,
+            env=os.environ,
         )
 
         assert result.exit_code == 0, (
