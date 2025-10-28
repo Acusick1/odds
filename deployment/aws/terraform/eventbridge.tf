@@ -2,7 +2,7 @@
 # After first execution, Lambda will self-schedule using dynamic rules
 
 resource "aws_cloudwatch_event_rule" "bootstrap_fetch_odds" {
-  name                = "odds-fetch-odds-bootstrap"
+  name                = format("%s-fetch-odds-bootstrap", var.project_name)
   description         = "Bootstrap trigger for odds fetching (will be updated dynamically)"
   schedule_expression = "rate(1 day)"
   state               = "ENABLED"
@@ -19,7 +19,7 @@ resource "aws_cloudwatch_event_target" "bootstrap_fetch_odds_target" {
 }
 
 resource "aws_lambda_permission" "allow_eventbridge_fetch_odds" {
-  statement_id  = "AllowExecutionFromEventBridgeFetchOdds"
+  statement_id  = format("AllowExecutionFromEventBridgeFetchOdds-%s", var.project_name)
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.odds_scheduler.function_name
   principal     = "events.amazonaws.com"
@@ -28,7 +28,7 @@ resource "aws_lambda_permission" "allow_eventbridge_fetch_odds" {
 
 # Bootstrap rule for scores fetching
 resource "aws_cloudwatch_event_rule" "bootstrap_fetch_scores" {
-  name                = "odds-fetch-scores-bootstrap"
+  name                = format("%s-fetch-scores-bootstrap", var.project_name)
   description         = "Bootstrap trigger for scores fetching"
   schedule_expression = "rate(6 hours)"
   state               = "ENABLED"
@@ -45,7 +45,7 @@ resource "aws_cloudwatch_event_target" "bootstrap_fetch_scores_target" {
 }
 
 resource "aws_lambda_permission" "allow_eventbridge_fetch_scores" {
-  statement_id  = "AllowExecutionFromEventBridgeFetchScores"
+  statement_id  = format("AllowExecutionFromEventBridgeFetchScores-%s", var.project_name)
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.odds_scheduler.function_name
   principal     = "events.amazonaws.com"
@@ -54,7 +54,7 @@ resource "aws_lambda_permission" "allow_eventbridge_fetch_scores" {
 
 # Bootstrap rule for status updates
 resource "aws_cloudwatch_event_rule" "bootstrap_update_status" {
-  name                = "odds-update-status-bootstrap"
+  name                = format("%s-update-status-bootstrap", var.project_name)
   description         = "Bootstrap trigger for status updates"
   schedule_expression = "rate(1 hour)"
   state               = "ENABLED"
@@ -71,7 +71,7 @@ resource "aws_cloudwatch_event_target" "bootstrap_update_status_target" {
 }
 
 resource "aws_lambda_permission" "allow_eventbridge_update_status" {
-  statement_id  = "AllowExecutionFromEventBridgeUpdateStatus"
+  statement_id  = format("AllowExecutionFromEventBridgeUpdateStatus-%s", var.project_name)
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.odds_scheduler.function_name
   principal     = "events.amazonaws.com"

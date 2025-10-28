@@ -6,11 +6,7 @@
 # - State versioning (old versions kept for 30 days)
 
 terraform {
-  backend "s3" {
-    bucket         = "odds-scheduler-terraform-state"
-    key            = "prod/terraform.tfstate"
-    region         = "eu-west-1"
-    encrypt        = true
-    dynamodb_table = "odds-scheduler-terraform-locks"
-  }
+  # Backend configuration is supplied per-environment via `terraform init -backend-config=...`
+  # so that development and production maintain isolated state files and locks.
+  backend "s3" {}
 }

@@ -55,7 +55,7 @@ jobs:
       - name: Terraform Init
         run: |
           cd deployment/aws/terraform
-          terraform init
+          terraform init -backend-config=backend.prod.hcl
 
       - name: Terraform Plan
         run: |

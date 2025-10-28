@@ -5,16 +5,33 @@ Creates S3 bucket and DynamoDB table for storing Terraform state.
 ## One-Time Setup
 
 ```bash
-# 1. Create infrastructure
+# 1. Create infrastructure (one time)
 terraform apply
 
-# 2. Migrate main terraform state
+# 2. In the main terraform project create backend configs
 cd ../terraform
-cp backend.tf.example backend.tf
-terraform init
-# Answer 'yes' to migrate existing state
+cat <<'EOF' > backend.dev.hcl
+bucket         = "odds-scheduler-terraform-state"
+key            = "dev/terraform.tfstate"
+region         = "eu-west-1"
+encrypt        = true
+dynamodb_table = "odds-scheduler-terraform-locks"
+EOF
 
-# 3. Commit bootstrap state (safe - no secrets)
+cat <<'EOF' > backend.prod.hcl
+bucket         = "odds-scheduler-terraform-state"
+key            = "prod/terraform.tfstate"
+region         = "eu-west-1"
+encrypt        = true
+dynamodb_table = "odds-scheduler-terraform-locks"
+EOF
+
+# 3. Initialize each environment when needed (run one command at a time)
+terraform init -backend-config=backend.dev.hcl
+# or
+terraform init -backend-config=backend.prod.hcl
+
+# 4. Commit bootstrap state (safe - no secrets)
 cd ../bootstrap
 git add terraform.tfstate
 git commit -m "Add remote state bootstrap"

@@ -18,20 +18,22 @@ output "dynamodb_table_arn" {
   value       = aws_dynamodb_table.terraform_locks.arn
 }
 
-output "backend_config" {
-  description = "Backend configuration to use in your main Terraform code"
+output "backend_config_examples" {
+  description = "Example backend config files for development and production"
   value       = <<-EOT
 
-    Add this to your deployment/aws/terraform/backend.tf:
+    # backend.dev.hcl
+    bucket         = "${aws_s3_bucket.terraform_state.id}"
+    key            = "dev/terraform.tfstate"
+    region         = "${var.aws_region}"
+    encrypt        = true
+    dynamodb_table = "${aws_dynamodb_table.terraform_locks.id}"
 
-    terraform {
-      backend "s3" {
-        bucket         = "${aws_s3_bucket.terraform_state.id}"
-        key            = "prod/terraform.tfstate"
-        region         = "${var.aws_region}"
-        encrypt        = true
-        dynamodb_table = "${aws_dynamodb_table.terraform_locks.id}"
-      }
-    }
+    # backend.prod.hcl
+    bucket         = "${aws_s3_bucket.terraform_state.id}"
+    key            = "prod/terraform.tfstate"
+    region         = "${var.aws_region}"
+    encrypt        = true
+    dynamodb_table = "${aws_dynamodb_table.terraform_locks.id}"
   EOT
 }
