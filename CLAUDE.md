@@ -2,11 +2,14 @@
 
 IMPORTANT (LLM agents): This document is read-only and should only be modified by the user. Do not create additional documentation files (outside of README.md) without confirming with the user first, only make a case for additional documentation files when you believe they are absolutely necessary.
 
+**Document Status**: Updated October 2024 to reflect production architecture with multi-backend scheduler and intelligent data collection. Original design specification available in git history.
+
 ## System Overview
 
 A single-user betting odds data collection and analysis system focused on NBA games with extensibility to other sports. The system prioritizes robust data pipeline architecture over immediate analytics capabilities, with a focus on comprehensive historical data collection, storage, and validation.
 
 ### Core Principles
+
 - **Data pipeline first**: Robust data collection and storage is paramount
 - **Single-user system**: Latency is not critical, simplicity over scale
 - **Extensibility**: Built to easily support additional sports and markets
@@ -14,6 +17,7 @@ A single-user betting odds data collection and analysis system focused on NBA ga
 - **Historical analysis**: All data preserved for backtesting and research
 
 ### Primary Use Cases
+
 - Pre-match betting decisions and research
 - Historical odds analysis over multiple seasons
 - Backtesting betting strategies against historical data
@@ -26,12 +30,14 @@ A single-user betting odds data collection and analysis system focused on NBA ga
 ## Technical Stack
 
 ### Core Technologies
+
 - **Python 3.11+**: Primary language
 - **SQLModel**: ORM and data validation (combines SQLAlchemy 2.0 + Pydantic)
 - **PostgreSQL 15+**: Database with JSONB support for hybrid storage
 - **asyncio + aiohttp**: Asynchronous API calls and operations
 
 ### Key Libraries
+
 - **uv**: Fast Python package installer and dependency management
 - **APScheduler**: Job scheduling for periodic data collection
 - **Typer + Rich**: CLI interface with formatted output
@@ -43,27 +49,32 @@ A single-user betting odds data collection and analysis system focused on NBA ga
 - **ruff**: Fast Python linter and formatter (used in pre-commit hooks)
 
 ### Deployment
-- **Docker + docker-compose**: Local development containerization
-- **Railway**: Production hosting (alternative: any Docker-compatible platform)
-- **PostgreSQL**: Managed database service
+
+- **Multi-Backend Scheduler**: AWS Lambda (production), Railway, or Local APScheduler
+- **AWS Lambda**: Primary production deployment (~$0.20/month) with self-scheduling via EventBridge
+- **Docker + docker-compose**: Local development and portable deployment
+- **PostgreSQL**: Managed database service (Neon/Railway)
 
 ---
 
 ## Data Sources
 
 ### Primary API: The Odds API
+
 - Base URL: `https://api.the-odds-api.com/v4`
 - NBA Endpoint: `/sports/basketball_nba/odds`
 - Scores Endpoint: `/sports/basketball_nba/scores`
 - Historical Endpoint: `/sports/basketball_nba/odds/history`
 
 ### API Pricing Model
+
 - Cost per "object" where 1 object = 1 game/event
 - Number of bookmakers and markets requested does not affect cost
 - 20,000 requests/month tier: $25/month
 - Expected usage with 30-minute sampling: ~14,400 requests/month
 
 ### Bookmaker Coverage (8 books)
+
 1. **Pinnacle** - Sharp, low-margin bookmaker (key for EV calculations)
 2. **Circa Sports** - Sharp, Vegas-based
 3. **DraftKings** - Major US retail sportsbook
@@ -74,12 +85,14 @@ A single-user betting odds data collection and analysis system focused on NBA ga
 8. **Bovada** - Offshore sportsbook
 
 ### Markets Collected
+
 - **Moneyline (h2h)**: Win/loss bets
 - **Spreads**: Point spread bets
 - **Totals**: Over/under total points bets
 
 ### API Configuration
-```
+
+```python
 regions: ["us"]
 markets: ["h2h", "spreads", "totals"]
 odds_format: "american"
@@ -94,6 +107,7 @@ odds_format: "american"
 All models use SQLModel for combined ORM and validation capabilities.
 
 #### Event Model
+
 ```python
 class EventStatus(str, Enum):
     SCHEDULED = "scheduled"
@@ -122,34 +136,48 @@ class Event(SQLModel, table=True):
     completed_at: datetime | None = None
     
     # Metadata
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))
 ```
 
 #### OddsSnapshot Model (Raw Data Preservation)
+
 ```python
 class OddsSnapshot(SQLModel, table=True):
     __tablename__ = "odds_snapshots"
-    
+
     id: int | None = Field(default=None, primary_key=True)
     event_id: str = Field(foreign_key="events.id", index=True)
     snapshot_time: datetime = Field(index=True)
-    
+
     # Full API response stored as JSON
     raw_data: dict = Field(sa_column=Column(JSON))
-    
+
     # Quick statistics
     bookmaker_count: int
     api_request_id: str | None = None  # For debugging
-    
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
+    # Fetch tier tracking (for adaptive sampling validation and ML features)
+    fetch_tier: str | None = None  # opening, early, sharp, pregame, closing
+    hours_until_commence: float | None = None
+
+    created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+
     __table_args__ = (
         Index('ix_event_snapshot_time', 'event_id', 'snapshot_time'),
+        Index('ix_event_tier', 'event_id', 'fetch_tier'),
     )
 ```
 
+**Fetch Tier Tracking**: Each snapshot records which tier it belongs to (`fetch_tier`) and timing (`hours_until_commence`). This enables:
+
+- Validation that intelligent scheduling is working correctly
+- ML feature engineering (e.g., "closing line" vs "opening line" features)
+- Analysis of line movement patterns by tier
+- See `core/fetch_tier.py` for FetchTier enum and `core/tier_utils.py` for calculations
+
 #### Odds Model (Normalized for Querying)
+
 ```python
 class Odds(SQLModel, table=True):
     __tablename__ = "odds"
@@ -170,7 +198,7 @@ class Odds(SQLModel, table=True):
     # Timestamps
     odds_timestamp: datetime = Field(index=True)  # When odds were valid
     last_update: datetime  # Bookmaker's last update time
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
     
     # Data quality
     is_valid: bool = Field(default=True)
@@ -183,6 +211,7 @@ class Odds(SQLModel, table=True):
 ```
 
 #### DataQualityLog Model
+
 ```python
 class DataQualityLog(SQLModel, table=True):
     __tablename__ = "data_quality_logs"
@@ -195,16 +224,17 @@ class DataQualityLog(SQLModel, table=True):
     description: str
     raw_data: dict | None = Field(sa_column=Column(JSON))
     
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    created_at: datetime = Field(default_factory=datetime.now(timezone.utc), index=True)
 ```
 
 #### FetchLog Model
+
 ```python
 class FetchLog(SQLModel, table=True):
     __tablename__ = "fetch_logs"
     
     id: int | None = Field(default=None, primary_key=True)
-    fetch_time: datetime = Field(default_factory=datetime.utcnow, index=True)
+    fetch_time: datetime = Field(default_factory=datetime.now(timezone.utc), index=True)
     
     sport_key: str
     events_count: int
@@ -221,12 +251,14 @@ class FetchLog(SQLModel, table=True):
 ### Storage Strategy: Hybrid Approach
 
 **Raw Data (OddsSnapshot)**: Complete API responses stored as JSON for:
+
 - Debugging and auditing
 - Schema flexibility
 - Exact data preservation
 - Note: PostgreSQL JSON type is used; consider migrating to JSONB for better query performance
 
 **Normalized Data (Odds)**: Individual odds records for:
+
 - Efficient querying and filtering
 - Time-series analysis
 - Standard SQL operations
@@ -238,177 +270,180 @@ class FetchLog(SQLModel, table=True):
 
 ### Component Structure
 
-```
+High-level directory organization:
+
+```bash
 betting-odds-system/
 ├── core/
 │   ├── models.py              # SQLModel schema definitions
-│   ├── database.py            # Database connection & session management
+│   ├── database.py            # Database session management
 │   ├── data_fetcher.py        # The Odds API client
-│   ├── config.py              # Configuration management
-│   ├── backfill_executor.py   # Backfill execution logic
-│   └── game_selector.py       # Strategic game selection for backfill
+│   ├── config.py              # Pydantic Settings configuration
+│   ├── ingestion.py           # Odds ingestion service
+│   ├── backfill_executor.py   # Historical data backfill
+│   ├── game_selector.py       # Game selection for backfill
+│   ├── fetch_tier.py          # FetchTier enum definition
+│   ├── tier_utils.py          # Tier calculation utilities
+│   └── scheduling/            # Multi-backend scheduler
+│       ├── intelligence.py    # Game-aware scheduling logic
+│       ├── jobs.py            # Job registry
+│       ├── health_check.py    # System health monitoring
+│       └── backends/
+│           ├── base.py        # Abstract backend interface
+│           ├── aws.py         # AWS Lambda + EventBridge
+│           ├── railway.py     # Railway deployment
+│           └── local.py       # APScheduler for dev
+│
+├── jobs/                      # Standalone job executables
+│   ├── fetch_odds.py          # Odds collection job
+│   ├── fetch_scores.py        # Scores update job
+│   └── update_status.py       # Status transition job
 │
 ├── storage/
-│   ├── writers.py             # Write operations (inserts, updates)
-│   ├── readers.py             # Read operations (queries)
+│   ├── writers.py             # Write operations
+│   ├── readers.py             # Read operations & queries
 │   └── validators.py          # Data quality validation
 │
-├── scheduler/
-│   ├── main.py                # APScheduler orchestration
-│   └── jobs.py                # Job definitions
-│
 ├── analytics/
-│   ├── __init__.py            # Analytics module
-│   ├── backtesting.py         # Backtesting engine and data models
-│   ├── strategies.py          # Betting strategy implementations
-│   └── utils.py               # Odds calculations and metrics utilities
-│
-├── alerts/
-│   └── base.py                # Alert infrastructure (for future use)
+│   ├── backtesting/           # Backtesting system
+│   │   ├── models.py          # Data models & results
+│   │   ├── services.py        # BacktestEngine
+│   │   └── config.py          # Configuration
+│   ├── strategies.py          # Strategy implementations
+│   ├── utils.py               # Odds calculations & metrics
+│   └── ml_strategy_example.py # ML integration example
 │
 ├── cli/
-│   ├── main.py                # Typer CLI entry point
-│   └── commands/
-│       ├── fetch.py           # Data collection commands
-│       ├── status.py          # System health monitoring
-│       ├── backfill.py        # Historical data collection
-│       └── backtest.py        # Backtesting commands
+│   └── commands/              # CLI command modules
+│       ├── fetch.py, status.py, backfill.py
+│       ├── backtest.py, scheduler.py, validate.py
 │
-├── migrations/                # Alembic database migrations
-├── tests/                     # Test suite
-├── docker-compose.yml         # Local development setup
-├── Dockerfile                 # Container definition
-├── pyproject.toml             # uv dependency management
-└── requirements.txt           # Python dependencies (exported)
+├── deployment/                # Deployment configurations
+│   ├── aws/                   # Lambda + Terraform
+│   └── railway/               # Railway configs
+│
+├── tests/                     # 82 test files, 5000+ lines
+├── migrations/                # Alembic migrations
+└── docker-compose.yml, Dockerfile, pyproject.toml
 ```
+
+See actual filesystem for complete structure.
+
+### Multi-Backend Scheduler Architecture
+
+The system uses an abstraction layer to support multiple deployment backends, allowing the same codebase to run on AWS Lambda, Railway, or locally for development.
+
+**Backend Interface** (`core/scheduling/backends/base.py`):
+All backends implement `SchedulerBackend` abstract base class with methods:
+
+- `schedule_job(job_name, execution_time)`: Schedule a future job execution
+- `get_backend_info()`: Return backend-specific metadata
+
+**AWS Lambda Backend** (`core/scheduling/backends/aws.py`):
+
+- Self-scheduling pattern using EventBridge rules
+- Each job invocation schedules its next execution
+- NullPool database connections (no connection reuse across invocations)
+- Serverless with automatic scaling
+- Configuration: `SCHEDULER_BACKEND=aws`, `AWS_LAMBDA_ARN`, `AWS_REGION`
+
+**Railway Backend** (`core/scheduling/backends/railway.py`):
+
+- Uses APScheduler with persistent scheduling
+- Long-running process with managed restarts
+- Standard connection pooling
+- Configuration: `SCHEDULER_BACKEND=railway`
+
+**Local Backend** (`core/scheduling/backends/local.py`):
+
+- APScheduler for development and testing
+- Runs until process terminated (Ctrl+C)
+- Full logging for debugging
+- Configuration: `SCHEDULER_BACKEND=local`
+
+**Job Registry** (`core/scheduling/jobs.py`):
+
+- Centralized mapping of job names to functions
+- Lazy-loaded to avoid circular imports
+- Jobs: `fetch-odds`, `fetch-scores`, `update-status`
+
+**Scheduling Intelligence** (`core/scheduling/intelligence.py`):
+
+- Game-aware execution logic (described in Scheduler Architecture section)
+- Calculates optimal next execution time based on game state
+- Used by all backends to determine job timing
 
 ### Data Collection Pipeline
 
 **Flow**:
+
 1. **Scheduler** triggers fetch job at configured interval
 2. **API Client** fetches odds data with rate limiting
 3. **Validator** checks data quality and logs issues
 4. **Writer** stores both raw (JSONB) and normalized data
 5. **Logger** records fetch success/failure and quota usage
 
-### API Client Design
+### API Client & Data Pipeline
 
-```python
-class TheOddsAPIClient:
-    """
-    Handles all interactions with The Odds API
+**TheOddsAPIClient** (`core/data_fetcher.py`):
+Handles all API interactions with retry logic (tenacity), rate limiting, and quota tracking. Methods: `get_odds()`, `get_scores()`, `get_historical_odds()`, `get_historical_events()`.
 
-    Features:
-    - Rate limiting to respect quota
-    - Retry logic with exponential backoff (using tenacity)
-    - Error handling and logging
-    - Quota tracking
-    """
+**OddsValidator** (`storage/validators.py`):
+Data quality validation with checks for odds range, timestamps, vig (2-15%), line movement, and required fields. Logs warnings but does not reject data (configurable).
 
-    async def get_odds(sport, regions, markets, odds_format) -> dict
-    async def get_scores(sport, days_from) -> dict
-    async def get_historical_odds(sport, date, regions, markets) -> dict
-    async def get_historical_events(sport, date) -> dict  # Discover games without full odds
-```
+**OddsWriter** (`storage/writers.py`):
+Write operations including `store_odds_snapshot()` (hybrid raw + normalized storage), `upsert_event()`, `bulk_insert_historical()` for backfill, and `log_data_quality_issue()`.
 
-### Data Validation
-
-```python
-class OddsValidator:
-    """
-    Data quality checks applied to all incoming data
-    
-    Checks:
-    - Odds within valid range (-10000 to +10000)
-    - Timestamps not in future
-    - Reasonable juice/vig (2-15%)
-    - Line movement not excessive
-    - Required fields present
-    - No duplicate outcomes
-    
-    Behavior: Log warnings and flag suspicious data, do not reject
-    """
-    
-    @staticmethod
-    def validate_odds_snapshot(data: dict) -> tuple[bool, list[str]]
-```
-
-### Storage Operations
-
-```python
-class OddsWriter:
-    """
-    All write operations to database
-    
-    Operations:
-    - store_odds_snapshot(): Hybrid storage of raw + normalized
-    - upsert_event(): Insert or update event details
-    - bulk_insert_historical(): Efficient backfill operations
-    - log_data_quality_issue(): Record validation problems
-    """
-
-class OddsReader:
-    """
-    Common query patterns
-    
-    Operations:
-    - get_odds_at_time(): Snapshot at specific timestamp
-    - get_line_movement(): Time series for event
-    - get_events_by_date_range(): Event queries
-    - get_best_odds(): Best price across bookmakers
-    """
-```
+**OddsReader** (`storage/readers.py`):
+Query operations including `get_odds_at_time()` (critical for backtesting to prevent look-ahead bias), `get_line_movement()`, `get_events_by_date_range()`, and `get_best_odds()`.
 
 ---
 
-## Scheduler Configuration
+## Scheduler Architecture
 
-### Sampling Modes
+### Intelligent Scheduling System
 
-The system supports two sampling modes with easy switching:
+The system uses **game-aware intelligent scheduling** that adapts data collection frequency based on game proximity, eliminating fixed sampling intervals. Implemented in `core/scheduling/intelligence.py`.
 
-#### Fixed Sampling
-- Fetch odds at regular intervals regardless of game timing
-- **Default interval**: 30 minutes
-- Simpler logic, predictable API usage
-- Configuration:
-  ```python
-  SAMPLING_MODE = "fixed"
-  FIXED_INTERVAL_MINUTES = 30
-  ```
+**Key Features**:
 
-#### Adaptive Sampling (Default)
-- Adjust frequency based on proximity to game time
-- More frequent as games approach
-- Configuration:
-  ```python
-  SAMPLING_MODE = "adaptive"
-  ADAPTIVE_INTERVALS = {
-      "opening": 72.0,    # 3 days before game: every 72 hours
-      "early": 24.0,      # 24 hours before: every 24 hours
-      "sharp": 12.0,      # 12 hours before: every 12 hours
-      "pregame": 3.0,     # 3 hours before: every 3 hours
-      "closing": 0.5,     # 30 minutes before: every 30 minutes
-  }
-  ```
+- Automatically discovers upcoming games from API
+- Adjusts fetch frequency as games approach using tiered intervals
+- No fetching during off-season (waits for new games)
+- Self-scheduling pattern for serverless deployment (AWS Lambda)
+
+**Fetch Tier System** (`core/fetch_tier.py`):
+
+- **Opening** (3+ days before): Every 48 hours - initial line release
+- **Early** (1-3 days before): Every 24 hours - line establishment
+- **Sharp** (12-24 hours before): Every 12 hours - professional betting period
+- **Pregame** (3-12 hours before): Every 3 hours - active betting
+- **Closing** (0-3 hours before): Every 30 minutes - critical line movement period
+
+Tier tracking is stored in `OddsSnapshot.fetch_tier` for validation and ML feature engineering.
 
 ### Scheduled Jobs
 
-**Primary Job - Fetch Odds**:
-- Frequency: Based on sampling mode configuration
-- Fetches all upcoming NBA games
-- Stores snapshots with validation
-- Logs API usage
+The system executes three autonomous jobs that self-schedule based on game state:
 
-**Secondary Job - Fetch Scores**:
-- Frequency: Every 6 hours
+**Fetch Odds Job** (`jobs/fetch_odds.py`):
+
+- Game-aware execution (only runs when games upcoming)
+- Fetches current odds for all scheduled NBA games
+- Stores hybrid data (raw JSONB + normalized records)
+- Calculates next execution based on closest game's tier
+- Logs API quota usage
+
+**Fetch Scores Job** (`jobs/fetch_scores.py`):
+
 - Updates completed game results
-- Updates event status
+- Marks events as FINAL with scores
+- Self-schedules based on live game activity
 
-**Tertiary Job - Update Status**:
-- Frequency: Every hour
-- Updates event statuses (scheduled → live → final)
-- Stops fetching odds for completed games
+**Update Status Job** (`jobs/update_status.py`):
+
+- Transitions event statuses (scheduled → live → final)
+- Prevents fetching odds for completed games
 
 ### Event Lifecycle
 
@@ -421,83 +456,55 @@ The system supports two sampling modes with easy switching:
 
 ## Configuration Management
 
-### Settings Schema
+Configuration uses Pydantic Settings with composition pattern for logical grouping. All settings loaded from environment variables. See `core/config.py` for complete implementation.
 
-```python
-class Settings(BaseSettings):
-    # API Configuration
-    odds_api_key: str
-    odds_api_base_url: str = "https://api.the-odds-api.com/v4"
-    odds_api_quota: int = 20_000
-    
-    # Database
-    database_url: str
-    database_pool_size: int = 5
-    
-    # Data Collection
-    sports: list[str] = ["basketball_nba"]
-    bookmakers: list[str] = [
-        "pinnacle",
-        "circasports", 
-        "draftkings",
-        "fanduel",
-        "betmgm",
-        "williamhill_us",  # Caesars
-        "betrivers",
-        "bovada"
-    ]
-    markets: list[str] = ["h2h", "spreads", "totals"]
-    regions: list[str] = ["us"]
-    
-    # Sampling Configuration
-    sampling_mode: str = "adaptive"  # "fixed" or "adaptive"
-    fixed_interval_minutes: int = 30
-    adaptive_intervals: dict = {
-        "opening": 72.0,
-        "early": 24.0,
-        "sharp": 12.0,
-        "pregame": 3.0,
-        "closing": 0.5,
-    }
-    
-    # Data Quality
-    enable_validation: bool = True
-    reject_invalid_odds: bool = False  # Log but don't reject
-    
-    # Alerts (infrastructure for future use)
-    discord_webhook_url: str | None = None
-    alert_enabled: bool = False
-    
-    # Logging
-    log_level: str = "INFO"
-    log_file: str = "logs/odds_pipeline.log"
-    
-    class Config:
-        env_file = ".env"
-```
+### Configuration Structure
 
-### Environment Variables
+**API Settings** (`APIConfig`):
 
-Required `.env` file structure:
-```
-# API
-ODDS_API_KEY=your_key_here
-ODDS_API_BASE_URL=https://api.the-odds-api.com/v4
+- `ODDS_API_KEY`: The Odds API authentication key (required)
+- `ODDS_API_BASE_URL`: API base URL (default: https://api.the-odds-api.com/v4)
+- `ODDS_API_QUOTA`: Monthly request quota (default: 20,000)
 
-# Database
-DATABASE_URL=postgresql://user:password@host:port/database
+**Database Settings** (`DatabaseConfig`):
 
-# Sampling
-SAMPLING_MODE=adaptive
-FIXED_INTERVAL_MINUTES=30
+- `DATABASE_URL`: PostgreSQL connection string (required)
+- `DATABASE_POOL_SIZE`: Connection pool size (default: 5, NullPool for Lambda)
 
-# Logging
-LOG_LEVEL=INFO
+**Data Collection** (`DataCollectionConfig`):
 
-# Optional - Alerts (future use)
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-ALERT_ENABLED=false
-```
+- `SPORTS`: Sports to track (default: ["basketball_nba"])
+- `BOOKMAKERS`: List of 8 bookmakers (Pinnacle, Circa, DraftKings, FanDuel, etc.)
+- `MARKETS`: Bet types to collect (default: ["h2h", "spreads", "totals"])
+- `REGIONS`: Odds regions (default: ["us"])
+
+**Scheduler Settings** (`SchedulerConfig`):
+
+- `SCHEDULER_BACKEND`: Backend type - "aws", "railway", or "local" (default: "local")
+- `SCHEDULER_DRY_RUN`: Enable dry-run mode for testing (default: false)
+- `SCHEDULER_LOOKAHEAD_DAYS`: Days ahead to check for games (default: 7)
+
+**AWS Settings** (`AWSConfig`) - Only needed for Lambda deployment:
+
+- `AWS_REGION`: AWS region for Lambda (optional)
+- `AWS_LAMBDA_ARN`: Lambda function ARN for self-scheduling (optional)
+
+**Data Quality** (`DataQualityConfig`):
+
+- `ENABLE_VALIDATION`: Run data quality checks (default: true)
+- `REJECT_INVALID_ODDS`: Reject vs. log invalid data (default: false)
+
+**Alert Settings** (`AlertConfig`) - Infrastructure exists, not actively used:
+
+- `DISCORD_WEBHOOK_URL`: Discord webhook for alerts (optional)
+- `ALERT_ENABLED`: Enable alert system (default: false)
+
+**Logging** (`LoggingConfig`):
+
+- `LOG_LEVEL`: Logging verbosity (default: INFO)
+- `LOG_FILE`: Log file path (default: logs/odds_pipeline.log)
+
+See `.env.example` for complete environment variable template.
 
 ---
 
@@ -506,6 +513,7 @@ ALERT_ENABLED=false
 ### Command Structure
 
 **Data Collection** (Implemented):
+
 ```bash
 odds fetch current                      # Manual fetch current odds
 odds fetch current --sport basketball_nba
@@ -514,6 +522,7 @@ odds fetch scores --sport basketball_nba --days 3
 ```
 
 **Backfill Commands** (Implemented):
+
 ```bash
 odds backfill plan --start YYYY-MM-DD --end YYYY-MM-DD --games N
 odds backfill execute --plan backfill_plan.json
@@ -521,6 +530,7 @@ odds backfill status                    # Show backfill progress
 ```
 
 **Backtesting Commands** (Implemented):
+
 ```bash
 odds backtest run --strategy STRATEGY --start YYYY-MM-DD --end YYYY-MM-DD
 odds backtest run --strategy basic_ev --start 2024-10-01 --end 2024-12-31 --output-json results.json
@@ -532,6 +542,7 @@ odds backtest list-strategies           # List available strategies
 ```
 
 **Status & Monitoring** (Implemented):
+
 ```bash
 odds status show                        # System health overview
 odds status show --verbose              # Detailed statistics
@@ -540,38 +551,14 @@ odds status events --days 7             # List recent events
 odds status events --team "Lakers"      # Filter by team
 ```
 
-**Future Commands** (Not Yet Implemented):
-```bash
-# Data validation
-odds validate                           # Run data quality checks
-
-# Odds inspection
-odds show-odds --event-id abc123        # View odds for specific event
-odds line-movement --event-id abc123 --bookmaker fanduel
-
-# Configuration management
-odds config show                        # Display current config
-odds config set-mode adaptive           # Switch sampling mode
-odds config test-alerts                 # Test alert delivery
-
-# Database management
-odds db migrate                         # Run pending migrations
-odds db stats                           # Database statistics
-odds db clean --older-than 90           # Archive old data
-
-# Scheduler control
-odds scheduler start                    # Start background jobs
-odds scheduler stop                     # Stop background jobs
-odds scheduler status                   # Check if running
-```
-
 ### CLI Output Formatting
 
-Use **Rich** library for:
-- Colored, formatted tables
-- Progress bars for backfill operations
-- Status indicators (✓, ✗, ⚠)
-- Syntax highlighting for JSON/config display
+The CLI uses the **Rich** library for formatted terminal output:
+
+- Colored, formatted tables for status and results
+- Progress bars for long-running operations (backfill, backtesting)
+- Status indicators (✓, ✗, ⚠) for system health
+- Syntax highlighting for JSON output
 
 ---
 
@@ -582,12 +569,14 @@ Use **Rich** library for:
 **Initial Backfill Target**: Sample of last season's regular season games
 
 **Sampling Approach**:
+
 - Select representative games distributed across season
 - Include all 30 teams proportionally
 - Mix of different matchup types
 - ~20% sample rate (every 5th game)
 
 **Selection Criteria** (Implemented in core/game_selector.py):
+
 ```python
 class GameSelector:
     """
@@ -602,12 +591,14 @@ class GameSelector:
 ```
 
 **Data Collection**:
+
 - Use historical odds API endpoint
 - Fetch odds snapshots for selected games
 - Fetch final scores for validation
 - Store using same schema as live data
 
 **Purpose**:
+
 - Validate schema design with real data
 - Test query patterns and performance
 - Enable immediate backtesting capability
@@ -658,6 +649,7 @@ class AlertManager:
 ### Future Alert Triggers (Not Implemented Yet)
 
 When alerts are enabled, they could trigger on:
+
 - Arbitrage opportunities above threshold
 - Expected value bets above threshold
 - Large line movements
@@ -706,6 +698,7 @@ class BettingStrategy(ABC):
 ### Implemented Strategies
 
 **1. FlatBettingStrategy** (`analytics/strategies.py`):
+
 ```python
 class FlatBettingStrategy(BettingStrategy):
     """Baseline strategy - bet on every game matching pattern"""
@@ -719,6 +712,7 @@ class FlatBettingStrategy(BettingStrategy):
 ```
 
 **2. BasicEVStrategy** (`analytics/strategies.py`):
+
 ```python
 class BasicEVStrategy(BettingStrategy):
     """Expected value betting using sharp vs retail odds comparison"""
@@ -733,6 +727,7 @@ class BasicEVStrategy(BettingStrategy):
 ```
 
 **3. ArbitrageStrategy** (`analytics/strategies.py`):
+
 ```python
 class ArbitrageStrategy(BettingStrategy):
     """Risk-free arbitrage betting across bookmakers"""
@@ -744,6 +739,107 @@ class ArbitrageStrategy(BettingStrategy):
     ):
         ...
 ```
+
+### Machine Learning Integration
+
+**Status**: ✓ **FULLY SUPPORTED** - The backtesting infrastructure fully supports ML-based strategies including XGBoost, neural networks, and time series models.
+
+**Key Features Enabling ML**:
+
+1. **Event + Odds as Input**: Strategy receives complete `BacktestEvent` object and `odds_snapshot` list, perfect for feature engineering
+2. **Type Safety**: BacktestEvent guarantees final scores exist, eliminating None checks in model code
+3. **Confidence Field**: `BetOpportunity.confidence` (0-1) maps directly to model probability predictions
+4. **Kelly Criterion Integration**: Model confidence is automatically used for optimal bet sizing
+5. **Async Support**: Allows batch predictions and external API calls
+6. **Look-Ahead Bias Prevention**: Built-in timestamp controls ensure only historical data is used
+
+**Example Implementation** (`analytics/ml_strategy_example.py`):
+
+```python
+class XGBoostStrategy(BettingStrategy):
+    """ML-based betting strategy using XGBoost for game outcome prediction."""
+
+    def __init__(
+        self,
+        model_path: str | None = None,
+        min_ev_threshold: float = 0.05,  # 5% minimum EV
+        min_model_confidence: float = 0.55,  # Only bet when >55% confident
+        sharp_book: str = "pinnacle",
+        retail_books: list[str] | None = None,
+    ):
+        # Load trained XGBoost model from pickle file
+        if model_path and Path(model_path).exists():
+            with open(model_path, "rb") as f:
+                self.model = pickle.load(f)
+
+    async def evaluate_opportunity(
+        self,
+        event: BacktestEvent,  # Type-safe with guaranteed scores
+        odds_snapshot: list[Odds],
+        config: BacktestConfig,
+    ) -> list[BetOpportunity]:
+        """
+        Process:
+            1. Engineer features from event and odds data
+            2. Run XGBoost model to predict win probabilities
+            3. Compare predictions to available odds
+            4. Return opportunities where EV exceeds threshold
+        """
+        # Feature engineering
+        features = self._engineer_features(event, odds_snapshot)
+
+        # Get model predictions
+        home_win_prob = self._predict_home_win_probability(features)
+
+        # Find +EV opportunities
+        for retail_book in retail_books:
+            retail_odds = self._find_odds(odds_snapshot, retail_book, "h2h", event.home_team)
+
+            if retail_odds and home_win_prob >= min_confidence:
+                ev = calculate_ev(home_win_prob, retail_odds.price, 100.0)
+
+                if ev_percentage >= min_ev:
+                    opportunities.append(
+                        BetOpportunity(
+                            confidence=home_win_prob,  # Used for Kelly sizing
+                            rationale=f"XGBoost: {home_win_prob:.1%} win prob"
+                        )
+                    )
+
+        return opportunities
+```
+
+**Feature Engineering Examples**:
+
+- Sharp bookmaker implied probabilities
+- Retail consensus probabilities
+- Sharp vs retail differentials
+- Day of week / game timing
+- Team stats (offensive/defensive rating)
+- Recent form (last N games)
+- Rest days between games
+- Head-to-head history
+- Home court advantage metrics
+
+**Supported ML Architectures**:
+
+- **XGBoost / LightGBM**: Gradient boosting for classification
+- **Neural Networks**: Deep learning with PyTorch/TensorFlow
+- **Time Series Models**: LSTM, GRU for sequential prediction
+- **Ensemble Models**: Combining multiple model predictions
+- **Online Learning**: Update models with new results
+
+**Integration Pattern**:
+
+1. Train model offline using historical event + odds data
+2. Save model to pickle file
+3. Load in strategy constructor
+4. Engineer features in `_engineer_features()`
+5. Generate predictions in `evaluate_opportunity()`
+6. Use model confidence for EV calculation and Kelly sizing
+7. Backtest strategy against historical data to validate
+
+See [analytics/ml_strategy_example.py](analytics/ml_strategy_example.py) for complete working example with training code.
 
 ### Backtesting Engine
 
@@ -785,224 +881,46 @@ class BacktestEngine:
 
 ### Data Models
 
-**BacktestConfig** (`analytics/backtesting.py`):
-```python
-@dataclass
-class BacktestConfig:
-    """Configuration for backtest execution"""
-    initial_bankroll: float
-    start_date: datetime
-    end_date: datetime
-    bet_sizing_method: str = "fractional_kelly"  # or "flat", "percentage"
-    kelly_fraction: float = 0.25  # Quarter-Kelly recommended
-    flat_bet_amount: float = 100.0
-    percentage_bet: float = 0.02
-    min_bet_size: float = 10.0
-    max_bet_size: float | None = None
-    decision_hours_before_game: float = 1.0  # Look-ahead bias prevention
-```
+**BacktestConfig** (`analytics/backtesting/config.py`):
+Configuration for backtest execution with settings for initial bankroll, date range, bet sizing method (fractional_kelly/flat/percentage), Kelly fraction, bet limits, and decision timing (hours before game to prevent look-ahead bias).
 
-**BetRecord** (`analytics/backtesting.py`):
-```python
-@dataclass
-class BetRecord:
-    """Complete record of a single bet"""
-    bet_id: str
-    event_id: str
-    event_date: datetime
-    home_team: str
-    away_team: str
-    market: str
-    outcome: str
-    bookmaker: str
-    odds: int  # American odds
-    line: float | None
-    stake: float
-    result: str  # "win", "loss", "push"
-    profit: float
-    bankroll_before: float
-    bankroll_after: float
-    # Analysis fields
-    opening_odds: int | None
-    closing_odds: int | None
-    strategy_confidence: float | None
-    bet_rationale: str | None
-```
+**BetRecord** (`analytics/backtesting/models.py`):
+Complete record of individual bet with event details, market/outcome, bookmaker, odds, stake, result (win/loss/push), profit, bankroll tracking, and strategy rationale. Used for detailed analysis and CSV export.
 
-**BacktestResult** (`analytics/backtesting.py`):
-```python
-@dataclass
-class BacktestResult:
-    """Complete backtesting results with comprehensive metrics"""
-    # Metadata
-    strategy_name: str
-    strategy_params: dict
-    start_date: datetime
-    end_date: datetime
-    initial_bankroll: float
-    final_bankroll: float
-    execution_time_seconds: float
+**BacktestResult** (`analytics/backtesting/models.py`):
+Comprehensive results container with 30+ fields including:
 
-    # Summary Metrics
-    total_bets: int
-    winning_bets: int
-    losing_bets: int
-    push_bets: int
-    total_wagered: float
-    total_profit: float
-    roi: float  # Return on investment
-    win_rate: float
+- Performance: ROI, win rate, total profit, bet counts
+- Risk metrics: Sharpe ratio, Sortino ratio, max drawdown, profit factor, Calmar ratio
+- Breakdowns: By market, bookmaker, month
+- Time series: Equity curve, all bet records
+- Export methods: `to_json()`, `to_csv()`, `from_json()` for persistence
 
-    # Risk Metrics
-    sharpe_ratio: float
-    sortino_ratio: float
-    max_drawdown: float
-    max_drawdown_duration_days: int
-    profit_factor: float  # Gross profit / gross loss
-    calmar_ratio: float  # Annual return / max drawdown
+See `analytics/backtesting/models.py` for complete definitions and `BACKTESTING_GUIDE.md` for usage documentation.
 
-    # Streak Analysis
-    longest_winning_streak: int
-    longest_losing_streak: int
-    largest_win: float
-    largest_loss: float
+### Bet Sizing & Utilities
 
-    # Breakdowns
-    market_breakdown: dict[str, MarketStats]
-    bookmaker_breakdown: dict[str, BookmakerStats]
-    monthly_breakdown: dict[str, MonthlyStats]
+**Bet Sizing Methods** (configured in BacktestConfig):
 
-    # Time Series
-    equity_curve: list[EquityPoint]
-    bet_records: list[BetRecord]
+1. **Fractional Kelly** (default, recommended): Quarter-Kelly (0.25) for optimal risk/reward balance
+2. **Flat Betting**: Fixed dollar amount per bet, good for baseline comparison
+3. **Percentage Betting**: Fixed percentage of current bankroll (default 2%)
 
-    # Data Quality
-    events_with_complete_data: int
-    data_quality_issues: list[str]
+All methods enforce min/max bet constraints and prevent betting with insufficient bankroll.
 
-    # Export Methods
-    def to_json(self, file_path: str) -> None: ...
-    def from_json(file_path: str) -> "BacktestResult": ...
-    def to_csv(self, file_path: str) -> None: ...
-    def to_summary_text(self) -> str: ...
-```
-
-### Bet Sizing Approaches
-
-**Implemented Methods**:
-
-**1. Fractional Kelly** (Default, Recommended):
-- Industry standard for professional betting
-- Uses strategy confidence (implied probability) for edge calculation
-- Formula: `stake = (kelly_percentage × kelly_fraction) × bankroll`
-- Default fraction: 0.25 (quarter-Kelly)
-- Provides ~75% of full Kelly returns with 50% lower volatility
-- Automatically returns 0 for negative EV opportunities
-
-**2. Flat Betting**:
-- Fixed dollar amount per bet (configurable)
-- Simple, predictable bankroll management
-- Good for baseline comparison
-- No adjustment for confidence or bankroll size
-
-**3. Percentage Betting**:
-- Fixed percentage of current bankroll per bet
-- Scales with bankroll growth/decline
-- More aggressive than fractional Kelly
-- Default: 2% of bankroll
-
-**All Methods Enforce**:
-- Minimum bet size (default: $10)
-- Maximum bet size (optional constraint)
-- No betting when bankroll insufficient
-
-### Utility Functions
-
-**Odds Conversion** (`analytics/utils.py`):
-- `american_to_decimal()` - Convert American to decimal odds
-- `decimal_to_american()` - Convert decimal to American odds
-- `calculate_implied_probability()` - Get probability from odds
-
-**Betting Calculations**:
-- `calculate_ev()` - Expected value calculation
-- `calculate_kelly_stake()` - Kelly Criterion implementation
-- `calculate_profit_from_odds()` - Profit/loss from bet result
-
-**Risk Metrics**:
-- `calculate_sharpe_ratio()` - Risk-adjusted returns
-- `calculate_sortino_ratio()` - Downside risk-adjusted returns
-- `calculate_max_drawdown()` - Peak-to-trough decline
-- `calculate_profit_factor()` - Gross profit / gross loss
-
-**Arbitrage Detection**:
-- `detect_arbitrage()` - Detect opportunities and optimal stakes
+**Utility Functions** (`analytics/utils.py`):
+Comprehensive toolkit for odds conversion (American ↔ decimal), probability calculations, expected value, Kelly Criterion, profit calculations, and risk metrics (Sharpe, Sortino, max drawdown, profit factor). Also includes arbitrage detection. See `BACKTESTING_GUIDE.md` for details.
 
 ---
 
 ## Docker Configuration
 
-### Local Development
+Docker configuration files exist in repo root for local development:
 
-```yaml
-# docker-compose.yml
-version: '3.8'
+- `docker-compose.yml`: PostgreSQL container for local testing
+- `Dockerfile`: Application container definition
 
-services:
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: odds
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: dev_password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-
-  app:
-    build: .
-    depends_on:
-      - postgres
-    environment:
-      DATABASE_URL: postgresql://postgres:dev_password@postgres:5432/odds
-      ODDS_API_KEY: ${ODDS_API_KEY}
-      SAMPLING_MODE: adaptive
-      FIXED_INTERVAL_MINUTES: 30
-    volumes:
-      - .:/app
-    command: python -m scheduler.main
-
-volumes:
-  postgres_data:
-```
-
-### Container Definition
-
-```dockerfile
-# Dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application
-COPY . .
-
-# Create logs directory
-RUN mkdir -p logs
-
-# Default command (can be overridden)
-CMD ["python", "-m", "scheduler.main"]
-```
+Docker-based architecture ensures portability across deployment platforms.
 
 ---
 
@@ -1014,92 +932,305 @@ The project uses **uv** for fast and reliable Python package management. Use a `
 
 ### Code Quality
 
-**Ruff** is used for linting and formatting, configured to run automatically via pre-commit hooks:
+**Ruff** linting and formatting enforced via pre-commit hooks (`.pre-commit-config.yaml`). Run `pre-commit install` to enable automatic checks on commit. Aim for zero type errors in the repository.
 
-```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.0
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
-```
+**IMPORTANT FOR LLM AGENTS**: Do NOT manually run `ruff` or `pre-commit` commands. These are automated via git hooks and CI. Running them wastes time and tokens.
 
-**Pre-commit setup**:
+---
+
+## Development Guide
+
+### Running Tests
+
 ```bash
-# Install pre-commit hooks
-pre-commit install
+# Run all tests
+uv run pytest
 
-# Manually run all hooks
-pre-commit run --all-files
+# Run specific test file
+uv run pytest tests/unit/test_models.py
+
+# Run tests matching pattern
+uv run pytest -k "backtest"
+
+# Run with verbose output
+uv run pytest -v
+
+# Run integration tests only
+uv run pytest tests/integration/
 ```
 
-Agents/developers do not need to manually run `ruff check` or `ruff format` as these are enforced automatically on commit. Aim for zero type errors in the repository.
+### Database Migrations
+
+**CRITICAL**: Always create migrations when modifying `core/models.py`.
+
+```bash
+# Create new migration after model changes
+uv run alembic revision --autogenerate -m "description"
+
+# Review the generated migration file in migrations/versions/
+# Alembic may miss certain changes (e.g., column renames, custom types)
+
+# Apply migrations
+uv run alembic upgrade head
+
+# Rollback one migration
+uv run alembic downgrade -1
+
+# View migration history
+uv run alembic history
+
+# Check current database version
+uv run alembic current
+```
+
+### Local Development Setup
+
+```bash
+# Start local PostgreSQL (via Docker)
+docker-compose up -d
+
+# Run scheduler locally (for testing scheduler changes)
+uv run python -m cli scheduler start
+
+# Manual data fetch (for testing without scheduler)
+uv run python -m cli fetch current
+
+# Check system status
+uv run python -m cli status show
+
+# Interactive Python shell with context
+uv run python
+>>> from core.database import get_async_session
+>>> from core.models import Event, Odds
+>>> import asyncio
+```
+
+### Database Environment Guidelines
+
+**Four database environments** exist, each with specific purposes:
+
+**Test Database** (`odds_test`):
+
+- **Purpose**: Automated testing only (pytest)
+- **Setup**: Automatically managed by pytest fixtures in `tests/conftest.py`
+- **Connection**: `postgresql+asyncpg://postgres:dev_password@localhost:5432/odds_test`
+- **Behavior**: Tables created/dropped per test run, completely isolated from development data
+- **When to use**: Never set manually - pytest uses this automatically
+
+**Local Database** (`odds`):
+
+- **Purpose**: Local development and experimentation
+- **Setup**: Docker Compose PostgreSQL container
+- **Connection**: Set `DATABASE_URL=${LOCAL_DATABASE_URL}` in `.env`
+- **When to use**: Daily development, testing migrations, manual data exploration
+- **Start**: `docker-compose up -d`
+
+**Dev Database** (remote, managed):
+
+- **Purpose**: CI/CD integration testing and validation
+- **Setup**: Managed PostgreSQL (e.g., Neon dev branch)
+- **Behavior**: Used by GitHub Actions dev workflow, **destroyed after each test run** (ephemeral)
+- **When to use**: Only via CI/CD pipeline (GitHub Actions), not for manual development
+- **Connection**: Set via GitHub secrets (`DATABASE_URL`)
+
+**Production Database** (remote, managed):
+
+- **Purpose**: Live production data collection
+- **Setup**: Managed PostgreSQL (Neon/Railway production branch)
+- **When to use**: Only via production Lambda functions
+- **⚠️ CRITICAL**: **NEVER point DATABASE_URL at production during local development**
+
+**Environment Variable Setup**:
+
+```bash
+# Local development (.env file)
+DATABASE_URL=${LOCAL_DATABASE_URL}
+LOCAL_DATABASE_URL=postgresql+asyncpg://postgres:dev_password@localhost:5432/odds
+
+# Running tests (automatic - no config needed)
+# pytest automatically uses odds_test database via conftest.py
+
+# CI/CD (GitHub Actions)
+# Uses secrets.DATABASE_URL (dev or prod depending on workflow)
+
+# Production (AWS Lambda)
+# Set via Terraform environment variables
+```
+
+**Migration Testing Workflow** (CRITICAL - prevents production breakage):
+
+1. Create migration locally: `uv run alembic revision --autogenerate -m "description"`
+2. Test against **local database**: `uv run alembic upgrade head`
+3. Run migration tests against **test database**: `uv run pytest tests/migration/ -v`
+4. Push to GitHub → triggers **dev CI deployment** (ephemeral environment)
+5. If dev tests pass → manual approval → **production deployment** via GitHub Actions
+
+**Safety Rules**:
+
+- **NEVER manually run migrations against production database**
+- **NEVER set DATABASE_URL to production** during local development
+- Test database (`odds_test`) is isolated - safe to drop/recreate anytime
+- Local database (`odds`) is for development - can be reset if needed
+- Always test migrations in order: local → test → CI dev → prod
+
+### Code Style Guidelines
+
+**Type Hints** (REQUIRED):
+
+- All function signatures must include type hints for parameters and return values
+- Use modern syntax: `str | None` (not `Optional[str]`)
+- Use `list[T]`, `dict[K, V]` (not `List[T]`, `Dict[K, V]`)
+
+**Async/Await** (REQUIRED):
+
+- All database operations must use `async`/`await`
+- Use `AsyncSession` for database sessions (never sync `Session`)
+- CLI commands use `asyncio.run()` to execute async functions
+- Never mix sync and async database code
+
+**Data Models**:
+
+- Use **SQLModel** for database models (ORM + validation)
+- Use **Pydantic BaseModel** for non-database data structures (API responses, configs)
+- Use **dataclasses** for simple data containers without validation
+
+### File Modification Workflows
+
+**When modifying `core/models.py` (database schema)**:
+
+1. Make model changes
+2. Create Alembic migration: `uv run alembic revision --autogenerate -m "description"`
+3. **Review generated migration** (Alembic misses some changes like renames)
+4. Test migration: `uv run alembic upgrade head`
+5. Update affected queries in `storage/readers.py` or `storage/writers.py`
+6. Run tests to ensure nothing broke
+
+**When adding betting strategies**:
+
+1. Create new class in `analytics/strategies.py` inheriting from `BettingStrategy`
+2. Implement `evaluate_opportunity()` method
+3. Add to `AVAILABLE_STRATEGIES` dict at bottom of `analytics/strategies.py`
+4. Register in CLI: Add to `cli/commands/backtest.py` strategy choices
+5. Write unit test in `tests/unit/test_strategies.py`
+6. Document in backtesting section if complex
+
+**When modifying `core/data_fetcher.py` (API client)**:
+
+1. Preserve retry logic (tenacity decorators on all API calls)
+2. Update quota tracking if request patterns change
+3. Add new fixtures to `tests/fixtures/` for new endpoints
+4. Update integration tests in `tests/integration/`
+5. Never remove rate limiting or error handling
+
+**When adding scheduler jobs** (`jobs/*.py`):
+
+1. Create job function (must be async)
+2. Add to `core/scheduling/jobs.py` registry (JOB_REGISTRY dict)
+3. Implement self-scheduling pattern (calculate and return next execution time)
+4. Add error handling (log errors, never crash)
+5. Register in CLI: `cli/commands/scheduler.py`
+6. Test locally with `odds scheduler start`
+
+**When modifying configuration** (`core/config.py`):
+
+1. Add field to appropriate Config class (with type hint and default)
+2. Update `.env.example` with new variable and description
+3. Ensure backward compatibility (provide sensible default)
+4. Document in Configuration Management section if user-facing
+5. Never remove existing config fields (deprecate instead)
+
+### Critical Constraints & Gotchas
+
+**AWS Lambda Limitations**:
+
+- **15-minute max execution time** - Design jobs to complete in <5 minutes
+- **Must use NullPool** for database connections (no connection reuse between invocations)
+- **No persistent state** - Each invocation is stateless
+- Cold start latency ~1-2 seconds (acceptable for this use case)
+- EventBridge rules limited to 300 per region
+
+**Timezone Handling** (CRITICAL):
+
+- **Always store UTC** in database: `datetime.now(timezone.utc)`
+- **Never use `datetime.now(timezone.utc)()`** - deprecated in Python 3.12+
+- **Never use `datetime.now()`** without timezone parameter
+- API returns UTC timestamps
+- Convert to local time **only for display** (CLI output)
+
+**API Cost Awareness**:
+
+- Each game fetched = **1 quota unit** (regardless of bookmakers/markets requested)
+- Historical endpoint costs **10x more** (10 units per game)
+- Backfill operations can consume significant quota
+- Always check remaining quota: `odds status quota`
+- Intelligent scheduling optimizes request usage automatically
+
+**Database Connection Patterns**:
+
+- Always use async context manager: `async with get_async_session() as session`
+- **Never share sessions across async tasks** (creates connection pool issues)
+- Lambda uses **NullPool** (set automatically when `SCHEDULER_BACKEND=aws`)
+- Local/Railway use standard connection pool (default 5 connections)
+- Always close sessions properly (context managers handle this)
+
+**Look-Ahead Bias Prevention** (Backtesting):
+
+- **Always use `get_odds_at_time()`** for historical analysis
+- Never use latest/current odds when backtesting
+- Backtesting enforces `decision_time` (hours before game) to prevent bias
+- This is a critical data integrity requirement
+
+**Data Quality & Validation**:
+
+- Validation **logs issues by default**, does not reject data
+- Set `REJECT_INVALID_ODDS=true` to enable strict validation (rejects bad data)
+- Review `DataQualityLog` table regularly for patterns
+- Missing bookmakers/markets are logged but not treated as errors
 
 ---
 
 ## Deployment
 
-### Railway Configuration
+The system supports three scheduler backends for different deployment scenarios:
 
-Railway deployment is Docker-based, making migration to any platform trivial.
+### AWS Lambda (Primary Production)
 
-**Setup**:
-1. Connect GitHub repository to Railway
-2. Add PostgreSQL addon
-3. Configure environment variables
-4. Auto-deploy on git push
+- **Cost**: ~$0.20/month for compute (within free tier)
+- **Pattern**: Self-scheduling via EventBridge rules
+- **Benefits**: Serverless, auto-scaling, minimal maintenance
+- **Configuration**: `SCHEDULER_BACKEND=aws`
+- **Database**: NullPool connection mode to avoid event loop issues
+- **Deployment**: See `deployment/aws/` for Terraform and Lambda configuration
 
-**Environment Variables** (Railway dashboard):
-- `ODDS_API_KEY`
-- `DATABASE_URL` (auto-populated by Railway)
-- `SAMPLING_MODE`
-- `FIXED_INTERVAL_MINUTES`
-- All other configuration from Settings class
+### Railway (Alternative Cloud)
 
-**Migration Path**: Since deployment is Docker-based, the same image runs on:
-- Railway (current choice)
-- DigitalOcean / AWS / Azure
-- Any Docker-compatible hosting
-- Local machine
+- **Cost**: $5-10/month (app + managed PostgreSQL)
+- **Pattern**: Continuous deployment from GitHub
+- **Benefits**: Simple setup, managed database, auto-restarts
+- **Configuration**: `SCHEDULER_BACKEND=railway`
+- **Deployment**: Docker-based, auto-deploys on git push
 
----
+### Local (Development)
 
-## Cost Analysis
+- **Pattern**: APScheduler with long-running process
+- **Benefits**: Easy debugging, no cloud dependencies
+- **Configuration**: `SCHEDULER_BACKEND=local`
+- **Usage**: `odds scheduler start` (runs until Ctrl+C)
 
-### Expected Monthly Costs
+**Portability**: Docker-based architecture allows deployment on any platform (DigitalOcean, Azure, GCP, etc.)
 
-**30-minute Fixed Sampling**:
-- NBA games per day: ~10 average
-- Fetches per day: 48 (every 30 minutes)
-- Objects per day: ~480
-- Objects per month: ~14,400
-- **API Cost**: $25/month (20k request tier)
+### Expected Costs
 
-**Railway Hosting**:
-- App + PostgreSQL: $7-10/month
-- **Hosting Cost**: $7-10/month
+**API Usage** (The Odds API):
 
-**Total Monthly**: $32-35/month
+- $25/month for 20,000 requests tier
+- Intelligent scheduling optimizes usage based on game schedule
+- Typical usage: ~10-15k requests/month during NBA season
 
-### One-time Costs
+**Compute**:
 
-**Historical Backfill**:
-- Sample 20% of last season's games: ~250 events
-- Estimated cost: ~$25 one-time
-
-**Total Initial Setup**: $57-60
-
-### Cost Scaling
-
-If sampling frequency changes:
-- 15-minute intervals: ~29k requests/month → $50/month API
-- 10-minute intervals: ~43k requests/month → $75/month API
-- 5-minute intervals: ~86k requests/month → $150/month API
-
-Storage scales linearly but remains negligible (~50-100 MB/month).
+- AWS Lambda: ~$0.20/month (within free tier)
+- Railway: ~$5-10/month (includes PostgreSQL)
 
 ---
 
@@ -1107,7 +1238,7 @@ Storage scales linearly but remains negligible (~50-100 MB/month).
 
 ### Test Structure
 
-```
+```bash
 tests/
 ├── unit/
 │   ├── test_models.py           # SQLModel validation (implemented)
@@ -1124,11 +1255,13 @@ tests/
 ```
 
 **Backtesting Tests** (Implemented):
+
 - `tests/unit/test_backtesting_models.py` - Data model tests (325 lines)
 - `tests/integration/test_backtest_integration.py` - Full backtest workflow (342 lines)
 - `tests/unit/test_utils.py` - Utility function tests
 
 **Not Yet Implemented**:
+
 - test_parsers.py
 - test_api_client.py
 - test_scheduler.py
@@ -1137,21 +1270,25 @@ tests/
 ### Key Test Areas
 
 **Data Validation**:
+
 - Schema validation with real API responses
 - Edge cases (missing data, invalid odds)
 - Data quality checks trigger correctly
 
 **Database Operations**:
+
 - Hybrid storage (raw + normalized) works correctly
 - Indexes perform as expected
 - Query patterns are efficient
 
 **API Client**:
+
 - Rate limiting prevents quota overruns
 - Retry logic handles transient failures
 - Error handling logs appropriately
 
 **Backtesting** (Implemented):
+
 - ✓ Look-ahead bias prevention validated
 - ✓ Bet sizing calculations verified (Kelly, flat, percentage)
 - ✓ Performance metrics accurate (13+ metrics)
@@ -1167,6 +1304,7 @@ tests/
 ### Validation Checks
 
 **Odds Validation**:
+
 - Price within valid range (-10000 to +10000)
 - Timestamp not in future
 - Juice/vig reasonable (2-15%)
@@ -1174,11 +1312,13 @@ tests/
 - Outcomes match expected format
 
 **Line Movement Validation**:
+
 - Changes not excessive (e.g., >10 point spread move)
 - Timestamps sequential
 - Bookmaker consistency
 
 **Completeness Validation**:
+
 - All configured bookmakers present
 - All markets present for each bookmaker
 - Outcomes complete (both sides of market)
@@ -1186,6 +1326,7 @@ tests/
 ### Quality Logging
 
 All validation issues logged to `DataQualityLog` table with:
+
 - Severity level (warning, error, critical)
 - Issue type classification
 - Full context for debugging
@@ -1202,6 +1343,7 @@ All validation issues logged to `DataQualityLog` table with:
 **Note**: Basic query functions are implemented in `storage/readers.py`. Advanced analytics with pandas DataFrame support planned for future `analytics/queries.py` module.
 
 **Implemented in OddsReader**:
+
 ```python
 async def get_line_movement(event_id: str, bookmaker: str, market: str) -> list[Odds]:
     """
@@ -1227,6 +1369,7 @@ async def get_odds_at_time(
 ```
 
 **Planned for analytics/queries.py**:
+
 ```python
 async def compare_bookmakers(
     event_id: str,
@@ -1244,6 +1387,7 @@ async def compare_bookmakers(
 **Current Implementation**: Full backtesting system with comprehensive analytics
 
 **Available Metrics** (calculated automatically):
+
 - ROI (Return on Investment)
 - Win Rate
 - Sharpe Ratio (risk-adjusted returns)
@@ -1258,274 +1402,60 @@ async def compare_bookmakers(
 - Daily equity curve
 
 **Export Formats**:
+
 - JSON (full reconstruction capability)
 - CSV (spreadsheet-ready bet records)
 - Rich console output (formatted tables)
 
 ---
 
-## Security Considerations
-
-### API Key Management
-- Store in environment variables only
-- Never commit to version control
-- Use separate keys for development/production
-
-### Database Access
-- Use connection pooling
-- Parameterized queries (SQLModel handles this)
-- Regular backups
-
-### Logging
-- Sanitize sensitive data from logs
-- Rotate log files
-- Monitor for unusual patterns
-
----
-
-## Extensibility Design
-
-### Adding New Sports
-1. Add sport key to configuration
-2. No code changes required
-3. Same schema supports all sports
-
-### Adding New Bookmakers
-1. Add bookmaker key to configuration
-2. No code changes required
-3. Automatic inclusion in data collection
-
-### Adding New Markets
-1. Add market key to configuration
-2. Schema supports arbitrary markets
-3. Validation adapts automatically
-
-### Adding New Strategies
-1. Inherit from `BettingStrategy` base class
-2. Implement `should_bet()` and `calculate_stake()`
-3. Register with backtest engine
-
----
-
 ## System Monitoring
 
-### Health Checks
+System health monitoring via `odds status show` command provides:
 
-**Data Pipeline Health**:
-- Last successful fetch time
-- Fetch success rate (last 24 hours)
-- API quota remaining
+- Data pipeline health: last fetch time, success rate, API quota remaining
+- Data quality: validation warning rate, missing data percentage
+- Storage metrics: event counts, odds records, database size
 - Database connection status
 
-**Data Quality Metrics**:
-- Validation warning rate
-- Missing data percentage
-- Stale bookmaker data detection
-
-**Storage Metrics**:
-- Total events stored
-- Total odds records
-- Database size
-- Growth rate
-
-### CLI Status Output
-
-```
-╔══════════════════════════════════════════════╗
-║        Odds Pipeline Status                  ║
-╠══════════════════════════════════════════════╣
-║ Last Fetch:         2025-10-16 14:30:00 UTC ║
-║ Status:             ✓ Healthy                ║
-║                                              ║
-║ Events (Scheduled): 12                       ║
-║ Events (Total):     8,429                    ║
-║ Odds Records:       2,847,392                ║
-║                                              ║
-║ API Quota Used:     12,847 / 20,000         ║
-║ Quota Remaining:    7,153 (35.8%)           ║
-║                                              ║
-║ DB Size:            1.2 GB                   ║
-║ Fetch Success Rate: 99.2% (24h)             ║
-║ Validation Warnings: 23 (0.1%)              ║
-╚══════════════════════════════════════════════╝
-```
+Run `odds status show --verbose` for detailed statistics.
 
 ---
 
 ## Logging Configuration
 
-### Structured Logging
-
-Use `structlog` for machine-readable logs:
-
-```python
-import structlog
-
-logger = structlog.get_logger()
-
-# Log with context
-logger.info(
-    "odds_fetched",
-    event_id="abc123",
-    bookmakers=8,
-    markets=3,
-    elapsed_ms=234
-)
-```
-
-### Log Levels
-
-- **DEBUG**: Detailed technical information
-- **INFO**: Normal operations (fetches, processing)
-- **WARNING**: Data quality issues, retries
-- **ERROR**: Failed operations, invalid data
-- **CRITICAL**: System failures, quota exceeded
-
-### Log Output
-
-- Console: Structured JSON for production
-- File: Rotating daily logs
-- Retention: 30 days
+System uses **structlog** for structured, machine-readable logging. Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL. Logs written to console (JSON format) and rotating files with 30-day retention. Configuration via `LOG_LEVEL` and `LOG_FILE` environment variables.
 
 ---
 
 ## Performance Considerations
 
-### Database Optimization
+**Database**: Composite indexes on event_id/timestamp/bookmaker for efficient queries. Connection pooling (5 connections, or NullPool for Lambda). Batch inserts for backfill operations.
 
-**Indexes**:
-- Composite indexes on frequently joined columns
-- Time-based indexes for range queries
-- Bookmaker/market indexes for filtering
-
-**Connection Pooling**:
-- Pool size: 5 connections (single-user system)
-- Async operations prevent blocking
-
-**Query Optimization**:
-- Use indexes for all time-range queries
-- Batch insert for backfill operations
-- EXPLAIN ANALYZE for slow queries
-
-### API Rate Limiting
-
-**Rate Limiter Implementation**:
-- Track requests per month
-- Prevent quota overrun
-- Warn at 80% usage
-- Automatic throttling near limit
-
-**Backoff Strategy**:
-- Exponential backoff on API errors (using tenacity)
-- Max retry attempts: 3
-- Jitter to prevent thundering herd
+**API**: Exponential backoff with tenacity library (max 3 retries). Quota tracking prevents overrun. Intelligent scheduling optimizes request usage.
 
 ---
 
-## Disaster Recovery
+## Operational Notes
 
-### Backup Strategy
+**Backups**: Managed database providers (Neon/Railway) handle automated backups with point-in-time recovery.
 
-**Database Backups**:
-- Automated daily backups (Railway provides this)
-- Point-in-time recovery capability
-- Export critical data periodically
+**Recovery**: Data loss addressed via backfill. API quota managed by intelligent scheduling. Docker containers auto-restart on failure.
 
-**Configuration Backups**:
-- Store `.env.example` in repository
-- Document all settings
-- Version control migrations
-
-### Recovery Procedures
-
-**Data Loss**:
-- Re-run backfill for missing historical data
-- Resume normal collection immediately
-- Validate data consistency
-
-**API Quota Exhaustion**:
-- Automatic throttling prevents overrun
-- If exceeded, wait for monthly reset
-- Reduce sampling frequency temporarily
-
-**System Failure**:
-- Docker containers restart automatically
-- Railway has auto-restart
-- Monitor health checks
+**Security**: API keys in environment variables only. SQLModel provides parameterized queries. Regular database backups.
 
 ---
 
-## Future Considerations
+## Extensibility
 
-### Potential Enhancements
+The system is designed for easy extension:
 
-**Data Collection**:
-- Player props markets
-- Alternate lines
-- Live betting odds
-- Additional sports
+**Adding Sports**: Add sport key to `SPORTS` config list. No code changes required - same schema supports all sports.
 
-**Analytics & Backtesting**:
-- ✓ Arbitrage detection (implemented)
-- ✓ Expected value calculators (implemented)
-- Closing line value tracking
-- Statistical models
-- Parameter optimization (grid search)
-- Walk-forward analysis
-- Additional betting strategies
-- Transaction cost modeling
-- Equity curve visualization/charts
+**Adding Bookmakers**: Add bookmaker key to `BOOKMAKERS` config list. Automatic inclusion in data collection.
 
-**Interface**:
-- Web dashboard for visualization
-- Mobile notifications
-- Real-time alerting system
+**Adding Markets**: Add market key to `MARKETS` config list. Schema supports arbitrary bet types.
 
-**Performance**:
-- Redis caching layer
-- WebSocket connections for live data
-- Query result caching
+**Adding Strategies**: Inherit from `BettingStrategy` base class and implement `evaluate_opportunity()` method. See `analytics/strategies.py` and ML example in `analytics/ml_strategy_example.py`.
 
-### Architecture Evolution
-
-Current monorepo structure supports:
-- Extraction of modules to microservices if needed
-- Addition of API layer (FastAPI) if web interface desired
-- Horizontal scaling of workers for multiple sports
-- Integration with external tools (Jupyter, BI platforms)
-
----
-
-## Additional Documentation
-
-### Project Documentation Files
-- **BACKTESTING_GUIDE.md** - Comprehensive backtesting user guide (375 lines)
-  - Quick start guide
-  - Strategy documentation
-  - CLI command reference
-  - Performance metrics explained
-  - Custom strategy development guide
-  - Troubleshooting tips
-- **SETUP_GUIDE.md** - System setup instructions
-- **HISTORICAL_BACKFILL_GUIDE.md** - Historical data collection guide
-- **STATUS.md** - Current project status
-- **TEST_REPORT.md** - Test coverage report
-
----
-
-## References
-
-### API Documentation
-- The Odds API: https://the-odds-api.com/liveapi/guides/v4/
-- Historical Odds: https://the-odds-api.com/historical-odds-data/
-
-### Technology Documentation
-- SQLModel: https://sqlmodel.tiangolo.com/
-- PostgreSQL JSONB: https://www.postgresql.org/docs/current/datatype-json.html
-- APScheduler: https://apscheduler.readthedocs.io/
-- Typer: https://typer.tiangolo.com/
-- Rich: https://rich.readthedocs.io/
-
-### Deployment
-- Railway: https://docs.railway.app/
-- Docker: https://docs.docker.com/
+Monorepo structure supports future microservices extraction, API layer addition (FastAPI), and integration with external tools (Jupyter, BI platforms).
