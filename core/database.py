@@ -1,21 +1,40 @@
 """Database connection and session management."""
 
+import os
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 
 from core.config import get_settings
 
 # Create async engine
+# AWS Lambda requires NullPool to avoid "attached to a different loop" errors because:
+# 1. Lambda may create an event loop during cold start/initialization
+# 2. asyncio.run() in the handler creates a NEW event loop per invocation
+# 3. asyncpg connections attached to the old loop can't be used in the new loop
+# NullPool disables connection pooling, creating a fresh connection per checkout.
 _settings = get_settings()
-engine = create_async_engine(
-    _settings.database.url,
-    echo=False,
-    future=True,
-    pool_size=_settings.database.pool_size,
-    max_overflow=10,
-)
+_is_lambda = bool(os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
+
+if _is_lambda:
+    # Lambda: Use NullPool to prevent connection reuse across event loops
+    engine = create_async_engine(
+        _settings.database.url,
+        echo=False,
+        future=True,
+        poolclass=NullPool,
+    )
+else:
+    # Local/Railway: Use connection pooling for better performance
+    engine = create_async_engine(
+        _settings.database.url,
+        echo=False,
+        future=True,
+        pool_size=_settings.database.pool_size,
+        max_overflow=10,
+    )
 
 # Create async session factory
 async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
