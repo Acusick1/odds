@@ -25,6 +25,14 @@ def validate_daily(
     strict: bool = typer.Option(
         True, "--strict/--no-strict", help="Require all 5 tiers (default: strict)"
     ),
+    check_scores: bool = typer.Option(
+        True,
+        "--check-scores/--no-check-scores",
+        help="Validate final scores exist for completed games",
+    ),
+    check_discovery: bool = typer.Option(
+        False, "--check-discovery", help="Check for missing games via API (limited to last 3 days)"
+    ),
     output_json: str = typer.Option(None, "--output-json", "-o", help="Save results to JSON file"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed game breakdown"),
 ):
@@ -32,23 +40,33 @@ def validate_daily(
     Validate tier coverage for a specific date.
 
     Examples:
-        # Validate yesterday's data
+        # Validate yesterday's data (with score validation)
         odds validate daily
 
-        # Validate specific date
-        odds validate daily --date 2024-10-24
+        # Validate specific date with game discovery check
+        odds validate daily --date 2024-10-24 --check-discovery
 
         # Allow partial coverage (just show warnings)
         odds validate daily --date 2024-10-24 --no-strict
 
+        # Skip score validation
+        odds validate daily --no-check-scores
+
         # Save results to JSON
         odds validate daily --date 2024-10-24 --output-json results.json
     """
-    asyncio.run(_validate_daily(target_date, strict, output_json, verbose))
+    asyncio.run(
+        _validate_daily(target_date, strict, check_scores, check_discovery, output_json, verbose)
+    )
 
 
 async def _validate_daily(
-    target_date_str: str | None, strict: bool, output_json: str | None, verbose: bool
+    target_date_str: str | None,
+    strict: bool,
+    check_scores: bool,
+    check_discovery: bool,
+    output_json: str | None,
+    verbose: bool,
 ):
     """Async implementation of daily validation."""
     # Parse target date (default to yesterday)
@@ -75,13 +93,23 @@ async def _validate_daily(
     # Run validation
     async with async_session_maker() as session:
         validator = TierCoverageValidator(session)
-        report = await validator.validate_date(target_date, required_tiers)
+        report = await validator.validate_date(
+            target_date, required_tiers, check_scores, check_discovery
+        )
 
     # Display summary
-    _display_summary(report, required_tiers)
+    _display_summary(report, required_tiers, check_scores, check_discovery)
 
     # Display tier breakdown
     _display_tier_breakdown(report)
+
+    # Display score issues if any
+    if check_scores and report.games_missing_scores > 0:
+        _display_score_issues(report, verbose)
+
+    # Display missing games if any
+    if check_discovery and len(report.missing_games) > 0:
+        _display_missing_games(report)
 
     # Display incomplete games if any
     if report.incomplete_games > 0:
@@ -89,19 +117,35 @@ async def _validate_daily(
 
     # Save to JSON if requested
     if output_json:
-        _save_to_json(report, output_json)
+        _save_to_json(report, output_json, check_scores, check_discovery)
         console.print(f"\n[green]Results saved to {output_json}[/green]")
 
     # Exit with appropriate code
-    if not report.is_valid:
-        console.print(f"\n[red]Status: FAILED - {report.incomplete_games} games incomplete[/red]")
-        sys.exit(1)
+    if check_scores and check_discovery:
+        # Strict mode: fail if any issue detected
+        if not report.is_fully_valid:
+            console.print(
+                f"\n[red]Status: FAILED - {report.incomplete_games} tier issues, "
+                f"{report.games_missing_scores} score issues, "
+                f"{len(report.missing_games)} missing games[/red]"
+            )
+            sys.exit(1)
+        else:
+            console.print("\n[green]Status: PASSED - All validations passed[/green]")
+            sys.exit(0)
     else:
-        console.print("\n[green]Status: PASSED - All games complete[/green]")
-        sys.exit(0)
+        # Legacy mode: only check tier coverage
+        if not report.is_valid:
+            console.print(
+                f"\n[red]Status: FAILED - {report.incomplete_games} games incomplete[/red]"
+            )
+            sys.exit(1)
+        else:
+            console.print("\n[green]Status: PASSED - All games complete[/green]")
+            sys.exit(0)
 
 
-def _display_summary(report, required_tiers):
+def _display_summary(report, required_tiers, check_scores=True, check_discovery=False):
     """Display validation summary table."""
     table = Table(show_header=False, box=None)
     table.add_column("Metric", style="cyan")
@@ -116,6 +160,19 @@ def _display_summary(report, required_tiers):
     )
     if report.incomplete_games > 0:
         table.add_row("Incomplete", f"[red]{report.incomplete_games}[/red]")
+
+    if check_scores:
+        if report.games_missing_scores > 0:
+            table.add_row("Missing Scores", f"[red]{report.games_missing_scores}[/red]")
+        else:
+            table.add_row("Missing Scores", "[green]0[/green]")
+
+    if check_discovery:
+        if len(report.missing_games) > 0:
+            table.add_row("Missing Games", f"[red]{len(report.missing_games)}[/red]")
+        else:
+            table.add_row("Missing Games", "[green]0[/green]")
+
     table.add_row("Required Tiers", f"{len(required_tiers)}/5")
 
     console.print(table)
@@ -159,6 +216,48 @@ def _display_tier_breakdown(report):
     console.print()
 
 
+def _display_score_issues(report, verbose):
+    """Display games with missing scores."""
+    console.print(f"[bold]Games Missing Scores ({report.games_missing_scores}):[/bold]\n")
+
+    games_with_score_issues = [
+        r for r in report.game_reports if "Missing final scores" in r.validation_issues
+    ]
+
+    for game_report in games_with_score_issues:
+        teams = f"{game_report.away_team} @ {game_report.home_team}"
+        game_time = game_report.commence_time.strftime("%Y-%m-%d %H:%M")
+
+        console.print(f"  ✗ [yellow]{teams}[/yellow] ({game_time})")
+        console.print("     Issue: [red]Missing final scores[/red]")
+
+        if verbose:
+            console.print(f"     Event ID: {game_report.event_id}")
+            console.print(f"     Home Score: {game_report.home_score}")
+            console.print(f"     Away Score: {game_report.away_score}")
+
+        console.print()
+
+
+def _display_missing_games(report):
+    """Display games from API that aren't in database."""
+    console.print(f"[bold]Missing Games from Database ({len(report.missing_games)}):[/bold]\n")
+
+    for missing_game in report.missing_games:
+        teams = f"{missing_game['away_team']} @ {missing_game['home_team']}"
+        commence_time = missing_game.get("commence_time", "Unknown")
+
+        console.print(f"  ✗ [red]{teams}[/red] ({commence_time})")
+        console.print(f"     Event ID: {missing_game['id']}")
+
+        home_score = missing_game.get("home_score")
+        away_score = missing_game.get("away_score")
+        if home_score is not None and away_score is not None:
+            console.print(f"     Final Score: {away_score} - {home_score}")
+
+        console.print()
+
+
 def _display_incomplete_games(report, verbose):
     """Display incomplete games."""
     console.print(f"[bold]Incomplete Games ({report.incomplete_games}):[/bold]\n")
@@ -187,7 +286,7 @@ def _display_incomplete_games(report, verbose):
         console.print()
 
 
-def _save_to_json(report, output_path: str):
+def _save_to_json(report, output_path: str, check_scores=True, check_discovery=False):
     """Save validation report to JSON file."""
     data = {
         "target_date": str(report.target_date),
@@ -223,6 +322,28 @@ def _save_to_json(report, output_path: str):
             if not r.is_complete
         ],
     }
+
+    # Add score validation results if enabled
+    if check_scores:
+        data["summary"]["games_missing_scores"] = report.games_missing_scores
+        data["summary"]["is_fully_valid"] = report.is_fully_valid
+        data["games_missing_scores"] = [
+            {
+                "event_id": r.event_id,
+                "home_team": r.home_team,
+                "away_team": r.away_team,
+                "commence_time": r.commence_time.isoformat(),
+                "home_score": r.home_score,
+                "away_score": r.away_score,
+            }
+            for r in report.game_reports
+            if "Missing final scores" in r.validation_issues
+        ]
+
+    # Add game discovery results if enabled
+    if check_discovery:
+        data["summary"]["missing_games_count"] = len(report.missing_games)
+        data["missing_games"] = list(report.missing_games)
 
     with open(output_path, "w") as f:
         json.dump(data, f, indent=2)

@@ -30,11 +30,22 @@ class TierCoverageReport:
     tiers_missing: frozenset[FetchTier] = field(default_factory=frozenset)
     total_snapshots: int = 0
     snapshots_by_tier: dict[FetchTier, int] = field(default_factory=dict)
+    # Score validation
+    has_final_scores: bool = False
+    home_score: int | None = None
+    away_score: int | None = None
+    # Validation issues
+    validation_issues: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def is_complete(self) -> bool:
         """Check if all required tiers are present."""
         return len(self.tiers_missing) == 0
+
+    @property
+    def is_fully_valid(self) -> bool:
+        """Check if game has complete tier coverage AND no validation issues."""
+        return self.is_complete and len(self.validation_issues) == 0
 
     @property
     def coverage_percentage(self) -> float:
@@ -61,11 +72,24 @@ class DailyValidationReport:
         default_factory=dict
     )  # tier -> count of games missing it
     game_reports: tuple[TierCoverageReport, ...] = field(default_factory=tuple)
+    # Score validation
+    games_missing_scores: int = 0
+    # Game discovery validation
+    missing_games: tuple[dict, ...] = field(default_factory=tuple)  # Games from API not in DB
 
     @property
     def is_valid(self) -> bool:
         """Check if all games have complete coverage."""
         return self.incomplete_games == 0
+
+    @property
+    def is_fully_valid(self) -> bool:
+        """Check if validation passed with no tier, score, or discovery issues."""
+        return (
+            self.incomplete_games == 0
+            and self.games_missing_scores == 0
+            and len(self.missing_games) == 0
+        )
 
     @property
     def completion_rate(self) -> float:
@@ -98,7 +122,10 @@ class TierCoverageValidator:
         self.reader = OddsReader(session)
 
     async def validate_game(
-        self, event_id: str, required_tiers: set[FetchTier] | None = None
+        self,
+        event_id: str,
+        required_tiers: set[FetchTier] | None = None,
+        check_scores: bool = True,
     ) -> TierCoverageReport:
         """
         Validate tier coverage for a single game.
@@ -106,6 +133,7 @@ class TierCoverageValidator:
         Args:
             event_id: Event identifier
             required_tiers: Set of required tiers (defaults to all 5)
+            check_scores: Whether to validate final scores exist for FINAL games
 
         Returns:
             TierCoverageReport with coverage details
@@ -119,6 +147,8 @@ class TierCoverageValidator:
             if not report.is_complete:
                 print(f"Missing tiers: {report.tiers_missing}")
         """
+        from core.models import EventStatus
+
         required_tiers = required_tiers or self.DEFAULT_REQUIRED_TIERS
 
         # Get event details
@@ -146,6 +176,23 @@ class TierCoverageValidator:
         # Calculate missing tiers
         tiers_missing = required_tiers - tiers_present
 
+        # Validate scores for FINAL games
+        has_final_scores = False
+        validation_issues = []
+
+        if check_scores and event.status == EventStatus.FINAL:
+            if event.home_score is not None and event.away_score is not None:
+                has_final_scores = True
+            else:
+                validation_issues.append("Missing final scores for completed game")
+                logger.warning(
+                    "missing_final_scores",
+                    event_id=event_id,
+                    status=event.status,
+                    home_score=event.home_score,
+                    away_score=event.away_score,
+                )
+
         return TierCoverageReport(
             event_id=event.id,
             home_team=event.home_team,
@@ -155,12 +202,18 @@ class TierCoverageValidator:
             tiers_missing=frozenset(tiers_missing),
             total_snapshots=len(all_snapshots),
             snapshots_by_tier=snapshots_by_tier_dict,
+            has_final_scores=has_final_scores,
+            home_score=event.home_score,
+            away_score=event.away_score,
+            validation_issues=tuple(validation_issues),
         )
 
     async def validate_date(
         self,
         target_date: date | datetime,
         required_tiers: set[FetchTier] | None = None,
+        check_scores: bool = True,
+        check_discovery: bool = False,
     ) -> DailyValidationReport:
         """
         Validate tier coverage for all games on a specific date.
@@ -168,6 +221,8 @@ class TierCoverageValidator:
         Args:
             target_date: Date to validate (by game commence_time)
             required_tiers: Set of required tiers (defaults to all 5)
+            check_scores: Whether to validate final scores exist for FINAL games
+            check_discovery: Whether to check for missing games via API
 
         Returns:
             DailyValidationReport with aggregate statistics
@@ -193,11 +248,12 @@ class TierCoverageValidator:
         incomplete_count = 0
         games_by_tier_dict = {}
         missing_tier_dict = {}
+        games_missing_scores = 0
 
         # Validate each game
         for game in games:
             try:
-                game_report = await self.validate_game(game.id, required_tiers)
+                game_report = await self.validate_game(game.id, required_tiers, check_scores)
                 game_reports_list.append(game_report)
 
                 # Update aggregate statistics
@@ -205,6 +261,10 @@ class TierCoverageValidator:
                     complete_count += 1
                 else:
                     incomplete_count += 1
+
+                # Track score issues
+                if check_scores and "Missing final scores" in game_report.validation_issues:
+                    games_missing_scores += 1
 
                 # Track games by tier coverage count
                 num_tiers = len(game_report.tiers_present)
@@ -222,6 +282,18 @@ class TierCoverageValidator:
                 )
                 continue
 
+        # Check for missing games via API if requested
+        missing_games_list = []
+        if check_discovery:
+            try:
+                missing_games_list = await self._check_missing_games(target_date, games)
+            except Exception as e:
+                logger.error(
+                    "game_discovery_check_failed",
+                    target_date=str(target_date),
+                    error=str(e),
+                )
+
         # Build immutable report
         report = DailyValidationReport(
             target_date=target_date if isinstance(target_date, date) else target_date.date(),
@@ -232,6 +304,8 @@ class TierCoverageValidator:
             games_by_tier_coverage=games_by_tier_dict,
             missing_tier_breakdown=missing_tier_dict,
             game_reports=tuple(game_reports_list),
+            games_missing_scores=games_missing_scores,
+            missing_games=tuple(missing_games_list),
         )
 
         logger.info(
@@ -243,6 +317,94 @@ class TierCoverageValidator:
         )
 
         return report
+
+    async def _check_missing_games(
+        self, target_date: date | datetime, db_games: list
+    ) -> list[dict]:
+        """
+        Check for games from The Odds API that aren't in our database.
+
+        Args:
+            target_date: Date to check
+            db_games: List of Event objects from database
+
+        Returns:
+            List of missing game dictionaries with id, home_team, away_team
+        """
+        from core.data_fetcher import TheOddsAPIClient
+
+        # Get games from API for this date
+        api_client = TheOddsAPIClient()
+
+        # Calculate days_from parameter for API (0 = today, 1 = yesterday, etc.)
+        from datetime import date as date_type
+
+        if isinstance(target_date, datetime):
+            target_date = target_date.date()
+
+        today = date_type.today()
+        days_from = (today - target_date).days
+
+        # Only check for recent dates (API supports up to 3 days)
+        if days_from < 0 or days_from > 3:
+            logger.warning(
+                "game_discovery_check_skipped",
+                target_date=str(target_date),
+                days_from=days_from,
+                reason="Date outside API /scores endpoint range (0-3 days)",
+            )
+            return []
+
+        try:
+            # Fetch scores from API
+            response = await api_client.get_scores(
+                sport="basketball_nba",
+                days_from=days_from,
+            )
+
+            api_games = response.scores_data
+
+            # Build set of game IDs in our database
+            db_game_ids = {game.id for game in db_games}
+
+            # Find games in API response that aren't in our DB
+            missing = []
+            for api_game in api_games:
+                if api_game.get("id") not in db_game_ids:
+                    # Check if game was completed (has scores)
+                    if api_game.get("completed", False):
+                        missing.append(
+                            {
+                                "id": api_game.get("id"),
+                                "home_team": api_game.get("home_team"),
+                                "away_team": api_game.get("away_team"),
+                                "commence_time": api_game.get("commence_time"),
+                                "home_score": api_game.get("scores", [{}])[0].get("score")
+                                if api_game.get("scores")
+                                else None,
+                                "away_score": api_game.get("scores", [{}])[1].get("score")
+                                if len(api_game.get("scores", [])) > 1
+                                else None,
+                            }
+                        )
+
+            if missing:
+                logger.warning(
+                    "missing_games_detected",
+                    target_date=str(target_date),
+                    missing_count=len(missing),
+                    missing_game_ids=[g["id"] for g in missing],
+                )
+
+            return missing
+
+        except Exception as e:
+            logger.error(
+                "api_scores_fetch_failed",
+                target_date=str(target_date),
+                error=str(e),
+            )
+            raise
 
     async def validate_date_range(
         self,

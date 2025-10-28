@@ -1,0 +1,33 @@
+name: Daily Validation
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # Run daily at 09:00 UTC
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Validate yesterday's data
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          uv run python -m cli.main validate daily \
+            --check-discovery \
+            --verbose \
+            --output-json validation_$(date -d yesterday +\%Y\%m\%d).json
+
+      - name: Upload validation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-results
+          path: validation_*.json
+          retention-days: 30
