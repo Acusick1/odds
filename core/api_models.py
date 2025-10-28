@@ -1,12 +1,15 @@
 """API response models and conversion utilities."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime
 
 from core.models import Event, EventStatus
+from core.time import parse_api_datetime
 
 
-@dataclass
+@dataclass(slots=True)
 class OddsResponse:
     """Response from get_odds() API call."""
 
@@ -17,7 +20,7 @@ class OddsResponse:
     timestamp: datetime
 
 
-@dataclass
+@dataclass(slots=True)
 class ScoresResponse:
     """Response from get_scores() API call."""
 
@@ -27,7 +30,7 @@ class ScoresResponse:
     timestamp: datetime
 
 
-@dataclass
+@dataclass(slots=True)
 class HistoricalOddsResponse:
     """Response from get_historical_odds() API call."""
 
@@ -60,9 +63,8 @@ def api_dict_to_event(event_data: dict) -> Event:
         ... }
         >>> event = api_dict_to_event(event_dict)
     """
-    # Parse commence_time
-    commence_time_str = event_data["commence_time"].replace("Z", "+00:00")
-    commence_time = datetime.fromisoformat(commence_time_str)
+    # Parse commence_time as timezone-aware UTC
+    commence_time = parse_api_datetime(event_data["commence_time"])
 
     return Event(
         id=event_data["id"],

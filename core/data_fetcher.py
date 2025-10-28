@@ -18,7 +18,7 @@ from core.api_models import (
     ScoresResponse,
     api_dict_to_event,
 )
-from core.config import settings
+from core.config import get_settings
 
 logger = structlog.get_logger()
 
@@ -34,8 +34,9 @@ class TheOddsAPIClient:
             api_key: API key (defaults to settings)
             base_url: Base URL (defaults to settings)
         """
-        self.api_key = api_key or settings.odds_api_key
-        self.base_url = base_url or settings.odds_api_base_url
+        app_settings = get_settings()
+        self.api_key = api_key or app_settings.api.key
+        self.base_url = base_url or app_settings.api.base_url
         self.session: aiohttp.ClientSession | None = None
         self._quota_remaining: int | None = None
 
@@ -85,7 +86,8 @@ class TheOddsAPIClient:
         start_time = time.time()
 
         try:
-            async with self.session.get(url, params=params, timeout=30) as response:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with self.session.get(url, params=params, timeout=timeout) as response:
                 response.raise_for_status()
 
                 # Track quota from headers
@@ -148,9 +150,10 @@ class TheOddsAPIClient:
                 for event in response.events:
                     print(f"{event.home_team} vs {event.away_team}")
         """
-        regions = regions or settings.regions
-        markets = markets or settings.markets
-        bookmakers = bookmakers or settings.bookmakers
+        app_settings = get_settings()
+        regions = regions or app_settings.data_collection.regions
+        markets = markets or app_settings.data_collection.markets
+        bookmakers = bookmakers or app_settings.data_collection.bookmakers
 
         params = {
             "regions": ",".join(regions),
@@ -239,9 +242,10 @@ class TheOddsAPIClient:
         Returns:
             HistoricalOddsResponse with parsed Event instances and raw data
         """
-        regions = regions or settings.regions
-        markets = markets or settings.markets
-        bookmakers = bookmakers or settings.bookmakers
+        app_settings = get_settings()
+        regions = regions or app_settings.data_collection.regions
+        markets = markets or app_settings.data_collection.markets
+        bookmakers = bookmakers or app_settings.data_collection.bookmakers
 
         params = {
             "regions": ",".join(regions),

@@ -14,13 +14,16 @@ Together these provide confidence the scheduler will work in production.
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 
 from core.api_models import OddsResponse, api_dict_to_event
+from core.fetch_tier import FetchTier
+from core.ingestion import OddsIngestionService
 from core.models import Event, EventStatus, OddsSnapshot
-from core.scheduling.intelligence import FetchTier
 from storage.readers import OddsReader
 from storage.writers import OddsWriter
 
@@ -153,15 +156,26 @@ async def test_scheduler_end_to_end(
 
     original_main = fetch_odds.main
 
+    def build_service(settings, client=mock_client):
+        class _ClientContext:
+            async def __aenter__(self):
+                return client
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        return OddsIngestionService(
+            settings=settings,
+            session_factory=mock_session_factory,
+            client_factory=cast(Any, lambda: _ClientContext()),
+        )
+
     async def wrapped_fetch_odds():
         """Wrapped job with mocked dependencies."""
         with (
-            patch("jobs.fetch_odds.TheOddsAPIClient") as mock_api_class,
-            patch("jobs.fetch_odds.async_session_maker", mock_session_factory),
+            patch("jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
             patch("core.scheduling.intelligence.async_session_maker", mock_session_factory),
         ):
-            mock_api_class.return_value.__aenter__.return_value = mock_client
-
             # Track execution
             execution_happened["fetch_odds"] = True
 
@@ -196,8 +210,6 @@ async def test_scheduler_end_to_end(
     await test_session.rollback()  # Refresh to see committed data
 
     # Verify odds snapshot was created
-    from sqlalchemy import select
-
     snapshot_query = select(OddsSnapshot).where(OddsSnapshot.event_id == EVENT_ID)
     result = await test_session.execute(snapshot_query)
     snapshot = result.scalar_one_or_none()
@@ -288,15 +300,26 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
         async def mock_schedule_next(job_name: str, next_time: datetime, _calls=scheduled_calls):
             _calls.append({"job_name": job_name, "next_time": next_time})
 
+        def build_service(settings, client=mock_client):
+            class _ClientContext:
+                async def __aenter__(self):
+                    return client
+
+                async def __aexit__(self, exc_type, exc, tb):
+                    return False
+
+            return OddsIngestionService(
+                settings=settings,
+                session_factory=mock_session_factory,
+                client_factory=cast(Any, lambda: _ClientContext()),
+            )
+
         with (
             freeze_time(test_time),
-            patch("jobs.fetch_odds.TheOddsAPIClient") as mock_api_class,
-            patch("jobs.fetch_odds.async_session_maker", mock_session_factory),
+            patch("jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
             patch("core.scheduling.intelligence.async_session_maker", mock_session_factory),
             patch("jobs.fetch_odds.get_scheduler_backend") as mock_backend_getter,
         ):
-            mock_api_class.return_value.__aenter__.return_value = mock_client
-
             mock_backend = AsyncMock()
             mock_backend.schedule_next_execution = mock_schedule_next
             mock_backend.get_backend_name = lambda: "mock_backend"

@@ -5,14 +5,15 @@ from collections.abc import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from core.config import settings
+from core.config import get_settings
 
 # Create async engine
+_settings = get_settings()
 engine = create_async_engine(
-    settings.database_url,
+    _settings.database.url,
     echo=False,
     future=True,
-    pool_size=settings.database_pool_size,
+    pool_size=_settings.database.pool_size,
     max_overflow=10,
 )
 

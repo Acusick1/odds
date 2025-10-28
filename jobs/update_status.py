@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 
-from core.config import settings
+from core.config import get_settings
 from core.database import async_session_maker
 from core.models import EventStatus
 from core.scheduling.backends import get_scheduler_backend
@@ -34,10 +34,12 @@ async def main():
     3. Calculate next execution time
     4. Schedule next run via backend
     """
-    logger.info("update_status_job_started", backend=settings.scheduler_backend)
+    app_settings = get_settings()
+
+    logger.info("update_status_job_started", backend=app_settings.scheduler.backend)
 
     # Smart execution gating
-    intelligence = SchedulingIntelligence(lookahead_days=settings.scheduling_lookahead_days)
+    intelligence = SchedulingIntelligence(lookahead_days=app_settings.scheduler.lookahead_days)
     decision = await intelligence.should_execute_status_update()
 
     if not decision.should_execute:
@@ -49,7 +51,7 @@ async def main():
 
         # Still schedule next check even if not executing
         if decision.next_execution:
-            backend = get_scheduler_backend(dry_run=settings.scheduler_dry_run)
+            backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
             await backend.schedule_next_execution(
                 job_name="update-status", next_time=decision.next_execution
             )
@@ -70,7 +72,7 @@ async def main():
     # Self-schedule next execution
     if decision.next_execution:
         try:
-            backend = get_scheduler_backend(dry_run=settings.scheduler_dry_run)
+            backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
             await backend.schedule_next_execution(
                 job_name="update-status", next_time=decision.next_execution
             )

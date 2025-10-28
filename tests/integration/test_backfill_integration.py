@@ -1,20 +1,18 @@
 """Integration tests for backfill functionality with real database."""
 
-from datetime import datetime
-
 import pytest
 from sqlalchemy import select
 
 from core.backfill_executor import BackfillExecutor
 from core.models import Event, EventStatus, Odds, OddsSnapshot
+from core.time import parse_api_datetime
 from storage.readers import OddsReader
 
 
 def _api_dict_to_event(event_data: dict) -> Event:
     """Convert API response dict to Event instance for testing."""
-    # Parse commence_time
-    commence_time_str = event_data["commence_time"].replace("Z", "+00:00")
-    commence_time = datetime.fromisoformat(commence_time_str).replace(tzinfo=None)
+    # Parse commence_time with timezone awareness
+    commence_time = parse_api_datetime(event_data["commence_time"])
 
     return Event(
         id=event_data["id"],
@@ -39,7 +37,7 @@ def simple_backfill_plan():
                 "event_id": "integration_test_1",
                 "home_team": "Test Lakers",
                 "away_team": "Test Celtics",
-                "commence_time": "2024-01-15T19:00:00",
+                "commence_time": "2024-01-15T19:00:00Z",
                 "snapshots": [
                     "2024-01-14T19:00:00Z",
                     "2024-01-15T18:30:00Z",

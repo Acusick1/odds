@@ -1,8 +1,12 @@
 """Data quality validation for odds data."""
 
-from datetime import datetime
+from __future__ import annotations
+
+from datetime import UTC, datetime
 
 import structlog
+
+from core.time import parse_api_datetime
 
 logger = structlog.get_logger()
 
@@ -83,10 +87,10 @@ class OddsValidator:
 
             # Check last update timestamp
             last_update = bookmaker.get("last_update")
-            if last_update:
+            if isinstance(last_update, str):
                 try:
-                    update_time = datetime.fromisoformat(last_update.replace("Z", "+00:00"))
-                    if update_time > datetime.now(update_time.tzinfo):
+                    update_time = parse_api_datetime(last_update)
+                    if update_time > datetime.now(UTC):
                         warnings.append(f"Future timestamp for {bookmaker_key}: {last_update}")
                 except Exception as e:
                     warnings.append(f"Invalid timestamp format for {bookmaker_key}: {str(e)}")
@@ -195,8 +199,7 @@ class OddsValidator:
                 )
             elif vig_percent > cls.MAX_VIG_PERCENT:
                 warnings.append(
-                    f"{bookmaker} {market}: Vig too high ({vig_percent:.2f}%), "
-                    "possible data error"
+                    f"{bookmaker} {market}: Vig too high ({vig_percent:.2f}%), possible data error"
                 )
 
         except Exception as e:
@@ -265,10 +268,8 @@ class OddsValidator:
         # Validate commence_time is in future or recent past
         if "commence_time" in event_data:
             try:
-                commence_time = datetime.fromisoformat(
-                    event_data["commence_time"].replace("Z", "+00:00")
-                )
-                now = datetime.now(commence_time.tzinfo)
+                commence_time = parse_api_datetime(event_data["commence_time"])
+                now = datetime.now(UTC)
 
                 # Allow events up to 24 hours in the past (for final results)
                 if commence_time < now.replace(hour=0, minute=0, second=0):

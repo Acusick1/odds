@@ -3,7 +3,7 @@
 import typer
 from rich.console import Console
 
-from cli.commands import backfill, backtest, fetch, scheduler, status
+from cli.commands import backfill, backtest, fetch, scheduler, status, validate
 
 app = typer.Typer(
     name="odds",
@@ -17,6 +17,7 @@ app.add_typer(status.app, name="status", help="System status and monitoring")
 app.add_typer(backfill.app, name="backfill", help="Historical data backfill")
 app.add_typer(backtest.app, name="backtest", help="Backtest betting strategies")
 app.add_typer(scheduler.app, name="scheduler", help="Scheduler management (local testing)")
+app.add_typer(validate.app, name="validate", help="Validate data completeness")
 
 console = Console()
 

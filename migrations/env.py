@@ -9,7 +9,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlmodel import SQLModel
 
-from core.config import settings
+from core.config import get_settings
 
 # Import all models to ensure they're registered with SQLModel.metadata
 from core.models import DataQualityLog, Event, FetchLog, Odds, OddsSnapshot  # noqa: F401
@@ -19,7 +19,7 @@ from core.models import DataQualityLog, Event, FetchLog, Odds, OddsSnapshot  # n
 config = context.config
 
 # Override sqlalchemy.url with settings
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", get_settings().database.url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

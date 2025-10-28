@@ -84,13 +84,26 @@ class OddsSnapshot(SQLModel, table=True):
     bookmaker_count: int = Field(description="Number of bookmakers in snapshot")
     api_request_id: str | None = Field(default=None, description="API request ID for debugging")
 
+    # Fetch tier tracking (for adaptive sampling validation and ML features)
+    fetch_tier: str | None = Field(
+        default=None,
+        index=True,
+        description="Fetch tier: opening, early, sharp, pregame, closing",
+    )
+    hours_until_commence: float | None = Field(
+        default=None, description="Hours between snapshot and game start"
+    )
+
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True)),
         default_factory=utc_now,
         description="Record creation time",
     )
 
-    __table_args__ = (Index("ix_event_snapshot_time", "event_id", "snapshot_time"),)
+    __table_args__ = (
+        Index("ix_event_snapshot_time", "event_id", "snapshot_time"),
+        Index("ix_event_tier", "event_id", "fetch_tier"),
+    )
 
 
 class Odds(SQLModel, table=True):

@@ -1,5 +1,7 @@
 """Database write operations for odds data."""
 
+from __future__ import annotations
+
 from datetime import UTC, datetime
 
 import structlog
@@ -7,7 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.fetch_tier import FetchTier
 from core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
+from core.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
+from core.time import ensure_utc, parse_api_datetime
 from storage.validators import OddsValidator
 
 logger = structlog.get_logger()
@@ -74,6 +79,7 @@ class OddsWriter:
         raw_data: dict,
         snapshot_time: datetime | None = None,
         validate: bool = True,
+        fetch_tier: FetchTier | None = None,
     ) -> tuple[OddsSnapshot, list[Odds]]:
         """
         Store odds snapshot with hybrid storage approach.
@@ -83,6 +89,7 @@ class OddsWriter:
             raw_data: Complete API response for the event
             snapshot_time: Time of snapshot (defaults to now)
             validate: Whether to run validation checks
+            fetch_tier: Fetch tier for this snapshot (computed if not provided)
 
         Returns:
             Tuple of (OddsSnapshot, list of normalized Odds records)
@@ -90,8 +97,25 @@ class OddsWriter:
         Storage:
             - Raw JSONB snapshot for debugging
             - Normalized odds records for querying
+            - Fetch tier and hours_until_commence for validation and ML features
         """
-        snapshot_time = snapshot_time or datetime.now(UTC)
+        snapshot_time = ensure_utc(snapshot_time or datetime.now(UTC))
+
+        # Get event to calculate tier if not provided
+        result = await self.session.execute(select(Event).where(Event.id == event_id))
+        event = result.scalar_one_or_none()
+
+        # Calculate tier and hours_until_commence if event exists
+        tier_value = None
+        hours_until = None
+        if event:
+            event_commence = ensure_utc(event.commence_time)
+            hours_until = calculate_hours_until_commence(snapshot_time, event_commence)
+            if fetch_tier:
+                tier_value = fetch_tier.value
+            else:
+                calculated_tier = calculate_tier_from_timestamps(snapshot_time, event_commence)
+                tier_value = calculated_tier.value
 
         # Validate if enabled
         if validate:
@@ -118,6 +142,8 @@ class OddsWriter:
             snapshot_time=snapshot_time,
             raw_data=raw_data,
             bookmaker_count=len(bookmakers),
+            fetch_tier=tier_value,
+            hours_until_commence=hours_until,
         )
         self.session.add(snapshot)
 
@@ -133,6 +159,8 @@ class OddsWriter:
             event_id=event_id,
             bookmakers=len(bookmakers),
             odds_records=len(odds_records),
+            fetch_tier=tier_value,
+            hours_until_commence=hours_until,
         )
 
         return snapshot, odds_records
@@ -157,17 +185,20 @@ class OddsWriter:
         odds_records = []
 
         for bookmaker in bookmakers:
-            bookmaker_key = bookmaker.get("key")
-            bookmaker_title = bookmaker.get("title", bookmaker_key)
+            bookmaker_key = str(bookmaker.get("key") or "").strip()
+            if not bookmaker_key:
+                continue  # Skip malformed bookmaker entries
+
+            bookmaker_title = str(bookmaker.get("title") or bookmaker_key)
 
             # Parse last_update timestamp
+            last_update = snapshot_time
             last_update_str = bookmaker.get("last_update")
-            try:
-                last_update = datetime.fromisoformat(
-                    last_update_str.replace("Z", "+00:00")
-                ).replace(tzinfo=None)
-            except Exception:
-                last_update = snapshot_time
+            if isinstance(last_update_str, str):
+                try:
+                    last_update = parse_api_datetime(last_update_str)
+                except Exception:
+                    last_update = snapshot_time
 
             # Process each market
             for market in bookmaker.get("markets", []):

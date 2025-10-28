@@ -29,7 +29,7 @@ def get_scheduler_backend(
 
     Args:
         backend_type: Backend type ('aws', 'railway', 'local').
-                     If None, reads from settings.scheduler_backend
+                     If None, reads from settings.scheduler.backend
         dry_run: Enable dry-run mode (log operations without executing)
         retry_config: Custom retry configuration (uses defaults if None)
         **kwargs: Backend-specific configuration options
@@ -64,9 +64,10 @@ def get_scheduler_backend(
         )
     """
     # Import settings here to avoid circular imports
-    from core.config import settings
+    from core.config import get_settings
 
-    backend = backend_type or settings.scheduler_backend.lower()
+    settings = get_settings()
+    backend = backend_type or settings.scheduler.backend.lower()
 
     if backend == "aws":
         from core.scheduling.backends.aws import AWSEventBridgeBackend
@@ -96,7 +97,7 @@ def get_scheduler_backend(
 
     else:
         raise ConfigurationError(
-            f"Unknown scheduler backend: {backend}. " f"Supported: 'aws', 'railway', 'local'"
+            f"Unknown scheduler backend: {backend}. Supported: 'aws', 'railway', 'local'"
         )
 
 

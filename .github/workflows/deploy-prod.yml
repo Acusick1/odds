@@ -76,6 +76,12 @@ jobs:
       - name: Run database migrations
         run: uv run alembic upgrade head
 
+      - name: Validate database schema (read-only)
+        run: uv run pytest tests/migration/test_schema_validation.py -v
+
+      - name: Test read-only CLI commands
+        run: uv run pytest tests/migration/test_cli_readonly.py -v
+
       - name: Test Lambda functions
         run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler --region ${{ env.AWS_REGION }}
 

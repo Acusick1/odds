@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import aiohttp
 import structlog
 
-from core.config import settings
+from core.config import Settings, get_settings
 
 logger = structlog.get_logger()
 
@@ -82,14 +82,14 @@ class DiscordAlert(AlertBase):
 class AlertManager:
     """Route alerts to appropriate channels."""
 
-    def __init__(self, config: settings | None = None):
+    def __init__(self, config: Settings | None = None):
         """
         Initialize alert manager.
 
         Args:
             config: Settings instance (defaults to global settings)
         """
-        self.config = config or settings
+        self.config = config or get_settings()
         self.enabled = self.config.alert_enabled
         self.channels: list[AlertBase] = []
 

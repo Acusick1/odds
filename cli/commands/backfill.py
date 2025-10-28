@@ -11,7 +11,7 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn
 from rich.table import Table
 
 from core.backfill_executor import BackfillExecutor, BackfillProgress
-from core.config import settings
+from core.config import get_settings
 from core.data_fetcher import TheOddsAPIClient
 from core.database import async_session_maker
 from core.game_selector import GameSelector
@@ -131,7 +131,8 @@ async def _create_plan_async(
     table.add_row("Total Games", str(plan["total_games"]))
     table.add_row("Total Snapshots", str(plan["total_snapshots"]))
     table.add_row("Estimated Quota Usage", f"{plan['estimated_quota_usage']:,}")
-    table.add_row("Quota Remaining", f"{settings.odds_api_quota - plan['estimated_quota_usage']:,}")
+    app_settings = get_settings()
+    table.add_row("Quota Remaining", f"{app_settings.api.quota - plan['estimated_quota_usage']:,}")
     table.add_row("Date Range", f"{start_date_str} to {end_date_str}")
 
     console.print("\n")
@@ -328,7 +329,10 @@ def backfill_status():
 
 async def _backfill_status_async():
     """Async implementation of status check."""
+    from typing import Any, cast
+
     from sqlalchemy import func, select
+    from sqlalchemy.sql.elements import ColumnElement
 
     from core.models import OddsSnapshot
 
@@ -338,7 +342,7 @@ async def _backfill_status_async():
             func.count(func.distinct(OddsSnapshot.event_id)),
             func.min(OddsSnapshot.snapshot_time),
             func.max(OddsSnapshot.snapshot_time),
-            func.count(OddsSnapshot.id),
+            func.count(cast(ColumnElement[Any], OddsSnapshot.id)),
         )
 
         result = await session.execute(query)

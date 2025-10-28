@@ -1,53 +1,25 @@
 """Game-aware scheduling intelligence for adaptive data collection."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from enum import Enum
 
 import structlog
 
+from core import tier_utils
 from core.database import async_session_maker
+from core.fetch_tier import FetchTier
 from core.models import Event, EventStatus
 from storage.readers import OddsReader
 
 logger = structlog.get_logger()
 
 
-class FetchTier(Enum):
-    """
-    Adaptive sampling tiers based on game proximity.
-
-    Each tier represents different data collection frequency needs:
-    - CLOSING: Most critical period for line movement
-    - PREGAME: Active betting period with frequent updates
-    - SHARP: Professional betting period
-    - EARLY: Opening line establishment
-    - OPENING: Initial line release
-    """
-
-    CLOSING = "closing"  # 0-3 hours before: every 30 min
-    PREGAME = "pregame"  # 3-12 hours before: every 3 hours
-    SHARP = "sharp"  # 12-24 hours before: every 12 hours
-    EARLY = "early"  # 1-3 days before: every 24 hours
-    OPENING = "opening"  # 3+ days before: every 48 hours
-
-    @property
-    def interval_hours(self) -> float:
-        """Get interval in hours for this tier."""
-        intervals = {
-            FetchTier.CLOSING: 0.5,  # 30 minutes
-            FetchTier.PREGAME: 3.0,
-            FetchTier.SHARP: 12.0,
-            FetchTier.EARLY: 24.0,
-            FetchTier.OPENING: 48.0,
-        }
-        return intervals[self]
-
-
-@dataclass
+@dataclass(slots=True, frozen=True)
 class ScheduleDecision:
     """
-    Decision about whether to execute and when to run next.
+    Decision about whether to execute and when to run next (immutable).
 
     Attributes:
         should_execute: Whether job should run now
@@ -122,7 +94,7 @@ class SchedulingIntelligence:
             )
 
         # Determine tier and next execution
-        tier = self._get_tier_for_hours(hours_until)
+        tier = tier_utils.calculate_tier(hours_until)
         next_execution = now + timedelta(hours=tier.interval_hours)
 
         return ScheduleDecision(
@@ -254,24 +226,3 @@ class SchedulingIntelligence:
             )
 
             return len(events) > 0
-
-    def _get_tier_for_hours(self, hours_until: float) -> FetchTier:
-        """
-        Determine fetch tier based on hours until game.
-
-        Args:
-            hours_until: Hours until game commence time
-
-        Returns:
-            Appropriate FetchTier
-        """
-        if hours_until <= 3:
-            return FetchTier.CLOSING
-        elif hours_until <= 12:
-            return FetchTier.PREGAME
-        elif hours_until <= 24:
-            return FetchTier.SHARP
-        elif hours_until <= 72:  # 3 days
-            return FetchTier.EARLY
-        else:
-            return FetchTier.OPENING

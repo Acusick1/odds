@@ -4,8 +4,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from core.fetch_tier import FetchTier
 from core.models import Event, EventStatus
-from core.scheduling.intelligence import FetchTier, SchedulingIntelligence
+from core.scheduling.intelligence import SchedulingIntelligence
 from storage.writers import OddsWriter
 
 

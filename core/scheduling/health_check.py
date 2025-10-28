@@ -1,6 +1,9 @@
 """Health check builder for scheduler backends."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from typing import Any
 
 from core.scheduling.backends.base import BackendHealth, ValidationResult
 
@@ -24,9 +27,9 @@ class HealthCheckBuilder:
     backend_name: str
     _checks_passed: list[str] = field(default_factory=list)
     _checks_failed: list[str] = field(default_factory=list)
-    _details: dict = field(default_factory=dict)
+    _details: dict[str, Any] = field(default_factory=dict)
 
-    def pass_check(self, message: str) -> "HealthCheckBuilder":
+    def pass_check(self, message: str) -> HealthCheckBuilder:
         """
         Record a passed health check.
 
@@ -39,7 +42,7 @@ class HealthCheckBuilder:
         self._checks_passed.append(message)
         return self
 
-    def fail_check(self, message: str) -> "HealthCheckBuilder":
+    def fail_check(self, message: str) -> HealthCheckBuilder:
         """
         Record a failed health check.
 
@@ -52,7 +55,7 @@ class HealthCheckBuilder:
         self._checks_failed.append(message)
         return self
 
-    def add_detail(self, key: str, value: any) -> "HealthCheckBuilder":
+    def add_detail(self, key: str, value: Any) -> HealthCheckBuilder:
         """
         Add detail information to health check.
 
@@ -66,9 +69,7 @@ class HealthCheckBuilder:
         self._details[key] = value
         return self
 
-    def check_condition(
-        self, condition: bool, pass_msg: str, fail_msg: str
-    ) -> "HealthCheckBuilder":
+    def check_condition(self, condition: bool, pass_msg: str, fail_msg: str) -> HealthCheckBuilder:
         """
         Conditionally pass or fail a check based on boolean condition.
 
@@ -96,8 +97,8 @@ class HealthCheckBuilder:
         return BackendHealth(
             is_healthy=len(self._checks_failed) == 0,
             backend_name=self.backend_name,
-            checks_passed=self._checks_passed,
-            checks_failed=self._checks_failed,
+            checks_passed=tuple(self._checks_passed),
+            checks_failed=tuple(self._checks_failed),
             details=self._details if self._details else None,
         )
 
@@ -119,7 +120,7 @@ class ValidationBuilder:
     _errors: list[str] = field(default_factory=list)
     _warnings: list[str] = field(default_factory=list)
 
-    def add_error(self, message: str) -> "ValidationBuilder":
+    def add_error(self, message: str) -> ValidationBuilder:
         """
         Add validation error.
 
@@ -132,7 +133,7 @@ class ValidationBuilder:
         self._errors.append(message)
         return self
 
-    def add_warning(self, message: str) -> "ValidationBuilder":
+    def add_warning(self, message: str) -> ValidationBuilder:
         """
         Add validation warning.
 
@@ -146,8 +147,8 @@ class ValidationBuilder:
         return self
 
     def check_required(
-        self, value: any, name: str, error_msg: str | None = None
-    ) -> "ValidationBuilder":
+        self, value: Any, name: str, error_msg: str | None = None
+    ) -> ValidationBuilder:
         """
         Check if required value is present.
 
@@ -173,6 +174,6 @@ class ValidationBuilder:
         """
         return ValidationResult(
             is_valid=len(self._errors) == 0,
-            errors=self._errors,
-            warnings=self._warnings,
+            errors=tuple(self._errors),
+            warnings=tuple(self._warnings),
         )

@@ -25,20 +25,20 @@ class TestSettings:
         ):
             settings = Settings(_env_file=None)  # Don't load .env file
 
-            assert settings.odds_api_base_url == "https://api.the-odds-api.com/v4"
-            assert settings.odds_api_quota == 20_000
-            assert settings.database_pool_size == 5
-            assert settings.sports == ["basketball_nba"]
-            assert len(settings.bookmakers) == 8
-            assert settings.markets == ["h2h", "spreads", "totals"]
-            assert settings.regions == ["us"]
-            assert settings.scheduler_backend == "local"
-            assert settings.scheduler_dry_run is False
-            assert settings.scheduling_lookahead_days == 7
-            assert settings.enable_validation is True
-            assert settings.reject_invalid_odds is False
-            assert settings.alert_enabled is False
-            assert settings.log_level == "INFO"
+            assert settings.api.base_url == "https://api.the-odds-api.com/v4"
+            assert settings.api.quota == 20_000
+            assert settings.database.pool_size == 5
+            assert settings.data_collection.sports == ["basketball_nba"]
+            assert len(settings.data_collection.bookmakers) == 8
+            assert settings.data_collection.markets == ["h2h", "spreads", "totals"]
+            assert settings.data_collection.regions == ["us"]
+            assert settings.scheduler.backend == "local"
+            assert settings.scheduler.dry_run is False
+            assert settings.scheduler.lookahead_days == 7
+            assert settings.data_quality.enable_validation is True
+            assert settings.data_quality.reject_invalid_odds is False
+            assert settings.alerts.alert_enabled is False
+            assert settings.logging.level == "INFO"
 
     def test_settings_custom_values(self):
         """Test custom configuration values."""
@@ -49,20 +49,20 @@ class TestSettings:
                 "DATABASE_URL": "postgresql://custom",
                 "SCHEDULER_BACKEND": "aws",
                 "SCHEDULER_DRY_RUN": "true",
-                "SCHEDULING_LOOKAHEAD_DAYS": "14",
+                "SCHEDULER_LOOKAHEAD_DAYS": "14",
                 "ENABLE_VALIDATION": "false",
                 "LOG_LEVEL": "DEBUG",
             },
         ):
             settings = Settings()
 
-            assert settings.odds_api_key == "custom_key"
-            assert settings.database_url == "postgresql://custom"
-            assert settings.scheduler_backend == "aws"
-            assert settings.scheduler_dry_run is True
-            assert settings.scheduling_lookahead_days == 14
-            assert settings.enable_validation is False
-            assert settings.log_level == "DEBUG"
+            assert settings.api.key == "custom_key"
+            assert settings.database.url == "postgresql://custom"
+            assert settings.scheduler.backend == "aws"
+            assert settings.scheduler.dry_run is True
+            assert settings.scheduler.lookahead_days == 14
+            assert settings.data_quality.enable_validation is False
+            assert settings.logging.level == "DEBUG"
 
     def test_settings_bookmakers(self):
         """Test bookmaker configuration."""
@@ -83,7 +83,7 @@ class TestSettings:
                 "bovada",
             ]
 
-            assert settings.bookmakers == expected_bookmakers
+            assert settings.data_collection.bookmakers == expected_bookmakers
 
     def test_settings_aws_configuration(self):
         """Test AWS-specific configuration fields."""
@@ -94,11 +94,13 @@ class TestSettings:
                 "DATABASE_URL": "postgresql://test:test@localhost/test",
                 "SCHEDULER_BACKEND": "aws",
                 "AWS_REGION": "us-east-1",
-                "LAMBDA_ARN": "arn:aws:lambda:us-east-1:123456789:function:fetch-odds",
+                "AWS_LAMBDA_ARN": "arn:aws:lambda:us-east-1:123456789:function:fetch-odds",
             },
         ):
             settings = Settings()
 
-            assert settings.scheduler_backend == "aws"
-            assert settings.aws_region == "us-east-1"
-            assert settings.lambda_arn == "arn:aws:lambda:us-east-1:123456789:function:fetch-odds"
+            assert settings.scheduler.backend == "aws"
+            assert settings.aws.region == "us-east-1"
+            assert (
+                settings.aws.lambda_arn == "arn:aws:lambda:us-east-1:123456789:function:fetch-odds"
+            )

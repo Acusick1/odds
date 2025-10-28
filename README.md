@@ -80,7 +80,7 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/odds
 SCHEDULER_BACKEND=local  # local, aws, or railway
 
 # Optional
-SCHEDULING_LOOKAHEAD_DAYS=7
+SCHEDULER_LOOKAHEAD_DAYS=7
 LOG_LEVEL=INFO
 ```
 
