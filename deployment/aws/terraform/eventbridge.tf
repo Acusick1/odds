@@ -78,6 +78,17 @@ resource "aws_lambda_permission" "allow_eventbridge_update_status" {
   source_arn    = aws_cloudwatch_event_rule.bootstrap_update_status.arn
 }
 
+# Allow dynamic rules (created by Lambda at runtime) to invoke the function
+# This covers rules like odds-fetch-odds, odds-fetch-scores, odds-update-status
+# that are created and updated by the Lambda's self-scheduling logic
+resource "aws_lambda_permission" "allow_dynamic_rules" {
+  statement_id  = format("AllowExecutionFromDynamicRules-%s", var.project_name)
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.odds_scheduler.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = format("arn:aws:events:%s:%s:rule/odds-*", var.aws_region, data.aws_caller_identity.current.account_id)
+}
+
 # Outputs
 output "bootstrap_rules" {
   description = "Bootstrap EventBridge rules (will be updated by Lambda)"
