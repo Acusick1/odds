@@ -90,14 +90,6 @@ A single-user betting odds data collection and analysis system focused on NBA ga
 - **Spreads**: Point spread bets
 - **Totals**: Over/under total points bets
 
-### API Configuration
-
-```python
-regions: ["us"]
-markets: ["h2h", "spreads", "totals"]
-odds_format: "american"
-```
-
 ---
 
 ## Data Models
@@ -267,67 +259,6 @@ class FetchLog(SQLModel, table=True):
 ---
 
 ## System Architecture
-
-### Component Structure
-
-High-level directory organization:
-
-```bash
-betting-odds-system/
-├── core/
-│   ├── models.py              # SQLModel schema definitions
-│   ├── database.py            # Database session management
-│   ├── data_fetcher.py        # The Odds API client
-│   ├── config.py              # Pydantic Settings configuration
-│   ├── ingestion.py           # Odds ingestion service
-│   ├── backfill_executor.py   # Historical data backfill
-│   ├── game_selector.py       # Game selection for backfill
-│   ├── fetch_tier.py          # FetchTier enum definition
-│   ├── tier_utils.py          # Tier calculation utilities
-│   └── scheduling/            # Multi-backend scheduler
-│       ├── intelligence.py    # Game-aware scheduling logic
-│       ├── jobs.py            # Job registry
-│       ├── health_check.py    # System health monitoring
-│       └── backends/
-│           ├── base.py        # Abstract backend interface
-│           ├── aws.py         # AWS Lambda + EventBridge
-│           ├── railway.py     # Railway deployment
-│           └── local.py       # APScheduler for dev
-│
-├── jobs/                      # Standalone job executables
-│   ├── fetch_odds.py          # Odds collection job
-│   ├── fetch_scores.py        # Scores update job
-│   └── update_status.py       # Status transition job
-│
-├── storage/
-│   ├── writers.py             # Write operations
-│   ├── readers.py             # Read operations & queries
-│   └── validators.py          # Data quality validation
-│
-├── analytics/
-│   ├── backtesting/           # Backtesting system
-│   │   ├── models.py          # Data models & results
-│   │   ├── services.py        # BacktestEngine
-│   │   └── config.py          # Configuration
-│   ├── strategies.py          # Strategy implementations
-│   ├── utils.py               # Odds calculations & metrics
-│   └── ml_strategy_example.py # ML integration example
-│
-├── cli/
-│   └── commands/              # CLI command modules
-│       ├── fetch.py, status.py, backfill.py
-│       ├── backtest.py, scheduler.py, validate.py
-│
-├── deployment/                # Deployment configurations
-│   ├── aws/                   # Lambda + Terraform
-│   └── railway/               # Railway configs
-│
-├── tests/                     # 82 test files, 5000+ lines
-├── migrations/                # Alembic migrations
-└── docker-compose.yml, Dockerfile, pyproject.toml
-```
-
-See actual filesystem for complete structure.
 
 ### Multi-Backend Scheduler Architecture
 
@@ -551,15 +482,6 @@ odds status events --days 7             # List recent events
 odds status events --team "Lakers"      # Filter by team
 ```
 
-### CLI Output Formatting
-
-The CLI uses the **Rich** library for formatted terminal output:
-
-- Colored, formatted tables for status and results
-- Progress bars for long-running operations (backfill, backtesting)
-- Status indicators (✓, ✗, ⚠) for system health
-- Syntax highlighting for JSON output
-
 ---
 
 ## Historical Data Backfill
@@ -603,59 +525,6 @@ class GameSelector:
 - Test query patterns and performance
 - Enable immediate backtesting capability
 - Verify data quality checks work correctly
-
----
-
-## Alert System Infrastructure
-
-### Design Philosophy
-
-Build alert infrastructure now for easy activation later, but do not implement active alerting yet.
-
-### Base Alert System
-
-```python
-class AlertBase(ABC):
-    """Base class for all alert types"""
-    
-    @abstractmethod
-    async def send(self, message: str, severity: str):
-        """Send alert via specific channel"""
-
-class DiscordAlert(AlertBase):
-    """Discord webhook implementation"""
-    def __init__(self, webhook_url: str):
-        self.webhook_url = webhook_url
-    
-    async def send(self, message: str, severity: str):
-        # Format and send to Discord
-
-class AlertManager:
-    """Route alerts to appropriate channels"""
-    def __init__(self, config: Settings):
-        self.enabled = config.alert_enabled
-        self.channels = []
-        
-        if config.discord_webhook_url:
-            self.channels.append(DiscordAlert(config.discord_webhook_url))
-    
-    async def alert(self, message: str, severity: str = "info"):
-        if not self.enabled:
-            return
-        for channel in self.channels:
-            await channel.send(message, severity)
-```
-
-### Future Alert Triggers (Not Implemented Yet)
-
-When alerts are enabled, they could trigger on:
-
-- Arbitrage opportunities above threshold
-- Expected value bets above threshold
-- Large line movements
-- Data quality issues
-- System errors
-- Daily summary reports
 
 ---
 
@@ -742,104 +611,16 @@ class ArbitrageStrategy(BettingStrategy):
 
 ### Machine Learning Integration
 
-**Status**: ✓ **FULLY SUPPORTED** - The backtesting infrastructure fully supports ML-based strategies including XGBoost, neural networks, and time series models.
+**Status**: ✓ **FULLY SUPPORTED** - ML-based strategies fully supported (XGBoost, neural networks, time series models).
 
-**Key Features Enabling ML**:
+**Key Features**:
 
-1. **Event + Odds as Input**: Strategy receives complete `BacktestEvent` object and `odds_snapshot` list, perfect for feature engineering
-2. **Type Safety**: BacktestEvent guarantees final scores exist, eliminating None checks in model code
-3. **Confidence Field**: `BetOpportunity.confidence` (0-1) maps directly to model probability predictions
-4. **Kelly Criterion Integration**: Model confidence is automatically used for optimal bet sizing
-5. **Async Support**: Allows batch predictions and external API calls
-6. **Look-Ahead Bias Prevention**: Built-in timestamp controls ensure only historical data is used
+- Strategy receives `BacktestEvent` + `odds_snapshot` for feature engineering
+- `BetOpportunity.confidence` field maps to model probability predictions
+- Kelly Criterion integration uses model confidence for bet sizing
+- Look-ahead bias prevention via timestamp controls
 
-**Example Implementation** (`analytics/ml_strategy_example.py`):
-
-```python
-class XGBoostStrategy(BettingStrategy):
-    """ML-based betting strategy using XGBoost for game outcome prediction."""
-
-    def __init__(
-        self,
-        model_path: str | None = None,
-        min_ev_threshold: float = 0.05,  # 5% minimum EV
-        min_model_confidence: float = 0.55,  # Only bet when >55% confident
-        sharp_book: str = "pinnacle",
-        retail_books: list[str] | None = None,
-    ):
-        # Load trained XGBoost model from pickle file
-        if model_path and Path(model_path).exists():
-            with open(model_path, "rb") as f:
-                self.model = pickle.load(f)
-
-    async def evaluate_opportunity(
-        self,
-        event: BacktestEvent,  # Type-safe with guaranteed scores
-        odds_snapshot: list[Odds],
-        config: BacktestConfig,
-    ) -> list[BetOpportunity]:
-        """
-        Process:
-            1. Engineer features from event and odds data
-            2. Run XGBoost model to predict win probabilities
-            3. Compare predictions to available odds
-            4. Return opportunities where EV exceeds threshold
-        """
-        # Feature engineering
-        features = self._engineer_features(event, odds_snapshot)
-
-        # Get model predictions
-        home_win_prob = self._predict_home_win_probability(features)
-
-        # Find +EV opportunities
-        for retail_book in retail_books:
-            retail_odds = self._find_odds(odds_snapshot, retail_book, "h2h", event.home_team)
-
-            if retail_odds and home_win_prob >= min_confidence:
-                ev = calculate_ev(home_win_prob, retail_odds.price, 100.0)
-
-                if ev_percentage >= min_ev:
-                    opportunities.append(
-                        BetOpportunity(
-                            confidence=home_win_prob,  # Used for Kelly sizing
-                            rationale=f"XGBoost: {home_win_prob:.1%} win prob"
-                        )
-                    )
-
-        return opportunities
-```
-
-**Feature Engineering Examples**:
-
-- Sharp bookmaker implied probabilities
-- Retail consensus probabilities
-- Sharp vs retail differentials
-- Day of week / game timing
-- Team stats (offensive/defensive rating)
-- Recent form (last N games)
-- Rest days between games
-- Head-to-head history
-- Home court advantage metrics
-
-**Supported ML Architectures**:
-
-- **XGBoost / LightGBM**: Gradient boosting for classification
-- **Neural Networks**: Deep learning with PyTorch/TensorFlow
-- **Time Series Models**: LSTM, GRU for sequential prediction
-- **Ensemble Models**: Combining multiple model predictions
-- **Online Learning**: Update models with new results
-
-**Integration Pattern**:
-
-1. Train model offline using historical event + odds data
-2. Save model to pickle file
-3. Load in strategy constructor
-4. Engineer features in `_engineer_features()`
-5. Generate predictions in `evaluate_opportunity()`
-6. Use model confidence for EV calculation and Kelly sizing
-7. Backtest strategy against historical data to validate
-
-See [analytics/ml_strategy_example.py](analytics/ml_strategy_example.py) for complete working example with training code.
+See [analytics/ml_strategy_example.py](analytics/ml_strategy_example.py) for complete XGBoost implementation with training code and feature engineering examples.
 
 ### Backtesting Engine
 
@@ -913,17 +694,6 @@ Comprehensive toolkit for odds conversion (American ↔ decimal), probability ca
 
 ---
 
-## Docker Configuration
-
-Docker configuration files exist in repo root for local development:
-
-- `docker-compose.yml`: PostgreSQL container for local testing
-- `Dockerfile`: Application container definition
-
-Docker-based architecture ensures portability across deployment platforms.
-
----
-
 ## Development Workflow
 
 ### Dependency Management
@@ -946,17 +716,8 @@ The project uses **uv** for fast and reliable Python package management. Use a `
 # Run all tests
 uv run pytest
 
-# Run specific test file
-uv run pytest tests/unit/test_models.py
-
-# Run tests matching pattern
-uv run pytest -k "backtest"
-
-# Run with verbose output
-uv run pytest -v
-
-# Run integration tests only
-uv run pytest tests/integration/
+# Run unit tests only
+uv run pytest tests/unit/
 ```
 
 ### Database Migrations
@@ -997,12 +758,6 @@ uv run python -m cli fetch current
 
 # Check system status
 uv run python -m cli status show
-
-# Interactive Python shell with context
-uv run python
->>> from core.database import get_async_session
->>> from core.models import Event, Odds
->>> import asyncio
 ```
 
 ### Database Environment Guidelines
@@ -1238,64 +993,7 @@ The system supports three scheduler backends for different deployment scenarios:
 
 ### Test Structure
 
-```bash
-tests/
-├── unit/
-│   ├── test_models.py           # SQLModel validation (implemented)
-│   ├── test_validators.py       # Data quality checks (implemented)
-│   ├── test_config.py           # Configuration loading (implemented)
-│   └── test_backfill_executor.py # Backfill executor tests (implemented)
-├── integration/
-│   ├── test_database.py         # DB operations (implemented)
-│   └── test_backfill_integration.py # Backfill integration tests (implemented)
-├── fixtures/
-│   ├── sample_odds_response.json     # Implemented
-│   └── sample_scores_response.json   # Implemented
-└── conftest.py                  # Pytest configuration (implemented)
-```
-
-**Backtesting Tests** (Implemented):
-
-- `tests/unit/test_backtesting_models.py` - Data model tests (325 lines)
-- `tests/integration/test_backtest_integration.py` - Full backtest workflow (342 lines)
-- `tests/unit/test_utils.py` - Utility function tests
-
-**Not Yet Implemented**:
-
-- test_parsers.py
-- test_api_client.py
-- test_scheduler.py
-- historical_data.json fixture
-
-### Key Test Areas
-
-**Data Validation**:
-
-- Schema validation with real API responses
-- Edge cases (missing data, invalid odds)
-- Data quality checks trigger correctly
-
-**Database Operations**:
-
-- Hybrid storage (raw + normalized) works correctly
-- Indexes perform as expected
-- Query patterns are efficient
-
-**API Client**:
-
-- Rate limiting prevents quota overruns
-- Retry logic handles transient failures
-- Error handling logs appropriately
-
-**Backtesting** (Implemented):
-
-- ✓ Look-ahead bias prevention validated
-- ✓ Bet sizing calculations verified (Kelly, flat, percentage)
-- ✓ Performance metrics accurate (13+ metrics)
-- ✓ Strategy execution tested (all 3 strategies)
-- ✓ JSON/CSV export and reconstruction tested
-- ✓ Empty result handling tested
-- ✓ Multi-event backtests with equity curves tested
+Tests organized as `tests/unit/`, `tests/integration/`, `tests/migration/` and `tests/fixtures/`. See actual filesystem for complete structure. Test database uses `odds_test` (isolated from dev data).
 
 ---
 
@@ -1448,14 +1146,6 @@ System uses **structlog** for structured, machine-readable logging. Log levels: 
 
 ## Extensibility
 
-The system is designed for easy extension:
-
-**Adding Sports**: Add sport key to `SPORTS` config list. No code changes required - same schema supports all sports.
-
-**Adding Bookmakers**: Add bookmaker key to `BOOKMAKERS` config list. Automatic inclusion in data collection.
-
-**Adding Markets**: Add market key to `MARKETS` config list. Schema supports arbitrary bet types.
+**Adding Sports/Bookmakers/Markets**: Add to respective config lists (`SPORTS`, `BOOKMAKERS`, `MARKETS`) in `.env`. No code changes required.
 
 **Adding Strategies**: Inherit from `BettingStrategy` base class and implement `evaluate_opportunity()` method. See `analytics/strategies.py` and ML example in `analytics/ml_strategy_example.py`.
-
-Monorepo structure supports future microservices extraction, API layer addition (FastAPI), and integration with external tools (Jupyter, BI platforms).
