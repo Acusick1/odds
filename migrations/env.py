@@ -19,7 +19,7 @@ from core.models import DataQualityLog, Event, FetchLog, Odds, OddsSnapshot  # n
 config = context.config
 
 # Override sqlalchemy.url with settings
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+config.set_main_option("sqlalchemy.url", get_settings().database.url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
