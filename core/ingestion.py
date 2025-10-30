@@ -143,7 +143,6 @@ class OddsIngestionService:
                         raw_data=event_data,
                         snapshot_time=response.timestamp,
                         validate=validation_enabled,
-                        fetch_tier=fetch_tier,
                     )
                     await session.commit()
 
