@@ -9,7 +9,6 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.fetch_tier import FetchTier
 from core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 from core.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 from core.time import ensure_utc, parse_api_datetime
@@ -79,7 +78,6 @@ class OddsWriter:
         raw_data: dict,
         snapshot_time: datetime | None = None,
         validate: bool = True,
-        fetch_tier: FetchTier | None = None,
     ) -> tuple[OddsSnapshot, list[Odds]]:
         """
         Store odds snapshot with hybrid storage approach.
@@ -89,7 +87,6 @@ class OddsWriter:
             raw_data: Complete API response for the event
             snapshot_time: Time of snapshot (defaults to now)
             validate: Whether to run validation checks
-            fetch_tier: Fetch tier for this snapshot (computed if not provided)
 
         Returns:
             Tuple of (OddsSnapshot, list of normalized Odds records)
@@ -101,21 +98,18 @@ class OddsWriter:
         """
         snapshot_time = ensure_utc(snapshot_time or datetime.now(UTC))
 
-        # Get event to calculate tier if not provided
+        # Get event to calculate tier
         result = await self.session.execute(select(Event).where(Event.id == event_id))
         event = result.scalar_one_or_none()
 
-        # Calculate tier and hours_until_commence if event exists
+        # Always calculate tier and hours_until_commence per-event from timestamps
         tier_value = None
         hours_until = None
         if event:
             event_commence = ensure_utc(event.commence_time)
             hours_until = calculate_hours_until_commence(snapshot_time, event_commence)
-            if fetch_tier:
-                tier_value = fetch_tier.value
-            else:
-                calculated_tier = calculate_tier_from_timestamps(snapshot_time, event_commence)
-                tier_value = calculated_tier.value
+            calculated_tier = calculate_tier_from_timestamps(snapshot_time, event_commence)
+            tier_value = calculated_tier.value
 
         # Validate if enabled
         if validate:

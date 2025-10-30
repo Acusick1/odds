@@ -2,7 +2,7 @@
 
 IMPORTANT (LLM agents): This document is read-only and should only be modified by the user. Do not create additional documentation files (outside of README.md) without confirming with the user first, only make a case for additional documentation files when you believe they are absolutely necessary.
 
-**Document Status**: Updated October 2024 to reflect production architecture with multi-backend scheduler and intelligent data collection. Original design specification available in git history.
+**Document Status**: Updated to reflect production architecture with multi-backend scheduler and intelligent data collection. Original design specification available in git history.
 
 ## System Overview
 
