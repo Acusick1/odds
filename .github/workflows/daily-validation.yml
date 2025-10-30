@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: '0 9 * * *'  # Run daily at 09:00 UTC
   workflow_dispatch:  # Allow manual triggering
+    inputs:
+      database_url:
+        required: false
+        type: string
 
 jobs:
   validate:
@@ -11,7 +15,7 @@ jobs:
     environment: production
 
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DATABASE_URL: ${{ inputs.database_url || secrets.DATABASE_URL }}
       ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
 
     steps:
