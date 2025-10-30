@@ -264,13 +264,14 @@ class TestTierCoverageValidatorDailyValidation:
         """Test daily validation with all games complete."""
         target_date = datetime(2024, 10, 24, tzinfo=UTC)
 
-        # Create 2 complete games
+        # Create 2 complete games in the noon-to-noon window
         for i in range(2):
             event = Event(
                 id=f"event_{i}",
                 sport_key="basketball_nba",
                 sport_title="NBA",
-                commence_time=target_date + timedelta(hours=i),
+                # Games at noon and 1 PM UTC (within noon-to-noon window)
+                commence_time=target_date.replace(hour=12) + timedelta(hours=i),
                 home_team=f"Home{i}",
                 away_team=f"Away{i}",
                 status=EventStatus.FINAL,
@@ -308,13 +309,14 @@ class TestTierCoverageValidatorDailyValidation:
         """Test daily validation with incomplete games."""
         target_date = datetime(2024, 10, 24, tzinfo=UTC)
 
-        # Create 2 games, one complete and one incomplete
+        # Create 2 games in the noon-to-noon window, one complete and one incomplete
         for i in range(2):
             event = Event(
                 id=f"event_{i}",
                 sport_key="basketball_nba",
                 sport_title="NBA",
-                commence_time=target_date + timedelta(hours=i),
+                # Games at noon and 1 PM UTC (within noon-to-noon window)
+                commence_time=target_date.replace(hour=12) + timedelta(hours=i),
                 home_team=f"Home{i}",
                 away_team=f"Away{i}",
                 status=EventStatus.FINAL,
@@ -354,13 +356,14 @@ class TestTierCoverageValidatorDailyValidation:
         """Test that missing tier breakdown is accurate."""
         target_date = datetime(2024, 10, 24, tzinfo=UTC)
 
-        # Create 3 games, each missing CLOSING tier
+        # Create 3 games in the noon-to-noon window, each missing CLOSING tier
         for i in range(3):
             event = Event(
                 id=f"event_{i}",
                 sport_key="basketball_nba",
                 sport_title="NBA",
-                commence_time=target_date + timedelta(hours=i),
+                # Games at noon, 1 PM, 2 PM UTC (within noon-to-noon window)
+                commence_time=target_date.replace(hour=12) + timedelta(hours=i),
                 home_team=f"Home{i}",
                 away_team=f"Away{i}",
                 status=EventStatus.FINAL,

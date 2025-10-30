@@ -20,7 +20,10 @@ console = Console()
 @app.command("daily")
 def validate_daily(
     target_date: str = typer.Option(
-        None, "--date", "-d", help="Date to validate (YYYY-MM-DD), defaults to yesterday"
+        None,
+        "--date",
+        "-d",
+        help="Date to validate (YYYY-MM-DD). Uses 24-hour window from noon UTC on this date to noon UTC next day. Defaults to yesterday.",
     ),
     strict: bool = typer.Option(
         True, "--strict/--no-strict", help="Require all 5 tiers (default: strict)"
@@ -38,6 +41,11 @@ def validate_daily(
 ):
     """
     Validate tier coverage for a specific date.
+
+    Uses a 24-hour window from noon UTC to noon UTC (next day) to capture a full
+    NBA "game day" which spans two UTC calendar dates. For example, --date 2024-10-24
+    validates games from noon Oct 24 to noon Oct 25 UTC, capturing all evening games
+    played on Oct 24 in US timezones.
 
     Examples:
         # Validate yesterday's data (with score validation)

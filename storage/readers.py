@@ -497,40 +497,38 @@ class OddsReader:
         self, target_date: datetime, status: EventStatus | None = EventStatus.FINAL
     ) -> list[Event]:
         """
-        Get all games for a specific date (by commence_time).
+        Get all games for a specific date using a 24-hour window (noon-to-noon UTC).
+
+        This uses noon-to-noon UTC to capture a full NBA "game day" which spans
+        two UTC calendar dates due to US timezones.
 
         Args:
-            target_date: Date to query (only date part is used, time is ignored)
+            target_date: Start date for the 24-hour window. The window runs from
+                        noon UTC on this date to noon UTC on the following day.
             status: Optional status filter (defaults to FINAL for validation)
 
         Returns:
-            List of Event records
+            List of Event records with commence_time in the window
 
         Example:
             from datetime import date
             reader = OddsReader(session)
+            # Gets games from noon Oct 24 to noon Oct 25 UTC
             games = await reader.get_games_by_date(
                 target_date=date(2024, 10, 24),
                 status=EventStatus.FINAL
             )
-
-        Note:
-            This uses the commence_time date, not the created_at or completed_at date.
-            A game starting at 11 PM on Oct 24 that ends at 1 AM on Oct 25 will be
-            returned for Oct 24.
         """
         # Convert to datetime if date object passed
         if not isinstance(target_date, datetime):
             target_date = datetime.combine(target_date, datetime.min.time())
 
-        # Start and end of the target date
-        start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=UTC)
-        end_of_day = target_date.replace(
-            hour=23, minute=59, second=59, microsecond=999999, tzinfo=UTC
-        )
+        # 24-hour window: noon UTC on target_date to noon UTC next day
+        window_start = target_date.replace(hour=12, minute=0, second=0, microsecond=0, tzinfo=UTC)
+        window_end = window_start + timedelta(days=1)
 
         query = select(Event).where(
-            and_(Event.commence_time >= start_of_day, Event.commence_time <= end_of_day)
+            and_(Event.commence_time >= window_start, Event.commence_time < window_end)
         )
 
         if status:
