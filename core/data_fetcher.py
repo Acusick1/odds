@@ -92,7 +92,7 @@ class TheOddsAPIClient:
 
                 # Track quota from headers
                 if "x-requests-remaining" in response.headers:
-                    self._quota_remaining = int(response.headers["x-requests-remaining"])
+                    self._quota_remaining = int(float(response.headers["x-requests-remaining"]))
 
                 data = await response.json()
                 elapsed_ms = int((time.time() - start_time) * 1000)

@@ -101,9 +101,13 @@ async def _validate_daily(
     # Run validation
     async with async_session_maker() as session:
         validator = TierCoverageValidator(session)
-        report = await validator.validate_date(
-            target_date, required_tiers, check_scores, check_discovery
-        )
+        try:
+            report = await validator.validate_date(
+                target_date, required_tiers, check_scores, check_discovery
+            )
+        except Exception as e:
+            console.print(f"\n[red]Validation failed with error: {e}[/red]")
+            sys.exit(1)
 
     # Display summary
     _display_summary(report, required_tiers, check_scores, check_discovery)

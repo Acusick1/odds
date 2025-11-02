@@ -293,6 +293,8 @@ class TierCoverageValidator:
                     target_date=str(target_date),
                     error=str(e),
                 )
+                # Re-raise to fail validation when discovery check fails
+                raise
 
         # Build immutable report
         report = DailyValidationReport(
