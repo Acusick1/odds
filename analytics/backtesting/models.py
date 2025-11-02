@@ -7,12 +7,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from pydantic import BaseModel
-
-from core.models import Event, EventStatus
-
 __all__ = [
-    "BacktestEvent",
     "BetRecord",
     "EquityPoint",
     "PerformanceStats",
@@ -23,34 +18,6 @@ __all__ = [
     "BacktestResult",
     "BetOpportunity",
 ]
-
-
-class BacktestEvent(BaseModel):
-    """Event validated for backtesting - guaranteed to have final scores."""
-
-    id: str
-    commence_time: datetime
-    home_team: str
-    away_team: str
-    home_score: int
-    away_score: int
-    status: EventStatus
-
-    @classmethod
-    def from_db_event(cls, event: Event) -> BacktestEvent | None:
-        """Convert database Event to BacktestEvent if scores are present."""
-        if event.home_score is None or event.away_score is None:
-            return None
-
-        return cls(
-            id=event.id,
-            commence_time=event.commence_time,
-            home_team=event.home_team,
-            away_team=event.away_team,
-            home_score=event.home_score,
-            away_score=event.away_score,
-            status=event.status,
-        )
 
 
 @dataclass(frozen=True)

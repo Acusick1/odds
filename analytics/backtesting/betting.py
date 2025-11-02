@@ -1,9 +1,8 @@
-"""Services responsible for executing backtests."""
+"""Betting-specific backtesting engine."""
 
 from __future__ import annotations
 
 import time
-from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
@@ -11,7 +10,10 @@ from datetime import UTC, date, datetime, timedelta
 import structlog
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from core.models import EventStatus, Odds
+from analytics.betting.observations import OddsObservation
+from analytics.betting.problems import BettingEvent
+from analytics.betting.strategies import BettingStrategy
+from core.models import EventStatus
 from storage.readers import OddsReader
 
 from ..utils import (
@@ -24,7 +26,6 @@ from ..utils import (
 )
 from .config import BacktestConfig
 from .models import (
-    BacktestEvent,
     BacktestResult,
     BetOpportunity,
     BetRecord,
@@ -36,39 +37,12 @@ from .models import (
     RiskMetrics,
 )
 
-__all__ = ["BettingStrategy", "BacktestEngine"]
+__all__ = ["BettingStrategy", "BettingBacktestEngine"]
 
 logger = structlog.get_logger()
 
 
-class BettingStrategy(ABC):
-    """Abstract base class for all betting strategies."""
-
-    __slots__ = ("name", "params")
-
-    def __init__(self, name: str, **params):
-        self.name = name
-        self.params = params
-
-    @abstractmethod
-    async def evaluate_opportunity(
-        self,
-        event: BacktestEvent,
-        odds_snapshot: list[Odds],
-        config: BacktestConfig,
-    ) -> list[BetOpportunity]:
-        """Evaluate an event and return betting opportunities."""
-
-    def get_name(self) -> str:
-        """Return strategy name for reporting."""
-        return self.name
-
-    def get_params(self) -> dict:
-        """Expose strategy parameters."""
-        return self.params
-
-
-class BacktestEngine:
+class BettingBacktestEngine:
     """
     Execute backtests of betting strategies against historical data.
 
@@ -145,8 +119,12 @@ class BacktestEngine:
                     progress.advance(task)
                     continue
 
+                # Convert DB Odds to domain OddsObservation
+                observations = [OddsObservation.from_db_odds(odds) for odds in odds_snapshot]
+
+                # Strategy receives BettingEvent directly (no conversion needed)
                 opportunities = await self.strategy.evaluate_opportunity(
-                    event, odds_snapshot, self.config
+                    event, observations, self.config
                 )
 
                 for opportunity in opportunities:
@@ -171,8 +149,8 @@ class BacktestEngine:
                         bet_id=bet_id,
                         event_id=event.id,
                         event_date=event.commence_time,
-                        home_team=event.home_team,
-                        away_team=event.away_team,
+                        home_team=event.home_competitor,
+                        away_team=event.away_competitor,
                         market=opportunity.market,
                         outcome=opportunity.outcome,
                         bookmaker=opportunity.bookmaker,
@@ -207,26 +185,28 @@ class BacktestEngine:
 
         return result
 
-    async def _get_events_with_results(self) -> list[BacktestEvent]:
+    async def _get_events_with_results(self) -> list[BettingEvent]:
+        """Get events with final scores from database."""
         events = await self.reader.get_events_by_date_range(
             start_date=self.config.start_date,
             end_date=self.config.end_date,
             status=EventStatus.FINAL,
         )
 
-        backtest_events: list[BacktestEvent] = []
+        betting_events: list[BettingEvent] = []
         for event in events:
-            bt_event = BacktestEvent.from_db_event(event)
-            if bt_event is not None:
-                backtest_events.append(bt_event)
+            # Convert DB event to domain model, only if it has scores
+            betting_event = BettingEvent.from_db_event(event)
+            if betting_event is not None:
+                betting_events.append(betting_event)
 
         self._logger.info(
             "events_loaded",
             total_events=len(events),
-            events_with_results=len(backtest_events),
+            events_with_results=len(betting_events),
         )
 
-        return backtest_events
+        return betting_events
 
     def _calculate_stake(self, opportunity: BetOpportunity, bankroll: float) -> float:
         if self.config.bet_sizing_method == "flat":
@@ -252,7 +232,7 @@ class BacktestEngine:
         return round(stake, 2)
 
     def _evaluate_bet_result_for_opportunity(
-        self, opportunity: BetOpportunity, event: BacktestEvent, stake: float
+        self, opportunity: BetOpportunity, event: BettingEvent, stake: float
     ) -> tuple[str, float]:
         """Evaluate bet result using opportunity details and event outcome."""
         if opportunity.market == "h2h":
@@ -273,7 +253,7 @@ class BacktestEngine:
         result_str = "win" if won else "loss"
         return (result_str, profit)
 
-    def _evaluate_bet_result(self, bet: BetRecord, event: BacktestEvent) -> tuple[str, float]:
+    def _evaluate_bet_result(self, bet: BetRecord, event: BettingEvent) -> tuple[str, float]:
         """Kept for backward compatibility, delegates to outcome-based evaluation."""
         if bet.market == "h2h":
             won = self._evaluate_moneyline_outcome(bet.outcome, event)
@@ -293,25 +273,25 @@ class BacktestEngine:
         result_str = "win" if won else "loss"
         return (result_str, profit)
 
-    def _evaluate_moneyline_outcome(self, outcome: str, event: BacktestEvent) -> bool | None:
+    def _evaluate_moneyline_outcome(self, outcome: str, event: BettingEvent) -> bool | None:
         """Evaluate moneyline bet based on outcome name."""
         if event.home_score > event.away_score:
-            winner = event.home_team
+            winner = event.home_competitor
         elif event.away_score > event.home_score:
-            winner = event.away_team
+            winner = event.away_competitor
         else:
             return None
 
         return outcome == winner
 
     def _evaluate_spread_outcome(
-        self, outcome: str, line: float | None, event: BacktestEvent
+        self, outcome: str, line: float | None, event: BettingEvent
     ) -> bool | None:
         """Evaluate spread bet based on outcome and line."""
         if line is None:
             return None
 
-        if outcome == event.home_team:
+        if outcome == event.home_competitor:
             adjusted_score = event.home_score + line
             won = adjusted_score > event.away_score
             push = adjusted_score == event.away_score
@@ -327,7 +307,7 @@ class BacktestEngine:
         return won
 
     def _evaluate_total_outcome(
-        self, outcome: str, line: float | None, event: BacktestEvent
+        self, outcome: str, line: float | None, event: BettingEvent
     ) -> bool | None:
         """Evaluate totals bet based on outcome and line."""
         if line is None:
@@ -349,7 +329,7 @@ class BacktestEngine:
 
     def _calculate_metrics(
         self,
-        events: list[BacktestEvent],
+        events: list[BettingEvent],
         bets: list[BetRecord],
         execution_time: float,
     ) -> BacktestResult:

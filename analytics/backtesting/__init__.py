@@ -1,8 +1,6 @@
-"""Backtesting package providing models, configuration, and execution engines."""
-
-from .config import BacktestConfig, BetConstraintsConfig, BetSizingConfig
-from .models import (
-    BacktestEvent,
+from analytics.backtesting.betting import BettingBacktestEngine
+from analytics.backtesting.config import BacktestConfig, BetConstraintsConfig, BetSizingConfig
+from analytics.backtesting.models import (
     BacktestResult,
     BetOpportunity,
     BetRecord,
@@ -13,13 +11,12 @@ from .models import (
     PerformanceStats,
     RiskMetrics,
 )
-from .services import BacktestEngine, BettingStrategy
+from analytics.betting.strategies import BettingStrategy
 
 __all__ = [
     "BacktestConfig",
     "BetConstraintsConfig",
     "BetSizingConfig",
-    "BacktestEvent",
     "BacktestResult",
     "BetOpportunity",
     "BetRecord",
@@ -29,6 +26,6 @@ __all__ = [
     "PerformanceBreakdown",
     "PerformanceStats",
     "RiskMetrics",
-    "BacktestEngine",
+    "BettingBacktestEngine",
     "BettingStrategy",
 ]
