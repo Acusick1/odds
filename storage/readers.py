@@ -493,6 +493,26 @@ class OddsReader:
 
         return dict(rows)
 
+    async def get_snapshot_count_for_event(self, event_id: str) -> int:
+        """
+        Get total count of odds snapshots for an event.
+
+        Args:
+            event_id: Event identifier
+
+        Returns:
+            Total number of snapshots for this event
+
+        Example:
+            reader = OddsReader(session)
+            count = await reader.get_snapshot_count_for_event("abc123")
+            print(f"Total snapshots: {count}")
+        """
+        query = select(func.count(OddsSnapshot.id)).where(OddsSnapshot.event_id == event_id)
+
+        result = await self.session.execute(query)
+        return result.scalar() or 0
+
     async def get_games_by_date(
         self, target_date: datetime, status: EventStatus | None = EventStatus.FINAL
     ) -> list[Event]:
@@ -531,7 +551,7 @@ class OddsReader:
             and_(Event.commence_time >= window_start, Event.commence_time < window_end)
         )
 
-        if status:
+        if status is not None:
             query = query.where(Event.status == status)
 
         query = query.order_by(Event.commence_time)

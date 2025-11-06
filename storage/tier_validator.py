@@ -13,6 +13,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.fetch_tier import FetchTier
+from core.models import EventStatus
 from storage.readers import OddsReader
 
 logger = structlog.get_logger()
@@ -75,7 +76,12 @@ class DailyValidationReport:
     # Score validation
     games_missing_scores: int = 0
     # Game discovery validation
-    missing_games: tuple[dict, ...] = field(default_factory=tuple)  # Games from API not in DB
+    missing_games: tuple[dict, ...] = field(
+        default_factory=tuple
+    )  # ERROR: Games from API not in DB
+    missing_scores: tuple[dict, ...] = field(
+        default_factory=tuple
+    )  # WARNING: Games in DB without scores
 
     @property
     def is_valid(self) -> bool:
@@ -147,8 +153,6 @@ class TierCoverageValidator:
             if not report.is_complete:
                 print(f"Missing tiers: {report.tiers_missing}")
         """
-        from core.models import EventStatus
-
         required_tiers = required_tiers or self.DEFAULT_REQUIRED_TIERS
 
         # Get event details
@@ -239,8 +243,11 @@ class TierCoverageValidator:
         """
         required_tiers = required_tiers or self.DEFAULT_REQUIRED_TIERS
 
-        # Get all final games for the date
-        games = await self.reader.get_games_by_date(target_date)
+        # Get games for the date
+        # When checking discovery, get ALL games (any status) to properly compare with API
+        # Otherwise, only get FINAL games for tier coverage validation
+        status_filter = None if check_discovery else EventStatus.FINAL
+        games = await self.reader.get_games_by_date(target_date, status=status_filter)
 
         # Temporary collections for building the report
         game_reports_list = []
@@ -282,11 +289,25 @@ class TierCoverageValidator:
                 )
                 continue
 
-        # Check for missing games via API if requested
+        # Check for missing games and scores via API if requested
         missing_games_list = []
+        missing_scores_list = []
         if check_discovery:
             try:
-                missing_games_list = await self._check_missing_games(target_date, games)
+                # Fetch games from API
+                api_games = await self._fetch_api_games(target_date)
+
+                if api_games is not None:
+                    # Check for missing games (not in DB at all)
+                    missing_games_list = await self._check_missing_games(
+                        target_date, games, api_games
+                    )
+
+                    # Check for missing scores (in DB but not updated)
+                    missing_scores_list = await self._check_missing_scores(
+                        target_date, games, api_games
+                    )
+
             except Exception as e:
                 logger.error(
                     "game_discovery_check_failed",
@@ -308,6 +329,7 @@ class TierCoverageValidator:
             game_reports=tuple(game_reports_list),
             games_missing_scores=games_missing_scores,
             missing_games=tuple(missing_games_list),
+            missing_scores=tuple(missing_scores_list),
         )
 
         logger.info(
@@ -320,27 +342,24 @@ class TierCoverageValidator:
 
         return report
 
-    async def _check_missing_games(
-        self, target_date: date | datetime, db_games: list
-    ) -> list[dict]:
+    async def _fetch_api_games(self, target_date: date | datetime) -> list[dict] | None:
         """
-        Check for games from The Odds API that aren't in our database.
+        Fetch games from The Odds API for a specific date.
 
         Args:
             target_date: Date to check
-            db_games: List of Event objects from database
 
         Returns:
-            List of missing game dictionaries with id, home_team, away_team
+            List of game dictionaries from API, or None if date out of range
         """
+        from datetime import date as date_type
+
         from core.data_fetcher import TheOddsAPIClient
 
         # Get games from API for this date
         api_client = TheOddsAPIClient()
 
         # Calculate days_from parameter for API (0 = today, 1 = yesterday, etc.)
-        from datetime import date as date_type
-
         if isinstance(target_date, datetime):
             target_date = target_date.date()
 
@@ -355,7 +374,7 @@ class TierCoverageValidator:
                 days_from=days_from,
                 reason="Date outside API /scores endpoint range (0-3 days)",
             )
-            return []
+            return None
 
         try:
             # Fetch scores from API
@@ -364,41 +383,7 @@ class TierCoverageValidator:
                 days_from=days_from,
             )
 
-            api_games = response.scores_data
-
-            # Build set of game IDs in our database
-            db_game_ids = {game.id for game in db_games}
-
-            # Find games in API response that aren't in our DB
-            missing = []
-            for api_game in api_games:
-                if api_game.get("id") not in db_game_ids:
-                    # Check if game was completed (has scores)
-                    if api_game.get("completed", False):
-                        missing.append(
-                            {
-                                "id": api_game.get("id"),
-                                "home_team": api_game.get("home_team"),
-                                "away_team": api_game.get("away_team"),
-                                "commence_time": api_game.get("commence_time"),
-                                "home_score": api_game.get("scores", [{}])[0].get("score")
-                                if api_game.get("scores")
-                                else None,
-                                "away_score": api_game.get("scores", [{}])[1].get("score")
-                                if len(api_game.get("scores", [])) > 1
-                                else None,
-                            }
-                        )
-
-            if missing:
-                logger.warning(
-                    "missing_games_detected",
-                    target_date=str(target_date),
-                    missing_count=len(missing),
-                    missing_game_ids=[g["id"] for g in missing],
-                )
-
-            return missing
+            return response.scores_data
 
         except Exception as e:
             logger.error(
@@ -407,6 +392,119 @@ class TierCoverageValidator:
                 error=str(e),
             )
             raise
+
+    async def _check_missing_games(
+        self, target_date: date | datetime, db_games: list, api_games: list[dict]
+    ) -> list[dict]:
+        """
+        Check for games from The Odds API that aren't in our database.
+
+        Args:
+            target_date: Date to check
+            db_games: List of Event objects from database (ALL statuses)
+            api_games: List of game dicts from API
+
+        Returns:
+            List of missing game dicts (games in API but not in database) - ERROR
+        """
+        # Build set of game IDs in our database
+        db_game_ids = {game.id for game in db_games}
+
+        # Find completed games in API response that aren't in our DB
+        missing_games = []
+
+        for api_game in api_games:
+            game_id = api_game.get("id")
+
+            if game_id not in db_game_ids and api_game.get("completed", False):
+                # ERROR: Game truly missing from database
+                missing_games.append(
+                    {
+                        "id": game_id,
+                        "home_team": api_game.get("home_team"),
+                        "away_team": api_game.get("away_team"),
+                        "commence_time": api_game.get("commence_time"),
+                        "home_score": api_game.get("scores", [{}])[0].get("score")
+                        if api_game.get("scores")
+                        else None,
+                        "away_score": api_game.get("scores", [{}])[1].get("score")
+                        if len(api_game.get("scores", [])) > 1
+                        else None,
+                        "reason": "Game not found in database",
+                    }
+                )
+
+        if missing_games:
+            logger.error(
+                "missing_games_detected",
+                target_date=str(target_date),
+                missing_count=len(missing_games),
+                missing_game_ids=[g["id"] for g in missing_games],
+            )
+
+        return missing_games
+
+    async def _check_missing_scores(
+        self, target_date: date | datetime, db_games: list, api_games: list[dict]
+    ) -> list[dict]:
+        """
+        Check for games in database that haven't been updated with final scores yet.
+
+        Args:
+            target_date: Date to check
+            db_games: List of Event objects from database (ALL statuses)
+            api_games: List of game dicts from API
+
+        Returns:
+            List of games with missing scores (games in DB without final scores) - WARNING
+        """
+        from core.models import EventStatus
+
+        # Build mapping of game IDs to game objects in our database
+        db_game_map = {game.id: game for game in db_games}
+
+        # Find games that are completed in API but not updated in DB
+        missing_scores = []
+
+        for api_game in api_games:
+            game_id = api_game.get("id")
+
+            # Skip if game not in database
+            if game_id not in db_game_map:
+                continue
+
+            # Check if game is completed in API
+            if not api_game.get("completed", False):
+                continue
+
+            # Game exists and is completed - check if DB has been updated
+            db_game = db_game_map[game_id]
+
+            if db_game.status != EventStatus.FINAL or db_game.home_score is None:
+                # WARNING: Game in DB but scores not updated yet
+                snapshot_count = await self.reader.get_snapshot_count_for_event(game_id)
+
+                missing_scores.append(
+                    {
+                        "id": game_id,
+                        "home_team": api_game.get("home_team"),
+                        "away_team": api_game.get("away_team"),
+                        "commence_time": api_game.get("commence_time"),
+                        "status": db_game.status.value,
+                        "snapshots_count": snapshot_count,
+                        "reason": "Game in database but final scores not updated yet",
+                    }
+                )
+
+        if missing_scores:
+            logger.warning(
+                "missing_scores_detected",
+                target_date=str(target_date),
+                missing_scores_count=len(missing_scores),
+                game_ids=[g["id"] for g in missing_scores],
+            )
+
+        return missing_scores
 
     async def validate_date_range(
         self,

@@ -119,9 +119,13 @@ async def _validate_daily(
     if check_scores and report.games_missing_scores > 0:
         _display_score_issues(report, verbose)
 
-    # Display missing games if any
+    # Display missing games if any (ERROR)
     if check_discovery and len(report.missing_games) > 0:
         _display_missing_games(report)
+
+    # Display missing scores if any (WARNING)
+    if check_discovery and len(report.missing_scores) > 0:
+        _display_missing_scores(report)
 
     # Display incomplete games if any
     if report.incomplete_games > 0:
@@ -181,9 +185,16 @@ def _display_summary(report, required_tiers, check_scores=True, check_discovery=
 
     if check_discovery:
         if len(report.missing_games) > 0:
-            table.add_row("Missing Games", f"[red]{len(report.missing_games)}[/red]")
+            table.add_row("Missing Games (ERROR)", f"[red]{len(report.missing_games)}[/red]")
         else:
-            table.add_row("Missing Games", "[green]0[/green]")
+            table.add_row("Missing Games (ERROR)", "[green]0[/green]")
+
+        if len(report.missing_scores) > 0:
+            table.add_row(
+                "Missing Scores (WARNING)", f"[yellow]{len(report.missing_scores)}[/yellow]"
+            )
+        else:
+            table.add_row("Missing Scores (WARNING)", "[green]0[/green]")
 
     table.add_row("Required Tiers", f"{len(required_tiers)}/5")
 
@@ -252,8 +263,10 @@ def _display_score_issues(report, verbose):
 
 
 def _display_missing_games(report):
-    """Display games from API that aren't in database."""
-    console.print(f"[bold]Missing Games from Database ({len(report.missing_games)}):[/bold]\n")
+    """Display games from API that aren't in database (ERROR)."""
+    console.print(
+        f"[bold red]Missing Games from Database - ERROR ({len(report.missing_games)}):[/bold red]\n"
+    )
 
     for missing_game in report.missing_games:
         teams = f"{missing_game['away_team']} @ {missing_game['home_team']}"
@@ -261,11 +274,31 @@ def _display_missing_games(report):
 
         console.print(f"  ✗ [red]{teams}[/red] ({commence_time})")
         console.print(f"     Event ID: {missing_game['id']}")
+        console.print(f"     Reason: {missing_game.get('reason', 'Unknown')}")
 
         home_score = missing_game.get("home_score")
         away_score = missing_game.get("away_score")
         if home_score is not None and away_score is not None:
             console.print(f"     Final Score: {away_score} - {home_score}")
+
+        console.print()
+
+
+def _display_missing_scores(report):
+    """Display games in database without final scores (WARNING)."""
+    console.print(
+        f"[bold yellow]Games Missing Final Scores - WARNING ({len(report.missing_scores)}):[/bold yellow]\n"
+    )
+
+    for missing_score in report.missing_scores:
+        teams = f"{missing_score['away_team']} @ {missing_score['home_team']}"
+        commence_time = missing_score.get("commence_time", "Unknown")
+
+        console.print(f"  ⚠ [yellow]{teams}[/yellow] ({commence_time})")
+        console.print(f"     Event ID: {missing_score['id']}")
+        console.print(f"     Status: {missing_score.get('status', 'Unknown')}")
+        console.print(f"     Snapshots: {missing_score.get('snapshots_count', 0)}")
+        console.print(f"     Reason: {missing_score.get('reason', 'Unknown')}")
 
         console.print()
 
@@ -355,7 +388,9 @@ def _save_to_json(report, output_path: str, check_scores=True, check_discovery=F
     # Add game discovery results if enabled
     if check_discovery:
         data["summary"]["missing_games_count"] = len(report.missing_games)
-        data["missing_games"] = list(report.missing_games)
+        data["summary"]["missing_scores_count"] = len(report.missing_scores)
+        data["missing_games"] = list(report.missing_games)  # ERROR: not in DB
+        data["missing_scores"] = list(report.missing_scores)  # WARNING: in DB without scores
 
     with open(output_path, "w") as f:
         json.dump(data, f, indent=2)
