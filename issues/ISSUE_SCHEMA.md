@@ -142,6 +142,8 @@ Line movement anomalies are key indicators of professional betting activity:
 
 ## Quick Decision Guide
 
+**Before creating an issue**: Check if the issue is necessary! The codebase may already contain the functionality or something similar to it. After reviewing the codebase, if you are not 100% clear on what the issue should contain, ask succinct clarifying questions. Continue to iterate with the user until you have a rounded overview of the requirements, constraints, and expected outcomes.
+
 Choose fields based on task complexity, whether location is obvious, whether external agent needs context, and whether design decisions are needed.
 
 **Default starting point**: Core 4 fields, add others as needed.
