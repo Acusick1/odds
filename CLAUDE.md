@@ -706,6 +706,17 @@ The project uses **uv** for fast and reliable Python package management. Use a `
 
 **IMPORTANT FOR LLM AGENTS**: Do NOT manually run `ruff` or `pre-commit` commands. These are automated via git hooks and CI. Running them wastes time and tokens.
 
+### Issue Creation Workflow
+
+When creating GitHub issues, follow this streamlined workflow:
+
+**Process**:
+
+1. Generate markdown issue following schema and instructions in [issues/ISSUE_SCHEMA.md](issues/ISSUE_SCHEMA.md)
+2. Show preview in chat for user review
+3. After user approval, post to GitHub using `gh issue create`
+4. Return issue URL to user
+
 ---
 
 ## Development Guide
