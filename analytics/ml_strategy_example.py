@@ -5,7 +5,7 @@ This module demonstrates how to build an ML-based betting strategy using XGBoost
 It serves as a reference implementation for creating machine learning strategies.
 
 Key Features:
-- Feature engineering from historical odds data
+- Feature engineering from historical odds data (via pluggable FeatureExtractor)
 - XGBoost binary classifier for win probability prediction
 - Integration with backtesting framework via BetOpportunity.confidence
 - Model persistence (save/load weights)
@@ -13,17 +13,24 @@ Key Features:
 
 Dependencies (install with uv):
     uv add xgboost scikit-learn numpy
+
+Architecture:
+- XGBoostStrategy uses dependency injection to accept any FeatureExtractor
+- Default: TabularFeatureExtractor for snapshot-based features
+- Extensible: Can swap in SequenceFeatureExtractor for LSTM models
 """
 
 from __future__ import annotations
 
 import pickle
+import warnings
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from analytics.backtesting import BacktestConfig, BacktestEvent, BetOpportunity, BettingStrategy
+from analytics.feature_extraction import FeatureExtractor, TabularFeatureExtractor
 from analytics.utils import american_to_decimal, calculate_implied_probability, calculate_market_hold
 from core.models import Odds
 
@@ -32,13 +39,22 @@ class FeatureEngineering:
     """
     Feature engineering for sports betting ML models.
 
-    Extracts features from event data and odds snapshots that capture:
-    - Line movement (sharp vs public)
-    - Market efficiency (vig, consensus)
-    - Closing line value
-    - Time-to-game factors
-    - Sharp vs retail odds discrepancies
+    DEPRECATED: Use TabularFeatureExtractor from analytics.feature_extraction instead.
+    This class is maintained for backward compatibility and will be removed in a future version.
+
+    Example migration:
+        ```python
+        # Old (deprecated)
+        features = FeatureEngineering.extract_features(event, odds, outcome="Lakers")
+
+        # New (recommended)
+        from analytics.feature_extraction import TabularFeatureExtractor
+        extractor = TabularFeatureExtractor()
+        features = extractor.extract_features(event, odds, outcome="Lakers")
+        ```
     """
+
+    _warned = False  # Class-level flag to warn only once
 
     @staticmethod
     def extract_features(
@@ -50,6 +66,8 @@ class FeatureEngineering:
         """
         Extract ML features from event and odds snapshot.
 
+        DEPRECATED: Use TabularFeatureExtractor instead.
+
         Args:
             event: Event with final scores
             odds_snapshot: Odds at decision time
@@ -59,158 +77,25 @@ class FeatureEngineering:
         Returns:
             Dictionary of feature names to values
         """
-        features = {}
-
-        # Filter for target market
-        market_odds = [o for o in odds_snapshot if o.market_key == market]
-
-        if not market_odds:
-            return features
-
-        # Sharp bookmaker features (Pinnacle as baseline)
-        sharp_book = "pinnacle"
-        sharp_odds = [o for o in market_odds if o.bookmaker_key == sharp_book]
-
-        # Retail bookmaker features (FanDuel, DraftKings, BetMGM)
-        retail_books = ["fanduel", "draftkings", "betmgm"]
-        retail_odds = [o for o in market_odds if o.bookmaker_key in retail_books]
-
-        # 1. Market consensus features
-        if market == "h2h":
-            home_odds_list = [o for o in market_odds if o.outcome_name == event.home_team]
-            away_odds_list = [o for o in market_odds if o.outcome_name == event.away_team]
-
-            if home_odds_list and away_odds_list:
-                features["avg_home_odds"] = np.mean([o.price for o in home_odds_list])
-                features["avg_away_odds"] = np.mean([o.price for o in away_odds_list])
-                features["std_home_odds"] = np.std([o.price for o in home_odds_list])
-                features["std_away_odds"] = np.std([o.price for o in away_odds_list])
-
-                # Market consensus (average implied probability)
-                avg_home_prob = np.mean(
-                    [calculate_implied_probability(o.price) for o in home_odds_list]
-                )
-                avg_away_prob = np.mean(
-                    [calculate_implied_probability(o.price) for o in away_odds_list]
-                )
-                features["home_consensus_prob"] = avg_home_prob
-                features["away_consensus_prob"] = avg_away_prob
-
-                # Determine if analyzing home or away
-                if outcome == event.home_team:
-                    features["consensus_prob"] = avg_home_prob
-                    features["opponent_consensus_prob"] = avg_away_prob
-                elif outcome == event.away_team:
-                    features["consensus_prob"] = avg_away_prob
-                    features["opponent_consensus_prob"] = avg_home_prob
-
-        # 2. Sharp vs Retail features (key for detecting value)
-        if sharp_odds and retail_odds:
-            sharp_home = next(
-                (o for o in sharp_odds if o.outcome_name == event.home_team), None
+        if not FeatureEngineering._warned:
+            warnings.warn(
+                "FeatureEngineering is deprecated. Use TabularFeatureExtractor from "
+                "analytics.feature_extraction instead.",
+                DeprecationWarning,
+                stacklevel=2,
             )
-            sharp_away = next(
-                (o for o in sharp_odds if o.outcome_name == event.away_team), None
-            )
+            FeatureEngineering._warned = True
 
-            if sharp_home and sharp_away:
-                sharp_home_prob = calculate_implied_probability(sharp_home.price)
-                sharp_away_prob = calculate_implied_probability(sharp_away.price)
-
-                features["sharp_home_prob"] = sharp_home_prob
-                features["sharp_away_prob"] = sharp_away_prob
-
-                # Calculate sharp market hold (should be lower than retail)
-                sharp_hold = calculate_market_hold([sharp_home.price, sharp_away.price])
-                features["sharp_market_hold"] = sharp_hold
-
-                # Compare retail to sharp (deviation indicates potential value)
-                retail_home_odds = [
-                    o for o in retail_odds if o.outcome_name == event.home_team
-                ]
-                retail_away_odds = [
-                    o for o in retail_odds if o.outcome_name == event.away_team
-                ]
-
-                if retail_home_odds:
-                    avg_retail_home_prob = np.mean(
-                        [calculate_implied_probability(o.price) for o in retail_home_odds]
-                    )
-                    features["retail_sharp_diff_home"] = avg_retail_home_prob - sharp_home_prob
-
-                if retail_away_odds:
-                    avg_retail_away_prob = np.mean(
-                        [calculate_implied_probability(o.price) for o in retail_away_odds]
-                    )
-                    features["retail_sharp_diff_away"] = avg_retail_away_prob - sharp_away_prob
-
-                # Set outcome-specific features
-                if outcome == event.home_team:
-                    features["sharp_prob"] = sharp_home_prob
-                    features["opponent_sharp_prob"] = sharp_away_prob
-                elif outcome == event.away_team:
-                    features["sharp_prob"] = sharp_away_prob
-                    features["opponent_sharp_prob"] = sharp_home_prob
-
-        # 3. Market efficiency features
-        all_books = set(o.bookmaker_key for o in market_odds)
-        features["num_bookmakers"] = len(all_books)
-
-        # Calculate average market hold across all books
-        if market == "h2h":
-            holds = []
-            for book in all_books:
-                book_odds = [o for o in market_odds if o.bookmaker_key == book]
-                book_home = next((o for o in book_odds if o.outcome_name == event.home_team), None)
-                book_away = next((o for o in book_odds if o.outcome_name == event.away_team), None)
-
-                if book_home and book_away:
-                    hold = calculate_market_hold([book_home.price, book_away.price])
-                    holds.append(hold)
-
-            if holds:
-                features["avg_market_hold"] = np.mean(holds)
-                features["std_market_hold"] = np.std(holds)
-
-        # 4. Best available odds features (line shopping)
-        if market == "h2h":
-            home_prices = [o.price for o in market_odds if o.outcome_name == event.home_team]
-            away_prices = [o.price for o in market_odds if o.outcome_name == event.away_team]
-
-            if home_prices:
-                features["best_home_odds"] = max(home_prices)
-                features["worst_home_odds"] = min(home_prices)
-                features["home_odds_range"] = max(home_prices) - min(home_prices)
-
-            if away_prices:
-                features["best_away_odds"] = max(away_prices)
-                features["worst_away_odds"] = min(away_prices)
-                features["away_odds_range"] = max(away_prices) - min(away_prices)
-
-            # Set outcome-specific best odds
-            if outcome == event.home_team and home_prices:
-                features["best_available_odds"] = max(home_prices)
-                features["odds_range"] = max(home_prices) - min(home_prices)
-            elif outcome == event.away_team and away_prices:
-                features["best_available_odds"] = max(away_prices)
-                features["odds_range"] = max(away_prices) - min(away_prices)
-
-        # 5. Decimal odds features (for model friendliness)
-        if "best_available_odds" in features:
-            features["best_available_decimal"] = american_to_decimal(
-                int(features["best_available_odds"])
-            )
-
-        # 6. Binary features
-        features["is_home_team"] = 1.0 if outcome == event.home_team else 0.0
-        features["is_away_team"] = 1.0 if outcome == event.away_team else 0.0
-
-        return features
+        # Delegate to TabularFeatureExtractor for backward compatibility
+        extractor = TabularFeatureExtractor()
+        return extractor.extract_features(event, odds_snapshot, outcome=outcome, market=market)
 
     @staticmethod
     def create_feature_vector(features: dict[str, float], feature_names: list[str]) -> np.ndarray:
         """
         Convert feature dictionary to numpy array for model input.
+
+        DEPRECATED: Use TabularFeatureExtractor.create_feature_vector() instead.
 
         Args:
             features: Feature dictionary from extract_features()
@@ -219,7 +104,18 @@ class FeatureEngineering:
         Returns:
             Numpy array of feature values (fills missing with 0.0)
         """
-        return np.array([features.get(name, 0.0) for name in feature_names])
+        if not FeatureEngineering._warned:
+            warnings.warn(
+                "FeatureEngineering is deprecated. Use TabularFeatureExtractor from "
+                "analytics.feature_extraction instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            FeatureEngineering._warned = True
+
+        # Delegate to TabularFeatureExtractor for backward compatibility
+        extractor = TabularFeatureExtractor()
+        return extractor.create_feature_vector(features, feature_names)
 
 
 class XGBoostStrategy(BettingStrategy):
@@ -236,16 +132,24 @@ class XGBoostStrategy(BettingStrategy):
     - Market consensus and efficiency
     - Closing line value
 
+    Architecture:
+    - Uses dependency injection to accept any FeatureExtractor
+    - Default: TabularFeatureExtractor for snapshot-based features
+    - Extensible: Can swap in custom feature extractors (e.g., SequenceFeatureExtractor for LSTM)
+
     Example:
         ```python
-        # Train model (see notebook)
-        strategy = XGBoostStrategy()
-        await strategy.train(training_data, labels)
-        strategy.save_model("models/xgboost_h2h.pkl")
-
-        # Use in backtesting
+        # Default tabular features
         strategy = XGBoostStrategy()
         strategy.load_model("models/xgboost_h2h.pkl")
+
+        # Custom feature extractor
+        from analytics.feature_extraction import TabularFeatureExtractor
+        extractor = TabularFeatureExtractor(sharp_bookmakers=["pinnacle", "circa"])
+        strategy = XGBoostStrategy(feature_extractor=extractor)
+        strategy.load_model("models/xgboost_h2h.pkl")
+
+        # Use in backtesting
         result = await backtest_engine.run()
         ```
     """
@@ -258,6 +162,7 @@ class XGBoostStrategy(BettingStrategy):
         min_confidence: float = 0.52,
         bookmakers: list[str] | None = None,
         feature_names: list[str] | None = None,
+        feature_extractor: FeatureExtractor | None = None,
     ):
         """
         Initialize XGBoost strategy.
@@ -269,6 +174,7 @@ class XGBoostStrategy(BettingStrategy):
             min_confidence: Minimum model probability to consider betting
             bookmakers: List of bookmakers to consider (default: all major books)
             feature_names: List of feature names used by model (auto-set on load)
+            feature_extractor: Feature extractor to use (default: TabularFeatureExtractor)
         """
         if bookmakers is None:
             bookmakers = [
@@ -293,6 +199,7 @@ class XGBoostStrategy(BettingStrategy):
 
         self.model: Any = None  # XGBoost classifier
         self.feature_names: list[str] = feature_names or []
+        self.feature_extractor: FeatureExtractor = feature_extractor or TabularFeatureExtractor()
 
         if model_path:
             self.load_model(model_path)
@@ -336,8 +243,8 @@ class XGBoostStrategy(BettingStrategy):
 
         # Evaluate both home and away team
         for outcome in [event.home_team, event.away_team]:
-            # Extract features for this outcome
-            features = FeatureEngineering.extract_features(
+            # Extract features for this outcome using injected extractor
+            features = self.feature_extractor.extract_features(
                 event, odds_snapshot, market=market, outcome=outcome
             )
 
@@ -345,7 +252,7 @@ class XGBoostStrategy(BettingStrategy):
                 continue
 
             # Convert to feature vector
-            feature_vector = FeatureEngineering.create_feature_vector(
+            feature_vector = self.feature_extractor.create_feature_vector(
                 features, self.feature_names
             )
 
