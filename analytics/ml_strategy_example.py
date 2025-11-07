@@ -23,7 +23,6 @@ Architecture:
 from __future__ import annotations
 
 import pickle
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -31,91 +30,8 @@ import numpy as np
 
 from analytics.backtesting import BacktestConfig, BacktestEvent, BetOpportunity, BettingStrategy
 from analytics.feature_extraction import FeatureExtractor, TabularFeatureExtractor
-from analytics.utils import american_to_decimal, calculate_implied_probability, calculate_market_hold
+from analytics.utils import calculate_implied_probability
 from core.models import Odds
-
-
-class FeatureEngineering:
-    """
-    Feature engineering for sports betting ML models.
-
-    DEPRECATED: Use TabularFeatureExtractor from analytics.feature_extraction instead.
-    This class is maintained for backward compatibility and will be removed in a future version.
-
-    Example migration:
-        ```python
-        # Old (deprecated)
-        features = FeatureEngineering.extract_features(event, odds, outcome="Lakers")
-
-        # New (recommended)
-        from analytics.feature_extraction import TabularFeatureExtractor
-        extractor = TabularFeatureExtractor()
-        features = extractor.extract_features(event, odds, outcome="Lakers")
-        ```
-    """
-
-    _warned = False  # Class-level flag to warn only once
-
-    @staticmethod
-    def extract_features(
-        event: BacktestEvent,
-        odds_snapshot: list[Odds],
-        market: str = "h2h",
-        outcome: str | None = None,
-    ) -> dict[str, float]:
-        """
-        Extract ML features from event and odds snapshot.
-
-        DEPRECATED: Use TabularFeatureExtractor instead.
-
-        Args:
-            event: Event with final scores
-            odds_snapshot: Odds at decision time
-            market: Market to analyze (h2h, spreads, totals)
-            outcome: Specific outcome to analyze (if None, analyzes both sides)
-
-        Returns:
-            Dictionary of feature names to values
-        """
-        if not FeatureEngineering._warned:
-            warnings.warn(
-                "FeatureEngineering is deprecated. Use TabularFeatureExtractor from "
-                "analytics.feature_extraction instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            FeatureEngineering._warned = True
-
-        # Delegate to TabularFeatureExtractor for backward compatibility
-        extractor = TabularFeatureExtractor()
-        return extractor.extract_features(event, odds_snapshot, outcome=outcome, market=market)
-
-    @staticmethod
-    def create_feature_vector(features: dict[str, float], feature_names: list[str]) -> np.ndarray:
-        """
-        Convert feature dictionary to numpy array for model input.
-
-        DEPRECATED: Use TabularFeatureExtractor.create_feature_vector() instead.
-
-        Args:
-            features: Feature dictionary from extract_features()
-            feature_names: Ordered list of feature names
-
-        Returns:
-            Numpy array of feature values (fills missing with 0.0)
-        """
-        if not FeatureEngineering._warned:
-            warnings.warn(
-                "FeatureEngineering is deprecated. Use TabularFeatureExtractor from "
-                "analytics.feature_extraction instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            FeatureEngineering._warned = True
-
-        # Delegate to TabularFeatureExtractor for backward compatibility
-        extractor = TabularFeatureExtractor()
-        return extractor.create_feature_vector(features, feature_names)
 
 
 class XGBoostStrategy(BettingStrategy):
@@ -233,9 +149,7 @@ class XGBoostStrategy(BettingStrategy):
         min_conf = self.params["min_confidence"]
 
         market_odds = [
-            o
-            for o in odds_snapshot
-            if o.market_key == market and o.bookmaker_key in bookmakers
+            o for o in odds_snapshot if o.market_key == market and o.bookmaker_key in bookmakers
         ]
 
         if not market_odds:
@@ -329,9 +243,7 @@ class XGBoostStrategy(BettingStrategy):
         try:
             from xgboost import XGBClassifier
         except ImportError as e:
-            raise ImportError(
-                "xgboost not installed. Install with: uv add xgboost"
-            ) from e
+            raise ImportError("xgboost not installed. Install with: uv add xgboost") from e
 
         self.feature_names = feature_names
 
