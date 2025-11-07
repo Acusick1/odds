@@ -15,6 +15,7 @@ from core.config import get_settings
 from core.data_fetcher import TheOddsAPIClient
 from core.database import async_session_maker
 from core.game_selector import GameSelector
+from core.gap_analyzer import GapAnalyzer
 
 app = typer.Typer(help="Historical data backfill operations")
 console = Console()
@@ -159,6 +160,12 @@ def execute_backfill(
         "--skip-existing/--no-skip-existing",
         help="Skip games that already have historical snapshots",
     ),
+    max_calls: int | None = typer.Option(
+        None,
+        "--max-calls",
+        "-n",
+        help="Maximum API calls to make (stops execution when reached)",
+    ),
 ):
     """
     Execute a backfill plan to fetch historical odds.
@@ -169,16 +176,18 @@ def execute_backfill(
     Example:
         odds backfill execute --plan backfill_plan.json
         odds backfill execute --plan backfill_plan.json --dry-run
+        odds backfill execute --plan backfill_plan.json --max-calls 50
     """
     console.print("\n[bold cyan]Executing Historical Backfill[/bold cyan]\n")
 
-    asyncio.run(_execute_backfill_async(plan_file, dry_run, skip_existing))
+    asyncio.run(_execute_backfill_async(plan_file, dry_run, skip_existing, max_calls))
 
 
 async def _execute_backfill_async(
     plan_file: str,
     dry_run: bool,
     skip_existing: bool,
+    max_calls: int | None,
 ):
     """Async implementation of backfill execution."""
     # Load plan
@@ -202,8 +211,59 @@ async def _execute_backfill_async(
     console.print(f"[bold]Total snapshots:[/bold] {plan['total_snapshots']}")
     console.print(f"[bold]Estimated quota:[/bold] {plan['estimated_quota_usage']:,}")
 
+    if max_calls is not None:
+        console.print(f"[bold yellow]API call limit:[/bold yellow] {max_calls}")
+        estimated_snapshots = min(max_calls, plan['total_snapshots'])
+        console.print(f"[dim]Will process approximately {estimated_snapshots} snapshots[/dim]")
+
     if dry_run:
         console.print("\n[yellow]DRY RUN - No API calls will be made[/yellow]")
+
+        # Enhanced dry-run reporting with detailed breakdown
+        console.print("\n[bold cyan]Detailed Breakdown[/bold cyan]")
+
+        # Analyze snapshots by game
+        from collections import defaultdict
+        snapshots_by_count = defaultdict(int)
+        for game in games:
+            snapshot_count = len(game.get("snapshots", []))
+            snapshots_by_count[snapshot_count] += 1
+
+        breakdown_table = Table(title="Snapshot Distribution")
+        breakdown_table.add_column("Snapshots per Game", style="cyan")
+        breakdown_table.add_column("Number of Games", style="yellow")
+        breakdown_table.add_column("Total Snapshots", style="green")
+
+        for count in sorted(snapshots_by_count.keys()):
+            num_games = snapshots_by_count[count]
+            total = count * num_games
+            breakdown_table.add_row(str(count), str(num_games), str(total))
+
+        console.print(breakdown_table)
+
+        # Date range analysis
+        if games:
+            from datetime import datetime as dt
+            game_dates = []
+            for game in games:
+                try:
+                    commence_time_str = game.get("commence_time", "")
+                    if commence_time_str:
+                        game_date = dt.fromisoformat(commence_time_str.replace('Z', '+00:00'))
+                        game_dates.append(game_date)
+                except (ValueError, AttributeError):
+                    pass
+
+            if game_dates:
+                min_date = min(game_dates)
+                max_date = max(game_dates)
+                console.print(f"\n[bold]Date Coverage:[/bold] {min_date.date()} to {max_date.date()}")
+
+        # Show plan metadata if available
+        if "generated_from" in plan:
+            console.print(f"[dim]Plan generated from: {plan['generated_from']}[/dim]")
+
+        console.print()
 
     # Confirm execution
     if not dry_run:
@@ -289,14 +349,19 @@ async def _execute_backfill_async(
                 last_event_id = progress_update.event_id
 
             # Execute the backfill
-            result = await executor.execute_plan(plan, progress_callback=on_progress_with_advance)
+            result = await executor.execute_plan(
+                plan, progress_callback=on_progress_with_advance, max_calls=max_calls
+            )
 
             # Advance for the last game
             progress.advance(game_task)
 
     # Final summary
     console.print("\n" + "=" * 60)
-    console.print("[bold cyan]Backfill Complete[/bold cyan]")
+    if result.stopped_at_limit:
+        console.print("[bold yellow]Backfill Stopped at API Limit[/bold yellow]")
+    else:
+        console.print("[bold cyan]Backfill Complete[/bold cyan]")
     console.print("=" * 60)
 
     summary_table = Table()
@@ -308,11 +373,23 @@ async def _execute_backfill_async(
     summary_table.add_row("Failed Snapshots", str(result.failed_snapshots))
     summary_table.add_row("Skipped Snapshots", str(result.skipped_snapshots))
 
+    if result.stopped_at_limit:
+        summary_table.add_row(
+            "Remaining Snapshots", str(result.remaining_snapshots), style="yellow"
+        )
+
     if not dry_run:
         summary_table.add_row("Approx. Quota Used", f"{result.total_quota_used:,}")
 
     console.print("\n")
     console.print(summary_table)
+
+    if result.stopped_at_limit:
+        console.print(
+            "\n[yellow]Note: Execution stopped due to API call limit. "
+            "Run again to continue processing remaining snapshots.[/yellow]"
+        )
+
     console.print()
 
 
@@ -367,3 +444,218 @@ async def _backfill_status_async():
             console.print("[yellow]No historical data found[/yellow]")
 
     console.print()
+
+
+@app.command("analyze")
+def analyze_gaps(
+    start_date: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
+    mode: str = typer.Option(
+        "all",
+        "--mode",
+        "-m",
+        help="Analysis mode: events, snapshots, tiers, or all",
+    ),
+    output_plan: str | None = typer.Option(
+        None,
+        "--output-plan",
+        "-o",
+        help="Generate backfill plan JSON to fill gaps",
+    ),
+    sport: str = typer.Option(
+        "basketball_nba",
+        "--sport",
+        help="Sport to analyze",
+    ),
+):
+    """
+    Analyze historical data for gaps and missing snapshots.
+
+    This command identifies:
+    - Missing events: Games with no historical snapshots
+    - Incomplete snapshots: Games with fewer snapshots than expected
+    - Missing tiers: Games missing specific fetch tiers (opening, closing, etc.)
+
+    Example:
+        odds backfill analyze --start 2024-11-01 --end 2024-11-07 --mode all
+        odds backfill analyze --start 2024-11-01 --end 2024-11-07 --mode tiers
+        odds backfill analyze --start 2024-11-01 --end 2024-11-07 --output-plan gaps.json
+    """
+    console.print("\n[bold cyan]Analyzing Historical Data Gaps[/bold cyan]\n")
+
+    asyncio.run(_analyze_gaps_async(start_date, end_date, mode, output_plan, sport))
+
+
+async def _analyze_gaps_async(
+    start_date_str: str,
+    end_date_str: str,
+    mode: str,
+    output_plan: str | None,
+    sport: str,
+):
+    """Async implementation of gap analysis."""
+    # Parse dates
+    try:
+        start_date = datetime.fromisoformat(start_date_str)
+        end_date = datetime.fromisoformat(end_date_str)
+    except ValueError as e:
+        console.print(f"[red]Error parsing dates: {e}[/red]")
+        raise typer.Exit(1) from e
+
+    # Validate mode
+    valid_modes = ["events", "snapshots", "tiers", "all"]
+    if mode not in valid_modes:
+        console.print(f"[red]Invalid mode: {mode}. Must be one of: {', '.join(valid_modes)}[/red]")
+        raise typer.Exit(1)
+
+    # Run gap analysis
+    async with async_session_maker() as session:
+        analyzer = GapAnalyzer(session)
+
+        console.print(f"[cyan]Analyzing {sport} from {start_date_str} to {end_date_str}...[/cyan]\n")
+
+        gap_report = await analyzer.analyze_gaps(
+            start_date=start_date,
+            end_date=end_date,
+            mode=mode,
+            sport_key=sport,
+        )
+
+        # Display summary statistics
+        summary_table = Table(title="Gap Analysis Summary")
+        summary_table.add_column("Metric", style="cyan")
+        summary_table.add_column("Value", style="yellow")
+
+        summary_table.add_row("Analysis Mode", mode.upper())
+        summary_table.add_row("Date Range", f"{start_date_str} to {end_date_str}")
+        summary_table.add_row("Total Events Checked", str(gap_report.total_events_checked))
+        summary_table.add_row("Total Gaps Found", str(gap_report.total_gaps_found))
+
+        if mode in ("events", "all"):
+            summary_table.add_row("Missing Events", str(len(gap_report.missing_events)))
+
+        if mode in ("snapshots", "all"):
+            summary_table.add_row("Incomplete Events", str(len(gap_report.incomplete_events)))
+
+        if mode in ("tiers", "all"):
+            summary_table.add_row(
+                "Events Missing Tiers", str(len(gap_report.events_missing_tiers))
+            )
+
+        summary_table.add_row(
+            "Estimated API Calls", f"{gap_report.estimated_api_calls:,}", style="bold green"
+        )
+
+        console.print(summary_table)
+        console.print()
+
+        # Display detailed results if gaps found
+        if not gap_report.has_gaps():
+            console.print("[green]✓ No gaps found! Historical data is complete.[/green]\n")
+            return
+
+        # Missing events details
+        if gap_report.missing_events and mode in ("events", "all"):
+            console.print("\n[bold yellow]Missing Events (No Snapshots)[/bold yellow]")
+            events_table = Table()
+            events_table.add_column("Event ID", style="dim")
+            events_table.add_column("Date", style="cyan")
+            events_table.add_column("Matchup", style="white")
+            events_table.add_column("Missing Snapshots", style="red")
+
+            for event in gap_report.missing_events[:20]:  # Limit display to 20
+                matchup = f"{event.away_team} @ {event.home_team}"
+                events_table.add_row(
+                    event.id[:8],
+                    event.commence_time.strftime("%Y-%m-%d %H:%M"),
+                    matchup,
+                    "5",
+                )
+
+            console.print(events_table)
+
+            if len(gap_report.missing_events) > 20:
+                console.print(
+                    f"[dim]... and {len(gap_report.missing_events) - 20} more events[/dim]"
+                )
+            console.print()
+
+        # Incomplete events details
+        if gap_report.incomplete_events and mode in ("snapshots", "all"):
+            console.print("\n[bold yellow]Incomplete Events (Missing Snapshots)[/bold yellow]")
+            incomplete_table = Table()
+            incomplete_table.add_column("Event ID", style="dim")
+            incomplete_table.add_column("Matchup", style="white")
+            incomplete_table.add_column("Current", style="yellow")
+            incomplete_table.add_column("Expected", style="green")
+            incomplete_table.add_column("Missing", style="red")
+
+            for gap in gap_report.incomplete_events[:20]:  # Limit display
+                matchup = f"{gap.event.away_team} @ {gap.event.home_team}"
+                incomplete_table.add_row(
+                    gap.event.id[:8],
+                    matchup,
+                    str(gap.current_snapshot_count),
+                    str(gap.expected_snapshot_count),
+                    str(len(gap.missing_snapshot_times)),
+                )
+
+            console.print(incomplete_table)
+
+            if len(gap_report.incomplete_events) > 20:
+                console.print(
+                    f"[dim]... and {len(gap_report.incomplete_events) - 20} more events[/dim]"
+                )
+            console.print()
+
+        # Events missing tiers
+        if gap_report.events_missing_tiers and mode in ("tiers", "all"):
+            console.print("\n[bold yellow]Events Missing Specific Tiers[/bold yellow]")
+            tiers_table = Table()
+            tiers_table.add_column("Event ID", style="dim")
+            tiers_table.add_column("Matchup", style="white")
+            tiers_table.add_column("Missing Tiers", style="red")
+            tiers_table.add_column("Tier Coverage", style="cyan")
+
+            for gap in gap_report.events_missing_tiers[:20]:  # Limit display
+                matchup = f"{gap.event.away_team} @ {gap.event.home_team}"
+                missing_tier_names = ", ".join(t.value for t in gap.missing_tiers)
+
+                # Format tier coverage
+                coverage_str = ", ".join(
+                    f"{tier}:{count}" for tier, count in gap.tier_coverage.items()
+                )
+
+                tiers_table.add_row(
+                    gap.event.id[:8],
+                    matchup,
+                    missing_tier_names,
+                    coverage_str or "none",
+                )
+
+            console.print(tiers_table)
+
+            if len(gap_report.events_missing_tiers) > 20:
+                console.print(
+                    f"[dim]... and {len(gap_report.events_missing_tiers) - 20} more events[/dim]"
+                )
+            console.print()
+
+        # Generate backfill plan if requested
+        if output_plan:
+            console.print(f"\n[cyan]Generating backfill plan to fill gaps...[/cyan]")
+
+            plan = await analyzer.generate_backfill_plan_for_gaps(gap_report)
+
+            # Save plan to file
+            output_path = Path(output_plan)
+            with open(output_path, "w") as f:
+                json.dump(plan, f, indent=2, default=str)
+
+            console.print(f"[green]✓ Backfill plan saved to {output_plan}[/green]")
+            console.print(f"[yellow]Execute with:[/yellow]")
+            console.print(f"[bold]  odds backfill execute --plan {output_plan}[/bold]\n")
+        else:
+            console.print(
+                "[dim]Tip: Use --output-plan gaps.json to generate a backfill plan[/dim]\n"
+            )

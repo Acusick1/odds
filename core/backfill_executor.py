@@ -24,6 +24,8 @@ class BackfillResult:
     failed_snapshots: int
     skipped_snapshots: int
     total_quota_used: int
+    stopped_at_limit: bool = False
+    remaining_snapshots: int = 0
 
 
 @dataclass
@@ -84,6 +86,7 @@ class BackfillExecutor:
         self,
         plan: dict,
         progress_callback: Callable[[BackfillProgress], None] | None = None,
+        max_calls: int | None = None,
     ) -> BackfillResult:
         """
         Execute a backfill plan.
@@ -92,6 +95,7 @@ class BackfillExecutor:
             plan: Backfill plan dictionary with 'games' list
             progress_callback: Optional callback for progress updates
                                Called with BackfillProgress objects
+            max_calls: Maximum API calls to make (stops execution when reached)
 
         Returns:
             BackfillResult with execution statistics
@@ -110,6 +114,12 @@ class BackfillExecutor:
         failed_snapshots = 0
         skipped_snapshots = 0
         total_quota_used = 0
+        api_calls_made = 0
+        stopped_at_limit = False
+
+        # Calculate total snapshots in plan for progress tracking
+        total_snapshots_in_plan = sum(len(game["snapshots"]) for game in games)
+        snapshots_processed = 0
 
         # Process each game
         for game in games:
@@ -122,6 +132,18 @@ class BackfillExecutor:
 
             # Process each snapshot for this game
             for snapshot_time in snapshots:
+                # Check if we've hit the API call limit
+                if max_calls is not None and api_calls_made >= max_calls:
+                    stopped_at_limit = True
+                    logger.info(
+                        "max_calls_limit_reached",
+                        api_calls_made=api_calls_made,
+                        max_calls=max_calls,
+                        snapshots_processed=snapshots_processed,
+                        total_snapshots=total_snapshots_in_plan,
+                    )
+                    break
+
                 try:
                     result = await self._process_snapshot(
                         event_id=event_id,
@@ -130,10 +152,14 @@ class BackfillExecutor:
                         snapshot_time=snapshot_time,
                     )
 
+                    # Track progress
+                    snapshots_processed += 1
+
                     # Update statistics
                     if result.status == "success":
                         successful_snapshots += 1
                         total_quota_used += 30  # Approximate quota cost
+                        api_calls_made += 1  # Increment API call counter
                     elif result.status == "exists":
                         skipped_snapshots += 1
                     elif result.status == "skipped":
@@ -180,12 +206,21 @@ class BackfillExecutor:
             if game_success:
                 successful_games += 1
 
+            # Break outer loop if we hit the limit
+            if stopped_at_limit:
+                break
+
+        # Calculate remaining snapshots if stopped
+        remaining_snapshots = total_snapshots_in_plan - snapshots_processed
+
         return BackfillResult(
             successful_games=successful_games,
             successful_snapshots=successful_snapshots,
             failed_snapshots=failed_snapshots,
             skipped_snapshots=skipped_snapshots,
             total_quota_used=total_quota_used,
+            stopped_at_limit=stopped_at_limit,
+            remaining_snapshots=remaining_snapshots,
         )
 
     async def _process_snapshot(
