@@ -530,7 +530,7 @@ class GameSelector:
 
 ## Backtesting Infrastructure
 
-**Status**: ✓ **FULLY IMPLEMENTED AND OPERATIONAL** - The backtesting system is complete with multiple strategies, comprehensive metrics, CLI interface, and full test coverage.
+**Status**: ✓ **FULLY IMPLEMENTED AND OPERATIONAL** - The backtesting system is complete with multiple strategies, comprehensive metrics, CLI interface, and comprehensive test coverage.
 
 ### Strategy Pattern
 
@@ -620,7 +620,7 @@ class ArbitrageStrategy(BettingStrategy):
 - Kelly Criterion integration uses model confidence for bet sizing
 - Look-ahead bias prevention via timestamp controls
 
-See [analytics/ml_strategy_example.py](analytics/ml_strategy_example.py) for complete XGBoost implementation with training code and feature engineering examples.
+ML strategies can be implemented by creating a new class inheriting from `BettingStrategy`. The strategy receives `BacktestEvent` and `odds_snapshot` for feature engineering, and can use `BetOpportunity.confidence` to pass model probability predictions to the Kelly Criterion bet sizing. See existing strategies in `analytics/strategies.py` for implementation patterns.
 
 ### Backtesting Engine
 
@@ -866,7 +866,7 @@ LOCAL_DATABASE_URL=postgresql+asyncpg://postgres:dev_password@localhost:5432/odd
 2. Implement `evaluate_opportunity()` method
 3. Add to `AVAILABLE_STRATEGIES` dict at bottom of `analytics/strategies.py`
 4. Register in CLI: Add to `cli/commands/backtest.py` strategy choices
-5. Write unit test in `tests/unit/test_strategies.py`
+5. Write unit tests in `tests/unit/` or add integration test in `tests/integration/test_backtest_integration.py`
 6. Document in backtesting section if complex
 
 **When modifying `core/data_fetcher.py` (API client)**:
@@ -1148,4 +1148,4 @@ System uses **structlog** for structured, machine-readable logging. Log levels: 
 
 **Adding Sports/Bookmakers/Markets**: Add to respective config lists (`SPORTS`, `BOOKMAKERS`, `MARKETS`) in `.env`. No code changes required.
 
-**Adding Strategies**: Inherit from `BettingStrategy` base class and implement `evaluate_opportunity()` method. See `analytics/strategies.py` and ML example in `analytics/ml_strategy_example.py`.
+**Adding Strategies**: Inherit from `BettingStrategy` base class and implement `evaluate_opportunity()` method. See `analytics/strategies.py` for examples (FlatBetting, BasicEV, Arbitrage).
