@@ -1,17 +1,15 @@
 """Unit tests for XGBoost ML strategy example."""
 
-import pickle
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import Mock
 
 import numpy as np
 import pytest
 
 from analytics.backtesting import BacktestConfig, BacktestEvent, BetOpportunity
-from analytics.ml_strategy_example import FeatureEngineering, XGBoostStrategy
-from analytics.utils import calculate_implied_probability
+from analytics.feature_extraction import TabularFeatureExtractor
+from analytics.ml_strategy_example import XGBoostStrategy
 from core.models import EventStatus, Odds
 
 
@@ -20,7 +18,7 @@ def sample_event():
     """Create a sample BacktestEvent for testing."""
     return BacktestEvent(
         id="test_event_1",
-        commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=timezone.utc),
+        commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
         home_team="Los Angeles Lakers",
         away_team="Boston Celtics",
         home_score=110,
@@ -32,7 +30,7 @@ def sample_event():
 @pytest.fixture
 def sample_odds_snapshot(sample_event):
     """Create sample odds snapshot for testing."""
-    timestamp = datetime(2024, 11, 1, 18, 0, 0, tzinfo=timezone.utc)
+    timestamp = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
     return [
         # Pinnacle (sharp book)
         Odds(
@@ -112,12 +110,13 @@ def sample_odds_snapshot(sample_event):
     ]
 
 
-class TestFeatureEngineering:
-    """Test feature engineering functions."""
+class TestTabularFeatureExtractor:
+    """Test TabularFeatureExtractor integration with XGBoostStrategy."""
 
     def test_extract_features_returns_dict(self, sample_event, sample_odds_snapshot):
         """Test that extract_features returns a dictionary."""
-        features = FeatureEngineering.extract_features(
+        extractor = TabularFeatureExtractor()
+        features = extractor.extract_features(
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
@@ -126,7 +125,8 @@ class TestFeatureEngineering:
 
     def test_extract_features_includes_consensus_prob(self, sample_event, sample_odds_snapshot):
         """Test that consensus probability features are calculated."""
-        features = FeatureEngineering.extract_features(
+        extractor = TabularFeatureExtractor()
+        features = extractor.extract_features(
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
@@ -136,7 +136,8 @@ class TestFeatureEngineering:
 
     def test_extract_features_includes_sharp_features(self, sample_event, sample_odds_snapshot):
         """Test that sharp bookmaker features are extracted."""
-        features = FeatureEngineering.extract_features(
+        extractor = TabularFeatureExtractor()
+        features = extractor.extract_features(
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
@@ -146,7 +147,8 @@ class TestFeatureEngineering:
 
     def test_extract_features_includes_retail_sharp_diff(self, sample_event, sample_odds_snapshot):
         """Test that retail vs sharp differences are calculated."""
-        features = FeatureEngineering.extract_features(
+        extractor = TabularFeatureExtractor()
+        features = extractor.extract_features(
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
@@ -155,7 +157,8 @@ class TestFeatureEngineering:
 
     def test_extract_features_includes_best_odds(self, sample_event, sample_odds_snapshot):
         """Test that best available odds are found."""
-        features = FeatureEngineering.extract_features(
+        extractor = TabularFeatureExtractor()
+        features = extractor.extract_features(
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
@@ -165,14 +168,15 @@ class TestFeatureEngineering:
 
     def test_extract_features_team_indicators(self, sample_event, sample_odds_snapshot):
         """Test that team indicator features are set correctly."""
-        home_features = FeatureEngineering.extract_features(
+        extractor = TabularFeatureExtractor()
+        home_features = extractor.extract_features(
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
         assert home_features["is_home_team"] == 1.0
         assert home_features["is_away_team"] == 0.0
 
-        away_features = FeatureEngineering.extract_features(
+        away_features = extractor.extract_features(
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.away_team
         )
 
@@ -181,7 +185,8 @@ class TestFeatureEngineering:
 
     def test_extract_features_empty_odds(self, sample_event):
         """Test that extract_features handles empty odds gracefully."""
-        features = FeatureEngineering.extract_features(
+        extractor = TabularFeatureExtractor()
+        features = extractor.extract_features(
             sample_event, [], market="h2h", outcome=sample_event.home_team
         )
 
@@ -191,6 +196,7 @@ class TestFeatureEngineering:
 
     def test_create_feature_vector_correct_order(self):
         """Test that feature vector maintains correct order."""
+        extractor = TabularFeatureExtractor()
         features = {
             "feature_a": 1.0,
             "feature_b": 2.0,
@@ -198,7 +204,7 @@ class TestFeatureEngineering:
         }
         feature_names = ["feature_c", "feature_a", "feature_b"]
 
-        vector = FeatureEngineering.create_feature_vector(features, feature_names)
+        vector = extractor.create_feature_vector(features, feature_names)
 
         assert isinstance(vector, np.ndarray)
         assert len(vector) == 3
@@ -208,10 +214,11 @@ class TestFeatureEngineering:
 
     def test_create_feature_vector_fills_missing_with_zero(self):
         """Test that missing features are filled with 0.0."""
+        extractor = TabularFeatureExtractor()
         features = {"feature_a": 1.0}
         feature_names = ["feature_a", "feature_b", "feature_c"]
 
-        vector = FeatureEngineering.create_feature_vector(features, feature_names)
+        vector = extractor.create_feature_vector(features, feature_names)
 
         assert vector[0] == 1.0
         assert vector[1] == 0.0  # Missing feature_b
@@ -260,7 +267,8 @@ class TestXGBoostStrategy:
                 del sys.modules["xgboost"]
 
     @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"), reason="requires xgboost"
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
     )
     def test_train_creates_model(self):
         """Test that training creates a model."""
@@ -280,7 +288,8 @@ class TestXGBoostStrategy:
         assert strategy.feature_names == feature_names
 
     @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"), reason="requires xgboost"
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
     )
     def test_predict_probability(self):
         """Test that model can make predictions."""
@@ -301,7 +310,8 @@ class TestXGBoostStrategy:
         assert 0 <= prob <= 1
 
     @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"), reason="requires xgboost"
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
     )
     def test_save_and_load_model(self):
         """Test that model can be saved and loaded."""
@@ -346,7 +356,8 @@ class TestXGBoostStrategy:
                 strategy.save_model(str(model_path))
 
     @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"), reason="requires xgboost"
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
     )
     def test_get_feature_importance(self):
         """Test that feature importance can be retrieved."""
@@ -369,24 +380,24 @@ class TestXGBoostStrategy:
         assert all(np.isscalar(score) and np.isfinite(score) for score in importance.values())
 
     @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"), reason="requires xgboost"
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
     )
-    async def test_evaluate_opportunity_requires_model(
-        self, sample_event, sample_odds_snapshot
-    ):
+    async def test_evaluate_opportunity_requires_model(self, sample_event, sample_odds_snapshot):
         """Test that evaluate_opportunity requires trained model."""
         strategy = XGBoostStrategy()
         config = BacktestConfig(
             initial_bankroll=10000.0,
             start_date=datetime(2024, 1, 1),
-            end_date=datetime(2024, 12, 31)
+            end_date=datetime(2024, 12, 31),
         )
 
         with pytest.raises(ValueError, match="Model not loaded"):
             await strategy.evaluate_opportunity(sample_event, sample_odds_snapshot, config)
 
     @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"), reason="requires xgboost"
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
     )
     async def test_evaluate_opportunity_returns_opportunities(
         self, sample_event, sample_odds_snapshot
@@ -405,7 +416,7 @@ class TestXGBoostStrategy:
         config = BacktestConfig(
             initial_bankroll=10000.0,
             start_date=datetime(2024, 1, 1),
-            end_date=datetime(2024, 12, 31)
+            end_date=datetime(2024, 12, 31),
         )
         opportunities = await strategy.evaluate_opportunity(
             sample_event, sample_odds_snapshot, config
@@ -420,14 +431,16 @@ class TestXGBoostStrategy:
             assert opp.market == "h2h"
 
     @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"), reason="requires xgboost"
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
     )
     async def test_evaluate_opportunity_respects_min_confidence(
         self, sample_event, sample_odds_snapshot
     ):
         """Test that opportunities below min_confidence are filtered."""
         strategy = XGBoostStrategy(
-            min_edge_threshold=0.0, min_confidence=0.99  # Very high threshold
+            min_edge_threshold=0.0,
+            min_confidence=0.99,  # Very high threshold
         )
 
         # Train model
@@ -441,7 +454,7 @@ class TestXGBoostStrategy:
         config = BacktestConfig(
             initial_bankroll=10000.0,
             start_date=datetime(2024, 1, 1),
-            end_date=datetime(2024, 12, 31)
+            end_date=datetime(2024, 12, 31),
         )
         opportunities = await strategy.evaluate_opportunity(
             sample_event, sample_odds_snapshot, config
@@ -452,7 +465,8 @@ class TestXGBoostStrategy:
         assert isinstance(opportunities, list)
 
     @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"), reason="requires xgboost"
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
     )
     async def test_evaluate_opportunity_empty_odds(self, sample_event):
         """Test that evaluate_opportunity handles empty odds."""
@@ -469,7 +483,7 @@ class TestXGBoostStrategy:
         config = BacktestConfig(
             initial_bankroll=10000.0,
             start_date=datetime(2024, 1, 1),
-            end_date=datetime(2024, 12, 31)
+            end_date=datetime(2024, 12, 31),
         )
         opportunities = await strategy.evaluate_opportunity(sample_event, [], config)
 
@@ -480,7 +494,8 @@ class TestIntegration:
     """Integration tests for ML strategy with backtesting framework."""
 
     @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"), reason="requires xgboost"
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
     )
     def test_model_persistence_workflow(self):
         """Test complete save/load workflow."""
@@ -514,14 +529,16 @@ class TestIntegration:
 
             assert abs(prob1 - prob2) < 1e-6
 
-    def test_feature_engineering_consistency(self, sample_event, sample_odds_snapshot):
-        """Test that feature engineering produces consistent results."""
+    def test_feature_extraction_consistency(self, sample_event, sample_odds_snapshot):
+        """Test that feature extraction produces consistent results."""
+        extractor = TabularFeatureExtractor()
+
         # Extract features twice
-        features1 = FeatureEngineering.extract_features(
+        features1 = extractor.extract_features(
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        features2 = FeatureEngineering.extract_features(
+        features2 = extractor.extract_features(
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
@@ -530,7 +547,7 @@ class TestIntegration:
 
         # Convert to vectors
         feature_names = sorted(features1.keys())
-        vec1 = FeatureEngineering.create_feature_vector(features1, feature_names)
-        vec2 = FeatureEngineering.create_feature_vector(features2, feature_names)
+        vec1 = extractor.create_feature_vector(features1, feature_names)
+        vec2 = extractor.create_feature_vector(features2, feature_names)
 
         assert np.allclose(vec1, vec2)
