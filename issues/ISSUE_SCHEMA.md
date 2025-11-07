@@ -40,90 +40,9 @@ The schema adapts based on issue complexity. Not all fields are required for eve
 
 ---
 
-## Field Definitions
+## Examples
 
-### Title
-
-- Clear, action-oriented
-- Format: `[Verb] [Subject]`
-- Examples: "Add Type Hints to Test Fixtures", "Implement Backfill Checkpoint System"
-
-### Goal
-
-- 1-3 sentences explaining the problem or opportunity
-- Focus on WHY, not HOW
-- Context for decision-making
-
-### Scope
-
-- Bulleted list of implementation requirements
-- Can be prescriptive ("Create X class") or outcome-based ("Implement detection for Y")
-- Balance specificity with flexibility
-
-### Success Criteria
-
-- Checkbox format: `- [ ] Criterion`
-- Concrete and testable
-- Includes both functional and quality criteria (tests pass, docs updated, etc.)
-
-### Location (optional)
-
-- Use when multiple files affected or location non-obvious
-- Format: File paths or directory paths
-- Can be list or single item
-
-### Implementation Approach (optional)
-
-- Prescriptive guidance on architecture
-- Specific patterns to follow
-- Technology/library choices
-- Reference to existing examples in codebase
-
-### Constraints (optional)
-
-- Non-negotiable requirements
-- Patterns that must be followed
-- Technology limitations
-- Compatibility requirements
-
-### Open Questions (optional)
-
-- Areas where agent should explore options
-- Design decisions to be made during implementation
-- Tradeoffs to consider
-- Encourages agent thinking within boundaries
-
-### Complexity (optional)
-
-- 🟢 Easy - Simple mechanical changes, clear path
-- 🟡 Medium - Multiple files, some design decisions, moderate testing
-- 🔴 Hard - Architectural changes, novel features, extensive testing
-
-### Prerequisites (optional)
-
-- Required knowledge for implementation
-- Dependencies or understanding needed
-- Useful for external agents unfamiliar with codebase
-
-### Related Files (optional)
-
-- Format: `path/to/file.py` - Context about this file
-- Reference implementations or patterns to follow
-- Files that provide useful context
-
-### Notes (optional)
-
-- Gotchas or warnings ("Don't use datetime.now() without timezone")
-- Links to documentation
-- Architectural context or decisions
-- Performance considerations
-- Security considerations
-
----
-
-## Examples by Complexity Tier
-
-### Tier 1: Simple Issue (4 core fields)
+### Simple Issue
 
 ```markdown
 # Add Type Hints to Test Fixtures
@@ -141,58 +60,9 @@ The schema adapts based on issue complexity. Not all fields are required for eve
 - [ ] Type hints use modern syntax
 ```
 
-**Why this works**: Mechanical task with clear requirements. No complex decisions needed.
-
 ---
 
-### Tier 2: Standard Issue (6-7 fields with prescriptive guidance)
-
-```markdown
-# Implement Discord Alert System
-
-**Goal**: Activate the existing alert infrastructure by implementing Discord webhook integration for critical system events (low API quota, data quality issues, fetch failures).
-
-**Complexity**: 🟡 Medium
-
-**Location**:
-- `alerts/discord.py` (new file)
-- `jobs/fetch_odds.py` (add alert triggers)
-
-**Implementation Approach**:
-- Create `DiscordAlertChannel` class inheriting from `BaseAlertChannel`
-- Implement `send_alert()` method using Discord webhook API
-- Format alerts as Discord embeds with color-coded severity
-- Use `aiohttp` for async HTTP requests (already in dependencies)
-
-**Scope**:
-- Implement webhook integration following abstract base class pattern
-- Add alert triggers for: API quota <20%, critical data quality issues, fetch job failures
-- Respect `ALERT_ENABLED` config flag
-- Write unit tests with mocked webhook calls
-- Handle webhook failures gracefully (log error, don't crash)
-
-**Success Criteria**:
-- [ ] Discord alerts send successfully when conditions met
-- [ ] Alert embeds include timestamp, severity, description, and context
-- [ ] Respects `ALERT_ENABLED=false` (no alerts sent)
-- [ ] Gracefully handles webhook failures
-- [ ] Unit tests pass with mocked HTTP requests
-
-**Related Files**:
-- `alerts/base.py` - `BaseAlertChannel` abstract class to inherit from
-- `core/config.py` - `AlertConfig` settings to use
-
-**Notes**:
-- Discord webhook API: https://discord.com/developers/docs/resources/webhook
-- Include rate limiting (Discord limits to ~5 requests/second)
-- Consider batching alerts to avoid spam during outages
-```
-
-**Why this works**: Clear architectural guidance (inherit from base, use existing patterns) with implementation freedom (how to batch, rate limiting strategy).
-
----
-
-### Tier 3: Complex Issue (hybrid prescriptive + outcome-based)
+### Complex Issue
 
 ```markdown
 # Implement Line Movement Anomaly Detection Strategy
@@ -268,32 +138,23 @@ Line movement anomalies are key indicators of professional betting activity:
 - Steam moves typically happen within 15-30 minute windows across 3+ books
 ```
 
-**Why this works**: Clear architectural constraints and patterns to follow, but gives agent freedom to explore detection algorithms, threshold tuning, and movement analysis strategies. The open questions guide exploration within boundaries.
-
 ---
 
-## Usage Guidelines
+## Quick Decision Guide
 
-### When Creating Issues
+Choose fields based on task complexity, whether location is obvious, whether external agent needs context, and whether design decisions are needed.
 
-**Choose field set based on:**
+**Default starting point**: Core 4 fields, add others as needed.
 
-- Task complexity
-- Whether location is obvious
-- Whether external agent needs context
-- Whether design decisions are needed
+**Include optional fields when:**
 
-**Default starting point**: Core 4 fields, add others as needed
+- Location: Multiple files affected OR location non-obvious
+- Notes: Gotchas, warnings, or important documentation links exist
+- Open Questions: Agent should explore different approaches
+- Prerequisites/Related Files: External agent unfamiliar with codebase
+- Implementation Approach/Constraints: Architectural changes or patterns must be followed
 
-**Ask yourself**:
-
-- Is the location obvious? → Skip Location
-- Are there gotchas or warnings? → Add Notes
-- Should agent explore approaches? → Add Open Questions
-- Is this for an external agent? → Add Prerequisites, Related Files
-- Is this architectural? → Add Implementation Approach, Constraints
-
-### Tone and Style
+## Tone and Style
 
 - **Imperative mood** for scope items ("Add type hints", not "Adding type hints")
 - **Clear and concise** - avoid unnecessary words
