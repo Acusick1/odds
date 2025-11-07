@@ -513,6 +513,29 @@ class OddsReader:
         result = await self.session.execute(query)
         return result.scalar() or 0
 
+    async def get_snapshots_for_event(self, event_id: str) -> list[OddsSnapshot]:
+        """
+        Get all odds snapshots for an event.
+
+        Args:
+            event_id: Event identifier
+
+        Returns:
+            List of all OddsSnapshot records for this event, ordered by time
+
+        Example:
+            reader = OddsReader(session)
+            snapshots = await reader.get_snapshots_for_event("abc123")
+        """
+        query = (
+            select(OddsSnapshot)
+            .where(OddsSnapshot.event_id == event_id)
+            .order_by(OddsSnapshot.snapshot_time)
+        )
+
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
     async def get_games_by_date(
         self, target_date: datetime, status: EventStatus | None = EventStatus.FINAL
     ) -> list[Event]:
