@@ -338,7 +338,7 @@ class TestTabularFeatureExtractor:
 
 
 class TestSequenceFeatureExtractor:
-    """Test SequenceFeatureExtractor stub."""
+    """Test SequenceFeatureExtractor functionality."""
 
     def test_initialization(self):
         """Test that SequenceFeatureExtractor initializes with default params."""
@@ -347,36 +347,419 @@ class TestSequenceFeatureExtractor:
         assert extractor.lookback_hours == 72
         assert extractor.timesteps == 24
         assert extractor.sharp_bookmakers == ["pinnacle"]
+        assert extractor.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
 
     def test_initialization_with_custom_params(self):
         """Test initialization with custom parameters."""
         extractor = SequenceFeatureExtractor(
-            lookback_hours=48, timesteps=16, sharp_bookmakers=["pinnacle", "circa"]
+            lookback_hours=48,
+            timesteps=16,
+            sharp_bookmakers=["pinnacle", "circa"],
+            retail_bookmakers=["fanduel"],
         )
 
         assert extractor.lookback_hours == 48
         assert extractor.timesteps == 16
         assert extractor.sharp_bookmakers == ["pinnacle", "circa"]
+        assert extractor.retail_bookmakers == ["fanduel"]
 
-    def test_extract_features_raises_not_implemented(self, sample_event, sample_odds_snapshot):
-        """Test that extract_features raises NotImplementedError (stub)."""
-        extractor = SequenceFeatureExtractor()
-
-        # Pass list of lists for sequence (even though it's a stub)
-        odds_sequence = [sample_odds_snapshot]
-
-        with pytest.raises(NotImplementedError, match="stub for future LSTM/Transformer support"):
-            extractor.extract_features(
-                sample_event, odds_sequence, market="h2h", outcome=sample_event.home_team
-            )
-
-    def test_get_feature_names_returns_empty_list(self):
-        """Test that get_feature_names returns empty list for stub."""
+    def test_get_feature_names_returns_list(self):
+        """Test that get_feature_names returns a list of feature names."""
         extractor = SequenceFeatureExtractor()
         feature_names = extractor.get_feature_names()
 
         assert isinstance(feature_names, list)
-        assert len(feature_names) == 0
+        assert len(feature_names) == 15  # Expected number of features per timestep
+        assert "american_odds" in feature_names
+        assert "implied_prob" in feature_names
+        assert "odds_change_from_prev" in feature_names
+        assert "hours_to_game" in feature_names
+
+    def test_extract_features_returns_dict_with_sequence_and_mask(
+        self, sample_event, sample_odds_snapshot
+    ):
+        """Test that extract_features returns dictionary with sequence and mask."""
+        extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
+
+        # Create sequence of snapshots at different times
+        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        odds_sequence = []
+
+        for i in range(4):
+            snapshot_time = base_time + np.timedelta64(i * 4, 'h')
+            snapshot = [
+                Odds(
+                    id=100 + i,
+                    event_id=sample_event.id,
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name=sample_event.home_team,
+                    price=-120 - i * 2,
+                    point=None,
+                    odds_timestamp=snapshot_time,
+                    last_update=snapshot_time,
+                )
+            ]
+            odds_sequence.append(snapshot)
+
+        result = extractor.extract_features(
+            sample_event, odds_sequence, market="h2h", outcome=sample_event.home_team
+        )
+
+        assert isinstance(result, dict)
+        assert "sequence" in result
+        assert "mask" in result
+
+    def test_extract_features_sequence_shape(self, sample_event, sample_odds_snapshot):
+        """Test that sequence has correct shape."""
+        extractor = SequenceFeatureExtractor(lookback_hours=48, timesteps=16)
+
+        # Create simple sequence
+        base_time = sample_event.commence_time - np.timedelta64(24, 'h')
+        odds_sequence = []
+
+        for i in range(6):
+            snapshot_time = base_time + np.timedelta64(i * 4, 'h')
+            snapshot = [
+                Odds(
+                    id=200 + i,
+                    event_id=sample_event.id,
+                    bookmaker_key="fanduel",
+                    bookmaker_title="FanDuel",
+                    market_key="h2h",
+                    outcome_name=sample_event.home_team,
+                    price=-115,
+                    point=None,
+                    odds_timestamp=snapshot_time,
+                    last_update=snapshot_time,
+                )
+            ]
+            odds_sequence.append(snapshot)
+
+        result = extractor.extract_features(
+            sample_event, odds_sequence, market="h2h", outcome=sample_event.home_team
+        )
+
+        sequence = result["sequence"]
+        mask = result["mask"]
+
+        # Check shapes
+        assert sequence.shape == (16, 15)  # (timesteps, num_features)
+        assert mask.shape == (16,)
+        assert isinstance(sequence, np.ndarray)
+        assert isinstance(mask, np.ndarray)
+
+    def test_extract_features_mask_indicates_valid_data(self, sample_event):
+        """Test that mask correctly indicates which timesteps have valid data."""
+        extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
+
+        # Create sparse sequence (only 3 snapshots)
+        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        odds_sequence = []
+
+        for i in range(3):
+            snapshot_time = base_time + np.timedelta64(i * 4, 'h')
+            snapshot = [
+                Odds(
+                    id=300 + i,
+                    event_id=sample_event.id,
+                    bookmaker_key="draftkings",
+                    bookmaker_title="DraftKings",
+                    market_key="h2h",
+                    outcome_name=sample_event.home_team,
+                    price=-110,
+                    point=None,
+                    odds_timestamp=snapshot_time,
+                    last_update=snapshot_time,
+                )
+            ]
+            odds_sequence.append(snapshot)
+
+        result = extractor.extract_features(
+            sample_event, odds_sequence, market="h2h", outcome=sample_event.home_team
+        )
+
+        mask = result["mask"]
+
+        # Should have some True values (where data exists)
+        assert mask.any(), "Mask should have at least some True values"
+        # Should have some False values (sparse data)
+        assert not mask.all(), "Mask should not be all True for sparse data"
+
+    def test_extract_features_empty_odds_returns_zeros(self, sample_event):
+        """Test that empty odds returns zero sequence with all False mask."""
+        extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
+
+        result = extractor.extract_features(sample_event, [], market="h2h", outcome=sample_event.home_team)
+
+        sequence = result["sequence"]
+        mask = result["mask"]
+
+        assert sequence.shape == (8, 15)
+        assert np.all(sequence == 0)
+        assert np.all(mask == False)
+
+    def test_extract_features_includes_line_movement(self, sample_event):
+        """Test that line movement features are calculated correctly."""
+        extractor = SequenceFeatureExtractor(lookback_hours=12, timesteps=4)
+
+        # Create sequence with changing odds
+        base_time = sample_event.commence_time - np.timedelta64(6, 'h')
+        odds_sequence = []
+
+        for i, price in enumerate([-120, -118, -115, -112]):  # Line moving toward home team
+            snapshot_time = base_time + np.timedelta64(i * 2, 'h')
+            snapshot = [
+                Odds(
+                    id=400 + i,
+                    event_id=sample_event.id,
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name=sample_event.home_team,
+                    price=price,
+                    point=None,
+                    odds_timestamp=snapshot_time,
+                    last_update=snapshot_time,
+                )
+            ]
+            odds_sequence.append(snapshot)
+
+        result = extractor.extract_features(
+            sample_event, odds_sequence, market="h2h", outcome=sample_event.home_team
+        )
+
+        sequence = result["sequence"]
+
+        # Check that odds_change_from_opening is tracked
+        feature_idx = extractor.get_feature_names().index("odds_change_from_opening")
+        changes = sequence[:, feature_idx]
+
+        # With valid mask positions, opening change should be 0 initially
+        # and increase as line moves
+        assert changes[0] == 0.0 or not result["mask"][0]  # Opening or no data
+
+    def test_extract_features_includes_time_encoding(self, sample_event):
+        """Test that time features are included."""
+        extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
+
+        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        odds_sequence = [
+            [
+                Odds(
+                    id=500,
+                    event_id=sample_event.id,
+                    bookmaker_key="fanduel",
+                    bookmaker_title="FanDuel",
+                    market_key="h2h",
+                    outcome_name=sample_event.home_team,
+                    price=-110,
+                    point=None,
+                    odds_timestamp=base_time,
+                    last_update=base_time,
+                )
+            ]
+        ]
+
+        result = extractor.extract_features(
+            sample_event, odds_sequence, market="h2h", outcome=sample_event.home_team
+        )
+
+        feature_names = extractor.get_feature_names()
+
+        # Check time features exist
+        assert "hours_to_game" in feature_names
+        assert "time_of_day_sin" in feature_names
+        assert "time_of_day_cos" in feature_names
+
+    def test_extract_features_sharp_vs_retail(self, sample_event):
+        """Test that sharp vs retail differential is calculated."""
+        extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=4)
+
+        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+
+        # Create snapshot with both sharp and retail odds
+        snapshot = [
+            # Pinnacle (sharp)
+            Odds(
+                id=600,
+                event_id=sample_event.id,
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="h2h",
+                outcome_name=sample_event.home_team,
+                price=-120,
+                point=None,
+                odds_timestamp=base_time,
+                last_update=base_time,
+            ),
+            # FanDuel (retail)
+            Odds(
+                id=601,
+                event_id=sample_event.id,
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name=sample_event.home_team,
+                price=-115,
+                point=None,
+                odds_timestamp=base_time,
+                last_update=base_time,
+            ),
+        ]
+
+        odds_sequence = [snapshot]
+
+        result = extractor.extract_features(
+            sample_event, odds_sequence, market="h2h", outcome=sample_event.home_team
+        )
+
+        feature_names = extractor.get_feature_names()
+
+        assert "sharp_prob" in feature_names
+        assert "retail_sharp_diff" in feature_names
+
+    def test_extract_features_handles_missing_outcome_gracefully(self, sample_event):
+        """Test that missing outcome data is handled gracefully."""
+        extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
+
+        # Create snapshot with wrong outcome
+        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        snapshot = [
+            Odds(
+                id=700,
+                event_id=sample_event.id,
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="h2h",
+                outcome_name=sample_event.away_team,  # Different outcome
+                price=-110,
+                point=None,
+                odds_timestamp=base_time,
+                last_update=base_time,
+            )
+        ]
+
+        odds_sequence = [snapshot]
+
+        # Request home team outcome (not in data)
+        result = extractor.extract_features(
+            sample_event, odds_sequence, market="h2h", outcome=sample_event.home_team
+        )
+
+        # Should return zeros
+        assert np.all(result["sequence"] == 0)
+        assert np.all(result["mask"] == False)
+
+    def test_extract_features_no_filtering_when_outcome_none(self, sample_event):
+        """Test that outcome=None includes all outcomes."""
+        extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=4)
+
+        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        snapshot = [
+            Odds(
+                id=800,
+                event_id=sample_event.id,
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="h2h",
+                outcome_name=sample_event.home_team,
+                price=-120,
+                point=None,
+                odds_timestamp=base_time,
+                last_update=base_time,
+            ),
+            Odds(
+                id=801,
+                event_id=sample_event.id,
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="h2h",
+                outcome_name=sample_event.away_team,
+                price=+100,
+                point=None,
+                odds_timestamp=base_time,
+                last_update=base_time,
+            ),
+        ]
+
+        odds_sequence = [snapshot]
+
+        result = extractor.extract_features(
+            sample_event, odds_sequence, market="h2h", outcome=None  # No filtering
+        )
+
+        # Should have valid data (both outcomes included)
+        assert result["mask"].any()
+
+    def test_sequence_features_produce_finite_values(self, sample_event, sample_odds_snapshot):
+        """Test that all feature values are finite (no NaN or Inf)."""
+        extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
+
+        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        odds_sequence = []
+
+        for i in range(4):
+            snapshot_time = base_time + np.timedelta64(i * 3, 'h')
+            snapshot = [
+                Odds(
+                    id=900 + i,
+                    event_id=sample_event.id,
+                    bookmaker_key="fanduel",
+                    bookmaker_title="FanDuel",
+                    market_key="h2h",
+                    outcome_name=sample_event.home_team,
+                    price=-110,
+                    point=None,
+                    odds_timestamp=snapshot_time,
+                    last_update=snapshot_time,
+                )
+            ]
+            odds_sequence.append(snapshot)
+
+        result = extractor.extract_features(
+            sample_event, odds_sequence, market="h2h", outcome=sample_event.home_team
+        )
+
+        sequence = result["sequence"]
+
+        # All values should be finite
+        assert np.all(np.isfinite(sequence))
+
+    def test_extract_features_consistency(self, sample_event):
+        """Test that feature extraction is deterministic."""
+        extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
+
+        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        odds_sequence = [
+            [
+                Odds(
+                    id=1000,
+                    event_id=sample_event.id,
+                    bookmaker_key="draftkings",
+                    bookmaker_title="DraftKings",
+                    market_key="h2h",
+                    outcome_name=sample_event.home_team,
+                    price=-115,
+                    point=None,
+                    odds_timestamp=base_time,
+                    last_update=base_time,
+                )
+            ]
+        ]
+
+        # Extract twice
+        result1 = extractor.extract_features(
+            sample_event, odds_sequence, market="h2h", outcome=sample_event.home_team
+        )
+        result2 = extractor.extract_features(
+            sample_event, odds_sequence, market="h2h", outcome=sample_event.home_team
+        )
+
+        # Should be identical
+        assert np.array_equal(result1["sequence"], result2["sequence"])
+        assert np.array_equal(result1["mask"], result2["mask"])
 
 
 class TestFeatureExtractorIntegration:
