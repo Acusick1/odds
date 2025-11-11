@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from odds_analytics.backtesting import BacktestConfig, BacktestEvent, BetOpportunity
-from odds_analytics.feature_extraction import TabularFeatureExtractor
+from odds_analytics.feature_extraction import TabularFeatureExtractor, TabularFeatures
 from odds_analytics.ml_strategy_example import XGBoostStrategy
 from odds_core.models import EventStatus, Odds
 
@@ -112,15 +112,17 @@ def sample_odds_snapshot(sample_event):
 class TestTabularFeatureExtractor:
     """Test TabularFeatureExtractor integration with XGBoostStrategy."""
 
-    def test_extract_features_returns_dict(self, sample_event, sample_odds_snapshot):
-        """Test that extract_features returns a dictionary."""
+    def test_extract_features_returns_tabular_features(self, sample_event, sample_odds_snapshot):
+        """Test that extract_features returns a TabularFeatures dataclass."""
         extractor = TabularFeatureExtractor()
         features = extractor.extract_features(
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        assert isinstance(features, dict)
-        assert len(features) > 0
+        assert isinstance(features, TabularFeatures)
+        # Should have required fields
+        assert features.is_home_team is not None
+        assert features.is_away_team is not None
 
     def test_extract_features_includes_consensus_prob(self, sample_event, sample_odds_snapshot):
         """Test that consensus probability features are calculated."""
@@ -129,9 +131,9 @@ class TestTabularFeatureExtractor:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        assert "consensus_prob" in features
-        assert 0 < features["consensus_prob"] < 1
-        assert "opponent_consensus_prob" in features
+        assert features.consensus_prob is not None
+        assert 0 < features.consensus_prob < 1
+        assert features.opponent_consensus_prob is not None
 
     def test_extract_features_includes_sharp_features(self, sample_event, sample_odds_snapshot):
         """Test that sharp bookmaker features are extracted."""
@@ -140,9 +142,9 @@ class TestTabularFeatureExtractor:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        assert "sharp_prob" in features
-        assert "sharp_market_hold" in features
-        assert features["sharp_market_hold"] > 0  # Should have some vig
+        assert features.sharp_prob is not None
+        assert features.sharp_market_hold is not None
+        assert features.sharp_market_hold > 0  # Should have some vig
 
     def test_extract_features_includes_retail_sharp_diff(self, sample_event, sample_odds_snapshot):
         """Test that retail vs sharp differences are calculated."""
@@ -151,8 +153,11 @@ class TestTabularFeatureExtractor:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        # Should have retail-sharp difference features
-        assert "retail_sharp_diff_home" in features or "retail_sharp_diff_away" in features
+        # Should have retail-sharp difference features (at least one side)
+        assert (
+            features.retail_sharp_diff_home is not None
+            or features.retail_sharp_diff_away is not None
+        )
 
     def test_extract_features_includes_best_odds(self, sample_event, sample_odds_snapshot):
         """Test that best available odds are found."""
@@ -161,9 +166,9 @@ class TestTabularFeatureExtractor:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        assert "best_available_odds" in features
-        assert "best_available_decimal" in features
-        assert features["best_available_decimal"] > 1.0
+        assert features.best_available_odds is not None
+        assert features.best_available_decimal is not None
+        assert features.best_available_decimal > 1.0
 
     def test_extract_features_team_indicators(self, sample_event, sample_odds_snapshot):
         """Test that team indicator features are set correctly."""
@@ -172,15 +177,15 @@ class TestTabularFeatureExtractor:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        assert home_features["is_home_team"] == 1.0
-        assert home_features["is_away_team"] == 0.0
+        assert home_features.is_home_team == 1.0
+        assert home_features.is_away_team == 0.0
 
         away_features = extractor.extract_features(
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.away_team
         )
 
-        assert away_features["is_home_team"] == 0.0
-        assert away_features["is_away_team"] == 1.0
+        assert away_features.is_home_team == 0.0
+        assert away_features.is_away_team == 1.0
 
     def test_extract_features_empty_odds(self, sample_event):
         """Test that extract_features handles empty odds gracefully."""
@@ -189,9 +194,12 @@ class TestTabularFeatureExtractor:
             sample_event, [], market="h2h", outcome=sample_event.home_team
         )
 
-        assert isinstance(features, dict)
-        # Should return empty or minimal features
-        assert len(features) == 0
+        assert isinstance(features, TabularFeatures)
+        # Should have only required fields (team indicators)
+        assert features.is_home_team is not None
+        assert features.is_away_team is not None
+        # Optional fields should be None
+        assert features.consensus_prob is None
 
     def test_create_feature_vector_correct_order(self):
         """Test that feature vector maintains correct order."""
@@ -405,9 +413,11 @@ class TestXGBoostStrategy:
         strategy = XGBoostStrategy(min_edge_threshold=0.0, min_confidence=0.0)
 
         # Train simple model (doesn't need to be good)
-        X_train = np.random.rand(100, 20)
+        # Use TabularFeatures field count (29 fields)
+        num_features = len(TabularFeatures.get_feature_names())
+        X_train = np.random.rand(100, num_features)
         y_train = np.random.randint(0, 2, 100)
-        feature_names = [f"feature_{i}" for i in range(20)]
+        feature_names = TabularFeatures.get_feature_names()
 
         strategy.train(X_train, y_train, feature_names, n_estimators=5)
 
@@ -442,10 +452,11 @@ class TestXGBoostStrategy:
             min_confidence=0.99,  # Very high threshold
         )
 
-        # Train model
-        X_train = np.random.rand(100, 20)
+        # Train model with correct feature count
+        num_features = len(TabularFeatures.get_feature_names())
+        X_train = np.random.rand(100, num_features)
         y_train = np.random.randint(0, 2, 100)
-        feature_names = [f"feature_{i}" for i in range(20)]
+        feature_names = TabularFeatures.get_feature_names()
 
         strategy.train(X_train, y_train, feature_names, n_estimators=5)
 
@@ -471,10 +482,11 @@ class TestXGBoostStrategy:
         """Test that evaluate_opportunity handles empty odds."""
         strategy = XGBoostStrategy()
 
-        # Train model
-        X_train = np.random.rand(100, 20)
+        # Train model with correct feature count
+        num_features = len(TabularFeatures.get_feature_names())
+        X_train = np.random.rand(100, num_features)
         y_train = np.random.randint(0, 2, 100)
-        feature_names = [f"feature_{i}" for i in range(20)]
+        feature_names = TabularFeatures.get_feature_names()
 
         strategy.train(X_train, y_train, feature_names, n_estimators=5)
 
@@ -489,8 +501,8 @@ class TestXGBoostStrategy:
         assert opportunities == []
 
 
-class TestIntegration:
-    """Integration tests for ML strategy with backtesting framework."""
+class TestMLWorkflow:
+    """Unit tests for ML strategy workflows (save/load, feature consistency)."""
 
     @pytest.mark.skipif(
         not pytest.importorskip("xgboost", reason="xgboost not installed"),
@@ -541,12 +553,11 @@ class TestIntegration:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        # Should be identical
+        # Should be identical (dataclass equality)
         assert features1 == features2
 
         # Convert to vectors
-        feature_names = sorted(features1.keys())
-        vec1 = extractor.create_feature_vector(features1, feature_names)
-        vec2 = extractor.create_feature_vector(features2, feature_names)
+        vec1 = features1.to_array()
+        vec2 = features2.to_array()
 
-        assert np.allclose(vec1, vec2)
+        assert np.allclose(vec1, vec2, equal_nan=True)
