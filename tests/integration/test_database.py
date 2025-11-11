@@ -3,7 +3,6 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds
 from odds_core.time import parse_api_datetime
 from odds_lambda.storage.readers import OddsReader

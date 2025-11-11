@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from odds_lambda.scheduling.backends.local import LocalSchedulerBackend
 from odds_lambda.scheduling.exceptions import (
     JobNotFoundError,

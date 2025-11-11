@@ -5,7 +5,6 @@ import tempfile
 from datetime import datetime
 
 import pytest
-
 from odds_analytics.backtesting import (
     BacktestResult,
     BetRecord,

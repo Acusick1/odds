@@ -7,9 +7,8 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from pydantic import BaseModel
-
 from odds_core.models import Event, EventStatus
+from pydantic import BaseModel
 
 __all__ = [
     "BacktestEvent",

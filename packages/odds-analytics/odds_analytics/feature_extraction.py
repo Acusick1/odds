@@ -31,6 +31,7 @@ from datetime import timedelta
 from typing import Any
 
 import numpy as np
+from odds_core.models import Odds
 
 from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.utils import (
@@ -38,7 +39,6 @@ from odds_analytics.utils import (
     calculate_implied_probability,
     calculate_market_hold,
 )
-from odds_core.models import Odds
 
 __all__ = [
     "FeatureExtractor",

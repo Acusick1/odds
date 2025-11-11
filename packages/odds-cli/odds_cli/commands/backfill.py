@@ -6,15 +6,14 @@ from datetime import datetime
 from pathlib import Path
 
 import typer
+from odds_core.config import get_settings
+from odds_core.database import async_session_maker
+from odds_lambda.backfill_executor import BackfillExecutor, BackfillProgress
+from odds_lambda.data_fetcher import TheOddsAPIClient
+from odds_lambda.game_selector import GameSelector
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
-
-from odds_lambda.backfill_executor import BackfillExecutor, BackfillProgress
-from odds_core.config import get_settings
-from odds_lambda.data_fetcher import TheOddsAPIClient
-from odds_core.database import async_session_maker
-from odds_lambda.game_selector import GameSelector
 
 app = typer.Typer(help="Historical data backfill operations")
 console = Console()

@@ -1,13 +1,19 @@
 """Example betting strategies for backtesting."""
 
-from odds_analytics.backtesting import BacktestConfig, BacktestEvent, BetOpportunity, BettingStrategy
+from odds_core.models import Odds
+
+from odds_analytics.backtesting import (
+    BacktestConfig,
+    BacktestEvent,
+    BetOpportunity,
+    BettingStrategy,
+)
 from odds_analytics.utils import (
     calculate_ev,
     calculate_implied_probability,
     calculate_market_hold,
     detect_arbitrage,
 )
-from odds_core.models import Odds
 
 
 class FlatBettingStrategy(BettingStrategy):

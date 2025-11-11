@@ -4,10 +4,9 @@ import asyncio
 
 import structlog
 import typer
+from odds_core.config import get_settings
 from rich.console import Console
 from rich.table import Table
-
-from odds_core.config import get_settings
 
 app = typer.Typer()
 console = Console()

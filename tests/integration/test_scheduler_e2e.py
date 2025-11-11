@@ -18,14 +18,13 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import select
-
 from odds_core.api_models import OddsResponse, api_dict_to_event
+from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.ingestion import OddsIngestionService
-from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.writers import OddsWriter
+from sqlalchemy import select
 
 # Test constants
 GAME_TIME = datetime(2025, 1, 15, 19, 0, 0, tzinfo=UTC)
@@ -257,7 +256,6 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
     Uses time mocking (freezegun) to test different tiers without waiting.
     """
     from freezegun import freeze_time
-
     from odds_lambda.jobs import fetch_odds
 
     # Create a test event for each tier

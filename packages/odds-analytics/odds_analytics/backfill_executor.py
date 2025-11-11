@@ -5,10 +5,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import structlog
-
-from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_core.database import async_session_maker
 from odds_core.time import parse_api_datetime
+from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.writers import OddsWriter
 

@@ -3,7 +3,6 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.tier_utils import (
     calculate_hours_until_commence,

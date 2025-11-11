@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 import structlog
-
 from odds_analytics.backtesting.config import BacktestConfig, BetConstraintsConfig, BetSizingConfig
 from odds_analytics.backtesting.models import BacktestEvent, BetOpportunity, BetRecord
 from odds_analytics.backtesting.services import BacktestEngine, BettingStrategy

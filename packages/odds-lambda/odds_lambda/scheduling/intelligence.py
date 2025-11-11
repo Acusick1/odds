@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from odds_core.database import async_session_maker
+from odds_core.models import Event, EventStatus
 
 from odds_lambda import tier_utils
-from odds_core.database import async_session_maker
 from odds_lambda.fetch_tier import FetchTier
-from odds_core.models import Event, EventStatus
 from odds_lambda.storage.readers import OddsReader
 
 logger = structlog.get_logger()

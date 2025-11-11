@@ -5,14 +5,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import structlog
+from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
+from odds_core.time import ensure_utc, parse_api_datetime
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
-from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
-from odds_core.time import ensure_utc, parse_api_datetime
 from odds_lambda.storage.validators import OddsValidator
+from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 
 logger = structlog.get_logger()
 

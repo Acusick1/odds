@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 
 import aiohttp
 import structlog
-
 from odds_core.config import Settings, get_settings
 
 logger = structlog.get_logger()

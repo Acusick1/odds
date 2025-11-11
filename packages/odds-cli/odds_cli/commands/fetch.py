@@ -3,14 +3,13 @@
 import asyncio
 
 import typer
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
-
 from odds_core.config import get_settings
-from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_core.database import async_session_maker
+from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.ingestion import OddsIngestionCallbacks, OddsIngestionService
 from odds_lambda.storage.writers import OddsWriter
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 app = typer.Typer()
 console = Console()

@@ -3,16 +3,15 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
-
 from odds_core.api_models import OddsResponse, api_dict_to_event
+from odds_core.models import Event, FetchLog, Odds, OddsSnapshot
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.ingestion import (
     EventIngestionFailure,
     OddsIngestionCallbacks,
     OddsIngestionService,
 )
-from odds_core.models import Event, FetchLog, Odds, OddsSnapshot
+from sqlalchemy import select
 
 
 class _StubClient:

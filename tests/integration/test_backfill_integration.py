@@ -1,12 +1,11 @@
 """Integration tests for backfill functionality with real database."""
 
 import pytest
-from sqlalchemy import select
-
 from odds_analytics.backfill_executor import BackfillExecutor
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.time import parse_api_datetime
 from odds_lambda.storage.readers import OddsReader
+from sqlalchemy import select
 
 
 def _api_dict_to_event(event_data: dict) -> Event:

@@ -11,8 +11,8 @@ This job:
 import asyncio
 
 import structlog
-
 from odds_core.config import Settings, get_settings
+
 from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.scheduling.backends import get_scheduler_backend
 from odds_lambda.scheduling.intelligence import SchedulingIntelligence

@@ -6,12 +6,12 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 import structlog
-
 from odds_core.config import Settings, get_settings
-from odds_lambda.data_fetcher import OddsResponse, TheOddsAPIClient
 from odds_core.database import async_session_maker
-from odds_lambda.fetch_tier import FetchTier
 from odds_core.models import FetchLog
+
+from odds_lambda.data_fetcher import OddsResponse, TheOddsAPIClient
+from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger(__name__)

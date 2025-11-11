@@ -6,13 +6,12 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from rich.console import Console
-from rich.table import Table
-
 from odds_analytics.backtesting import BacktestConfig, BacktestEngine, BacktestResult
 from odds_analytics.strategies import ArbitrageStrategy, BasicEVStrategy, FlatBettingStrategy
 from odds_core.database import get_session
 from odds_lambda.storage.readers import OddsReader
+from rich.console import Console
+from rich.table import Table
 
 app = typer.Typer()
 console = Console()

@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import structlog
-
 from odds_core.time import parse_api_datetime
 
 logger = structlog.get_logger()

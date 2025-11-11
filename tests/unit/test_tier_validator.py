@@ -3,9 +3,8 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from odds_lambda.fetch_tier import FetchTier
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.tier_validator import TierCoverageReport, TierCoverageValidator
 
 

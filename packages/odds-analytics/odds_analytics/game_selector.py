@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import structlog
-
 from odds_core.time import ensure_utc, parse_api_datetime, utc_isoformat
 
 logger = structlog.get_logger()

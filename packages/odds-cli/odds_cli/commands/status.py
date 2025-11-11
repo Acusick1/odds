@@ -4,12 +4,11 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import typer
-from rich.console import Console
-from rich.table import Table
-
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_lambda.storage.readers import OddsReader
+from rich.console import Console
+from rich.table import Table
 
 app = typer.Typer()
 console = Console()

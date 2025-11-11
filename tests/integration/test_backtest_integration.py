@@ -4,7 +4,6 @@ import tempfile
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from odds_analytics.backtesting import (
     BacktestConfig,
     BacktestEngine,

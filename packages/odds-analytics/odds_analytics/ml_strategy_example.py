@@ -27,11 +27,16 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from odds_core.models import Odds
 
-from odds_analytics.backtesting import BacktestConfig, BacktestEvent, BetOpportunity, BettingStrategy
+from odds_analytics.backtesting import (
+    BacktestConfig,
+    BacktestEvent,
+    BetOpportunity,
+    BettingStrategy,
+)
 from odds_analytics.feature_extraction import FeatureExtractor, TabularFeatureExtractor
 from odds_analytics.utils import calculate_implied_probability
-from odds_core.models import Odds
 
 
 class XGBoostStrategy(BettingStrategy):

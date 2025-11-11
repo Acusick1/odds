@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 
 import numpy as np
 import pytest
-
 from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import SequenceFeatureExtractor, TabularFeatureExtractor
 from odds_core.models import Event, EventStatus, Odds

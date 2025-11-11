@@ -13,8 +13,8 @@ from odds_analytics.strategies import (
 )
 from odds_analytics.utils import (
     american_to_decimal,
-    calculate_implied_probability,
     calculate_ev,
+    calculate_implied_probability,
     decimal_to_american,
 )
 

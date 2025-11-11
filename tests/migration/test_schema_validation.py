@@ -13,12 +13,12 @@ IMPORTANT: These tests are READ-ONLY and safe to run against production.
 import os
 
 import pytest
-from sqlalchemy import inspect, text
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlmodel import SQLModel
 
 # Import all models to ensure they're registered with SQLModel.metadata
 from odds_core.models import DataQualityLog, Event, FetchLog, Odds, OddsSnapshot  # noqa: F401
+from sqlalchemy import inspect, text
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlmodel import SQLModel
 
 # Get the actual database URL from environment
 DATABASE_URL = os.getenv("DATABASE_URL")

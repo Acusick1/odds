@@ -8,8 +8,8 @@ from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.tier_utils import (
-    calculate_tier,
     calculate_hours_until_commence,
+    calculate_tier,
 )
 
 __all__ = [

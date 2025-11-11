@@ -6,12 +6,11 @@ import sys
 from datetime import datetime, timedelta
 
 import typer
-from rich.console import Console
-from rich.table import Table
-
 from odds_core.database import async_session_maker
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.tier_validator import TierCoverageValidator
+from rich.console import Console
+from rich.table import Table
 
 app = typer.Typer()
 console = Console()

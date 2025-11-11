@@ -6,7 +6,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from odds_analytics.backtesting import BacktestConfig, BacktestEvent, BetOpportunity
 from odds_analytics.feature_extraction import TabularFeatureExtractor
 from odds_analytics.ml_strategy_example import XGBoostStrategy

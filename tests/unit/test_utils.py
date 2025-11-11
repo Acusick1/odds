@@ -1,7 +1,6 @@
 """Unit tests for analytics utility functions."""
 
 import pytest
-
 from odds_analytics.utils import (
     american_to_decimal,
     calculate_ev,

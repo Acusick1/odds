@@ -10,10 +10,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
 import structlog
+from odds_core.models import EventStatus
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.fetch_tier import FetchTier
-from odds_core.models import EventStatus
 from odds_lambda.storage.readers import OddsReader
 
 logger = structlog.get_logger()

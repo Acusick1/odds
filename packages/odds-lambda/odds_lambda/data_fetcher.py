@@ -5,13 +5,6 @@ from datetime import UTC, datetime
 
 import aiohttp
 import structlog
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
-
 from odds_core.api_models import (
     HistoricalOddsResponse,
     OddsResponse,
@@ -19,6 +12,12 @@ from odds_core.api_models import (
     api_dict_to_event,
 )
 from odds_core.config import get_settings
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 logger = structlog.get_logger()
 

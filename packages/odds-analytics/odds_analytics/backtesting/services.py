@@ -9,10 +9,9 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 
 import structlog
-from rich.progress import Progress, SpinnerColumn, TextColumn
-
 from odds_core.models import EventStatus, Odds
 from odds_lambda.storage.readers import OddsReader
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from ..utils import (
     calculate_kelly_stake,

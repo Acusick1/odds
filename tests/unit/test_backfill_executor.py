@@ -1,7 +1,6 @@
 """Unit tests for BackfillExecutor."""
 
 import pytest
-
 from odds_analytics.backfill_executor import BackfillExecutor
 
 
