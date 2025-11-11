@@ -4,18 +4,19 @@ FROM public.ecr.aws/lambda/python:3.11 AS builder
 RUN yum install -y zip && yum clean all
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
-# Copy workspace files for dependency resolution
+# Copy workspace files
 WORKDIR /workspace
 COPY pyproject.toml uv.lock ./
 COPY packages/odds-core ./packages/odds-core
 COPY packages/odds-lambda ./packages/odds-lambda
 
-# Install Lambda packages and dependencies to /asset directory
-# UV properly resolves workspace dependencies (odds-core, odds-lambda)
-# and their external dependencies (aiohttp, boto3, sqlmodel, etc.)
+# Build wheels for workspace packages
+RUN uv build --package odds-core --out-dir /tmp/wheels && \
+    uv build --package odds-lambda --out-dir /tmp/wheels
+
+# Install wheels and their dependencies to /asset
 RUN uv pip install --target /asset --no-cache \
-    ./packages/odds-core \
-    ./packages/odds-lambda
+    /tmp/wheels/*.whl
 
 # Copy Lambda handler to root of deployment package (entry point)
 RUN cp packages/odds-lambda/odds_lambda/lambda_handler.py /asset/
