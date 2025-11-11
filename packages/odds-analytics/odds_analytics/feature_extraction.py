@@ -128,15 +128,15 @@ class TabularFeatures:
             dtype=np.float64,
         )
 
-    @staticmethod
-    def get_feature_names() -> list[str]:
+    @classmethod
+    def get_feature_names(cls) -> list[str]:
         """
         Return ordered list of feature names.
 
         Returns:
             List of feature names in the order they appear in to_array()
         """
-        return [field.name for field in fields(TabularFeatures)]
+        return [field.name for field in fields(cls)]
 
 
 @dataclass
@@ -197,15 +197,15 @@ class SequenceFeatures:
             dtype=np.float64,
         )
 
-    @staticmethod
-    def get_feature_names() -> list[str]:
+    @classmethod
+    def get_feature_names(cls) -> list[str]:
         """
         Return ordered list of feature names.
 
         Returns:
             List of feature names in the order they appear in to_array()
         """
-        return [field.name for field in fields(SequenceFeatures)]
+        return [field.name for field in fields(cls)]
 
 
 class FeatureExtractor(ABC):
@@ -321,46 +321,6 @@ class TabularFeatureExtractor(FeatureExtractor):
         """
         self.sharp_bookmakers = sharp_bookmakers or ["pinnacle"]
         self.retail_bookmakers = retail_bookmakers or ["fanduel", "draftkings", "betmgm"]
-
-        # Feature names are dynamically determined based on market
-        # This is a comprehensive list of all possible features
-        self._feature_names = [
-            # Consensus features
-            "avg_home_odds",
-            "avg_away_odds",
-            "std_home_odds",
-            "std_away_odds",
-            "home_consensus_prob",
-            "away_consensus_prob",
-            "consensus_prob",
-            "opponent_consensus_prob",
-            # Sharp bookmaker features
-            "sharp_home_prob",
-            "sharp_away_prob",
-            "sharp_market_hold",
-            "sharp_prob",
-            "opponent_sharp_prob",
-            # Retail vs sharp features
-            "retail_sharp_diff_home",
-            "retail_sharp_diff_away",
-            # Market efficiency features
-            "num_bookmakers",
-            "avg_market_hold",
-            "std_market_hold",
-            # Best odds features (line shopping)
-            "best_home_odds",
-            "worst_home_odds",
-            "home_odds_range",
-            "best_away_odds",
-            "worst_away_odds",
-            "away_odds_range",
-            "best_available_odds",
-            "odds_range",
-            "best_available_decimal",
-            # Team indicators
-            "is_home_team",
-            "is_away_team",
-        ]
 
     def extract_features(
         self,
@@ -528,12 +488,12 @@ class TabularFeatureExtractor(FeatureExtractor):
 
         Note: Not all features may be present for every event (depends on
         available bookmakers and market type). Missing features are filled
-        with 0.0 in create_feature_vector().
+        with np.nan in create_feature_vector() for TabularFeatures.
 
         Returns:
             Ordered list of all possible feature names
         """
-        return self._feature_names
+        return TabularFeatures.get_feature_names()
 
 
 class SequenceFeatureExtractor(FeatureExtractor):
@@ -611,25 +571,6 @@ class SequenceFeatureExtractor(FeatureExtractor):
         self.sharp_bookmakers = sharp_bookmakers or ["pinnacle"]
         self.retail_bookmakers = retail_bookmakers or ["fanduel", "draftkings", "betmgm"]
 
-        # Feature names (per timestep)
-        self._feature_names = [
-            "american_odds",
-            "decimal_odds",
-            "implied_prob",
-            "odds_change_from_prev",
-            "odds_change_from_opening",
-            "implied_prob_change_from_prev",
-            "implied_prob_change_from_opening",
-            "num_bookmakers",
-            "odds_std",
-            "sharp_odds",
-            "sharp_prob",
-            "retail_sharp_diff",
-            "hours_to_game",
-            "time_of_day_sin",
-            "time_of_day_cos",
-        ]
-
     def extract_features(
         self,
         event: BacktestEvent,
@@ -659,7 +600,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
             >>> mask = result["mask"]  # Shape: (16,) - True where data exists
         """
         # Initialize empty sequence
-        feature_dim = len(self._feature_names)
+        feature_dim = len(SequenceFeatures.get_feature_names())
         sequence = np.zeros((self.timesteps, feature_dim))
         mask = np.zeros(self.timesteps, dtype=bool)
 
@@ -930,4 +871,4 @@ class SequenceFeatureExtractor(FeatureExtractor):
             >>> "american_odds" in names
             True
         """
-        return self._feature_names
+        return SequenceFeatures.get_feature_names()
