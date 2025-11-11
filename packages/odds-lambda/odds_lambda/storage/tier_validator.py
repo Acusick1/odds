@@ -354,7 +354,7 @@ class TierCoverageValidator:
         """
         from datetime import date as date_type
 
-        from odds_core.data_fetcher import TheOddsAPIClient
+        from odds_lambda.data_fetcher import TheOddsAPIClient
 
         # Get games from API for this date
         api_client = TheOddsAPIClient()

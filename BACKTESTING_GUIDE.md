@@ -198,8 +198,8 @@ Return per unit of drawdown risk. Higher is better.
 To create a new strategy, inherit from `BettingStrategy`:
 
 ```python
-from analytics.backtesting import BettingStrategy, BacktestEvent, BetOpportunity, BacktestConfig
-from core.models import Odds
+from odds_analytics..backtesting import BettingStrategy, BacktestEvent, BetOpportunity, BacktestConfig
+from odds_core.models import Odds
 
 class MyStrategy(BettingStrategy):
     def __init__(self, my_param: float = 0.05):
@@ -244,9 +244,9 @@ STRATEGIES = {
 ```python
 import asyncio
 from datetime import datetime
-from analytics.backtesting import BacktestConfig, BacktestEngine, BetSizingConfig
-from analytics.strategies import BasicEVStrategy
-from core.database import get_session
+from odds_analytics..backtesting import BacktestConfig, BacktestEngine, BetSizingConfig
+from odds_analytics..strategies import BasicEVStrategy
+from odds_core.database import get_session
 
 async def run_backtest():
     strategy = BasicEVStrategy()

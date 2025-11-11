@@ -6,15 +6,14 @@ from datetime import datetime
 from pathlib import Path
 
 import typer
+from odds_analytics.backfill_executor import BackfillExecutor, BackfillProgress
+from odds_analytics.game_selector import GameSelector
+from odds_core.config import get_settings
+from odds_core.database import async_session_maker
+from odds_lambda.data_fetcher import TheOddsAPIClient
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
-
-from odds_analytics.backfill_executor import BackfillExecutor, BackfillProgress
-from odds_core.config import get_settings
-from odds_lambda.data_fetcher import TheOddsAPIClient
-from odds_core.database import async_session_maker
-from odds_analytics.game_selector import GameSelector
 
 app = typer.Typer(help="Historical data backfill operations")
 console = Console()
@@ -331,10 +330,9 @@ async def _backfill_status_async():
     """Async implementation of status check."""
     from typing import Any, cast
 
+    from odds_core.models import OddsSnapshot
     from sqlalchemy import func, select
     from sqlalchemy.sql.elements import ColumnElement
-
-    from core.models import OddsSnapshot
 
     async with async_session_maker() as session:
         # Count events with historical snapshots

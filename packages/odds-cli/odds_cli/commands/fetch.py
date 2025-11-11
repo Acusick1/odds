@@ -132,7 +132,7 @@ async def _fetch_scores(sport: str, days: int):
                                         away_score = score.get("score")
 
                                 if home_score is not None and away_score is not None:
-                                    from core.models import EventStatus
+                                    from odds_core.models import EventStatus
 
                                     await writer.update_event_status(
                                         event_id=event_id,

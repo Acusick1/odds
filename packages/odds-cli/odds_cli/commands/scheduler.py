@@ -48,7 +48,7 @@ def start_local():
 
     # Import backend
     try:
-        from core.scheduling.backends.local import LocalSchedulerBackend
+        from odds_lambda.scheduling.backends.local import LocalSchedulerBackend
     except ImportError as e:
         console.print(f"[bold red]Error:[/bold red] Failed to import local backend: {e}")
         raise typer.Exit(1) from e
@@ -59,7 +59,7 @@ def start_local():
         console.print("[green]Running initial fetch to bootstrap scheduler...[/green]")
 
         try:
-            from jobs import fetch_odds
+            from odds_lambda.jobs import fetch_odds
 
             await fetch_odds.main()
             console.print("[green]✓ Bootstrap complete[/green]\n")
@@ -118,7 +118,7 @@ def run_once(
 
     try:
         # Use centralized job registry
-        from core.scheduling.jobs import get_job_function, list_available_jobs
+        from odds_lambda.scheduling.jobs import get_job_function, list_available_jobs
 
         job_func = get_job_function(job)
 
@@ -130,7 +130,7 @@ def run_once(
     except KeyError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         console.print("\n[yellow]Available jobs:[/yellow]")
-        from core.scheduling.jobs import list_available_jobs
+        from odds_lambda.scheduling.jobs import list_available_jobs
 
         for job_name in list_available_jobs():
             console.print(f"  - {job_name}")
@@ -213,7 +213,7 @@ def list_jobs():
     console.print("[bold blue]Scheduled Jobs[/bold blue]\n")
 
     try:
-        from core.scheduling.backends import BackendUnavailableError, get_scheduler_backend
+        from odds_lambda.scheduling.backends import BackendUnavailableError, get_scheduler_backend
 
         backend = get_scheduler_backend()
 
@@ -270,7 +270,7 @@ def health():
     console.print("[bold blue]Scheduler Health Check[/bold blue]\n")
 
     try:
-        from core.scheduling.backends import get_scheduler_backend
+        from odds_lambda.scheduling.backends import get_scheduler_backend
 
         backend = get_scheduler_backend()
 
@@ -331,7 +331,7 @@ def test_backend():
     console.print("[bold blue]Testing scheduler backend...[/bold blue]\n")
 
     try:
-        from core.scheduling.backends import get_scheduler_backend
+        from odds_lambda.scheduling.backends import get_scheduler_backend
 
         backend = get_scheduler_backend()
 
@@ -382,7 +382,7 @@ def test_backend():
 
         # Test database connection
         console.print("\n[bold]Testing database connection...[/bold]")
-        from core.database import async_session_maker
+        from odds_core.database import async_session_maker
 
         async def test_db():
             async with async_session_maker() as session:
