@@ -35,6 +35,12 @@ import numpy as np
 from odds_core.models import Odds
 
 from odds_analytics.backtesting import BacktestEvent
+from odds_analytics.resampling_strategies import (
+    DensityAwareResampling,
+    ResamplingStrategy,
+    TierAwareResampling,
+    UniformResampling,
+)
 from odds_analytics.utils import (
     american_to_decimal,
     calculate_implied_probability,
@@ -47,6 +53,10 @@ __all__ = [
     "SequenceFeatureExtractor",
     "TabularFeatures",
     "SequenceFeatures",
+    "ResamplingStrategy",
+    "UniformResampling",
+    "DensityAwareResampling",
+    "TierAwareResampling",
 ]
 
 
@@ -546,8 +556,9 @@ class SequenceFeatureExtractor(FeatureExtractor):
         ```
 
     Note:
-        Uses uniform timestep allocation (nearest-neighbor resampling). For use cases
-        with non-uniform data density, consider implementing a custom resampling strategy.
+        Supports pluggable resampling strategies via the resampling_strategy parameter.
+        Default is UniformResampling (evenly-spaced timesteps). For variable-density data,
+        consider DensityAwareResampling or TierAwareResampling strategies.
     """
 
     def __init__(
@@ -556,6 +567,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
         timesteps: int = 24,
         sharp_bookmakers: list[str] | None = None,
         retail_bookmakers: list[str] | None = None,
+        resampling_strategy: ResamplingStrategy | None = None,
     ):
         """
         Initialize sequence feature extractor.
@@ -565,11 +577,13 @@ class SequenceFeatureExtractor(FeatureExtractor):
             timesteps: Number of timesteps in sequence (default: 24)
             sharp_bookmakers: Sharp bookmakers for line movement analysis (default: ["pinnacle"])
             retail_bookmakers: Retail bookmakers for comparison (default: ["fanduel", "draftkings", "betmgm"])
+            resampling_strategy: Strategy for resampling to timesteps (default: UniformResampling)
         """
         self.lookback_hours = lookback_hours
         self.timesteps = timesteps
         self.sharp_bookmakers = sharp_bookmakers or ["pinnacle"]
         self.retail_bookmakers = retail_bookmakers or ["fanduel", "draftkings", "betmgm"]
+        self.resampling_strategy = resampling_strategy or UniformResampling()
 
     def extract_features(
         self,
@@ -706,26 +720,31 @@ class SequenceFeatureExtractor(FeatureExtractor):
         self,
         snapshot_times: list,
         commence_time,
+        snapshot_metadata: list[dict[str, Any]] | None = None,
     ) -> list[int | None]:
         """
-        Resample irregular snapshots to fixed timesteps.
+        Resample irregular snapshots to fixed timesteps using pluggable strategy.
 
-        Uses nearest-neighbor resampling: each target timestep is mapped
-        to the closest available snapshot (or None if too far).
+        Uses the configured resampling strategy to determine target times,
+        then maps each target to the nearest available snapshot via nearest-neighbor
+        matching (or None if too far).
 
         Args:
             snapshot_times: List of datetime objects for available snapshots
             commence_time: Game start time
+            snapshot_metadata: Optional metadata for each snapshot (e.g., fetch_tier)
 
         Returns:
             List of indices into snapshot_times (or None for missing data)
         """
-        # Calculate target times working backwards from game start
-        target_times = []
-        for i in range(self.timesteps):
-            hours_before = self.lookback_hours - (i * self.lookback_hours / self.timesteps)
-            target_time = commence_time - timedelta(seconds=hours_before * 3600)
-            target_times.append(target_time)
+        # Use strategy to calculate target times
+        target_times = self.resampling_strategy.get_target_times(
+            snapshot_times=snapshot_times,
+            commence_time=commence_time,
+            lookback_hours=self.lookback_hours,
+            timesteps=self.timesteps,
+            snapshot_metadata=snapshot_metadata,
+        )
 
         # For each target time, find nearest snapshot
         resampled_indices = []
