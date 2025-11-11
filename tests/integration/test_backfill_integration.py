@@ -3,7 +3,7 @@
 import pytest
 from sqlalchemy import select
 
-from odds_lambda.backfill_executor import BackfillExecutor
+from odds_analytics.backfill_executor import BackfillExecutor
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.time import parse_api_datetime
 from odds_lambda.storage.readers import OddsReader

@@ -61,7 +61,7 @@ class RailwayBackend(SchedulerBackend):
 
     def validate_configuration(self) -> ValidationResult:
         """Validate Railway backend configuration."""
-        from odds_core.scheduling.health_check import ValidationBuilder
+        from odds_lambda.scheduling.health_check import ValidationBuilder
 
         builder = ValidationBuilder()
 
@@ -81,7 +81,7 @@ class RailwayBackend(SchedulerBackend):
         """Perform health check of Railway backend."""
         import os
 
-        from odds_core.scheduling.health_check import HealthCheckBuilder
+        from odds_lambda.scheduling.health_check import HealthCheckBuilder
 
         builder = HealthCheckBuilder(self.get_backend_name())
 
@@ -111,7 +111,7 @@ class RailwayBackend(SchedulerBackend):
         Raises:
             BackendUnavailableError: Always, as Railway doesn't support job listing
         """
-        from odds_core.scheduling.exceptions import BackendUnavailableError
+        from odds_lambda.scheduling.exceptions import BackendUnavailableError
 
         raise BackendUnavailableError(
             "Railway backend does not support programmatic job listing. "
@@ -127,7 +127,7 @@ class RailwayBackend(SchedulerBackend):
         Raises:
             BackendUnavailableError: Always, as Railway doesn't support job status queries
         """
-        from odds_core.scheduling.exceptions import BackendUnavailableError
+        from odds_lambda.scheduling.exceptions import BackendUnavailableError
 
         raise BackendUnavailableError(
             f"Railway backend does not support job status queries for '{job_name}'. "

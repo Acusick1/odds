@@ -70,7 +70,7 @@ def get_scheduler_backend(
     backend = backend_type or settings.scheduler.backend.lower()
 
     if backend == "aws":
-        from odds_core.scheduling.backends.aws import AWSEventBridgeBackend
+        from odds_lambda.scheduling.backends.aws import AWSEventBridgeBackend
 
         return AWSEventBridgeBackend(
             dry_run=dry_run,
@@ -80,7 +80,7 @@ def get_scheduler_backend(
         )
 
     elif backend == "railway":
-        from odds_core.scheduling.backends.railway import RailwayBackend
+        from odds_lambda.scheduling.backends.railway import RailwayBackend
 
         return RailwayBackend(
             dry_run=dry_run,
@@ -88,7 +88,7 @@ def get_scheduler_backend(
         )
 
     elif backend == "local":
-        from odds_core.scheduling.backends.local import LocalSchedulerBackend
+        from odds_lambda.scheduling.backends.local import LocalSchedulerBackend
 
         return LocalSchedulerBackend(
             dry_run=dry_run,
