@@ -4,16 +4,10 @@ on:
   push:
     branches: [master]
     paths:
-      - 'core/**/*.py'
-      - 'storage/**/*.py'
-      - 'jobs/**/*.py'
-      - 'analytics/**/*.py'
-      - 'cli/**/*.py'
-      - 'alerts/**/*.py'
+      - 'packages/**/*.py'
       - 'tests/**'
       - 'migrations/**'
       - 'deployment/aws/**'
-      - 'requirements.txt'
       - 'pyproject.toml'
       - 'uv.lock'
       - 'alembic.ini'

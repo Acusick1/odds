@@ -698,7 +698,7 @@ Comprehensive toolkit for odds conversion (American ↔ decimal), probability ca
 
 ### Dependency Management
 
-The project uses **uv** for fast and reliable Python package management. Use a `toml` file for development and export to a `requirements.txt` for containerization.
+The project uses **uv** workspace architecture for Python package management. Dependencies are managed via `pyproject.toml` and `uv.lock` for reproducible builds.
 
 ### Code Quality
 

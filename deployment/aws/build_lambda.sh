@@ -1,75 +1,47 @@
 #!/bin/bash
-# Build Lambda deployment package for workspace architecture
+# Build Lambda deployment package using Docker
 #
-# This script creates a deployment package for AWS Lambda containing:
-# - Only odds-core and odds-lambda packages (analytics excluded)
-# - Python dependencies for Lambda runtime
-# - Lambda handler
+# This script builds a Lambda-compatible deployment package containing:
+# - odds-core: Foundation layer (models, database, config)
+# - odds-lambda: Lambda runtime (jobs, storage, scheduling, data fetcher)
+# - External dependencies from PyPI
+# - Lambda handler entry point
 #
-# Uses Docker to ensure compatibility with Lambda's Amazon Linux 2 runtime
+# The build uses Dockerfile.lambda with a multi-stage build process that:
+# 1. Installs packages using UV (proper workspace dependency resolution)
+# 2. Creates a Lambda-compatible directory structure
+# 3. Packages everything into lambda.zip
+#
+# Requirements:
+# - Docker installed and running
+# - Run from repository root or deployment/aws directory
 
 set -e
 
-echo "Building Lambda deployment package (workspace architecture)..."
+echo "Building Lambda deployment package using Docker..."
+
+# Navigate to repository root (script can be run from anywhere)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$REPO_ROOT"
 
 # Clean previous build
-rm -rf build/
-rm -f lambda_deployment.zip
+rm -f deployment/aws/lambda.zip deployment/aws/lambda_deployment.zip
 
-# Create build directory
-mkdir -p build/
+# Build Lambda package using Dockerfile
+# The --output flag extracts lambda.zip from the final scratch stage
+echo "Running Docker build (this may take a minute)..."
+docker build \
+  -f deployment/aws/Dockerfile.lambda \
+  --output type=local,dest=deployment/aws \
+  . \
+  2>&1 | grep -v "^#" || true  # Filter build output noise
 
-# Copy ONLY Lambda-required packages (core + lambda, excluding analytics)
-echo "Copying Lambda packages (odds-core + odds-lambda)..."
-cp -r ../../packages/odds-core/odds_core build/
-cp -r ../../packages/odds-lambda/odds_lambda build/
+# Rename to standard name
+if [ -f deployment/aws/lambda.zip ]; then
+    mv deployment/aws/lambda.zip deployment/aws/lambda_deployment.zip
+fi
 
-# Copy Lambda handler to root (entry point)
-cp ../../packages/odds-lambda/odds_lambda/lambda_handler.py build/
-
-# Create requirements.txt from workspace using uv export
-echo "Generating Lambda requirements.txt from workspace..."
-cd ../..
-uv export --package odds-lambda --no-dev --no-editable > deployment/aws/build/requirements_lambda.txt
-cd deployment/aws
-
-# Install dependencies using Docker with Lambda-compatible environment
-echo "Installing Python dependencies (using Docker for Lambda compatibility)..."
-docker run --rm \
-  --entrypoint="" \
-  --user "$(id -u):$(id -g)" \
-  -v "$(pwd)/build/requirements_lambda.txt:/requirements.txt:ro" \
-  -v "$(pwd)/build:/build" \
-  public.ecr.aws/lambda/python:3.11 \
-  pip install -r /requirements.txt -t /build --no-cache-dir
-
-# Remove unnecessary files to reduce size
-echo "Cleaning up unnecessary files..."
-cd build/
-find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-find . -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
-find . -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
-find . -type f -name "*.pyc" -delete 2>/dev/null || true
-find . -type f -name "*.pyo" -delete 2>/dev/null || true
-rm -f requirements_lambda.txt
-cd ..
-
-# Create deployment package
-echo "Creating deployment zip..."
-cd build/
-zip -r ../lambda_deployment.zip . -q
-cd ..
-
-# Cleanup
-rm -rf build/
-
-echo "✓ Lambda deployment package created: lambda_deployment.zip"
-echo "  Size: $(du -h lambda_deployment.zip | cut -f1)"
 echo ""
-echo "  Package contains:"
-echo "    - odds_core/ (foundation layer)"
-echo "    - odds_lambda/ (Lambda runtime)"
-echo "    - lambda_handler.py (entry point)"
-echo "    - Python dependencies"
-echo ""
-echo "  Analytics package EXCLUDED - size optimized for Lambda"
+echo "✓ Lambda deployment package created: deployment/aws/lambda_deployment.zip"
+echo "  Size: $(du -h deployment/aws/lambda_deployment.zip | cut -f1)"
