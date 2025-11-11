@@ -27,6 +27,7 @@ Example:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import timedelta
 from typing import Any
 
 import numpy as np
@@ -512,9 +513,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
             return {"sequence": sequence, "mask": mask}
 
         # Resample to fixed timesteps
-        resampled_indices = self._resample_to_timesteps(
-            snapshot_times, event.commence_time
-        )
+        resampled_indices = self._resample_to_timesteps(snapshot_times, event.commence_time)
 
         # Track opening line for change calculation
         opening_odds = None
@@ -580,7 +579,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
         target_times = []
         for i in range(self.timesteps):
             hours_before = self.lookback_hours - (i * self.lookback_hours / self.timesteps)
-            target_time = commence_time - np.timedelta64(int(hours_before * 3600), 's')
+            target_time = commence_time - timedelta(seconds=hours_before * 3600)
             target_times.append(target_time)
 
         # For each target time, find nearest snapshot
@@ -589,7 +588,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
 
         for target_time in target_times:
             best_idx = None
-            best_diff = float('inf')
+            best_diff = float("inf")
 
             for idx, snap_time in enumerate(snapshot_times):
                 diff_seconds = abs((snap_time - target_time).total_seconds())
@@ -672,7 +671,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
         features["implied_prob_change_from_opening"] = 0.0
 
         # 3. Market features
-        bookmakers = set(o.bookmaker_key for o in target_odds)
+        bookmakers = {o.bookmaker_key for o in target_odds}
         features["num_bookmakers"] = float(len(bookmakers))
         features["odds_std"] = float(np.std(prices)) if len(prices) > 1 else 0.0
 
@@ -710,7 +709,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
 
     def _empty_features(self) -> dict[str, float]:
         """Return dictionary of features with zero values."""
-        return {name: 0.0 for name in self._feature_names}
+        return dict.fromkeys(self._feature_names, 0.0)
 
     def _features_dict_to_array(self, features_dict: dict[str, float]) -> np.ndarray:
         """Convert feature dictionary to ordered numpy array."""

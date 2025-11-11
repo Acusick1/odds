@@ -1,6 +1,6 @@
 """Integration tests for feature extraction with database."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
@@ -23,7 +23,7 @@ class TestFeatureExtractionIntegration:
             id="test_event_tabular_1",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=timezone.utc),
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
             home_team="Los Angeles Lakers",
             away_team="Boston Celtics",
             status=EventStatus.FINAL,
@@ -32,7 +32,7 @@ class TestFeatureExtractionIntegration:
         )
 
         # Create test odds
-        odds_time = datetime(2024, 11, 1, 18, 0, 0, tzinfo=timezone.utc)
+        odds_time = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
         odds_records = [
             Odds(
                 event_id=event.id,
@@ -90,9 +90,7 @@ class TestFeatureExtractionIntegration:
 
         # Query back and extract features
         reader = OddsReader(test_session)
-        queried_odds = await reader.get_odds_at_time(
-            event.id, odds_time, tolerance_minutes=5
-        )
+        queried_odds = await reader.get_odds_at_time(event.id, odds_time, tolerance_minutes=5)
 
         # Extract features
         backtest_event = BacktestEvent(
@@ -123,7 +121,7 @@ class TestFeatureExtractionIntegration:
             id="test_event_sequence_1",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=timezone.utc),
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
             home_team="Los Angeles Lakers",
             away_team="Boston Celtics",
             status=EventStatus.FINAL,
@@ -132,37 +130,39 @@ class TestFeatureExtractionIntegration:
         )
 
         # Create time series of odds (simulate line movement)
-        base_time = event.commence_time - np.timedelta64(12, 'h')
+        base_time = event.commence_time - np.timedelta64(12, "h")
         odds_records = []
 
         for i in range(5):
-            timestamp = base_time + np.timedelta64(i * 2, 'h')
+            timestamp = base_time + np.timedelta64(i * 2, "h")
             price = -120 + i * 2  # Line moving
 
-            odds_records.extend([
-                Odds(
-                    event_id=event.id,
-                    bookmaker_key="pinnacle",
-                    bookmaker_title="Pinnacle",
-                    market_key="h2h",
-                    outcome_name=event.home_team,
-                    price=price,
-                    point=None,
-                    odds_timestamp=timestamp,
-                    last_update=timestamp,
-                ),
-                Odds(
-                    event_id=event.id,
-                    bookmaker_key="pinnacle",
-                    bookmaker_title="Pinnacle",
-                    market_key="h2h",
-                    outcome_name=event.away_team,
-                    price=100,
-                    point=None,
-                    odds_timestamp=timestamp,
-                    last_update=timestamp,
-                ),
-            ])
+            odds_records.extend(
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="h2h",
+                        outcome_name=event.home_team,
+                        price=price,
+                        point=None,
+                        odds_timestamp=timestamp,
+                        last_update=timestamp,
+                    ),
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="h2h",
+                        outcome_name=event.away_team,
+                        price=100,
+                        point=None,
+                        odds_timestamp=timestamp,
+                        last_update=timestamp,
+                    ),
+                ]
+            )
 
         # Insert into database
         writer = OddsWriter(test_session)
@@ -186,7 +186,7 @@ class TestFeatureExtractionIntegration:
         # Group by timestamp to create snapshots
         snapshots = []
         for i in range(5):
-            timestamp = base_time + np.timedelta64(i * 2, 'h')
+            timestamp = base_time + np.timedelta64(i * 2, "h")
             snapshot_odds = [o for o in odds_records if o.odds_timestamp == timestamp]
             if snapshot_odds:
                 snapshots.append(snapshot_odds)
@@ -226,7 +226,7 @@ class TestFeatureExtractionIntegration:
             id="test_event_sequence_2",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=timezone.utc),
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
             home_team="Phoenix Suns",
             away_team="Denver Nuggets",
             status=EventStatus.FINAL,
@@ -235,36 +235,38 @@ class TestFeatureExtractionIntegration:
         )
 
         # Create sparse odds (only 2 snapshots over 24 hour period)
-        base_time = event.commence_time - np.timedelta64(20, 'h')
+        base_time = event.commence_time - np.timedelta64(20, "h")
         odds_records = []
 
         for i in [0, 2]:  # Sparse: only at 0h and 4h
-            timestamp = base_time + np.timedelta64(i * 10, 'h')
+            timestamp = base_time + np.timedelta64(i * 10, "h")
 
-            odds_records.extend([
-                Odds(
-                    event_id=event.id,
-                    bookmaker_key="fanduel",
-                    bookmaker_title="FanDuel",
-                    market_key="h2h",
-                    outcome_name=event.home_team,
-                    price=-110,
-                    point=None,
-                    odds_timestamp=timestamp,
-                    last_update=timestamp,
-                ),
-                Odds(
-                    event_id=event.id,
-                    bookmaker_key="fanduel",
-                    bookmaker_title="FanDuel",
-                    market_key="h2h",
-                    outcome_name=event.away_team,
-                    price=-110,
-                    point=None,
-                    odds_timestamp=timestamp,
-                    last_update=timestamp,
-                ),
-            ])
+            odds_records.extend(
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="fanduel",
+                        bookmaker_title="FanDuel",
+                        market_key="h2h",
+                        outcome_name=event.home_team,
+                        price=-110,
+                        point=None,
+                        odds_timestamp=timestamp,
+                        last_update=timestamp,
+                    ),
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="fanduel",
+                        bookmaker_title="FanDuel",
+                        market_key="h2h",
+                        outcome_name=event.away_team,
+                        price=-110,
+                        point=None,
+                        odds_timestamp=timestamp,
+                        last_update=timestamp,
+                    ),
+                ]
+            )
 
         # Insert into database
         writer = OddsWriter(test_session)
@@ -277,7 +279,7 @@ class TestFeatureExtractionIntegration:
         # Group by timestamp
         snapshots = []
         for i in [0, 2]:
-            timestamp = base_time + np.timedelta64(i * 10, 'h')
+            timestamp = base_time + np.timedelta64(i * 10, "h")
             snapshot_odds = [o for o in odds_records if o.odds_timestamp == timestamp]
             if snapshot_odds:
                 snapshots.append(snapshot_odds)
@@ -315,7 +317,7 @@ class TestFeatureExtractionIntegration:
             id="test_event_sequence_3",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=timezone.utc),
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
             home_team="Milwaukee Bucks",
             away_team="Miami Heat",
             status=EventStatus.FINAL,
@@ -324,37 +326,39 @@ class TestFeatureExtractionIntegration:
         )
 
         # Create odds from multiple bookmakers
-        base_time = event.commence_time - np.timedelta64(6, 'h')
+        base_time = event.commence_time - np.timedelta64(6, "h")
         odds_records = []
 
         for bookmaker in ["pinnacle", "fanduel", "draftkings"]:
             for i in range(3):
-                timestamp = base_time + np.timedelta64(i * 2, 'h')
+                timestamp = base_time + np.timedelta64(i * 2, "h")
 
-                odds_records.extend([
-                    Odds(
-                        event_id=event.id,
-                        bookmaker_key=bookmaker,
-                        bookmaker_title=bookmaker.title(),
-                        market_key="h2h",
-                        outcome_name=event.home_team,
-                        price=-120 if bookmaker == "pinnacle" else -115,
-                        point=None,
-                        odds_timestamp=timestamp,
-                        last_update=timestamp,
-                    ),
-                    Odds(
-                        event_id=event.id,
-                        bookmaker_key=bookmaker,
-                        bookmaker_title=bookmaker.title(),
-                        market_key="h2h",
-                        outcome_name=event.away_team,
-                        price=100,
-                        point=None,
-                        odds_timestamp=timestamp,
-                        last_update=timestamp,
-                    ),
-                ])
+                odds_records.extend(
+                    [
+                        Odds(
+                            event_id=event.id,
+                            bookmaker_key=bookmaker,
+                            bookmaker_title=bookmaker.title(),
+                            market_key="h2h",
+                            outcome_name=event.home_team,
+                            price=-120 if bookmaker == "pinnacle" else -115,
+                            point=None,
+                            odds_timestamp=timestamp,
+                            last_update=timestamp,
+                        ),
+                        Odds(
+                            event_id=event.id,
+                            bookmaker_key=bookmaker,
+                            bookmaker_title=bookmaker.title(),
+                            market_key="h2h",
+                            outcome_name=event.away_team,
+                            price=100,
+                            point=None,
+                            odds_timestamp=timestamp,
+                            last_update=timestamp,
+                        ),
+                    ]
+                )
 
         # Insert into database
         writer = OddsWriter(test_session)
@@ -365,7 +369,7 @@ class TestFeatureExtractionIntegration:
         await test_session.commit()
 
         # Group by timestamp
-        timestamps = sorted(set(o.odds_timestamp for o in odds_records))
+        timestamps = sorted({o.odds_timestamp for o in odds_records})
         snapshots = []
         for timestamp in timestamps:
             snapshot_odds = [o for o in odds_records if o.odds_timestamp == timestamp]
@@ -392,19 +396,21 @@ class TestFeatureExtractionIntegration:
             backtest_event, snapshots, outcome=event.home_team, market="h2h"
         )
 
-        # Should successfully aggregate multiple bookmakers
-        assert result["mask"].any()
+        # Verify output shape and valid data
+        assert result["mask"].any(), "Expected valid data in mask, but all values are False"
+        assert result["sequence"].shape == (4, 15)
 
-        # Check that sharp vs retail differential was calculated
+        # This test specifically verifies multiple bookmakers are aggregated correctly
+        # Since Pinnacle has -120 and FanDuel/DraftKings have -115, the retail-sharp
+        # differential should be non-zero
         feature_names = extractor.get_feature_names()
         retail_sharp_diff_idx = feature_names.index("retail_sharp_diff")
 
-        # At least one timestep should have retail-sharp differential
+        sequence = result["sequence"]
         valid_timesteps = result["mask"]
-        if valid_timesteps.any():
-            # We expect some differential since retail books have different odds
-            sequence = result["sequence"]
-            assert sequence.shape == (4, 15)
+        retail_sharp_diff_values = sequence[valid_timesteps, retail_sharp_diff_idx]
+        # Should have calculated non-zero differential given different odds
+        assert np.any(retail_sharp_diff_values != 0)
 
     async def test_feature_extractors_interface_compatibility(self, test_session):
         """Test that both extractors implement the same interface."""
@@ -413,7 +419,7 @@ class TestFeatureExtractionIntegration:
             id="test_event_interface_1",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=timezone.utc),
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
             home_team="Dallas Mavericks",
             away_team="San Antonio Spurs",
             status=EventStatus.FINAL,
@@ -421,7 +427,7 @@ class TestFeatureExtractionIntegration:
             away_score=102,
         )
 
-        odds_time = datetime(2024, 11, 1, 18, 0, 0, tzinfo=timezone.utc)
+        odds_time = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
         odds_records = [
             Odds(
                 event_id=event.id,

@@ -382,11 +382,11 @@ class TestSequenceFeatureExtractor:
         extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
 
         # Create sequence of snapshots at different times
-        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        base_time = sample_event.commence_time - np.timedelta64(12, "h")
         odds_sequence = []
 
         for i in range(4):
-            snapshot_time = base_time + np.timedelta64(i * 4, 'h')
+            snapshot_time = base_time + np.timedelta64(i * 4, "h")
             snapshot = [
                 Odds(
                     id=100 + i,
@@ -416,11 +416,11 @@ class TestSequenceFeatureExtractor:
         extractor = SequenceFeatureExtractor(lookback_hours=48, timesteps=16)
 
         # Create simple sequence
-        base_time = sample_event.commence_time - np.timedelta64(24, 'h')
+        base_time = sample_event.commence_time - np.timedelta64(24, "h")
         odds_sequence = []
 
         for i in range(6):
-            snapshot_time = base_time + np.timedelta64(i * 4, 'h')
+            snapshot_time = base_time + np.timedelta64(i * 4, "h")
             snapshot = [
                 Odds(
                     id=200 + i,
@@ -455,11 +455,11 @@ class TestSequenceFeatureExtractor:
         extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
 
         # Create sparse sequence (only 3 snapshots)
-        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        base_time = sample_event.commence_time - np.timedelta64(12, "h")
         odds_sequence = []
 
         for i in range(3):
-            snapshot_time = base_time + np.timedelta64(i * 4, 'h')
+            snapshot_time = base_time + np.timedelta64(i * 4, "h")
             snapshot = [
                 Odds(
                     id=300 + i,
@@ -491,25 +491,27 @@ class TestSequenceFeatureExtractor:
         """Test that empty odds returns zero sequence with all False mask."""
         extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
 
-        result = extractor.extract_features(sample_event, [], market="h2h", outcome=sample_event.home_team)
+        result = extractor.extract_features(
+            sample_event, [], market="h2h", outcome=sample_event.home_team
+        )
 
         sequence = result["sequence"]
         mask = result["mask"]
 
         assert sequence.shape == (8, 15)
         assert np.all(sequence == 0)
-        assert np.all(mask == False)
+        assert np.all(~mask)
 
     def test_extract_features_includes_line_movement(self, sample_event):
         """Test that line movement features are calculated correctly."""
         extractor = SequenceFeatureExtractor(lookback_hours=12, timesteps=4)
 
         # Create sequence with changing odds
-        base_time = sample_event.commence_time - np.timedelta64(6, 'h')
+        base_time = sample_event.commence_time - np.timedelta64(6, "h")
         odds_sequence = []
 
         for i, price in enumerate([-120, -118, -115, -112]):  # Line moving toward home team
-            snapshot_time = base_time + np.timedelta64(i * 2, 'h')
+            snapshot_time = base_time + np.timedelta64(i * 2, "h")
             snapshot = [
                 Odds(
                     id=400 + i,
@@ -544,7 +546,7 @@ class TestSequenceFeatureExtractor:
         """Test that time features are included."""
         extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
 
-        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        base_time = sample_event.commence_time - np.timedelta64(12, "h")
         odds_sequence = [
             [
                 Odds(
@@ -568,16 +570,29 @@ class TestSequenceFeatureExtractor:
 
         feature_names = extractor.get_feature_names()
 
-        # Check time features exist
+        # Check time features exist in feature names
         assert "hours_to_game" in feature_names
         assert "time_of_day_sin" in feature_names
         assert "time_of_day_cos" in feature_names
+
+        # Verify time encoding is correctly calculated
+        sequence = result["sequence"]
+        time_sin_idx = feature_names.index("time_of_day_sin")
+        time_cos_idx = feature_names.index("time_of_day_cos")
+
+        # Test should produce valid data - fail if mask is all False
+        valid_mask = result["mask"]
+        assert valid_mask.any(), "Expected valid data in mask, but all values are False"
+
+        # Cyclical encoding should be in valid range [-1, 1]
+        assert np.all(np.abs(sequence[valid_mask, time_sin_idx]) <= 1)
+        assert np.all(np.abs(sequence[valid_mask, time_cos_idx]) <= 1)
 
     def test_extract_features_sharp_vs_retail(self, sample_event):
         """Test that sharp vs retail differential is calculated."""
         extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=4)
 
-        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        base_time = sample_event.commence_time - np.timedelta64(12, "h")
 
         # Create snapshot with both sharp and retail odds
         snapshot = [
@@ -617,15 +632,29 @@ class TestSequenceFeatureExtractor:
 
         feature_names = extractor.get_feature_names()
 
+        # Verify sharp vs retail features exist
         assert "sharp_prob" in feature_names
         assert "retail_sharp_diff" in feature_names
+
+        # Since we have both sharp (Pinnacle -120) and retail (FanDuel -115) books,
+        # the differential should be calculated and non-zero
+        sequence = result["sequence"]
+        retail_sharp_diff_idx = feature_names.index("retail_sharp_diff")
+
+        # Test should produce valid data - fail if mask is all False
+        valid_mask = result["mask"]
+        assert valid_mask.any(), "Expected valid data in mask, but all values are False"
+
+        # With different odds (-120 vs -115), differential should be non-zero
+        retail_sharp_diffs = sequence[valid_mask, retail_sharp_diff_idx]
+        assert np.any(retail_sharp_diffs != 0)
 
     def test_extract_features_handles_missing_outcome_gracefully(self, sample_event):
         """Test that missing outcome data is handled gracefully."""
         extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
 
         # Create snapshot with wrong outcome
-        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        base_time = sample_event.commence_time - np.timedelta64(12, "h")
         snapshot = [
             Odds(
                 id=700,
@@ -650,13 +679,13 @@ class TestSequenceFeatureExtractor:
 
         # Should return zeros
         assert np.all(result["sequence"] == 0)
-        assert np.all(result["mask"] == False)
+        assert np.all(~result["mask"])
 
     def test_extract_features_no_filtering_when_outcome_none(self, sample_event):
         """Test that outcome=None includes all outcomes."""
         extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=4)
 
-        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        base_time = sample_event.commence_time - np.timedelta64(12, "h")
         snapshot = [
             Odds(
                 id=800,
@@ -687,7 +716,10 @@ class TestSequenceFeatureExtractor:
         odds_sequence = [snapshot]
 
         result = extractor.extract_features(
-            sample_event, odds_sequence, market="h2h", outcome=None  # No filtering
+            sample_event,
+            odds_sequence,
+            market="h2h",
+            outcome=None,  # No filtering
         )
 
         # Should have valid data (both outcomes included)
@@ -697,11 +729,11 @@ class TestSequenceFeatureExtractor:
         """Test that all feature values are finite (no NaN or Inf)."""
         extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
 
-        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        base_time = sample_event.commence_time - np.timedelta64(12, "h")
         odds_sequence = []
 
         for i in range(4):
-            snapshot_time = base_time + np.timedelta64(i * 3, 'h')
+            snapshot_time = base_time + np.timedelta64(i * 3, "h")
             snapshot = [
                 Odds(
                     id=900 + i,
@@ -731,7 +763,7 @@ class TestSequenceFeatureExtractor:
         """Test that feature extraction is deterministic."""
         extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
 
-        base_time = sample_event.commence_time - np.timedelta64(12, 'h')
+        base_time = sample_event.commence_time - np.timedelta64(12, "h")
         odds_sequence = [
             [
                 Odds(
