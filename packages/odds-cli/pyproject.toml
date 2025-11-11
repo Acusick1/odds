@@ -12,6 +12,11 @@ dependencies = [
     "rich>=13.7.0",
 ]
 
+[tool.uv.sources]
+odds-core = { workspace = true }
+odds-lambda = { workspace = true }
+odds-analytics = { workspace = true }
+
 [dependency-groups]
 dev = [
     "pytest>=7.4.0",

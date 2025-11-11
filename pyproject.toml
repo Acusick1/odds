@@ -1,5 +1,4 @@
-[workspace]
-# UV Workspace configuration
+[tool.uv.workspace]
 members = [
     "packages/odds-core",
     "packages/odds-lambda",
@@ -14,12 +13,46 @@ description = "NBA betting odds data collection and analysis system"
 authors = [{name = "Andrew"}]
 requires-python = ">=3.11"
 
-# Workspace root - no direct dependencies
-# Install individual packages as needed:
-# - uv pip install -e packages/odds-core
-# - uv pip install -e packages/odds-lambda
-# - uv pip install -e packages/odds-analytics
-# - uv pip install -e packages/odds-cli
+# Install all workspace packages by default
+# (dependencies remain in their respective subpackages)
+dependencies = [
+    "odds-core",
+    "odds-lambda",
+    "odds-analytics",
+    "odds-cli",
+]
+
+[tool.uv.sources]
+odds-core = { workspace = true }
+odds-lambda = { workspace = true }
+odds-analytics = { workspace = true }
+odds-cli = { workspace = true }
+
+[dependency-groups]
+dev = [
+    # Testing
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "freezegun>=1.5.5",
+
+    # Code quality
+    "ruff>=0.1.0",
+    "pre-commit>=3.5.0",
+
+    # Data analysis & ML (for development)
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.7",
+    "pandas>=2.3.3",
+    "plotly>=6.3.1",
+    "seaborn>=0.13.2",
+    "xgboost>=2.0.0",
+    "scikit-learn>=1.3.0",
+    "numpy>=1.24.0",
+]
+
+# Virtual workspace root - no build system needed
+# Workspace members are built independently
 
 [tool.ruff]
 line-length = 100
