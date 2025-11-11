@@ -178,15 +178,19 @@ class TestTabularFeatureExtractor:
         assert extractor.sharp_bookmakers == ["pinnacle", "circa"]
         assert extractor.retail_bookmakers == ["fanduel"]
 
-    def test_extract_features_returns_dict(self, sample_event, sample_odds_snapshot):
-        """Test that extract_features returns a dictionary."""
+    def test_extract_features_returns_tabular_features(self, sample_event, sample_odds_snapshot):
+        """Test that extract_features returns a TabularFeatures instance."""
+        from odds_analytics.feature_extraction import TabularFeatures
+
         extractor = TabularFeatureExtractor()
         features = extractor.extract_features(
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        assert isinstance(features, dict)
-        assert len(features) > 0
+        assert isinstance(features, TabularFeatures)
+        # Check that we have at least some non-None features
+        array = features.to_array()
+        assert len(array) > 0
 
     def test_extract_features_includes_consensus_prob(self, sample_event, sample_odds_snapshot):
         """Test that consensus probability features are calculated."""
@@ -195,9 +199,9 @@ class TestTabularFeatureExtractor:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        assert "consensus_prob" in features
-        assert 0 < features["consensus_prob"] < 1
-        assert "opponent_consensus_prob" in features
+        assert features.consensus_prob is not None
+        assert 0 < features.consensus_prob < 1
+        assert features.opponent_consensus_prob is not None
 
     def test_extract_features_includes_sharp_features(self, sample_event, sample_odds_snapshot):
         """Test that sharp bookmaker features are extracted."""
@@ -206,9 +210,9 @@ class TestTabularFeatureExtractor:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        assert "sharp_prob" in features
-        assert "sharp_market_hold" in features
-        assert features["sharp_market_hold"] > 0  # Should have some vig
+        assert features.sharp_prob is not None
+        assert features.sharp_market_hold is not None
+        assert features.sharp_market_hold > 0  # Should have some vig
 
     def test_extract_features_includes_retail_sharp_diff(self, sample_event, sample_odds_snapshot):
         """Test that retail vs sharp differences are calculated."""
@@ -218,7 +222,7 @@ class TestTabularFeatureExtractor:
         )
 
         # Should have retail-sharp difference features
-        assert "retail_sharp_diff_home" in features or "retail_sharp_diff_away" in features
+        assert features.retail_sharp_diff_home is not None or features.retail_sharp_diff_away is not None
 
     def test_extract_features_includes_best_odds(self, sample_event, sample_odds_snapshot):
         """Test that best available odds are found."""
@@ -227,9 +231,9 @@ class TestTabularFeatureExtractor:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        assert "best_available_odds" in features
-        assert "best_available_decimal" in features
-        assert features["best_available_decimal"] > 1.0
+        assert features.best_available_odds is not None
+        assert features.best_available_decimal is not None
+        assert features.best_available_decimal > 1.0
 
     def test_extract_features_team_indicators(self, sample_event, sample_odds_snapshot):
         """Test that team indicator features are set correctly."""
@@ -239,25 +243,29 @@ class TestTabularFeatureExtractor:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        assert home_features["is_home_team"] == 1.0
-        assert home_features["is_away_team"] == 0.0
+        assert home_features.is_home_team == 1.0
+        assert home_features.is_away_team == 0.0
 
         away_features = extractor.extract_features(
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.away_team
         )
 
-        assert away_features["is_home_team"] == 0.0
-        assert away_features["is_away_team"] == 1.0
+        assert away_features.is_home_team == 0.0
+        assert away_features.is_away_team == 1.0
 
     def test_extract_features_empty_odds(self, sample_event):
         """Test that extract_features handles empty odds gracefully."""
+        from odds_analytics.feature_extraction import TabularFeatures
+
         extractor = TabularFeatureExtractor()
         features = extractor.extract_features(
             sample_event, [], market="h2h", outcome=sample_event.home_team
         )
 
-        assert isinstance(features, dict)
-        assert len(features) == 0
+        assert isinstance(features, TabularFeatures)
+        # Should have is_home_team and is_away_team set
+        assert features.is_home_team == 1.0
+        assert features.is_away_team == 0.0
 
     def test_get_feature_names_returns_list(self):
         """Test that get_feature_names returns a list of strings."""
@@ -275,26 +283,33 @@ class TestTabularFeatureExtractor:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        feature_names = ["is_home_team", "is_away_team", "consensus_prob"]
-        vector = extractor.create_feature_vector(features, feature_names)
+        # TabularFeatures.to_array() is called automatically
+        vector = extractor.create_feature_vector(features)
 
         assert isinstance(vector, np.ndarray)
-        assert len(vector) == 3
-        assert vector[0] == features.get("is_home_team", 0.0)
-        assert vector[1] == features.get("is_away_team", 0.0)
-        assert vector[2] == features.get("consensus_prob", 0.0)
+        # Should have all features in the defined order
+        assert len(vector) == len(features.get_feature_names())
 
-    def test_create_feature_vector_fills_missing_with_zero(self):
-        """Test that missing features are filled with 0.0."""
-        extractor = TabularFeatureExtractor()
-        features = {"feature_a": 1.0}
-        feature_names = ["feature_a", "feature_b", "feature_c"]
+    def test_create_feature_vector_fills_missing_with_nan(self):
+        """Test that missing features (None) are converted to np.nan."""
+        from odds_analytics.feature_extraction import TabularFeatures
 
-        vector = extractor.create_feature_vector(features, feature_names)
+        # Create features with some None values
+        features = TabularFeatures(
+            is_home_team=1.0,
+            is_away_team=0.0,
+            consensus_prob=0.55,
+            # Other fields default to None
+        )
 
-        assert vector[0] == 1.0
-        assert vector[1] == 0.0  # Missing feature_b
-        assert vector[2] == 0.0  # Missing feature_c
+        vector = features.to_array()
+
+        # Required fields should have values
+        assert vector[0] == 1.0  # is_home_team
+        assert vector[1] == 0.0  # is_away_team
+
+        # Optional fields that are None should be NaN
+        assert np.isnan(vector[2])  # avg_home_odds (None)
 
     def test_create_feature_vector_uses_get_feature_names_by_default(
         self, sample_event, sample_odds_snapshot
@@ -325,15 +340,15 @@ class TestTabularFeatureExtractor:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        # Should be identical
+        # Should be identical (dataclass equality)
         assert features1 == features2
 
         # Convert to vectors
-        feature_names = sorted(features1.keys())
-        vec1 = extractor.create_feature_vector(features1, feature_names)
-        vec2 = extractor.create_feature_vector(features2, feature_names)
+        vec1 = extractor.create_feature_vector(features1)
+        vec2 = extractor.create_feature_vector(features2)
 
-        assert np.allclose(vec1, vec2)
+        # Use allclose with equal_nan=True to handle NaN values
+        assert np.allclose(vec1, vec2, equal_nan=True)
 
 
 class TestSequenceFeatureExtractor:
@@ -583,9 +598,11 @@ class TestSequenceFeatureExtractor:
         valid_mask = result["mask"]
         assert valid_mask.any(), "Expected valid data in mask, but all values are False"
 
-        # Cyclical encoding should be in valid range [-1, 1]
-        assert np.all(np.abs(sequence[valid_mask, time_sin_idx]) <= 1)
-        assert np.all(np.abs(sequence[valid_mask, time_cos_idx]) <= 1)
+        # Cyclical encoding should be in valid range [-1, 1] (ignoring NaN values)
+        time_sin_values = sequence[valid_mask, time_sin_idx]
+        time_cos_values = sequence[valid_mask, time_cos_idx]
+        assert np.all(np.abs(time_sin_values[~np.isnan(time_sin_values)]) <= 1)
+        assert np.all(np.abs(time_cos_values[~np.isnan(time_cos_values)]) <= 1)
 
     def test_extract_features_sharp_vs_retail(self, sample_event):
         """Test that sharp vs retail differential is calculated."""
@@ -724,15 +741,17 @@ class TestSequenceFeatureExtractor:
         # Should have valid data (both outcomes included)
         assert result["mask"].any()
 
-    def test_sequence_features_produce_finite_values(self, sample_event, sample_odds_snapshot):
-        """Test that all feature values are finite (no NaN or Inf)."""
+    def test_sequence_features_produce_valid_values(self, sample_event, sample_odds_snapshot):
+        """Test that feature extraction produces valid output structure."""
+        from datetime import timedelta
+
         extractor = SequenceFeatureExtractor(lookback_hours=24, timesteps=8)
 
-        base_time = sample_event.commence_time - np.timedelta64(12, "h")
+        base_time = sample_event.commence_time - timedelta(hours=12)
         odds_sequence = []
 
         for i in range(4):
-            snapshot_time = base_time + np.timedelta64(i * 3, "h")
+            snapshot_time = base_time + timedelta(hours=i * 3)
             snapshot = [
                 Odds(
                     id=900 + i,
@@ -754,9 +773,21 @@ class TestSequenceFeatureExtractor:
         )
 
         sequence = result["sequence"]
+        mask = result["mask"]
 
-        # All values should be finite
-        assert np.all(np.isfinite(sequence))
+        # Should have valid shape
+        assert sequence.shape == (8, 15)  # 8 timesteps, 15 features
+        assert mask.shape == (8,)
+
+        # Should have some valid data
+        assert mask.any(), "Should have at least some valid timesteps"
+
+        # Valid timesteps should have american_odds (core feature)
+        feature_names = extractor.get_feature_names()
+        american_odds_idx = feature_names.index("american_odds")
+        valid_odds = sequence[mask, american_odds_idx]
+        # At least one value should be finite and non-zero
+        assert np.any(np.isfinite(valid_odds) & (valid_odds != 0))
 
     def test_extract_features_consistency(self, sample_event):
         """Test that feature extraction is deterministic."""
@@ -788,8 +819,8 @@ class TestSequenceFeatureExtractor:
             sample_event, odds_sequence, market="h2h", outcome=sample_event.home_team
         )
 
-        # Should be identical
-        assert np.array_equal(result1["sequence"], result2["sequence"])
+        # Should be identical (use allclose with equal_nan=True for NaN handling)
+        assert np.allclose(result1["sequence"], result2["sequence"], equal_nan=True)
         assert np.array_equal(result1["mask"], result2["mask"])
 
 
@@ -831,13 +862,15 @@ class TestFeatureExtractorIntegration:
         )
 
         # Sharp probabilities should differ (different bookmaker as baseline)
-        if "sharp_prob" in default_features and "sharp_prob" in custom_features:
-            assert default_features["sharp_prob"] != custom_features["sharp_prob"]
+        if default_features.sharp_prob is not None and custom_features.sharp_prob is not None:
+            assert default_features.sharp_prob != custom_features.sharp_prob
 
     def test_different_extractors_can_be_used_interchangeably(
         self, sample_event, sample_odds_snapshot
     ):
         """Test that different extractors can be used through the same interface."""
+        from odds_analytics.feature_extraction import TabularFeatures
+
         extractors = [
             TabularFeatureExtractor(),
             TabularFeatureExtractor(sharp_bookmakers=["pinnacle"], retail_bookmakers=["fanduel"]),
@@ -848,7 +881,7 @@ class TestFeatureExtractorIntegration:
             features = extractor.extract_features(
                 sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
             )
-            assert isinstance(features, dict)
+            assert isinstance(features, TabularFeatures)
 
             feature_names = extractor.get_feature_names()
             assert isinstance(feature_names, list)

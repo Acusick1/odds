@@ -108,10 +108,9 @@ class TestFeatureExtractionIntegration:
         )
 
         # Verify features were extracted
-        assert len(features) > 0
-        assert "consensus_prob" in features
-        assert "sharp_prob" in features
-        assert 0 < features["consensus_prob"] < 1
+        assert features.consensus_prob is not None
+        assert features.sharp_prob is not None
+        assert 0 < features.consensus_prob < 1
 
     async def test_sequence_extractor_with_line_movement_query(self, test_session):
         """Test SequenceFeatureExtractor with line movement from database."""
@@ -459,13 +458,15 @@ class TestFeatureExtractionIntegration:
         )
 
         # Test TabularFeatureExtractor
+        from odds_analytics.feature_extraction import TabularFeatures
+
         tabular_extractor = TabularFeatureExtractor()
         tabular_features = tabular_extractor.extract_features(
             backtest_event, odds_records, outcome=event.home_team, market="h2h"
         )
         tabular_names = tabular_extractor.get_feature_names()
 
-        assert isinstance(tabular_features, dict)
+        assert isinstance(tabular_features, TabularFeatures)
         assert isinstance(tabular_names, list)
 
         # Test SequenceFeatureExtractor
