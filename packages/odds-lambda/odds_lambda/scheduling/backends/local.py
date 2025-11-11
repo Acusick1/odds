@@ -69,7 +69,7 @@ class LocalSchedulerBackend(SchedulerBackend):
 
     def validate_configuration(self) -> ValidationResult:
         """Validate local backend configuration."""
-        from core.scheduling.health_check import ValidationBuilder
+        from odds_core.scheduling.health_check import ValidationBuilder
 
         builder = ValidationBuilder()
 
@@ -81,7 +81,7 @@ class LocalSchedulerBackend(SchedulerBackend):
 
         # Check that job registry can be loaded
         try:
-            from core.scheduling.jobs import get_job_registry
+            from odds_core.scheduling.jobs import get_job_registry
 
             registry = get_job_registry()
             if not registry:
@@ -99,7 +99,7 @@ class LocalSchedulerBackend(SchedulerBackend):
         regardless of whether scheduler is started. "Not started" is a
         valid state, not a failure.
         """
-        from core.scheduling.health_check import HealthCheckBuilder
+        from odds_core.scheduling.health_check import HealthCheckBuilder
 
         builder = HealthCheckBuilder(self.get_backend_name())
 
@@ -214,7 +214,7 @@ class LocalSchedulerBackend(SchedulerBackend):
 
         try:
             # Get job function from centralized registry
-            from core.scheduling.jobs import get_job_function
+            from odds_core.scheduling.jobs import get_job_function
 
             job_func = get_job_function(job_name)
 

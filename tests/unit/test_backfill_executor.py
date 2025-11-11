@@ -2,7 +2,7 @@
 
 import pytest
 
-from odds_lambda.backfill_executor import BackfillExecutor
+from odds_analytics.backfill_executor import BackfillExecutor
 
 
 class TestBackfillExecutor:
@@ -129,7 +129,7 @@ class TestBackfillExecutor:
         from datetime import datetime
         from unittest.mock import AsyncMock
 
-        from core.api_models import HistoricalOddsResponse
+        from odds_core.api_models import HistoricalOddsResponse
 
         # Client returns empty response
         empty_client = AsyncMock()

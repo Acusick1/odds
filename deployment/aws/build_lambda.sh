@@ -27,23 +27,11 @@ cp -r ../../packages/odds-lambda/odds_lambda build/
 # Copy Lambda handler to root (entry point)
 cp ../../packages/odds-lambda/odds_lambda/lambda_handler.py build/
 
-# Create requirements.txt from package dependencies
-echo "Generating Lambda requirements.txt..."
-cat > build/requirements_lambda.txt << 'EOF'
-# odds-core dependencies
-sqlmodel>=0.0.14
-asyncpg>=0.29.0
-pydantic-settings>=2.1.0
-python-dotenv>=1.0.0
-structlog>=23.3.0
-
-# odds-lambda dependencies
-aiohttp>=3.9.0
-apscheduler>=3.10.4
-tenacity>=8.2.3
-boto3>=1.34.0
-alembic>=1.13.0
-EOF
+# Create requirements.txt from workspace using uv export
+echo "Generating Lambda requirements.txt from workspace..."
+cd ../..
+uv export --package odds-lambda --no-dev --no-editable > deployment/aws/build/requirements_lambda.txt
+cd deployment/aws
 
 # Install dependencies using Docker with Lambda-compatible environment
 echo "Installing Python dependencies (using Docker for Lambda compatibility)..."

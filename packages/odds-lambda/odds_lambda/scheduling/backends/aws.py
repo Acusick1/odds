@@ -136,7 +136,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
 
     def validate_configuration(self) -> ValidationResult:
         """Validate AWS backend configuration."""
-        from core.scheduling.health_check import ValidationBuilder
+        from odds_core.scheduling.health_check import ValidationBuilder
 
         builder = ValidationBuilder()
 
@@ -198,7 +198,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
 
     async def _perform_health_check(self) -> BackendHealth:
         """Perform actual health check (called when cache is stale)."""
-        from core.scheduling.health_check import HealthCheckBuilder
+        from odds_core.scheduling.health_check import HealthCheckBuilder
 
         builder = HealthCheckBuilder(self.get_backend_name())
 

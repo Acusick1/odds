@@ -354,7 +354,7 @@ class TierCoverageValidator:
         """
         from datetime import date as date_type
 
-        from core.data_fetcher import TheOddsAPIClient
+        from odds_core.data_fetcher import TheOddsAPIClient
 
         # Get games from API for this date
         api_client = TheOddsAPIClient()
@@ -458,7 +458,7 @@ class TierCoverageValidator:
         Returns:
             List of games with missing scores (games in DB without final scores) - WARNING
         """
-        from core.models import EventStatus
+        from odds_core.models import EventStatus
 
         # Build mapping of game IDs to game objects in our database
         db_game_map = {game.id: game for game in db_games}

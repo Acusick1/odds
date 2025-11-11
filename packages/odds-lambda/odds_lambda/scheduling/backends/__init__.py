@@ -64,13 +64,13 @@ def get_scheduler_backend(
         )
     """
     # Import settings here to avoid circular imports
-    from core.config import get_settings
+    from odds_core.config import get_settings
 
     settings = get_settings()
     backend = backend_type or settings.scheduler.backend.lower()
 
     if backend == "aws":
-        from core.scheduling.backends.aws import AWSEventBridgeBackend
+        from odds_core.scheduling.backends.aws import AWSEventBridgeBackend
 
         return AWSEventBridgeBackend(
             dry_run=dry_run,
@@ -80,7 +80,7 @@ def get_scheduler_backend(
         )
 
     elif backend == "railway":
-        from core.scheduling.backends.railway import RailwayBackend
+        from odds_core.scheduling.backends.railway import RailwayBackend
 
         return RailwayBackend(
             dry_run=dry_run,
@@ -88,7 +88,7 @@ def get_scheduler_backend(
         )
 
     elif backend == "local":
-        from core.scheduling.backends.local import LocalSchedulerBackend
+        from odds_core.scheduling.backends.local import LocalSchedulerBackend
 
         return LocalSchedulerBackend(
             dry_run=dry_run,

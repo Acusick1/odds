@@ -152,7 +152,7 @@ async def test_scheduler_end_to_end(
     mock_client.get_odds = mock_get_odds
 
     # Wrap the actual job to inject our mocks
-    from jobs import fetch_odds
+    from odds_lambda.jobs import fetch_odds
 
     original_main = fetch_odds.main
 
@@ -258,7 +258,7 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
     """
     from freezegun import freeze_time
 
-    from jobs import fetch_odds
+    from odds_lambda.jobs import fetch_odds
 
     # Create a test event for each tier
     writer = OddsWriter(test_session)

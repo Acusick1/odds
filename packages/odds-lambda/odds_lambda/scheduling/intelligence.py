@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 
-from core import tier_utils
+from odds_lambda import tier_utils
 from odds_core.database import async_session_maker
 from odds_lambda.fetch_tier import FetchTier
 from odds_core.models import Event, EventStatus
