@@ -310,7 +310,7 @@ alembic downgrade -1
 
 ```python
 # analytics/strategies.py
-from analytics.backtesting import BettingStrategy, BacktestEvent, BetOpportunity
+from odds_analytics..backtesting import BettingStrategy, BacktestEvent, BetOpportunity
 
 class MyStrategy(BettingStrategy):
     async def evaluate_opportunity(

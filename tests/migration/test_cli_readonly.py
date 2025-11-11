@@ -12,7 +12,7 @@ They do NOT write to the database or use API quota.
 
 import os
 
-from cli.main import app
+from odds_cli.main import app
 
 # Get the actual database URL from environment
 DATABASE_URL = os.getenv("DATABASE_URL")

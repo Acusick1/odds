@@ -74,7 +74,7 @@ async def test_session(test_engine):
 @pytest.fixture
 def mock_settings():
     """Mock settings for testing."""
-    from core.config import (
+    from odds_core.config import (
         APIConfig,
         DatabaseConfig,
         DataCollectionConfig,
@@ -135,7 +135,7 @@ def sample_backfill_plan():
 @pytest.fixture
 def mock_api_response_factory():
     """Factory to create mock API responses for different events."""
-    from core.api_models import HistoricalOddsResponse, api_dict_to_event
+    from odds_core.api_models import HistoricalOddsResponse, api_dict_to_event
 
     def _create_response(event_id="test_event_1", home_team="Lakers", away_team="Celtics"):
         # Create raw event data dict

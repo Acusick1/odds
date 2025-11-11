@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from storage.validators import OddsValidator
+from odds_lambda.storage.validators import OddsValidator
 
 
 class TestOddsValidator:

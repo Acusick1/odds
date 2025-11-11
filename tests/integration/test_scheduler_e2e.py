@@ -18,14 +18,13 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from odds_core.api_models import OddsResponse, api_dict_to_event
+from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_lambda.fetch_tier import FetchTier
+from odds_lambda.ingestion import OddsIngestionService
+from odds_lambda.storage.readers import OddsReader
+from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
-
-from core.api_models import OddsResponse, api_dict_to_event
-from core.fetch_tier import FetchTier
-from core.ingestion import OddsIngestionService
-from core.models import Event, EventStatus, OddsSnapshot
-from storage.readers import OddsReader
-from storage.writers import OddsWriter
 
 # Test constants
 GAME_TIME = datetime(2025, 1, 15, 19, 0, 0, tzinfo=UTC)
@@ -129,7 +128,7 @@ async def test_scheduler_end_to_end(
     NOTE: This uses REAL time (no freezegun) because APScheduler runs in real-time.
     The game is 2 hours in the future, so we're in CLOSING tier.
     """
-    from core.scheduling.backends.local import LocalSchedulerBackend
+    from odds_lambda.scheduling.backends.local import LocalSchedulerBackend
 
     # Track execution
     execution_happened = {"fetch_odds": False}
@@ -152,7 +151,7 @@ async def test_scheduler_end_to_end(
     mock_client.get_odds = mock_get_odds
 
     # Wrap the actual job to inject our mocks
-    from jobs import fetch_odds
+    from odds_lambda.jobs import fetch_odds
 
     original_main = fetch_odds.main
 
@@ -173,8 +172,8 @@ async def test_scheduler_end_to_end(
     async def wrapped_fetch_odds():
         """Wrapped job with mocked dependencies."""
         with (
-            patch("jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
-            patch("core.scheduling.intelligence.async_session_maker", mock_session_factory),
+            patch("odds_lambda.jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
+            patch("odds_lambda.scheduling.intelligence.async_session_maker", mock_session_factory),
         ):
             # Track execution
             execution_happened["fetch_odds"] = True
@@ -185,7 +184,7 @@ async def test_scheduler_end_to_end(
     # Start the scheduler backend
     async with LocalSchedulerBackend(dry_run=False) as backend:
         # Mock the job registry to return our wrapped job
-        with patch("core.scheduling.jobs.get_job_function", return_value=wrapped_fetch_odds):
+        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=wrapped_fetch_odds):
             # Schedule job to run 2 seconds in the future
             run_time = datetime.now(UTC) + timedelta(seconds=2)
             await backend.schedule_next_execution(job_name="fetch-odds", next_time=run_time)
@@ -257,8 +256,7 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
     Uses time mocking (freezegun) to test different tiers without waiting.
     """
     from freezegun import freeze_time
-
-    from jobs import fetch_odds
+    from odds_lambda.jobs import fetch_odds
 
     # Create a test event for each tier
     writer = OddsWriter(test_session)
@@ -316,9 +314,9 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
 
         with (
             freeze_time(test_time),
-            patch("jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
-            patch("core.scheduling.intelligence.async_session_maker", mock_session_factory),
-            patch("jobs.fetch_odds.get_scheduler_backend") as mock_backend_getter,
+            patch("odds_lambda.jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
+            patch("odds_lambda.scheduling.intelligence.async_session_maker", mock_session_factory),
+            patch("odds_lambda.jobs.fetch_odds.get_scheduler_backend") as mock_backend_getter,
         ):
             mock_backend = AsyncMock()
             mock_backend.schedule_next_execution = mock_schedule_next

@@ -4,15 +4,14 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
+from odds_core.config import get_settings
+
+# Import all models to ensure they're registered with SQLModel.metadata
+from odds_core.models import DataQualityLog, Event, FetchLog, Odds, OddsSnapshot  # noqa: F401
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlmodel import SQLModel
-
-from core.config import get_settings
-
-# Import all models to ensure they're registered with SQLModel.metadata
-from core.models import DataQualityLog, Event, FetchLog, Odds, OddsSnapshot  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

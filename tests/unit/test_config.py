@@ -9,7 +9,7 @@ if "ODDS_API_KEY" not in os.environ:
 if "DATABASE_URL" not in os.environ:
     os.environ["DATABASE_URL"] = "postgresql://test:test@localhost/test"
 
-from core.config import Settings
+from odds_core.config import Settings
 
 
 class TestSettings:

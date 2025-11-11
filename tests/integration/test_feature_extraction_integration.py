@@ -4,12 +4,11 @@ from datetime import UTC, datetime
 
 import numpy as np
 import pytest
-
-from analytics.backtesting import BacktestEvent
-from analytics.feature_extraction import SequenceFeatureExtractor, TabularFeatureExtractor
-from core.models import Event, EventStatus, Odds
-from storage.readers import OddsReader
-from storage.writers import OddsWriter
+from odds_analytics.backtesting import BacktestEvent
+from odds_analytics.feature_extraction import SequenceFeatureExtractor, TabularFeatureExtractor
+from odds_core.models import Event, EventStatus, Odds
+from odds_lambda.storage.readers import OddsReader
+from odds_lambda.storage.writers import OddsWriter
 
 
 @pytest.mark.asyncio

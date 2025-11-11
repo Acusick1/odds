@@ -3,16 +3,15 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
-
-from core.api_models import OddsResponse, api_dict_to_event
-from core.fetch_tier import FetchTier
-from core.ingestion import (
+from odds_core.api_models import OddsResponse, api_dict_to_event
+from odds_core.models import Event, FetchLog, Odds, OddsSnapshot
+from odds_lambda.fetch_tier import FetchTier
+from odds_lambda.ingestion import (
     EventIngestionFailure,
     OddsIngestionCallbacks,
     OddsIngestionService,
 )
-from core.models import Event, FetchLog, Odds, OddsSnapshot
+from sqlalchemy import select
 
 
 class _StubClient:
@@ -179,7 +178,7 @@ class TestOddsIngestionService:
         async def _failing_store(*args, **kwargs):
             raise RuntimeError("snapshot_failure")
 
-        monkeypatch.setattr("core.ingestion.OddsWriter.store_odds_snapshot", _failing_store)
+        monkeypatch.setattr("odds_lambda.ingestion.OddsWriter.store_odds_snapshot", _failing_store)
 
         callbacks_record: dict[str, list] = {"failed": []}
         callbacks = OddsIngestionCallbacks(

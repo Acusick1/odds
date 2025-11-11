@@ -22,8 +22,8 @@ def pytest_configure(config):
 
     See: https://github.com/sqlalchemy/sqlalchemy/issues/5626
     """
-    import core.database
-    from core.config import get_settings
+    import odds_core.database
+    from odds_core.config import get_settings
 
     settings = get_settings()
 
@@ -39,8 +39,8 @@ def pytest_configure(config):
     test_session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
 
     # Replace module-level objects
-    core.database.engine = test_engine
-    core.database.async_session_maker = test_session_maker
+    odds_core.database.engine = test_engine
+    odds_core.database.async_session_maker = test_session_maker
 
 
 @pytest.fixture(scope="function")

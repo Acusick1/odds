@@ -3,9 +3,8 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from core.fetch_tier import FetchTier
-from core.tier_utils import (
+from odds_lambda.fetch_tier import FetchTier
+from odds_lambda.tier_utils import (
     calculate_hours_until_commence,
     calculate_tier,
     calculate_tier_from_timestamps,

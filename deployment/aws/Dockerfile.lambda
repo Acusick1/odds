@@ -1,0 +1,37 @@
+FROM public.ecr.aws/lambda/python:3.11 AS builder
+
+# Install zip utility (not included in Lambda base image) and uv for package management
+RUN yum install -y zip && yum clean all
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+# Copy workspace files
+WORKDIR /workspace
+COPY pyproject.toml uv.lock ./
+COPY packages/odds-core ./packages/odds-core
+COPY packages/odds-lambda ./packages/odds-lambda
+
+# Build wheels for workspace packages
+RUN uv build --package odds-core --out-dir /tmp/wheels && \
+    uv build --package odds-lambda --out-dir /tmp/wheels
+
+# Install wheels and their dependencies to /asset
+RUN uv pip install --target /asset --no-cache \
+    /tmp/wheels/*.whl
+
+# Copy Lambda handler to root of deployment package (entry point)
+RUN cp packages/odds-lambda/odds_lambda/lambda_handler.py /asset/
+
+# Remove unnecessary files to reduce package size
+RUN cd /asset && \
+    find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
+    find . -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find . -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true && \
+    find . -type f -name "*.pyc" -delete 2>/dev/null || true && \
+    find . -type f -name "*.pyo" -delete 2>/dev/null || true
+
+# Create deployment zip
+RUN cd /asset && zip -r /lambda.zip . -q
+
+# Final stage - extract just the zip file
+FROM scratch
+COPY --from=builder /lambda.zip /

@@ -1,51 +1,47 @@
 #!/bin/bash
-# Build Lambda deployment package
+# Build Lambda deployment package using Docker
 #
-# This script creates a deployment package for AWS Lambda containing:
-# - All application code
-# - Python dependencies
-# - Lambda handler
+# This script builds a Lambda-compatible deployment package containing:
+# - odds-core: Foundation layer (models, database, config)
+# - odds-lambda: Lambda runtime (jobs, storage, scheduling, data fetcher)
+# - External dependencies from PyPI
+# - Lambda handler entry point
 #
-# Uses Docker to ensure compatibility with Lambda's Amazon Linux 2 runtime
+# The build uses Dockerfile.lambda with a multi-stage build process that:
+# 1. Installs packages using UV (proper workspace dependency resolution)
+# 2. Creates a Lambda-compatible directory structure
+# 3. Packages everything into lambda.zip
+#
+# Requirements:
+# - Docker installed and running
+# - Run from repository root or deployment/aws directory
 
 set -e
 
-echo "Building Lambda deployment package..."
+echo "Building Lambda deployment package using Docker..."
+
+# Navigate to repository root (script can be run from anywhere)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$REPO_ROOT"
 
 # Clean previous build
-rm -rf build/
-rm -f lambda_deployment.zip
+rm -f deployment/aws/lambda.zip deployment/aws/lambda_deployment.zip
 
-# Create build directory
-mkdir -p build/
+# Build Lambda package using Dockerfile
+# The --output flag extracts lambda.zip from the final scratch stage
+echo "Running Docker build (this may take a minute)..."
+docker build \
+  -f deployment/aws/Dockerfile.lambda \
+  --output type=local,dest=deployment/aws \
+  . \
+  2>&1 | grep -v "^#" || true  # Filter build output noise
 
-# Copy application code
-echo "Copying application code..."
-cp -r ../../core build/
-cp -r ../../storage build/
-cp -r ../../analytics build/
-cp -r ../../alerts build/
-cp -r ../../jobs build/
-cp lambda_function.py build/
+# Rename to standard name
+if [ -f deployment/aws/lambda.zip ]; then
+    mv deployment/aws/lambda.zip deployment/aws/lambda_deployment.zip
+fi
 
-# Install dependencies using Docker with Lambda-compatible environment
-echo "Installing Python dependencies (using Docker for Lambda compatibility)..."
-docker run --rm \
-  --entrypoint="" \
-  --user "$(id -u):$(id -g)" \
-  -v "$(pwd)/../../requirements.txt:/requirements.txt:ro" \
-  -v "$(pwd)/build:/build" \
-  public.ecr.aws/lambda/python:3.11 \
-  pip install -r /requirements.txt -t /build --no-cache-dir
-
-# Create deployment package
-echo "Creating deployment zip..."
-cd build/
-zip -r ../lambda_deployment.zip . -q
-cd ..
-
-# Cleanup
-rm -rf build/
-
-echo "✓ Lambda deployment package created: lambda_deployment.zip"
-echo "  Size: $(du -h lambda_deployment.zip | cut -f1)"
+echo ""
+echo "✓ Lambda deployment package created: deployment/aws/lambda_deployment.zip"
+echo "  Size: $(du -h deployment/aws/lambda_deployment.zip | cut -f1)"

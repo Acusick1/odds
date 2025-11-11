@@ -13,7 +13,7 @@ The main migration validation is handled by test_schema_validation.py.
 
 import os
 
-from cli.main import app
+from odds_cli.main import app
 
 # Get environment variables
 DATABASE_URL = os.getenv("DATABASE_URL")

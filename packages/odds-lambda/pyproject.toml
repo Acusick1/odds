@@ -1,0 +1,24 @@
+[project]
+name = "odds-lambda"
+version = "0.1.0"
+description = "Lambda runtime code for betting odds pipeline"
+authors = [{name = "Andrew"}]
+requires-python = ">=3.11"
+dependencies = [
+    "odds-core",
+    "aiohttp>=3.9.0",
+    "apscheduler>=3.10.4",
+    "tenacity>=8.2.3",
+    "boto3>=1.34.0",
+    "alembic>=1.13.0",
+]
+
+[tool.uv.sources]
+odds-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["odds_lambda"]
