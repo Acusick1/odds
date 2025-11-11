@@ -4,9 +4,8 @@ import asyncio
 from datetime import datetime
 
 import typer
+from odds_lambda.copy_from_production import copy_from_prod
 from rich.console import Console
-
-from scripts.copy_from_production import copy_from_prod
 
 app = typer.Typer()
 console = Console()

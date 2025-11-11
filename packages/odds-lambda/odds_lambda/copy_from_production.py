@@ -12,11 +12,12 @@ from datetime import UTC, datetime
 
 import structlog
 from odds_core.models import Event, EventStatus
-from odds_lambda.storage.readers import OddsReader
-from odds_lambda.storage.writers import OddsWriter
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeElapsedColumn
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from odds_lambda.storage.readers import OddsReader
+from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 console = Console()
