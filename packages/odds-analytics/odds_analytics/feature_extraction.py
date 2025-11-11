@@ -27,6 +27,7 @@ Example:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, fields
 from datetime import timedelta
 from typing import Any
 
@@ -44,7 +45,167 @@ __all__ = [
     "FeatureExtractor",
     "TabularFeatureExtractor",
     "SequenceFeatureExtractor",
+    "TabularFeatures",
+    "SequenceFeatures",
 ]
+
+
+@dataclass
+class TabularFeatures:
+    """
+    Type-safe feature container for tabular ML models.
+
+    Replaces string-keyed dictionaries with typed attributes to eliminate
+    runtime errors from typos and provide compile-time type checking.
+
+    Fields marked as Optional (with None default) indicate features that may
+    be unavailable depending on data completeness. None values are converted
+    to np.nan in array representation to distinguish from calculated zeros.
+
+    Required fields (always present):
+    - is_home_team, is_away_team: Team indicators
+
+    Optional fields (depend on data availability):
+    - Consensus features: Require h2h market with multiple bookmakers
+    - Sharp features: Require sharp bookmaker data (e.g., Pinnacle)
+    - Retail features: Require retail bookmaker data
+    - Best odds features: Require multiple bookmaker quotes
+    """
+
+    # Required fields - always present
+    is_home_team: float  # 1.0 or 0.0
+    is_away_team: float  # 1.0 or 0.0
+
+    # Consensus features (optional - require h2h market data)
+    avg_home_odds: float | None = None
+    avg_away_odds: float | None = None
+    std_home_odds: float | None = None
+    std_away_odds: float | None = None
+    home_consensus_prob: float | None = None
+    away_consensus_prob: float | None = None
+    consensus_prob: float | None = None
+    opponent_consensus_prob: float | None = None
+
+    # Sharp bookmaker features (optional - require sharp books)
+    sharp_home_prob: float | None = None
+    sharp_away_prob: float | None = None
+    sharp_market_hold: float | None = None
+    sharp_prob: float | None = None
+    opponent_sharp_prob: float | None = None
+
+    # Retail vs sharp features (optional - require both sharp and retail)
+    retail_sharp_diff_home: float | None = None
+    retail_sharp_diff_away: float | None = None
+
+    # Market efficiency features (optional - require bookmaker data)
+    num_bookmakers: float | None = None
+    avg_market_hold: float | None = None
+    std_market_hold: float | None = None
+
+    # Best odds features (optional - require line shopping data)
+    best_home_odds: float | None = None
+    worst_home_odds: float | None = None
+    home_odds_range: float | None = None
+    best_away_odds: float | None = None
+    worst_away_odds: float | None = None
+    away_odds_range: float | None = None
+    best_available_odds: float | None = None
+    odds_range: float | None = None
+    best_available_decimal: float | None = None
+
+    def to_array(self) -> np.ndarray:
+        """
+        Convert features to numpy array for model input.
+
+        None values are converted to np.nan to distinguish "feature unavailable"
+        from "calculated value equals zero".
+
+        Returns:
+            Numpy array with shape (num_features,) where None → np.nan
+        """
+        return np.array(
+            [getattr(self, field.name) if getattr(self, field.name) is not None else np.nan for field in fields(self)],
+            dtype=np.float64,
+        )
+
+    @classmethod
+    def get_feature_names(cls) -> list[str]:
+        """
+        Return ordered list of feature names.
+
+        Returns:
+            List of feature names in the order they appear in to_array()
+        """
+        return [field.name for field in fields(cls)]
+
+
+@dataclass
+class SequenceFeatures:
+    """
+    Type-safe feature container for sequence models (LSTM, Transformers).
+
+    Represents features for a single timestep in a sequence. Multiple
+    SequenceFeatures instances are stacked to form time series.
+
+    Required fields (always present when odds exist):
+    - american_odds, decimal_odds, implied_prob: Basic odds representation
+    - num_bookmakers: Count of bookmakers in snapshot
+    - hours_to_game: Time until game start
+    - time_of_day_sin, time_of_day_cos: Cyclical time encoding
+
+    Optional fields (depend on data availability):
+    - Line movement features: Require previous snapshots
+    - Sharp features: Require sharp bookmaker data
+    - Retail features: Require retail bookmaker data
+    """
+
+    # Required fields - always present when odds exist
+    american_odds: float
+    decimal_odds: float
+    implied_prob: float
+    num_bookmakers: float
+    hours_to_game: float
+    time_of_day_sin: float
+    time_of_day_cos: float
+
+    # Optional line movement features (require previous snapshots)
+    odds_change_from_prev: float | None = None
+    odds_change_from_opening: float | None = None
+    implied_prob_change_from_prev: float | None = None
+    implied_prob_change_from_opening: float | None = None
+
+    # Optional market features
+    odds_std: float | None = None
+
+    # Optional sharp vs retail features (require sharp/retail bookmakers)
+    sharp_odds: float | None = None
+    sharp_prob: float | None = None
+    retail_sharp_diff: float | None = None
+
+    def to_array(self) -> np.ndarray:
+        """
+        Convert features to numpy array for model input.
+
+        None values are converted to np.nan to distinguish "feature unavailable"
+        from "calculated value equals zero".
+
+        Returns:
+            Numpy array with shape (num_features,) where None → np.nan
+        """
+        return np.array(
+            [getattr(self, field.name) if getattr(self, field.name) is not None else np.nan for field in fields(self)],
+            dtype=np.float64,
+        )
+
+    @classmethod
+    def get_feature_names(cls) -> list[str]:
+        """
+        Return ordered list of feature names.
+
+        Returns:
+            List of feature names in the order they appear in to_array()
+        """
+        return [field.name for field in fields(cls)]
 
 
 class FeatureExtractor(ABC):
@@ -69,7 +230,7 @@ class FeatureExtractor(ABC):
         odds_data: list[Odds] | list[list[Odds]],
         outcome: str | None = None,
         **kwargs,
-    ) -> dict[str, Any]:
+    ) -> TabularFeatures | dict[str, Any]:
         """
         Extract features from event and odds data.
 
@@ -80,7 +241,8 @@ class FeatureExtractor(ABC):
             **kwargs: Additional extractor-specific parameters
 
         Returns:
-            Feature dictionary (structure depends on extractor type)
+            TabularFeatures instance for tabular extractors, or
+            dict with "sequence" and "mask" keys for sequence extractors
         """
 
     @abstractmethod
@@ -96,18 +258,23 @@ class FeatureExtractor(ABC):
         """
 
     def create_feature_vector(
-        self, features: dict[str, float], feature_names: list[str] | None = None
+        self, features: TabularFeatures | dict[str, float], feature_names: list[str] | None = None
     ) -> np.ndarray:
         """
-        Convert feature dictionary to numpy array for model input.
+        Convert features to numpy array for model input.
 
         Args:
-            features: Feature dictionary from extract_features()
+            features: TabularFeatures instance or feature dictionary from extract_features()
             feature_names: Ordered list of feature names (uses get_feature_names() if None)
 
         Returns:
-            Numpy array of feature values (fills missing with 0.0)
+            Numpy array of feature values (fills missing with 0.0 for dicts, np.nan for TabularFeatures)
         """
+        # If features is a TabularFeatures instance, use its to_array() method
+        if isinstance(features, TabularFeatures):
+            return features.to_array()
+
+        # Otherwise, treat as dictionary (legacy support)
         if feature_names is None:
             feature_names = self.get_feature_names()
 
@@ -155,46 +322,6 @@ class TabularFeatureExtractor(FeatureExtractor):
         self.sharp_bookmakers = sharp_bookmakers or ["pinnacle"]
         self.retail_bookmakers = retail_bookmakers or ["fanduel", "draftkings", "betmgm"]
 
-        # Feature names are dynamically determined based on market
-        # This is a comprehensive list of all possible features
-        self._feature_names = [
-            # Consensus features
-            "avg_home_odds",
-            "avg_away_odds",
-            "std_home_odds",
-            "std_away_odds",
-            "home_consensus_prob",
-            "away_consensus_prob",
-            "consensus_prob",
-            "opponent_consensus_prob",
-            # Sharp bookmaker features
-            "sharp_home_prob",
-            "sharp_away_prob",
-            "sharp_market_hold",
-            "sharp_prob",
-            "opponent_sharp_prob",
-            # Retail vs sharp features
-            "retail_sharp_diff_home",
-            "retail_sharp_diff_away",
-            # Market efficiency features
-            "num_bookmakers",
-            "avg_market_hold",
-            "std_market_hold",
-            # Best odds features (line shopping)
-            "best_home_odds",
-            "worst_home_odds",
-            "home_odds_range",
-            "best_away_odds",
-            "worst_away_odds",
-            "away_odds_range",
-            "best_available_odds",
-            "odds_range",
-            "best_available_decimal",
-            # Team indicators
-            "is_home_team",
-            "is_away_team",
-        ]
-
     def extract_features(
         self,
         event: BacktestEvent,
@@ -202,7 +329,7 @@ class TabularFeatureExtractor(FeatureExtractor):
         outcome: str | None = None,
         market: str = "h2h",
         **kwargs,
-    ) -> dict[str, float]:
+    ) -> TabularFeatures:
         """
         Extract ML features from event and odds snapshot.
 
@@ -213,16 +340,21 @@ class TabularFeatureExtractor(FeatureExtractor):
             market: Market to analyze (h2h, spreads, totals)
 
         Returns:
-            Dictionary of feature names to values
+            TabularFeatures instance with type-safe feature access
         """
-        features = {}
+        # Initialize feature values dictionary for building
+        feature_values = {}
         odds_snapshot = odds_data  # Alias for clarity
 
         # Filter for target market
         market_odds = [o for o in odds_snapshot if o.market_key == market]
 
+        # Always set required fields
+        feature_values["is_home_team"] = 1.0 if outcome == event.home_team else 0.0
+        feature_values["is_away_team"] = 1.0 if outcome == event.away_team else 0.0
+
         if not market_odds:
-            return features
+            return TabularFeatures(**feature_values)
 
         # Sharp bookmaker features
         sharp_odds = [o for o in market_odds if o.bookmaker_key in self.sharp_bookmakers]
@@ -236,10 +368,10 @@ class TabularFeatureExtractor(FeatureExtractor):
             away_odds_list = [o for o in market_odds if o.outcome_name == event.away_team]
 
             if home_odds_list and away_odds_list:
-                features["avg_home_odds"] = float(np.mean([o.price for o in home_odds_list]))
-                features["avg_away_odds"] = float(np.mean([o.price for o in away_odds_list]))
-                features["std_home_odds"] = float(np.std([o.price for o in home_odds_list]))
-                features["std_away_odds"] = float(np.std([o.price for o in away_odds_list]))
+                feature_values["avg_home_odds"] = float(np.mean([o.price for o in home_odds_list]))
+                feature_values["avg_away_odds"] = float(np.mean([o.price for o in away_odds_list]))
+                feature_values["std_home_odds"] = float(np.std([o.price for o in home_odds_list]))
+                feature_values["std_away_odds"] = float(np.std([o.price for o in away_odds_list]))
 
                 # Market consensus (average implied probability)
                 avg_home_prob = float(
@@ -248,16 +380,16 @@ class TabularFeatureExtractor(FeatureExtractor):
                 avg_away_prob = float(
                     np.mean([calculate_implied_probability(o.price) for o in away_odds_list])
                 )
-                features["home_consensus_prob"] = avg_home_prob
-                features["away_consensus_prob"] = avg_away_prob
+                feature_values["home_consensus_prob"] = avg_home_prob
+                feature_values["away_consensus_prob"] = avg_away_prob
 
                 # Determine if analyzing home or away
                 if outcome == event.home_team:
-                    features["consensus_prob"] = avg_home_prob
-                    features["opponent_consensus_prob"] = avg_away_prob
+                    feature_values["consensus_prob"] = avg_home_prob
+                    feature_values["opponent_consensus_prob"] = avg_away_prob
                 elif outcome == event.away_team:
-                    features["consensus_prob"] = avg_away_prob
-                    features["opponent_consensus_prob"] = avg_home_prob
+                    feature_values["consensus_prob"] = avg_away_prob
+                    feature_values["opponent_consensus_prob"] = avg_home_prob
 
         # 2. Sharp vs Retail features (key for detecting value)
         if sharp_odds and retail_odds:
@@ -268,12 +400,12 @@ class TabularFeatureExtractor(FeatureExtractor):
                 sharp_home_prob = calculate_implied_probability(sharp_home.price)
                 sharp_away_prob = calculate_implied_probability(sharp_away.price)
 
-                features["sharp_home_prob"] = sharp_home_prob
-                features["sharp_away_prob"] = sharp_away_prob
+                feature_values["sharp_home_prob"] = sharp_home_prob
+                feature_values["sharp_away_prob"] = sharp_away_prob
 
                 # Calculate sharp market hold (should be lower than retail)
                 sharp_hold = calculate_market_hold([sharp_home.price, sharp_away.price])
-                features["sharp_market_hold"] = sharp_hold
+                feature_values["sharp_market_hold"] = sharp_hold
 
                 # Compare retail to sharp (deviation indicates potential value)
                 retail_home_odds = [o for o in retail_odds if o.outcome_name == event.home_team]
@@ -283,25 +415,25 @@ class TabularFeatureExtractor(FeatureExtractor):
                     avg_retail_home_prob = float(
                         np.mean([calculate_implied_probability(o.price) for o in retail_home_odds])
                     )
-                    features["retail_sharp_diff_home"] = avg_retail_home_prob - sharp_home_prob
+                    feature_values["retail_sharp_diff_home"] = avg_retail_home_prob - sharp_home_prob
 
                 if retail_away_odds:
                     avg_retail_away_prob = float(
                         np.mean([calculate_implied_probability(o.price) for o in retail_away_odds])
                     )
-                    features["retail_sharp_diff_away"] = avg_retail_away_prob - sharp_away_prob
+                    feature_values["retail_sharp_diff_away"] = avg_retail_away_prob - sharp_away_prob
 
                 # Set outcome-specific features
                 if outcome == event.home_team:
-                    features["sharp_prob"] = sharp_home_prob
-                    features["opponent_sharp_prob"] = sharp_away_prob
+                    feature_values["sharp_prob"] = sharp_home_prob
+                    feature_values["opponent_sharp_prob"] = sharp_away_prob
                 elif outcome == event.away_team:
-                    features["sharp_prob"] = sharp_away_prob
-                    features["opponent_sharp_prob"] = sharp_home_prob
+                    feature_values["sharp_prob"] = sharp_away_prob
+                    feature_values["opponent_sharp_prob"] = sharp_home_prob
 
         # 3. Market efficiency features
         all_books = {o.bookmaker_key for o in market_odds}
-        features["num_bookmakers"] = float(len(all_books))
+        feature_values["num_bookmakers"] = float(len(all_books))
 
         # Calculate average market hold across all books
         if market == "h2h":
@@ -316,8 +448,8 @@ class TabularFeatureExtractor(FeatureExtractor):
                     holds.append(hold)
 
             if holds:
-                features["avg_market_hold"] = float(np.mean(holds))
-                features["std_market_hold"] = float(np.std(holds))
+                feature_values["avg_market_hold"] = float(np.mean(holds))
+                feature_values["std_market_hold"] = float(np.std(holds))
 
         # 4. Best available odds features (line shopping)
         if market == "h2h":
@@ -325,34 +457,30 @@ class TabularFeatureExtractor(FeatureExtractor):
             away_prices = [o.price for o in market_odds if o.outcome_name == event.away_team]
 
             if home_prices:
-                features["best_home_odds"] = float(max(home_prices))
-                features["worst_home_odds"] = float(min(home_prices))
-                features["home_odds_range"] = float(max(home_prices) - min(home_prices))
+                feature_values["best_home_odds"] = float(max(home_prices))
+                feature_values["worst_home_odds"] = float(min(home_prices))
+                feature_values["home_odds_range"] = float(max(home_prices) - min(home_prices))
 
             if away_prices:
-                features["best_away_odds"] = float(max(away_prices))
-                features["worst_away_odds"] = float(min(away_prices))
-                features["away_odds_range"] = float(max(away_prices) - min(away_prices))
+                feature_values["best_away_odds"] = float(max(away_prices))
+                feature_values["worst_away_odds"] = float(min(away_prices))
+                feature_values["away_odds_range"] = float(max(away_prices) - min(away_prices))
 
             # Set outcome-specific best odds
             if outcome == event.home_team and home_prices:
-                features["best_available_odds"] = float(max(home_prices))
-                features["odds_range"] = float(max(home_prices) - min(home_prices))
+                feature_values["best_available_odds"] = float(max(home_prices))
+                feature_values["odds_range"] = float(max(home_prices) - min(home_prices))
             elif outcome == event.away_team and away_prices:
-                features["best_available_odds"] = float(max(away_prices))
-                features["odds_range"] = float(max(away_prices) - min(away_prices))
+                feature_values["best_available_odds"] = float(max(away_prices))
+                feature_values["odds_range"] = float(max(away_prices) - min(away_prices))
 
         # 5. Decimal odds features (for model friendliness)
-        if "best_available_odds" in features:
-            features["best_available_decimal"] = american_to_decimal(
-                int(features["best_available_odds"])
+        if "best_available_odds" in feature_values:
+            feature_values["best_available_decimal"] = american_to_decimal(
+                int(feature_values["best_available_odds"])
             )
 
-        # 6. Binary features
-        features["is_home_team"] = 1.0 if outcome == event.home_team else 0.0
-        features["is_away_team"] = 1.0 if outcome == event.away_team else 0.0
-
-        return features
+        return TabularFeatures(**feature_values)
 
     def get_feature_names(self) -> list[str]:
         """
@@ -360,12 +488,12 @@ class TabularFeatureExtractor(FeatureExtractor):
 
         Note: Not all features may be present for every event (depends on
         available bookmakers and market type). Missing features are filled
-        with 0.0 in create_feature_vector().
+        with np.nan in create_feature_vector() for TabularFeatures.
 
         Returns:
             Ordered list of all possible feature names
         """
-        return self._feature_names
+        return TabularFeatures.get_feature_names()
 
 
 class SequenceFeatureExtractor(FeatureExtractor):
@@ -443,25 +571,6 @@ class SequenceFeatureExtractor(FeatureExtractor):
         self.sharp_bookmakers = sharp_bookmakers or ["pinnacle"]
         self.retail_bookmakers = retail_bookmakers or ["fanduel", "draftkings", "betmgm"]
 
-        # Feature names (per timestep)
-        self._feature_names = [
-            "american_odds",
-            "decimal_odds",
-            "implied_prob",
-            "odds_change_from_prev",
-            "odds_change_from_opening",
-            "implied_prob_change_from_prev",
-            "implied_prob_change_from_opening",
-            "num_bookmakers",
-            "odds_std",
-            "sharp_odds",
-            "sharp_prob",
-            "retail_sharp_diff",
-            "hours_to_game",
-            "time_of_day_sin",
-            "time_of_day_cos",
-        ]
-
     def extract_features(
         self,
         event: BacktestEvent,
@@ -491,7 +600,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
             >>> mask = result["mask"]  # Shape: (16,) - True where data exists
         """
         # Initialize empty sequence
-        feature_dim = len(self._feature_names)
+        feature_dim = len(SequenceFeatures.get_feature_names())
         sequence = np.zeros((self.timesteps, feature_dim))
         mask = np.zeros(self.timesteps, dtype=bool)
 
@@ -532,7 +641,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
             snapshot_time = snapshot_times[snapshot_idx]
 
             # Extract features for this timestep
-            features_dict = self._extract_timestep_features(
+            timestep_features = self._extract_timestep_features(
                 snapshot=snapshot,
                 event=event,
                 outcome=outcome,
@@ -542,22 +651,54 @@ class SequenceFeatureExtractor(FeatureExtractor):
                 prev_time=snapshot_times[snapshot_idx - 1] if snapshot_idx > 0 else None,
             )
 
-            # Store opening odds for reference
-            if opening_odds is None and "american_odds" in features_dict:
-                opening_odds = features_dict["american_odds"]
-                features_dict["odds_change_from_opening"] = 0.0
-                features_dict["implied_prob_change_from_opening"] = 0.0
-            elif opening_odds is not None:
-                features_dict["odds_change_from_opening"] = (
-                    features_dict.get("american_odds", opening_odds) - opening_odds
+            # Store opening odds for reference and update opening-relative features
+            if opening_odds is None and timestep_features is not None:
+                opening_odds = timestep_features.american_odds
+                # Create updated features with opening changes set to 0
+                timestep_features = SequenceFeatures(
+                    american_odds=timestep_features.american_odds,
+                    decimal_odds=timestep_features.decimal_odds,
+                    implied_prob=timestep_features.implied_prob,
+                    num_bookmakers=timestep_features.num_bookmakers,
+                    hours_to_game=timestep_features.hours_to_game,
+                    time_of_day_sin=timestep_features.time_of_day_sin,
+                    time_of_day_cos=timestep_features.time_of_day_cos,
+                    odds_change_from_prev=timestep_features.odds_change_from_prev,
+                    odds_change_from_opening=0.0,
+                    implied_prob_change_from_prev=timestep_features.implied_prob_change_from_prev,
+                    implied_prob_change_from_opening=0.0,
+                    odds_std=timestep_features.odds_std,
+                    sharp_odds=timestep_features.sharp_odds,
+                    sharp_prob=timestep_features.sharp_prob,
+                    retail_sharp_diff=timestep_features.retail_sharp_diff,
                 )
+            elif opening_odds is not None and timestep_features is not None:
+                odds_change_from_opening = timestep_features.american_odds - opening_odds
                 opening_prob = calculate_implied_probability(int(opening_odds))
-                current_prob = features_dict.get("implied_prob", opening_prob)
-                features_dict["implied_prob_change_from_opening"] = current_prob - opening_prob
+                implied_prob_change_from_opening = timestep_features.implied_prob - opening_prob
+                # Create updated features with opening changes calculated
+                timestep_features = SequenceFeatures(
+                    american_odds=timestep_features.american_odds,
+                    decimal_odds=timestep_features.decimal_odds,
+                    implied_prob=timestep_features.implied_prob,
+                    num_bookmakers=timestep_features.num_bookmakers,
+                    hours_to_game=timestep_features.hours_to_game,
+                    time_of_day_sin=timestep_features.time_of_day_sin,
+                    time_of_day_cos=timestep_features.time_of_day_cos,
+                    odds_change_from_prev=timestep_features.odds_change_from_prev,
+                    odds_change_from_opening=odds_change_from_opening,
+                    implied_prob_change_from_prev=timestep_features.implied_prob_change_from_prev,
+                    implied_prob_change_from_opening=implied_prob_change_from_opening,
+                    odds_std=timestep_features.odds_std,
+                    sharp_odds=timestep_features.sharp_odds,
+                    sharp_prob=timestep_features.sharp_prob,
+                    retail_sharp_diff=timestep_features.retail_sharp_diff,
+                )
 
             # Convert to array
-            sequence[timestep_idx] = self._features_dict_to_array(features_dict)
-            mask[timestep_idx] = True
+            if timestep_features is not None:
+                sequence[timestep_idx] = timestep_features.to_array()
+                mask[timestep_idx] = True
 
         return {"sequence": sequence, "mask": mask}
 
@@ -613,7 +754,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
         snapshot_time,
         prev_snapshot: list[Odds] | None,
         prev_time,
-    ) -> dict[str, float]:
+    ) -> SequenceFeatures | None:
         """
         Extract features for a single timestep.
 
@@ -627,9 +768,10 @@ class SequenceFeatureExtractor(FeatureExtractor):
             prev_time: Timestamp of previous snapshot
 
         Returns:
-            Dictionary of feature names to values
+            SequenceFeatures instance or None if no valid data
         """
-        features = {}
+        # Build feature values
+        feature_values = {}
 
         # Filter for target market and outcome
         market_odds = [o for o in snapshot if o.market_key == market]
@@ -639,15 +781,15 @@ class SequenceFeatureExtractor(FeatureExtractor):
             target_odds = market_odds
 
         if not target_odds:
-            return self._empty_features()
+            return None
 
         # 1. Basic odds features (average across bookmakers)
         prices = [o.price for o in target_odds]
         avg_price = float(np.mean(prices))
 
-        features["american_odds"] = avg_price
-        features["decimal_odds"] = american_to_decimal(int(avg_price))
-        features["implied_prob"] = calculate_implied_probability(int(avg_price))
+        feature_values["american_odds"] = avg_price
+        feature_values["decimal_odds"] = american_to_decimal(int(avg_price))
+        feature_values["implied_prob"] = calculate_implied_probability(int(avg_price))
 
         # 2. Line movement features
         if prev_snapshot:
@@ -659,25 +801,26 @@ class SequenceFeatureExtractor(FeatureExtractor):
 
             if prev_target_odds:
                 prev_avg_price = float(np.mean([o.price for o in prev_target_odds]))
-                features["odds_change_from_prev"] = avg_price - prev_avg_price
+                feature_values["odds_change_from_prev"] = avg_price - prev_avg_price
 
                 prev_prob = calculate_implied_probability(int(prev_avg_price))
-                features["implied_prob_change_from_prev"] = features["implied_prob"] - prev_prob
+                feature_values["implied_prob_change_from_prev"] = feature_values["implied_prob"] - prev_prob
             else:
-                features["odds_change_from_prev"] = 0.0
-                features["implied_prob_change_from_prev"] = 0.0
+                feature_values["odds_change_from_prev"] = 0.0
+                feature_values["implied_prob_change_from_prev"] = 0.0
         else:
-            features["odds_change_from_prev"] = 0.0
-            features["implied_prob_change_from_prev"] = 0.0
+            feature_values["odds_change_from_prev"] = 0.0
+            feature_values["implied_prob_change_from_prev"] = 0.0
 
-        # Placeholders for opening line changes (filled by caller)
-        features["odds_change_from_opening"] = 0.0
-        features["implied_prob_change_from_opening"] = 0.0
+        # Placeholders for opening line changes (will be set by caller)
+        # These will be overwritten by the caller based on opening odds
+        feature_values["odds_change_from_opening"] = None
+        feature_values["implied_prob_change_from_opening"] = None
 
         # 3. Market features
         bookmakers = {o.bookmaker_key for o in target_odds}
-        features["num_bookmakers"] = float(len(bookmakers))
-        features["odds_std"] = float(np.std(prices)) if len(prices) > 1 else 0.0
+        feature_values["num_bookmakers"] = float(len(bookmakers))
+        feature_values["odds_std"] = float(np.std(prices)) if len(prices) > 1 else None
 
         # 4. Sharp vs retail features
         sharp_odds_list = [o for o in target_odds if o.bookmaker_key in self.sharp_bookmakers]
@@ -685,39 +828,32 @@ class SequenceFeatureExtractor(FeatureExtractor):
 
         if sharp_odds_list:
             sharp_price = float(np.mean([o.price for o in sharp_odds_list]))
-            features["sharp_odds"] = sharp_price
-            features["sharp_prob"] = calculate_implied_probability(int(sharp_price))
+            feature_values["sharp_odds"] = sharp_price
+            sharp_prob = calculate_implied_probability(int(sharp_price))
+            feature_values["sharp_prob"] = sharp_prob
 
             if retail_odds_list:
                 retail_price = float(np.mean([o.price for o in retail_odds_list]))
                 retail_prob = calculate_implied_probability(int(retail_price))
-                features["retail_sharp_diff"] = retail_prob - features["sharp_prob"]
+                feature_values["retail_sharp_diff"] = retail_prob - sharp_prob
             else:
-                features["retail_sharp_diff"] = 0.0
+                feature_values["retail_sharp_diff"] = None
         else:
-            features["sharp_odds"] = avg_price
-            features["sharp_prob"] = features["implied_prob"]
-            features["retail_sharp_diff"] = 0.0
+            feature_values["sharp_odds"] = None
+            feature_values["sharp_prob"] = None
+            feature_values["retail_sharp_diff"] = None
 
-        # 5. Time features
+        # 5. Time features (required)
         time_delta = event.commence_time - snapshot_time
         hours_to_game = time_delta.total_seconds() / 3600
-        features["hours_to_game"] = float(hours_to_game)
+        feature_values["hours_to_game"] = float(hours_to_game)
 
         # Cyclical time encoding (hour of day)
         hour_of_day = snapshot_time.hour + snapshot_time.minute / 60
-        features["time_of_day_sin"] = np.sin(2 * np.pi * hour_of_day / 24)
-        features["time_of_day_cos"] = np.cos(2 * np.pi * hour_of_day / 24)
+        feature_values["time_of_day_sin"] = float(np.sin(2 * np.pi * hour_of_day / 24))
+        feature_values["time_of_day_cos"] = float(np.cos(2 * np.pi * hour_of_day / 24))
 
-        return features
-
-    def _empty_features(self) -> dict[str, float]:
-        """Return dictionary of features with zero values."""
-        return dict.fromkeys(self._feature_names, 0.0)
-
-    def _features_dict_to_array(self, features_dict: dict[str, float]) -> np.ndarray:
-        """Convert feature dictionary to ordered numpy array."""
-        return np.array([features_dict.get(name, 0.0) for name in self._feature_names])
+        return SequenceFeatures(**feature_values)
 
     def get_feature_names(self) -> list[str]:
         """
@@ -735,4 +871,4 @@ class SequenceFeatureExtractor(FeatureExtractor):
             >>> "american_odds" in names
             True
         """
-        return self._feature_names
+        return SequenceFeatures.get_feature_names()
