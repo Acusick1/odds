@@ -179,7 +179,7 @@ class TestOddsIngestionService:
         async def _failing_store(*args, **kwargs):
             raise RuntimeError("snapshot_failure")
 
-        monkeypatch.setattr("core.ingestion.OddsWriter.store_odds_snapshot", _failing_store)
+        monkeypatch.setattr("odds_lambda.ingestion.OddsWriter.store_odds_snapshot", _failing_store)
 
         callbacks_record: dict[str, list] = {"failed": []}
         callbacks = OddsIngestionCallbacks(

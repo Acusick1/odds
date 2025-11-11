@@ -174,7 +174,7 @@ async def test_scheduler_end_to_end(
         """Wrapped job with mocked dependencies."""
         with (
             patch("jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
-            patch("core.scheduling.intelligence.async_session_maker", mock_session_factory),
+            patch("odds_lambda.scheduling.intelligence.async_session_maker", mock_session_factory),
         ):
             # Track execution
             execution_happened["fetch_odds"] = True
@@ -185,7 +185,7 @@ async def test_scheduler_end_to_end(
     # Start the scheduler backend
     async with LocalSchedulerBackend(dry_run=False) as backend:
         # Mock the job registry to return our wrapped job
-        with patch("core.scheduling.jobs.get_job_function", return_value=wrapped_fetch_odds):
+        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=wrapped_fetch_odds):
             # Schedule job to run 2 seconds in the future
             run_time = datetime.now(UTC) + timedelta(seconds=2)
             await backend.schedule_next_execution(job_name="fetch-odds", next_time=run_time)
@@ -317,7 +317,7 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
         with (
             freeze_time(test_time),
             patch("jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
-            patch("core.scheduling.intelligence.async_session_maker", mock_session_factory),
+            patch("odds_lambda.scheduling.intelligence.async_session_maker", mock_session_factory),
             patch("jobs.fetch_odds.get_scheduler_backend") as mock_backend_getter,
         ):
             mock_backend = AsyncMock()

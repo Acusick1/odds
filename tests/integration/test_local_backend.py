@@ -71,7 +71,7 @@ class TestLocalSchedulerBackend:
         mock_job = AsyncMock()
 
         # Patch job registry to return our mock
-        with patch("core.scheduling.jobs.get_job_function", return_value=mock_job):
+        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=mock_job):
             async with LocalSchedulerBackend() as backend:
                 next_time = datetime.now(UTC) + timedelta(hours=1)
 
@@ -88,7 +88,7 @@ class TestLocalSchedulerBackend:
         """Test that scheduling replaces existing job with same name."""
         mock_job = AsyncMock()
 
-        with patch("core.scheduling.jobs.get_job_function", return_value=mock_job):
+        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=mock_job):
             async with LocalSchedulerBackend() as backend:
                 time1 = datetime.now(UTC) + timedelta(hours=1)
                 time2 = datetime.now(UTC) + timedelta(hours=2)
@@ -109,7 +109,7 @@ class TestLocalSchedulerBackend:
         """Test cancelling a scheduled job."""
         mock_job = AsyncMock()
 
-        with patch("core.scheduling.jobs.get_job_function", return_value=mock_job):
+        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=mock_job):
             async with LocalSchedulerBackend() as backend:
                 next_time = datetime.now(UTC) + timedelta(hours=1)
 
@@ -139,7 +139,7 @@ class TestLocalSchedulerBackend:
         """Test getting status of an existing job."""
         mock_job = AsyncMock()
 
-        with patch("core.scheduling.jobs.get_job_function", return_value=mock_job):
+        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=mock_job):
             async with LocalSchedulerBackend() as backend:
                 next_time = datetime.now(UTC) + timedelta(hours=1)
 
@@ -171,7 +171,7 @@ class TestLocalSchedulerBackend:
         """Test getting multiple scheduled jobs."""
         mock_job = AsyncMock()
 
-        with patch("core.scheduling.jobs.get_job_function", return_value=mock_job):
+        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=mock_job):
             async with LocalSchedulerBackend() as backend:
                 # Schedule multiple jobs
                 await backend.schedule_next_execution(
@@ -225,7 +225,7 @@ class TestLocalSchedulerBackend:
         """Test that scheduling unknown job raises SchedulingFailedError."""
         # Patch to raise KeyError (job not in registry)
         with patch(
-            "core.scheduling.jobs.get_job_function",
+            "odds_lambda.scheduling.jobs.get_job_function",
             side_effect=KeyError("Unknown job 'invalid-job'"),
         ):
             async with LocalSchedulerBackend() as backend:
@@ -245,7 +245,7 @@ class TestLocalSchedulerBackend:
         async def test_job():
             executed.set()
 
-        with patch("core.scheduling.jobs.get_job_function", return_value=test_job):
+        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=test_job):
             async with LocalSchedulerBackend() as backend:
                 # Schedule job to run very soon (100ms)
                 next_time = datetime.now(UTC) + timedelta(milliseconds=100)
@@ -274,7 +274,7 @@ class TestLocalSchedulerBackend:
         def get_job_func(job_name):
             return job1 if job_name == "job1" else job2
 
-        with patch("core.scheduling.jobs.get_job_function", side_effect=get_job_func):
+        with patch("odds_lambda.scheduling.jobs.get_job_function", side_effect=get_job_func):
             async with LocalSchedulerBackend() as backend:
                 # Schedule both jobs
                 await backend.schedule_next_execution(
