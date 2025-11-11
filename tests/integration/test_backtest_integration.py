@@ -5,16 +5,16 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from analytics.backtesting import (
+from odds_analytics.backtesting import (
     BacktestConfig,
     BacktestEngine,
     BacktestResult,
     BetSizingConfig,
 )
-from analytics.strategies import ArbitrageStrategy, FlatBettingStrategy
-from core.models import Event, EventStatus, Odds
-from storage.readers import OddsReader
-from storage.writers import OddsWriter
+from odds_analytics.strategies import ArbitrageStrategy, FlatBettingStrategy
+from odds_core.models import Event, EventStatus, Odds
+from odds_lambda.storage.readers import OddsReader
+from odds_lambda.storage.writers import OddsWriter
 
 
 @pytest.mark.asyncio

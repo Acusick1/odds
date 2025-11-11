@@ -3,10 +3,10 @@
 import pytest
 from sqlalchemy import select
 
-from core.backfill_executor import BackfillExecutor
-from core.models import Event, EventStatus, Odds, OddsSnapshot
-from core.time import parse_api_datetime
-from storage.readers import OddsReader
+from odds_lambda.backfill_executor import BackfillExecutor
+from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.time import parse_api_datetime
+from odds_lambda.storage.readers import OddsReader
 
 
 def _api_dict_to_event(event_data: dict) -> Event:
@@ -154,7 +154,7 @@ class TestBackfillIntegration:
         """Test that events are properly upserted on multiple runs."""
         from unittest.mock import AsyncMock
 
-        from storage.writers import OddsWriter
+        from odds_lambda.storage.writers import OddsWriter
 
         # Create event with old data
         writer = OddsWriter(test_session)

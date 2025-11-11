@@ -4,10 +4,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds
-from core.time import parse_api_datetime
-from storage.readers import OddsReader
-from storage.writers import OddsWriter
+from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds
+from odds_core.time import parse_api_datetime
+from odds_lambda.storage.readers import OddsReader
+from odds_lambda.storage.writers import OddsWriter
 
 
 def _api_dict_to_event(event_data: dict) -> Event:

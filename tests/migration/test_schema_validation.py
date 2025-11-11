@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 
 # Import all models to ensure they're registered with SQLModel.metadata
-from core.models import DataQualityLog, Event, FetchLog, Odds, OddsSnapshot  # noqa: F401
+from odds_core.models import DataQualityLog, Event, FetchLog, Odds, OddsSnapshot  # noqa: F401
 
 # Get the actual database URL from environment
 DATABASE_URL = os.getenv("DATABASE_URL")

@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
+from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 
 
 class TestEventModel:

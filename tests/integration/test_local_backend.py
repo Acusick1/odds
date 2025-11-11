@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.scheduling.backends.local import LocalSchedulerBackend
-from core.scheduling.exceptions import (
+from odds_lambda.scheduling.backends.local import LocalSchedulerBackend
+from odds_lambda.scheduling.exceptions import (
     JobNotFoundError,
     SchedulingFailedError,
 )

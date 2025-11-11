@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from core.time import ensure_utc, parse_api_datetime, utc_isoformat
+from odds_core.time import ensure_utc, parse_api_datetime, utc_isoformat
 
 
 class TestTimeUtils:

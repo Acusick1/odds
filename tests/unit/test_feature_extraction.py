@@ -5,13 +5,13 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from analytics.backtesting import BacktestEvent
-from analytics.feature_extraction import (
+from odds_analytics.backtesting import BacktestEvent
+from odds_analytics.feature_extraction import (
     FeatureExtractor,
     SequenceFeatureExtractor,
     TabularFeatureExtractor,
 )
-from core.models import EventStatus, Odds
+from odds_core.models import EventStatus, Odds
 
 
 @pytest.fixture

@@ -20,12 +20,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy import select
 
-from core.api_models import OddsResponse, api_dict_to_event
-from core.fetch_tier import FetchTier
-from core.ingestion import OddsIngestionService
-from core.models import Event, EventStatus, OddsSnapshot
-from storage.readers import OddsReader
-from storage.writers import OddsWriter
+from odds_core.api_models import OddsResponse, api_dict_to_event
+from odds_lambda.fetch_tier import FetchTier
+from odds_lambda.ingestion import OddsIngestionService
+from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_lambda.storage.readers import OddsReader
+from odds_lambda.storage.writers import OddsWriter
 
 # Test constants
 GAME_TIME = datetime(2025, 1, 15, 19, 0, 0, tzinfo=UTC)

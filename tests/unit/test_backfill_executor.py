@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.backfill_executor import BackfillExecutor
+from odds_lambda.backfill_executor import BackfillExecutor
 
 
 class TestBackfillExecutor:

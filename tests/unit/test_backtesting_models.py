@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pytest
 
-from analytics.backtesting import (
+from odds_analytics.backtesting import (
     BacktestResult,
     BetRecord,
     BetStatistics,
