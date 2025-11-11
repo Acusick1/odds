@@ -414,8 +414,12 @@ class SequenceFeatureExtractor(FeatureExtractor):
             outcome="Lakers",
             market="h2h"
         )
-        # Returns: {"sequence": np.ndarray(24, 15), "mask": np.ndarray(24,)}
+        # Returns: {"sequence": np.ndarray(24, num_features), "mask": np.ndarray(24,)}
         ```
+
+    Note:
+        Uses uniform timestep allocation (nearest-neighbor resampling). For use cases
+        with non-uniform data density, consider implementing a custom resampling strategy.
     """
 
     def __init__(
@@ -483,7 +487,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
         Example:
             >>> extractor = SequenceFeatureExtractor(lookback_hours=48, timesteps=16)
             >>> result = extractor.extract_features(event, odds_snapshots, outcome="Lakers")
-            >>> sequence = result["sequence"]  # Shape: (16, 15)
+            >>> sequence = result["sequence"]  # Shape: (16, num_features)
             >>> mask = result["mask"]  # Shape: (16,) - True where data exists
         """
         # Initialize empty sequence
@@ -723,13 +727,11 @@ class SequenceFeatureExtractor(FeatureExtractor):
         The full sequence output has shape (timesteps, num_features).
 
         Returns:
-            List of feature names (length: 15)
+            List of feature names
 
         Example:
             >>> extractor = SequenceFeatureExtractor()
             >>> names = extractor.get_feature_names()
-            >>> len(names)
-            15
             >>> "american_odds" in names
             True
         """
