@@ -129,7 +129,7 @@ async def test_scheduler_end_to_end(
     NOTE: This uses REAL time (no freezegun) because APScheduler runs in real-time.
     The game is 2 hours in the future, so we're in CLOSING tier.
     """
-    from core.scheduling.backends.local import LocalSchedulerBackend
+    from odds_lambda.scheduling.backends.local import LocalSchedulerBackend
 
     # Track execution
     execution_happened = {"fetch_odds": False}
@@ -173,7 +173,7 @@ async def test_scheduler_end_to_end(
     async def wrapped_fetch_odds():
         """Wrapped job with mocked dependencies."""
         with (
-            patch("jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
+            patch("odds_lambda.jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
             patch("odds_lambda.scheduling.intelligence.async_session_maker", mock_session_factory),
         ):
             # Track execution
@@ -316,9 +316,9 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
 
         with (
             freeze_time(test_time),
-            patch("jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
+            patch("odds_lambda.jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
             patch("odds_lambda.scheduling.intelligence.async_session_maker", mock_session_factory),
-            patch("jobs.fetch_odds.get_scheduler_backend") as mock_backend_getter,
+            patch("odds_lambda.jobs.fetch_odds.get_scheduler_backend") as mock_backend_getter,
         ):
             mock_backend = AsyncMock()
             mock_backend.schedule_next_execution = mock_schedule_next
