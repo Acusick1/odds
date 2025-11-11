@@ -27,6 +27,7 @@ Example:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import timedelta
 from typing import Any
 
 import numpy as np
@@ -371,38 +372,54 @@ class SequenceFeatureExtractor(FeatureExtractor):
     """
     Feature extractor for sequence models (LSTM, Transformers).
 
-    STUB - Future implementation for time-series models that need
-    historical odds sequences rather than single snapshots.
+    Extracts time-series features from historical odds sequences, capturing
+    line movement patterns and temporal dynamics that are critical for
+    sequence models.
 
-    Planned features:
-    - Line movement patterns over 72 hours
-    - Time-to-game encoding
-    - Sharp money indicators (reverse line movement)
-    - Steam moves (rapid line changes)
-    - Betting percentage vs line movement divergence
+    Features extracted per timestep:
+    - Odds values (American, decimal, implied probability)
+    - Line movement (change from previous timestep, change from opening)
+    - Market indicators (number of bookmakers, spread of odds)
+    - Sharp vs retail differentials
+    - Time encoding (hours until game start)
 
-    Expected input: List of odds snapshots ordered by time
-    Expected output: 3D tensor (timesteps, features) or dictionary with sequences
+    The extractor resamples irregular snapshots to fixed timesteps and
+    creates attention masks for variable-length sequences.
 
-    Example (future):
+    Example:
         ```python
+        from storage.readers import OddsReader
+
         extractor = SequenceFeatureExtractor(
             lookback_hours=72,
             timesteps=24,  # One snapshot every 3 hours
         )
 
-        # odds_history: List of snapshots from 72h before game to decision time
+        # Query historical odds using OddsReader
+        async with get_async_session() as session:
+            reader = OddsReader(session)
+            odds_history = await reader.get_line_movement(
+                event_id="abc123",
+                bookmaker_key="pinnacle",
+                market_key="h2h",
+                outcome_name="Lakers"
+            )
+
+        # Convert to list of snapshots (group by timestamp)
+        snapshots = _group_odds_by_timestamp(odds_history)
+
         features = extractor.extract_features(
             event=event,
-            odds_data=odds_history,  # List[List[Odds]]
-            outcome="Lakers"
+            odds_data=snapshots,  # List[List[Odds]]
+            outcome="Lakers",
+            market="h2h"
         )
-        # Returns: {"sequence": np.ndarray(24, 50), "mask": np.ndarray(24,)}
+        # Returns: {"sequence": np.ndarray(24, num_features), "mask": np.ndarray(24,)}
         ```
 
     Note:
-        This is a placeholder for future LSTM/Transformer implementations.
-        The actual interface may evolve based on model requirements.
+        Uses uniform timestep allocation (nearest-neighbor resampling). For use cases
+        with non-uniform data density, consider implementing a custom resampling strategy.
     """
 
     def __init__(
@@ -410,6 +427,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
         lookback_hours: int = 72,
         timesteps: int = 24,
         sharp_bookmakers: list[str] | None = None,
+        retail_bookmakers: list[str] | None = None,
     ):
         """
         Initialize sequence feature extractor.
@@ -417,11 +435,32 @@ class SequenceFeatureExtractor(FeatureExtractor):
         Args:
             lookback_hours: Hours before game to start sequence (default: 72)
             timesteps: Number of timesteps in sequence (default: 24)
-            sharp_bookmakers: Sharp bookmakers for line movement analysis
+            sharp_bookmakers: Sharp bookmakers for line movement analysis (default: ["pinnacle"])
+            retail_bookmakers: Retail bookmakers for comparison (default: ["fanduel", "draftkings", "betmgm"])
         """
         self.lookback_hours = lookback_hours
         self.timesteps = timesteps
         self.sharp_bookmakers = sharp_bookmakers or ["pinnacle"]
+        self.retail_bookmakers = retail_bookmakers or ["fanduel", "draftkings", "betmgm"]
+
+        # Feature names (per timestep)
+        self._feature_names = [
+            "american_odds",
+            "decimal_odds",
+            "implied_prob",
+            "odds_change_from_prev",
+            "odds_change_from_opening",
+            "implied_prob_change_from_prev",
+            "implied_prob_change_from_opening",
+            "num_bookmakers",
+            "odds_std",
+            "sharp_odds",
+            "sharp_prob",
+            "retail_sharp_diff",
+            "hours_to_game",
+            "time_of_day_sin",
+            "time_of_day_cos",
+        ]
 
     def extract_features(
         self,
@@ -436,37 +475,264 @@ class SequenceFeatureExtractor(FeatureExtractor):
 
         Args:
             event: Event with final scores
-            odds_data: List of odds snapshots ordered by time
-            outcome: Specific outcome to analyze
+            odds_data: List of odds snapshots ordered by time (each snapshot is a list of Odds)
+            outcome: Specific outcome to analyze (team name or Over/Under)
             market: Market to analyze (h2h, spreads, totals)
 
         Returns:
-            Dictionary with sequence data (e.g., {"sequence": array, "mask": array})
+            Dictionary with:
+            - "sequence": np.ndarray of shape (timesteps, num_features)
+            - "mask": np.ndarray of shape (timesteps,) with True for valid data points
 
-        Raises:
-            NotImplementedError: This is a stub for future implementation
+        Example:
+            >>> extractor = SequenceFeatureExtractor(lookback_hours=48, timesteps=16)
+            >>> result = extractor.extract_features(event, odds_snapshots, outcome="Lakers")
+            >>> sequence = result["sequence"]  # Shape: (16, num_features)
+            >>> mask = result["mask"]  # Shape: (16,) - True where data exists
         """
-        raise NotImplementedError(
-            "SequenceFeatureExtractor is a stub for future LSTM/Transformer support. "
-            "To implement:\n"
-            "1. Query OddsReader.get_line_movement() to fetch historical snapshots\n"
-            "2. Resample/interpolate to fixed timesteps (e.g., every 3 hours)\n"
-            "3. Extract features at each timestep (odds, implied prob, line changes)\n"
-            "4. Stack into 3D tensor (timesteps, features)\n"
-            "5. Create attention mask for variable-length sequences\n"
-            "6. Return dict with 'sequence' and 'mask' arrays"
-        )
+        # Initialize empty sequence
+        feature_dim = len(self._feature_names)
+        sequence = np.zeros((self.timesteps, feature_dim))
+        mask = np.zeros(self.timesteps, dtype=bool)
+
+        # If no data, return empty sequence
+        if not odds_data or all(len(snapshot) == 0 for snapshot in odds_data):
+            return {"sequence": sequence, "mask": mask}
+
+        # Extract timestamps from snapshots
+        snapshot_times = []
+        valid_snapshots = []
+
+        for snapshot in odds_data:
+            # Filter for target market and outcome
+            filtered = [o for o in snapshot if o.market_key == market]
+            if outcome:
+                filtered = [o for o in filtered if o.outcome_name == outcome]
+
+            if filtered:
+                valid_snapshots.append(snapshot)  # Keep full snapshot for market context
+                snapshot_times.append(filtered[0].odds_timestamp)
+
+        if not valid_snapshots:
+            return {"sequence": sequence, "mask": mask}
+
+        # Resample to fixed timesteps
+        resampled_indices = self._resample_to_timesteps(snapshot_times, event.commence_time)
+
+        # Track opening line for change calculation
+        opening_odds = None
+
+        # Extract features for each timestep
+        for timestep_idx, snapshot_idx in enumerate(resampled_indices):
+            if snapshot_idx is None:
+                # No data for this timestep - leave as zeros with mask=False
+                continue
+
+            snapshot = valid_snapshots[snapshot_idx]
+            snapshot_time = snapshot_times[snapshot_idx]
+
+            # Extract features for this timestep
+            features_dict = self._extract_timestep_features(
+                snapshot=snapshot,
+                event=event,
+                outcome=outcome,
+                market=market,
+                snapshot_time=snapshot_time,
+                prev_snapshot=valid_snapshots[snapshot_idx - 1] if snapshot_idx > 0 else None,
+                prev_time=snapshot_times[snapshot_idx - 1] if snapshot_idx > 0 else None,
+            )
+
+            # Store opening odds for reference
+            if opening_odds is None and "american_odds" in features_dict:
+                opening_odds = features_dict["american_odds"]
+                features_dict["odds_change_from_opening"] = 0.0
+                features_dict["implied_prob_change_from_opening"] = 0.0
+            elif opening_odds is not None:
+                features_dict["odds_change_from_opening"] = (
+                    features_dict.get("american_odds", opening_odds) - opening_odds
+                )
+                opening_prob = calculate_implied_probability(int(opening_odds))
+                current_prob = features_dict.get("implied_prob", opening_prob)
+                features_dict["implied_prob_change_from_opening"] = current_prob - opening_prob
+
+            # Convert to array
+            sequence[timestep_idx] = self._features_dict_to_array(features_dict)
+            mask[timestep_idx] = True
+
+        return {"sequence": sequence, "mask": mask}
+
+    def _resample_to_timesteps(
+        self,
+        snapshot_times: list,
+        commence_time,
+    ) -> list[int | None]:
+        """
+        Resample irregular snapshots to fixed timesteps.
+
+        Uses nearest-neighbor resampling: each target timestep is mapped
+        to the closest available snapshot (or None if too far).
+
+        Args:
+            snapshot_times: List of datetime objects for available snapshots
+            commence_time: Game start time
+
+        Returns:
+            List of indices into snapshot_times (or None for missing data)
+        """
+        # Calculate target times working backwards from game start
+        target_times = []
+        for i in range(self.timesteps):
+            hours_before = self.lookback_hours - (i * self.lookback_hours / self.timesteps)
+            target_time = commence_time - timedelta(seconds=hours_before * 3600)
+            target_times.append(target_time)
+
+        # For each target time, find nearest snapshot
+        resampled_indices = []
+        tolerance_seconds = (self.lookback_hours / self.timesteps) * 3600 / 2  # Half interval
+
+        for target_time in target_times:
+            best_idx = None
+            best_diff = float("inf")
+
+            for idx, snap_time in enumerate(snapshot_times):
+                diff_seconds = abs((snap_time - target_time).total_seconds())
+                if diff_seconds < best_diff and diff_seconds <= tolerance_seconds:
+                    best_diff = diff_seconds
+                    best_idx = idx
+
+            resampled_indices.append(best_idx)
+
+        return resampled_indices
+
+    def _extract_timestep_features(
+        self,
+        snapshot: list[Odds],
+        event: BacktestEvent,
+        outcome: str | None,
+        market: str,
+        snapshot_time,
+        prev_snapshot: list[Odds] | None,
+        prev_time,
+    ) -> dict[str, float]:
+        """
+        Extract features for a single timestep.
+
+        Args:
+            snapshot: Full odds snapshot at this timestep
+            event: Event details
+            outcome: Target outcome
+            market: Market type
+            snapshot_time: Timestamp of this snapshot
+            prev_snapshot: Previous snapshot for change calculation
+            prev_time: Timestamp of previous snapshot
+
+        Returns:
+            Dictionary of feature names to values
+        """
+        features = {}
+
+        # Filter for target market and outcome
+        market_odds = [o for o in snapshot if o.market_key == market]
+        if outcome:
+            target_odds = [o for o in market_odds if o.outcome_name == outcome]
+        else:
+            target_odds = market_odds
+
+        if not target_odds:
+            return self._empty_features()
+
+        # 1. Basic odds features (average across bookmakers)
+        prices = [o.price for o in target_odds]
+        avg_price = float(np.mean(prices))
+
+        features["american_odds"] = avg_price
+        features["decimal_odds"] = american_to_decimal(int(avg_price))
+        features["implied_prob"] = calculate_implied_probability(int(avg_price))
+
+        # 2. Line movement features
+        if prev_snapshot:
+            prev_market_odds = [o for o in prev_snapshot if o.market_key == market]
+            if outcome:
+                prev_target_odds = [o for o in prev_market_odds if o.outcome_name == outcome]
+            else:
+                prev_target_odds = prev_market_odds
+
+            if prev_target_odds:
+                prev_avg_price = float(np.mean([o.price for o in prev_target_odds]))
+                features["odds_change_from_prev"] = avg_price - prev_avg_price
+
+                prev_prob = calculate_implied_probability(int(prev_avg_price))
+                features["implied_prob_change_from_prev"] = features["implied_prob"] - prev_prob
+            else:
+                features["odds_change_from_prev"] = 0.0
+                features["implied_prob_change_from_prev"] = 0.0
+        else:
+            features["odds_change_from_prev"] = 0.0
+            features["implied_prob_change_from_prev"] = 0.0
+
+        # Placeholders for opening line changes (filled by caller)
+        features["odds_change_from_opening"] = 0.0
+        features["implied_prob_change_from_opening"] = 0.0
+
+        # 3. Market features
+        bookmakers = {o.bookmaker_key for o in target_odds}
+        features["num_bookmakers"] = float(len(bookmakers))
+        features["odds_std"] = float(np.std(prices)) if len(prices) > 1 else 0.0
+
+        # 4. Sharp vs retail features
+        sharp_odds_list = [o for o in target_odds if o.bookmaker_key in self.sharp_bookmakers]
+        retail_odds_list = [o for o in target_odds if o.bookmaker_key in self.retail_bookmakers]
+
+        if sharp_odds_list:
+            sharp_price = float(np.mean([o.price for o in sharp_odds_list]))
+            features["sharp_odds"] = sharp_price
+            features["sharp_prob"] = calculate_implied_probability(int(sharp_price))
+
+            if retail_odds_list:
+                retail_price = float(np.mean([o.price for o in retail_odds_list]))
+                retail_prob = calculate_implied_probability(int(retail_price))
+                features["retail_sharp_diff"] = retail_prob - features["sharp_prob"]
+            else:
+                features["retail_sharp_diff"] = 0.0
+        else:
+            features["sharp_odds"] = avg_price
+            features["sharp_prob"] = features["implied_prob"]
+            features["retail_sharp_diff"] = 0.0
+
+        # 5. Time features
+        time_delta = event.commence_time - snapshot_time
+        hours_to_game = time_delta.total_seconds() / 3600
+        features["hours_to_game"] = float(hours_to_game)
+
+        # Cyclical time encoding (hour of day)
+        hour_of_day = snapshot_time.hour + snapshot_time.minute / 60
+        features["time_of_day_sin"] = np.sin(2 * np.pi * hour_of_day / 24)
+        features["time_of_day_cos"] = np.cos(2 * np.pi * hour_of_day / 24)
+
+        return features
+
+    def _empty_features(self) -> dict[str, float]:
+        """Return dictionary of features with zero values."""
+        return dict.fromkeys(self._feature_names, 0.0)
+
+    def _features_dict_to_array(self, features_dict: dict[str, float]) -> np.ndarray:
+        """Convert feature dictionary to ordered numpy array."""
+        return np.array([features_dict.get(name, 0.0) for name in self._feature_names])
 
     def get_feature_names(self) -> list[str]:
         """
         Return feature names per timestep.
 
-        For sequence models, this might return per-timestep feature names
-        or None if features are learned embeddings.
+        These features are extracted at each timestep in the sequence.
+        The full sequence output has shape (timesteps, num_features).
 
         Returns:
-            List of feature names or empty list for stub
+            List of feature names
+
+        Example:
+            >>> extractor = SequenceFeatureExtractor()
+            >>> names = extractor.get_feature_names()
+            >>> "american_odds" in names
+            True
         """
-        # Future: Return per-timestep feature names
-        # e.g., ["odds", "implied_prob", "line_change", "volume_indicator"]
-        return []
+        return self._feature_names
