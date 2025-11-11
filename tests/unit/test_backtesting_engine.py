@@ -1,7 +1,7 @@
 """Unit tests for BacktestEngine."""
 
-from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 import structlog
@@ -223,7 +223,9 @@ class TestEvaluateTotalOutcome:
     def test_case_insensitive_over_under(self, backtest_engine, sample_backtest_event):
         """Test that over/under matching is case insensitive."""
         result_over = backtest_engine._evaluate_total_outcome("over", 210.5, sample_backtest_event)
-        result_under = backtest_engine._evaluate_total_outcome("UNDER", 220.5, sample_backtest_event)
+        result_under = backtest_engine._evaluate_total_outcome(
+            "UNDER", 220.5, sample_backtest_event
+        )
 
         assert result_over is True
         assert result_under is True

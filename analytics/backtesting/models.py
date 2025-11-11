@@ -611,23 +611,23 @@ class BacktestResult:
 ╠═══════════════════════════════════════════════════════════════╣
 ║ Period:           {self.start_date.date()} to {self.end_date.date()}                   ║
 ║ Total Days:       {self.total_days:<47d}║
-║ Initial Bankroll: ${self.initial_bankroll:,.2f}{' ' * (43 - len(f'{self.initial_bankroll:,.2f}'))}║
-║ Final Bankroll:   ${self.final_bankroll:,.2f}{' ' * (43 - len(f'{self.final_bankroll:,.2f}'))}║
-║ Total Profit:     ${self.total_profit:,.2f} {profit_indicator}{' ' * (40 - len(f'{self.total_profit:,.2f}'))}║
+║ Initial Bankroll: ${self.initial_bankroll:,.2f}{" " * (43 - len(f"{self.initial_bankroll:,.2f}"))}║
+║ Final Bankroll:   ${self.final_bankroll:,.2f}{" " * (43 - len(f"{self.final_bankroll:,.2f}"))}║
+║ Total Profit:     ${self.total_profit:,.2f} {profit_indicator}{" " * (40 - len(f"{self.total_profit:,.2f}"))}║
 ║                                                               ║
 ║ PERFORMANCE METRICS                                           ║
-║ ├─ ROI:              {self.roi:.2f}%{' ' * (42 - len(f'{self.roi:.2f}'))}║
+║ ├─ ROI:              {self.roi:.2f}%{" " * (42 - len(f"{self.roi:.2f}"))}║
 ║ ├─ Total Bets:       {self.total_bets:<42d}║
-║ ├─ Win Rate:         {self.win_rate:.2f}% ({self.winning_bets}W / {self.losing_bets}L){' ' * (25 - len(f'{self.win_rate:.2f}% ({self.winning_bets}W / {self.losing_bets}L)'))}║
-║ ├─ Avg Stake:        ${self.average_stake:,.2f}{' ' * (39 - len(f'{self.average_stake:,.2f}'))}║
-║ └─ Total Wagered:    ${self.total_wagered:,.2f}{' ' * (39 - len(f'{self.total_wagered:,.2f}'))}║
+║ ├─ Win Rate:         {self.win_rate:.2f}% ({self.winning_bets}W / {self.losing_bets}L){" " * (25 - len(f"{self.win_rate:.2f}% ({self.winning_bets}W / {self.losing_bets}L)"))}║
+║ ├─ Avg Stake:        ${self.average_stake:,.2f}{" " * (39 - len(f"{self.average_stake:,.2f}"))}║
+║ └─ Total Wagered:    ${self.total_wagered:,.2f}{" " * (39 - len(f"{self.total_wagered:,.2f}"))}║
 ║                                                               ║
 ║ RISK METRICS                                                  ║
-║ ├─ Max Drawdown:     ${abs(self.max_drawdown):,.2f} ({self.max_drawdown_percentage:.2f}%){' ' * (25 - len(f'{abs(self.max_drawdown):,.2f} ({self.max_drawdown_percentage:.2f}%)'))}║
-║ ├─ Sharpe Ratio:     {self.sharpe_ratio:.2f}{' ' * (42 - len(f'{self.sharpe_ratio:.2f}'))}║
-║ ├─ Sortino Ratio:    {self.sortino_ratio:.2f}{' ' * (42 - len(f'{self.sortino_ratio:.2f}'))}║
-║ ├─ Profit Factor:    {self.profit_factor:.2f}{' ' * (42 - len(f'{self.profit_factor:.2f}'))}║
-║ └─ Longest Streak:   {self.longest_winning_streak} wins / {self.longest_losing_streak} losses{' ' * (29 - len(f'{self.longest_winning_streak} wins / {self.longest_losing_streak} losses'))}║
+║ ├─ Max Drawdown:     ${abs(self.max_drawdown):,.2f} ({self.max_drawdown_percentage:.2f}%){" " * (25 - len(f"{abs(self.max_drawdown):,.2f} ({self.max_drawdown_percentage:.2f}%)"))}║
+║ ├─ Sharpe Ratio:     {self.sharpe_ratio:.2f}{" " * (42 - len(f"{self.sharpe_ratio:.2f}"))}║
+║ ├─ Sortino Ratio:    {self.sortino_ratio:.2f}{" " * (42 - len(f"{self.sortino_ratio:.2f}"))}║
+║ ├─ Profit Factor:    {self.profit_factor:.2f}{" " * (42 - len(f"{self.profit_factor:.2f}"))}║
+║ └─ Longest Streak:   {self.longest_winning_streak} wins / {self.longest_losing_streak} losses{" " * (29 - len(f"{self.longest_winning_streak} wins / {self.longest_losing_streak} losses"))}║
 ╚═══════════════════════════════════════════════════════════════╝
 """
         return summary

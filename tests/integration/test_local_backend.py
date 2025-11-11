@@ -256,7 +256,7 @@ class TestLocalSchedulerBackend:
                 try:
                     await asyncio.wait_for(executed.wait(), timeout=2.0)
                     assert executed.is_set()
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pytest.fail("Job did not execute within timeout")
 
     @pytest.mark.asyncio
@@ -292,5 +292,5 @@ class TestLocalSchedulerBackend:
                     )
                     assert job1_executed.is_set()
                     assert job2_executed.is_set()
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pytest.fail("Jobs did not execute within timeout")

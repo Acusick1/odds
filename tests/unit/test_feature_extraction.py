@@ -1,12 +1,16 @@
 """Unit tests for feature extraction abstraction."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
 
 from analytics.backtesting import BacktestEvent
-from analytics.feature_extraction import FeatureExtractor, SequenceFeatureExtractor, TabularFeatureExtractor
+from analytics.feature_extraction import (
+    FeatureExtractor,
+    SequenceFeatureExtractor,
+    TabularFeatureExtractor,
+)
 from core.models import EventStatus, Odds
 
 
@@ -15,7 +19,7 @@ def sample_event():
     """Create a sample BacktestEvent for testing."""
     return BacktestEvent(
         id="test_event_1",
-        commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=timezone.utc),
+        commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
         home_team="Los Angeles Lakers",
         away_team="Boston Celtics",
         home_score=110,
@@ -27,7 +31,7 @@ def sample_event():
 @pytest.fixture
 def sample_odds_snapshot(sample_event):
     """Create sample odds snapshot for testing."""
-    timestamp = datetime(2024, 11, 1, 18, 0, 0, tzinfo=timezone.utc)
+    timestamp = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
     return [
         # Pinnacle (sharp book)
         Odds(
@@ -378,7 +382,9 @@ class TestSequenceFeatureExtractor:
 class TestFeatureExtractorIntegration:
     """Integration tests for feature extractors."""
 
-    def test_tabular_extractor_produces_valid_numpy_arrays(self, sample_event, sample_odds_snapshot):
+    def test_tabular_extractor_produces_valid_numpy_arrays(
+        self, sample_event, sample_odds_snapshot
+    ):
         """Test that TabularFeatureExtractor produces valid numpy arrays for ML models."""
         extractor = TabularFeatureExtractor()
 

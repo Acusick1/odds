@@ -10,6 +10,7 @@ odds_snapshots based on their snapshot_time and the associated event's commence_
 This fixes a bug where tiers were incorrectly assigned based on the closest game
 instead of each event's individual timing.
 """
+
 import sqlalchemy as sa
 from alembic import op
 

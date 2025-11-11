@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Verify database writes after Lambda execution."""
+
 import asyncio
 import os
 import sys

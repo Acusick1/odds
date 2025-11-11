@@ -32,7 +32,11 @@ from typing import Any
 import numpy as np
 
 from analytics.backtesting import BacktestEvent
-from analytics.utils import american_to_decimal, calculate_implied_probability, calculate_market_hold
+from analytics.utils import (
+    american_to_decimal,
+    calculate_implied_probability,
+    calculate_market_hold,
+)
 from core.models import Odds
 
 __all__ = [
@@ -90,7 +94,9 @@ class FeatureExtractor(ABC):
             Ordered list of feature names
         """
 
-    def create_feature_vector(self, features: dict[str, float], feature_names: list[str] | None = None) -> np.ndarray:
+    def create_feature_vector(
+        self, features: dict[str, float], feature_names: list[str] | None = None
+    ) -> np.ndarray:
         """
         Convert feature dictionary to numpy array for model input.
 
@@ -235,12 +241,12 @@ class TabularFeatureExtractor(FeatureExtractor):
                 features["std_away_odds"] = float(np.std([o.price for o in away_odds_list]))
 
                 # Market consensus (average implied probability)
-                avg_home_prob = float(np.mean(
-                    [calculate_implied_probability(o.price) for o in home_odds_list]
-                ))
-                avg_away_prob = float(np.mean(
-                    [calculate_implied_probability(o.price) for o in away_odds_list]
-                ))
+                avg_home_prob = float(
+                    np.mean([calculate_implied_probability(o.price) for o in home_odds_list])
+                )
+                avg_away_prob = float(
+                    np.mean([calculate_implied_probability(o.price) for o in away_odds_list])
+                )
                 features["home_consensus_prob"] = avg_home_prob
                 features["away_consensus_prob"] = avg_away_prob
 
@@ -254,12 +260,8 @@ class TabularFeatureExtractor(FeatureExtractor):
 
         # 2. Sharp vs Retail features (key for detecting value)
         if sharp_odds and retail_odds:
-            sharp_home = next(
-                (o for o in sharp_odds if o.outcome_name == event.home_team), None
-            )
-            sharp_away = next(
-                (o for o in sharp_odds if o.outcome_name == event.away_team), None
-            )
+            sharp_home = next((o for o in sharp_odds if o.outcome_name == event.home_team), None)
+            sharp_away = next((o for o in sharp_odds if o.outcome_name == event.away_team), None)
 
             if sharp_home and sharp_away:
                 sharp_home_prob = calculate_implied_probability(sharp_home.price)
@@ -273,23 +275,19 @@ class TabularFeatureExtractor(FeatureExtractor):
                 features["sharp_market_hold"] = sharp_hold
 
                 # Compare retail to sharp (deviation indicates potential value)
-                retail_home_odds = [
-                    o for o in retail_odds if o.outcome_name == event.home_team
-                ]
-                retail_away_odds = [
-                    o for o in retail_odds if o.outcome_name == event.away_team
-                ]
+                retail_home_odds = [o for o in retail_odds if o.outcome_name == event.home_team]
+                retail_away_odds = [o for o in retail_odds if o.outcome_name == event.away_team]
 
                 if retail_home_odds:
-                    avg_retail_home_prob = float(np.mean(
-                        [calculate_implied_probability(o.price) for o in retail_home_odds]
-                    ))
+                    avg_retail_home_prob = float(
+                        np.mean([calculate_implied_probability(o.price) for o in retail_home_odds])
+                    )
                     features["retail_sharp_diff_home"] = avg_retail_home_prob - sharp_home_prob
 
                 if retail_away_odds:
-                    avg_retail_away_prob = float(np.mean(
-                        [calculate_implied_probability(o.price) for o in retail_away_odds]
-                    ))
+                    avg_retail_away_prob = float(
+                        np.mean([calculate_implied_probability(o.price) for o in retail_away_odds])
+                    )
                     features["retail_sharp_diff_away"] = avg_retail_away_prob - sharp_away_prob
 
                 # Set outcome-specific features
@@ -301,7 +299,7 @@ class TabularFeatureExtractor(FeatureExtractor):
                     features["opponent_sharp_prob"] = sharp_home_prob
 
         # 3. Market efficiency features
-        all_books = set(o.bookmaker_key for o in market_odds)
+        all_books = {o.bookmaker_key for o in market_odds}
         features["num_bookmakers"] = float(len(all_books))
 
         # Calculate average market hold across all books

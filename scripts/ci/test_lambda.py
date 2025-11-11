@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Test Lambda functions."""
+
 import argparse
 import json
 import sys
