@@ -9,7 +9,7 @@ from odds_core.api_models import (
     HistoricalOddsResponse,
     OddsResponse,
     ScoresResponse,
-    api_dict_to_event,
+    create_scheduled_event,
 )
 from odds_core.config import get_settings
 from tenacity import (
@@ -166,8 +166,8 @@ class TheOddsAPIClient:
         # Ensure data is a list
         raw_events_data = data if isinstance(data, list) else [data] if data else []
 
-        # Convert API dicts to Event instances
-        events = [api_dict_to_event(event_dict) for event_dict in raw_events_data]
+        # Convert API dicts to Event instances (scheduled games only)
+        events = [create_scheduled_event(event_dict) for event_dict in raw_events_data]
 
         logger.info(
             "odds_fetched",
@@ -262,8 +262,8 @@ class TheOddsAPIClient:
         response_data = data.get("data", []) if isinstance(data, dict) else []
         raw_events_data = response_data if isinstance(response_data, list) else []
 
-        # Convert API dicts to Event instances
-        events = [api_dict_to_event(event_dict) for event_dict in raw_events_data]
+        # Convert API dicts to Event instances (scheduled games only)
+        events = [create_scheduled_event(event_dict) for event_dict in raw_events_data]
 
         logger.info(
             "historical_odds_fetched",
