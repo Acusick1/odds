@@ -318,3 +318,306 @@ class TestDatabaseIntegration:
         assert stats["total_events"] >= 1
         assert stats["total_odds_records"] > 0
         assert stats["total_snapshots"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_bulk_upsert_events_empty_list(self, test_session):
+        """Test bulk upsert with empty list returns zero counts."""
+        writer = OddsWriter(test_session)
+
+        result = await writer.bulk_upsert_events([])
+        await test_session.commit()
+
+        assert result == {"inserted": 0, "updated": 0}
+
+    @pytest.mark.asyncio
+    async def test_bulk_upsert_events_all_new(self, test_session):
+        """Test bulk upsert with all new events (all inserts)."""
+        writer = OddsWriter(test_session)
+        reader = OddsReader(test_session)
+
+        now = datetime.now(UTC)
+        events = [
+            Event(
+                id=f"bulk_test_{i}",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=now + timedelta(days=i),
+                home_team=f"Team{i}",
+                away_team=f"Team{i + 1}",
+            )
+            for i in range(5)
+        ]
+
+        result = await writer.bulk_upsert_events(events)
+        await test_session.commit()
+
+        # Verify counts
+        assert result == {"inserted": 5, "updated": 0}
+
+        # Verify events exist in database
+        for i in range(5):
+            event = await reader.get_event_by_id(f"bulk_test_{i}")
+            assert event is not None
+            assert event.home_team == f"Team{i}"
+            assert event.status == EventStatus.SCHEDULED
+
+    @pytest.mark.asyncio
+    async def test_bulk_upsert_events_all_existing(self, test_session):
+        """Test bulk upsert with all existing events (all updates)."""
+        writer = OddsWriter(test_session)
+        reader = OddsReader(test_session)
+
+        now = datetime.now(UTC)
+
+        # First, create the events
+        initial_events = [
+            Event(
+                id=f"bulk_test_{i}",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=now + timedelta(days=i),
+                home_team=f"Team{i}",
+                away_team=f"Team{i + 1}",
+            )
+            for i in range(5)
+        ]
+
+        result = await writer.bulk_upsert_events(initial_events)
+        await test_session.commit()
+        assert result == {"inserted": 5, "updated": 0}
+
+        # Now, update them with modified data
+        updated_events = [
+            Event(
+                id=f"bulk_test_{i}",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=now + timedelta(days=i + 10),  # Changed
+                home_team=f"UpdatedTeam{i}",  # Changed
+                away_team=f"UpdatedTeam{i + 1}",  # Changed
+            )
+            for i in range(5)
+        ]
+
+        result = await writer.bulk_upsert_events(updated_events)
+        await test_session.commit()
+
+        # Verify counts
+        assert result == {"inserted": 0, "updated": 5}
+
+        # Verify events were updated
+        for i in range(5):
+            event = await reader.get_event_by_id(f"bulk_test_{i}")
+            assert event is not None
+            assert event.home_team == f"UpdatedTeam{i}"
+            assert event.away_team == f"UpdatedTeam{i + 1}"
+
+    @pytest.mark.asyncio
+    async def test_bulk_upsert_events_mixed(self, test_session):
+        """Test bulk upsert with mixed new and existing events."""
+        writer = OddsWriter(test_session)
+        reader = OddsReader(test_session)
+
+        now = datetime.now(UTC)
+
+        # First, create some events (will be existing)
+        existing_events = [
+            Event(
+                id=f"bulk_test_{i}",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=now + timedelta(days=i),
+                home_team=f"Team{i}",
+                away_team=f"Team{i + 1}",
+            )
+            for i in range(3)
+        ]
+
+        result = await writer.bulk_upsert_events(existing_events)
+        await test_session.commit()
+        assert result == {"inserted": 3, "updated": 0}
+
+        # Now, create a mixed batch: update first 3, insert 2 new ones
+        mixed_events = [
+            # Update existing (IDs 0-2)
+            Event(
+                id="bulk_test_0",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=now,
+                home_team="UpdatedTeam0",
+                away_team="UpdatedTeam1",
+            ),
+            Event(
+                id="bulk_test_1",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=now,
+                home_team="UpdatedTeam1",
+                away_team="UpdatedTeam2",
+            ),
+            Event(
+                id="bulk_test_2",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=now,
+                home_team="UpdatedTeam2",
+                away_team="UpdatedTeam3",
+            ),
+            # New events (IDs 3-4)
+            Event(
+                id="bulk_test_3",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=now + timedelta(days=3),
+                home_team="Team3",
+                away_team="Team4",
+            ),
+            Event(
+                id="bulk_test_4",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=now + timedelta(days=4),
+                home_team="Team4",
+                away_team="Team5",
+            ),
+        ]
+
+        result = await writer.bulk_upsert_events(mixed_events)
+        await test_session.commit()
+
+        # Verify counts
+        assert result == {"inserted": 2, "updated": 3}
+
+        # Verify updated events
+        event0 = await reader.get_event_by_id("bulk_test_0")
+        assert event0.home_team == "UpdatedTeam0"
+
+        # Verify new events
+        event3 = await reader.get_event_by_id("bulk_test_3")
+        assert event3 is not None
+        assert event3.home_team == "Team3"
+
+    @pytest.mark.asyncio
+    async def test_bulk_upsert_events_with_helper_functions(self, test_session):
+        """Test bulk upsert with events created via helper functions."""
+        writer = OddsWriter(test_session)
+        reader = OddsReader(test_session)
+
+        # Create events using helper function from api_models
+        event_data_list = [
+            {
+                "id": f"helper_test_{i}",
+                "sport_key": "basketball_nba",
+                "sport_title": "NBA",
+                "commence_time": (datetime.now(UTC) + timedelta(days=i)).isoformat(),
+                "home_team": f"Team{i}",
+                "away_team": f"Team{i + 1}",
+            }
+            for i in range(3)
+        ]
+
+        events = [create_scheduled_event(data) for data in event_data_list]
+
+        result = await writer.bulk_upsert_events(events)
+        await test_session.commit()
+
+        # Verify counts
+        assert result == {"inserted": 3, "updated": 0}
+
+        # Verify events exist
+        for i in range(3):
+            event = await reader.get_event_by_id(f"helper_test_{i}")
+            assert event is not None
+            assert event.status == EventStatus.SCHEDULED
+
+    @pytest.mark.asyncio
+    async def test_bulk_upsert_events_performance(self, test_session):
+        """Test bulk upsert performance with 100+ records."""
+        import time
+
+        writer = OddsWriter(test_session)
+        reader = OddsReader(test_session)
+
+        now = datetime.now(UTC)
+        num_events = 150
+
+        # Create 150 events
+        events = [
+            Event(
+                id=f"perf_test_{i}",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=now + timedelta(days=i),
+                home_team=f"Team{i}",
+                away_team=f"Team{i + 1}",
+            )
+            for i in range(num_events)
+        ]
+
+        # Measure execution time
+        start_time = time.time()
+        result = await writer.bulk_upsert_events(events)
+        await test_session.commit()
+        elapsed = time.time() - start_time
+
+        # Verify counts
+        assert result == {"inserted": num_events, "updated": 0}
+
+        # Verify performance (should complete in under 2 seconds per requirements)
+        assert elapsed < 2.0, f"Bulk upsert took {elapsed:.2f}s, expected < 2.0s"
+
+        # Verify random samples exist
+        sample_ids = ["perf_test_0", "perf_test_50", "perf_test_149"]
+        for event_id in sample_ids:
+            event = await reader.get_event_by_id(event_id)
+            assert event is not None
+
+    @pytest.mark.asyncio
+    async def test_bulk_upsert_events_preserves_scores(self, test_session):
+        """Test that bulk upsert doesn't overwrite completed event scores."""
+        writer = OddsWriter(test_session)
+        reader = OddsReader(test_session)
+
+        now = datetime.now(UTC)
+
+        # Create completed event with scores
+        completed_event = Event(
+            id="completed_test",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=now - timedelta(days=1),
+            home_team="Lakers",
+            away_team="Celtics",
+            status=EventStatus.FINAL,
+            home_score=108,
+            away_score=105,
+            completed_at=now,
+        )
+
+        await writer.upsert_event(completed_event)
+        await test_session.commit()
+
+        # Now try to bulk upsert with updated commence_time but no scores
+        update_event = Event(
+            id="completed_test",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=now,  # Updated time
+            home_team="Lakers",
+            away_team="Celtics",
+        )
+
+        result = await writer.bulk_upsert_events([update_event])
+        await test_session.commit()
+
+        assert result == {"inserted": 0, "updated": 1}
+
+        # Verify scores and status are preserved (not overwritten)
+        # Note: This test documents current behavior. The bulk upsert
+        # only updates: sport_key, sport_title, home_team, away_team,
+        # commence_time, updated_at. It does NOT update status or scores.
+        event = await reader.get_event_by_id("completed_test")
+        assert event.status == EventStatus.FINAL
+        assert event.home_score == 108
+        assert event.away_score == 105

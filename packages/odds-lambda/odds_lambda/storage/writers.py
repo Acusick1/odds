@@ -358,3 +358,89 @@ class OddsWriter:
 
         logger.info("bulk_odds_inserted", count=count)
         return count
+
+    async def bulk_upsert_events(self, events: list[Event]) -> dict[str, int]:
+        """
+        Bulk insert or update events using PostgreSQL UPSERT.
+
+        Efficiently handles batch operations for historical Event records,
+        avoiding duplicate key errors by updating existing records.
+
+        Args:
+            events: List of Event instances to insert or update
+
+        Returns:
+            Dictionary with counts:
+                - "inserted": Number of new events created
+                - "updated": Number of existing events updated
+
+        Note:
+            Uses PostgreSQL INSERT ... ON CONFLICT DO UPDATE for efficiency.
+            On conflict, updates: sport_key, sport_title, home_team, away_team,
+            commence_time, and updated_at.
+
+        Example:
+            from odds_core.api_models import create_scheduled_event
+
+            events = [
+                create_scheduled_event({
+                    "id": "abc123",
+                    "sport_key": "basketball_nba",
+                    "sport_title": "NBA",
+                    "commence_time": "2024-10-20T00:00:00Z",
+                    "home_team": "Lakers",
+                    "away_team": "Celtics"
+                }),
+                create_scheduled_event({
+                    "id": "def456",
+                    "sport_key": "basketball_nba",
+                    "sport_title": "NBA",
+                    "commence_time": "2024-10-21T00:00:00Z",
+                    "home_team": "Warriors",
+                    "away_team": "Bucks"
+                }),
+            ]
+            result = await writer.bulk_upsert_events(events)
+            # result = {"inserted": 2, "updated": 0}
+        """
+        if not events:
+            return {"inserted": 0, "updated": 0}
+
+        # Get list of event IDs to check which already exist
+        event_ids = [event.id for event in events]
+
+        # Query for existing event IDs
+        result = await self.session.execute(select(Event.id).where(Event.id.in_(event_ids)))
+        existing_ids = {row[0] for row in result.all()}
+
+        # Convert Event instances to dicts for bulk insert
+        event_dicts = [event.model_dump(exclude_unset=True) for event in events]
+
+        # Perform INSERT ... ON CONFLICT DO UPDATE
+        stmt = insert(Event).values(event_dicts)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["id"],  # Primary key
+            set_={
+                "sport_key": stmt.excluded.sport_key,
+                "sport_title": stmt.excluded.sport_title,
+                "home_team": stmt.excluded.home_team,
+                "away_team": stmt.excluded.away_team,
+                "commence_time": stmt.excluded.commence_time,
+                "updated_at": datetime.now(UTC),
+            },
+        )
+
+        await self.session.execute(stmt)
+
+        # Calculate counts
+        updated_count = len(existing_ids)
+        inserted_count = len(events) - updated_count
+
+        logger.info(
+            "bulk_events_upserted",
+            total=len(events),
+            inserted=inserted_count,
+            updated=updated_count,
+        )
+
+        return {"inserted": inserted_count, "updated": updated_count}
