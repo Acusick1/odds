@@ -166,7 +166,7 @@ class OddsSnapshot(SQLModel, table=True):
 - Validation that intelligent scheduling is working correctly
 - ML feature engineering (e.g., "closing line" vs "opening line" features)
 - Analysis of line movement patterns by tier
-- See `core/fetch_tier.py` for FetchTier enum and `core/tier_utils.py` for calculations
+- See `packages/odds-lambda/odds_lambda/fetch_tier.py` for FetchTier enum and `packages/odds-lambda/odds_lambda/tier_utils.py` for calculations
 
 #### Odds Model (Normalized for Querying)
 
@@ -264,13 +264,13 @@ class FetchLog(SQLModel, table=True):
 
 The system uses an abstraction layer to support multiple deployment backends, allowing the same codebase to run on AWS Lambda, Railway, or locally for development.
 
-**Backend Interface** (`core/scheduling/backends/base.py`):
+**Backend Interface** (`packages/odds-lambda/odds_lambda/scheduling/backends/base.py`):
 All backends implement `SchedulerBackend` abstract base class with methods:
 
 - `schedule_job(job_name, execution_time)`: Schedule a future job execution
 - `get_backend_info()`: Return backend-specific metadata
 
-**AWS Lambda Backend** (`core/scheduling/backends/aws.py`):
+**AWS Lambda Backend** (`packages/odds-lambda/odds_lambda/scheduling/backends/aws.py`):
 
 - Self-scheduling pattern using EventBridge rules
 - Each job invocation schedules its next execution
@@ -278,27 +278,27 @@ All backends implement `SchedulerBackend` abstract base class with methods:
 - Serverless with automatic scaling
 - Configuration: `SCHEDULER_BACKEND=aws`, `AWS_LAMBDA_ARN`, `AWS_REGION`
 
-**Railway Backend** (`core/scheduling/backends/railway.py`):
+**Railway Backend** (`packages/odds-lambda/odds_lambda/scheduling/backends/railway.py`):
 
 - Uses APScheduler with persistent scheduling
 - Long-running process with managed restarts
 - Standard connection pooling
 - Configuration: `SCHEDULER_BACKEND=railway`
 
-**Local Backend** (`core/scheduling/backends/local.py`):
+**Local Backend** (`packages/odds-lambda/odds_lambda/scheduling/backends/local.py`):
 
 - APScheduler for development and testing
 - Runs until process terminated (Ctrl+C)
 - Full logging for debugging
 - Configuration: `SCHEDULER_BACKEND=local`
 
-**Job Registry** (`core/scheduling/jobs.py`):
+**Job Registry** (`packages/odds-lambda/odds_lambda/scheduling/jobs.py`):
 
 - Centralized mapping of job names to functions
 - Lazy-loaded to avoid circular imports
 - Jobs: `fetch-odds`, `fetch-scores`, `update-status`
 
-**Scheduling Intelligence** (`core/scheduling/intelligence.py`):
+**Scheduling Intelligence** (`packages/odds-lambda/odds_lambda/scheduling/intelligence.py`):
 
 - Game-aware execution logic (described in Scheduler Architecture section)
 - Calculates optimal next execution time based on game state
@@ -316,16 +316,16 @@ All backends implement `SchedulerBackend` abstract base class with methods:
 
 ### API Client & Data Pipeline
 
-**TheOddsAPIClient** (`core/data_fetcher.py`):
+**TheOddsAPIClient** (`packages/odds-lambda/odds_lambda/data_fetcher.py`):
 Handles all API interactions with retry logic (tenacity), rate limiting, and quota tracking. Methods: `get_odds()`, `get_scores()`, `get_historical_odds()`, `get_historical_events()`.
 
-**OddsValidator** (`storage/validators.py`):
+**OddsValidator** (`packages/odds-lambda/odds_lambda/storage/validators.py`):
 Data quality validation with checks for odds range, timestamps, vig (2-15%), line movement, and required fields. Logs warnings but does not reject data (configurable).
 
-**OddsWriter** (`storage/writers.py`):
+**OddsWriter** (`packages/odds-lambda/odds_lambda/storage/writers.py`):
 Write operations including `store_odds_snapshot()` (hybrid raw + normalized storage), `upsert_event()`, `bulk_insert_historical()` for backfill, and `log_data_quality_issue()`.
 
-**OddsReader** (`storage/readers.py`):
+**OddsReader** (`packages/odds-lambda/odds_lambda/storage/readers.py`):
 Query operations including `get_odds_at_time()` (critical for backtesting to prevent look-ahead bias), `get_line_movement()`, `get_events_by_date_range()`, and `get_best_odds()`.
 
 ---
@@ -334,7 +334,7 @@ Query operations including `get_odds_at_time()` (critical for backtesting to pre
 
 ### Intelligent Scheduling System
 
-The system uses **game-aware intelligent scheduling** that adapts data collection frequency based on game proximity, eliminating fixed sampling intervals. Implemented in `core/scheduling/intelligence.py`.
+The system uses **game-aware intelligent scheduling** that adapts data collection frequency based on game proximity, eliminating fixed sampling intervals. Implemented in `packages/odds-lambda/odds_lambda/scheduling/intelligence.py`.
 
 **Key Features**:
 
@@ -343,7 +343,7 @@ The system uses **game-aware intelligent scheduling** that adapts data collectio
 - No fetching during off-season (waits for new games)
 - Self-scheduling pattern for serverless deployment (AWS Lambda)
 
-**Fetch Tier System** (`core/fetch_tier.py`):
+**Fetch Tier System** (`packages/odds-lambda/odds_lambda/fetch_tier.py`):
 
 - **Opening** (3+ days before): Every 48 hours - initial line release
 - **Early** (1-3 days before): Every 24 hours - line establishment
@@ -357,7 +357,7 @@ Tier tracking is stored in `OddsSnapshot.fetch_tier` for validation and ML featu
 
 The system executes three autonomous jobs that self-schedule based on game state:
 
-**Fetch Odds Job** (`jobs/fetch_odds.py`):
+**Fetch Odds Job** (`packages/odds-lambda/odds_lambda/jobs/fetch_odds.py`):
 
 - Game-aware execution (only runs when games upcoming)
 - Fetches current odds for all scheduled NBA games
@@ -365,13 +365,13 @@ The system executes three autonomous jobs that self-schedule based on game state
 - Calculates next execution based on closest game's tier
 - Logs API quota usage
 
-**Fetch Scores Job** (`jobs/fetch_scores.py`):
+**Fetch Scores Job** (`packages/odds-lambda/odds_lambda/jobs/fetch_scores.py`):
 
 - Updates completed game results
 - Marks events as FINAL with scores
 - Self-schedules based on live game activity
 
-**Update Status Job** (`jobs/update_status.py`):
+**Update Status Job** (`packages/odds-lambda/odds_lambda/jobs/update_status.py`):
 
 - Transitions event statuses (scheduled → live → final)
 - Prevents fetching odds for completed games
@@ -387,7 +387,7 @@ The system executes three autonomous jobs that self-schedule based on game state
 
 ## Configuration Management
 
-Configuration uses Pydantic Settings with composition pattern for logical grouping. All settings loaded from environment variables. See `core/config.py` for complete implementation.
+Configuration uses Pydantic Settings with composition pattern for logical grouping. All settings loaded from environment variables. See `packages/odds-core/odds_core/config.py` for complete implementation.
 
 ### Configuration Structure
 
@@ -497,7 +497,7 @@ odds status events --team "Lakers"      # Filter by team
 - Mix of different matchup types
 - ~20% sample rate (every 5th game)
 
-**Selection Criteria** (Implemented in core/game_selector.py):
+**Selection Criteria** (Implemented in packages/odds-analytics/odds_analytics/game_selector.py):
 
 ```python
 class GameSelector:
@@ -566,7 +566,7 @@ class BettingStrategy(ABC):
 
 ### Implemented Strategies
 
-**1. FlatBettingStrategy** (`analytics/strategies.py`):
+**1. FlatBettingStrategy** (`packages/odds-analytics/odds_analytics/strategies.py`):
 
 ```python
 class FlatBettingStrategy(BettingStrategy):
@@ -580,7 +580,7 @@ class FlatBettingStrategy(BettingStrategy):
         ...
 ```
 
-**2. BasicEVStrategy** (`analytics/strategies.py`):
+**2. BasicEVStrategy** (`packages/odds-analytics/odds_analytics/strategies.py`):
 
 ```python
 class BasicEVStrategy(BettingStrategy):
@@ -595,7 +595,7 @@ class BasicEVStrategy(BettingStrategy):
         ...
 ```
 
-**3. ArbitrageStrategy** (`analytics/strategies.py`):
+**3. ArbitrageStrategy** (`packages/odds-analytics/odds_analytics/strategies.py`):
 
 ```python
 class ArbitrageStrategy(BettingStrategy):
@@ -620,7 +620,7 @@ class ArbitrageStrategy(BettingStrategy):
 - Kelly Criterion integration uses model confidence for bet sizing
 - Look-ahead bias prevention via timestamp controls
 
-ML strategies can be implemented by creating a new class inheriting from `BettingStrategy`. The strategy receives `BacktestEvent` and `odds_snapshot` for feature engineering, and can use `BetOpportunity.confidence` to pass model probability predictions to the Kelly Criterion bet sizing. See existing strategies in `analytics/strategies.py` for implementation patterns.
+ML strategies can be implemented by creating a new class inheriting from `BettingStrategy`. The strategy receives `BacktestEvent` and `odds_snapshot` for feature engineering, and can use `BetOpportunity.confidence` to pass model probability predictions to the Kelly Criterion bet sizing. See existing strategies in `packages/odds-analytics/odds_analytics/strategies.py` for implementation patterns.
 
 ### Backtesting Engine
 
@@ -662,13 +662,13 @@ class BacktestEngine:
 
 ### Data Models
 
-**BacktestConfig** (`analytics/backtesting/config.py`):
+**BacktestConfig** (`packages/odds-analytics/odds_analytics/backtesting/config.py`):
 Configuration for backtest execution with settings for initial bankroll, date range, bet sizing method (fractional_kelly/flat/percentage), Kelly fraction, bet limits, and decision timing (hours before game to prevent look-ahead bias).
 
-**BetRecord** (`analytics/backtesting/models.py`):
+**BetRecord** (`packages/odds-analytics/odds_analytics/backtesting/models.py`):
 Complete record of individual bet with event details, market/outcome, bookmaker, odds, stake, result (win/loss/push), profit, bankroll tracking, and strategy rationale. Used for detailed analysis and CSV export.
 
-**BacktestResult** (`analytics/backtesting/models.py`):
+**BacktestResult** (`packages/odds-analytics/odds_analytics/backtesting/models.py`):
 Comprehensive results container with 30+ fields including:
 
 - Performance: ROI, win rate, total profit, bet counts
@@ -677,7 +677,7 @@ Comprehensive results container with 30+ fields including:
 - Time series: Equity curve, all bet records
 - Export methods: `to_json()`, `to_csv()`, `from_json()` for persistence
 
-See `analytics/backtesting/models.py` for complete definitions and `BACKTESTING_GUIDE.md` for usage documentation.
+See `packages/odds-analytics/odds_analytics/backtesting/models.py` for complete definitions and `BACKTESTING_GUIDE.md` for usage documentation.
 
 ### Bet Sizing & Utilities
 
@@ -689,7 +689,7 @@ See `analytics/backtesting/models.py` for complete definitions and `BACKTESTING_
 
 All methods enforce min/max bet constraints and prevent betting with insufficient bankroll.
 
-**Utility Functions** (`analytics/utils.py`):
+**Utility Functions** (`packages/odds-analytics/odds_analytics/utils.py`):
 Comprehensive toolkit for odds conversion (American ↔ decimal), probability calculations, expected value, Kelly Criterion, profit calculations, and risk metrics (Sharpe, Sortino, max drawdown, profit factor). Also includes arbitrage detection. See `BACKTESTING_GUIDE.md` for details.
 
 ---
@@ -733,7 +733,7 @@ uv run pytest tests/unit/
 
 ### Database Migrations
 
-**CRITICAL**: Always create migrations when modifying `core/models.py`.
+**CRITICAL**: Always create migrations when modifying `packages/odds-core/odds_core/models.py`.
 
 ```bash
 # Create new migration after model changes
@@ -862,25 +862,25 @@ LOCAL_DATABASE_URL=postgresql+asyncpg://postgres:dev_password@localhost:5432/odd
 
 ### File Modification Workflows
 
-**When modifying `core/models.py` (database schema)**:
+**When modifying `packages/odds-core/odds_core/models.py` (database schema)**:
 
 1. Make model changes
 2. Create Alembic migration: `uv run alembic revision --autogenerate -m "description"`
 3. **Review generated migration** (Alembic misses some changes like renames)
 4. Test migration: `uv run alembic upgrade head`
-5. Update affected queries in `storage/readers.py` or `storage/writers.py`
+5. Update affected queries in `packages/odds-lambda/odds_lambda/storage/readers.py` or `packages/odds-lambda/odds_lambda/storage/writers.py`
 6. Run tests to ensure nothing broke
 
 **When adding betting strategies**:
 
-1. Create new class in `analytics/strategies.py` inheriting from `BettingStrategy`
+1. Create new class in `packages/odds-analytics/odds_analytics/strategies.py` inheriting from `BettingStrategy`
 2. Implement `evaluate_opportunity()` method
-3. Add to `AVAILABLE_STRATEGIES` dict at bottom of `analytics/strategies.py`
-4. Register in CLI: Add to `cli/commands/backtest.py` strategy choices
+3. Add to `AVAILABLE_STRATEGIES` dict at bottom of `packages/odds-analytics/odds_analytics/strategies.py`
+4. Register in CLI: Add to `packages/odds-cli/odds_cli/commands/backtest.py` strategy choices
 5. Write unit tests in `tests/unit/` or add integration test in `tests/integration/test_backtest_integration.py`
 6. Document in backtesting section if complex
 
-**When modifying `core/data_fetcher.py` (API client)**:
+**When modifying `packages/odds-lambda/odds_lambda/data_fetcher.py` (API client)**:
 
 1. Preserve retry logic (tenacity decorators on all API calls)
 2. Update quota tracking if request patterns change
@@ -888,16 +888,16 @@ LOCAL_DATABASE_URL=postgresql+asyncpg://postgres:dev_password@localhost:5432/odd
 4. Update integration tests in `tests/integration/`
 5. Never remove rate limiting or error handling
 
-**When adding scheduler jobs** (`jobs/*.py`):
+**When adding scheduler jobs** (`packages/odds-lambda/odds_lambda/jobs/*.py`):
 
 1. Create job function (must be async)
-2. Add to `core/scheduling/jobs.py` registry (JOB_REGISTRY dict)
+2. Add to `packages/odds-lambda/odds_lambda/scheduling/jobs.py` registry (JOB_REGISTRY dict)
 3. Implement self-scheduling pattern (calculate and return next execution time)
 4. Add error handling (log errors, never crash)
-5. Register in CLI: `cli/commands/scheduler.py`
+5. Register in CLI: `packages/odds-cli/odds_cli/commands/scheduler.py`
 6. Test locally with `odds scheduler start`
 
-**When modifying configuration** (`core/config.py`):
+**When modifying configuration** (`packages/odds-core/odds_core/config.py`):
 
 1. Add field to appropriate Config class (with type hint and default)
 2. Update `.env.example` with new variable and description
@@ -1049,7 +1049,7 @@ All validation issues logged to `DataQualityLog` table with:
 
 ### Common Analytics Queries
 
-**Note**: Basic query functions are implemented in `storage/readers.py`. Advanced analytics with pandas DataFrame support planned for future `analytics/queries.py` module.
+**Note**: Basic query functions are implemented in `packages/odds-lambda/odds_lambda/storage/readers.py`. Advanced analytics with pandas DataFrame support planned for future `packages/odds-analytics/odds_analytics/queries.py` module.
 
 **Implemented in OddsReader**:
 
@@ -1159,4 +1159,4 @@ System uses **structlog** for structured, machine-readable logging. Log levels: 
 
 **Adding Sports/Bookmakers/Markets**: Add to respective config lists (`SPORTS`, `BOOKMAKERS`, `MARKETS`) in `.env`. No code changes required.
 
-**Adding Strategies**: Inherit from `BettingStrategy` base class and implement `evaluate_opportunity()` method. See `analytics/strategies.py` for examples (FlatBetting, BasicEV, Arbitrage).
+**Adding Strategies**: Inherit from `BettingStrategy` base class and implement `evaluate_opportunity()` method. See `packages/odds-analytics/odds_analytics/strategies.py` for examples (FlatBetting, BasicEV, Arbitrage).

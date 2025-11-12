@@ -89,12 +89,14 @@ LOG_LEVEL=INFO
 The system supports three scheduler backends:
 
 **Local (Development)**
+
 ```bash
 SCHEDULER_BACKEND=local
 odds scheduler start  # Runs until Ctrl+C
 ```
 
 **AWS Lambda (Production, ~$0.20/month)**
+
 ```bash
 SCHEDULER_BACKEND=aws
 AWS_REGION=us-east-1
@@ -102,12 +104,14 @@ AWS_REGION=us-east-1
 ```
 
 **Railway (Production, ~$5/month)**
+
 ```bash
 SCHEDULER_BACKEND=railway
 # See Railway Deployment section below
 ```
 
 All backends use the same adaptive scheduling logic:
+
 - 30 minutes when games are within 3 hours
 - 3 hours when games are 3-12 hours away
 - 12 hours when games are 12-24 hours away
@@ -152,6 +156,7 @@ odds backfill status
 ### Backfill Strategy
 
 The system uses a 5-snapshot adaptive approach per game:
+
 - **Opening line** (3 days before): Initial market
 - **Early action** (24h before): Public betting begins
 - **Sharp action** (12h before): Professional bettors active
@@ -161,6 +166,7 @@ The system uses a 5-snapshot adaptive approach per game:
 This captures complete line movement for sophisticated backtesting.
 
 **Quota Math:**
+
 - 5 snapshots × 30 API requests = 150 requests per game
 - 133 games × 150 = ~20,000 requests (full monthly quota)
 
@@ -191,6 +197,7 @@ odds backtest export results.json bets.csv
 ```
 
 **Available Strategies:**
+
 - `flat` - Baseline flat betting
 - `basic_ev` - Expected value betting (sharp vs retail odds)
 - `arbitrage` - Risk-free arbitrage opportunities
@@ -225,6 +232,7 @@ aws lambda invoke \
 ```
 
 **Monitoring:**
+
 ```bash
 # Stream logs
 aws logs tail /aws/lambda/odds-scheduler --follow
@@ -276,16 +284,16 @@ docker-compose down
 
 ## Project Structure
 
-```
+```bash
 betting-odds-system/
-├── core/                   # Core models, config, database, API client
-│   ├── scheduling/         # Multi-backend scheduler
-│   │   ├── intelligence.py # Game-aware scheduling logic
-│   │   └── backends/       # AWS, Railway, Local
-├── storage/                # Data writers, readers, validators
-├── jobs/                   # Standalone scheduler jobs
-├── cli/                    # Typer CLI commands
-├── analytics/              # Backtesting engine and strategies
+├── packages/               # Subpackage architecture
+│   ├── odds-core/          # Core models, config, database
+│   ├── odds-lambda/        # Lambda function, jobs, scheduling, storage
+│   │   ├── jobs/           # Fetch odds, scores, update status
+│   │   ├── scheduling/     # Multi-backend scheduler (AWS, Railway, Local)
+│   │   └── storage/        # Data writers, readers, validators
+│   ├── odds-cli/           # Typer CLI commands
+│   └── odds-analytics/     # Backtesting engine and strategies
 ├── tests/                  # Test suite
 ├── migrations/             # Alembic migrations
 └── deployment/             # AWS Lambda & Railway configs
@@ -309,8 +317,8 @@ alembic downgrade -1
 ### Adding Custom Betting Strategies
 
 ```python
-# analytics/strategies.py
-from odds_analytics..backtesting import BettingStrategy, BacktestEvent, BetOpportunity
+# packages/odds-analytics/odds_analytics/strategies.py
+from odds_analytics.backtesting import BettingStrategy, BacktestEvent, BetOpportunity
 
 class MyStrategy(BettingStrategy):
     async def evaluate_opportunity(
@@ -323,7 +331,8 @@ class MyStrategy(BettingStrategy):
         return opportunities
 ```
 
-Register in `cli/commands/backtest.py`:
+Register in `packages/odds-cli/odds_cli/commands/backtest.py`:
+
 ```python
 STRATEGIES = {
     "my_strategy": MyStrategy,
@@ -381,21 +390,27 @@ odds backtest list-strategies
 ## Data Models
 
 ### Events
+
 Game/event information with final scores and status tracking.
 
 ### Odds (Normalized)
+
 Individual odds records for efficient querying:
+
 - Bookmaker, market (h2h/spreads/totals), outcome
 - American odds format, optional point spread/total
 - Timestamps for line movement analysis
 
 ### OddsSnapshot (Raw)
+
 Complete API responses stored as JSONB for:
+
 - Exact data preservation
 - Debugging and auditing
 - Schema flexibility
 
 ### Quality & Fetch Logs
+
 Validation warnings and API operation tracking.
 
 ## Bookmakers (8)

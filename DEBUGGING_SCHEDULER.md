@@ -134,7 +134,7 @@ The Lambda function handles three jobs based on event payload:
 
 ## Intelligent Scheduling Logic
 
-### Fetch Tiers (from `core/fetch_tier.py`)
+### Fetch Tiers (from `packages/odds-lambda/odds_lambda/fetch_tier.py`)
 
 | Tier | Hours Before Game | Fetch Interval | Purpose |
 |------|------------------|----------------|---------|
@@ -144,7 +144,7 @@ The Lambda function handles three jobs based on event payload:
 | `early` | 24-72h (1-3 days) | 24 hours | Line establishment |
 | `opening` | >72h (3+ days) | 48 hours | Initial line release |
 
-### Scheduling Algorithm (from `core/scheduling/intelligence.py`)
+### Scheduling Algorithm (from `packages/odds-lambda/odds_lambda/scheduling/intelligence.py`)
 
 1. Find closest upcoming game in database
 2. Calculate hours until game starts
@@ -154,10 +154,10 @@ The Lambda function handles three jobs based on event payload:
 
 **Key Files**:
 
-- `core/scheduling/intelligence.py` - Decision logic
-- `core/fetch_tier.py` - Tier definitions and intervals
-- `core/tier_utils.py` - Tier calculation functions
-- `jobs/fetch_odds.py` - Fetch odds job implementation
+- `packages/odds-lambda/odds_lambda/scheduling/intelligence.py` - Decision logic
+- `packages/odds-lambda/odds_lambda/fetch_tier.py` - Tier definitions and intervals
+- `packages/odds-lambda/odds_lambda/tier_utils.py` - Tier calculation functions
+- `packages/odds-lambda/odds_lambda/jobs/fetch_odds.py` - Fetch odds job implementation
 
 ## Quick Diagnostic Commands
 
@@ -270,7 +270,7 @@ uv run python scripts/check_game_tier_coverage.py --date 2025-11-04
 
 **Symptoms**: Database shows all events with identical tier despite different hours_until_commence
 
-**Diagnosis**: Check `storage/writers.py` line 105-112 - tier calculation logic
+**Diagnosis**: Check `packages/odds-lambda/odds_lambda/storage/writers.py` tier calculation logic
 
 **Historical Bug**:
 
@@ -323,8 +323,8 @@ aws logs filter-log-events \
 
 ## Related Files
 
-- `core/scheduling/intelligence.py` - Scheduling decision logic
-- `core/scheduling/backends/aws.py` - EventBridge integration
-- `jobs/fetch_odds.py` - Main fetch job
-- `storage/writers.py` - Tier assignment during storage
+- `packages/odds-lambda/odds_lambda/scheduling/intelligence.py` - Scheduling decision logic
+- `packages/odds-lambda/odds_lambda/scheduling/backends/aws.py` - EventBridge integration
+- `packages/odds-lambda/odds_lambda/jobs/fetch_odds.py` - Main fetch job
+- `packages/odds-lambda/odds_lambda/storage/writers.py` - Tier assignment during storage
 - `CLAUDE.md` - Full system architecture documentation

@@ -72,7 +72,7 @@ The schema adapts based on issue complexity. Not all fields are required for eve
 **Complexity**: 🔴 Hard
 
 **Location**:
-- `analytics/strategies.py` (new `LineMovementStrategy` class)
+- `packages/odds-analytics/odds_analytics/strategies.py` (new `LineMovementStrategy` class)
 - `tests/unit/test_strategies.py`
 
 **Background**:
@@ -126,10 +126,10 @@ Line movement anomalies are key indicators of professional betting activity:
 - Knowledge of sharp vs public betting patterns
 
 **Related Files**:
-- `analytics/strategies.py` - See `BasicEVStrategy` and `ArbitrageStrategy` for pattern examples
-- `analytics/backtesting/models.py` - `BetOpportunity` model definition
-- `storage/readers.py` - `get_line_movement()` method for fetching historical odds
-- `cli/commands/backtest.py` - Strategy registration pattern
+- `packages/odds-analytics/odds_analytics/strategies.py` - See `BasicEVStrategy` and `ArbitrageStrategy` for pattern examples
+- `packages/odds-analytics/odds_analytics/backtesting/models.py` - `BetOpportunity` model definition
+- `packages/odds-lambda/odds_lambda/storage/readers.py` - `get_line_movement()` method for fetching historical odds
+- `packages/odds-cli/odds_cli/commands/backtest.py` - Strategy registration pattern
 
 **Notes**:
 - May need to filter out small movements that are normal market making

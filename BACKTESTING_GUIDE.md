@@ -198,7 +198,7 @@ Return per unit of drawdown risk. Higher is better.
 To create a new strategy, inherit from `BettingStrategy`:
 
 ```python
-from odds_analytics..backtesting import BettingStrategy, BacktestEvent, BetOpportunity, BacktestConfig
+from odds_analytics.backtesting import BettingStrategy, BacktestEvent, BetOpportunity, BacktestConfig
 from odds_core.models import Odds
 
 class MyStrategy(BettingStrategy):
@@ -228,7 +228,7 @@ class MyStrategy(BettingStrategy):
 - `BacktestEvent` guarantees `home_score` and `away_score` are not None (type-safe)
 - No need to check if scores exist - they're always present during backtesting
 
-Register in `cli/commands/backtest.py`:
+Register in `packages/odds-cli/odds_cli/commands/backtest.py`:
 
 ```python
 STRATEGIES = {
@@ -244,8 +244,8 @@ STRATEGIES = {
 ```python
 import asyncio
 from datetime import datetime
-from odds_analytics..backtesting import BacktestConfig, BacktestEngine, BetSizingConfig
-from odds_analytics..strategies import BasicEVStrategy
+from odds_analytics.backtesting import BacktestConfig, BacktestEngine, BetSizingConfig
+from odds_analytics.strategies import BasicEVStrategy
 from odds_core.database import get_session
 
 async def run_backtest():
