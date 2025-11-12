@@ -3,26 +3,10 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from odds_core.api_models import create_scheduled_event
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds
-from odds_core.time import parse_api_datetime
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.writers import OddsWriter
-
-
-def _api_dict_to_event(event_data: dict) -> Event:
-    """Convert API response dict to Event instance for testing."""
-    # Parse commence_time
-    commence_time = parse_api_datetime(event_data["commence_time"])
-
-    return Event(
-        id=event_data["id"],
-        sport_key=event_data["sport_key"],
-        sport_title=event_data.get("sport_title", event_data["sport_key"]),
-        commence_time=commence_time,
-        home_team=event_data["home_team"],
-        away_team=event_data["away_team"],
-        status=EventStatus.SCHEDULED,
-    )
 
 
 class TestDatabaseIntegration:
@@ -206,7 +190,7 @@ class TestDatabaseIntegration:
                 "home_team": f"Team{i}",
                 "away_team": f"Team{i + 1}",
             }
-            event = _api_dict_to_event(event_data)
+            event = create_scheduled_event(event_data)
             await writer.upsert_event(event)
 
         await test_session.commit()

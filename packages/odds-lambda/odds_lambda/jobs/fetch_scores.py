@@ -11,6 +11,7 @@ This job:
 import asyncio
 
 import structlog
+from odds_core.api_models import parse_scores_from_api_dict
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import EventStatus
@@ -107,24 +108,15 @@ async def _fetch_and_update_scores(app_settings):
                     completed = score_data.get("completed", False)
 
                     if completed and event_id:
-                        scores = score_data.get("scores", [])
-
-                        # Extract home and away scores
-                        home_score = None
-                        away_score = None
-
-                        for score in scores:
-                            if score.get("name") == score_data.get("home_team"):
-                                home_score = score.get("score")
-                            if score.get("name") == score_data.get("away_team"):
-                                away_score = score.get("score")
+                        # Extract home and away scores using helper
+                        home_score, away_score = parse_scores_from_api_dict(score_data)
 
                         if home_score is not None and away_score is not None:
                             await writer.update_event_status(
                                 event_id=event_id,
                                 status=EventStatus.FINAL,
-                                home_score=int(home_score),
-                                away_score=int(away_score),
+                                home_score=home_score,
+                                away_score=away_score,
                             )
                             updated_count += 1
 
