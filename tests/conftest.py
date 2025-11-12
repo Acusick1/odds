@@ -9,17 +9,16 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-# Set required environment variables for testing BEFORE any imports of Settings
-os.environ.setdefault("ODDS_API_KEY", "test_api_key")
-os.environ.setdefault(
-    "DATABASE_URL", "postgresql+asyncpg://postgres:dev_password@localhost:5432/odds_test"
-)
-
 # Test database URL - use PostgreSQL for timezone-aware datetime support
 # Can be overridden with TEST_DATABASE_URL environment variable
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL", "postgresql+asyncpg://postgres:dev_password@localhost:5432/odds_test"
 )
+
+# Set required environment variables for testing BEFORE any imports of Settings
+# Force override DATABASE_URL to ensure tests use TEST_DATABASE_URL
+os.environ.setdefault("ODDS_API_KEY", "test_api_key")
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 
 
 @pytest.fixture
