@@ -10,6 +10,7 @@ from odds_analytics.backfill_executor import BackfillExecutor, BackfillProgress
 from odds_analytics.game_selector import GameSelector
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
+from odds_core.time import utc_isoformat
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
@@ -24,7 +25,7 @@ def create_backfill_plan(
     start_date: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
     end_date: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
     target_games: int = typer.Option(
-        166, "--games", "-g", help="Target number of games to backfill"
+        10, "--games", "-g", help="Target number of games to backfill"
     ),
     output_file: str = typer.Option(
         "backfill_plan.json", "--output", "-o", help="Output file for backfill plan"
@@ -91,7 +92,7 @@ async def _create_plan_async(
 
             for sample_date in sample_dates:
                 # Query for events around this date
-                date_str = sample_date.isoformat()
+                date_str = utc_isoformat(sample_date)
 
                 try:
                     response = await client.get_historical_events(
