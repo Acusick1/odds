@@ -1,7 +1,7 @@
 """Integration tests for discover command with database."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from odds_core.models import Event, EventStatus
@@ -11,56 +11,36 @@ from sqlalchemy import select
 class TestDiscoverIntegration:
     """Integration tests for discover command with real database."""
 
-    @pytest.fixture
-    def mock_historical_events_response(self):
-        """Mock response from get_historical_events."""
-        return {
-            "data": [
-                {
-                    "id": "integration_event_1",
-                    "sport_key": "basketball_nba",
-                    "sport_title": "NBA",
-                    "commence_time": "2024-10-15T19:00:00Z",
-                    "home_team": "Lakers",
-                    "away_team": "Celtics",
-                },
-                {
-                    "id": "integration_event_2",
-                    "sport_key": "basketball_nba",
-                    "sport_title": "NBA",
-                    "commence_time": "2024-10-15T20:00:00Z",
-                    "home_team": "Warriors",
-                    "away_team": "Heat",
-                },
-            ],
-            "quota_remaining": 19990,
-            "timestamp": datetime(2024, 10, 15, 12, 0, 0, tzinfo=UTC),
-        }
-
     @pytest.mark.asyncio
     async def test_discover_stores_events_in_database(
-        self, test_session, mock_historical_events_response
+        self, test_session, mock_historical_events_response, mock_api_client_factory
     ):
         """Test that discover command stores events in database with SCHEDULED status."""
+        from unittest.mock import AsyncMock
+
         from odds_cli.commands.discover import _discover_games
 
-        with patch("odds_lambda.data_fetcher.TheOddsAPIClient") as mock_client_class:
-            # Setup mock client
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock()
-            mock_client.get_historical_events = AsyncMock(
-                return_value=mock_historical_events_response
-            )
-            mock_client_class.return_value = mock_client
+        mock_client = mock_api_client_factory(mock_historical_events_response)
 
-            # Run discover command
-            await _discover_games(
-                start_date_str="2024-10-15",
-                end_date_str="2024-10-15",
-                sport="basketball_nba",
-                dry_run=False,
-            )
+        # Mock async_session_maker to return test_session
+        mock_session_context = AsyncMock()
+        mock_session_context.__aenter__ = AsyncMock(return_value=test_session)
+        mock_session_context.__aexit__ = AsyncMock()
+
+        with patch(
+            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
+        ):
+            with patch(
+                "odds_cli.commands.discover.async_session_maker",
+                return_value=mock_session_context,
+            ):
+                # Run discover command
+                await _discover_games(
+                    start_date_str="2024-10-15",
+                    end_date_str="2024-10-15",
+                    sport="basketball_nba",
+                    dry_run=False,
+                )
 
             # Verify events were stored in database
             result = await test_session.execute(select(Event))
@@ -70,8 +50,8 @@ class TestDiscoverIntegration:
 
             # Verify event details
             event_ids = {e.id for e in events}
-            assert "integration_event_1" in event_ids
-            assert "integration_event_2" in event_ids
+            assert "event1" in event_ids
+            assert "event2" in event_ids
 
             # Verify all events have SCHEDULED status (not FINAL)
             for event in events:
@@ -81,21 +61,22 @@ class TestDiscoverIntegration:
                 assert event.completed_at is None
 
             # Verify team names
-            lakers_event = next(e for e in events if e.id == "integration_event_1")
+            lakers_event = next(e for e in events if e.id == "event1")
             assert lakers_event.home_team == "Lakers"
             assert lakers_event.away_team == "Celtics"
 
     @pytest.mark.asyncio
     async def test_discover_updates_existing_events(
-        self, test_session, mock_historical_events_response
+        self, test_session, mock_historical_events_response, mock_api_client_factory
     ):
         """Test that re-running discover updates existing events (idempotency)."""
+        from unittest.mock import AsyncMock
+
         from odds_cli.commands.discover import _discover_games
-        from odds_core.models import Event, EventStatus
 
         # First, create an existing event with different data
         existing_event = Event(
-            id="integration_event_1",
+            id="event1",
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 10, 14, 19, 0, 0, tzinfo=UTC),  # Different time
@@ -106,40 +87,51 @@ class TestDiscoverIntegration:
         test_session.add(existing_event)
         await test_session.commit()
 
-        with patch("odds_lambda.data_fetcher.TheOddsAPIClient") as mock_client_class:
-            # Setup mock client
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock()
-            mock_client.get_historical_events = AsyncMock(
-                return_value=mock_historical_events_response
-            )
-            mock_client_class.return_value = mock_client
+        mock_client = mock_api_client_factory(mock_historical_events_response)
 
-            # Run discover command
-            await _discover_games(
-                start_date_str="2024-10-15",
-                end_date_str="2024-10-15",
-                sport="basketball_nba",
-                dry_run=False,
-            )
+        # Mock async_session_maker to return test_session
+        mock_session_context = AsyncMock()
+        mock_session_context.__aenter__ = AsyncMock(return_value=test_session)
+        mock_session_context.__aexit__ = AsyncMock()
 
-            # Verify events in database
-            result = await test_session.execute(select(Event))
-            events = result.scalars().all()
+        with patch(
+            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
+        ):
+            with patch(
+                "odds_cli.commands.discover.async_session_maker",
+                return_value=mock_session_context,
+            ):
+                # Run discover command
+                await _discover_games(
+                    start_date_str="2024-10-15",
+                    end_date_str="2024-10-15",
+                    sport="basketball_nba",
+                    dry_run=False,
+                )
 
-            # Should still have 2 events (1 updated, 1 inserted)
-            assert len(events) == 2
+        # Refresh test_session to get updated data from database
+        test_session.expire_all()  # Force SQLAlchemy to re-fetch from database
 
-            # Verify the existing event was updated
-            updated_event = next(e for e in events if e.id == "integration_event_1")
-            assert updated_event.home_team == "Lakers"  # Updated
-            assert updated_event.away_team == "Celtics"  # Updated
-            assert updated_event.commence_time == datetime(2024, 10, 15, 19, 0, 0, tzinfo=UTC)
+        # Verify events in database
+        result = await test_session.execute(select(Event))
+        events = result.scalars().all()
+
+        # Should still have 2 events (1 updated, 1 inserted)
+        assert len(events) == 2
+
+        # Verify the existing event was updated
+        updated_event = next(e for e in events if e.id == "event1")
+        assert updated_event.home_team == "Lakers"  # Updated
+        assert updated_event.away_team == "Celtics"  # Updated
+        assert updated_event.commence_time == datetime(
+            2024, 10, 15, 19, 0, 0, tzinfo=UTC
+        )
 
     @pytest.mark.asyncio
-    async def test_discover_multiple_days(self, test_session):
+    async def test_discover_multiple_days(self, test_session, mock_api_client_factory):
         """Test discovering events across multiple days."""
+        from unittest.mock import AsyncMock
+
         from odds_cli.commands.discover import _discover_games
 
         # Mock responses for different days
@@ -178,21 +170,27 @@ class TestDiscoverIntegration:
             else:
                 return {"data": [], "quota_remaining": 19988, "timestamp": datetime.now(UTC)}
 
-        with patch("odds_lambda.data_fetcher.TheOddsAPIClient") as mock_client_class:
-            # Setup mock client
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock()
-            mock_client.get_historical_events = AsyncMock(side_effect=get_events_for_date)
-            mock_client_class.return_value = mock_client
+        mock_client = mock_api_client_factory(side_effect=get_events_for_date)
 
-            # Run discover command for 2-day range
-            await _discover_games(
-                start_date_str="2024-10-15",
-                end_date_str="2024-10-16",
-                sport="basketball_nba",
-                dry_run=False,
-            )
+        # Mock async_session_maker to return test_session
+        mock_session_context = AsyncMock()
+        mock_session_context.__aenter__ = AsyncMock(return_value=test_session)
+        mock_session_context.__aexit__ = AsyncMock()
+
+        with patch(
+            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
+        ):
+            with patch(
+                "odds_cli.commands.discover.async_session_maker",
+                return_value=mock_session_context,
+            ):
+                # Run discover command for 2-day range
+                await _discover_games(
+                    start_date_str="2024-10-15",
+                    end_date_str="2024-10-16",
+                    sport="basketball_nba",
+                    dry_run=False,
+                )
 
             # Verify events in database
             result = await test_session.execute(select(Event))
@@ -209,31 +207,35 @@ class TestDiscoverIntegration:
             assert mock_client.get_historical_events.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_discover_handles_empty_days(self, test_session):
+    async def test_discover_handles_empty_days(
+        self, test_session, mock_api_client_factory
+    ):
         """Test that discover handles days with no games gracefully."""
+        from unittest.mock import AsyncMock
+
         from odds_cli.commands.discover import _discover_games
 
-        with patch("odds_lambda.data_fetcher.TheOddsAPIClient") as mock_client_class:
-            # Setup mock client with empty responses
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock()
-            mock_client.get_historical_events = AsyncMock(
-                return_value={
-                    "data": [],
-                    "quota_remaining": 19990,
-                    "timestamp": datetime.now(UTC),
-                }
-            )
-            mock_client_class.return_value = mock_client
+        mock_client = mock_api_client_factory()  # Uses default empty response
 
-            # Run discover command (should not crash)
-            await _discover_games(
-                start_date_str="2024-07-01",  # Off-season
-                end_date_str="2024-07-05",
-                sport="basketball_nba",
-                dry_run=False,
-            )
+        # Mock async_session_maker to return test_session
+        mock_session_context = AsyncMock()
+        mock_session_context.__aenter__ = AsyncMock(return_value=test_session)
+        mock_session_context.__aexit__ = AsyncMock()
+
+        with patch(
+            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
+        ):
+            with patch(
+                "odds_cli.commands.discover.async_session_maker",
+                return_value=mock_session_context,
+            ):
+                # Run discover command (should not crash)
+                await _discover_games(
+                    start_date_str="2024-07-01",  # Off-season
+                    end_date_str="2024-07-05",
+                    sport="basketball_nba",
+                    dry_run=False,
+                )
 
             # Verify no events in database
             result = await test_session.execute(select(Event))
@@ -242,13 +244,17 @@ class TestDiscoverIntegration:
             assert len(events) == 0
 
     @pytest.mark.asyncio
-    async def test_discover_preserves_existing_scores(self, test_session):
+    async def test_discover_preserves_existing_scores(
+        self, test_session, mock_api_client_factory
+    ):
         """Test that discover doesn't overwrite final scores if event already completed."""
+        from unittest.mock import AsyncMock
+
         from odds_cli.commands.discover import _discover_games
 
         # Create an existing event with final scores
         completed_event = Event(
-            id="integration_event_1",
+            id="event1",
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 10, 15, 19, 0, 0, tzinfo=UTC),
@@ -265,7 +271,7 @@ class TestDiscoverIntegration:
         mock_response = {
             "data": [
                 {
-                    "id": "integration_event_1",
+                    "id": "event1",
                     "sport_key": "basketball_nba",
                     "sport_title": "NBA",
                     "commence_time": "2024-10-15T19:00:00Z",
@@ -277,25 +283,31 @@ class TestDiscoverIntegration:
             "timestamp": datetime.now(UTC),
         }
 
-        with patch("odds_lambda.data_fetcher.TheOddsAPIClient") as mock_client_class:
-            # Setup mock client
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock()
-            mock_client.get_historical_events = AsyncMock(return_value=mock_response)
-            mock_client_class.return_value = mock_client
+        mock_client = mock_api_client_factory(mock_response)
 
-            # Run discover command
-            await _discover_games(
-                start_date_str="2024-10-15",
-                end_date_str="2024-10-15",
-                sport="basketball_nba",
-                dry_run=False,
-            )
+        # Mock async_session_maker to return test_session
+        mock_session_context = AsyncMock()
+        mock_session_context.__aenter__ = AsyncMock(return_value=test_session)
+        mock_session_context.__aexit__ = AsyncMock()
+
+        with patch(
+            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
+        ):
+            with patch(
+                "odds_cli.commands.discover.async_session_maker",
+                return_value=mock_session_context,
+            ):
+                # Run discover command
+                await _discover_games(
+                    start_date_str="2024-10-15",
+                    end_date_str="2024-10-15",
+                    sport="basketball_nba",
+                    dry_run=False,
+                )
 
             # Refresh the event from database
             result = await test_session.execute(
-                select(Event).where(Event.id == "integration_event_1")
+                select(Event).where(Event.id == "event1")
             )
             event = result.scalar_one()
 

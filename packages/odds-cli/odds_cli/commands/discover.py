@@ -183,7 +183,7 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
                 # Commit transaction
                 await session.commit()
 
-        console.print(f"\n[bold green]✓ Storage completed![/bold green]")
+        console.print("\n[bold green]✓ Storage completed![/bold green]")
         console.print(f"  Events inserted: {total_inserted}")
         console.print(f"  Events updated: {total_updated}")
         console.print("\n[dim]Note: Events stored with SCHEDULED status (no scores).[/dim]")
