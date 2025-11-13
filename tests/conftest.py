@@ -2,27 +2,25 @@
 
 import json
 import os
+from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlmodel import SQLModel
-
-# Test database URL - use PostgreSQL for timezone-aware datetime support
-# Can be overridden with TEST_DATABASE_URL environment variable
-TEST_DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL", "postgresql+asyncpg://postgres:dev_password@localhost:5432/odds_test"
-)
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.orm import sessionmaker
 
 # Set required environment variables for testing BEFORE any imports of Settings
-# Force override DATABASE_URL to ensure tests use TEST_DATABASE_URL
 os.environ.setdefault("ODDS_API_KEY", "test_api_key")
-os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+
+# Configure py-pglite to use TCP mode (required for compatibility)
+os.environ.setdefault("PGLITE_USE_TCP", "1")
+os.environ.setdefault("PGLITE_TCP_PORT", "5433")
 
 
 @pytest.fixture
-def sample_odds_data():
+def sample_odds_data() -> list[dict[str, Any]]:
     """Load sample odds response from fixture file."""
     fixture_path = Path(__file__).parent / "fixtures" / "sample_odds_response.json"
     with open(fixture_path) as f:
@@ -30,48 +28,77 @@ def sample_odds_data():
 
 
 @pytest.fixture
-def sample_scores_data():
+def sample_scores_data() -> list[dict[str, Any]]:
     """Load sample scores response from fixture file."""
     fixture_path = Path(__file__).parent / "fixtures" / "sample_scores_response.json"
     with open(fixture_path) as f:
         return json.load(f)
 
 
-@pytest.fixture
-async def test_engine():
-    """Create test database engine."""
-    engine = create_async_engine(
-        TEST_DATABASE_URL,
-        echo=False,
-        future=True,
-    )
+# Override pglite_async_engine to create SQLModel tables
+@pytest.fixture(scope="session")
+async def pglite_async_engine(pglite_async_sqlalchemy_manager) -> AsyncEngine:
+    """Override py-pglite engine to create SQLModel tables."""
+    from sqlmodel import SQLModel
 
-    # Create all tables
+    engine = pglite_async_sqlalchemy_manager.get_engine()
+
+    # Create all tables once at session level
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
-    yield engine
-
-    # Cleanup
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.drop_all)
-
-    await engine.dispose()
+    return engine
 
 
+# Override pglite_async_session to use expire_on_commit=False
 @pytest.fixture
-async def test_session(test_engine):
-    """Create test database session."""
-    async_session_maker = async_sessionmaker(
-        test_engine, class_=AsyncSession, expire_on_commit=False
-    )
+async def pglite_async_session(
+    pglite_async_engine: AsyncEngine,
+) -> AsyncGenerator[AsyncSession, None]:
+    """Override py-pglite session to use expire_on_commit=False."""
+    from sqlalchemy import text
 
-    async with async_session_maker() as session:
+    # Clean up data before test starts
+    async with pglite_async_engine.connect() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                AND table_type = 'BASE TABLE'
+            """
+            )
+        )
+        table_names = [row[0] for row in result]
+
+        if table_names:
+            await conn.execute(text("SET session_replication_role = replica;"))
+            for table_name in table_names:
+                await conn.execute(text(f'TRUNCATE TABLE "{table_name}" RESTART IDENTITY CASCADE;'))
+            await conn.execute(text("SET session_replication_role = DEFAULT;"))
+            await conn.commit()
+
+    # Create session with expire_on_commit=False using SQLAlchemy's AsyncSession
+    async with AsyncSession(pglite_async_engine, expire_on_commit=False) as session:
         yield session
 
 
+# Alias py-pglite fixtures to match existing test code
 @pytest.fixture
-def mock_settings():
+def test_engine(pglite_async_engine: AsyncEngine) -> AsyncEngine:
+    """Alias for pglite_async_engine to match existing tests."""
+    return pglite_async_engine
+
+
+@pytest.fixture
+def test_session(pglite_async_session: AsyncSession) -> AsyncSession:
+    """Alias for pglite_async_session to match existing tests."""
+    return pglite_async_session
+
+
+@pytest.fixture
+def mock_settings() -> Any:
     """Mock settings for testing."""
     from odds_core.config import (
         APIConfig,
@@ -83,7 +110,7 @@ def mock_settings():
 
     return Settings(
         api=APIConfig(key="test_api_key", base_url="https://api.test.com/v4"),
-        database=DatabaseConfig(url=TEST_DATABASE_URL),
+        database=DatabaseConfig(url="postgresql+asyncpg://localhost/test"),
         data_collection=DataCollectionConfig(
             sports=["basketball_nba"],
             bookmakers=["fanduel", "draftkings"],
@@ -96,7 +123,7 @@ def mock_settings():
 
 # Backfill test fixtures
 @pytest.fixture
-def sample_backfill_plan():
+def sample_backfill_plan() -> dict[str, Any]:
     """Sample backfill plan for testing."""
     return {
         "total_games": 2,
@@ -132,11 +159,13 @@ def sample_backfill_plan():
 
 
 @pytest.fixture
-def mock_api_response_factory():
+def mock_api_response_factory() -> Callable[[str, str, str], Any]:
     """Factory to create mock API responses for different events."""
     from odds_core.api_models import HistoricalOddsResponse, api_dict_to_event
 
-    def _create_response(event_id="test_event_1", home_team="Lakers", away_team="Celtics"):
+    def _create_response(
+        event_id: str = "test_event_1", home_team: str = "Lakers", away_team: str = "Celtics"
+    ) -> HistoricalOddsResponse:
         # Create raw event data dict
         event_dict = {
             "id": event_id,
@@ -200,7 +229,7 @@ def mock_api_response_factory():
 
 
 @pytest.fixture
-def mock_api_client(mock_api_response_factory):
+def mock_api_client(mock_api_response_factory: Callable[[str, str, str], Any]) -> Any:
     """Mock API client with configurable responses."""
     from unittest.mock import AsyncMock
 
@@ -221,10 +250,7 @@ def mock_api_client(mock_api_response_factory):
 
 
 @pytest.fixture
-async def mock_session_factory(test_engine):
+def mock_session_factory(test_engine):
     """Create a session factory for testing that uses the test engine."""
-    from sqlalchemy.ext.asyncio import AsyncSession
-    from sqlalchemy.orm import sessionmaker
-
     factory = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
     return factory
