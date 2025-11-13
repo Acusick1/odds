@@ -25,7 +25,7 @@ jobs:
 
       - name: Validate yesterday's data
         run: |
-          uv run python -m cli.main validate daily \
+          uv run odds validate daily \
             --check-discovery \
             --verbose \
             --output-json validation_$(date -d yesterday +\%Y\%m\%d).json
