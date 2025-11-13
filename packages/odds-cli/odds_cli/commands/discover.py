@@ -4,8 +4,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import typer
-from odds_core.api_models import create_completed_event, parse_scores_from_api_dict
-from odds_core.config import get_settings
+from odds_core.api_models import create_scheduled_event
 from odds_core.database import async_session_maker
 from odds_core.models import Event
 from odds_lambda.data_fetcher import TheOddsAPIClient
@@ -26,11 +25,15 @@ def games(
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview operations without database writes"),
 ):
     """
-    Discover and store historical NBA games with final scores.
+    Discover and catalog historical NBA games for backfill planning.
 
-    This command fetches historical events from the API for the specified date range,
-    retrieves their final scores, and stores them in the database with FINAL status.
-    Perfect for populating the database with completed games for backtesting.
+    This command fetches historical event metadata from the API for the specified date range
+    and stores them in the database with SCHEDULED status. This enables zero-cost planning
+    of future backfill operations.
+
+    Note: Final scores are NOT available from The Odds API for games older than 3 days.
+    Use this command to discover game schedules, then use the backfill command to fetch
+    historical odds data for selected games.
 
     Examples:
         odds discover games --start 2024-10-01 --end 2024-10-31
@@ -66,10 +69,9 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
 
     # Track statistics
     total_events_found = 0
-    total_events_with_scores = 0
     total_api_requests = 0
     quota_remaining = None
-    all_completed_events: list[Event] = []
+    all_events: list[Event] = []
 
     # Progress tracking
     with Progress(
@@ -81,7 +83,7 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
     ) as progress:
         # Task for iterating through dates
         date_task = progress.add_task(
-            f"Scanning dates...",
+            "Scanning dates...",
             total=days_in_range,
         )
 
@@ -115,50 +117,16 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
 
                     total_events_found += len(events_data)
 
-                    # For each event, we need to fetch scores
-                    if events_data:
-                        progress.update(
-                            date_task,
-                            description=f"Fetching scores for {len(events_data)} events on {current_date.strftime('%Y-%m-%d')}...",
-                        )
-
-                        # Fetch scores for these events
-                        # Use a reasonable days_from value to capture scores
-                        # We'll fetch scores from 1 day after the current date to capture games that might have run late
-                        days_from_current = (datetime.now(UTC) - current_date).days + 1
-                        if days_from_current > 0:
-                            scores_response = await client.get_scores(
-                                sport=sport, days_from=min(days_from_current, 365)
+                    # Create Event objects with SCHEDULED status
+                    for event_data in events_data:
+                        try:
+                            # Create scheduled event (no scores)
+                            event = create_scheduled_event(event_data)
+                            all_events.append(event)
+                        except Exception as e:
+                            console.print(
+                                f"[yellow]Warning: Failed to parse event {event_data.get('id')}: {str(e)}[/yellow]"
                             )
-                            total_api_requests += 1
-
-                            if scores_response.quota_remaining is not None:
-                                quota_remaining = scores_response.quota_remaining
-
-                            # Build a lookup of event_id -> scores
-                            scores_lookup = {}
-                            for score_data in scores_response.scores_data:
-                                event_id = score_data.get("id")
-                                if event_id and score_data.get("completed"):
-                                    scores_lookup[event_id] = score_data
-
-                            # Match events with scores and create completed Event objects
-                            for event_data in events_data:
-                                event_id = event_data.get("id")
-
-                                if event_id and event_id in scores_lookup:
-                                    score_data = scores_lookup[event_id]
-                                    # Merge event data with score data
-                                    merged_data = {**event_data, **score_data}
-
-                                    try:
-                                        # Create completed event with scores
-                                        completed_event = create_completed_event(merged_data)
-                                        all_completed_events.append(completed_event)
-                                        total_events_with_scores += 1
-                                    except ValueError:
-                                        # Score parsing failed, skip this event
-                                        pass
 
                 except Exception as e:
                     console.print(
@@ -172,13 +140,13 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
     # Display discovered events summary
     console.print("\n[bold]Discovery Summary:[/bold]")
     console.print(f"  Events found: {total_events_found}")
-    console.print(f"  Events with scores: {total_events_with_scores}")
+    console.print(f"  Events parsed: {len(all_events)}")
     console.print(f"  API requests made: {total_api_requests}")
     if quota_remaining is not None:
         console.print(f"  API quota remaining: {quota_remaining:,}")
 
     # Store in database if not dry run
-    if not dry_run and all_completed_events:
+    if not dry_run and all_events:
         console.print("\n[bold blue]Storing events in database...[/bold blue]")
 
         with Progress(
@@ -189,7 +157,7 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
         ) as progress:
             store_task = progress.add_task(
                 "Upserting events...",
-                total=len(all_completed_events),
+                total=len(all_events),
             )
 
             async with async_session_maker() as session:
@@ -200,8 +168,8 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
                 total_inserted = 0
                 total_updated = 0
 
-                for i in range(0, len(all_completed_events), batch_size):
-                    batch = all_completed_events[i : i + batch_size]
+                for i in range(0, len(all_events), batch_size):
+                    batch = all_events[i : i + batch_size]
 
                     try:
                         result = await writer.bulk_upsert_events(batch)
@@ -218,8 +186,10 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
         console.print(f"\n[bold green]✓ Storage completed![/bold green]")
         console.print(f"  Events inserted: {total_inserted}")
         console.print(f"  Events updated: {total_updated}")
+        console.print("\n[dim]Note: Events stored with SCHEDULED status (no scores).")
+        console.print("Use 'odds backfill' to fetch historical odds for discovered games.[/dim]")
 
-    elif dry_run and all_completed_events:
+    elif dry_run and all_events:
         # Show sample of events in dry run mode
         console.print("\n[bold]Sample Events (first 10):[/bold]")
 
@@ -227,22 +197,24 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
         table.add_column("Date", style="cyan")
         table.add_column("Home Team", style="green")
         table.add_column("Away Team", style="yellow")
-        table.add_column("Score", style="white")
+        table.add_column("Status", style="white")
 
-        for event in all_completed_events[:10]:
+        for event in all_events[:10]:
             table.add_row(
                 event.commence_time.strftime("%Y-%m-%d %H:%M"),
                 event.home_team,
                 event.away_team,
-                f"{event.home_score}-{event.away_score}",
+                event.status.value,
             )
 
         console.print(table)
 
-        if len(all_completed_events) > 10:
-            console.print(f"\n  ... and {len(all_completed_events) - 10} more events")
+        if len(all_events) > 10:
+            console.print(f"\n  ... and {len(all_events) - 10} more events")
 
-    elif not all_completed_events:
-        console.print("\n[yellow]No completed events with scores found in date range[/yellow]")
+        console.print("\n[dim]Events will be stored with SCHEDULED status (no scores).[/dim]")
+
+    elif not all_events:
+        console.print("\n[yellow]No events found in date range[/yellow]")
 
     console.print()
