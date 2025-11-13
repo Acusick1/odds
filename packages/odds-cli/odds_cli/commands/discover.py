@@ -186,8 +186,8 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
         console.print(f"\n[bold green]✓ Storage completed![/bold green]")
         console.print(f"  Events inserted: {total_inserted}")
         console.print(f"  Events updated: {total_updated}")
-        console.print("\n[dim]Note: Events stored with SCHEDULED status (no scores).")
-        console.print("Use 'odds backfill' to fetch historical odds for discovered games.[/dim]")
+        console.print("\n[dim]Note: Events stored with SCHEDULED status (no scores).[/dim]")
+        console.print("[dim]Use 'odds backfill' to fetch historical odds for discovered games.[/dim]")
 
     elif dry_run and all_events:
         # Show sample of events in dry run mode
