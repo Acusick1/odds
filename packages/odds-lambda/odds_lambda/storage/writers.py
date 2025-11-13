@@ -401,21 +401,19 @@ class OddsWriter:
         # Build upsert statement
         stmt = insert(Event).values(event_dicts)
 
-        # On conflict, update all fields except id and created_at
+        # Build dynamic update set excluding primary key and created_at
+        # This automatically includes new fields and fails loudly on schema changes
+        set_ = {
+            col.name: stmt.excluded[col.name]
+            for col in Event.__table__.columns
+            if not col.primary_key and col.name != "created_at"
+        }
+        # Override updated_at to current time (SQLAlchemy doesn't auto-apply Python defaults)
+        set_["updated_at"] = datetime.now(UTC)
+
         stmt = stmt.on_conflict_do_update(
             index_elements=["id"],
-            set_={
-                "sport_key": stmt.excluded.sport_key,
-                "sport_title": stmt.excluded.sport_title,
-                "commence_time": stmt.excluded.commence_time,
-                "home_team": stmt.excluded.home_team,
-                "away_team": stmt.excluded.away_team,
-                "status": stmt.excluded.status,
-                "home_score": stmt.excluded.home_score,
-                "away_score": stmt.excluded.away_score,
-                "completed_at": stmt.excluded.completed_at,
-                "updated_at": datetime.now(UTC),
-            },
+            set_=set_,
         )
 
         await self.session.execute(stmt)
