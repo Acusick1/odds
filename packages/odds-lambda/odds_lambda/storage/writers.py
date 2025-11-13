@@ -358,3 +358,73 @@ class OddsWriter:
 
         logger.info("bulk_odds_inserted", count=count)
         return count
+
+    async def bulk_upsert_events(self, events: list[Event]) -> dict[str, int]:
+        """
+        Bulk upsert event records for efficient backfill operations.
+
+        Args:
+            events: List of Event instances to insert or update
+
+        Returns:
+            Dictionary with keys 'inserted' and 'updated' containing approximate counts
+
+        Note:
+            Uses PostgreSQL INSERT ... ON CONFLICT DO UPDATE pattern.
+            Preserves created_at timestamps on updates, updates updated_at field.
+
+        Example:
+            events = [
+                Event(id="abc", sport_key="basketball_nba", ...),
+                Event(id="def", sport_key="basketball_nba", ...),
+            ]
+            result = await writer.bulk_upsert_events(events)
+            # result = {'inserted': 1, 'updated': 1}
+        """
+        if not events:
+            logger.info("bulk_events_upserted", inserted=0, updated=0)
+            return {"inserted": 0, "updated": 0}
+
+        # Determine which events already exist
+        event_ids = [event.id for event in events]
+        result = await self.session.execute(select(Event.id).where(Event.id.in_(event_ids)))
+        existing_ids = {row[0] for row in result.fetchall()}
+
+        # Calculate counts
+        updated_count = len(existing_ids)
+        inserted_count = len(events) - updated_count
+
+        # Convert Event instances to dicts for bulk upsert
+        # Use model_dump() to include all fields with defaults
+        event_dicts = [event.model_dump() for event in events]
+
+        # Build upsert statement
+        stmt = insert(Event).values(event_dicts)
+
+        # On conflict, update all fields except id and created_at
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["id"],
+            set_={
+                "sport_key": stmt.excluded.sport_key,
+                "sport_title": stmt.excluded.sport_title,
+                "commence_time": stmt.excluded.commence_time,
+                "home_team": stmt.excluded.home_team,
+                "away_team": stmt.excluded.away_team,
+                "status": stmt.excluded.status,
+                "home_score": stmt.excluded.home_score,
+                "away_score": stmt.excluded.away_score,
+                "completed_at": stmt.excluded.completed_at,
+                "updated_at": datetime.now(UTC),
+            },
+        )
+
+        await self.session.execute(stmt)
+
+        logger.info(
+            "bulk_events_upserted",
+            inserted=inserted_count,
+            updated=updated_count,
+            total=len(events),
+        )
+
+        return {"inserted": inserted_count, "updated": updated_count}
