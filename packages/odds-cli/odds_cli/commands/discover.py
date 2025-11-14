@@ -15,14 +15,21 @@ from rich.table import Table
 
 app = typer.Typer()
 console = Console()
+today = datetime.now(tz=UTC).date()
 
 
 @app.command()
 def games(
-    start: str = typer.Option(..., "--start", help="Start date (YYYY-MM-DD)"),
-    end: str = typer.Option(..., "--end", help="End date (YYYY-MM-DD)"),
-    sport: str = typer.Option("basketball_nba", "--sport", "-s", help="Sport to discover games for"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview operations without database writes"),
+    start: str = typer.Option(
+        (today - timedelta(days=1)).isoformat(), "--start", help="Start date (YYYY-MM-DD)"
+    ),
+    end: str = typer.Option(today.isoformat(), "--end", help="End date (YYYY-MM-DD)"),
+    sport: str = typer.Option(
+        "basketball_nba", "--sport", "-s", help="Sport to discover games for"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview operations without database writes"
+    ),
 ):
     """
     Discover and catalog historical NBA games for backfill planning.
@@ -36,6 +43,7 @@ def games(
     historical odds data for selected games.
 
     Examples:
+        odds discover games  # Discover games from the past day
         odds discover games --start 2024-10-01 --end 2024-10-31
         odds discover games --start 2024-10-01 --end 2024-10-31 --dry-run
     """
@@ -91,8 +99,8 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
             # Iterate through each date in range
             current_date = start_date
             while current_date <= end_date:
-                # Format date for API (ISO 8601 format)
-                date_str = current_date.isoformat()
+                # Format date for API (ISO 8601 format with Z suffix - API rejects +00:00 format)
+                date_str = current_date.strftime("%Y-%m-%dT%H:%M:%SZ")
 
                 try:
                     # Fetch historical events for this date
@@ -187,7 +195,9 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
         console.print(f"  Events inserted: {total_inserted}")
         console.print(f"  Events updated: {total_updated}")
         console.print("\n[dim]Note: Events stored with SCHEDULED status (no scores).[/dim]")
-        console.print("[dim]Use 'odds backfill' to fetch historical odds for discovered games.[/dim]")
+        console.print(
+            "[dim]Use 'odds backfill' to fetch historical odds for discovered games.[/dim]"
+        )
 
     elif dry_run and all_events:
         # Show sample of events in dry run mode
