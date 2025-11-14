@@ -54,8 +54,8 @@ class TestBackfillPlanFromDatabase:
     """Test database-based backfill plan generation."""
 
     @pytest.mark.asyncio
-    async def test_from_db_queries_database(self, sample_db_events):
-        """Test that --from-db mode queries the database instead of API."""
+    async def test_queries_database(self, sample_db_events):
+        """Test that command queries the database for events."""
         from odds_cli.commands.backfill import _create_plan_async
         from rich.console import Console
 
@@ -89,14 +89,12 @@ class TestBackfillPlanFromDatabase:
         ):
             mock_session_maker.return_value.__aenter__.return_value = mock_session
 
-            # Execute with from_db=True
+            # Execute plan creation
             await _create_plan_async(
                 start_date_str="2024-01-15",
                 end_date_str="2024-01-17",
                 target_games=3,
                 output_file="test_plan.json",
-                sample_interval=1,
-                from_db=True,
             )
 
             # Verify database was queried
@@ -106,7 +104,7 @@ class TestBackfillPlanFromDatabase:
             assert call_args.kwargs["status"] == EventStatus.FINAL
 
     @pytest.mark.asyncio
-    async def test_from_db_converts_events_to_dict_format(self, sample_db_events):
+    async def test_converts_events_to_dict_format(self, sample_db_events):
         """Test that Event models are converted to dict format for GameSelector."""
         from odds_cli.commands.backfill import _create_plan_async
         from rich.console import Console
@@ -149,8 +147,6 @@ class TestBackfillPlanFromDatabase:
                 end_date_str="2024-01-17",
                 target_games=3,
                 output_file="test_plan.json",
-                sample_interval=1,
-                from_db=True,
             )
 
             # Verify events were converted to dict format
@@ -169,7 +165,7 @@ class TestBackfillPlanFromDatabase:
                     assert "sport_title" in event_dict
 
     @pytest.mark.asyncio
-    async def test_from_db_no_events_shows_error(self):
+    async def test_no_events_shows_error(self):
         """Test that helpful error is shown when no events found in database."""
         from odds_cli.commands.backfill import _create_plan_async
         from rich.console import Console
@@ -195,113 +191,6 @@ class TestBackfillPlanFromDatabase:
                     end_date_str="2024-01-17",
                     target_games=3,
                     output_file="test_plan.json",
-                    sample_interval=1,
-                    from_db=True,
                 )
 
             assert exc_info.value.exit_code == 1
-
-    @pytest.mark.asyncio
-    async def test_from_db_adds_data_source_to_plan(self, sample_db_events):
-        """Test that data source is added to plan metadata."""
-        from odds_cli.commands.backfill import _create_plan_async
-        from rich.console import Console
-
-        mock_session = AsyncMock()
-        mock_reader = AsyncMock(spec=OddsReader)
-        mock_reader.get_events_by_date_range = AsyncMock(return_value=sample_db_events)
-
-        mock_selector = MagicMock()
-        mock_selector.generate_backfill_plan = MagicMock(
-            return_value={
-                "total_games": 3,
-                "total_snapshots": 15,
-                "estimated_quota_usage": 450,
-                "games": [],
-            }
-        )
-
-        # Capture what was written to the file
-        written_content = StringIO()
-        m_open = mock_open()
-        m_open.return_value.write = written_content.write
-
-        with (
-            patch("odds_cli.commands.backfill.async_session_maker") as mock_session_maker,
-            patch("odds_lambda.storage.readers.OddsReader", return_value=mock_reader),
-            patch("odds_cli.commands.backfill.GameSelector", return_value=mock_selector),
-            patch("odds_cli.commands.backfill.console", Console()),
-            patch("builtins.open", m_open),
-            patch("odds_cli.commands.backfill.Path", MagicMock()),
-        ):
-            mock_session_maker.return_value.__aenter__.return_value = mock_session
-
-            await _create_plan_async(
-                start_date_str="2024-01-15",
-                end_date_str="2024-01-17",
-                target_games=3,
-                output_file="test_plan.json",
-                sample_interval=1,
-                from_db=True,
-            )
-
-            # Verify data_source was added to plan
-            written_content.seek(0)
-            captured_plan = json.loads(written_content.read())
-            assert "data_source" in captured_plan
-            assert captured_plan["data_source"] == "database"
-
-    @pytest.mark.asyncio
-    async def test_api_mode_adds_data_source_as_api(self):
-        """Test that API mode sets data source as 'API'."""
-        from odds_cli.commands.backfill import _create_plan_async
-        from rich.console import Console
-
-        # Mock API client
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get_historical_events = AsyncMock(
-            return_value={"data": {"data": []}}  # Empty response
-        )
-
-        mock_selector = MagicMock()
-        mock_selector.generate_sample_dates = MagicMock(
-            return_value=[datetime(2024, 1, 15, tzinfo=timezone.utc)]
-        )
-        mock_selector.generate_backfill_plan = MagicMock(
-            return_value={
-                "total_games": 0,
-                "total_snapshots": 0,
-                "estimated_quota_usage": 0,
-                "games": [],
-            }
-        )
-
-        # Capture what was written to the file
-        written_content = StringIO()
-        m_open = mock_open()
-        m_open.return_value.write = written_content.write
-
-        with (
-            patch("odds_cli.commands.backfill.TheOddsAPIClient", return_value=mock_client),
-            patch("odds_cli.commands.backfill.GameSelector", return_value=mock_selector),
-            patch("odds_cli.commands.backfill.console", Console()),
-            patch("builtins.open", m_open),
-            patch("odds_cli.commands.backfill.Path", MagicMock()),
-            patch("odds_cli.commands.backfill.asyncio.sleep", AsyncMock()),
-        ):
-            await _create_plan_async(
-                start_date_str="2024-01-15",
-                end_date_str="2024-01-17",
-                target_games=3,
-                output_file="test_plan.json",
-                sample_interval=1,
-                from_db=False,  # API mode
-            )
-
-            # Verify data_source was set to API
-            written_content.seek(0)
-            captured_plan = json.loads(written_content.read())
-            assert "data_source" in captured_plan
-            assert captured_plan["data_source"] == "API"
