@@ -9,6 +9,7 @@ jobs:
   test:
     name: Run Unit and Integration Tests
     runs-on: ubuntu-latest
+    environment: development
 
     steps:
       - name: Checkout code
