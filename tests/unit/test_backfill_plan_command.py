@@ -1,8 +1,6 @@
 """Unit tests for backfill plan command with database mode."""
 
-import json
-from datetime import datetime, timezone
-from io import StringIO
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
@@ -18,7 +16,7 @@ def sample_db_events():
             id="test_event_1",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime(2024, 1, 15, 19, 0, 0, tzinfo=timezone.utc),
+            commence_time=datetime(2024, 1, 15, 19, 0, 0, tzinfo=UTC),
             home_team="Los Angeles Lakers",
             away_team="Boston Celtics",
             status=EventStatus.FINAL,
@@ -29,7 +27,7 @@ def sample_db_events():
             id="test_event_2",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime(2024, 1, 16, 20, 0, 0, tzinfo=timezone.utc),
+            commence_time=datetime(2024, 1, 16, 20, 0, 0, tzinfo=UTC),
             home_team="Golden State Warriors",
             away_team="Miami Heat",
             status=EventStatus.FINAL,
@@ -40,7 +38,7 @@ def sample_db_events():
             id="test_event_3",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime(2024, 1, 17, 19, 30, 0, tzinfo=timezone.utc),
+            commence_time=datetime(2024, 1, 17, 19, 30, 0, tzinfo=UTC),
             home_team="Chicago Bulls",
             away_team="Phoenix Suns",
             status=EventStatus.FINAL,
@@ -101,7 +99,6 @@ class TestBackfillPlanFromDatabase:
             mock_reader.get_events_by_date_range.assert_called_once()
             call_args = mock_reader.get_events_by_date_range.call_args
             assert call_args.kwargs["sport_key"] == "basketball_nba"
-            assert call_args.kwargs["status"] == EventStatus.FINAL
 
     @pytest.mark.asyncio
     async def test_converts_events_to_dict_format(self, sample_db_events):
@@ -154,7 +151,7 @@ class TestBackfillPlanFromDatabase:
             assert len(captured_events_by_date) > 0
 
             # Check structure of converted events
-            for date_str, events in captured_events_by_date.items():
+            for _, events in captured_events_by_date.items():
                 assert isinstance(events, list)
                 for event_dict in events:
                     assert "id" in event_dict
@@ -167,10 +164,9 @@ class TestBackfillPlanFromDatabase:
     @pytest.mark.asyncio
     async def test_no_events_shows_error(self):
         """Test that helpful error is shown when no events found in database."""
+        import typer
         from odds_cli.commands.backfill import _create_plan_async
         from rich.console import Console
-
-        import typer
 
         mock_session = AsyncMock()
         mock_reader = AsyncMock(spec=OddsReader)

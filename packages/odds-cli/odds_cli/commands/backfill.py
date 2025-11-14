@@ -23,8 +23,11 @@ console = Console()
 def create_backfill_plan(
     start_date: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
     end_date: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
-    target_games: int = typer.Option(
-        10, "--games", "-g", help="Target number of games to backfill"
+    target_games: int | None = typer.Option(
+        None,
+        "--games",
+        "-g",
+        help="Target number of games to backfill (default: all discovered games)",
     ),
     output_file: str = typer.Option(
         "backfill_plan.json", "--output", "-o", help="Output file for backfill plan"
@@ -35,14 +38,18 @@ def create_backfill_plan(
 
     This queries the local database to find completed games in the date range
     and generates an execution plan for fetching historical odds. Events must
-    already exist in the database (status=FINAL) before creating a plan.
+    already exist in the database before creating a plan.
 
     Workflow:
-        1. Discover events: Use fetch commands or manual data collection
-        2. Plan backfill: odds backfill plan --start DATE --end DATE --games N
+        1. Discover events: odds discover games --start DATE --end DATE
+        2. Plan backfill: odds backfill plan --start DATE --end DATE [--games N]
         3. Execute plan: odds backfill execute --plan backfill_plan.json
 
-    Example:
+    Examples:
+        # Backfill all discovered games in date range
+        odds backfill plan --start 2023-10-01 --end 2024-04-30
+
+        # Backfill specific number of games (balanced selection)
         odds backfill plan --start 2023-10-01 --end 2024-04-30 --games 166
     """
     console.print("\n[bold cyan]Creating Historical Backfill Plan[/bold cyan]\n")
@@ -53,7 +60,7 @@ def create_backfill_plan(
 async def _create_plan_async(
     start_date_str: str,
     end_date_str: str,
-    target_games: int,
+    target_games: int | None,
     output_file: str,
 ):
     """Async implementation of plan creation."""
@@ -65,18 +72,21 @@ async def _create_plan_async(
         raise typer.Exit(1) from e
 
     # Initialize selector
+    # If target_games is None, we'll select all games (set high limit)
+    # Otherwise use specified target with team distribution
     selector = GameSelector(
         start_date=start_date,
         end_date=end_date,
-        target_games=target_games,
-        games_per_team=max(1, target_games // 30),  # ~5-6 games per team
+        target_games=target_games or 10000,  # High default for "select all"
+        games_per_team=max(1, (target_games // 30) if target_games else 10000),
     )
 
-    # Query database for completed events
+    # Query database for events (SCHEDULED or FINAL) with past commence times
     console.print("[cyan]Querying local database for events...[/cyan]")
     console.print(f"Date range: {start_date_str} to {end_date_str}")
 
-    from odds_core.models import EventStatus
+    from datetime import UTC
+
     from odds_lambda.storage.readers import OddsReader
 
     events_by_date = {}
@@ -84,23 +94,27 @@ async def _create_plan_async(
     async with async_session_maker() as session:
         reader = OddsReader(session)
 
-        # Query all FINAL events in date range
-        events = await reader.get_events_by_date_range(
+        # Query all events in date range (don't filter by status yet)
+        all_events = await reader.get_events_by_date_range(
             start_date=start_date,
             end_date=end_date,
             sport_key="basketball_nba",
-            status=EventStatus.FINAL,
         )
+
+        # Filter to events with past commence times (eligible for historical backfill)
+        now = datetime.now(UTC)
+        events = [e for e in all_events if e.commence_time < now]
 
         if not events:
             console.print(
-                f"[red]No FINAL events found in database for date range {start_date_str} to {end_date_str}[/red]"
+                f"[red]No events found in database for date range {start_date_str} to {end_date_str}[/red]"
             )
             console.print("\n[yellow]Run event discovery first:[/yellow]")
             console.print(f"  odds discover games --start {start_date_str} --end {end_date_str}")
             console.print("\n[yellow]Then create your plan:[/yellow]")
+            games_param = f" --games {target_games}" if target_games else ""
             console.print(
-                f"  odds backfill plan --start {start_date_str} --end {end_date_str} --games {target_games}\n"
+                f"  odds backfill plan --start {start_date_str} --end {end_date_str}{games_param}\n"
             )
             raise typer.Exit(1)
 
