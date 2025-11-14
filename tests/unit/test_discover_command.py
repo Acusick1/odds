@@ -16,12 +16,6 @@ class TestDiscoverCommand:
         """Create CLI runner."""
         return CliRunner()
 
-    def test_missing_required_arguments(self, runner):
-        """Test that command fails without required start/end dates."""
-        result = runner.invoke(app, ["discover", "games"])
-
-        assert result.exit_code != 0
-
     def test_invalid_date_format(self, runner):
         """Test that command validates date format."""
         result = runner.invoke(

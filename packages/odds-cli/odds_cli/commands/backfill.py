@@ -11,7 +11,6 @@ from odds_analytics.game_selector import GameSelector
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.time import utc_isoformat
-from odds_lambda.data_fetcher import TheOddsAPIClient
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
@@ -24,44 +23,45 @@ console = Console()
 def create_backfill_plan(
     start_date: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
     end_date: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
-    target_games: int = typer.Option(
-        10, "--games", "-g", help="Target number of games to backfill"
+    target_games: int | None = typer.Option(
+        None,
+        "--games",
+        "-g",
+        help="Target number of games to backfill (default: all discovered games)",
     ),
     output_file: str = typer.Option(
         "backfill_plan.json", "--output", "-o", help="Output file for backfill plan"
     ),
-    sample_interval: int = typer.Option(
-        1, "--interval", "-i", help="Days between samples when discovering games"
-    ),
-    from_db: bool = typer.Option(
-        False, "--from-db", help="Query local database instead of API (no quota cost)"
-    ),
 ):
     """
-    Create a backfill plan by discovering games in date range.
+    Create a backfill plan from games already in the database.
 
-    By default, this queries the API to find games and create an execution plan,
-    but will NOT fetch historical odds yet. Use --from-db to query the local database
-    instead (requires prior discovery, no API quota cost).
+    This queries the local database to find completed games in the date range
+    and generates an execution plan for fetching historical odds. Events must
+    already exist in the database before creating a plan.
 
-    Example:
+    Workflow:
+        1. Discover events: odds discover games --start DATE --end DATE
+        2. Plan backfill: odds backfill plan --start DATE --end DATE [--games N]
+        3. Execute plan: odds backfill execute --plan backfill_plan.json
+
+    Examples:
+        # Backfill all discovered games in date range
+        odds backfill plan --start 2023-10-01 --end 2024-04-30
+
+        # Backfill specific number of games (balanced selection)
         odds backfill plan --start 2023-10-01 --end 2024-04-30 --games 166
-        odds backfill plan --start 2023-10-01 --end 2024-04-30 --games 166 --from-db
     """
     console.print("\n[bold cyan]Creating Historical Backfill Plan[/bold cyan]\n")
 
-    asyncio.run(
-        _create_plan_async(start_date, end_date, target_games, output_file, sample_interval, from_db)
-    )
+    asyncio.run(_create_plan_async(start_date, end_date, target_games, output_file))
 
 
 async def _create_plan_async(
     start_date_str: str,
     end_date_str: str,
-    target_games: int,
+    target_games: int | None,
     output_file: str,
-    sample_interval: int,
-    from_db: bool,
 ):
     """Async implementation of plan creation."""
     try:
@@ -72,130 +72,85 @@ async def _create_plan_async(
         raise typer.Exit(1) from e
 
     # Initialize selector
+    # If target_games is None, we'll select all games (set high limit)
+    # Otherwise use specified target with team distribution
     selector = GameSelector(
         start_date=start_date,
         end_date=end_date,
-        target_games=target_games,
-        games_per_team=max(1, target_games // 30),  # ~5-6 games per team
+        target_games=target_games or 10000,  # High default for "select all"
+        games_per_team=max(1, (target_games // 30) if target_games else 10000),
     )
 
-    # Fetch event lists from database or API
+    # Query database for events (SCHEDULED or FINAL) with past commence times
+    console.print("[cyan]Querying local database for events...[/cyan]")
+    console.print(f"Date range: {start_date_str} to {end_date_str}")
+
+    from datetime import UTC
+
+    from odds_lambda.storage.readers import OddsReader
+
     events_by_date = {}
-    data_source = "database" if from_db else "API"
 
-    if from_db:
-        # Database-based discovery (no API quota cost)
-        console.print(f"[cyan]Querying local database for events...[/cyan]")
-        console.print(f"Date range: {start_date_str} to {end_date_str}")
+    async with async_session_maker() as session:
+        reader = OddsReader(session)
 
-        from odds_core.models import EventStatus
-        from odds_lambda.storage.readers import OddsReader
-
-        async with async_session_maker() as session:
-            reader = OddsReader(session)
-
-            # Query all FINAL events in date range
-            events = await reader.get_events_by_date_range(
-                start_date=start_date,
-                end_date=end_date,
-                sport_key="basketball_nba",
-                status=EventStatus.FINAL,
-            )
-
-            if not events:
-                console.print(
-                    f"[red]No FINAL events found in database for date range {start_date_str} to {end_date_str}[/red]"
-                )
-                console.print(
-                    "[yellow]Hint: Run event discovery first or use API mode (without --from-db)[/yellow]"
-                )
-                raise typer.Exit(1)
-
-            console.print(f"Found {len(events)} completed games in database")
-
-            # Group events by date (similar to API response structure)
-            for event in events:
-                date_str = utc_isoformat(event.commence_time)
-                # Convert Event model to dict format expected by GameSelector
-                event_dict = {
-                    "id": event.id,
-                    "sport_key": event.sport_key,
-                    "sport_title": event.sport_title,
-                    "commence_time": event.commence_time.isoformat(),
-                    "home_team": event.home_team,
-                    "away_team": event.away_team,
-                    "bookmakers": [],  # Not needed for plan generation
-                }
-
-                if date_str not in events_by_date:
-                    events_by_date[date_str] = []
-                events_by_date[date_str].append(event_dict)
-
-            # Display date distribution
-            dates_with_games = len(events_by_date)
-            console.print(f"Events span {dates_with_games} unique dates")
-
-    else:
-        # API-based discovery (original behavior)
-        sample_dates = selector.generate_sample_dates(days_interval=sample_interval)
-        console.print(
-            f"Sampling {len(sample_dates)} dates between {start_date_str} and {end_date_str}"
+        # Query all events in date range (don't filter by status yet)
+        all_events = await reader.get_events_by_date_range(
+            start_date=start_date,
+            end_date=end_date,
+            sport_key="basketball_nba",
         )
 
-        async with TheOddsAPIClient() as client:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn(),
-                console=console,
-            ) as progress:
-                task = progress.add_task("Discovering games...", total=len(sample_dates))
+        # Filter to events with past commence times (eligible for historical backfill)
+        now = datetime.now(UTC)
+        events = [e for e in all_events if e.commence_time < now]
 
-                for sample_date in sample_dates:
-                    # Query for events around this date
-                    date_str = utc_isoformat(sample_date)
+        if not events:
+            console.print(
+                f"[red]No events found in database for date range {start_date_str} to {end_date_str}[/red]"
+            )
+            console.print("\n[yellow]Run event discovery first:[/yellow]")
+            console.print(f"  odds discover games --start {start_date_str} --end {end_date_str}")
+            console.print("\n[yellow]Then create your plan:[/yellow]")
+            games_param = f" --games {target_games}" if target_games else ""
+            console.print(
+                f"  odds backfill plan --start {start_date_str} --end {end_date_str}{games_param}\n"
+            )
+            raise typer.Exit(1)
 
-                    try:
-                        response = await client.get_historical_events(
-                            sport="basketball_nba", date=date_str
-                        )
+        console.print(f"Found {len(events)} completed games in database")
 
-                        # Response structure: {"data": {"data": [events], "timestamp": ...}, ...}
-                        response_data = response.get("data", {})
-                        events = (
-                            response_data.get("data", []) if isinstance(response_data, dict) else []
-                        )
+        # Group events by date (similar to API response structure)
+        for event in events:
+            date_str = utc_isoformat(event.commence_time)
+            # Convert Event model to dict format expected by GameSelector
+            event_dict = {
+                "id": event.id,
+                "sport_key": event.sport_key,
+                "sport_title": event.sport_title,
+                "commence_time": event.commence_time.isoformat(),
+                "home_team": event.home_team,
+                "away_team": event.away_team,
+                "bookmakers": [],  # Not needed for plan generation
+            }
 
-                        if events:
-                            events_by_date[date_str] = events
-                            progress.console.print(
-                                f"  {sample_date.date()}: Found {len(events)} games"
-                            )
+            if date_str not in events_by_date:
+                events_by_date[date_str] = []
+            events_by_date[date_str].append(event_dict)
 
-                    except Exception as e:
-                        progress.console.print(
-                            f"  [yellow]Warning: Failed to fetch {sample_date.date()}: {e}[/yellow]"
-                        )
-
-                    progress.advance(task)
-
-                    # Small delay to be nice to API
-                    await asyncio.sleep(0.5)
+        # Display date distribution
+        dates_with_games = len(events_by_date)
+        console.print(f"Events span {dates_with_games} unique dates")
 
     # Generate execution plan
     console.print("\n[cyan]Generating backfill plan...[/cyan]")
     plan = selector.generate_backfill_plan(events_by_date)
-
-    # Add data source to plan metadata
-    plan["data_source"] = data_source
 
     # Display summary
     table = Table(title="Backfill Plan Summary")
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="green")
 
-    table.add_row("Data Source", data_source)
     table.add_row("Total Games", str(plan["total_games"]))
     table.add_row("Total Snapshots", str(plan["total_snapshots"]))
     table.add_row("Estimated Quota Usage", f"{plan['estimated_quota_usage']:,}")
