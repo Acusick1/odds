@@ -3,7 +3,16 @@
 import typer
 from rich.console import Console
 
-from odds_cli.commands import backfill, backtest, copy_from_prod, fetch, scheduler, status, validate
+from odds_cli.commands import (
+    backfill,
+    backtest,
+    copy_from_prod,
+    discover,
+    fetch,
+    scheduler,
+    status,
+    validate,
+)
 
 app = typer.Typer(
     name="odds",
@@ -19,6 +28,7 @@ app.add_typer(backtest.app, name="backtest", help="Backtest betting strategies")
 app.add_typer(scheduler.app, name="scheduler", help="Scheduler management (local testing)")
 app.add_typer(validate.app, name="validate", help="Validate data completeness")
 app.add_typer(copy_from_prod.app, name="copy", help="Copy data from production database")
+app.add_typer(discover.app, name="discover", help="Discover historical games")
 
 console = Console()
 

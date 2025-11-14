@@ -95,14 +95,14 @@ class OddsIngestionService:
 
     def __init__(
         self,
+        client: TheOddsAPIClient,
         *,
         settings: Settings | None = None,
         session_factory=async_session_maker,
-        client_factory: Callable[[], TheOddsAPIClient] = TheOddsAPIClient,
     ) -> None:
+        self._client = client
         self._settings = settings or get_settings()
         self._session_factory = session_factory
-        self._client_factory = client_factory
 
     async def ingest_sport(
         self,
@@ -118,13 +118,12 @@ class OddsIngestionService:
         )
         callback_bundle = callbacks or OddsIngestionCallbacks()
 
-        async with self._client_factory() as client:
-            response = await client.get_odds(
-                sport=sport_key,
-                regions=self._settings.data_collection.regions,
-                markets=self._settings.data_collection.markets,
-                bookmakers=self._settings.data_collection.bookmakers,
-            )
+        response = await self._client.get_odds(
+            sport=sport_key,
+            regions=self._settings.data_collection.regions,
+            markets=self._settings.data_collection.markets,
+            bookmakers=self._settings.data_collection.bookmakers,
+        )
 
         if callback_bundle.on_fetch_complete:
             callback_bundle.on_fetch_complete(response)

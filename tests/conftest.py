@@ -14,10 +14,6 @@ from sqlalchemy.orm import sessionmaker
 # Set required environment variables for testing BEFORE any imports of Settings
 os.environ.setdefault("ODDS_API_KEY", "test_api_key")
 
-# Configure py-pglite to use TCP mode (required for compatibility)
-os.environ.setdefault("PGLITE_USE_TCP", "1")
-os.environ.setdefault("PGLITE_TCP_PORT", "5433")
-
 
 @pytest.fixture
 def sample_odds_data() -> list[dict[str, Any]]:
@@ -229,28 +225,84 @@ def mock_api_response_factory() -> Callable[[str, str, str], Any]:
 
 
 @pytest.fixture
-def mock_api_client(mock_api_response_factory: Callable[[str, str, str], Any]) -> Any:
-    """Mock API client with configurable responses."""
-    from unittest.mock import AsyncMock
-
-    client = AsyncMock()
-
-    # Default behavior: return appropriate response based on call count
-    call_count = {"count": 0}
-
-    async def get_historical_odds(*args, **kwargs):
-        call_count["count"] += 1
-        if call_count["count"] <= 2:
-            return mock_api_response_factory("test_event_1", "Lakers", "Celtics")
-        else:
-            return mock_api_response_factory("test_event_2", "Warriors", "Heat")
-
-    client.get_historical_odds = AsyncMock(side_effect=get_historical_odds)
-    return client
-
-
-@pytest.fixture
 def mock_session_factory(test_engine):
     """Create a session factory for testing that uses the test engine."""
     factory = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
     return factory
+
+
+# Discover command test fixtures
+@pytest.fixture
+def mock_api_client_factory():
+    """Factory to create mock TheOddsAPIClient with custom response."""
+    from unittest.mock import AsyncMock
+
+    def _create_mock_client(get_historical_events_response=None, side_effect=None):
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        if side_effect:
+            mock_client.get_historical_events = AsyncMock(side_effect=side_effect)
+        elif get_historical_events_response:
+            mock_client.get_historical_events = AsyncMock(
+                return_value=get_historical_events_response
+            )
+        else:
+            # Default empty response
+            mock_client.get_historical_events = AsyncMock(
+                return_value={
+                    "data": [],
+                    "quota_remaining": 19990,
+                    "timestamp": datetime.now(UTC),
+                }
+            )
+
+        return mock_client
+
+    return _create_mock_client
+
+
+@pytest.fixture
+def mock_db_session():
+    """Create mock database session for unit tests."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_session = AsyncMock()
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock()
+    mock_session.commit = AsyncMock()
+
+    # Mock execute to return a result object with fetchall
+    mock_execute_result = MagicMock()
+    mock_execute_result.fetchall.return_value = []
+    mock_session.execute = AsyncMock(return_value=mock_execute_result)
+
+    return mock_session
+
+
+@pytest.fixture
+def mock_historical_events_response():
+    """Standard mock response from get_historical_events for testing."""
+    return {
+        "data": [
+            {
+                "id": "event1",
+                "sport_key": "basketball_nba",
+                "sport_title": "NBA",
+                "commence_time": "2024-10-15T19:00:00Z",
+                "home_team": "Lakers",
+                "away_team": "Celtics",
+            },
+            {
+                "id": "event2",
+                "sport_key": "basketball_nba",
+                "sport_title": "NBA",
+                "commence_time": "2024-10-15T20:00:00Z",
+                "home_team": "Warriors",
+                "away_team": "Heat",
+            },
+        ],
+        "quota_remaining": 19990,
+        "timestamp": datetime(2024, 10, 15, 12, 0, 0, tzinfo=UTC),
+    }

@@ -14,7 +14,6 @@ Together these provide confidence the scheduler will work in production.
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -25,6 +24,8 @@ from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
+
+from tests.test_helpers import StubOddsClient
 
 # Test constants
 GAME_TIME = datetime(2025, 1, 15, 19, 0, 0, tzinfo=UTC)
@@ -133,40 +134,28 @@ async def test_scheduler_end_to_end(
     # Track execution
     execution_happened = {"fetch_odds": False}
 
-    # Create mock API client
-    mock_client = AsyncMock()
-
-    async def mock_get_odds(*args, **kwargs):
-        """Return realistic odds data."""
-        odds_data = mock_odds_data()
-        event = api_dict_to_event(odds_data)
-        return OddsResponse(
-            events=[event],
-            raw_events_data=[odds_data],
-            response_time_ms=100,
-            quota_remaining=19900,
-            timestamp=datetime.now(UTC),
-        )
-
-    mock_client.get_odds = mock_get_odds
+    # Create stub client with configured response
+    odds_data = mock_odds_data()
+    event = api_dict_to_event(odds_data)
+    response = OddsResponse(
+        events=[event],
+        raw_events_data=[odds_data],
+        response_time_ms=100,
+        quota_remaining=19900,
+        timestamp=datetime.now(UTC),
+    )
+    stub_client = StubOddsClient(response)
 
     # Wrap the actual job to inject our mocks
     from odds_lambda.jobs import fetch_odds
 
     original_main = fetch_odds.main
 
-    def build_service(settings, client=mock_client):
-        class _ClientContext:
-            async def __aenter__(self):
-                return client
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
+    def build_service(client_arg, settings, _client=stub_client):
         return OddsIngestionService(
+            client=_client,  # type: ignore
             settings=settings,
             session_factory=mock_session_factory,
-            client_factory=cast(Any, lambda: _ClientContext()),
         )
 
     async def wrapped_fetch_odds():
@@ -284,32 +273,24 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
 
         scheduled_calls = []
 
-        mock_client = AsyncMock()
-        mock_client.get_odds = AsyncMock(
-            return_value=OddsResponse(
-                events=[],
-                raw_events_data=[],
-                response_time_ms=100,
-                quota_remaining=19900,
-                timestamp=test_time,
-            )
+        # Create stub client with empty response
+        response = OddsResponse(
+            events=[],
+            raw_events_data=[],
+            response_time_ms=100,
+            quota_remaining=19900,
+            timestamp=test_time,
         )
+        stub_client = StubOddsClient(response)
 
         async def mock_schedule_next(job_name: str, next_time: datetime, _calls=scheduled_calls):
             _calls.append({"job_name": job_name, "next_time": next_time})
 
-        def build_service(settings, client=mock_client):
-            class _ClientContext:
-                async def __aenter__(self):
-                    return client
-
-                async def __aexit__(self, exc_type, exc, tb):
-                    return False
-
+        def build_service(client_arg, settings, _client=stub_client):
             return OddsIngestionService(
+                client=_client,  # type: ignore
                 settings=settings,
                 session_factory=mock_session_factory,
-                client_factory=cast(Any, lambda: _ClientContext()),
             )
 
         with (
