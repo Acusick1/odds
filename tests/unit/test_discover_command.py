@@ -4,9 +4,8 @@ from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
-from typer.testing import CliRunner
-
 from odds_cli.main import app
+from typer.testing import CliRunner
 
 
 class TestDiscoverCommand:
@@ -43,15 +42,11 @@ class TestDiscoverCommand:
         assert result.exit_code == 1
         assert "start date must be before" in result.stdout.lower()
 
-    def test_dry_run_mode(
-        self, runner, mock_historical_events_response, mock_api_client_factory
-    ):
+    def test_dry_run_mode(self, runner, mock_historical_events_response, mock_api_client_factory):
         """Test dry-run mode doesn't write to database."""
         mock_client = mock_api_client_factory(mock_historical_events_response)
 
-        with patch(
-            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
-        ):
+        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
             with patch("odds_lambda.storage.writers.OddsWriter") as mock_writer_class:
                 result = runner.invoke(
                     app,
@@ -90,9 +85,7 @@ class TestDiscoverCommand:
         """Test successful discovery and storage of events."""
         mock_client = mock_api_client_factory(mock_historical_events_response)
 
-        with patch(
-            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
-        ):
+        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
             with patch(
                 "odds_cli.commands.discover.async_session_maker",
                 return_value=mock_db_session,
@@ -139,9 +132,7 @@ class TestDiscoverCommand:
         """Test discovery across multiple days."""
         mock_client = mock_api_client_factory(mock_historical_events_response)
 
-        with patch(
-            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
-        ):
+        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
             with patch(
                 "odds_cli.commands.discover.async_session_maker",
                 return_value=mock_db_session,
@@ -178,9 +169,7 @@ class TestDiscoverCommand:
             side_effect=Exception("API Error: Rate limit exceeded")
         )
 
-        with patch(
-            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
-        ):
+        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
             result = runner.invoke(
                 app,
                 [
@@ -204,9 +193,7 @@ class TestDiscoverCommand:
         """Test handling of empty API response (no events found)."""
         mock_client = mock_api_client_factory()  # Uses default empty response
 
-        with patch(
-            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
-        ):
+        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
             result = runner.invoke(
                 app,
                 [
@@ -226,15 +213,11 @@ class TestDiscoverCommand:
             assert "Events found: 0" in result.stdout
             assert "No events found in date range" in result.stdout
 
-    def test_quota_tracking(
-        self, runner, mock_historical_events_response, mock_api_client_factory
-    ):
+    def test_quota_tracking(self, runner, mock_historical_events_response, mock_api_client_factory):
         """Test that quota is tracked and displayed."""
         mock_client = mock_api_client_factory(mock_historical_events_response)
 
-        with patch(
-            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
-        ):
+        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
             result = runner.invoke(
                 app,
                 [
@@ -254,9 +237,7 @@ class TestDiscoverCommand:
             # Should display quota information
             assert "API quota remaining: 19,990" in result.stdout
 
-    def test_batch_upsert(
-        self, runner, mock_api_client_factory, mock_db_session
-    ):
+    def test_batch_upsert(self, runner, mock_api_client_factory, mock_db_session):
         """Test that events are upserted in batches."""
         # Create response with > 100 events to test batching
         many_events = [
@@ -279,9 +260,7 @@ class TestDiscoverCommand:
 
         mock_client = mock_api_client_factory(response)
 
-        with patch(
-            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
-        ):
+        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
             with patch(
                 "odds_cli.commands.discover.async_session_maker",
                 return_value=mock_db_session,
@@ -338,9 +317,7 @@ class TestDiscoverCommand:
 
         mock_client = mock_api_client_factory(malformed_response)
 
-        with patch(
-            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
-        ):
+        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
             result = runner.invoke(
                 app,
                 [

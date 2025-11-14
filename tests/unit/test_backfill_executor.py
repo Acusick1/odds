@@ -1,19 +1,29 @@
 """Unit tests for BackfillExecutor."""
 
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
+
 import pytest
 from odds_analytics.backfill_executor import BackfillExecutor
+from odds_core.api_models import HistoricalOddsResponse
+
+from tests.test_helpers import StubHistoricalOddsClient
 
 
 class TestBackfillExecutor:
     """Test BackfillExecutor functionality."""
 
     @pytest.mark.asyncio
-    async def test_dry_run_mode(self, sample_backfill_plan, mock_api_client):
+    async def test_dry_run_mode(self, sample_backfill_plan):
         """Test dry run mode doesn't make API calls and counts as success."""
+        # Create mock client to verify no calls made
+        mock_client = AsyncMock()
+        mock_client.get_historical_odds = AsyncMock()
+
         progress_updates = []
 
         async with BackfillExecutor(
-            client=mock_api_client, dry_run=True, rate_limit_seconds=0
+            client=mock_client, dry_run=True, rate_limit_seconds=0
         ) as executor:
             result = await executor.execute_plan(
                 sample_backfill_plan, progress_callback=lambda p: progress_updates.append(p)
@@ -27,12 +37,15 @@ class TestBackfillExecutor:
             assert result.total_quota_used == 0
 
             # No API calls made
-            mock_api_client.get_historical_odds.assert_not_called()
+            mock_client.get_historical_odds.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_empty_plan_raises_error(self, mock_api_client):
+    async def test_empty_plan_raises_error(self):
         """Test that empty plan raises ValueError."""
-        async with BackfillExecutor(client=mock_api_client) as executor:
+        # Client not used in this test, just needs to exist
+        mock_client = AsyncMock()
+
+        async with BackfillExecutor(client=mock_client) as executor:
             with pytest.raises(ValueError, match="Plan contains no games"):
                 await executor.execute_plan({"games": []})
 
@@ -60,11 +73,14 @@ class TestBackfillExecutor:
             assert all(p.status == "failed" for p in progress_updates)
 
     @pytest.mark.asyncio
-    async def test_progress_callback(self, sample_backfill_plan, mock_api_client):
+    async def test_progress_callback(self, sample_backfill_plan):
         """Test that progress callback is called for each snapshot."""
+        # Client not actually called in dry run mode
+        mock_client = AsyncMock()
+
         progress_updates = []
 
-        async with BackfillExecutor(client=mock_api_client, dry_run=True) as executor:
+        async with BackfillExecutor(client=mock_client, dry_run=True) as executor:
             await executor.execute_plan(
                 sample_backfill_plan, progress_callback=lambda p: progress_updates.append(p)
             )
@@ -83,24 +99,81 @@ class TestBackfillExecutor:
             assert len(event2_updates) == 2
 
     @pytest.mark.asyncio
-    async def test_rate_limiting(self, sample_backfill_plan, mock_api_client):
+    async def test_rate_limiting(self, sample_backfill_plan):
         """Test that rate limiting is applied after successful requests."""
-        from unittest.mock import patch
+        from unittest.mock import MagicMock, patch
+
+        from odds_core.api_models import api_dict_to_event
+
+        # First part: dry run mode (no sleeps)
+        mock_client = AsyncMock()
 
         with patch("asyncio.sleep") as mock_sleep:
             async with BackfillExecutor(
-                client=mock_api_client, dry_run=True, rate_limit_seconds=1.5
+                client=mock_client, dry_run=True, rate_limit_seconds=1.5
             ) as executor:
                 await executor.execute_plan(sample_backfill_plan)
 
                 # In dry run, no sleep is called (no actual API requests)
                 mock_sleep.assert_not_called()
 
-        # Now test with actual API calls (not dry run)
+        # Second part: actual API calls with rate limiting
+        # Create responses for the two events
+        event1_dict = {
+            "id": "test_event_1",
+            "sport_key": "basketball_nba",
+            "sport_title": "NBA",
+            "commence_time": "2024-01-15T19:00:00Z",
+            "home_team": "Lakers",
+            "away_team": "Celtics",
+            "bookmakers": [],
+        }
+        event2_dict = {
+            "id": "test_event_2",
+            "sport_key": "basketball_nba",
+            "sport_title": "NBA",
+            "commence_time": "2024-01-15T21:00:00Z",
+            "home_team": "Warriors",
+            "away_team": "Heat",
+            "bookmakers": [],
+        }
+
+        # Create responses - first 2 calls for event1, next 2 for event2
+        responses = [
+            HistoricalOddsResponse(
+                events=[api_dict_to_event(event1_dict)],
+                raw_events_data=[event1_dict],
+                response_time_ms=100,
+                quota_remaining=19950,
+                timestamp=datetime(2024, 1, 15, 18, 0, 0, tzinfo=UTC),
+            ),
+            HistoricalOddsResponse(
+                events=[api_dict_to_event(event1_dict)],
+                raw_events_data=[event1_dict],
+                response_time_ms=100,
+                quota_remaining=19940,
+                timestamp=datetime(2024, 1, 15, 18, 30, 0, tzinfo=UTC),
+            ),
+            HistoricalOddsResponse(
+                events=[api_dict_to_event(event2_dict)],
+                raw_events_data=[event2_dict],
+                response_time_ms=100,
+                quota_remaining=19930,
+                timestamp=datetime(2024, 1, 15, 20, 0, 0, tzinfo=UTC),
+            ),
+            HistoricalOddsResponse(
+                events=[api_dict_to_event(event2_dict)],
+                raw_events_data=[event2_dict],
+                response_time_ms=100,
+                quota_remaining=19920,
+                timestamp=datetime(2024, 1, 15, 20, 30, 0, tzinfo=UTC),
+            ),
+        ]
+
+        stub_client = StubHistoricalOddsClient(responses)
+
         with patch("asyncio.sleep") as mock_sleep:
             # Need to mock session factory to avoid database access
-            from unittest.mock import AsyncMock, MagicMock
-
             mock_session = MagicMock()
             mock_session.__aenter__ = AsyncMock(return_value=mock_session)
             mock_session.__aexit__ = AsyncMock()
@@ -111,7 +184,7 @@ class TestBackfillExecutor:
                 return mock_session
 
             async with BackfillExecutor(
-                client=mock_api_client,
+                client=stub_client,
                 session_factory=mock_factory,
                 skip_existing=False,
                 rate_limit_seconds=1.5,

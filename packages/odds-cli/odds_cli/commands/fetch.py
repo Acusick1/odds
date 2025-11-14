@@ -37,39 +37,43 @@ async def _fetch_current(sport: str):
 
         try:
             app_settings = get_settings()
-            ingestion_service = OddsIngestionService(settings=app_settings)
 
-            def _on_fetch_complete(response):
-                progress.update(
-                    task,
-                    description=f"Processing {len(response.events)} events...",
+            async with TheOddsAPIClient() as client:
+                ingestion_service = OddsIngestionService(client=client, settings=app_settings)
+
+                def _on_fetch_complete(response):
+                    progress.update(
+                        task,
+                        description=f"Processing {len(response.events)} events...",
+                    )
+
+                def _on_event_failed(event_id: str | None, exc: Exception) -> None:
+                    identifier = event_id or "unknown"
+                    console.print(
+                        f"[yellow]Warning: Failed to process event {identifier}: {exc}[/yellow]"
+                    )
+
+                callbacks = OddsIngestionCallbacks(
+                    on_fetch_complete=_on_fetch_complete,
+                    on_event_failed=_on_event_failed,
                 )
 
-            def _on_event_failed(event_id: str | None, exc: Exception) -> None:
-                identifier = event_id or "unknown"
+                result = await ingestion_service.ingest_sport(sport, callbacks=callbacks)
+
+                progress.update(task, description="Complete!", completed=True)
+
+                # Summary
+                console.print("\n[bold green]✓ Fetch completed successfully![/bold green]")
                 console.print(
-                    f"[yellow]Warning: Failed to process event {identifier}: {exc}[/yellow]"
+                    f"  Events processed: {result.processed_events} of {result.total_events}"
                 )
+                console.print(f"  Bookmakers: {len(app_settings.data_collection.bookmakers)}")
+                console.print(f"  Markets: {', '.join(app_settings.data_collection.markets)}")
 
-            callbacks = OddsIngestionCallbacks(
-                on_fetch_complete=_on_fetch_complete,
-                on_event_failed=_on_event_failed,
-            )
+                if result.quota_remaining is not None:
+                    console.print(f"  API quota remaining: {result.quota_remaining:,}")
 
-            result = await ingestion_service.ingest_sport(sport, callbacks=callbacks)
-
-            progress.update(task, description="Complete!", completed=True)
-
-            # Summary
-            console.print("\n[bold green]✓ Fetch completed successfully![/bold green]")
-            console.print(f"  Events processed: {result.processed_events} of {result.total_events}")
-            console.print(f"  Bookmakers: {len(app_settings.data_collection.bookmakers)}")
-            console.print(f"  Markets: {', '.join(app_settings.data_collection.markets)}")
-
-            if result.quota_remaining is not None:
-                console.print(f"  API quota remaining: {result.quota_remaining:,}")
-
-            console.print(f"  Response time: {result.response_time_ms}ms")
+                console.print(f"  Response time: {result.response_time_ms}ms")
 
         except Exception as e:
             progress.update(task, description="Failed!", completed=True)

@@ -13,6 +13,7 @@ import asyncio
 import structlog
 from odds_core.config import Settings, get_settings
 
+from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.scheduling.backends import get_scheduler_backend
 from odds_lambda.scheduling.intelligence import SchedulingIntelligence
@@ -20,9 +21,9 @@ from odds_lambda.scheduling.intelligence import SchedulingIntelligence
 logger = structlog.get_logger()
 
 
-def build_ingestion_service(settings: Settings) -> OddsIngestionService:
+def build_ingestion_service(client: TheOddsAPIClient, settings: Settings) -> OddsIngestionService:
     """Factory to create ingestion service; exposed for test patching."""
-    return OddsIngestionService(settings=settings)
+    return OddsIngestionService(client=client, settings=settings)
 
 
 async def main():
@@ -66,13 +67,13 @@ async def main():
         tier=decision.tier.value if decision.tier else None,
     )
 
-    ingestion_service = build_ingestion_service(app_settings)
-
     try:
-        results = await ingestion_service.ingest_sports(
-            app_settings.data_collection.sports,
-            fetch_tier=decision.tier,
-        )
+        async with TheOddsAPIClient() as client:
+            ingestion_service = build_ingestion_service(client, app_settings)
+            results = await ingestion_service.ingest_sports(
+                app_settings.data_collection.sports,
+                fetch_tier=decision.tier,
+            )
 
         for sport_result in results.sport_results:
             for failure in sport_result.failures:

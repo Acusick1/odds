@@ -229,27 +229,6 @@ def mock_api_response_factory() -> Callable[[str, str, str], Any]:
 
 
 @pytest.fixture
-def mock_api_client(mock_api_response_factory: Callable[[str, str, str], Any]) -> Any:
-    """Mock API client with configurable responses."""
-    from unittest.mock import AsyncMock
-
-    client = AsyncMock()
-
-    # Default behavior: return appropriate response based on call count
-    call_count = {"count": 0}
-
-    async def get_historical_odds(*args, **kwargs):
-        call_count["count"] += 1
-        if call_count["count"] <= 2:
-            return mock_api_response_factory("test_event_1", "Lakers", "Celtics")
-        else:
-            return mock_api_response_factory("test_event_2", "Warriors", "Heat")
-
-    client.get_historical_odds = AsyncMock(side_effect=get_historical_odds)
-    return client
-
-
-@pytest.fixture
 def mock_session_factory(test_engine):
     """Create a session factory for testing that uses the test engine."""
     factory = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)

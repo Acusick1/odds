@@ -13,21 +13,7 @@ from odds_lambda.ingestion import (
 )
 from sqlalchemy import select
 
-
-class _StubClient:
-    """Async context manager returning a prebuilt odds response."""
-
-    def __init__(self, response: OddsResponse):
-        self._response = response
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-    async def get_odds(self, *args, **kwargs) -> OddsResponse:
-        return self._response
+from tests.test_helpers import StubOddsClient
 
 
 class TestOddsIngestionService:
@@ -90,9 +76,9 @@ class TestOddsIngestionService:
         )
 
         service = OddsIngestionService(
+            client=StubOddsClient(response),  # type: ignore
             settings=mock_settings,
             session_factory=mock_session_factory,
-            client_factory=lambda: _StubClient(response),
         )
 
         result = await service.ingest_sport(
@@ -186,9 +172,9 @@ class TestOddsIngestionService:
         )
 
         service = OddsIngestionService(
+            client=StubOddsClient(response),  # type: ignore
             settings=mock_settings,
             session_factory=mock_session_factory,
-            client_factory=lambda: _StubClient(response),
         )
 
         result = await service.ingest_sport(
