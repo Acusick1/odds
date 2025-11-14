@@ -49,6 +49,7 @@ dev = [
     "numpy>=1.24.0",
     "py-pglite[asyncpg,sqlalchemy]>=0.5.3",
     "psycopg[binary]>=3.2.12",
+    "pytest-env>=1.2.0",
 ]
 
 # Virtual workspace root - no build system needed
@@ -82,3 +83,8 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
+env = [
+    "PGLITE_USE_TCP=1",
+    "PGLITE_TCP_PORT=5433",
+    "ODDS_API_KEY=",
+]

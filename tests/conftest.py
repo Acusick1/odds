@@ -14,10 +14,6 @@ from sqlalchemy.orm import sessionmaker
 # Set required environment variables for testing BEFORE any imports of Settings
 os.environ.setdefault("ODDS_API_KEY", "test_api_key")
 
-# Configure py-pglite to use TCP mode (required for compatibility)
-os.environ.setdefault("PGLITE_USE_TCP", "1")
-os.environ.setdefault("PGLITE_TCP_PORT", "5433")
-
 
 @pytest.fixture
 def sample_odds_data() -> list[dict[str, Any]]:
