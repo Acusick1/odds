@@ -10,21 +10,6 @@ jobs:
     name: Run Unit and Integration Tests
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: dev_password
-          POSTGRES_DB: odds_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -44,7 +29,7 @@ jobs:
 
       - name: Run unit tests
         env:
-          DATABASE_URL: postgresql+asyncpg://postgres:dev_password@localhost:5432/odds_test
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           PGLITE_USE_TCP: "1"
           PGLITE_TCP_PORT: "5433"
@@ -52,7 +37,7 @@ jobs:
 
       - name: Run integration tests
         env:
-          DATABASE_URL: postgresql+asyncpg://postgres:dev_password@localhost:5432/odds_test
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           PGLITE_USE_TCP: "1"
           PGLITE_TCP_PORT: "5433"
