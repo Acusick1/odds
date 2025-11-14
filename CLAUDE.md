@@ -455,6 +455,7 @@ odds fetch scores --sport basketball_nba --days 3
 **Backfill Commands** (Implemented):
 
 ```bash
+odds discover games --start YYYY-MM-DD --end YYYY-MM-DD  # Discover historical games
 odds backfill plan --start YYYY-MM-DD --end YYYY-MM-DD --games N
 odds backfill execute --plan backfill_plan.json
 odds backfill status                    # Show backfill progress
@@ -480,6 +481,13 @@ odds status show --verbose              # Detailed statistics
 odds status quota                       # Check API usage remaining
 odds status events --days 7             # List recent events
 odds status events --team "Lakers"      # Filter by team
+```
+
+**Validation & Data Management** (Implemented):
+
+```bash
+odds validate coverage --start YYYY-MM-DD --end YYYY-MM-DD  # Validate data completeness
+odds copy from-prod --start YYYY-MM-DD --end YYYY-MM-DD     # Copy from production DB
 ```
 
 ---
@@ -762,13 +770,13 @@ uv run alembic current
 docker-compose up -d
 
 # Run scheduler locally (for testing scheduler changes)
-uv run python -m cli scheduler start
+uv run odds scheduler start
 
 # Manual data fetch (for testing without scheduler)
-uv run python -m cli fetch current
+uv run odds fetch current
 
 # Check system status
-uv run python -m cli status show
+uv run odds status show
 ```
 
 ### Database Environment Guidelines
@@ -917,8 +925,8 @@ LOCAL_DATABASE_URL=postgresql+asyncpg://postgres:dev_password@localhost:5432/odd
 
 **Timezone Handling** (CRITICAL):
 
-- **Always store UTC** in database: `datetime.now(timezone.utc)`
-- **Never use `datetime.now(timezone.utc)()`** - deprecated in Python 3.12+
+- **Always store UTC** in database: `datetime.now(UTC)` (from `datetime import UTC`)
+- **Never use `datetime.utcnow()`** - deprecated in Python 3.12+
 - **Never use `datetime.now()`** without timezone parameter
 - API returns UTC timestamps
 - Convert to local time **only for display** (CLI output)
