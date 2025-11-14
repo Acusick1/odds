@@ -47,9 +47,7 @@ def create_backfill_plan(
     """
     console.print("\n[bold cyan]Creating Historical Backfill Plan[/bold cyan]\n")
 
-    asyncio.run(
-        _create_plan_async(start_date, end_date, target_games, output_file)
-    )
+    asyncio.run(_create_plan_async(start_date, end_date, target_games, output_file))
 
 
 async def _create_plan_async(
@@ -75,7 +73,7 @@ async def _create_plan_async(
     )
 
     # Query database for completed events
-    console.print(f"[cyan]Querying local database for events...[/cyan]")
+    console.print("[cyan]Querying local database for events...[/cyan]")
     console.print(f"Date range: {start_date_str} to {end_date_str}")
 
     from odds_core.models import EventStatus
@@ -98,17 +96,11 @@ async def _create_plan_async(
             console.print(
                 f"[red]No FINAL events found in database for date range {start_date_str} to {end_date_str}[/red]"
             )
+            console.print("\n[yellow]Run event discovery first:[/yellow]")
+            console.print(f"  odds discover games --start {start_date_str} --end {end_date_str}")
+            console.print("\n[yellow]Then create your plan:[/yellow]")
             console.print(
-                "\n[yellow]Next steps:[/yellow]"
-            )
-            console.print(
-                "  1. Ensure events have been discovered and marked as FINAL"
-            )
-            console.print(
-                "  2. Use 'odds fetch scores' to update event results"
-            )
-            console.print(
-                "  3. Verify events exist with 'odds status events --days 90'\n"
+                f"  odds backfill plan --start {start_date_str} --end {end_date_str} --games {target_games}\n"
             )
             raise typer.Exit(1)
 
