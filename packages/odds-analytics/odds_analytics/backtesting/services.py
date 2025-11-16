@@ -58,7 +58,18 @@ class BettingStrategy(ABC):
         config: BacktestConfig,
         session: AsyncSession | None = None,
     ) -> list[BetOpportunity]:
-        """Evaluate an event and return betting opportunities."""
+        """
+        Evaluate an event and return betting opportunities.
+
+        Args:
+            event: Event with final scores
+            odds_snapshot: Available odds at decision time
+            config: Backtest configuration
+            session: Database session for querying historical data (optional)
+
+        Returns:
+            List of BetOpportunity objects
+        """
 
     def get_name(self) -> str:
         """Return strategy name for reporting."""
