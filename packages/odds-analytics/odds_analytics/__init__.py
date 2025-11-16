@@ -6,6 +6,10 @@ Provides strategies, backtesting, feature extraction, and game selection.
 
 from odds_analytics.backfill_executor import BackfillExecutor
 from odds_analytics.game_selector import GameSelector
+from odds_analytics.sequence_loader import (
+    load_sequences_for_event,
+    prepare_lstm_training_data,
+)
 from odds_analytics.strategies import (
     ArbitrageStrategy,
     BasicEVStrategy,
@@ -26,6 +30,9 @@ __all__ = [
     # Backfill
     "BackfillExecutor",
     "GameSelector",
+    # Sequence Loading
+    "load_sequences_for_event",
+    "prepare_lstm_training_data",
     # Utils
     "american_to_decimal",
     "decimal_to_american",
