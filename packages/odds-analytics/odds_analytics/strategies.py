@@ -1,6 +1,7 @@
 """Example betting strategies for backtesting."""
 
 from odds_core.models import Odds
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backtesting import (
     BacktestConfig,
@@ -49,6 +50,7 @@ class FlatBettingStrategy(BettingStrategy):
         event: BacktestEvent,
         odds_snapshot: list[Odds],
         config: BacktestConfig,
+        session: AsyncSession | None = None,
     ) -> list[BetOpportunity]:
         """Find opportunities based on simple rules."""
         opportunities = []
@@ -142,6 +144,7 @@ class BasicEVStrategy(BettingStrategy):
         event: BacktestEvent,
         odds_snapshot: list[Odds],
         config: BacktestConfig,
+        session: AsyncSession | None = None,
     ) -> list[BetOpportunity]:
         """Find +EV opportunities by comparing sharp vs retail odds."""
         opportunities = []
@@ -256,6 +259,7 @@ class ArbitrageStrategy(BettingStrategy):
         event: BacktestEvent,
         odds_snapshot: list[Odds],
         config: BacktestConfig,
+        session: AsyncSession | None = None,
     ) -> list[BetOpportunity]:
         """Find arbitrage opportunities across bookmakers."""
         opportunities = []

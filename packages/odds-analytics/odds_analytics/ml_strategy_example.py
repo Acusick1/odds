@@ -28,6 +28,7 @@ from typing import Any
 
 import numpy as np
 from odds_core.models import Odds
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backtesting import (
     BacktestConfig,
@@ -130,6 +131,7 @@ class XGBoostStrategy(BettingStrategy):
         event: BacktestEvent,
         odds_snapshot: list[Odds],
         config: BacktestConfig,
+        session: AsyncSession | None = None,
     ) -> list[BetOpportunity]:
         """
         Evaluate betting opportunities using trained ML model.
@@ -138,6 +140,7 @@ class XGBoostStrategy(BettingStrategy):
             event: Event with final scores
             odds_snapshot: Odds at decision time
             config: Backtest configuration
+            session: Database session for querying historical data (optional)
 
         Returns:
             List of BetOpportunity objects with model predictions as confidence
