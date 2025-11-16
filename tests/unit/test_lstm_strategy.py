@@ -307,7 +307,7 @@ class TestLSTMStrategy:
 
     @pytest.mark.asyncio
     async def test_evaluate_opportunity_with_session(self, sample_event, sample_odds_snapshot):
-        """Test evaluate_opportunity_with_session with trained model."""
+        """Test evaluate_opportunity with trained model and session."""
         strategy = LSTMStrategy(
             lookback_hours=24,
             timesteps=8,
@@ -359,7 +359,7 @@ class TestLSTMStrategy:
                 end_date=datetime(2024, 12, 31, tzinfo=UTC),
             )
 
-            opportunities = await strategy.evaluate_opportunity_with_session(
+            opportunities = await strategy.evaluate_opportunity(
                 sample_event, sample_odds_snapshot, config, mock_session
             )
 
@@ -408,7 +408,7 @@ class TestLSTMStrategy:
                 end_date=datetime(2024, 12, 31, tzinfo=UTC),
             )
 
-            opportunities = await strategy.evaluate_opportunity_with_session(
+            opportunities = await strategy.evaluate_opportunity(
                 sample_event, sample_odds_snapshot, config, mock_session
             )
 
@@ -437,7 +437,7 @@ class TestLSTMStrategy:
                 end_date=datetime(2024, 12, 31, tzinfo=UTC),
             )
 
-            opportunities = await strategy.evaluate_opportunity_with_session(
+            opportunities = await strategy.evaluate_opportunity(
                 sample_event, sample_odds_snapshot, config, mock_session
             )
 

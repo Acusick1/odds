@@ -67,7 +67,6 @@ Example:
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -376,6 +375,7 @@ class LSTMStrategy(BettingStrategy):
         event: BacktestEvent,
         odds_snapshot: list[Odds],
         config: BacktestConfig,
+        session: AsyncSession | None = None,
     ) -> list[BetOpportunity]:
         """
         Evaluate betting opportunities using trained LSTM model.
@@ -389,6 +389,7 @@ class LSTMStrategy(BettingStrategy):
             event: Event with final scores
             odds_snapshot: Odds at decision time (used for market odds comparison)
             config: Backtest configuration
+            session: Database session for loading historical sequences (required for LSTM)
 
         Returns:
             List of BetOpportunity objects (may be empty if no edge found)
@@ -401,44 +402,13 @@ class LSTMStrategy(BettingStrategy):
             logger.warning("model_not_trained", event_id=event.id)
             return []
 
-        # Need to load historical sequence for this event
-        # Note: In production, we would get the session from somewhere
-        # For now, this is a limitation - we can't easily get session in evaluate_opportunity
-        # This is a design issue that needs to be addressed
-        # For now, return empty list and log warning
-        logger.warning(
-            "lstm_evaluate_needs_session",
-            event_id=event.id,
-            message="LSTMStrategy.evaluate_opportunity requires database session to load sequences. "
-            "Use LSTMStrategy.evaluate_opportunity_with_session instead.",
-        )
-        return []
-
-    async def evaluate_opportunity_with_session(
-        self,
-        event: BacktestEvent,
-        odds_snapshot: list[Odds],
-        config: BacktestConfig,
-        session: AsyncSession,
-    ) -> list[BetOpportunity]:
-        """
-        Evaluate betting opportunities with database session access.
-
-        This is an extended version of evaluate_opportunity that accepts a session
-        parameter to load historical odds sequences. This is necessary for LSTM
-        models that require time-series data.
-
-        Args:
-            event: Event with final scores
-            odds_snapshot: Odds at decision time (used for market odds comparison)
-            config: Backtest configuration
-            session: Database session for loading historical sequences
-
-        Returns:
-            List of BetOpportunity objects (may be empty if no edge found)
-        """
-        if not self.is_trained or self.model is None:
-            logger.warning("model_not_trained", event_id=event.id)
+        # LSTM requires database session to load historical sequences
+        if session is None:
+            logger.warning(
+                "lstm_requires_session",
+                event_id=event.id,
+                message="LSTMStrategy requires database session to load sequences",
+            )
             return []
 
         opportunities = []
