@@ -12,6 +12,7 @@ import structlog
 from odds_core.models import EventStatus, Odds
 from odds_lambda.storage.readers import OddsReader
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..utils import (
     calculate_kelly_stake,
@@ -55,8 +56,20 @@ class BettingStrategy(ABC):
         event: BacktestEvent,
         odds_snapshot: list[Odds],
         config: BacktestConfig,
+        session: AsyncSession | None = None,
     ) -> list[BetOpportunity]:
-        """Evaluate an event and return betting opportunities."""
+        """
+        Evaluate an event and return betting opportunities.
+
+        Args:
+            event: Event with final scores
+            odds_snapshot: Available odds at decision time
+            config: Backtest configuration
+            session: Database session for querying historical data (optional)
+
+        Returns:
+            List of BetOpportunity objects
+        """
 
     def get_name(self) -> str:
         """Return strategy name for reporting."""
@@ -145,7 +158,7 @@ class BacktestEngine:
                     continue
 
                 opportunities = await self.strategy.evaluate_opportunity(
-                    event, odds_snapshot, self.config
+                    event, odds_snapshot, self.config, self.reader.session
                 )
 
                 for opportunity in opportunities:
