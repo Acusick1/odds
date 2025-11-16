@@ -316,7 +316,7 @@ class TestLSTMStrategy:
         )
 
         # Manually create and set a trained model
-        strategy.model = strategy._create_model()
+        strategy.model = strategy._create_model().to(strategy.device)
         strategy.is_trained = True
 
         # Mock load_sequences_for_event
@@ -382,7 +382,7 @@ class TestLSTMStrategy:
             min_confidence=0.99,  # Very high
         )
 
-        strategy.model = strategy._create_model()
+        strategy.model = strategy._create_model().to(strategy.device)
         strategy.is_trained = True
 
         mock_sequences = [[Odds()] * 3] * 5
@@ -416,12 +416,10 @@ class TestLSTMStrategy:
         assert isinstance(opportunities, list)
 
     @pytest.mark.asyncio
-    async def test_evaluate_opportunity_with_no_sequences(
-        self, sample_event, sample_odds_snapshot
-    ):
+    async def test_evaluate_opportunity_with_no_sequences(self, sample_event, sample_odds_snapshot):
         """Test that evaluate_opportunity handles missing sequence data."""
         strategy = LSTMStrategy()
-        strategy.model = strategy._create_model()
+        strategy.model = strategy._create_model().to(strategy.device)
         strategy.is_trained = True
 
         # Mock empty sequences
@@ -446,7 +444,7 @@ class TestLSTMStrategy:
     def test_save_model(self):
         """Test that model can be saved to disk."""
         strategy = LSTMStrategy(hidden_size=128)
-        strategy.model = strategy._create_model()
+        strategy.model = strategy._create_model().to(strategy.device)
         strategy.is_trained = True
         strategy.training_history = {"loss": [0.5, 0.4, 0.3]}
 
@@ -471,7 +469,7 @@ class TestLSTMStrategy:
         """Test that model can be loaded from disk."""
         # Create and save model
         strategy = LSTMStrategy(hidden_size=128, num_layers=2)
-        strategy.model = strategy._create_model()
+        strategy.model = strategy._create_model().to(strategy.device)
         strategy.is_trained = True
         strategy.training_history = {"loss": [0.5, 0.4, 0.3]}
 
@@ -501,11 +499,12 @@ class TestLSTMStrategy:
         torch.manual_seed(42)
 
         strategy = LSTMStrategy(hidden_size=64)
-        strategy.model = strategy._create_model()
+        strategy.model = strategy._create_model().to(strategy.device)
         strategy.is_trained = True
 
         # Get initial predictions
-        x = torch.randn(1, 24, strategy.input_size)
+        x = torch.randn(1, 24, strategy.input_size).to(strategy.device)
+        strategy.model.eval()
         with torch.no_grad():
             logits1, probs1 = strategy.model(x)
 
@@ -516,6 +515,7 @@ class TestLSTMStrategy:
             # Load and predict
             new_strategy = LSTMStrategy()
             new_strategy.load_model(model_path)
+            new_strategy.model.eval()
 
             with torch.no_grad():
                 logits2, probs2 = new_strategy.model(x)
