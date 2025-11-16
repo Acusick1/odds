@@ -52,11 +52,11 @@ Example:
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import datetime
 
 import numpy as np
 import structlog
-from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.models import Event, EventStatus, Odds
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backtesting import BacktestEvent
@@ -267,10 +267,9 @@ async def prepare_lstm_training_data(
 
     # Filter for events with final scores
     valid_events = [
-        e for e in events
-        if e.status == EventStatus.FINAL
-        and e.home_score is not None
-        and e.away_score is not None
+        e
+        for e in events
+        if e.status == EventStatus.FINAL and e.home_score is not None and e.away_score is not None
     ]
 
     if not valid_events:

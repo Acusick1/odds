@@ -3,7 +3,6 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import numpy as np
 import pytest
 from odds_analytics.sequence_loader import (
     load_sequences_for_event,
