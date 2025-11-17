@@ -95,6 +95,7 @@ class TestNBAScoreFetcher:
                 "GAME_DATE": ["2024-01-15", "2024-01-15"],
                 "MATCHUP": ["LAL vs. BOS", "BOS @ LAL"],
                 "TEAM_ABBREVIATION": ["LAL", "BOS"],
+                "TEAM_NAME": ["Los Angeles Lakers", "Boston Celtics"],
                 "PTS": [110, 105],
             }
         )
@@ -110,8 +111,8 @@ class TestNBAScoreFetcher:
         assert len(results) == 1
         game = results[0]
         assert game["game_id"] == "0022300456"
-        assert game["home_team"] == "LAL"
-        assert game["away_team"] == "BOS"
+        assert game["home_team"] == "Los Angeles Lakers"
+        assert game["away_team"] == "Boston Celtics"
         assert game["home_score"] == 110
         assert game["away_score"] == 105
         assert isinstance(game["game_date"], datetime)
@@ -135,6 +136,7 @@ class TestNBAScoreFetcher:
                 "GAME_DATE": ["2024-01-15", "2024-01-15"],
                 "MATCHUP": ["LAL vs. BOS", "BOS @ LAL"],
                 "TEAM_ABBREVIATION": ["LAL", "BOS"],
+                "TEAM_NAME": ["Los Angeles Lakers", "Boston Celtics"],
                 "PTS": [110, 105],
             }
         )
@@ -144,13 +146,15 @@ class TestNBAScoreFetcher:
         fetcher = NBAScoreFetcher()
         game_date = datetime(2024, 1, 15, 12, 0, tzinfo=UTC)
 
-        # Match with exact team abbreviations
-        matched = fetcher.match_game_by_teams_and_date("LAL", "BOS", game_date)
+        # Match with full team names (as stored in database from The Odds API)
+        matched = fetcher.match_game_by_teams_and_date(
+            "Los Angeles Lakers", "Boston Celtics", game_date
+        )
 
         assert matched is not None
         assert matched["game_id"] == "0022300456"
-        assert matched["home_team"] == "LAL"
-        assert matched["away_team"] == "BOS"
+        assert matched["home_team"] == "Los Angeles Lakers"
+        assert matched["away_team"] == "Boston Celtics"
         assert matched["home_score"] == 110
         assert matched["away_score"] == 105
 
@@ -167,6 +171,7 @@ class TestNBAScoreFetcher:
                 "GAME_DATE": [],
                 "MATCHUP": [],
                 "TEAM_ABBREVIATION": [],
+                "TEAM_NAME": [],
                 "PTS": [],
             }
         )
@@ -177,7 +182,9 @@ class TestNBAScoreFetcher:
         game_date = datetime(2024, 1, 15, 12, 0, tzinfo=UTC)
 
         # Try to match with no results
-        matched = fetcher.match_game_by_teams_and_date("LAL", "BOS", game_date)
+        matched = fetcher.match_game_by_teams_and_date(
+            "Los Angeles Lakers", "Boston Celtics", game_date
+        )
 
         assert matched is None
 
@@ -194,6 +201,7 @@ class TestNBAScoreFetcher:
                 "GAME_DATE": ["2024-01-15", "2024-01-15"],
                 "MATCHUP": ["LAL vs. BOS", "BOS @ LAL"],
                 "TEAM_ABBREVIATION": ["LAL", "BOS"],
+                "TEAM_NAME": ["Los Angeles Lakers", "Boston Celtics"],
                 "PTS": [110, 105],
             }
         )

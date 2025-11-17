@@ -139,8 +139,8 @@ class NBAScoreFetcher:
 
                 result = {
                     "game_id": str(game_id),
-                    "home_team": str(home_row["TEAM_ABBREVIATION"]),
-                    "away_team": str(away_row["TEAM_ABBREVIATION"]),
+                    "home_team": str(home_row["TEAM_NAME"]),
+                    "away_team": str(away_row["TEAM_NAME"]),
                     "home_score": int(home_row["PTS"]) if home_row["PTS"] else 0,
                     "away_score": int(away_row["PTS"]) if away_row["PTS"] else 0,
                     "game_date": game_date,
