@@ -6,7 +6,7 @@ from datetime import datetime
 
 from odds_core.models import Event, OddsSnapshot
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, distinct, func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -209,23 +209,20 @@ class QualityMetrics:
             )
             print(f"Found {len(games)} games with final scores")
         """
-        query = (
-            select(
-                Event.id,
-                Event.sport_key,
-                Event.home_team,
-                Event.away_team,
-                Event.commence_time,
-                Event.home_score,
-                Event.away_score,
-            )
-            .where(
-                and_(
-                    Event.commence_time >= start_date,
-                    Event.commence_time <= end_date,
-                    Event.home_score.is_not(None),
-                    Event.away_score.is_not(None),
-                )
+        query = select(
+            Event.id,
+            Event.sport_key,
+            Event.home_team,
+            Event.away_team,
+            Event.commence_time,
+            Event.home_score,
+            Event.away_score,
+        ).where(
+            and_(
+                Event.commence_time >= start_date,
+                Event.commence_time <= end_date,
+                Event.home_score.is_not(None),
+                Event.away_score.is_not(None),
             )
         )
 
@@ -276,21 +273,18 @@ class QualityMetrics:
             )
             print(f"Found {len(games)} games missing scores")
         """
-        query = (
-            select(
-                Event.id,
-                Event.sport_key,
-                Event.home_team,
-                Event.away_team,
-                Event.commence_time,
-                Event.status,
-            )
-            .where(
-                and_(
-                    Event.commence_time >= start_date,
-                    Event.commence_time <= end_date,
-                    (Event.home_score.is_(None)) | (Event.away_score.is_(None)),
-                )
+        query = select(
+            Event.id,
+            Event.sport_key,
+            Event.home_team,
+            Event.away_team,
+            Event.commence_time,
+            Event.status,
+        ).where(
+            and_(
+                Event.commence_time >= start_date,
+                Event.commence_time <= end_date,
+                (Event.home_score.is_(None)) | (Event.away_score.is_(None)),
             )
         )
 

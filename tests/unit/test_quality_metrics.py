@@ -1,6 +1,6 @@
 """Unit tests for QualityMetrics module."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 from odds_analytics.quality_metrics import (
