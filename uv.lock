@@ -3,7 +3,8 @@ revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version < '3.12'",
-    "python_full_version >= '3.12' and python_full_version < '3.14'",
+    "python_full_version == '3.13.*'",
+    "python_full_version == '3.12.*'",
     "python_full_version >= '3.14'",
 ]
 
@@ -2004,6 +2005,20 @@ wheels = [
 ]
 
 [[package]]
+name = "nba-api"
+version = "1.11.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/81/0e/fad600ae85fb86620ccc2a2e668a869ca674e4f01d7d8bf9f39642dd090c/nba_api-1.11.3.tar.gz", hash = "sha256:24e98a91561a6a2b6380ae811b3962bdb9574eb91f52c3873c38709160551c09", size = 175251, upload-time = "2025-11-14T13:29:59.413Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/40/68/799e2885c6444a18e0f905bdf22986b3d258aea2e22802f86f3688268e8a/nba_api-1.11.3-py3-none-any.whl", hash = "sha256:3a77ec8474446a4289b449c147dd64f9150c07890b8200a25b7da057d738f184", size = 318992, upload-time = "2025-11-14T13:29:58.194Z" },
+]
+
+[[package]]
 name = "nbclient"
 version = "0.10.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2441,6 +2456,7 @@ dependencies = [
     { name = "alembic" },
     { name = "apscheduler" },
     { name = "boto3" },
+    { name = "nba-api" },
     { name = "odds-core" },
     { name = "tenacity" },
 ]
@@ -2451,6 +2467,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "apscheduler", specifier = ">=3.10.4" },
     { name = "boto3", specifier = ">=1.34.0" },
+    { name = "nba-api", specifier = ">=1.1.0" },
     { name = "odds-core", editable = "packages/odds-core" },
     { name = "tenacity", specifier = ">=8.2.3" },
 ]

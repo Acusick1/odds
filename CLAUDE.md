@@ -47,6 +47,7 @@ A single-user betting odds data collection and analysis system focused on NBA ga
 - **pytest + pytest-asyncio**: Testing framework
 - **structlog**: Structured logging
 - **ruff**: Fast Python linter and formatter (used in pre-commit hooks)
+- **nba_api**: Python wrapper for NBA.com API (historical score backfill)
 
 ### Deployment
 
@@ -89,6 +90,16 @@ A single-user betting odds data collection and analysis system focused on NBA ga
 - **Moneyline (h2h)**: Win/loss bets
 - **Spreads**: Point spread bets
 - **Totals**: Over/under total points bets
+
+### Secondary API: NBA API (for historical scores)
+
+- Library: `nba_api` (Python wrapper for NBA.com data)
+- Purpose: Backfill historical game scores for events missing final results
+- Endpoints used:
+  - `scoreboard.ScoreBoard`: Live scores
+  - `leaguegamefinder.LeagueGameFinder`: Historical game results by date range
+- Cost: Free, rate-limited by NBA.com
+- Use case: Fill gaps in score data when The Odds API scores endpoint is unavailable or incomplete
 
 ---
 
@@ -319,6 +330,9 @@ All backends implement `SchedulerBackend` abstract base class with methods:
 **TheOddsAPIClient** (`packages/odds-lambda/odds_lambda/data_fetcher.py`):
 Handles all API interactions with retry logic (tenacity), rate limiting, and quota tracking. Methods: `get_odds()`, `get_scores()`, `get_historical_odds()`, `get_historical_events()`.
 
+**NBAScoreFetcher** (`packages/odds-lambda/odds_lambda/nba_score_fetcher.py`):
+Fetches NBA game scores using the nba_api library for historical data backfill. Methods: `get_live_scores()` (current game scores), `get_historical_scores(start_date, end_date)` (historical results by date range), `match_game_by_teams_and_date()` (fuzzy matching to link events in database with NBA API data). Used by `odds backfill scores` command to populate missing final scores.
+
 **OddsValidator** (`packages/odds-lambda/odds_lambda/storage/validators.py`):
 Data quality validation with checks for odds range, timestamps, vig (2-15%), line movement, and required fields. Logs warnings but does not reject data (configurable).
 
@@ -459,6 +473,8 @@ odds discover games --start YYYY-MM-DD --end YYYY-MM-DD  # Discover historical g
 odds backfill plan --start YYYY-MM-DD --end YYYY-MM-DD --games N
 odds backfill execute --plan backfill_plan.json
 odds backfill status                    # Show backfill progress
+odds backfill scores --start YYYY-MM-DD --end YYYY-MM-DD  # Backfill scores using NBA API
+odds backfill scores --start YYYY-MM-DD --end YYYY-MM-DD --dry-run  # Preview without changes
 ```
 
 **Backtesting Commands** (Implemented):
