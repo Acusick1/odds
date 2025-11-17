@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from odds_core.models import Event, OddsSnapshot
+from odds_lambda.fetch_tier import FetchTier
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +52,20 @@ class GameMissingScoresResult(BaseModel):
     away_team: str = Field(description="Away team name")
     commence_time: datetime = Field(description="Game start time")
     status: str = Field(description="Event status")
+
+
+class TierCoverage(BaseModel):
+    """Result model for tier-based coverage analysis."""
+
+    tier: str = Field(description="FetchTier enum value (e.g., 'closing', 'pregame')")
+    tier_name: str = Field(description="Lowercase tier identifier")
+    hours_range: str = Field(description="Human-readable time window (e.g., '0-3 hours before')")
+    expected_interval_hours: float = Field(description="Expected sampling interval from tier properties")
+    games_in_tier_range: int = Field(description="Games eligible for this tier")
+    games_with_tier_snapshots: int = Field(description="Games with at least one snapshot in tier")
+    total_snapshots_in_tier: int = Field(description="Total snapshots captured in this tier")
+    coverage_pct: float = Field(description="Percentage of eligible games with tier coverage")
+    avg_snapshots_per_game: float = Field(description="Average snapshots per game in tier")
 
 
 class QualityMetrics:
@@ -307,3 +322,144 @@ class QualityMetrics:
             )
             for row in rows
         ]
+
+    async def get_tier_coverage(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        sport_key: str | None = None,
+    ) -> list[TierCoverage]:
+        """
+        Get tier-based coverage analysis showing snapshot distribution across fetch tiers.
+
+        This method dynamically integrates with the FetchTier system to validate that
+        intelligent scheduling is working correctly. For each tier (opening, early, sharp,
+        pregame, closing), it calculates:
+        - How many games should have snapshots in that tier
+        - How many games actually have snapshots
+        - Coverage percentage and average snapshots per game
+
+        Args:
+            start_date: Start of date range (inclusive)
+            end_date: End of date range (inclusive)
+            sport_key: Optional sport filter (e.g., "basketball_nba")
+
+        Returns:
+            List of TierCoverage results, one per tier, ordered from longest to shortest
+            time window (opening -> closing)
+
+        Example:
+            metrics = QualityMetrics(session)
+            coverage = await metrics.get_tier_coverage(
+                start_date=datetime(2024, 10, 1, tzinfo=UTC),
+                end_date=datetime(2024, 10, 31, tzinfo=UTC),
+                sport_key="basketball_nba"
+            )
+            for tier_info in coverage:
+                print(f"{tier_info.tier_name}: {tier_info.coverage_pct}% coverage")
+        """
+        # Get all events in date range
+        events_query = select(Event.id, Event.commence_time).where(
+            and_(
+                Event.commence_time >= start_date,
+                Event.commence_time <= end_date,
+            )
+        )
+
+        if sport_key:
+            events_query = events_query.where(Event.sport_key == sport_key)
+
+        events_result = await self.session.execute(events_query)
+        events = events_result.all()
+
+        # Build tier coverage for each FetchTier enum value
+        tier_results = []
+
+        # Iterate through all tiers dynamically
+        for fetch_tier in FetchTier:
+            tier_value = fetch_tier.value  # e.g., "closing"
+
+            # Get snapshot statistics for this tier
+            snapshot_query = (
+                select(
+                    OddsSnapshot.event_id,
+                    func.count(OddsSnapshot.id).label("snapshot_count"),
+                )
+                .join(Event, Event.id == OddsSnapshot.event_id)
+                .where(
+                    and_(
+                        Event.commence_time >= start_date,
+                        Event.commence_time <= end_date,
+                        OddsSnapshot.fetch_tier == tier_value,
+                    )
+                )
+            )
+
+            if sport_key:
+                snapshot_query = snapshot_query.where(Event.sport_key == sport_key)
+
+            snapshot_query = snapshot_query.group_by(OddsSnapshot.event_id)
+
+            snapshot_result = await self.session.execute(snapshot_query)
+            snapshot_rows = snapshot_result.all()
+
+            # Calculate metrics
+            games_with_tier_snapshots = len(snapshot_rows)
+            total_snapshots_in_tier = sum(row[1] for row in snapshot_rows)
+
+            # All events are eligible for all tiers (any game could theoretically have
+            # snapshots in any tier depending on when it was discovered)
+            games_in_tier_range = len(events)
+
+            # Calculate coverage percentage
+            coverage_pct = (
+                (games_with_tier_snapshots / games_in_tier_range * 100)
+                if games_in_tier_range > 0
+                else 0.0
+            )
+
+            # Calculate average snapshots per game
+            avg_snapshots_per_game = (
+                (total_snapshots_in_tier / games_with_tier_snapshots)
+                if games_with_tier_snapshots > 0
+                else 0.0
+            )
+
+            # Get human-readable hours range based on tier
+            hours_range = self._get_tier_hours_range(fetch_tier)
+
+            tier_results.append(
+                TierCoverage(
+                    tier=tier_value,
+                    tier_name=tier_value,  # Already lowercase
+                    hours_range=hours_range,
+                    expected_interval_hours=fetch_tier.interval_hours,
+                    games_in_tier_range=games_in_tier_range,
+                    games_with_tier_snapshots=games_with_tier_snapshots,
+                    total_snapshots_in_tier=total_snapshots_in_tier,
+                    coverage_pct=coverage_pct,
+                    avg_snapshots_per_game=avg_snapshots_per_game,
+                )
+            )
+
+        return tier_results
+
+    @staticmethod
+    def _get_tier_hours_range(tier: FetchTier) -> str:
+        """
+        Get human-readable hours range for a fetch tier.
+
+        Args:
+            tier: FetchTier enum value
+
+        Returns:
+            Human-readable string describing the time window
+        """
+        ranges = {
+            FetchTier.CLOSING: "0-3 hours before",
+            FetchTier.PREGAME: "3-12 hours before",
+            FetchTier.SHARP: "12-24 hours before",
+            FetchTier.EARLY: "1-3 days before",
+            FetchTier.OPENING: "3+ days before",
+        }
+        return ranges[tier]
