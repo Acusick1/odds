@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 from odds_analytics.quality_metrics import (
+    BookmakerCoverage,
     GameCountResult,
     GameMissingScoresResult,
     GameWithOddsResult,
@@ -11,7 +12,7 @@ from odds_analytics.quality_metrics import (
     QualityMetrics,
     TierCoverage,
 )
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_lambda.fetch_tier import FetchTier
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1201,3 +1202,637 @@ class TestQualityMetricsTierCoverage:
         assert closing.games_in_tier_range == 1  # Only event2
         assert closing.games_with_tier_snapshots == 1
         assert closing.total_snapshots_in_tier == 1
+
+
+@pytest.mark.asyncio
+class TestQualityMetricsBookmakerCoverage:
+    """Tests for get_bookmaker_coverage() method."""
+
+    async def test_get_bookmaker_coverage_empty_database(self, test_session: AsyncSession):
+        """Test bookmaker coverage with no data in database."""
+        metrics = QualityMetrics(test_session)
+
+        result = await metrics.get_bookmaker_coverage(
+            start_date=datetime(2024, 10, 1, tzinfo=UTC),
+            end_date=datetime(2024, 10, 31, tzinfo=UTC),
+        )
+
+        # Should return empty list when no data exists
+        assert isinstance(result, list)
+        assert len(result) == 0
+
+    async def test_get_bookmaker_coverage_full_coverage(self, test_session: AsyncSession):
+        """Test bookmaker coverage with 100% coverage."""
+        # Create test events
+        events = [
+            Event(
+                id="event1",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
+                home_team="Lakers",
+                away_team="Celtics",
+            ),
+            Event(
+                id="event2",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 10, 20, 20, 0, tzinfo=UTC),
+                home_team="Warriors",
+                away_team="Heat",
+            ),
+            Event(
+                id="event3",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 10, 25, 21, 0, tzinfo=UTC),
+                home_team="Bulls",
+                away_team="Nets",
+            ),
+        ]
+
+        for event in events:
+            test_session.add(event)
+        await test_session.commit()
+
+        # Create odds for FanDuel covering all 3 games
+        fanduel_odds = [
+            # Event 1
+            Odds(
+                event_id="event1",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-110,
+                odds_timestamp=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+            ),
+            Odds(
+                event_id="event1",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Celtics",
+                price=+100,
+                odds_timestamp=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+            ),
+            # Event 2
+            Odds(
+                event_id="event2",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Warriors",
+                price=-120,
+                odds_timestamp=datetime(2024, 10, 20, 19, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 20, 19, 0, tzinfo=UTC),
+            ),
+            # Event 3
+            Odds(
+                event_id="event3",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Bulls",
+                price=+105,
+                odds_timestamp=datetime(2024, 10, 25, 20, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 25, 20, 0, tzinfo=UTC),
+            ),
+        ]
+
+        for odds in fanduel_odds:
+            test_session.add(odds)
+        await test_session.commit()
+
+        # Get bookmaker coverage
+        metrics = QualityMetrics(test_session)
+        result = await metrics.get_bookmaker_coverage(
+            start_date=datetime(2024, 10, 1, tzinfo=UTC),
+            end_date=datetime(2024, 10, 31, tzinfo=UTC),
+        )
+
+        # Should return one bookmaker with 100% coverage
+        assert len(result) == 1
+        assert isinstance(result[0], BookmakerCoverage)
+
+        fanduel = result[0]
+        assert fanduel.bookmaker_key == "fanduel"
+        assert fanduel.bookmaker_title == "FanDuel"
+        assert fanduel.total_games == 3
+        assert fanduel.games_with_odds == 3
+        assert fanduel.coverage_pct == 100.0
+        assert fanduel.total_snapshots == 4
+        assert fanduel.avg_snapshots_per_game == pytest.approx(4 / 3, abs=0.01)
+
+    async def test_get_bookmaker_coverage_partial_coverage(self, test_session: AsyncSession):
+        """Test bookmaker coverage with partial coverage (some games missing)."""
+        # Create test events
+        events = [
+            Event(
+                id="event1",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
+                home_team="Lakers",
+                away_team="Celtics",
+            ),
+            Event(
+                id="event2",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 10, 20, 20, 0, tzinfo=UTC),
+                home_team="Warriors",
+                away_team="Heat",
+            ),
+            Event(
+                id="event3",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 10, 25, 21, 0, tzinfo=UTC),
+                home_team="Bulls",
+                away_team="Nets",
+            ),
+        ]
+
+        for event in events:
+            test_session.add(event)
+        await test_session.commit()
+
+        # DraftKings only has odds for event1 and event2 (66.67% coverage)
+        draftkings_odds = [
+            Odds(
+                event_id="event1",
+                bookmaker_key="draftkings",
+                bookmaker_title="DraftKings",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-115,
+                odds_timestamp=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+            ),
+            Odds(
+                event_id="event2",
+                bookmaker_key="draftkings",
+                bookmaker_title="DraftKings",
+                market_key="h2h",
+                outcome_name="Warriors",
+                price=-125,
+                odds_timestamp=datetime(2024, 10, 20, 19, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 20, 19, 0, tzinfo=UTC),
+            ),
+        ]
+
+        for odds in draftkings_odds:
+            test_session.add(odds)
+        await test_session.commit()
+
+        # Get bookmaker coverage
+        metrics = QualityMetrics(test_session)
+        result = await metrics.get_bookmaker_coverage(
+            start_date=datetime(2024, 10, 1, tzinfo=UTC),
+            end_date=datetime(2024, 10, 31, tzinfo=UTC),
+        )
+
+        # Should return DraftKings with ~66.67% coverage
+        assert len(result) == 1
+        draftkings = result[0]
+        assert draftkings.bookmaker_key == "draftkings"
+        assert draftkings.total_games == 3
+        assert draftkings.games_with_odds == 2
+        assert draftkings.coverage_pct == pytest.approx(66.67, abs=0.01)
+        assert draftkings.total_snapshots == 2
+        assert draftkings.avg_snapshots_per_game == 1.0
+
+    async def test_get_bookmaker_coverage_multiple_bookmakers(self, test_session: AsyncSession):
+        """Test bookmaker coverage with multiple bookmakers at different coverage levels."""
+        # Create test events
+        events = [
+            Event(
+                id="event1",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
+                home_team="Lakers",
+                away_team="Celtics",
+            ),
+            Event(
+                id="event2",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 10, 20, 20, 0, tzinfo=UTC),
+                home_team="Warriors",
+                away_team="Heat",
+            ),
+            Event(
+                id="event3",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 10, 25, 21, 0, tzinfo=UTC),
+                home_team="Bulls",
+                away_team="Nets",
+            ),
+        ]
+
+        for event in events:
+            test_session.add(event)
+        await test_session.commit()
+
+        # FanDuel: 100% coverage (3/3 games)
+        # DraftKings: 66.67% coverage (2/3 games)
+        # Pinnacle: 33.33% coverage (1/3 games)
+        odds = [
+            # FanDuel - all games
+            Odds(
+                event_id="event1",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-110,
+                odds_timestamp=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+            ),
+            Odds(
+                event_id="event2",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Warriors",
+                price=-120,
+                odds_timestamp=datetime(2024, 10, 20, 19, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 20, 19, 0, tzinfo=UTC),
+            ),
+            Odds(
+                event_id="event3",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Bulls",
+                price=+105,
+                odds_timestamp=datetime(2024, 10, 25, 20, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 25, 20, 0, tzinfo=UTC),
+            ),
+            # DraftKings - event1 and event2
+            Odds(
+                event_id="event1",
+                bookmaker_key="draftkings",
+                bookmaker_title="DraftKings",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-115,
+                odds_timestamp=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+            ),
+            Odds(
+                event_id="event2",
+                bookmaker_key="draftkings",
+                bookmaker_title="DraftKings",
+                market_key="h2h",
+                outcome_name="Warriors",
+                price=-125,
+                odds_timestamp=datetime(2024, 10, 20, 19, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 20, 19, 0, tzinfo=UTC),
+            ),
+            # Pinnacle - event1 only
+            Odds(
+                event_id="event1",
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-108,
+                odds_timestamp=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+            ),
+        ]
+
+        for odd in odds:
+            test_session.add(odd)
+        await test_session.commit()
+
+        # Get bookmaker coverage
+        metrics = QualityMetrics(test_session)
+        result = await metrics.get_bookmaker_coverage(
+            start_date=datetime(2024, 10, 1, tzinfo=UTC),
+            end_date=datetime(2024, 10, 31, tzinfo=UTC),
+        )
+
+        # Should return 3 bookmakers sorted by coverage_pct descending
+        assert len(result) == 3
+
+        # Check sorting (FanDuel > DraftKings > Pinnacle)
+        assert result[0].bookmaker_key == "fanduel"
+        assert result[0].coverage_pct == 100.0
+
+        assert result[1].bookmaker_key == "draftkings"
+        assert result[1].coverage_pct == pytest.approx(66.67, abs=0.01)
+
+        assert result[2].bookmaker_key == "pinnacle"
+        assert result[2].coverage_pct == pytest.approx(33.33, abs=0.01)
+
+    async def test_get_bookmaker_coverage_sport_filter(self, test_session: AsyncSession):
+        """Test bookmaker coverage with sport filter."""
+        # Create events for different sports
+        events = [
+            Event(
+                id="event1",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
+                home_team="Lakers",
+                away_team="Celtics",
+            ),
+            Event(
+                id="event2",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 10, 20, 20, 0, tzinfo=UTC),
+                home_team="Warriors",
+                away_team="Heat",
+            ),
+            Event(
+                id="event3",
+                sport_key="americanfootball_nfl",
+                sport_title="NFL",
+                commence_time=datetime(2024, 10, 25, 18, 0, tzinfo=UTC),
+                home_team="Patriots",
+                away_team="Cowboys",
+            ),
+        ]
+
+        for event in events:
+            test_session.add(event)
+        await test_session.commit()
+
+        # Create odds for all events
+        odds = [
+            # NBA event1
+            Odds(
+                event_id="event1",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-110,
+                odds_timestamp=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+            ),
+            # NBA event2
+            Odds(
+                event_id="event2",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Warriors",
+                price=-120,
+                odds_timestamp=datetime(2024, 10, 20, 19, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 20, 19, 0, tzinfo=UTC),
+            ),
+            # NFL event3
+            Odds(
+                event_id="event3",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Patriots",
+                price=+105,
+                odds_timestamp=datetime(2024, 10, 25, 17, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 25, 17, 0, tzinfo=UTC),
+            ),
+        ]
+
+        for odd in odds:
+            test_session.add(odd)
+        await test_session.commit()
+
+        # Get bookmaker coverage filtered by NBA
+        metrics = QualityMetrics(test_session)
+        result = await metrics.get_bookmaker_coverage(
+            start_date=datetime(2024, 10, 1, tzinfo=UTC),
+            end_date=datetime(2024, 10, 31, tzinfo=UTC),
+            sport_key="basketball_nba",
+        )
+
+        # Should only count NBA games (2 total, 2 with odds = 100% coverage)
+        assert len(result) == 1
+        fanduel = result[0]
+        assert fanduel.total_games == 2  # Only NBA games
+        assert fanduel.games_with_odds == 2
+        assert fanduel.coverage_pct == 100.0
+        assert fanduel.total_snapshots == 2
+
+    async def test_get_bookmaker_coverage_zero_games(self, test_session: AsyncSession):
+        """Test bookmaker coverage when total games is zero."""
+        # Create events outside the date range
+        event = Event(
+            id="event1",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 9, 15, 19, 0, tzinfo=UTC),  # Before range
+            home_team="Lakers",
+            away_team="Celtics",
+        )
+        test_session.add(event)
+        await test_session.commit()
+
+        # Create odds for the event
+        odds = Odds(
+            event_id="event1",
+            bookmaker_key="fanduel",
+            bookmaker_title="FanDuel",
+            market_key="h2h",
+            outcome_name="Lakers",
+            price=-110,
+            odds_timestamp=datetime(2024, 9, 15, 18, 0, tzinfo=UTC),
+            last_update=datetime(2024, 9, 15, 18, 0, tzinfo=UTC),
+        )
+        test_session.add(odds)
+        await test_session.commit()
+
+        # Get bookmaker coverage for October (no games in range)
+        metrics = QualityMetrics(test_session)
+        result = await metrics.get_bookmaker_coverage(
+            start_date=datetime(2024, 10, 1, tzinfo=UTC),
+            end_date=datetime(2024, 10, 31, tzinfo=UTC),
+        )
+
+        # Should return empty list (no games in date range)
+        assert len(result) == 0
+
+    async def test_get_bookmaker_coverage_multiple_snapshots_per_game(self, test_session: AsyncSession):
+        """Test avg_snapshots_per_game calculation with multiple snapshots."""
+        # Create one event
+        event = Event(
+            id="event1",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
+            home_team="Lakers",
+            away_team="Celtics",
+        )
+        test_session.add(event)
+        await test_session.commit()
+
+        # Create 5 odds snapshots for the same event/bookmaker
+        odds = [
+            Odds(
+                event_id="event1",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-110,
+                odds_timestamp=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+            ),
+            Odds(
+                event_id="event1",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-112,
+                odds_timestamp=datetime(2024, 10, 15, 18, 30, tzinfo=UTC),
+                last_update=datetime(2024, 10, 15, 18, 30, tzinfo=UTC),
+            ),
+            Odds(
+                event_id="event1",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-115,
+                odds_timestamp=datetime(2024, 10, 15, 17, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 15, 17, 0, tzinfo=UTC),
+            ),
+            Odds(
+                event_id="event1",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="spreads",
+                outcome_name="Lakers",
+                price=-110,
+                point=-2.5,
+                odds_timestamp=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+            ),
+            Odds(
+                event_id="event1",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="totals",
+                outcome_name="Over",
+                price=-110,
+                point=218.5,
+                odds_timestamp=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
+            ),
+        ]
+
+        for odd in odds:
+            test_session.add(odd)
+        await test_session.commit()
+
+        # Get bookmaker coverage
+        metrics = QualityMetrics(test_session)
+        result = await metrics.get_bookmaker_coverage(
+            start_date=datetime(2024, 10, 1, tzinfo=UTC),
+            end_date=datetime(2024, 10, 31, tzinfo=UTC),
+        )
+
+        # Should have 1 game with 5 total snapshots
+        assert len(result) == 1
+        fanduel = result[0]
+        assert fanduel.total_games == 1
+        assert fanduel.games_with_odds == 1
+        assert fanduel.coverage_pct == 100.0
+        assert fanduel.total_snapshots == 5
+        assert fanduel.avg_snapshots_per_game == 5.0
+
+    async def test_get_bookmaker_coverage_date_range_boundary(self, test_session: AsyncSession):
+        """Test bookmaker coverage respects date range boundaries."""
+        events = [
+            Event(
+                id="event1",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 9, 30, 19, 0, tzinfo=UTC),  # Before range
+                home_team="Lakers",
+                away_team="Celtics",
+            ),
+            Event(
+                id="event2",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 10, 15, 20, 0, tzinfo=UTC),  # In range
+                home_team="Warriors",
+                away_team="Heat",
+            ),
+            Event(
+                id="event3",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime(2024, 11, 1, 21, 0, tzinfo=UTC),  # After range
+                home_team="Bulls",
+                away_team="Nets",
+            ),
+        ]
+
+        for event in events:
+            test_session.add(event)
+        await test_session.commit()
+
+        # Create odds for all events
+        odds = [
+            Odds(
+                event_id="event1",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-110,
+                odds_timestamp=datetime(2024, 9, 30, 18, 0, tzinfo=UTC),
+                last_update=datetime(2024, 9, 30, 18, 0, tzinfo=UTC),
+            ),
+            Odds(
+                event_id="event2",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Warriors",
+                price=-120,
+                odds_timestamp=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
+                last_update=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
+            ),
+            Odds(
+                event_id="event3",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Bulls",
+                price=+105,
+                odds_timestamp=datetime(2024, 11, 1, 20, 0, tzinfo=UTC),
+                last_update=datetime(2024, 11, 1, 20, 0, tzinfo=UTC),
+            ),
+        ]
+
+        for odd in odds:
+            test_session.add(odd)
+        await test_session.commit()
+
+        # Get bookmaker coverage for October only
+        metrics = QualityMetrics(test_session)
+        result = await metrics.get_bookmaker_coverage(
+            start_date=datetime(2024, 10, 1, tzinfo=UTC),
+            end_date=datetime(2024, 10, 31, 23, 59, 59, tzinfo=UTC),
+        )
+
+        # Should only include event2
+        assert len(result) == 1
+        fanduel = result[0]
+        assert fanduel.total_games == 1  # Only event2
+        assert fanduel.games_with_odds == 1
+        assert fanduel.coverage_pct == 100.0
+        assert fanduel.total_snapshots == 1
