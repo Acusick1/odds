@@ -92,29 +92,48 @@ async def main():
                 quota_remaining=sport_result.quota_remaining,
             )
 
-            if sport_result.quota_remaining is not None and sport_result.quota_remaining < (
-                app_settings.api.quota * 0.2
-            ):
-                percentage_remaining = round(
-                    sport_result.quota_remaining / app_settings.api.quota * 100,
-                    1,
-                )
-                logger.warning(
-                    "api_quota_low",
-                    sport=sport_result.sport_key,
-                    remaining=sport_result.quota_remaining,
-                    quota=app_settings.api.quota,
-                    percentage=percentage_remaining,
-                )
+            # Check quota thresholds and send tiered alerts
+            if sport_result.quota_remaining is not None:
+                quota_fraction = sport_result.quota_remaining / app_settings.api.quota
+                percentage_remaining = round(quota_fraction * 100, 1)
 
-                # Send warning alert
-                if app_settings.alerts.alert_enabled:
-                    from odds_cli.alerts.base import send_warning
-
-                    await send_warning(
-                        f"⚠️ API quota low: {sport_result.quota_remaining} requests remaining "
-                        f"({percentage_remaining}% of {app_settings.api.quota})"
+                # Critical threshold (default 10%)
+                if quota_fraction < app_settings.alerts.quota_critical_threshold:
+                    logger.error(
+                        "api_quota_critical",
+                        sport=sport_result.sport_key,
+                        remaining=sport_result.quota_remaining,
+                        quota=app_settings.api.quota,
+                        percentage=percentage_remaining,
                     )
+
+                    # Send critical alert
+                    if app_settings.alerts.alert_enabled:
+                        from odds_cli.alerts.base import send_critical
+
+                        await send_critical(
+                            f"🚨 API quota critical: {sport_result.quota_remaining} requests remaining "
+                            f"({percentage_remaining}% of {app_settings.api.quota})"
+                        )
+
+                # Warning threshold (default 20%)
+                elif quota_fraction < app_settings.alerts.quota_warning_threshold:
+                    logger.warning(
+                        "api_quota_low",
+                        sport=sport_result.sport_key,
+                        remaining=sport_result.quota_remaining,
+                        quota=app_settings.api.quota,
+                        percentage=percentage_remaining,
+                    )
+
+                    # Send warning alert
+                    if app_settings.alerts.alert_enabled:
+                        from odds_cli.alerts.base import send_warning
+
+                        await send_warning(
+                            f"⚠️ API quota low: {sport_result.quota_remaining} requests remaining "
+                            f"({percentage_remaining}% of {app_settings.api.quota})"
+                        )
 
         logger.info(
             "fetch_odds_completed",

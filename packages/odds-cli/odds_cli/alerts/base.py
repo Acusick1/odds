@@ -89,12 +89,12 @@ class AlertManager:
             config: Settings instance (defaults to global settings)
         """
         self.config = config or get_settings()
-        self.enabled = self.config.alert_enabled
+        self.enabled = self.config.alerts.alert_enabled
         self.channels: list[AlertBase] = []
 
         # Initialize configured channels
-        if self.config.discord_webhook_url:
-            self.channels.append(DiscordAlert(self.config.discord_webhook_url))
+        if self.config.alerts.discord_webhook_url:
+            self.channels.append(DiscordAlert(self.config.alerts.discord_webhook_url))
 
         if self.enabled:
             logger.info(
