@@ -78,8 +78,34 @@ resource "aws_lambda_permission" "allow_eventbridge_update_status" {
   source_arn    = aws_cloudwatch_event_rule.bootstrap_update_status.arn
 }
 
+# Bootstrap rule for health checks
+resource "aws_cloudwatch_event_rule" "bootstrap_check_health" {
+  name                = format("%s-check-health-bootstrap", var.project_name)
+  description         = "Bootstrap trigger for health checks"
+  schedule_expression = "rate(60 minutes)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "bootstrap_check_health_target" {
+  rule      = aws_cloudwatch_event_rule.bootstrap_check_health.name
+  target_id = "lambda"
+  arn       = aws_lambda_function.odds_scheduler.arn
+
+  input = jsonencode({
+    job = "check-health"
+  })
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_check_health" {
+  statement_id  = format("AllowExecutionFromEventBridgeCheckHealth-%s", var.project_name)
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.odds_scheduler.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.bootstrap_check_health.arn
+}
+
 # Allow dynamic rules (created by Lambda at runtime) to invoke the function
-# This covers rules like odds-fetch-odds, odds-fetch-scores, odds-update-status
+# This covers rules like odds-fetch-odds, odds-fetch-scores, odds-update-status, odds-check-health
 # that are created and updated by the Lambda's self-scheduling logic
 resource "aws_lambda_permission" "allow_dynamic_rules" {
   statement_id  = format("AllowExecutionFromDynamicRules-%s", var.project_name)
@@ -96,5 +122,6 @@ output "bootstrap_rules" {
     fetch_odds    = aws_cloudwatch_event_rule.bootstrap_fetch_odds.name
     fetch_scores  = aws_cloudwatch_event_rule.bootstrap_fetch_scores.name
     update_status = aws_cloudwatch_event_rule.bootstrap_update_status.name
+    check_health  = aws_cloudwatch_event_rule.bootstrap_check_health.name
   }
 }

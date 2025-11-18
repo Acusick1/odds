@@ -20,12 +20,13 @@ def get_job_registry() -> dict[str, Callable[[], Awaitable[None]]]:
 
     if _JOB_REGISTRY is None:
         # Import job modules only when needed
-        from odds_lambda.jobs import fetch_odds, fetch_scores, update_status
+        from odds_lambda.jobs import check_health, fetch_odds, fetch_scores, update_status
 
         _JOB_REGISTRY = {
             "fetch-odds": fetch_odds.main,
             "fetch-scores": fetch_scores.main,
             "update-status": update_status.main,
+            "check-health": check_health.main,
         }
 
     return _JOB_REGISTRY

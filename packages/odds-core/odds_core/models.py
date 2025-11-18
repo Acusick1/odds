@@ -191,3 +191,30 @@ class FetchLog(SQLModel, table=True):
         default=None, description="Remaining API quota after request"
     )
     response_time_ms: int | None = Field(default=None, description="API response time")
+
+
+class AlertHistory(SQLModel, table=True):
+    """Alert deduplication tracking."""
+
+    __tablename__ = "alert_history"
+
+    id: int | None = Field(default=None, primary_key=True)
+
+    alert_type: str = Field(
+        index=True, description="Alert type: quota_low, stale_data, consecutive_failures, etc."
+    )
+    severity: str = Field(description="Severity: info, warning, error, critical")
+    message: str = Field(description="Alert message content")
+
+    sent_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), index=True),
+        default_factory=utc_now,
+        description="Alert sent timestamp",
+    )
+
+    # Context data for debugging
+    context: dict | None = Field(
+        sa_column=Column(JSON), default=None, description="Additional context data"
+    )
+
+    __table_args__ = (Index("ix_alert_type_sent_at", "alert_type", "sent_at"),)
