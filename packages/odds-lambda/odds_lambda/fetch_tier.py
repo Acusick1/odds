@@ -35,3 +35,23 @@ class FetchTier(Enum):
             FetchTier.OPENING: 48.0,
         }
         return intervals[self]
+
+    @classmethod
+    def get_priority_order(cls) -> list["FetchTier"]:
+        """
+        Get tiers in priority order from highest to lowest priority.
+
+        Priority is based on proximity to game start (closest = highest priority).
+        Used for gap detection and backfill planning.
+
+        Returns:
+            List of FetchTier in descending priority order:
+            [CLOSING, PREGAME, SHARP, EARLY, OPENING]
+        """
+        return [
+            cls.CLOSING,  # Highest priority (closest to game)
+            cls.PREGAME,
+            cls.SHARP,
+            cls.EARLY,
+            cls.OPENING,  # Lowest priority (earliest)
+        ]

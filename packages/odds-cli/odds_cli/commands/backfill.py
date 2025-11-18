@@ -554,3 +554,213 @@ async def _backfill_scores_async(start_date_str: str, end_date_str: str, dry_run
     console.print("\n")
     console.print(summary_table)
     console.print()
+
+
+@app.command("gaps")
+def detect_and_plan_gaps(
+    start_date: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
+    max_quota: int | None = typer.Option(
+        None,
+        "--max-quota",
+        help="Maximum quota to use (default: unlimited)",
+    ),
+    output_file: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Save plan to file (e.g., gap_plan.json)",
+    ),
+):
+    """
+    Detect gaps in tier coverage and generate backfill plan.
+
+    This command identifies missing fetch tier data (OPENING, EARLY, SHARP,
+    PREGAME, CLOSING) and generates an executable backfill plan to fill those gaps.
+
+    Games are prioritized by highest-priority missing tier:
+    - CLOSING (highest priority) - closest to game start
+    - PREGAME
+    - SHARP
+    - EARLY
+    - OPENING (lowest priority) - earliest snapshots
+
+    When quota is limited, only complete games are included (all missing tiers
+    filled per game). Partial games are never included.
+
+    Examples:
+        # Detect gaps and show summary
+        odds backfill gaps --start 2024-10-01 --end 2024-10-31
+
+        # Generate plan with quota limit
+        odds backfill gaps --start 2024-10-01 --end 2024-10-31 --max-quota 3000
+
+        # Generate and save plan
+        odds backfill gaps --start 2024-10-01 --end 2024-10-31 --output gap_plan.json
+
+    After generating a plan, execute it with:
+        odds backfill execute --plan gap_plan.json
+    """
+    console.print("\n[bold cyan]Gap Detection and Backfill Planning[/bold cyan]\n")
+    asyncio.run(_detect_and_plan_gaps_async(start_date, end_date, max_quota, output_file))
+
+
+async def _detect_and_plan_gaps_async(
+    start_date_str: str,
+    end_date_str: str,
+    max_quota: int | None,
+    output_file: str | None,
+):
+    """Async implementation of gap detection and planning."""
+    try:
+        start_date = datetime.fromisoformat(start_date_str).date()
+        end_date = datetime.fromisoformat(end_date_str).date()
+    except ValueError as e:
+        console.print(f"[red]Error parsing dates: {e}[/red]")
+        raise typer.Exit(1) from e
+
+    # Display settings
+    console.print(f"[bold]Date range:[/bold] {start_date_str} to {end_date_str}")
+    if max_quota:
+        console.print(f"[bold]Max quota:[/bold] {max_quota:,} units")
+    else:
+        console.print("[bold]Max quota:[/bold] unlimited")
+    console.print()
+
+    # Import here to avoid circular dependencies
+    from odds_analytics.gap_backfill_planner import GapBackfillPlanner
+    from odds_analytics.utils import create_tier_coverage_table
+
+    # Analyze gaps
+    console.print("[cyan]Analyzing tier coverage gaps...[/cyan]")
+
+    async with async_session_maker() as session:
+        planner = GapBackfillPlanner(session)
+
+        # Run gap analysis
+        try:
+            analysis = await planner.analyze_gaps(start_date, end_date)
+        except Exception as e:
+            console.print(f"\n[red]Gap analysis failed: {e}[/red]")
+            raise typer.Exit(1) from e
+
+        # Display analysis summary
+        console.print("\n[bold]Gap Analysis Summary:[/bold]\n")
+
+        summary_table = Table(show_header=False, box=None)
+        summary_table.add_column("Metric", style="cyan")
+        summary_table.add_column("Value", style="white")
+
+        summary_table.add_row("Total Games", str(analysis.total_games))
+        summary_table.add_row(
+            "Games with Gaps",
+            f"[red]{analysis.games_with_gaps}[/red]"
+            if analysis.games_with_gaps > 0
+            else "[green]0[/green]",
+        )
+        summary_table.add_row(
+            "Total Missing Snapshots",
+            f"[red]{analysis.total_missing_snapshots}[/red]"
+            if analysis.total_missing_snapshots > 0
+            else "[green]0[/green]",
+        )
+
+        console.print(summary_table)
+        console.print()
+
+        # If no gaps, exit early
+        if analysis.games_with_gaps == 0:
+            console.print("[green]No gaps found! All games have complete tier coverage.[/green]\n")
+            return
+
+        # Display games by priority tier
+        console.print("[bold]Games Missing Each Tier (by priority):[/bold]\n")
+
+        priority_table = Table(show_header=True)
+        priority_table.add_column("Priority", style="cyan")
+        priority_table.add_column("Tier", style="cyan")
+        priority_table.add_column("Games Missing", justify="right")
+
+        from odds_lambda.fetch_tier import FetchTier
+
+        for idx, tier in enumerate(FetchTier.get_priority_order(), start=1):
+            games_missing_tier = len(analysis.games_by_priority.get(tier, []))
+
+            if games_missing_tier > 0:
+                games_str = f"[red]{games_missing_tier}[/red]"
+            else:
+                games_str = f"[green]{games_missing_tier}[/green]"
+
+            priority_table.add_row(
+                f"#{idx}",
+                tier.value.upper(),
+                games_str,
+            )
+
+        console.print(priority_table)
+        console.print()
+
+        # Generate backfill plan
+        console.print("[cyan]Generating backfill plan...[/cyan]")
+
+        try:
+            plan = await planner.generate_plan(start_date, end_date, max_quota)
+        except ValueError as e:
+            console.print(f"\n[red]Error: {e}[/red]")
+            console.print(
+                "[yellow]Tip: Use --max-quota with a higher value or remove the limit.[/yellow]\n"
+            )
+            raise typer.Exit(1) from e
+        except Exception as e:
+            console.print(f"\n[red]Plan generation failed: {e}[/red]")
+            raise typer.Exit(1) from e
+
+        # Display plan summary
+        console.print("\n[bold]Backfill Plan Summary:[/bold]\n")
+
+        plan_table = Table(show_header=False, box=None)
+        plan_table.add_column("Metric", style="cyan")
+        plan_table.add_column("Value", style="white")
+
+        plan_table.add_row("Games in Plan", str(plan["total_games"]))
+        plan_table.add_row("Total Snapshots", str(plan["total_snapshots"]))
+        plan_table.add_row("Estimated Quota", f"{plan['estimated_quota_usage']:,} units")
+
+        # Calculate coverage
+        if analysis.games_with_gaps > 0:
+            coverage_pct = (plan["total_games"] / analysis.games_with_gaps) * 100
+            coverage_str = (
+                f"[green]{coverage_pct:.1f}%[/green]"
+                if coverage_pct == 100
+                else f"[yellow]{coverage_pct:.1f}%[/yellow]"
+            )
+            plan_table.add_row("Gap Coverage", coverage_str)
+
+        console.print(plan_table)
+        console.print()
+
+        # Show incomplete coverage warning if applicable
+        if max_quota and plan["total_games"] < analysis.games_with_gaps:
+            skipped_games = analysis.games_with_gaps - plan["total_games"]
+            console.print(
+                f"[yellow]Note: {skipped_games} games excluded due to quota limit.[/yellow]"
+            )
+            console.print(
+                "[yellow]Increase --max-quota to include more games or remove limit for full coverage.[/yellow]\n"
+            )
+
+        # Save plan to file if requested
+        if output_file:
+            output_path = Path(output_file)
+            with open(output_path, "w") as f:
+                json.dump(plan, f, indent=2)
+
+            console.print(f"[green]Plan saved to {output_path}[/green]\n")
+
+            # Show execution command
+            console.print("[bold]Execute plan with:[/bold]")
+            console.print(f"  odds backfill execute --plan {output_file}\n")
+        else:
+            console.print(
+                "[yellow]No output file specified. Use --output to save plan for execution.[/yellow]\n"
+            )
