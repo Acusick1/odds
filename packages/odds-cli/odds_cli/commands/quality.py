@@ -122,17 +122,20 @@ async def _coverage(start_date_str: str, end_date_str: str, sport_key: str):
 
         # Fetch all required data in parallel for performance
         try:
-            game_counts = await metrics.get_game_counts(start_date, end_date, sport_key)
-            games_with_odds = await metrics.get_games_with_odds(start_date, end_date, sport_key)
-            games_with_scores = await metrics.get_games_with_scores(
-                start_date, end_date, sport_key
-            )
-            games_missing_scores = await metrics.get_games_missing_scores(
-                start_date, end_date, sport_key
-            )
-            tier_coverage = await metrics.get_tier_coverage(start_date, end_date, sport_key)
-            bookmaker_coverage = await metrics.get_bookmaker_coverage(
-                start_date, end_date, sport_key
+            (
+                game_counts,
+                games_with_odds,
+                games_with_scores,
+                games_missing_scores,
+                tier_coverage,
+                bookmaker_coverage,
+            ) = await asyncio.gather(
+                metrics.get_game_counts(start_date, end_date, sport_key),
+                metrics.get_games_with_odds(start_date, end_date, sport_key),
+                metrics.get_games_with_scores(start_date, end_date, sport_key),
+                metrics.get_games_missing_scores(start_date, end_date, sport_key),
+                metrics.get_tier_coverage(start_date, end_date, sport_key),
+                metrics.get_bookmaker_coverage(start_date, end_date, sport_key),
             )
         except Exception as e:
             console.print(f"[red]Error fetching data: {e}[/red]")
