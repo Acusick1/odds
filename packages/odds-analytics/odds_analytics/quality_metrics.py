@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from odds_core.models import Event, OddsSnapshot
+from odds_core.models import Event, Odds, OddsSnapshot
 from odds_lambda.fetch_tier import FetchTier
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
@@ -66,6 +66,18 @@ class TierCoverage(BaseModel):
     total_snapshots_in_tier: int = Field(description="Total snapshots captured in this tier")
     coverage_pct: float = Field(description="Percentage of eligible games with tier coverage")
     avg_snapshots_per_game: float = Field(description="Average snapshots per game in tier")
+
+
+class BookmakerCoverage(BaseModel):
+    """Result model for bookmaker coverage analysis."""
+
+    bookmaker_key: str = Field(description="Bookmaker identifier (e.g., 'fanduel', 'draftkings')")
+    bookmaker_title: str = Field(description="Bookmaker display name")
+    total_games: int = Field(description="Total games in the analyzed date range")
+    games_with_odds: int = Field(description="Games where this bookmaker provided odds")
+    coverage_pct: float = Field(description="Percentage of games with odds (games_with_odds / total_games * 100)")
+    total_snapshots: int = Field(description="Total odds records from this bookmaker")
+    avg_snapshots_per_game: float = Field(description="Average snapshots per game (total_snapshots / games_with_odds)")
 
 
 class QualityMetrics:
@@ -463,3 +475,106 @@ class QualityMetrics:
             FetchTier.OPENING: "3+ days before",
         }
         return ranges[tier]
+
+    async def get_bookmaker_coverage(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        sport_key: str | None = None,
+    ) -> list[BookmakerCoverage]:
+        """
+        Get bookmaker coverage analysis showing availability across games.
+
+        This method identifies systematic gaps in data collection by tracking
+        which bookmakers consistently provide odds data and which have missing
+        coverage. Useful for identifying reliability issues with specific bookmakers.
+
+        Args:
+            start_date: Start of date range (inclusive)
+            end_date: End of date range (inclusive)
+            sport_key: Optional sport filter (e.g., "basketball_nba")
+
+        Returns:
+            List of BookmakerCoverage results, sorted by coverage_pct descending
+
+        Example:
+            metrics = QualityMetrics(session)
+            coverage = await metrics.get_bookmaker_coverage(
+                start_date=datetime(2024, 10, 1, tzinfo=UTC),
+                end_date=datetime(2024, 10, 31, tzinfo=UTC),
+                sport_key="basketball_nba"
+            )
+            for book in coverage:
+                print(f"{book.bookmaker_title}: {book.coverage_pct}% coverage")
+        """
+        # First, get total games in date range
+        total_games_result = await self.get_game_counts(
+            start_date=start_date,
+            end_date=end_date,
+            sport_key=sport_key,
+        )
+        total_games = total_games_result.total_games
+
+        # Query to get bookmaker statistics
+        # We need to:
+        # 1. Count distinct events per bookmaker
+        # 2. Count total odds records per bookmaker
+        # 3. Get bookmaker_title for display
+        query = (
+            select(
+                Odds.bookmaker_key,
+                Odds.bookmaker_title,
+                func.count(func.distinct(Odds.event_id)).label("games_with_odds"),
+                func.count(Odds.id).label("total_snapshots"),
+            )
+            .join(Event, Event.id == Odds.event_id)
+            .where(
+                and_(
+                    Event.commence_time >= start_date,
+                    Event.commence_time <= end_date,
+                )
+            )
+        )
+
+        if sport_key:
+            query = query.where(Event.sport_key == sport_key)
+
+        query = query.group_by(Odds.bookmaker_key, Odds.bookmaker_title)
+
+        result = await self.session.execute(query)
+        rows = result.all()
+
+        # Build coverage results
+        coverage_results = []
+        for row in rows:
+            bookmaker_key = row[0]
+            bookmaker_title = row[1]
+            games_with_odds = row[2]
+            total_snapshots = row[3]
+
+            # Calculate coverage percentage
+            coverage_pct = (
+                (games_with_odds / total_games * 100) if total_games > 0 else 0.0
+            )
+
+            # Calculate average snapshots per game
+            avg_snapshots_per_game = (
+                (total_snapshots / games_with_odds) if games_with_odds > 0 else 0.0
+            )
+
+            coverage_results.append(
+                BookmakerCoverage(
+                    bookmaker_key=bookmaker_key,
+                    bookmaker_title=bookmaker_title,
+                    total_games=total_games,
+                    games_with_odds=games_with_odds,
+                    coverage_pct=coverage_pct,
+                    total_snapshots=total_snapshots,
+                    avg_snapshots_per_game=avg_snapshots_per_game,
+                )
+            )
+
+        # Sort by coverage percentage descending
+        coverage_results.sort(key=lambda x: x.coverage_pct, reverse=True)
+
+        return coverage_results
