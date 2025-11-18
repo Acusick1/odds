@@ -1,8 +1,8 @@
-# GitHub Issue Schema
+# GitHub issue schema
 
 This document defines the markdown format for issues created by Claude and posted to GitHub.
 
-## Philosophy: Mostly Prescriptive
+## Philosophy: mostly prescriptive
 
 Issues should be **mostly prescriptive** with strategic outcome-based flexibility:
 
@@ -16,36 +16,36 @@ This approach works because:
 - Established patterns should be followed for consistency
 - Review agents catch implementation issues
 
-## Adaptive Schema
+## Adaptive schema
 
 The schema adapts based on issue complexity. Not all fields are required for every issue.
 
-### Core Fields (Always Required)
+### Core fields (always required)
 
 1. **Title** - Clear, action-oriented issue title
 2. **Goal** - 1-3 sentence problem statement explaining WHY this matters
 3. **Scope** - Bulleted list of what needs to change/be implemented
 4. **Success Criteria** - Checkbox list of concrete, testable acceptance criteria
 
-### Optional Fields (Include When Relevant)
+### Optional fields (include when relevant)
 
 5. **Location** - Primary files/directories affected (include when >1 file or non-obvious)
-6. **Implementation Approach** - Prescribed architecture/pattern to follow (for prescriptive issues)
+6. **Implementation approach** - Prescribed architecture/pattern to follow (for prescriptive issues)
 7. **Constraints** - Non-negotiable requirements (async patterns, no new dependencies, etc.)
-8. **Open Questions** - Areas where agent should explore/decide (for outcome-based flexibility)
+8. **Open questions** - Areas where agent should explore/decide (for outcome-based flexibility)
 9. **Complexity** - Easy/Medium/Hard (when prioritizing or triaging)
 10. **Prerequisites** - Required knowledge/dependencies (for external agents unfamiliar with codebase)
-11. **Related Files** - Additional context files with explanations (for external agents)
+11. **Related files** - Additional context files with explanations (for external agents)
 12. **Notes** - Gotchas, warnings, documentation links, architectural decisions
 
 ---
 
 ## Examples
 
-### Simple Issue
+### Simple issue
 
 ```markdown
-# Add Type Hints to Test Fixtures
+# Add type hints to test fixtures
 
 **Goal**: Improve test code quality by adding return type hints to all pytest fixtures.
 
@@ -54,7 +54,7 @@ The schema adapts based on issue complexity. Not all fields are required for eve
 - Use modern syntax (`str | None`, not `Optional[str]`)
 - Follow existing project style from `core/` modules
 
-**Success Criteria**:
+**Success criteria**:
 - [ ] All fixtures have proper return type annotations
 - [ ] pytest runs successfully with no new errors
 - [ ] Type hints use modern syntax
@@ -62,10 +62,10 @@ The schema adapts based on issue complexity. Not all fields are required for eve
 
 ---
 
-### Complex Issue
+### Complex issue
 
 ```markdown
-# Implement Line Movement Anomaly Detection Strategy
+# Implement line movement anomaly detection strategy
 
 **Goal**: Create a betting strategy that detects and capitalizes on unusual line movement patterns that indicate sharp money activity (reverse line movement and steam moves).
 
@@ -80,7 +80,7 @@ Line movement anomalies are key indicators of professional betting activity:
 - **Reverse line movement**: Line moves toward underdog despite public betting on favorite (sharp money indicator)
 - **Steam moves**: Rapid coordinated line movement across multiple books (synchronized sharp action)
 
-**Implementation Approach** (prescriptive):
+**Implementation approach** (prescriptive):
 - Create `LineMovementStrategy` class inheriting from `BettingStrategy`
 - Implement `evaluate_opportunity()` method per base class contract
 - Support all markets (h2h, spreads, totals)
@@ -89,7 +89,7 @@ Line movement anomalies are key indicators of professional betting activity:
 - Add to `AVAILABLE_STRATEGIES` registry
 - Register in CLI backtest command
 
-**Open Questions** (outcome-based flexibility):
+**Open questions** (outcome-based flexibility):
 - How to distinguish "sharp movement" from normal market making noise?
 - What thresholds effectively detect steam without false positives?
 - Should we track velocity (points/hour) or just absolute movement magnitude?
@@ -111,7 +111,7 @@ Line movement anomalies are key indicators of professional betting activity:
 - Write comprehensive unit tests with fixture data covering various scenarios
 - Integration test with backtesting engine
 
-**Success Criteria**:
+**Success criteria**:
 - [ ] Strategy correctly implements `evaluate_opportunity()` method
 - [ ] Detects reverse line movement scenarios
 - [ ] Detects steam move scenarios
@@ -125,7 +125,7 @@ Line movement anomalies are key indicators of professional betting activity:
 - Familiarity with backtesting framework architecture
 - Knowledge of sharp vs public betting patterns
 
-**Related Files**:
+**Related files**:
 - `packages/odds-analytics/odds_analytics/strategies.py` - See `BasicEVStrategy` and `ArbitrageStrategy` for pattern examples
 - `packages/odds-analytics/odds_analytics/backtesting/models.py` - `BetOpportunity` model definition
 - `packages/odds-lambda/odds_lambda/storage/readers.py` - `get_line_movement()` method for fetching historical odds
@@ -140,7 +140,7 @@ Line movement anomalies are key indicators of professional betting activity:
 
 ---
 
-## Quick Decision Guide
+## Quick decision guide
 
 **Before creating an issue**: Check if the issue is necessary! The codebase may already contain the functionality or something similar to it. After reviewing the codebase, if you are not 100% clear on what the issue should contain, ask succinct clarifying questions. Continue to iterate with the user until you have a rounded overview of the requirements, constraints, and expected outcomes.
 
