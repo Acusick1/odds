@@ -67,6 +67,15 @@ async def main():
 
     except Exception as e:
         logger.error("fetch_scores_failed", error=str(e), exc_info=True)
+
+        # Send critical alert
+        if app_settings.alerts.alert_enabled:
+            from odds_cli.alerts.base import send_critical
+
+            await send_critical(
+                f"🚨 Fetch scores job failed: {type(e).__name__}: {str(e)}"
+            )
+
         raise
 
     # Self-schedule next execution
@@ -83,6 +92,14 @@ async def main():
             )
         except Exception as e:
             logger.error("fetch_scores_scheduling_failed", error=str(e), exc_info=True)
+
+            # Send error alert
+            if app_settings.alerts.alert_enabled:
+                from odds_cli.alerts.base import send_error
+
+                await send_error(
+                    f"Fetch scores scheduling failed: {type(e).__name__}: {str(e)}"
+                )
 
 
 async def _fetch_and_update_scores(app_settings):

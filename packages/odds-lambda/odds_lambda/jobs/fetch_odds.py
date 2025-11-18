@@ -107,6 +107,15 @@ async def main():
                     percentage=percentage_remaining,
                 )
 
+                # Send warning alert
+                if app_settings.alerts.alert_enabled:
+                    from odds_cli.alerts.base import send_warning
+
+                    await send_warning(
+                        f"⚠️ API quota low: {sport_result.quota_remaining} requests remaining "
+                        f"({percentage_remaining}% of {app_settings.api.quota})"
+                    )
+
         logger.info(
             "fetch_odds_completed",
             total_processed=results.total_processed,
@@ -116,6 +125,15 @@ async def main():
 
     except Exception as e:
         logger.error("fetch_odds_failed", error=str(e), exc_info=True)
+
+        # Send critical alert
+        if app_settings.alerts.alert_enabled:
+            from odds_cli.alerts.base import send_critical
+
+            await send_critical(
+                f"🚨 Fetch odds job failed: {type(e).__name__}: {str(e)}"
+            )
+
         # Don't schedule next run if we failed - let manual intervention happen
         raise
 
@@ -134,6 +152,15 @@ async def main():
             )
         except Exception as e:
             logger.error("fetch_odds_scheduling_failed", error=str(e), exc_info=True)
+
+            # Send error alert
+            if app_settings.alerts.alert_enabled:
+                from odds_cli.alerts.base import send_error
+
+                await send_error(
+                    f"Fetch odds scheduling failed: {type(e).__name__}: {str(e)}"
+                )
+
             # Don't fail the job if scheduling fails - the fetch itself succeeded
 
 
