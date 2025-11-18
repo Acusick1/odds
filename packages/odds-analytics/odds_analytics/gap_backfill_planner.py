@@ -12,12 +12,13 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 import structlog
-from odds_analytics.game_selector import GameSelector
 from odds_core.time import utc_isoformat
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.readers import OddsReader
-from odds_lambda.storage.tier_validator import DailyValidationReport, TierCoverageValidator
+from odds_lambda.storage.tier_validator import TierCoverageValidator
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from odds_analytics.game_selector import GameSelector
 
 logger = structlog.get_logger()
 
@@ -50,9 +51,9 @@ class GapAnalysis:
 class GapBackfillPlanner:
     """Detects gaps in tier coverage and generates backfill plans."""
 
-    # Quota cost per snapshot (historical multiplier × regions × markets)
+    # Quota cost per snapshot (historical multiplier ï¿½ regions ï¿½ markets)
     # Historical API costs 10x normal rate
-    QUOTA_PER_SNAPSHOT = 30  # 10 (historical) × 1 (region) × 3 (markets)
+    QUOTA_PER_SNAPSHOT = 30  # 10 (historical) ï¿½ 1 (region) ï¿½ 3 (markets)
 
     def __init__(self, session: AsyncSession):
         """
@@ -427,8 +428,12 @@ class GapBackfillPlanner:
         total_snapshots = 0
 
         selector = GameSelector(
-            start_date=start_date if isinstance(start_date, datetime) else datetime.combine(start_date, datetime.min.time()),
-            end_date=end_date if isinstance(end_date, datetime) else datetime.combine(end_date, datetime.min.time()),
+            start_date=start_date
+            if isinstance(start_date, datetime)
+            else datetime.combine(start_date, datetime.min.time()),
+            end_date=end_date
+            if isinstance(end_date, datetime)
+            else datetime.combine(end_date, datetime.min.time()),
         )
 
         for game in selected_games:
