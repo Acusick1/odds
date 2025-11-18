@@ -120,22 +120,17 @@ async def _coverage(start_date_str: str, end_date_str: str, sport_key: str):
     async with async_session_maker() as session:
         metrics = QualityMetrics(session)
 
-        # Fetch all required data in parallel for performance
+        # Fetch all required data (sequential due to AsyncSession limitations)
         try:
-            (
-                game_counts,
-                games_with_odds,
-                games_with_scores,
-                games_missing_scores,
-                tier_coverage,
-                bookmaker_coverage,
-            ) = await asyncio.gather(
-                metrics.get_game_counts(start_date, end_date, sport_key),
-                metrics.get_games_with_odds(start_date, end_date, sport_key),
-                metrics.get_games_with_scores(start_date, end_date, sport_key),
-                metrics.get_games_missing_scores(start_date, end_date, sport_key),
-                metrics.get_tier_coverage(start_date, end_date, sport_key),
-                metrics.get_bookmaker_coverage(start_date, end_date, sport_key),
+            game_counts = await metrics.get_game_counts(start_date, end_date, sport_key)
+            games_with_odds = await metrics.get_games_with_odds(start_date, end_date, sport_key)
+            games_with_scores = await metrics.get_games_with_scores(start_date, end_date, sport_key)
+            games_missing_scores = await metrics.get_games_missing_scores(
+                start_date, end_date, sport_key
+            )
+            tier_coverage = await metrics.get_tier_coverage(start_date, end_date, sport_key)
+            bookmaker_coverage = await metrics.get_bookmaker_coverage(
+                start_date, end_date, sport_key
             )
         except Exception as e:
             console.print(f"[red]Error fetching data: {e}[/red]")
@@ -154,7 +149,9 @@ async def _coverage(start_date_str: str, end_date_str: str, sport_key: str):
     _display_bookmaker_coverage(bookmaker_coverage)
     console.print()  # Blank line for spacing
 
-    _display_data_quality_issues(games_missing_scores, len(games_with_odds), game_counts.total_games)
+    _display_data_quality_issues(
+        games_missing_scores, len(games_with_odds), game_counts.total_games
+    )
 
 
 def _display_summary(
@@ -332,16 +329,12 @@ def _display_data_quality_issues(
     # Check for missing final scores
     missing_scores_count = len(games_missing_scores)
     if missing_scores_count > 0:
-        issues.append(
-            f"⚠ [yellow]{missing_scores_count} game(s) missing final scores[/yellow]"
-        )
+        issues.append(f"⚠ [yellow]{missing_scores_count} game(s) missing final scores[/yellow]")
 
     # Check for games without any odds snapshots
     games_without_odds = total_games - games_with_odds_count
     if games_without_odds > 0:
-        issues.append(
-            f"⚠ [yellow]{games_without_odds} game(s) have no odds snapshots[/yellow]"
-        )
+        issues.append(f"⚠ [yellow]{games_without_odds} game(s) have no odds snapshots[/yellow]")
 
     # Display issues panel if any issues found
     if issues:
