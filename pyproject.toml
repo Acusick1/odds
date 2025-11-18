@@ -86,5 +86,6 @@ python_functions = "test_*"
 env = [
     "PGLITE_USE_TCP=1",
     "PGLITE_TCP_PORT=5433",
+    "PGLITE_PERSIST=0",
     "ODDS_API_KEY=",
 ]
