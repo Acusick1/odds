@@ -203,36 +203,14 @@ def _display_summary(report, required_tiers, check_scores=True, check_discovery=
 
 def _display_tier_breakdown(report):
     """Display tier coverage breakdown."""
+    from odds_analytics.utils import create_tier_coverage_table
+
     console.print("[bold]Tier Coverage Breakdown:[/bold]")
 
-    # Calculate coverage for each tier
-    tier_table = Table(show_header=True)
-    tier_table.add_column("Tier", style="cyan")
-    tier_table.add_column("Games with Tier", justify="right")
-    tier_table.add_column("Coverage %", justify="right")
-
-    all_tiers = [
-        FetchTier.OPENING,
-        FetchTier.EARLY,
-        FetchTier.SHARP,
-        FetchTier.PREGAME,
-        FetchTier.CLOSING,
-    ]
-
-    for tier in all_tiers:
-        games_missing = report.missing_tier_breakdown.get(tier, 0)
-        games_with = report.total_games - games_missing
-        coverage_pct = (games_with / report.total_games * 100) if report.total_games > 0 else 0
-
-        # Color coding
-        if coverage_pct == 100:
-            coverage_str = f"[green]{coverage_pct:.1f}%[/green]"
-        elif coverage_pct >= 80:
-            coverage_str = f"[yellow]{coverage_pct:.1f}%[/yellow]"
-        else:
-            coverage_str = f"[red]{coverage_pct:.1f}%[/red]"
-
-        tier_table.add_row(tier.value.upper(), f"{games_with}/{report.total_games}", coverage_str)
+    tier_table = create_tier_coverage_table(
+        total_games=report.total_games,
+        missing_tier_breakdown=report.missing_tier_breakdown,
+    )
 
     console.print(tier_table)
     console.print()

@@ -350,3 +350,66 @@ def detect_arbitrage(odds_list: list[tuple[str, int]]) -> tuple[bool, float, dic
         stake_distribution[bookmaker] = round(stake_pct, 2)
 
     return (has_arbitrage, round(profit_percentage, 2), stake_distribution)
+
+
+def create_tier_coverage_table(
+    total_games: int,
+    missing_tier_breakdown: dict,  # dict[FetchTier, int] but avoiding circular import
+) -> "Table":
+    """
+    Create a Rich table showing tier coverage breakdown.
+
+    Extracted from validate.py to enable reuse across commands (validate, gaps, etc.).
+
+    Args:
+        total_games: Total number of games
+        missing_tier_breakdown: Dict mapping FetchTier to count of games missing it
+
+    Returns:
+        Rich Table object ready to display
+
+    Example:
+        from rich.console import Console
+        from odds_analytics.utils import create_tier_coverage_table
+        from odds_lambda.fetch_tier import FetchTier
+
+        console = Console()
+        table = create_tier_coverage_table(
+            total_games=50,
+            missing_tier_breakdown={FetchTier.CLOSING: 5, FetchTier.OPENING: 2}
+        )
+        console.print(table)
+    """
+    from odds_lambda.fetch_tier import FetchTier
+    from rich.table import Table
+
+    tier_table = Table(show_header=True)
+    tier_table.add_column("Tier", style="cyan")
+    tier_table.add_column("Games with Tier", justify="right")
+    tier_table.add_column("Coverage %", justify="right")
+
+    # Use tier priority order (OPENING to CLOSING)
+    all_tiers = [
+        FetchTier.OPENING,
+        FetchTier.EARLY,
+        FetchTier.SHARP,
+        FetchTier.PREGAME,
+        FetchTier.CLOSING,
+    ]
+
+    for tier in all_tiers:
+        games_missing = missing_tier_breakdown.get(tier, 0)
+        games_with = total_games - games_missing
+        coverage_pct = (games_with / total_games * 100) if total_games > 0 else 0
+
+        # Color coding
+        if coverage_pct == 100:
+            coverage_str = f"[green]{coverage_pct:.1f}%[/green]"
+        elif coverage_pct >= 80:
+            coverage_str = f"[yellow]{coverage_pct:.1f}%[/yellow]"
+        else:
+            coverage_str = f"[red]{coverage_pct:.1f}%[/red]"
+
+        tier_table.add_row(tier.value.upper(), f"{games_with}/{total_games}", coverage_str)
+
+    return tier_table
