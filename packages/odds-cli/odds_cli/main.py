@@ -9,6 +9,7 @@ from odds_cli.commands import (
     copy_from_prod,
     discover,
     fetch,
+    quality,
     scheduler,
     status,
     validate,
@@ -27,6 +28,7 @@ app.add_typer(backfill.app, name="backfill", help="Historical data backfill")
 app.add_typer(backtest.app, name="backtest", help="Backtest betting strategies")
 app.add_typer(scheduler.app, name="scheduler", help="Scheduler management (local testing)")
 app.add_typer(validate.app, name="validate", help="Validate data completeness")
+app.add_typer(quality.app, name="quality", help="Data quality coverage analysis")
 app.add_typer(copy_from_prod.app, name="copy", help="Copy data from production database")
 app.add_typer(discover.app, name="discover", help="Discover historical games")
 

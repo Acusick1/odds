@@ -51,3 +51,34 @@ class TestReadOnlyCLI:
         assert any(
             keyword in output_lower for keyword in ["events", "odds", "snapshots", "total"]
         ), f"Output missing expected statistics keywords:\n{result.stdout}"
+
+    def test_quality_coverage(self, runner):
+        """
+        Test that 'odds quality coverage' command works.
+
+        This validates:
+        - Quality metrics queries work through full stack
+        - Tier and bookmaker coverage analysis functions correctly
+        - Rich formatting displays properly
+        """
+        result = runner.invoke(
+            app,
+            ["quality", "coverage", "--start", "2024-10-01", "--end", "2024-10-31"],
+            env=os.environ,
+        )
+
+        assert result.exit_code == 0, (
+            f"'odds quality coverage' command failed with exit code {result.exit_code}\n"
+            f"Output: {result.stdout}\n"
+            f"Error: {result.stderr if hasattr(result, 'stderr') else 'N/A'}\n"
+            f"\nThis command queries quality metrics and validates:\n"
+            f"- Quality metrics database queries work\n"
+            f"- Tier coverage analysis functions correctly\n"
+            f"- Bookmaker coverage analysis functions correctly"
+        )
+
+        # Verify output contains expected quality coverage keywords
+        output_lower = result.stdout.lower()
+        assert any(
+            keyword in output_lower for keyword in ["coverage", "tier", "bookmaker"]
+        ), f"Output missing expected quality coverage keywords:\n{result.stdout}"
