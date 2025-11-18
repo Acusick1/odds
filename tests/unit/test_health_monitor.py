@@ -34,6 +34,9 @@ def mock_settings():
 async def mock_session():
     """Create mock database session."""
     session = AsyncMock()
+    # In SQLAlchemy async sessions, add() is synchronous but commit() is async
+    session.add = MagicMock()  # Synchronous method
+    session.commit = AsyncMock()  # Async method
     return session
 
 

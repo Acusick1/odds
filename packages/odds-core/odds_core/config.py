@@ -132,6 +132,12 @@ class AlertConfig(BaseSettings):
         description="Minimum minutes between identical alerts to prevent spam",
     )
 
+    # Data quality monitoring
+    data_quality_error_threshold: int = Field(
+        default=10,
+        description="Number of error/critical data quality issues in 24h before triggering alert",
+    )
+
 
 class LoggingConfig(BaseSettings):
     """Logging configuration."""

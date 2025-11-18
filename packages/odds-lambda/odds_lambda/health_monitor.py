@@ -260,8 +260,9 @@ class HealthMonitor:
 
         total_errors = len(error_logs) + len(critical_logs)
 
-        # Consider unhealthy if >10 errors in 24h (configurable threshold)
-        is_healthy = total_errors < 10
+        # Check against configurable threshold (default: 10 errors per 24h)
+        threshold = self.settings.alerts.data_quality_error_threshold
+        is_healthy = total_errors < threshold
 
         return is_healthy, total_errors
 
