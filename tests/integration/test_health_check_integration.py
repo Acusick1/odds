@@ -4,12 +4,8 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from odds_core.config import AlertConfig, Settings, get_settings
+from odds_core.config import get_settings
 from odds_core.models import AlertHistory, DataQualityLog, FetchLog
-from odds_lambda.health_monitor import HealthStatus
-from odds_lambda.jobs import check_health
-from odds_lambda.storage.readers import OddsReader
-from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
 
 
@@ -19,8 +15,6 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_health_check_job_with_healthy_system(self, test_session):
         """Test health check job when system is healthy."""
-        writer = OddsWriter(test_session)
-
         # Create recent successful fetch logs
         for i in range(5):
             fetch_log = FetchLog(
@@ -58,8 +52,6 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_health_check_detects_stale_data(self, test_session):
         """Test health check detects stale data (no recent fetches)."""
-        writer = OddsWriter(test_session)
-
         # Create old fetch log (5 hours ago, threshold is 2 hours)
         fetch_log = FetchLog(
             fetch_time=datetime.now(UTC) - timedelta(hours=5),
@@ -91,8 +83,6 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_health_check_detects_consecutive_failures(self, test_session):
         """Test health check detects consecutive failures."""
-        writer = OddsWriter(test_session)
-
         # Create 4 consecutive failures (threshold is 3)
         for i in range(4):
             fetch_log = FetchLog(
@@ -128,8 +118,6 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_health_check_detects_low_quota(self, test_session):
         """Test health check detects low API quota."""
-        writer = OddsWriter(test_session)
-
         # Create fetch log with low quota (1000 out of 20000 = 5%, below 10% critical)
         fetch_log = FetchLog(
             fetch_time=datetime.now(UTC) - timedelta(minutes=30),
@@ -147,6 +135,7 @@ class TestHealthCheckIntegration:
             with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
                 mock_settings = get_settings()
                 mock_settings.alerts.alert_enabled = False
+                mock_settings.api.quota = 20000  # Set explicit quota for test (1000/20000 = 5%)
                 mock_get_settings.return_value = mock_settings
 
                 from odds_lambda.health_monitor import HealthMonitor
@@ -163,8 +152,6 @@ class TestHealthCheckIntegration:
     async def test_health_check_detects_data_quality_issues(self, test_session):
         """Test health check detects high data quality error rate."""
         from odds_core.models import Event, EventStatus
-
-        writer = OddsWriter(test_session)
 
         # Create test event for foreign key constraint
         test_event = Event(
@@ -223,8 +210,6 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_alert_deduplication_prevents_duplicate_alerts(self, test_session):
         """Test that alert deduplication prevents duplicate alerts within rate limit window."""
-        writer = OddsWriter(test_session)
-
         # Create old fetch log to trigger stale data alert
         fetch_log = FetchLog(
             fetch_time=datetime.now(UTC) - timedelta(hours=5),
@@ -238,7 +223,9 @@ class TestHealthCheckIntegration:
         await test_session.commit()
 
         # Mock alert system to track calls
-        with patch("odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
+        with patch(
+            "odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock
+        ) as mock_alert:
             with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
                 mock_settings = get_settings()
                 mock_settings.alerts.alert_enabled = True  # Enable alerts
@@ -268,7 +255,6 @@ class TestHealthCheckIntegration:
         assert len(health_status2.alerts_sent) == 0  # Rate-limited
 
         # Verify AlertHistory records exist
-        reader = OddsReader(test_session)
         result = await test_session.execute(select(AlertHistory))
         alert_records = list(result.scalars().all())
         assert len(alert_records) > 0
@@ -278,8 +264,6 @@ class TestHealthCheckIntegration:
     async def test_health_check_with_configurable_thresholds(self, test_session):
         """Test that health check respects configurable thresholds."""
         from odds_core.models import Event, EventStatus
-
-        writer = OddsWriter(test_session)
 
         # Create test event for foreign key constraint
         test_event = Event(
