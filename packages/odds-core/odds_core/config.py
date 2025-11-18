@@ -104,6 +104,34 @@ class AlertConfig(BaseSettings):
     discord_webhook_url: str | None = Field(default=None, description="Discord webhook URL")
     alert_enabled: bool = Field(default=False, description="Enable alerts")
 
+    # Quota monitoring thresholds
+    quota_warning_threshold: float = Field(
+        default=0.2,
+        description="Trigger warning when API quota falls below this fraction (0-1)",
+    )
+    quota_critical_threshold: float = Field(
+        default=0.1,
+        description="Trigger critical alert when API quota falls below this fraction (0-1)",
+    )
+
+    # Failure tracking thresholds
+    consecutive_failures_threshold: int = Field(
+        default=3,
+        description="Number of consecutive failures before triggering alert",
+    )
+
+    # Data staleness monitoring
+    stale_data_hours: int = Field(
+        default=2,
+        description="Hours without new data before triggering stale data alert",
+    )
+
+    # Alert rate limiting
+    alert_rate_limit_minutes: int = Field(
+        default=30,
+        description="Minimum minutes between identical alerts to prevent spam",
+    )
+
 
 class LoggingConfig(BaseSettings):
     """Logging configuration."""
