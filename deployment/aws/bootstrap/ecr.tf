@@ -16,7 +16,8 @@ resource "aws_ecr_repository" "lambda" {
   tags = {
     Name        = "odds-scheduler"
     Project     = "betting-odds-pipeline"
-    Environment = var.environment
+    Environment = "shared"
+    ManagedBy   = "terraform"
   }
 }
 
