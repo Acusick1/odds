@@ -68,6 +68,8 @@ jobs:
           cd deployment/aws/terraform
           terraform plan \
             -var-file="terraform.tfvars.example" \
+            -var="environment=production" \
+            -var="project_name=odds-scheduler" \
             -var="database_url=$DATABASE_URL" \
             -var="odds_api_key=$ODDS_API_KEY" \
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
