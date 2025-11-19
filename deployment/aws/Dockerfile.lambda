@@ -19,14 +19,16 @@ COPY pyproject.toml uv.lock ./
 COPY packages/odds-core ./packages/odds-core
 COPY packages/odds-lambda ./packages/odds-lambda
 
-# Build wheels and install to /asset
-# Using uv for faster, more reliable builds
+# Build wheels first to ensure packages are properly copied, not referenced via .pth
+RUN uv build --wheel --out-dir /wheels ./packages/odds-core && \
+    uv build --wheel --out-dir /wheels ./packages/odds-lambda
+
+# Install from wheels to ensure actual file installation (not .pth references)
 RUN uv pip install \
     --python /var/lang/bin/python3.12 \
     --target /asset \
     --no-cache \
-    ./packages/odds-core \
-    ./packages/odds-lambda
+    /wheels/*.whl
 
 # Remove unnecessary files to reduce image size
 RUN cd /asset && \
