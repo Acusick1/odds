@@ -78,9 +78,15 @@ resource "aws_lambda_function" "odds_scheduler" {
 }
 
 # CloudWatch log group for Lambda
+# Note: Lambda automatically creates log groups, but we manage it explicitly for retention
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   name              = "/aws/lambda/${aws_lambda_function.odds_scheduler.function_name}"
   retention_in_days = 14
+
+  # Prevent errors if log group already exists (e.g., created by Lambda or leftover from failed deploy)
+  lifecycle {
+    ignore_changes = []
+  }
 }
 
 # Data source for current AWS account

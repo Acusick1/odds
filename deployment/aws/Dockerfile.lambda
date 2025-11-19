@@ -1,7 +1,14 @@
 FROM public.ecr.aws/lambda/python:3.11 AS builder
 
-# Install zip utility (not included in Lambda base image) and uv for package management
-RUN yum install -y zip && yum clean all
+# Install build tools for compiling Python packages (numpy, etc.) and zip utility
+# gcc/gcc-c++/make needed for numpy and other scientific packages
+RUN yum install -y \
+    zip \
+    gcc \
+    gcc-c++ \
+    make \
+    && yum clean all
+
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 # Copy workspace files

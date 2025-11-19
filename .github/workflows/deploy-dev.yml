@@ -51,6 +51,15 @@ jobs:
           cd deployment/aws
           ./build_lambda.sh
 
+          # Verify build succeeded
+          if [ ! -f lambda_deployment.zip ]; then
+            echo "ERROR: lambda_deployment.zip was not created"
+            exit 1
+          fi
+
+          echo "Build successful:"
+          ls -lh lambda_deployment.zip
+
       - name: Terraform Init
         run: |
           cd deployment/aws/terraform
