@@ -25,7 +25,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install uv
         run: |
@@ -47,10 +47,16 @@ jobs:
         with:
           terraform_version: "1.6.0"
 
-      - name: Build Lambda package
+      - name: Build and push Lambda container image
+        id: build-image
         run: |
+          # Build and push to ECR
           cd deployment/aws
-          ./build_lambda.sh
+          ./build_and_push.sh prod ${{ env.AWS_REGION }} ${{ secrets.AWS_ACCOUNT_ID }}
+
+          # Extract image tag from git SHA
+          IMAGE_TAG="prod-$(git rev-parse --short HEAD)"
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
 
       - name: Terraform Init
         run: |
@@ -62,10 +68,9 @@ jobs:
           cd deployment/aws/terraform
           terraform plan \
             -var-file="terraform.tfvars.example" \
-            -var="environment=production" \
-            -var="project_name=odds-scheduler" \
             -var="database_url=$DATABASE_URL" \
             -var="odds_api_key=$ODDS_API_KEY" \
+            -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
             -out=tfplan
 
       - name: Deploy to Production
