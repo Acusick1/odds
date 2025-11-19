@@ -39,3 +39,9 @@ variable "project_name" {
   type        = string
   default     = "odds-scheduler-dev"
 }
+
+variable "image_tag" {
+  description = "Docker image tag to deploy (e.g., dev-a1b2c3d or dev-latest)"
+  type        = string
+  default     = "dev-latest"
+}

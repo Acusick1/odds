@@ -43,16 +43,14 @@ resource "aws_iam_role_policy" "eventbridge_access" {
   })
 }
 
-# Lambda function
+# Lambda function (container image deployment)
 resource "aws_lambda_function" "odds_scheduler" {
-  filename         = "../lambda_deployment.zip"
-  function_name    = var.project_name
-  role            = aws_iam_role.lambda_exec.arn
-  handler         = "lambda_handler.lambda_handler"
-  runtime         = "python3.12"
-  timeout         = var.lambda_timeout
-  memory_size     = var.lambda_memory_size
-  source_code_hash = filebase64sha256("../lambda_deployment.zip")
+  function_name = var.project_name
+  role          = aws_iam_role.lambda_exec.arn
+  package_type  = "Image"
+  image_uri     = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${aws_ecr_repository.lambda.name}:${var.image_tag}"
+  timeout       = var.lambda_timeout
+  memory_size   = var.lambda_memory_size
 
   environment {
     variables = {

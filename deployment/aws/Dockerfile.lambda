@@ -1,34 +1,33 @@
+# Multi-stage build for Lambda container deployment
+# Stage 1: Builder - compile dependencies with build tools
 FROM public.ecr.aws/lambda/python:3.12 AS builder
 
-# Install build tools for compiling Python packages (numpy, etc.) and zip utility
-# gcc/gcc-c++/make needed for numpy and other scientific packages
+# Install build tools for compiling Python packages (numpy, etc.)
+# AL2023 includes GCC 11 which supports numpy 2.x
 RUN dnf install -y \
-    zip \
     gcc \
     gcc-c++ \
     make \
     && dnf clean all
 
+# Install UV for fast package management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 # Copy workspace files
-WORKDIR /workspace
+WORKDIR /build
 COPY pyproject.toml uv.lock ./
 COPY packages/odds-core ./packages/odds-core
 COPY packages/odds-lambda ./packages/odds-lambda
 
-# Build wheels for workspace packages
-RUN uv build --package odds-core --out-dir /tmp/wheels && \
-    uv build --package odds-lambda --out-dir /tmp/wheels
+# Build wheels and install to /asset
+# Using uv for faster, more reliable builds
+RUN uv pip install \
+    --python /var/lang/bin/python3.12 \
+    --target /asset \
+    --no-cache \
+    ./packages/odds-lambda
 
-# Install wheels and their dependencies to /asset
-RUN uv pip install --target /asset --no-cache \
-    /tmp/wheels/*.whl
-
-# Copy Lambda handler to root of deployment package (entry point)
-RUN cp packages/odds-lambda/odds_lambda/lambda_handler.py /asset/
-
-# Remove unnecessary files to reduce package size
+# Remove unnecessary files to reduce image size
 RUN cd /asset && \
     find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
     find . -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
@@ -36,9 +35,14 @@ RUN cd /asset && \
     find . -type f -name "*.pyc" -delete 2>/dev/null || true && \
     find . -type f -name "*.pyo" -delete 2>/dev/null || true
 
-# Create deployment zip
-RUN cd /asset && zip -r /lambda.zip . -q
+# Stage 2: Runtime - clean Lambda base image
+FROM public.ecr.aws/lambda/python:3.12
 
-# Final stage - extract just the zip file
-FROM scratch
-COPY --from=builder /lambda.zip /
+# Copy compiled dependencies from builder
+COPY --from=builder /asset ${LAMBDA_TASK_ROOT}
+
+# Copy Lambda handler (entry point)
+COPY packages/odds-lambda/odds_lambda/lambda_handler.py ${LAMBDA_TASK_ROOT}/
+
+# Set the CMD to your handler
+CMD ["lambda_handler.lambda_handler"]

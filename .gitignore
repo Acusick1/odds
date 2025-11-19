@@ -72,6 +72,4 @@ deployment/aws/terraform/*.tfvars
 deployment/aws/bootstrap/.terraform/
 deployment/aws/bootstrap/.terraform.lock.hcl
 
-# AWS Lambda
-deployment/aws/lambda_deployment.zip
 deployment/aws/build/
