@@ -34,8 +34,7 @@ echo "Running Docker build (this may take a minute)..."
 docker build \
   -f deployment/aws/Dockerfile.lambda \
   --output type=local,dest=deployment/aws \
-  . \
-  2>&1 | grep -v "^#" || true  # Filter build output noise
+  .
 
 # Rename to standard name
 if [ -f deployment/aws/lambda.zip ]; then
