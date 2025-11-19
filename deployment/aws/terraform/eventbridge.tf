@@ -24,6 +24,11 @@ resource "aws_lambda_permission" "allow_eventbridge_fetch_odds" {
   function_name = aws_lambda_function.odds_scheduler.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.bootstrap_fetch_odds.arn
+
+  depends_on = [
+    aws_cloudwatch_event_rule.bootstrap_fetch_odds,
+    aws_cloudwatch_event_target.bootstrap_fetch_odds_target
+  ]
 }
 
 # Bootstrap rule for scores fetching
@@ -50,6 +55,11 @@ resource "aws_lambda_permission" "allow_eventbridge_fetch_scores" {
   function_name = aws_lambda_function.odds_scheduler.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.bootstrap_fetch_scores.arn
+
+  depends_on = [
+    aws_cloudwatch_event_rule.bootstrap_fetch_scores,
+    aws_cloudwatch_event_target.bootstrap_fetch_scores_target
+  ]
 }
 
 # Bootstrap rule for status updates
@@ -76,6 +86,11 @@ resource "aws_lambda_permission" "allow_eventbridge_update_status" {
   function_name = aws_lambda_function.odds_scheduler.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.bootstrap_update_status.arn
+
+  depends_on = [
+    aws_cloudwatch_event_rule.bootstrap_update_status,
+    aws_cloudwatch_event_target.bootstrap_update_status_target
+  ]
 }
 
 # Bootstrap rule for health checks
@@ -102,6 +117,11 @@ resource "aws_lambda_permission" "allow_eventbridge_check_health" {
   function_name = aws_lambda_function.odds_scheduler.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.bootstrap_check_health.arn
+
+  depends_on = [
+    aws_cloudwatch_event_rule.bootstrap_check_health,
+    aws_cloudwatch_event_target.bootstrap_check_health_target
+  ]
 }
 
 # Allow dynamic rules (created by Lambda at runtime) to invoke the function
