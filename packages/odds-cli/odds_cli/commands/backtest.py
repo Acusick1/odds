@@ -340,6 +340,52 @@ def export_csv(
         raise typer.Exit(1) from e
 
 
+@app.command("report")
+def generate_html_report(
+    json_file: Annotated[str, typer.Argument(help="Path to JSON results file")],
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output HTML file path (default: results_report.html)",
+    ),
+):
+    """
+    Generate an interactive HTML report from backtest results.
+
+    Example:
+        odds backtest report results.json
+        odds backtest report results.json --output custom_report.html
+    """
+    if not Path(json_file).exists():
+        console.print(f"[red]Error: File not found: {json_file}[/red]")
+        raise typer.Exit(1)
+
+    # Load backtest results
+    try:
+        result = BacktestResult.from_json(json_file)
+    except Exception as e:
+        console.print(f"[red]Error loading results: {e}[/red]")
+        raise typer.Exit(1) from e
+
+    # Determine output path
+    if output is None:
+        output = str(Path(json_file).with_suffix("")) + "_report.html"
+
+    # Generate HTML report
+    try:
+        from odds_analytics.reporting import HTMLReportGenerator
+
+        generator = HTMLReportGenerator(result)
+        generator.generate(output)
+
+        console.print(f"[green]✓[/green] HTML report generated: {output}")
+        console.print(f"\n[dim]Open in browser to view interactive visualizations[/dim]")
+    except Exception as e:
+        console.print(f"[red]Error generating HTML report: {e}[/red]")
+        raise typer.Exit(1) from e
+
+
 @app.command("list-strategies")
 def list_strategies():
     """
