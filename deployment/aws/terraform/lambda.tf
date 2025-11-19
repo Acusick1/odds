@@ -49,7 +49,7 @@ resource "aws_lambda_function" "odds_scheduler" {
   function_name    = var.project_name
   role            = aws_iam_role.lambda_exec.arn
   handler         = "lambda_handler.lambda_handler"
-  runtime         = "python3.11"
+  runtime         = "python3.12"
   timeout         = var.lambda_timeout
   memory_size     = var.lambda_memory_size
   source_code_hash = filebase64sha256("../lambda_deployment.zip")
