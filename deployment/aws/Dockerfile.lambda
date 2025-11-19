@@ -1,5 +1,14 @@
 FROM public.ecr.aws/lambda/python:3.12 AS builder
 
+# Install build tools for compiling Python packages (numpy, etc.) and zip utility
+# gcc/gcc-c++/make needed for numpy and other scientific packages
+RUN dnf install -y \
+    zip \
+    gcc \
+    gcc-c++ \
+    make \
+    && dnf clean all
+
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 # Copy workspace files
