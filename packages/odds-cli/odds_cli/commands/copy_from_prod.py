@@ -11,7 +11,7 @@ app = typer.Typer()
 console = Console()
 
 
-@app.command("copy-from-prod")
+@app.command("from-prod")
 def copy_from_production(
     start: str = typer.Argument(..., help="Start date (YYYY-MM-DD)"),
     end: str = typer.Argument(..., help="End date (YYYY-MM-DD)"),
@@ -31,13 +31,13 @@ def copy_from_production(
 
     Examples:
         # Copy October-November 2025 data (dry run first)
-        odds copy-from-prod 2025-10-23 2025-11-07 --dry-run
+        odds copy from-prod 2025-10-23 2025-11-07 --dry-run
 
         # Actually copy the data
-        odds copy-from-prod 2025-10-23 2025-11-07
+        odds copy from-prod 2025-10-23 2025-11-07
 
         # Copy with overwrite
-        odds copy-from-prod 2025-10-23 2025-11-07 --overwrite
+        odds copy from-prod 2025-10-23 2025-11-07 --overwrite
     """
     # Validate dates
     try:
