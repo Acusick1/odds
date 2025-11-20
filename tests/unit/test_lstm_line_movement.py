@@ -86,10 +86,10 @@ def sample_odds_snapshot(sample_event):
 
 
 class TestLSTMLineMovementModel:
-    """Test LSTM line movement model architecture."""
+    """Test LSTM line movement model architecture (using unified LSTMModel with regression)."""
 
     def test_model_initialization(self):
-        """Test that LSTM model initializes correctly."""
+        """Test that LSTM model initializes correctly for regression."""
         input_size = 16
         hidden_size = 64
         num_layers = 2
@@ -100,12 +100,14 @@ class TestLSTMLineMovementModel:
             hidden_size=hidden_size,
             num_layers=num_layers,
             dropout=dropout,
+            output_type="regression",
         )
 
         assert model.input_size == input_size
         assert model.hidden_size == hidden_size
         assert model.num_layers == num_layers
         assert model.dropout == dropout
+        assert model.output_type == "regression"
         assert isinstance(model.lstm, torch.nn.LSTM)
         assert isinstance(model.fc, torch.nn.Linear)
 
@@ -116,14 +118,15 @@ class TestLSTMLineMovementModel:
         input_size = 16
         hidden_size = 64
 
-        model = LSTMLineMovementModel(input_size=input_size, hidden_size=hidden_size)
+        model = LSTMLineMovementModel(
+            input_size=input_size, hidden_size=hidden_size, output_type="regression"
+        )
 
         # Create dummy input
         x = torch.randn(batch_size, seq_len, input_size)
-        mask = torch.ones(batch_size, seq_len, dtype=torch.bool)
 
         # Forward pass
-        predictions = model(x, mask)
+        predictions = model(x)
 
         # Check shapes
         assert predictions.shape == (batch_size,)
@@ -131,26 +134,30 @@ class TestLSTMLineMovementModel:
         # Regression output - can be any real value (no sigmoid)
         assert predictions.dtype == torch.float32
 
-    def test_model_forward_without_mask(self):
-        """Test that forward pass works without mask."""
+    def test_model_forward_different_batch_sizes(self):
+        """Test that forward pass works with different batch sizes."""
         batch_size = 2
         seq_len = 12
         input_size = 8
 
         model = LSTMLineMovementModel(
-            input_size=input_size, hidden_size=32, num_layers=1, dropout=0.0
+            input_size=input_size,
+            hidden_size=32,
+            num_layers=1,
+            dropout=0.0,
+            output_type="regression",
         )
 
         x = torch.randn(batch_size, seq_len, input_size)
 
-        # Forward without mask
-        predictions = model(x, mask=None)
+        # Forward pass
+        predictions = model(x)
 
         assert predictions.shape == (batch_size,)
 
     def test_model_regression_output(self):
         """Test that model produces unbounded regression output."""
-        model = LSTMLineMovementModel(input_size=10, hidden_size=32)
+        model = LSTMLineMovementModel(input_size=10, hidden_size=32, output_type="regression")
         x = torch.randn(1, 10, 10)
 
         predictions = model(x)

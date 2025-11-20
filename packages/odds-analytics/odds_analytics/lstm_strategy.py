@@ -92,7 +92,7 @@ __all__ = ["LSTMModel", "LSTMStrategy"]
 
 class LSTMModel(nn.Module):
     """
-    Simple 2-layer LSTM for binary outcome prediction.
+    Unified LSTM model supporting both classification and regression.
 
     Architecture kept simple and readable for easy experimentation.
     Users can modify this class to test different architectures.
@@ -102,14 +102,14 @@ class LSTMModel(nn.Module):
         hidden_size: Number of hidden units in LSTM layers (default: 64)
         num_layers: Number of stacked LSTM layers (default: 2)
         dropout: Dropout rate between LSTM layers (default: 0.2)
+        output_type: Type of output - "classification" or "regression" (default: "classification")
 
     Input:
         x: Tensor of shape (batch_size, seq_len, input_size)
-        mask: Optional attention mask of shape (batch_size, seq_len)
 
     Output:
-        logits: Tensor of shape (batch_size,) - raw prediction scores
-        probs: Tensor of shape (batch_size,) - probability of outcome=1
+        Classification: Tuple of (logits, probs) where both are (batch_size,)
+        Regression: Single tensor of predictions (batch_size,)
     """
 
     def __init__(
@@ -118,13 +118,18 @@ class LSTMModel(nn.Module):
         hidden_size: int = 64,
         num_layers: int = 2,
         dropout: float = 0.2,
+        output_type: str = "classification",
     ):
         super().__init__()
+
+        if output_type not in ("classification", "regression"):
+            raise ValueError(f"output_type must be 'classification' or 'regression', got '{output_type}'")
 
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
+        self.output_type = output_type
 
         # LSTM layers
         self.lstm = nn.LSTM(
@@ -135,23 +140,21 @@ class LSTMModel(nn.Module):
             batch_first=True,
         )
 
-        # Output layer (binary classification)
+        # Output layer
         self.fc = nn.Linear(hidden_size, 1)
 
     def forward(
-        self, x: torch.Tensor, mask: torch.Tensor | None = None
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         """
         Forward pass through LSTM.
 
         Args:
             x: Input tensor (batch_size, seq_len, input_size)
-            mask: Attention mask (batch_size, seq_len) - True for valid timesteps
 
         Returns:
-            Tuple of (logits, probabilities):
-            - logits: Raw prediction scores (batch_size,)
-            - probs: Sigmoid probabilities (batch_size,)
+            Classification: Tuple of (logits, probabilities)
+            Regression: Single tensor of predictions
         """
         # LSTM forward pass
         # output shape: (batch_size, seq_len, hidden_size)
@@ -163,16 +166,19 @@ class LSTMModel(nn.Module):
         final_hidden = h_n[-1]
 
         # Fully connected layer
-        # logits shape: (batch_size, 1)
-        logits = self.fc(final_hidden)
+        # output shape: (batch_size, 1)
+        output = self.fc(final_hidden)
 
         # Squeeze to (batch_size,)
-        logits = logits.squeeze(-1)
+        output = output.squeeze(-1)
 
-        # Apply sigmoid for probabilities
-        probs = torch.sigmoid(logits)
-
-        return logits, probs
+        if self.output_type == "classification":
+            # Apply sigmoid for probabilities
+            probs = torch.sigmoid(output)
+            return output, probs
+        else:
+            # Regression: return raw output
+            return output
 
 
 class LSTMStrategy(BettingStrategy):
@@ -345,7 +351,7 @@ class LSTMStrategy(BettingStrategy):
                 optimizer.zero_grad()
 
                 # Forward pass
-                logits, probs = self.model(batch_X, batch_mask)
+                logits, probs = self.model(batch_X)
 
                 # Calculate loss
                 loss = criterion(logits, batch_y)
@@ -451,7 +457,7 @@ class LSTMStrategy(BettingStrategy):
         # Run inference
         self.model.eval()
         with torch.no_grad():
-            logits, probs = self.model(X, mask_tensor)
+            logits, probs = self.model(X)
             home_win_prob = probs.item()
 
         # Calculate market consensus from odds snapshot

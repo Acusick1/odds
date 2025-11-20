@@ -86,6 +86,7 @@ from odds_analytics.backtesting import (
     BettingStrategy,
 )
 from odds_analytics.feature_extraction import SequenceFeatureExtractor
+from odds_analytics.lstm_strategy import LSTMModel
 from odds_analytics.sequence_loader import (
     TargetType,
     load_sequences_for_event,
@@ -96,84 +97,8 @@ logger = structlog.get_logger()
 
 __all__ = ["LSTMLineMovementModel", "LSTMLineMovementStrategy"]
 
-
-class LSTMLineMovementModel(nn.Module):
-    """
-    LSTM model for regression-based line movement prediction.
-
-    Architecture optimized for continuous value prediction (not classification).
-    Outputs a single value representing the predicted line movement delta.
-
-    Args:
-        input_size: Number of input features per timestep
-        hidden_size: Number of hidden units in LSTM layers (default: 64)
-        num_layers: Number of stacked LSTM layers (default: 2)
-        dropout: Dropout rate between LSTM layers (default: 0.2)
-
-    Input:
-        x: Tensor of shape (batch_size, seq_len, input_size)
-        mask: Optional attention mask of shape (batch_size, seq_len)
-
-    Output:
-        predictions: Tensor of shape (batch_size,) - predicted line movement deltas
-    """
-
-    def __init__(
-        self,
-        input_size: int,
-        hidden_size: int = 64,
-        num_layers: int = 2,
-        dropout: float = 0.2,
-    ):
-        super().__init__()
-
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.dropout = dropout
-
-        # LSTM layers
-        self.lstm = nn.LSTM(
-            input_size=input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            dropout=dropout if num_layers > 1 else 0.0,
-            batch_first=True,
-        )
-
-        # Output layer (regression - no activation)
-        self.fc = nn.Linear(hidden_size, 1)
-
-    def forward(
-        self, x: torch.Tensor, mask: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        """
-        Forward pass through LSTM for regression.
-
-        Args:
-            x: Input tensor (batch_size, seq_len, input_size)
-            mask: Attention mask (batch_size, seq_len) - True for valid timesteps
-
-        Returns:
-            predictions: Predicted line movement deltas (batch_size,)
-        """
-        # LSTM forward pass
-        # output shape: (batch_size, seq_len, hidden_size)
-        # h_n shape: (num_layers, batch_size, hidden_size)
-        lstm_out, (h_n, c_n) = self.lstm(x)
-
-        # Use final hidden state from last layer
-        # h_n[-1] shape: (batch_size, hidden_size)
-        final_hidden = h_n[-1]
-
-        # Fully connected layer (no activation for regression)
-        # predictions shape: (batch_size, 1)
-        predictions = self.fc(final_hidden)
-
-        # Squeeze to (batch_size,)
-        predictions = predictions.squeeze(-1)
-
-        return predictions
+# Backward compatibility alias - LSTMLineMovementModel is now LSTMModel with output_type="regression"
+LSTMLineMovementModel = LSTMModel
 
 
 class LSTMLineMovementStrategy(BettingStrategy):
@@ -254,7 +179,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
         self.input_size = len(self.feature_extractor.get_feature_names())
 
         # Initialize model (will be created on first training or load)
-        self.model: LSTMLineMovementModel | None = None
+        self.model: LSTMModel | None = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Training metadata
@@ -265,13 +190,14 @@ class LSTMLineMovementStrategy(BettingStrategy):
         if model_path:
             self.load_model(model_path)
 
-    def _create_model(self) -> LSTMLineMovementModel:
-        """Create new LSTM model with configured architecture."""
-        return LSTMLineMovementModel(
+    def _create_model(self) -> LSTMModel:
+        """Create new LSTM model with configured architecture for regression."""
+        return LSTMModel(
             input_size=self.input_size,
             hidden_size=self.params["hidden_size"],
             num_layers=self.params["num_layers"],
             dropout=self.params["dropout"],
+            output_type="regression",
         )
 
     def _get_loss_function(self) -> nn.Module:
@@ -386,7 +312,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
                 optimizer.zero_grad()
 
                 # Forward pass
-                predictions = self.model(batch_X, batch_mask)
+                predictions = self.model(batch_X)
 
                 # Calculate loss
                 loss = criterion(predictions, batch_y)
@@ -511,7 +437,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
             # Run inference
             self.model.eval()
             with torch.no_grad():
-                predicted_movement = self.model(X, mask_tensor).item()
+                predicted_movement = self.model(X).item()
 
             # Only bet if significant positive movement is predicted
             # Positive movement = line expected to move in favor of this outcome

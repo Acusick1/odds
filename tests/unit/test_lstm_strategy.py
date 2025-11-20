@@ -120,10 +120,9 @@ class TestLSTMModel:
 
         # Create dummy input
         x = torch.randn(batch_size, seq_len, input_size)
-        mask = torch.ones(batch_size, seq_len, dtype=torch.bool)
 
         # Forward pass
-        logits, probs = model(x, mask)
+        logits, probs = model(x)
 
         # Check shapes
         assert logits.shape == (batch_size,)
@@ -132,8 +131,8 @@ class TestLSTMModel:
         # Check value ranges
         assert torch.all((probs >= 0) & (probs <= 1))
 
-    def test_model_forward_without_mask(self):
-        """Test that forward pass works without mask."""
+    def test_model_forward_different_batch_sizes(self):
+        """Test that forward pass works with different batch sizes."""
         batch_size = 2
         seq_len = 12
         input_size = 8
@@ -142,8 +141,8 @@ class TestLSTMModel:
 
         x = torch.randn(batch_size, seq_len, input_size)
 
-        # Forward without mask
-        logits, probs = model(x, mask=None)
+        # Forward pass
+        logits, probs = model(x)
 
         assert logits.shape == (batch_size,)
         assert probs.shape == (batch_size,)
