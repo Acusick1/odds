@@ -18,6 +18,12 @@ from odds_lambda.storage.readers import OddsReader
 
 logger = structlog.get_logger()
 
+# Tier classification for validation severity
+# Critical tiers contain essential betting data and must be present for validation success
+CRITICAL_TIERS = frozenset({FetchTier.PREGAME, FetchTier.CLOSING})
+# Warning tiers are supplementary; missing data generates warnings but doesn't fail validation
+WARNING_TIERS = frozenset({FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP})
+
 
 @dataclass(slots=True, frozen=True)
 class TierCoverageReport:
@@ -39,14 +45,29 @@ class TierCoverageReport:
     validation_issues: tuple[str, ...] = field(default_factory=tuple)
 
     @property
+    def critical_tiers_missing(self) -> frozenset[FetchTier]:
+        """Get missing tiers that are critical (PREGAME, CLOSING)."""
+        return frozenset(self.tiers_missing & CRITICAL_TIERS)
+
+    @property
+    def warning_tiers_missing(self) -> frozenset[FetchTier]:
+        """Get missing tiers that are warnings only (OPENING, EARLY, SHARP)."""
+        return frozenset(self.tiers_missing & WARNING_TIERS)
+
+    @property
     def is_complete(self) -> bool:
-        """Check if all required tiers are present."""
-        return len(self.tiers_missing) == 0
+        """Check if all critical tiers are present (PREGAME and CLOSING)."""
+        return len(self.critical_tiers_missing) == 0
+
+    @property
+    def has_tier_warnings(self) -> bool:
+        """Check if there are missing warning-level tiers."""
+        return len(self.warning_tiers_missing) > 0
 
     @property
     def is_fully_valid(self) -> bool:
         """Check if game has complete tier coverage AND no validation issues."""
-        return self.is_complete and len(self.validation_issues) == 0
+        return self.is_complete and not self.has_tier_warnings and len(self.validation_issues) == 0
 
     @property
     def coverage_percentage(self) -> float:
@@ -66,6 +87,7 @@ class DailyValidationReport:
     total_games: int = 0
     complete_games: int = 0
     incomplete_games: int = 0
+    games_with_warnings: int = 0  # Games with only warning-level tier issues
     games_by_tier_coverage: dict[int, int] = field(
         default_factory=dict
     )  # num_tiers -> count of games
@@ -85,14 +107,20 @@ class DailyValidationReport:
 
     @property
     def is_valid(self) -> bool:
-        """Check if all games have complete coverage."""
+        """Check if all games have critical tier coverage (PREGAME and CLOSING)."""
         return self.incomplete_games == 0
+
+    @property
+    def has_warnings(self) -> bool:
+        """Check if there are any warning-level tier issues."""
+        return self.games_with_warnings > 0
 
     @property
     def is_fully_valid(self) -> bool:
         """Check if validation passed with no tier, score, or discovery issues."""
         return (
             self.incomplete_games == 0
+            and self.games_with_warnings == 0
             and self.games_missing_scores == 0
             and len(self.missing_games) == 0
         )
@@ -253,6 +281,7 @@ class TierCoverageValidator:
         game_reports_list = []
         complete_count = 0
         incomplete_count = 0
+        games_with_warnings_count = 0
         games_by_tier_dict = {}
         missing_tier_dict = {}
         games_missing_scores = 0
@@ -266,6 +295,9 @@ class TierCoverageValidator:
                 # Update aggregate statistics
                 if game_report.is_complete:
                     complete_count += 1
+                    # Check if game has warning-level tier issues
+                    if game_report.has_tier_warnings:
+                        games_with_warnings_count += 1
                 else:
                     incomplete_count += 1
 
@@ -324,6 +356,7 @@ class TierCoverageValidator:
             total_games=len(games),
             complete_games=complete_count,
             incomplete_games=incomplete_count,
+            games_with_warnings=games_with_warnings_count,
             games_by_tier_coverage=games_by_tier_dict,
             missing_tier_breakdown=missing_tier_dict,
             game_reports=tuple(game_reports_list),

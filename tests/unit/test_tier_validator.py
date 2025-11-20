@@ -38,30 +38,67 @@ class TestTierCoverageReport:
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
-            tiers_present={
+            tiers_present=frozenset({
                 FetchTier.OPENING,
                 FetchTier.EARLY,
                 FetchTier.SHARP,
                 FetchTier.PREGAME,
                 FetchTier.CLOSING,
-            },
-            tiers_missing=set(),
+            }),
+            tiers_missing=frozenset(),
         )
 
         assert report.is_complete is True
+        assert report.has_tier_warnings is False
 
-    def test_is_complete_with_missing_tiers(self):
-        """Test is_complete returns False when tiers missing."""
+    def test_is_complete_with_only_warning_tiers_missing(self):
+        """Test is_complete returns True when only warning tiers missing."""
         report = TierCoverageReport(
             event_id="test123",
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
-            tiers_present={FetchTier.OPENING, FetchTier.CLOSING},
-            tiers_missing={FetchTier.EARLY, FetchTier.SHARP, FetchTier.PREGAME},
+            tiers_present=frozenset({FetchTier.PREGAME, FetchTier.CLOSING}),
+            tiers_missing=frozenset({FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP}),
         )
 
+        # is_complete should be True since critical tiers are present
+        assert report.is_complete is True
+        assert report.has_tier_warnings is True
+        assert report.critical_tiers_missing == frozenset()
+        assert report.warning_tiers_missing == frozenset({FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP})
+
+    def test_is_complete_with_critical_tiers_missing(self):
+        """Test is_complete returns False when critical tiers missing."""
+        report = TierCoverageReport(
+            event_id="test123",
+            home_team="Lakers",
+            away_team="Celtics",
+            commence_time=datetime.now(UTC),
+            tiers_present=frozenset({FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP}),
+            tiers_missing=frozenset({FetchTier.PREGAME, FetchTier.CLOSING}),
+        )
+
+        # is_complete should be False since critical tiers are missing
         assert report.is_complete is False
+        assert report.critical_tiers_missing == frozenset({FetchTier.PREGAME, FetchTier.CLOSING})
+        assert report.warning_tiers_missing == frozenset()
+
+    def test_is_complete_with_mixed_missing_tiers(self):
+        """Test is_complete returns False when any critical tier missing."""
+        report = TierCoverageReport(
+            event_id="test123",
+            home_team="Lakers",
+            away_team="Celtics",
+            commence_time=datetime.now(UTC),
+            tiers_present=frozenset({FetchTier.OPENING, FetchTier.CLOSING}),
+            tiers_missing=frozenset({FetchTier.EARLY, FetchTier.SHARP, FetchTier.PREGAME}),
+        )
+
+        # is_complete should be False since PREGAME (critical) is missing
+        assert report.is_complete is False
+        assert report.critical_tiers_missing == frozenset({FetchTier.PREGAME})
+        assert report.warning_tiers_missing == frozenset({FetchTier.EARLY, FetchTier.SHARP})
 
     def test_coverage_percentage_full(self):
         """Test coverage percentage with all tiers."""
@@ -70,14 +107,14 @@ class TestTierCoverageReport:
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
-            tiers_present={
+            tiers_present=frozenset({
                 FetchTier.OPENING,
                 FetchTier.EARLY,
                 FetchTier.SHARP,
                 FetchTier.PREGAME,
                 FetchTier.CLOSING,
-            },
-            tiers_missing=set(),
+            }),
+            tiers_missing=frozenset(),
         )
 
         assert report.coverage_percentage == 100.0
@@ -89,8 +126,8 @@ class TestTierCoverageReport:
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
-            tiers_present={FetchTier.OPENING, FetchTier.CLOSING},
-            tiers_missing={FetchTier.EARLY, FetchTier.SHARP, FetchTier.PREGAME},
+            tiers_present=frozenset({FetchTier.OPENING, FetchTier.CLOSING}),
+            tiers_missing=frozenset({FetchTier.EARLY, FetchTier.SHARP, FetchTier.PREGAME}),
         )
 
         # 2 out of 5 tiers = 40%
@@ -103,14 +140,14 @@ class TestTierCoverageReport:
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
-            tiers_present=set(),
-            tiers_missing={
+            tiers_present=frozenset(),
+            tiers_missing=frozenset({
                 FetchTier.OPENING,
                 FetchTier.EARLY,
                 FetchTier.SHARP,
                 FetchTier.PREGAME,
                 FetchTier.CLOSING,
-            },
+            }),
         )
 
         assert report.coverage_percentage == 0.0
@@ -304,11 +341,12 @@ class TestTierCoverageValidatorDailyValidation:
         assert report.completion_rate == 100.0
 
     @pytest.mark.asyncio
-    async def test_validate_date_with_incomplete_games(self, test_session):
-        """Test daily validation with incomplete games."""
+    async def test_validate_date_with_warning_games(self, test_session):
+        """Test daily validation with games that have only warning tiers missing."""
         target_date = datetime(2024, 10, 24, tzinfo=UTC)
 
-        # Create 2 games in the noon-to-noon window, one complete and one incomplete
+        # Create 2 games in the noon-to-noon window
+        # First game gets all tiers, second game only gets critical tiers (PREGAME, CLOSING)
         for i in range(2):
             event = Event(
                 id=f"event_{i}",
@@ -324,8 +362,8 @@ class TestTierCoverageValidatorDailyValidation:
             )
             test_session.add(event)
 
-            # First game gets all tiers, second game only gets 2 tiers
-            tiers = FetchTier if i == 0 else [FetchTier.OPENING, FetchTier.CLOSING]
+            # First game gets all tiers, second game only gets critical tiers
+            tiers = FetchTier if i == 0 else [FetchTier.PREGAME, FetchTier.CLOSING]
 
             for tier in tiers:
                 snapshot = OddsSnapshot(
@@ -344,6 +382,59 @@ class TestTierCoverageValidatorDailyValidation:
         validator = TierCoverageValidator(test_session)
         report = await validator.validate_date(target_date.date())
 
+        # Both games should be "complete" (have critical tiers)
+        # but second game should have warnings
+        assert report.is_valid  # No critical tier issues
+        assert report.has_warnings  # Has warning tier issues
+        assert report.total_games == 2
+        assert report.complete_games == 2
+        assert report.incomplete_games == 0
+        assert report.games_with_warnings == 1
+        assert report.completion_rate == 100.0
+
+    @pytest.mark.asyncio
+    async def test_validate_date_with_critical_tier_missing(self, test_session):
+        """Test daily validation fails when critical tiers are missing."""
+        target_date = datetime(2024, 10, 24, tzinfo=UTC)
+
+        # Create 2 games in the noon-to-noon window
+        # Second game missing CLOSING (critical tier)
+        for i in range(2):
+            event = Event(
+                id=f"event_{i}",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                # Games at noon and 1 PM UTC (within noon-to-noon window)
+                commence_time=target_date.replace(hour=12) + timedelta(hours=i),
+                home_team=f"Home{i}",
+                away_team=f"Away{i}",
+                status=EventStatus.FINAL,
+                home_score=100,
+                away_score=95,
+            )
+            test_session.add(event)
+
+            # First game gets all tiers, second game missing CLOSING
+            tiers = FetchTier if i == 0 else [FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP, FetchTier.PREGAME]
+
+            for tier in tiers:
+                snapshot = OddsSnapshot(
+                    event_id=event.id,
+                    snapshot_time=event.commence_time - timedelta(hours=1),
+                    raw_data={"test": "data"},
+                    bookmaker_count=8,
+                    fetch_tier=tier.value,
+                    hours_until_commence=1.0,
+                )
+                test_session.add(snapshot)
+
+        await test_session.commit()
+
+        # Validate
+        validator = TierCoverageValidator(test_session)
+        report = await validator.validate_date(target_date.date())
+
+        # Validation should fail because CLOSING (critical) is missing
         assert not report.is_valid
         assert report.total_games == 2
         assert report.complete_games == 1
