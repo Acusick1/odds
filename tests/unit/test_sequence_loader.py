@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 from odds_analytics.sequence_loader import (
     TargetType,
-    _calculate_regression_target,
-    _extract_opening_closing_odds,
+    calculate_regression_target,
+    extract_opening_closing_odds,
     load_sequences_for_event,
     prepare_lstm_training_data,
 )
@@ -560,7 +560,7 @@ class TestPrepareLSTMTrainingData:
 
 
 class TestExtractOpeningClosingOdds:
-    """Tests for _extract_opening_closing_odds helper function."""
+    """Tests for extract_opening_closing_odds helper function."""
 
     def test_extract_basic_legacy_mode(self):
         """Test basic extraction without commence_time (legacy first/last mode)."""
@@ -597,7 +597,7 @@ class TestExtractOpeningClosingOdds:
         ]
 
         # Legacy mode (no commence_time)
-        opening, closing = _extract_opening_closing_odds(odds_sequences, "Lakers", "h2h")
+        opening, closing = extract_opening_closing_odds(odds_sequences, "Lakers", "h2h")
 
         assert opening is not None
         assert closing is not None
@@ -671,7 +671,7 @@ class TestExtractOpeningClosingOdds:
         ]
 
         # Find opening at 48h before, closing at 0.5h before
-        opening, closing = _extract_opening_closing_odds(
+        opening, closing = extract_opening_closing_odds(
             odds_sequences,
             "Lakers",
             "h2h",
@@ -737,7 +737,7 @@ class TestExtractOpeningClosingOdds:
         ]
 
         # 47h is closer to 48h target than 50h
-        opening, closing = _extract_opening_closing_odds(
+        opening, closing = extract_opening_closing_odds(
             odds_sequences,
             "Lakers",
             "h2h",
@@ -774,7 +774,7 @@ class TestExtractOpeningClosingOdds:
             ],
         ]
 
-        opening, closing = _extract_opening_closing_odds(
+        opening, closing = extract_opening_closing_odds(
             odds_sequences,
             "Lakers",
             "h2h",
@@ -789,7 +789,7 @@ class TestExtractOpeningClosingOdds:
 
     def test_extract_empty_sequences(self):
         """Test handling of empty sequences."""
-        opening, closing = _extract_opening_closing_odds([], "Lakers", "h2h")
+        opening, closing = extract_opening_closing_odds([], "Lakers", "h2h")
         assert opening is None
         assert closing is None
 
@@ -812,7 +812,7 @@ class TestExtractOpeningClosingOdds:
             ],
         ]
 
-        opening, closing = _extract_opening_closing_odds(odds_sequences, "Lakers", "h2h")
+        opening, closing = extract_opening_closing_odds(odds_sequences, "Lakers", "h2h")
         assert opening is None
         assert closing is None
 
@@ -850,7 +850,7 @@ class TestExtractOpeningClosingOdds:
             ],
         ]
 
-        opening, closing = _extract_opening_closing_odds(odds_sequences, "Lakers", "spreads")
+        opening, closing = extract_opening_closing_odds(odds_sequences, "Lakers", "spreads")
 
         assert opening is not None
         assert closing is not None
@@ -878,13 +878,13 @@ class TestExtractOpeningClosingOdds:
         ]
 
         # Legacy mode with single snapshot should return None
-        opening, closing = _extract_opening_closing_odds(odds_sequences, "Lakers", "h2h")
+        opening, closing = extract_opening_closing_odds(odds_sequences, "Lakers", "h2h")
         assert opening is None
         assert closing is None
 
 
 class TestCalculateRegressionTarget:
-    """Tests for _calculate_regression_target helper function."""
+    """Tests for calculate_regression_target helper function."""
 
     def test_h2h_probability_delta(self):
         """Test h2h market uses implied probability delta."""
@@ -918,7 +918,7 @@ class TestCalculateRegressionTarget:
             ),
         ]
 
-        result = _calculate_regression_target(opening_odds, closing_odds, "h2h")
+        result = calculate_regression_target(opening_odds, closing_odds, "h2h")
 
         assert result is not None
         # Probability should increase (line moved in favor of Lakers)
@@ -958,7 +958,7 @@ class TestCalculateRegressionTarget:
             ),
         ]
 
-        result = _calculate_regression_target(opening_odds, closing_odds, "spreads")
+        result = calculate_regression_target(opening_odds, closing_odds, "spreads")
 
         assert result is not None
         # Point delta: -3.5 - (-2.5) = -1.0
@@ -996,7 +996,7 @@ class TestCalculateRegressionTarget:
             ),
         ]
 
-        result = _calculate_regression_target(opening_odds, closing_odds, "totals")
+        result = calculate_regression_target(opening_odds, closing_odds, "totals")
 
         assert result is not None
         # Point delta: 218.5 - 215.5 = 3.0
@@ -1020,7 +1020,7 @@ class TestCalculateRegressionTarget:
             ),
         ]
 
-        result = _calculate_regression_target(None, closing_odds, "h2h")
+        result = calculate_regression_target(None, closing_odds, "h2h")
         assert result is None
 
     def test_missing_closing_odds(self):
@@ -1041,7 +1041,7 @@ class TestCalculateRegressionTarget:
             ),
         ]
 
-        result = _calculate_regression_target(opening_odds, None, "h2h")
+        result = calculate_regression_target(opening_odds, None, "h2h")
         assert result is None
 
     def test_unknown_market(self):
@@ -1076,7 +1076,7 @@ class TestCalculateRegressionTarget:
             ),
         ]
 
-        result = _calculate_regression_target(opening_odds, closing_odds, "unknown")
+        result = calculate_regression_target(opening_odds, closing_odds, "unknown")
         assert result is None
 
     def test_multiple_bookmakers_average(self):
@@ -1133,7 +1133,7 @@ class TestCalculateRegressionTarget:
             ),
         ]
 
-        result = _calculate_regression_target(opening_odds, closing_odds, "spreads")
+        result = calculate_regression_target(opening_odds, closing_odds, "spreads")
 
         assert result is not None
         # Opening avg: (-2.5 + -3.5) / 2 = -3.0

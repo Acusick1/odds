@@ -57,6 +57,9 @@ def run_backtest(
     kelly_fraction: float = typer.Option(
         0.25, "--kelly-fraction", help="Kelly fraction (default: 0.25)"
     ),
+    model_path: str | None = typer.Option(
+        None, "--model-path", "-m", help="Path to pre-trained model (for lstm, xgb_line_movement)"
+    ),
 ):
     """
     Run a backtest for a strategy over a date range.
@@ -85,6 +88,7 @@ def run_backtest(
             output_csv=output_csv,
             bet_sizing=bet_sizing,
             kelly_fraction=kelly_fraction,
+            model_path=model_path,
         )
     )
 
@@ -98,11 +102,17 @@ async def _run_backtest_async(
     output_csv: str | None,
     bet_sizing: str,
     kelly_fraction: float,
+    model_path: str | None = None,
 ):
     """Run backtest asynchronously."""
     # Create strategy instance
     strategy_class = STRATEGIES[strategy_name]
-    strategy = strategy_class()
+
+    # Pass model_path for strategies that support it
+    if strategy_name in ("lstm", "xgb_line_movement") and model_path:
+        strategy = strategy_class(model_path=model_path)
+    else:
+        strategy = strategy_class()
 
     # Create bet sizing config
     from odds_analytics.backtesting import BetSizingConfig

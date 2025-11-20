@@ -77,10 +77,12 @@ __all__ = [
     "load_sequences_for_event",
     "prepare_lstm_training_data",
     "TargetType",
+    "extract_opening_closing_odds",
+    "calculate_regression_target",
 ]
 
 
-def _extract_opening_closing_odds(
+def extract_opening_closing_odds(
     odds_sequences: list[list[Odds]],
     outcome: str,
     market: str,
@@ -171,7 +173,7 @@ def _extract_opening_closing_odds(
     return opening_odds, closing_odds
 
 
-def _calculate_regression_target(
+def calculate_regression_target(
     opening_odds: list[Odds] | None,
     closing_odds: list[Odds] | None,
     market: str,
@@ -576,7 +578,7 @@ async def prepare_lstm_training_data(
                     label = 1 if event.away_score > event.home_score else 0
         else:
             # Regression: line movement delta (closing - opening)
-            opening_odds, closing_odds = _extract_opening_closing_odds(
+            opening_odds, closing_odds = extract_opening_closing_odds(
                 odds_sequences,
                 target_outcome,
                 market,
@@ -584,7 +586,7 @@ async def prepare_lstm_training_data(
                 opening_hours_before=opening_hours_before,
                 closing_hours_before=closing_hours_before,
             )
-            regression_target = _calculate_regression_target(
+            regression_target = calculate_regression_target(
                 opening_odds, closing_odds, market
             )
 

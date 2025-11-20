@@ -55,8 +55,8 @@ from odds_analytics.backtesting import (
 from odds_analytics.feature_extraction import TabularFeatureExtractor
 from odds_analytics.sequence_loader import (
     TargetType,
-    _calculate_regression_target,
-    _extract_opening_closing_odds,
+    calculate_regression_target,
+    extract_opening_closing_odds,
     load_sequences_for_event,
 )
 from odds_analytics.utils import calculate_implied_probability
@@ -544,7 +544,7 @@ async def prepare_tabular_training_data(
             target_outcome = outcome
 
         # Extract opening and closing odds for regression target
-        opening_odds, closing_odds = _extract_opening_closing_odds(
+        opening_odds, closing_odds = extract_opening_closing_odds(
             odds_sequences,
             target_outcome,
             market,
@@ -554,7 +554,7 @@ async def prepare_tabular_training_data(
         )
 
         # Calculate regression target
-        regression_target = _calculate_regression_target(opening_odds, closing_odds, market)
+        regression_target = calculate_regression_target(opening_odds, closing_odds, market)
 
         if regression_target is None:
             logger.debug(
