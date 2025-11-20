@@ -562,8 +562,8 @@ class TestPrepareLSTMTrainingData:
 class TestExtractOpeningClosingOdds:
     """Tests for _extract_opening_closing_odds helper function."""
 
-    def test_extract_basic(self):
-        """Test basic extraction of opening and closing odds."""
+    def test_extract_basic_legacy_mode(self):
+        """Test basic extraction without commence_time (legacy first/last mode)."""
         timestamp1 = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
         timestamp2 = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
 
@@ -596,12 +596,196 @@ class TestExtractOpeningClosingOdds:
             ],
         ]
 
+        # Legacy mode (no commence_time)
         opening, closing = _extract_opening_closing_odds(odds_sequences, "Lakers", "h2h")
 
         assert opening is not None
         assert closing is not None
         assert opening[0].price == -120
         assert closing[0].price == -140
+
+    def test_extract_with_time_windows(self):
+        """Test extraction with configurable time windows."""
+        # Game at 19:00
+        commence_time = datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC)
+
+        # Snapshots at various times before game
+        timestamp_48h = datetime(2024, 10, 30, 19, 0, 0, tzinfo=UTC)  # 48h before
+        timestamp_24h = datetime(2024, 10, 31, 19, 0, 0, tzinfo=UTC)  # 24h before
+        timestamp_1h = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)   # 1h before
+        timestamp_30m = datetime(2024, 11, 1, 18, 30, 0, tzinfo=UTC)  # 30min before
+
+        odds_sequences = [
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name="Lakers",
+                    price=-120,
+                    point=None,
+                    odds_timestamp=timestamp_48h,
+                    last_update=timestamp_48h,
+                ),
+            ],
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name="Lakers",
+                    price=-130,
+                    point=None,
+                    odds_timestamp=timestamp_24h,
+                    last_update=timestamp_24h,
+                ),
+            ],
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name="Lakers",
+                    price=-140,
+                    point=None,
+                    odds_timestamp=timestamp_1h,
+                    last_update=timestamp_1h,
+                ),
+            ],
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name="Lakers",
+                    price=-150,
+                    point=None,
+                    odds_timestamp=timestamp_30m,
+                    last_update=timestamp_30m,
+                ),
+            ],
+        ]
+
+        # Find opening at 48h before, closing at 0.5h before
+        opening, closing = _extract_opening_closing_odds(
+            odds_sequences,
+            "Lakers",
+            "h2h",
+            commence_time=commence_time,
+            opening_hours_before=48.0,
+            closing_hours_before=0.5,
+        )
+
+        assert opening is not None
+        assert closing is not None
+        assert opening[0].price == -120  # 48h before snapshot
+        assert closing[0].price == -150  # 30min before snapshot
+
+    def test_extract_finds_closest_snapshot(self):
+        """Test that extraction finds snapshot closest to target time."""
+        commence_time = datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC)
+
+        # No snapshot exactly at 48h, but one at 47h and one at 50h
+        timestamp_50h = datetime(2024, 10, 30, 17, 0, 0, tzinfo=UTC)  # 50h before
+        timestamp_47h = datetime(2024, 10, 30, 20, 0, 0, tzinfo=UTC)  # 47h before
+        timestamp_1h = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)   # 1h before
+
+        odds_sequences = [
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name="Lakers",
+                    price=-110,
+                    point=None,
+                    odds_timestamp=timestamp_50h,
+                    last_update=timestamp_50h,
+                ),
+            ],
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name="Lakers",
+                    price=-120,
+                    point=None,
+                    odds_timestamp=timestamp_47h,
+                    last_update=timestamp_47h,
+                ),
+            ],
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name="Lakers",
+                    price=-150,
+                    point=None,
+                    odds_timestamp=timestamp_1h,
+                    last_update=timestamp_1h,
+                ),
+            ],
+        ]
+
+        # 47h is closer to 48h target than 50h
+        opening, closing = _extract_opening_closing_odds(
+            odds_sequences,
+            "Lakers",
+            "h2h",
+            commence_time=commence_time,
+            opening_hours_before=48.0,
+            closing_hours_before=1.0,
+        )
+
+        assert opening is not None
+        assert closing is not None
+        assert opening[0].price == -120  # 47h before (closest to 48h target)
+        assert closing[0].price == -150  # 1h before
+
+    def test_extract_same_snapshot_returns_none(self):
+        """Test that same snapshot for opening/closing returns None."""
+        commence_time = datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC)
+
+        # Only one snapshot - both opening and closing resolve to it
+        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+        odds_sequences = [
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name="Lakers",
+                    price=-120,
+                    point=None,
+                    odds_timestamp=timestamp,
+                    last_update=timestamp,
+                ),
+            ],
+        ]
+
+        opening, closing = _extract_opening_closing_odds(
+            odds_sequences,
+            "Lakers",
+            "h2h",
+            commence_time=commence_time,
+            opening_hours_before=48.0,
+            closing_hours_before=0.5,
+        )
+
+        # Should return None because both resolve to same snapshot
+        assert opening is None
+        assert closing is None
 
     def test_extract_empty_sequences(self):
         """Test handling of empty sequences."""
@@ -672,6 +856,31 @@ class TestExtractOpeningClosingOdds:
         assert closing is not None
         assert opening[0].point == -2.5
         assert closing[0].point == -3.5
+
+    def test_extract_single_snapshot_legacy_mode_returns_none(self):
+        """Test that single snapshot in legacy mode returns None."""
+        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+        odds_sequences = [
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name="Lakers",
+                    price=-120,
+                    point=None,
+                    odds_timestamp=timestamp,
+                    last_update=timestamp,
+                ),
+            ],
+        ]
+
+        # Legacy mode with single snapshot should return None
+        opening, closing = _extract_opening_closing_odds(odds_sequences, "Lakers", "h2h")
+        assert opening is None
+        assert closing is None
 
 
 class TestCalculateRegressionTarget:
@@ -1227,3 +1436,137 @@ class TestPrepareLSTMRegressionMode:
             assert X.shape[0] == 1, "Should have 1 sample"
             # Point delta: 220.5 - 215.5 = 5.0
             assert y[0] == pytest.approx(5.0, abs=0.01)
+
+    @pytest.mark.asyncio
+    async def test_regression_custom_time_windows(self):
+        """Test regression mode with custom opening/closing time windows."""
+        event = Event(
+            id="test_event",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
+            home_team="Lakers",
+            away_team="Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+
+        mock_session = AsyncMock()
+
+        with patch("odds_analytics.sequence_loader.load_sequences_for_event") as mock_load:
+            # Create snapshots at specific times
+            timestamp_72h = datetime(2024, 10, 29, 19, 0, 0, tzinfo=UTC)  # 72h before
+            timestamp_24h = datetime(2024, 10, 31, 19, 0, 0, tzinfo=UTC)  # 24h before
+            timestamp_1h = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)   # 1h before
+
+            mock_sequences = [
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="h2h",
+                        outcome_name="Lakers",
+                        price=-110,  # At 72h
+                        point=None,
+                        odds_timestamp=timestamp_72h,
+                        last_update=timestamp_72h,
+                    ),
+                ],
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="h2h",
+                        outcome_name="Lakers",
+                        price=-130,  # At 24h
+                        point=None,
+                        odds_timestamp=timestamp_24h,
+                        last_update=timestamp_24h,
+                    ),
+                ],
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="h2h",
+                        outcome_name="Lakers",
+                        price=-150,  # At 1h
+                        point=None,
+                        odds_timestamp=timestamp_1h,
+                        last_update=timestamp_1h,
+                    ),
+                ],
+            ]
+            mock_load.return_value = mock_sequences
+
+            # Use 24h opening window instead of default 48h
+            X, y, masks = await prepare_lstm_training_data(
+                events=[event],
+                session=mock_session,
+                outcome="home",
+                market="h2h",
+                timesteps=8,
+                target_type=TargetType.REGRESSION,
+                opening_hours_before=24.0,
+                closing_hours_before=1.0,
+            )
+
+            assert X.shape[0] == 1, "Should have 1 sample"
+            assert y.dtype == np.float32, "Regression targets should be float32"
+            # Should use -130 (24h) as opening and -150 (1h) as closing
+            # Both are negative odds, so line moved in favor
+            assert y[0] > 0, "Target should be positive (line moved in favor)"
+
+    @pytest.mark.asyncio
+    async def test_regression_skips_same_snapshot(self):
+        """Test that regression mode skips events where opening/closing are same snapshot."""
+        event = Event(
+            id="test_event",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
+            home_team="Lakers",
+            away_team="Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+
+        mock_session = AsyncMock()
+
+        with patch("odds_analytics.sequence_loader.load_sequences_for_event") as mock_load:
+            # Only one snapshot - both opening and closing will resolve to it
+            timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+            mock_sequences = [
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="h2h",
+                        outcome_name="Lakers",
+                        price=-120,
+                        point=None,
+                        odds_timestamp=timestamp,
+                        last_update=timestamp,
+                    ),
+                ],
+            ]
+            mock_load.return_value = mock_sequences
+
+            X, y, masks = await prepare_lstm_training_data(
+                events=[event],
+                session=mock_session,
+                outcome="home",
+                market="h2h",
+                timesteps=8,
+                target_type=TargetType.REGRESSION,
+            )
+
+            # Should skip because opening and closing resolve to same snapshot
+            assert X.shape[0] == 0, "Should skip events where opening/closing are same snapshot"

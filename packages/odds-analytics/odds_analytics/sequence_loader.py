@@ -52,7 +52,7 @@ Example:
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 
 import numpy as np
@@ -84,44 +84,89 @@ def _extract_opening_closing_odds(
     odds_sequences: list[list[Odds]],
     outcome: str,
     market: str,
+    commence_time: datetime | None = None,
+    opening_hours_before: float = 48.0,
+    closing_hours_before: float = 0.5,
 ) -> tuple[list[Odds] | None, list[Odds] | None]:
     """
     Extract opening and closing odds from a sequence of snapshots.
 
-    Opening odds are from the first snapshot, closing odds from the last.
+    When commence_time is provided, finds snapshots closest to the target times:
+    - Opening: snapshot closest to (commence_time - opening_hours_before)
+    - Closing: snapshot closest to (commence_time - closing_hours_before)
+
+    When commence_time is None (legacy mode), uses first/last snapshots.
 
     Args:
         odds_sequences: List of snapshots ordered chronologically
         outcome: Target outcome name (team name or Over/Under)
         market: Market type (h2h, spreads, totals)
+        commence_time: Game start time for calculating target windows
+        opening_hours_before: Hours before game for opening line (default: 48)
+        closing_hours_before: Hours before game for closing line (default: 0.5)
 
     Returns:
         Tuple of (opening_odds, closing_odds) where each is a list of Odds
         for the target outcome/market, or None if not found.
+        Returns (None, None) if opening and closing resolve to same snapshot.
     """
     if not odds_sequences:
         return None, None
 
-    opening_odds = None
-    closing_odds = None
-
-    # Find opening odds (first snapshot with valid data)
+    # Build list of valid snapshots with their timestamps
+    valid_snapshots: list[tuple[datetime, list[Odds]]] = []
     for snapshot in odds_sequences:
         filtered = [
             o for o in snapshot if o.market_key == market and o.outcome_name == outcome
         ]
         if filtered:
-            opening_odds = filtered
-            break
+            # Use odds_timestamp from first odds in snapshot
+            timestamp = filtered[0].odds_timestamp
+            valid_snapshots.append((timestamp, filtered))
 
-    # Find closing odds (last snapshot with valid data)
-    for snapshot in reversed(odds_sequences):
-        filtered = [
-            o for o in snapshot if o.market_key == market and o.outcome_name == outcome
-        ]
-        if filtered:
-            closing_odds = filtered
-            break
+    if not valid_snapshots:
+        return None, None
+
+    # Legacy mode: use first/last snapshots
+    if commence_time is None:
+        if len(valid_snapshots) == 1:
+            # Only one snapshot - can't calculate delta
+            return None, None
+        return valid_snapshots[0][1], valid_snapshots[-1][1]
+
+    # Time-window mode: find snapshots closest to target times
+    opening_target = commence_time - timedelta(hours=opening_hours_before)
+    closing_target = commence_time - timedelta(hours=closing_hours_before)
+
+    def find_closest_snapshot(
+        target_time: datetime,
+    ) -> tuple[int, list[Odds]] | None:
+        """Find snapshot closest to target time, returning (index, odds)."""
+        best_idx = None
+        best_diff = float("inf")
+
+        for idx, (timestamp, odds) in enumerate(valid_snapshots):
+            diff = abs((timestamp - target_time).total_seconds())
+            if diff < best_diff:
+                best_diff = diff
+                best_idx = idx
+
+        if best_idx is not None:
+            return best_idx, valid_snapshots[best_idx][1]
+        return None
+
+    opening_result = find_closest_snapshot(opening_target)
+    closing_result = find_closest_snapshot(closing_target)
+
+    if opening_result is None or closing_result is None:
+        return None, None
+
+    opening_idx, opening_odds = opening_result
+    closing_idx, closing_odds = closing_result
+
+    # If opening and closing resolve to same snapshot, can't calculate delta
+    if opening_idx == closing_idx:
+        return None, None
 
     return opening_odds, closing_odds
 
@@ -327,6 +372,8 @@ async def prepare_lstm_training_data(
     sharp_bookmakers: list[str] | None = None,
     retail_bookmakers: list[str] | None = None,
     target_type: TargetType | str = TargetType.CLASSIFICATION,
+    opening_hours_before: float = 48.0,
+    closing_hours_before: float = 0.5,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Process multiple events to generate LSTM training data.
@@ -353,6 +400,12 @@ async def prepare_lstm_training_data(
             - "regression": Line movement delta (closing - opening)
               For h2h: implied probability change
               For spreads/totals: point change
+        opening_hours_before: Hours before game to find opening line (default: 48).
+            Only used when target_type="regression". Finds snapshot closest to
+            (commence_time - opening_hours_before).
+        closing_hours_before: Hours before game to find closing line (default: 0.5).
+            Only used when target_type="regression". Finds snapshot closest to
+            (commence_time - closing_hours_before).
 
     Returns:
         Tuple of (X, y, masks):
@@ -524,7 +577,12 @@ async def prepare_lstm_training_data(
         else:
             # Regression: line movement delta (closing - opening)
             opening_odds, closing_odds = _extract_opening_closing_odds(
-                odds_sequences, target_outcome, market
+                odds_sequences,
+                target_outcome,
+                market,
+                commence_time=event.commence_time,
+                opening_hours_before=opening_hours_before,
+                closing_hours_before=closing_hours_before,
             )
             regression_target = _calculate_regression_target(
                 opening_odds, closing_odds, market
