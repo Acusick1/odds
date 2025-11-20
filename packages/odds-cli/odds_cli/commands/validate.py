@@ -126,9 +126,13 @@ async def _validate_daily(
     if check_discovery and len(report.missing_scores) > 0:
         _display_missing_scores(report)
 
-    # Display incomplete games if any
+    # Display incomplete games if any (critical issues)
     if report.incomplete_games > 0:
         _display_incomplete_games(report, verbose)
+
+    # Display warning games if any (warning issues)
+    if report.games_with_warnings > 0:
+        _display_warning_games(report, verbose)
 
     # Save to JSON if requested
     if output_json:
@@ -136,25 +140,42 @@ async def _validate_daily(
         console.print(f"\n[green]Results saved to {output_json}[/green]")
 
     # Exit with appropriate code
+    # Critical failures: missing critical tiers (PREGAME, CLOSING), missing scores, missing games
+    # Warnings: missing supplementary tiers (OPENING, EARLY, SHARP)
     if check_scores and check_discovery:
-        # Strict mode: fail if any issue detected
-        if not report.is_fully_valid:
+        # Full validation mode: fail only on critical issues
+        has_critical_issues = (
+            report.incomplete_games > 0
+            or report.games_missing_scores > 0
+            or len(report.missing_games) > 0
+        )
+        if has_critical_issues:
             console.print(
-                f"\n[red]Status: FAILED - {report.incomplete_games} tier issues, "
+                f"\n[red]Status: FAILED - {report.incomplete_games} critical tier issues, "
                 f"{report.games_missing_scores} score issues, "
                 f"{len(report.missing_games)} missing games[/red]"
             )
             sys.exit(1)
+        elif report.has_warnings:
+            console.print(
+                f"\n[green]Status: PASSED[/green] [yellow](with {report.games_with_warnings} warnings)[/yellow]"
+            )
+            sys.exit(0)
         else:
             console.print("\n[green]Status: PASSED - All validations passed[/green]")
             sys.exit(0)
     else:
-        # Legacy mode: only check tier coverage
+        # Legacy mode: only check critical tier coverage
         if not report.is_valid:
             console.print(
-                f"\n[red]Status: FAILED - {report.incomplete_games} games incomplete[/red]"
+                f"\n[red]Status: FAILED - {report.incomplete_games} games missing critical tiers[/red]"
             )
             sys.exit(1)
+        elif report.has_warnings:
+            console.print(
+                f"\n[green]Status: PASSED[/green] [yellow](with {report.games_with_warnings} warnings)[/yellow]"
+            )
+            sys.exit(0)
         else:
             console.print("\n[green]Status: PASSED - All games complete[/green]")
             sys.exit(0)
@@ -174,7 +195,9 @@ def _display_summary(report, required_tiers, check_scores=True, check_discovery=
         else f"{report.complete_games} ({report.completion_rate:.1f}%)",
     )
     if report.incomplete_games > 0:
-        table.add_row("Incomplete", f"[red]{report.incomplete_games}[/red]")
+        table.add_row("Critical Issues", f"[red]{report.incomplete_games}[/red]")
+    if report.games_with_warnings > 0:
+        table.add_row("Warnings", f"[yellow]{report.games_with_warnings}[/yellow]")
 
     if check_scores:
         if report.games_missing_scores > 0:
@@ -281,8 +304,11 @@ def _display_missing_scores(report):
 
 
 def _display_incomplete_games(report, verbose):
-    """Display incomplete games."""
-    console.print(f"[bold]Incomplete Games ({report.incomplete_games}):[/bold]\n")
+    """Display incomplete games (missing critical tiers)."""
+    if report.incomplete_games == 0:
+        return
+
+    console.print(f"[bold red]Critical Issues - Missing Critical Tiers ({report.incomplete_games}):[/bold red]\n")
 
     incomplete_reports = [r for r in report.game_reports if not r.is_complete]
 
@@ -291,11 +317,49 @@ def _display_incomplete_games(report, verbose):
         teams = f"{game_report.away_team} @ {game_report.home_team}"
         game_time = game_report.commence_time.strftime("%Y-%m-%d %H:%M")
 
+        console.print(f"  {status_icon} [red]{teams}[/red] ({game_time})")
+
+        # Show critical missing tiers
+        if game_report.critical_tiers_missing:
+            critical = ", ".join(sorted([t.value.upper() for t in game_report.critical_tiers_missing]))
+            console.print(f"     Critical Missing: [red]{critical}[/red]")
+
+        # Show warning missing tiers
+        if game_report.warning_tiers_missing:
+            warnings = ", ".join(sorted([t.value.upper() for t in game_report.warning_tiers_missing]))
+            console.print(f"     Warning Missing: [yellow]{warnings}[/yellow]")
+
+        if verbose:
+            # Show present tiers
+            present = ", ".join(sorted([t.value.upper() for t in game_report.tiers_present]))
+            console.print(
+                f"     Has: {present} ({len(game_report.tiers_present)}/{len(game_report.tiers_present) + len(game_report.tiers_missing)} tiers)"
+            )
+            console.print(f"     Total snapshots: {game_report.total_snapshots}")
+
+        console.print()
+
+
+def _display_warning_games(report, verbose):
+    """Display games with only warning-level tier issues."""
+    if report.games_with_warnings == 0:
+        return
+
+    console.print(f"[bold yellow]Warnings - Missing Supplementary Tiers ({report.games_with_warnings}):[/bold yellow]\n")
+
+    # Get games that are complete (have critical tiers) but have warnings
+    warning_reports = [r for r in report.game_reports if r.is_complete and r.has_tier_warnings]
+
+    for game_report in warning_reports:
+        status_icon = "⚠"
+        teams = f"{game_report.away_team} @ {game_report.home_team}"
+        game_time = game_report.commence_time.strftime("%Y-%m-%d %H:%M")
+
         console.print(f"  {status_icon} [yellow]{teams}[/yellow] ({game_time})")
 
-        # Show missing tiers
-        missing = ", ".join(sorted([t.value.upper() for t in game_report.tiers_missing]))
-        console.print(f"     Missing: [red]{missing}[/red]")
+        # Show warning missing tiers
+        warnings = ", ".join(sorted([t.value.upper() for t in game_report.warning_tiers_missing]))
+        console.print(f"     Missing: [yellow]{warnings}[/yellow]")
 
         if verbose:
             # Show present tiers
@@ -317,8 +381,10 @@ def _save_to_json(report, output_path: str, check_scores=True, check_discovery=F
             "total_games": report.total_games,
             "complete_games": report.complete_games,
             "incomplete_games": report.incomplete_games,
+            "games_with_warnings": report.games_with_warnings,
             "completion_rate": report.completion_rate,
             "is_valid": report.is_valid,
+            "has_warnings": report.has_warnings,
         },
         "tier_coverage": {
             tier.value: report.total_games - report.missing_tier_breakdown.get(tier, 0)
@@ -338,10 +404,25 @@ def _save_to_json(report, output_path: str, check_scores=True, check_discovery=F
                 "commence_time": r.commence_time.isoformat(),
                 "tiers_present": [t.value for t in r.tiers_present],
                 "tiers_missing": [t.value for t in r.tiers_missing],
+                "critical_tiers_missing": [t.value for t in r.critical_tiers_missing],
+                "warning_tiers_missing": [t.value for t in r.warning_tiers_missing],
                 "total_snapshots": r.total_snapshots,
             }
             for r in report.game_reports
             if not r.is_complete
+        ],
+        "warning_games": [
+            {
+                "event_id": r.event_id,
+                "home_team": r.home_team,
+                "away_team": r.away_team,
+                "commence_time": r.commence_time.isoformat(),
+                "tiers_present": [t.value for t in r.tiers_present],
+                "warning_tiers_missing": [t.value for t in r.warning_tiers_missing],
+                "total_snapshots": r.total_snapshots,
+            }
+            for r in report.game_reports
+            if r.is_complete and r.has_tier_warnings
         ],
     }
 

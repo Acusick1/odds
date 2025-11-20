@@ -111,9 +111,10 @@ class GapBackfillPlanner:
         }
 
         for report in reports:
-            # Process each incomplete game in the report
+            # Process each game with any missing tiers (for backfill purposes)
+            # Note: is_complete only checks critical tiers; backfill should fill all gaps
             for game_report in report.game_reports:
-                if not game_report.is_complete:
+                if len(game_report.tiers_missing) > 0:
                     # Calculate missing snapshots for this game
                     missing_snapshot_count = await self._calculate_missing_snapshots(
                         game_report.event_id,
