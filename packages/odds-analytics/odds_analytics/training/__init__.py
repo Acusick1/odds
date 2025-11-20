@@ -29,6 +29,11 @@ from odds_analytics.training.config import (
     TuningConfig,
     XGBoostConfig,
 )
+from odds_analytics.training.data_preparation import (
+    TrainingDataResult,
+    filter_events_by_date_range,
+    prepare_training_data_from_config,
+)
 
 __all__ = [
     "ExperimentConfig",
@@ -41,4 +46,7 @@ __all__ = [
     "TuningConfig",
     "TrackingConfig",
     "MLTrainingConfig",
+    "prepare_training_data_from_config",
+    "filter_events_by_date_range",
+    "TrainingDataResult",
 ]
