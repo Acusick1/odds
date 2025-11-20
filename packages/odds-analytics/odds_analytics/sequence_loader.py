@@ -53,6 +53,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+from enum import Enum
 
 import numpy as np
 import structlog
@@ -61,13 +62,129 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import SequenceFeatureExtractor
+from odds_analytics.utils import calculate_implied_probability
+
+
+class TargetType(str, Enum):
+    """Target type for LSTM training."""
+
+    CLASSIFICATION = "classification"
+    REGRESSION = "regression"
 
 logger = structlog.get_logger()
 
 __all__ = [
     "load_sequences_for_event",
     "prepare_lstm_training_data",
+    "TargetType",
 ]
+
+
+def _extract_opening_closing_odds(
+    odds_sequences: list[list[Odds]],
+    outcome: str,
+    market: str,
+) -> tuple[list[Odds] | None, list[Odds] | None]:
+    """
+    Extract opening and closing odds from a sequence of snapshots.
+
+    Opening odds are from the first snapshot, closing odds from the last.
+
+    Args:
+        odds_sequences: List of snapshots ordered chronologically
+        outcome: Target outcome name (team name or Over/Under)
+        market: Market type (h2h, spreads, totals)
+
+    Returns:
+        Tuple of (opening_odds, closing_odds) where each is a list of Odds
+        for the target outcome/market, or None if not found.
+    """
+    if not odds_sequences:
+        return None, None
+
+    opening_odds = None
+    closing_odds = None
+
+    # Find opening odds (first snapshot with valid data)
+    for snapshot in odds_sequences:
+        filtered = [
+            o for o in snapshot if o.market_key == market and o.outcome_name == outcome
+        ]
+        if filtered:
+            opening_odds = filtered
+            break
+
+    # Find closing odds (last snapshot with valid data)
+    for snapshot in reversed(odds_sequences):
+        filtered = [
+            o for o in snapshot if o.market_key == market and o.outcome_name == outcome
+        ]
+        if filtered:
+            closing_odds = filtered
+            break
+
+    return opening_odds, closing_odds
+
+
+def _calculate_regression_target(
+    opening_odds: list[Odds] | None,
+    closing_odds: list[Odds] | None,
+    market: str,
+) -> float | None:
+    """
+    Calculate the regression target (closing - opening line delta).
+
+    For h2h market: Uses implied probability delta (closing prob - opening prob)
+    For spreads/totals: Uses point delta (closing point - opening point)
+
+    Args:
+        opening_odds: Opening odds for target outcome
+        closing_odds: Closing odds for target outcome
+        market: Market type (h2h, spreads, totals)
+
+    Returns:
+        Line movement delta or None if cannot be calculated.
+        For h2h: Probability change (positive = line moved in favor)
+        For spreads/totals: Point change (closing point - opening point)
+    """
+    if not opening_odds or not closing_odds:
+        return None
+
+    if market == "h2h":
+        # For h2h, use implied probability delta
+        # Average across bookmakers if multiple
+        opening_probs = [
+            calculate_implied_probability(o.price) for o in opening_odds
+        ]
+        closing_probs = [
+            calculate_implied_probability(o.price) for o in closing_odds
+        ]
+
+        if not opening_probs or not closing_probs:
+            return None
+
+        opening_prob = float(np.mean(opening_probs))
+        closing_prob = float(np.mean(closing_probs))
+
+        return closing_prob - opening_prob
+
+    elif market in ("spreads", "totals"):
+        # For spreads/totals, use point delta
+        # Filter for odds that have point values
+        opening_points = [o.point for o in opening_odds if o.point is not None]
+        closing_points = [o.point for o in closing_odds if o.point is not None]
+
+        if not opening_points or not closing_points:
+            return None
+
+        opening_point = float(np.mean(opening_points))
+        closing_point = float(np.mean(closing_points))
+
+        return closing_point - opening_point
+
+    else:
+        # Unknown market
+        return None
 
 
 async def load_sequences_for_event(
@@ -209,6 +326,7 @@ async def prepare_lstm_training_data(
     timesteps: int = 24,
     sharp_bookmakers: list[str] | None = None,
     retail_bookmakers: list[str] | None = None,
+    target_type: TargetType | str = TargetType.CLASSIFICATION,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Process multiple events to generate LSTM training data.
@@ -216,7 +334,9 @@ async def prepare_lstm_training_data(
     This function:
     1. Loads odds sequences for each event
     2. Uses SequenceFeatureExtractor to convert to feature tensors
-    3. Generates binary labels from event outcomes
+    3. Generates labels based on target_type:
+       - Classification: Binary labels from event outcomes (win/loss)
+       - Regression: Continuous line movement delta (closing - opening)
     4. Creates attention masks for variable-length sequences
 
     Args:
@@ -228,11 +348,18 @@ async def prepare_lstm_training_data(
         timesteps: Number of timesteps in sequence (fixed length)
         sharp_bookmakers: Sharp bookmakers for features (default: ["pinnacle"])
         retail_bookmakers: Retail bookmakers for features (default: ["fanduel", "draftkings", "betmgm"])
+        target_type: Type of target to generate:
+            - "classification": Binary win/loss labels (default)
+            - "regression": Line movement delta (closing - opening)
+              For h2h: implied probability change
+              For spreads/totals: point change
 
     Returns:
         Tuple of (X, y, masks):
         - X: Feature array of shape (n_samples, timesteps, num_features)
-        - y: Label array of shape (n_samples,) - binary (1=win, 0=loss)
+        - y: Label array of shape (n_samples,)
+            - Classification: int32 binary (1=win, 0=loss)
+            - Regression: float32 continuous (line movement delta)
         - masks: Attention mask of shape (n_samples, timesteps) - True for valid timesteps
 
     Edge Cases:
@@ -240,6 +367,7 @@ async def prepare_lstm_training_data(
         - Skips events with no odds data
         - Returns empty arrays if no valid events
         - Handles variable-length sequences via attention masks
+        - For regression: Skips events without opening/closing odds data
 
     Example:
         >>> from odds_lambda.storage.readers import OddsReader
@@ -250,6 +378,7 @@ async def prepare_lstm_training_data(
         ...         end_date=datetime(2024, 10, 31, tzinfo=UTC),
         ...         status=EventStatus.FINAL
         ...     )
+        ...     # Classification mode (default)
         ...     X, y, masks = await prepare_lstm_training_data(
         ...         events=events,
         ...         session=session,
@@ -257,13 +386,26 @@ async def prepare_lstm_training_data(
         ...         market="h2h"
         ...     )
         ...     print(f"Training data shape: {X.shape}")
-        ...     print(f"Labels shape: {y.shape}")
-        ...     print(f"Masks shape: {masks.shape}")
+        ...     print(f"Labels shape: {y.shape}")  # Binary labels
+        ...
+        ...     # Regression mode
+        ...     X, y, masks = await prepare_lstm_training_data(
+        ...         events=events,
+        ...         session=session,
+        ...         outcome="home",
+        ...         market="h2h",
+        ...         target_type="regression"
+        ...     )
+        ...     print(f"Labels shape: {y.shape}")  # Continuous deltas
     """
     # Validate inputs
     if not events:
         logger.warning("no_events_provided")
         return np.array([]), np.array([]), np.array([])
+
+    # Normalize target_type to enum
+    if isinstance(target_type, str):
+        target_type = TargetType(target_type.lower())
 
     # Filter for events with final scores
     valid_events = [
@@ -291,7 +433,9 @@ async def prepare_lstm_training_data(
     # Pre-allocate arrays
     n_samples = len(valid_events)
     X = np.zeros((n_samples, timesteps, num_features), dtype=np.float32)
-    y = np.zeros(n_samples, dtype=np.int32)
+    # Use float32 for regression, int32 for classification
+    y_dtype = np.float32 if target_type == TargetType.REGRESSION else np.int32
+    y = np.zeros(n_samples, dtype=y_dtype)
     masks = np.zeros((n_samples, timesteps), dtype=bool)
 
     # Process each event
@@ -364,17 +508,38 @@ async def prepare_lstm_training_data(
             skipped_events += 1
             continue
 
-        # Generate label based on outcome
-        if outcome == "home":
-            label = 1 if event.home_score > event.away_score else 0
-        elif outcome == "away":
-            label = 1 if event.away_score > event.home_score else 0
-        else:
-            # Assume outcome is a team name
-            if target_outcome == event.home_team:
+        # Generate label based on target_type and outcome
+        if target_type == TargetType.CLASSIFICATION:
+            # Binary classification: win/loss
+            if outcome == "home":
                 label = 1 if event.home_score > event.away_score else 0
-            else:
+            elif outcome == "away":
                 label = 1 if event.away_score > event.home_score else 0
+            else:
+                # Assume outcome is a team name
+                if target_outcome == event.home_team:
+                    label = 1 if event.home_score > event.away_score else 0
+                else:
+                    label = 1 if event.away_score > event.home_score else 0
+        else:
+            # Regression: line movement delta (closing - opening)
+            opening_odds, closing_odds = _extract_opening_closing_odds(
+                odds_sequences, target_outcome, market
+            )
+            regression_target = _calculate_regression_target(
+                opening_odds, closing_odds, market
+            )
+
+            if regression_target is None:
+                logger.warning(
+                    "missing_regression_target",
+                    event_id=event.id,
+                    reason="could not calculate opening/closing delta",
+                )
+                skipped_events += 1
+                continue
+
+            label = regression_target
 
         # Store in arrays
         X[valid_sample_idx] = sequence
@@ -402,6 +567,7 @@ async def prepare_lstm_training_data(
         num_features=num_features,
         outcome=outcome,
         market=market,
+        target_type=target_type.value,
         skipped_events=skipped_events,
     )
 

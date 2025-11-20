@@ -3,8 +3,12 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import numpy as np
 import pytest
 from odds_analytics.sequence_loader import (
+    TargetType,
+    _calculate_regression_target,
+    _extract_opening_closing_odds,
     load_sequences_for_event,
     prepare_lstm_training_data,
 )
@@ -553,3 +557,673 @@ class TestPrepareLSTMTrainingData:
             )
 
             assert X.shape[1] == 16, "Should respect custom timesteps parameter"
+
+
+class TestExtractOpeningClosingOdds:
+    """Tests for _extract_opening_closing_odds helper function."""
+
+    def test_extract_basic(self):
+        """Test basic extraction of opening and closing odds."""
+        timestamp1 = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+        timestamp2 = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
+
+        odds_sequences = [
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name="Lakers",
+                    price=-120,
+                    point=None,
+                    odds_timestamp=timestamp1,
+                    last_update=timestamp1,
+                ),
+            ],
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name="Lakers",
+                    price=-140,
+                    point=None,
+                    odds_timestamp=timestamp2,
+                    last_update=timestamp2,
+                ),
+            ],
+        ]
+
+        opening, closing = _extract_opening_closing_odds(odds_sequences, "Lakers", "h2h")
+
+        assert opening is not None
+        assert closing is not None
+        assert opening[0].price == -120
+        assert closing[0].price == -140
+
+    def test_extract_empty_sequences(self):
+        """Test handling of empty sequences."""
+        opening, closing = _extract_opening_closing_odds([], "Lakers", "h2h")
+        assert opening is None
+        assert closing is None
+
+    def test_extract_no_matching_outcome(self):
+        """Test handling of sequences with no matching outcome."""
+        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+        odds_sequences = [
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name="Celtics",  # Different team
+                    price=-120,
+                    point=None,
+                    odds_timestamp=timestamp,
+                    last_update=timestamp,
+                ),
+            ],
+        ]
+
+        opening, closing = _extract_opening_closing_odds(odds_sequences, "Lakers", "h2h")
+        assert opening is None
+        assert closing is None
+
+    def test_extract_spreads_market(self):
+        """Test extraction for spreads market with point values."""
+        timestamp1 = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+        timestamp2 = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
+
+        odds_sequences = [
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="spreads",
+                    outcome_name="Lakers",
+                    price=-110,
+                    point=-2.5,
+                    odds_timestamp=timestamp1,
+                    last_update=timestamp1,
+                ),
+            ],
+            [
+                Odds(
+                    event_id="test",
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="spreads",
+                    outcome_name="Lakers",
+                    price=-110,
+                    point=-3.5,
+                    odds_timestamp=timestamp2,
+                    last_update=timestamp2,
+                ),
+            ],
+        ]
+
+        opening, closing = _extract_opening_closing_odds(odds_sequences, "Lakers", "spreads")
+
+        assert opening is not None
+        assert closing is not None
+        assert opening[0].point == -2.5
+        assert closing[0].point == -3.5
+
+
+class TestCalculateRegressionTarget:
+    """Tests for _calculate_regression_target helper function."""
+
+    def test_h2h_probability_delta(self):
+        """Test h2h market uses implied probability delta."""
+        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+        opening_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-120,  # ~54.5% implied prob
+                point=None,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+
+        closing_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-150,  # ~60% implied prob
+                point=None,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+
+        result = _calculate_regression_target(opening_odds, closing_odds, "h2h")
+
+        assert result is not None
+        # Probability should increase (line moved in favor of Lakers)
+        assert result > 0
+        # Approximately 60% - 54.5% = 5.5%
+        assert 0.04 < result < 0.07
+
+    def test_spreads_point_delta(self):
+        """Test spreads market uses point delta."""
+        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+        opening_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="spreads",
+                outcome_name="Lakers",
+                price=-110,
+                point=-2.5,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+
+        closing_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="spreads",
+                outcome_name="Lakers",
+                price=-110,
+                point=-3.5,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+
+        result = _calculate_regression_target(opening_odds, closing_odds, "spreads")
+
+        assert result is not None
+        # Point delta: -3.5 - (-2.5) = -1.0
+        assert result == -1.0
+
+    def test_totals_point_delta(self):
+        """Test totals market uses point delta."""
+        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+        opening_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="totals",
+                outcome_name="Over",
+                price=-110,
+                point=215.5,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+
+        closing_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="totals",
+                outcome_name="Over",
+                price=-110,
+                point=218.5,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+
+        result = _calculate_regression_target(opening_odds, closing_odds, "totals")
+
+        assert result is not None
+        # Point delta: 218.5 - 215.5 = 3.0
+        assert result == 3.0
+
+    def test_missing_opening_odds(self):
+        """Test handling of missing opening odds."""
+        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+        closing_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-150,
+                point=None,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+
+        result = _calculate_regression_target(None, closing_odds, "h2h")
+        assert result is None
+
+    def test_missing_closing_odds(self):
+        """Test handling of missing closing odds."""
+        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+        opening_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-120,
+                point=None,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+
+        result = _calculate_regression_target(opening_odds, None, "h2h")
+        assert result is None
+
+    def test_unknown_market(self):
+        """Test handling of unknown market type."""
+        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+        opening_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="unknown",
+                outcome_name="Lakers",
+                price=-120,
+                point=None,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+
+        closing_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="unknown",
+                outcome_name="Lakers",
+                price=-150,
+                point=None,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+
+        result = _calculate_regression_target(opening_odds, closing_odds, "unknown")
+        assert result is None
+
+    def test_multiple_bookmakers_average(self):
+        """Test averaging across multiple bookmakers."""
+        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+        opening_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="spreads",
+                outcome_name="Lakers",
+                price=-110,
+                point=-2.5,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+            Odds(
+                event_id="test",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="spreads",
+                outcome_name="Lakers",
+                price=-110,
+                point=-3.5,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+
+        closing_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="pinnacle",
+                bookmaker_title="Pinnacle",
+                market_key="spreads",
+                outcome_name="Lakers",
+                price=-110,
+                point=-4.5,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+            Odds(
+                event_id="test",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="spreads",
+                outcome_name="Lakers",
+                price=-110,
+                point=-5.5,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+
+        result = _calculate_regression_target(opening_odds, closing_odds, "spreads")
+
+        assert result is not None
+        # Opening avg: (-2.5 + -3.5) / 2 = -3.0
+        # Closing avg: (-4.5 + -5.5) / 2 = -5.0
+        # Delta: -5.0 - (-3.0) = -2.0
+        assert result == -2.0
+
+
+class TestPrepareLSTMRegressionMode:
+    """Tests for prepare_lstm_training_data in regression mode."""
+
+    @pytest.mark.asyncio
+    async def test_regression_mode_h2h(self):
+        """Test regression mode with h2h market."""
+        event = Event(
+            id="test_event",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
+            home_team="Lakers",
+            away_team="Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+
+        mock_session = AsyncMock()
+
+        with patch("odds_analytics.sequence_loader.load_sequences_for_event") as mock_load:
+            timestamp1 = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+            timestamp2 = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
+
+            # Create sequences with different odds to produce a regression target
+            mock_sequences = [
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="h2h",
+                        outcome_name="Lakers",
+                        price=-120,  # Opening
+                        point=None,
+                        odds_timestamp=timestamp1,
+                        last_update=timestamp1,
+                    ),
+                ],
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="h2h",
+                        outcome_name="Lakers",
+                        price=-150,  # Closing
+                        point=None,
+                        odds_timestamp=timestamp2,
+                        last_update=timestamp2,
+                    ),
+                ],
+            ]
+            mock_load.return_value = mock_sequences
+
+            X, y, masks = await prepare_lstm_training_data(
+                events=[event],
+                session=mock_session,
+                outcome="home",
+                market="h2h",
+                timesteps=8,
+                target_type=TargetType.REGRESSION,
+            )
+
+            assert X.shape[0] == 1, "Should have 1 sample"
+            assert y.dtype == np.float32, "Regression targets should be float32"
+            # Y should be the probability delta (positive since line moved in favor)
+            assert y[0] > 0, "Target should be positive (line moved in favor)"
+
+    @pytest.mark.asyncio
+    async def test_regression_mode_spreads(self):
+        """Test regression mode with spreads market."""
+        event = Event(
+            id="test_event",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
+            home_team="Lakers",
+            away_team="Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+
+        mock_session = AsyncMock()
+
+        with patch("odds_analytics.sequence_loader.load_sequences_for_event") as mock_load:
+            timestamp1 = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+            timestamp2 = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
+
+            mock_sequences = [
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="spreads",
+                        outcome_name="Lakers",
+                        price=-110,
+                        point=-2.5,  # Opening
+                        odds_timestamp=timestamp1,
+                        last_update=timestamp1,
+                    ),
+                ],
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="spreads",
+                        outcome_name="Lakers",
+                        price=-110,
+                        point=-4.5,  # Closing
+                        odds_timestamp=timestamp2,
+                        last_update=timestamp2,
+                    ),
+                ],
+            ]
+            mock_load.return_value = mock_sequences
+
+            X, y, masks = await prepare_lstm_training_data(
+                events=[event],
+                session=mock_session,
+                outcome="home",
+                market="spreads",
+                timesteps=8,
+                target_type="regression",  # Test string conversion
+            )
+
+            assert X.shape[0] == 1, "Should have 1 sample"
+            assert y.dtype == np.float32, "Regression targets should be float32"
+            # Point delta: -4.5 - (-2.5) = -2.0
+            assert y[0] == pytest.approx(-2.0, abs=0.01)
+
+    @pytest.mark.asyncio
+    async def test_regression_skips_missing_data(self):
+        """Test that regression mode skips events without opening/closing data."""
+        event = Event(
+            id="test_event",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
+            home_team="Lakers",
+            away_team="Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+
+        mock_session = AsyncMock()
+
+        with patch("odds_analytics.sequence_loader.load_sequences_for_event") as mock_load:
+            timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+            # Sequences with non-matching outcome (no Lakers odds)
+            mock_sequences = [
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="h2h",
+                        outcome_name="Celtics",  # Different team
+                        price=-120,
+                        point=None,
+                        odds_timestamp=timestamp,
+                        last_update=timestamp,
+                    ),
+                ],
+            ]
+            mock_load.return_value = mock_sequences
+
+            X, y, masks = await prepare_lstm_training_data(
+                events=[event],
+                session=mock_session,
+                outcome="home",
+                market="h2h",
+                timesteps=8,
+                target_type=TargetType.REGRESSION,
+            )
+
+            # Should skip the event due to missing regression target
+            assert X.shape[0] == 0, "Should skip events without regression target"
+
+    @pytest.mark.asyncio
+    async def test_classification_backward_compatibility(self):
+        """Test that classification mode still works (backward compatibility)."""
+        event = Event(
+            id="test_event",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
+            home_team="Lakers",
+            away_team="Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+
+        mock_session = AsyncMock()
+
+        with patch("odds_analytics.sequence_loader.load_sequences_for_event") as mock_load:
+            timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+            mock_sequences = [
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="h2h",
+                        outcome_name="Lakers",
+                        price=-120,
+                        point=None,
+                        odds_timestamp=timestamp,
+                        last_update=timestamp,
+                    ),
+                ]
+            ]
+            mock_load.return_value = mock_sequences
+
+            # Default target_type should be classification
+            X, y, masks = await prepare_lstm_training_data(
+                events=[event],
+                session=mock_session,
+                outcome="home",
+                timesteps=8,
+            )
+
+            assert y.dtype == np.int32, "Classification targets should be int32"
+            assert y[0] == 1, "Home team won, label should be 1"
+
+    @pytest.mark.asyncio
+    async def test_regression_totals_market(self):
+        """Test regression mode with totals market."""
+        event = Event(
+            id="test_event",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
+            home_team="Lakers",
+            away_team="Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+
+        mock_session = AsyncMock()
+
+        with patch("odds_analytics.sequence_loader.load_sequences_for_event") as mock_load:
+            timestamp1 = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+            timestamp2 = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
+
+            mock_sequences = [
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="totals",
+                        outcome_name="Over",
+                        price=-110,
+                        point=215.5,  # Opening
+                        odds_timestamp=timestamp1,
+                        last_update=timestamp1,
+                    ),
+                ],
+                [
+                    Odds(
+                        event_id=event.id,
+                        bookmaker_key="pinnacle",
+                        bookmaker_title="Pinnacle",
+                        market_key="totals",
+                        outcome_name="Over",
+                        price=-110,
+                        point=220.5,  # Closing
+                        odds_timestamp=timestamp2,
+                        last_update=timestamp2,
+                    ),
+                ],
+            ]
+            mock_load.return_value = mock_sequences
+
+            X, y, masks = await prepare_lstm_training_data(
+                events=[event],
+                session=mock_session,
+                outcome="Over",  # For totals, use Over/Under
+                market="totals",
+                timesteps=8,
+                target_type=TargetType.REGRESSION,
+            )
+
+            assert X.shape[0] == 1, "Should have 1 sample"
+            # Point delta: 220.5 - 215.5 = 5.0
+            assert y[0] == pytest.approx(5.0, abs=0.01)
