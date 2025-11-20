@@ -9,7 +9,8 @@ import numpy as np
 import pytest
 import torch
 from odds_analytics.backtesting import BacktestConfig, BacktestEvent, BetOpportunity
-from odds_analytics.lstm_line_movement import LSTMLineMovementModel, LSTMLineMovementStrategy
+from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
+from odds_analytics.lstm_strategy import LSTMModel
 from odds_core.models import Event, EventStatus, Odds
 
 
@@ -85,7 +86,7 @@ def sample_odds_snapshot(sample_event):
     ]
 
 
-class TestLSTMLineMovementModel:
+class TestLSTMModel:
     """Test LSTM line movement model architecture (using unified LSTMModel with regression)."""
 
     def test_model_initialization(self):
@@ -95,7 +96,7 @@ class TestLSTMLineMovementModel:
         num_layers = 2
         dropout = 0.2
 
-        model = LSTMLineMovementModel(
+        model = LSTMModel(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
@@ -118,7 +119,7 @@ class TestLSTMLineMovementModel:
         input_size = 16
         hidden_size = 64
 
-        model = LSTMLineMovementModel(
+        model = LSTMModel(
             input_size=input_size, hidden_size=hidden_size, output_type="regression"
         )
 
@@ -140,7 +141,7 @@ class TestLSTMLineMovementModel:
         seq_len = 12
         input_size = 8
 
-        model = LSTMLineMovementModel(
+        model = LSTMModel(
             input_size=input_size,
             hidden_size=32,
             num_layers=1,
@@ -157,7 +158,7 @@ class TestLSTMLineMovementModel:
 
     def test_model_regression_output(self):
         """Test that model produces unbounded regression output."""
-        model = LSTMLineMovementModel(input_size=10, hidden_size=32, output_type="regression")
+        model = LSTMModel(input_size=10, hidden_size=32, output_type="regression")
         x = torch.randn(1, 10, 10)
 
         predictions = model(x)
@@ -221,7 +222,7 @@ class TestLSTMLineMovementStrategy:
 
         model = strategy._create_model()
 
-        assert isinstance(model, LSTMLineMovementModel)
+        assert isinstance(model, LSTMModel)
         assert model.hidden_size == 128
         assert model.num_layers == 3
         assert model.dropout == 0.3

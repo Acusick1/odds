@@ -95,10 +95,7 @@ from odds_analytics.sequence_loader import (
 
 logger = structlog.get_logger()
 
-__all__ = ["LSTMLineMovementModel", "LSTMLineMovementStrategy"]
-
-# Backward compatibility alias - LSTMLineMovementModel is now LSTMModel with output_type="regression"
-LSTMLineMovementModel = LSTMModel
+__all__ = ["LSTMLineMovementStrategy"]
 
 
 class LSTMLineMovementStrategy(BettingStrategy):
@@ -432,7 +429,6 @@ class LSTMLineMovementStrategy(BettingStrategy):
 
             # Convert to PyTorch tensors and add batch dimension
             X = torch.FloatTensor(sequence).unsqueeze(0).to(self.device)
-            mask_tensor = torch.BoolTensor(mask).unsqueeze(0).to(self.device)
 
             # Run inference
             self.model.eval()

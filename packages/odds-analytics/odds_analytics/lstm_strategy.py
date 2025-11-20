@@ -452,7 +452,6 @@ class LSTMStrategy(BettingStrategy):
 
         # Convert to PyTorch tensors and add batch dimension
         X = torch.FloatTensor(sequence).unsqueeze(0).to(self.device)  # (1, timesteps, features)
-        mask_tensor = torch.BoolTensor(mask).unsqueeze(0).to(self.device)  # (1, timesteps)
 
         # Run inference
         self.model.eval()
