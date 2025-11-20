@@ -9,6 +9,7 @@ import typer
 from odds_analytics.backtesting import BacktestConfig, BacktestEngine, BacktestResult
 from odds_analytics.lstm_strategy import LSTMStrategy
 from odds_analytics.strategies import ArbitrageStrategy, BasicEVStrategy, FlatBettingStrategy
+from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from odds_core.database import get_session
 from odds_lambda.storage.readers import OddsReader
 from rich.console import Console
@@ -23,6 +24,7 @@ STRATEGIES = {
     "basic_ev": BasicEVStrategy,
     "arbitrage": ArbitrageStrategy,
     "lstm": LSTMStrategy,
+    "xgb_line_movement": XGBoostLineMovementStrategy,
 }
 
 
@@ -38,7 +40,7 @@ def parse_date(date_str: str) -> datetime:
 @app.command("run")
 def run_backtest(
     strategy: str = typer.Option(
-        ..., "--strategy", "-s", help="Strategy name (flat, basic_ev, arbitrage, lstm)"
+        ..., "--strategy", "-s", help="Strategy name (flat, basic_ev, arbitrage, lstm, xgb_line_movement)"
     ),
     start: str = typer.Option(..., "--start", help="Start date (YYYY-MM-DD)"),
     end: str = typer.Option(..., "--end", help="End date (YYYY-MM-DD)"),
