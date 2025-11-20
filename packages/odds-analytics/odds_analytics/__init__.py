@@ -15,6 +15,10 @@ from odds_analytics.strategies import (
     BasicEVStrategy,
     FlatBettingStrategy,
 )
+from odds_analytics.xgboost_line_movement import (
+    XGBoostLineMovementStrategy,
+    prepare_tabular_training_data,
+)
 from odds_analytics.utils import (
     american_to_decimal,
     calculate_ev,
@@ -27,12 +31,15 @@ __all__ = [
     "FlatBettingStrategy",
     "BasicEVStrategy",
     "ArbitrageStrategy",
+    "XGBoostLineMovementStrategy",
     # Backfill
     "BackfillExecutor",
     "GameSelector",
     # Sequence Loading
     "load_sequences_for_event",
     "prepare_lstm_training_data",
+    # Tabular Training Data
+    "prepare_tabular_training_data",
     # Utils
     "american_to_decimal",
     "decimal_to_american",

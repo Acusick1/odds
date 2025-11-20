@@ -9,6 +9,7 @@ import typer
 from odds_analytics.backtesting import BacktestConfig, BacktestEngine, BacktestResult
 from odds_analytics.lstm_strategy import LSTMStrategy
 from odds_analytics.strategies import ArbitrageStrategy, BasicEVStrategy, FlatBettingStrategy
+from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from odds_core.database import get_session
 from odds_lambda.storage.readers import OddsReader
 from rich.console import Console
@@ -23,6 +24,7 @@ STRATEGIES = {
     "basic_ev": BasicEVStrategy,
     "arbitrage": ArbitrageStrategy,
     "lstm": LSTMStrategy,
+    "xgb_line_movement": XGBoostLineMovementStrategy,
 }
 
 
@@ -38,7 +40,7 @@ def parse_date(date_str: str) -> datetime:
 @app.command("run")
 def run_backtest(
     strategy: str = typer.Option(
-        ..., "--strategy", "-s", help="Strategy name (flat, basic_ev, arbitrage, lstm)"
+        ..., "--strategy", "-s", help="Strategy name (flat, basic_ev, arbitrage, lstm, xgb_line_movement)"
     ),
     start: str = typer.Option(..., "--start", help="Start date (YYYY-MM-DD)"),
     end: str = typer.Option(..., "--end", help="End date (YYYY-MM-DD)"),
@@ -54,6 +56,9 @@ def run_backtest(
     ),
     kelly_fraction: float = typer.Option(
         0.25, "--kelly-fraction", help="Kelly fraction (default: 0.25)"
+    ),
+    model_path: str | None = typer.Option(
+        None, "--model-path", "-m", help="Path to pre-trained model (for lstm, xgb_line_movement)"
     ),
 ):
     """
@@ -83,6 +88,7 @@ def run_backtest(
             output_csv=output_csv,
             bet_sizing=bet_sizing,
             kelly_fraction=kelly_fraction,
+            model_path=model_path,
         )
     )
 
@@ -96,11 +102,17 @@ async def _run_backtest_async(
     output_csv: str | None,
     bet_sizing: str,
     kelly_fraction: float,
+    model_path: str | None = None,
 ):
     """Run backtest asynchronously."""
     # Create strategy instance
     strategy_class = STRATEGIES[strategy_name]
-    strategy = strategy_class()
+
+    # Pass model_path for strategies that support it
+    if strategy_name in ("lstm", "xgb_line_movement") and model_path:
+        strategy = strategy_class(model_path=model_path)
+    else:
+        strategy = strategy_class()
 
     # Create bet sizing config
     from odds_analytics.backtesting import BetSizingConfig
