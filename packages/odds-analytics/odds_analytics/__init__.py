@@ -21,6 +21,18 @@ from odds_analytics.xgboost_line_movement import (
     XGBoostLineMovementStrategy,
     prepare_tabular_training_data,
 )
+from odds_analytics.training import (
+    DataConfig,
+    ExperimentConfig,
+    FeatureConfig,
+    LSTMConfig,
+    MLTrainingConfig,
+    SearchSpace,
+    TrackingConfig,
+    TrainingConfig,
+    TuningConfig,
+    XGBoostConfig,
+)
 from odds_analytics.utils import (
     american_to_decimal,
     calculate_ev,
@@ -51,4 +63,15 @@ __all__ = [
     "decimal_to_american",
     "calculate_implied_probability",
     "calculate_ev",
+    # Training Configuration
+    "MLTrainingConfig",
+    "TrainingConfig",
+    "ExperimentConfig",
+    "DataConfig",
+    "XGBoostConfig",
+    "LSTMConfig",
+    "FeatureConfig",
+    "SearchSpace",
+    "TuningConfig",
+    "TrackingConfig",
 ]
