@@ -17,10 +17,6 @@ from odds_analytics.strategies import (
     BasicEVStrategy,
     FlatBettingStrategy,
 )
-from odds_analytics.xgboost_line_movement import (
-    XGBoostLineMovementStrategy,
-    prepare_tabular_training_data,
-)
 from odds_analytics.training import (
     DataConfig,
     ExperimentConfig,
@@ -38,6 +34,10 @@ from odds_analytics.utils import (
     calculate_ev,
     calculate_implied_probability,
     decimal_to_american,
+)
+from odds_analytics.xgboost_line_movement import (
+    XGBoostLineMovementStrategy,
+    prepare_tabular_training_data,
 )
 
 __all__ = [

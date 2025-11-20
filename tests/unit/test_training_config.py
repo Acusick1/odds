@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from odds_analytics.training import (
     DataConfig,
     ExperimentConfig,
@@ -31,7 +30,6 @@ from odds_analytics.training import (
     TuningConfig,
     XGBoostConfig,
 )
-
 
 # =============================================================================
 # ExperimentConfig Tests
@@ -1021,3 +1019,112 @@ class TestEdgeCases:
             description="Test with unicode: αβγδ 中文 日本語",
         )
         assert "αβγδ" in config.description
+
+
+# =============================================================================
+# Unknown Field Rejection Tests
+# =============================================================================
+
+
+class TestUnknownFieldRejection:
+    """Tests for rejecting unknown fields in configurations."""
+
+    def test_experiment_config_unknown_field_rejected(self):
+        """Test that ExperimentConfig rejects unknown fields."""
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            ExperimentConfig(name="test", unknown_param=42)
+
+    def test_data_config_unknown_field_rejected(self):
+        """Test that DataConfig rejects unknown fields."""
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                unknown_param="invalid",
+            )
+
+    def test_xgboost_config_unknown_field_rejected(self):
+        """Test that XGBoostConfig rejects unknown fields."""
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            XGBoostConfig(n_estimators=100, unknown_param=42)
+
+    def test_lstm_config_unknown_field_rejected(self):
+        """Test that LSTMConfig rejects unknown fields."""
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            LSTMConfig(hidden_size=64, unknown_param="invalid")
+
+    def test_feature_config_unknown_field_rejected(self):
+        """Test that FeatureConfig rejects unknown fields."""
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            FeatureConfig(unknown_param=123)
+
+    def test_search_space_unknown_field_rejected(self):
+        """Test that SearchSpace rejects unknown fields."""
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            SearchSpace(type="int", low=0, high=100, unknown_param="invalid")
+
+    def test_tuning_config_unknown_field_rejected(self):
+        """Test that TuningConfig rejects unknown fields."""
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            TuningConfig(n_trials=50, unknown_param=True)
+
+    def test_tracking_config_unknown_field_rejected(self):
+        """Test that TrackingConfig rejects unknown fields."""
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            TrackingConfig(enabled=True, unknown_param="invalid")
+
+    def test_training_config_unknown_field_rejected(self):
+        """Test that TrainingConfig rejects unknown fields."""
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            TrainingConfig(
+                strategy_type="xgboost",
+                data=DataConfig(
+                    start_date=date(2024, 1, 1),
+                    end_date=date(2024, 12, 31),
+                ),
+                model=XGBoostConfig(),
+                unknown_param="invalid",
+            )
+
+    def test_ml_training_config_unknown_field_rejected(self):
+        """Test that MLTrainingConfig rejects unknown fields."""
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            MLTrainingConfig(
+                experiment=ExperimentConfig(name="test"),
+                training=TrainingConfig(
+                    strategy_type="xgboost",
+                    data=DataConfig(
+                        start_date=date(2024, 1, 1),
+                        end_date=date(2024, 12, 31),
+                    ),
+                    model=XGBoostConfig(),
+                ),
+                unknown_param="invalid",
+            )
+
+    def test_yaml_unknown_field_rejected(self):
+        """Test that unknown fields in YAML are rejected."""
+        config_data = {
+            "experiment": {
+                "name": "test",
+                "unknown_field": "should_fail",
+            },
+            "training": {
+                "strategy_type": "xgboost",
+                "data": {
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-12-31",
+                },
+                "model": {},
+            },
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_data, f)
+            temp_path = f.name
+
+        try:
+            with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+                MLTrainingConfig.from_yaml(temp_path)
+        finally:
+            Path(temp_path).unlink()

@@ -36,11 +36,10 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
-
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
     "ExperimentConfig",
@@ -68,6 +67,8 @@ class ExperimentConfig(BaseModel):
     Used for experiment identification, documentation, and MLflow tracking.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(
         ...,
         description="Unique experiment name for identification",
@@ -94,6 +95,8 @@ class DataConfig(BaseModel):
 
     Controls the date range for training data and train/test split settings.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     start_date: date = Field(
         ...,
@@ -126,7 +129,7 @@ class DataConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_date_range(self) -> "DataConfig":
+    def validate_date_range(self) -> DataConfig:
         """Ensure start_date is before end_date."""
         if self.start_date >= self.end_date:
             raise ValueError(
@@ -135,7 +138,7 @@ class DataConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_splits(self) -> "DataConfig":
+    def validate_splits(self) -> DataConfig:
         """Ensure splits don't exceed 1.0 in total."""
         total = self.test_split + self.validation_split
         if total >= 1.0:
@@ -158,6 +161,8 @@ class XGBoostConfig(BaseModel):
     Contains all configurable XGBoost parameters for regression tasks.
     See XGBoost documentation for detailed parameter descriptions.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     # Tree parameters
     n_estimators: int = Field(
@@ -258,6 +263,8 @@ class LSTMConfig(BaseModel):
 
     Contains all configurable parameters for LSTM sequence models.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     # Architecture parameters
     hidden_size: int = Field(
@@ -360,6 +367,8 @@ class FeatureConfig(BaseModel):
     Controls how features are extracted from raw odds data for model training.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     # Bookmaker configuration
     sharp_bookmakers: list[str] = Field(
         default=["pinnacle"],
@@ -400,7 +409,7 @@ class FeatureConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_timing(self) -> "FeatureConfig":
+    def validate_timing(self) -> FeatureConfig:
         """Ensure opening is before closing."""
         if self.opening_hours_before <= self.closing_hours_before:
             raise ValueError(
@@ -442,6 +451,8 @@ class SearchSpace(BaseModel):
         ```
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     type: Literal["int", "float", "categorical"] = Field(
         ...,
         description="Parameter type for search space",
@@ -469,7 +480,7 @@ class SearchSpace(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_search_space(self) -> "SearchSpace":
+    def validate_search_space(self) -> SearchSpace:
         """Validate search space parameters based on type."""
         if self.type in ("int", "float"):
             if self.low is None or self.high is None:
@@ -477,22 +488,16 @@ class SearchSpace(BaseModel):
                     f"Search space type '{self.type}' requires 'low' and 'high' bounds"
                 )
             if self.low >= self.high:
-                raise ValueError(
-                    f"'low' ({self.low}) must be less than 'high' ({self.high})"
-                )
+                raise ValueError(f"'low' ({self.low}) must be less than 'high' ({self.high})")
             if self.log and self.low <= 0:
-                raise ValueError(
-                    f"Log scale requires 'low' > 0, got {self.low}"
-                )
+                raise ValueError(f"Log scale requires 'low' > 0, got {self.low}")
         elif self.type == "categorical":
             if not self.choices:
                 raise ValueError(
                     "Search space type 'categorical' requires non-empty 'choices' list"
                 )
             if self.low is not None or self.high is not None:
-                raise ValueError(
-                    "Search space type 'categorical' should not have 'low' or 'high'"
-                )
+                raise ValueError("Search space type 'categorical' should not have 'low' or 'high'")
         return self
 
 
@@ -507,6 +512,8 @@ class TuningConfig(BaseModel):
 
     Controls the optimization process for finding best hyperparameters.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     n_trials: int = Field(
         default=100,
@@ -555,6 +562,8 @@ class TrackingConfig(BaseModel):
     Controls logging and artifact storage for experiment reproducibility.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = Field(
         default=False,
         description="Enable MLflow tracking",
@@ -602,9 +611,13 @@ class TrainingConfig(BaseModel):
     based on strategy_type.
     """
 
-    strategy_type: Literal["xgboost", "xgboost_line_movement", "lstm", "lstm_line_movement"] = Field(
-        ...,
-        description="Type of ML strategy to train",
+    model_config = ConfigDict(extra="forbid")
+
+    strategy_type: Literal["xgboost", "xgboost_line_movement", "lstm", "lstm_line_movement"] = (
+        Field(
+            ...,
+            description="Type of ML strategy to train",
+        )
     )
 
     # Data configuration
@@ -655,7 +668,7 @@ class TrainingConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_model_type(self) -> "TrainingConfig":
+    def validate_model_type(self) -> TrainingConfig:
         """Ensure model config matches strategy type."""
         if self.strategy_type in ("xgboost", "xgboost_line_movement"):
             if not isinstance(self.model, XGBoostConfig):
@@ -728,6 +741,8 @@ class MLTrainingConfig(BaseModel):
         ```
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     experiment: ExperimentConfig = Field(
         ...,
         description="Experiment metadata",
@@ -746,7 +761,7 @@ class MLTrainingConfig(BaseModel):
     )
 
     @classmethod
-    def from_yaml(cls, filepath: str | Path) -> "MLTrainingConfig":
+    def from_yaml(cls, filepath: str | Path) -> MLTrainingConfig:
         """
         Load configuration from a YAML file.
 
@@ -780,7 +795,7 @@ class MLTrainingConfig(BaseModel):
         return cls.model_validate(data)
 
     @classmethod
-    def from_json(cls, filepath: str | Path) -> "MLTrainingConfig":
+    def from_json(cls, filepath: str | Path) -> MLTrainingConfig:
         """
         Load configuration from a JSON file.
 
@@ -874,6 +889,7 @@ class MLTrainingConfig(BaseModel):
 
     def _to_serializable_dict(self) -> dict:
         """Convert configuration to a JSON/YAML serializable dictionary."""
+
         def serialize_value(value: Any) -> Any:
             if isinstance(value, date):
                 return value.isoformat()
@@ -899,7 +915,7 @@ class MLTrainingConfig(BaseModel):
         return self._to_serializable_dict()
 
     @classmethod
-    def from_dict(cls, data: dict) -> "MLTrainingConfig":
+    def from_dict(cls, data: dict) -> MLTrainingConfig:
         """
         Create configuration from a dictionary.
 
