@@ -1,32 +1,36 @@
 """
-LSTM-based betting strategy for sequence modeling of line movement.
+LSTM-based line movement predictor for regression-based betting.
 
-This module provides a minimal, extensible LSTM framework for time-series betting models.
-The architecture emphasizes clean integration and ease of modification over performance
-optimization, enabling rapid experimentation with different model architectures.
+This module provides an LSTM model that predicts line movement deltas (closing - opening)
+using time-series sequence data. Unlike classification-based approaches, this strategy
+predicts continuous values representing how betting lines are expected to move.
 
 Key Features:
-- Simple 2-layer LSTM with 64 hidden units (easily customizable)
-- Integrates with SequenceFeatureExtractor via dependency injection
-- Returns training history for user analysis/visualization
-- Supports model persistence (torch.save/load)
-- Compatible with backtesting engine and Kelly Criterion sizing
+- LSTM regressor for predicting continuous line movement deltas
+- Multiple loss function support (MSE, MAE, Huber)
+- Uses SequenceFeatureExtractor for sequential feature handling
+- Converts predicted movements to betting confidence for Kelly sizing
+- Model persistence (save/load weights)
+- Integration with backtesting framework
+
+The core insight is that if a line is predicted to move significantly in one
+direction (e.g., probability increasing for home team), it suggests the opening
+line undervalues that outcome, creating a potential +EV betting opportunity.
 
 Example:
     ```python
-    from odds_analytics.lstm_strategy import LSTMStrategy
+    from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
     from odds_analytics.backtesting import BacktestEngine, BacktestConfig
     from odds_lambda.storage.readers import OddsReader
 
     # Create and train strategy
-    strategy = LSTMStrategy(
+    strategy = LSTMLineMovementStrategy(
         lookback_hours=72,
         timesteps=24,
         hidden_size=64,
         num_layers=2,
         market="h2h",
-        min_edge_threshold=0.03,
-        min_confidence=0.52
+        min_predicted_movement=0.02,
     )
 
     # Train on historical data
@@ -43,11 +47,10 @@ Example:
             session=session,
             epochs=20,
             batch_size=32,
-            learning_rate=0.001
         )
 
         # Save trained model
-        strategy.save_model("models/lstm_h2h_v1.pt")
+        strategy.save_model("models/lstm_line_movement_v1.pt")
 
     # Use in backtesting
     config = BacktestConfig(
@@ -83,156 +86,80 @@ from odds_analytics.backtesting import (
     BettingStrategy,
 )
 from odds_analytics.feature_extraction import SequenceFeatureExtractor
-from odds_analytics.sequence_loader import load_sequences_for_event, prepare_lstm_training_data
+from odds_analytics.lstm_strategy import LSTMModel
+from odds_analytics.sequence_loader import (
+    TargetType,
+    load_sequences_for_event,
+    prepare_lstm_training_data,
+)
 
 logger = structlog.get_logger()
 
-__all__ = ["LSTMModel", "LSTMStrategy"]
+__all__ = ["LSTMLineMovementStrategy"]
 
 
-class LSTMModel(nn.Module):
+class LSTMLineMovementStrategy(BettingStrategy):
     """
-    Unified LSTM model supporting both classification and regression.
-
-    Architecture kept simple and readable for easy experimentation.
-    Users can modify this class to test different architectures.
-
-    Args:
-        input_size: Number of input features per timestep
-        hidden_size: Number of hidden units in LSTM layers (default: 64)
-        num_layers: Number of stacked LSTM layers (default: 2)
-        dropout: Dropout rate between LSTM layers (default: 0.2)
-        output_type: Type of output - "classification" or "regression" (default: "classification")
-
-    Input:
-        x: Tensor of shape (batch_size, seq_len, input_size)
-
-    Output:
-        Classification: Tuple of (logits, probs) where both are (batch_size,)
-        Regression: Single tensor of predictions (batch_size,)
-    """
-
-    def __init__(
-        self,
-        input_size: int,
-        hidden_size: int = 64,
-        num_layers: int = 2,
-        dropout: float = 0.2,
-        output_type: str = "classification",
-    ):
-        super().__init__()
-
-        if output_type not in ("classification", "regression"):
-            raise ValueError(f"output_type must be 'classification' or 'regression', got '{output_type}'")
-
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.dropout = dropout
-        self.output_type = output_type
-
-        # LSTM layers
-        self.lstm = nn.LSTM(
-            input_size=input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            dropout=dropout if num_layers > 1 else 0.0,
-            batch_first=True,
-        )
-
-        # Output layer
-        self.fc = nn.Linear(hidden_size, 1)
-
-    def forward(
-        self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
-        """
-        Forward pass through LSTM.
-
-        Args:
-            x: Input tensor (batch_size, seq_len, input_size)
-
-        Returns:
-            Classification: Tuple of (logits, probabilities)
-            Regression: Single tensor of predictions
-        """
-        # LSTM forward pass
-        # output shape: (batch_size, seq_len, hidden_size)
-        # h_n shape: (num_layers, batch_size, hidden_size)
-        lstm_out, (h_n, c_n) = self.lstm(x)
-
-        # Use final hidden state from last layer
-        # h_n[-1] shape: (batch_size, hidden_size)
-        final_hidden = h_n[-1]
-
-        # Fully connected layer
-        # output shape: (batch_size, 1)
-        output = self.fc(final_hidden)
-
-        # Squeeze to (batch_size,)
-        output = output.squeeze(-1)
-
-        if self.output_type == "classification":
-            # Apply sigmoid for probabilities
-            probs = torch.sigmoid(output)
-            return output, probs
-        else:
-            # Regression: return raw output
-            return output
-
-
-class LSTMStrategy(BettingStrategy):
-    """
-    LSTM-based betting strategy using sequence modeling of line movement.
+    LSTM-based betting strategy for line movement regression prediction.
 
     This strategy trains an LSTM model on historical odds sequences to predict
-    game outcomes, then identifies betting opportunities where the model's
-    probability estimate differs from the market consensus.
+    how betting lines will move from opening to closing. It then identifies
+    betting opportunities where significant favorable movement is predicted.
 
-    Design Philosophy:
-    - Keep implementation simple and extensible
-    - Return training history for user analysis
-    - No advanced features (early stopping, LR scheduling) - users add as needed
-    - Focus on clean integration with existing backtesting infrastructure
+    The model predicts:
+    - For h2h: Probability delta (closing_prob - opening_prob)
+    - For spreads/totals: Point delta (closing_point - opening_point)
+
+    A positive predicted delta for an outcome indicates the market is expected
+    to move in favor of that outcome, suggesting it's currently undervalued.
 
     Args:
+        model_path: Path to saved model file (loads on init if provided)
         lookback_hours: Hours of historical data to use (default: 72)
         timesteps: Number of sequence timesteps (default: 24)
         hidden_size: LSTM hidden units (default: 64)
         num_layers: Number of LSTM layers (default: 2)
         dropout: Dropout rate (default: 0.2)
         market: Market to analyze (default: "h2h")
-        min_edge_threshold: Minimum edge to bet (default: 0.03 = 3%)
-        min_confidence: Minimum model confidence to bet (default: 0.52)
+        min_predicted_movement: Minimum predicted movement to trigger bet (default: 0.02)
+        movement_confidence_scale: Scale factor for confidence (default: 5.0)
+        base_confidence: Base confidence at threshold (default: 0.52)
+        loss_function: Loss function to use (default: "mse", options: "mse", "mae", "huber")
         sharp_bookmakers: Sharp bookmakers for features (default: ["pinnacle"])
         retail_bookmakers: Retail bookmakers for features (default: ["fanduel", "draftkings", "betmgm"])
     """
 
     def __init__(
         self,
+        model_path: str | None = None,
         lookback_hours: int = 72,
         timesteps: int = 24,
         hidden_size: int = 64,
         num_layers: int = 2,
         dropout: float = 0.2,
         market: str = "h2h",
-        min_edge_threshold: float = 0.03,
-        min_confidence: float = 0.52,
+        min_predicted_movement: float = 0.02,
+        movement_confidence_scale: float = 5.0,
+        base_confidence: float = 0.52,
+        loss_function: str = "mse",
         sharp_bookmakers: list[str] | None = None,
         retail_bookmakers: list[str] | None = None,
     ):
-        """Initialize LSTM betting strategy."""
+        """Initialize LSTM Line Movement betting strategy."""
         # Call parent constructor
         super().__init__(
-            name="LSTM",
+            name="LSTMLineMovement",
+            model_path=model_path,
             lookback_hours=lookback_hours,
             timesteps=timesteps,
             hidden_size=hidden_size,
             num_layers=num_layers,
             dropout=dropout,
             market=market,
-            min_edge_threshold=min_edge_threshold,
-            min_confidence=min_confidence,
+            min_predicted_movement=min_predicted_movement,
+            movement_confidence_scale=movement_confidence_scale,
+            base_confidence=base_confidence,
+            loss_function=loss_function,
             sharp_bookmakers=sharp_bookmakers or ["pinnacle"],
             retail_bookmakers=retail_bookmakers or ["fanduel", "draftkings", "betmgm"],
         )
@@ -256,14 +183,33 @@ class LSTMStrategy(BettingStrategy):
         self.is_trained = False
         self.training_history: dict[str, list[float]] | None = None
 
+        # Load model if path provided
+        if model_path:
+            self.load_model(model_path)
+
     def _create_model(self) -> LSTMModel:
-        """Create new LSTM model with configured architecture."""
+        """Create new LSTM model with configured architecture for regression."""
         return LSTMModel(
             input_size=self.input_size,
             hidden_size=self.params["hidden_size"],
             num_layers=self.params["num_layers"],
             dropout=self.params["dropout"],
+            output_type="regression",
         )
+
+    def _get_loss_function(self) -> nn.Module:
+        """Get loss function based on configuration."""
+        loss_name = self.params.get("loss_function", "mse").lower()
+
+        if loss_name == "mse":
+            return nn.MSELoss()
+        elif loss_name == "mae":
+            return nn.L1Loss()
+        elif loss_name == "huber":
+            return nn.HuberLoss()
+        else:
+            logger.warning(f"Unknown loss function '{loss_name}', defaulting to MSE")
+            return nn.MSELoss()
 
     async def train(
         self,
@@ -273,12 +219,11 @@ class LSTMStrategy(BettingStrategy):
         batch_size: int = 32,
         learning_rate: float = 0.001,
         outcome: str = "home",
+        opening_hours_before: float = 48.0,
+        closing_hours_before: float = 0.5,
     ) -> dict[str, list[float]]:
         """
-        Train LSTM model on historical events.
-
-        This is a basic training loop without early stopping or learning rate
-        scheduling. Users can modify this method to add advanced features.
+        Train LSTM model on historical events for line movement regression.
 
         Args:
             events: List of events with final scores (status=FINAL)
@@ -287,23 +232,26 @@ class LSTMStrategy(BettingStrategy):
             batch_size: Batch size for training (default: 32)
             learning_rate: Learning rate for Adam optimizer (default: 0.001)
             outcome: What to predict - "home" or "away" (default: "home")
+            opening_hours_before: Hours before game for opening line (default: 48)
+            closing_hours_before: Hours before game for closing line (default: 0.5)
 
         Returns:
-            Training history dict with "loss" key containing loss values per epoch
+            Training history dict with loss values per epoch
 
         Example:
             >>> history = await strategy.train(events, session, epochs=20)
             >>> print(f"Final loss: {history['loss'][-1]:.4f}")
         """
         logger.info(
-            "training_lstm",
+            "training_lstm_line_movement",
             num_events=len(events),
             epochs=epochs,
             batch_size=batch_size,
             outcome=outcome,
+            loss_function=self.params.get("loss_function", "mse"),
         )
 
-        # Prepare training data
+        # Prepare training data with regression targets
         X, y, masks = await prepare_lstm_training_data(
             events=events,
             session=session,
@@ -313,13 +261,22 @@ class LSTMStrategy(BettingStrategy):
             timesteps=self.params["timesteps"],
             sharp_bookmakers=self.params["sharp_bookmakers"],
             retail_bookmakers=self.params["retail_bookmakers"],
+            target_type=TargetType.REGRESSION,
+            opening_hours_before=opening_hours_before,
+            closing_hours_before=closing_hours_before,
         )
 
         if len(X) == 0:
             logger.error("no_training_data")
             raise ValueError("No valid training data available")
 
-        logger.info("training_data_prepared", num_samples=len(X), num_features=self.input_size)
+        logger.info(
+            "training_data_prepared",
+            num_samples=len(X),
+            num_features=self.input_size,
+            target_mean=float(np.mean(y)),
+            target_std=float(np.std(y)),
+        )
 
         # Create model
         self.model = self._create_model().to(self.device)
@@ -336,43 +293,54 @@ class LSTMStrategy(BettingStrategy):
         )
 
         # Loss function and optimizer
-        criterion = nn.BCEWithLogitsLoss()
+        criterion = self._get_loss_function()
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
 
         # Training loop
-        history: dict[str, list[float]] = {"loss": []}
+        history: dict[str, list[float]] = {"loss": [], "mae": []}
 
         for epoch in range(epochs):
             self.model.train()
             epoch_loss = 0.0
+            epoch_mae = 0.0
             num_batches = 0
 
             for batch_X, batch_y, batch_mask in dataloader:
                 optimizer.zero_grad()
 
                 # Forward pass
-                logits, probs = self.model(batch_X)
+                predictions = self.model(batch_X)
 
                 # Calculate loss
-                loss = criterion(logits, batch_y)
+                loss = criterion(predictions, batch_y)
 
                 # Backward pass
                 loss.backward()
                 optimizer.step()
 
                 epoch_loss += loss.item()
+                # Calculate MAE for tracking regardless of loss function
+                with torch.no_grad():
+                    mae = torch.mean(torch.abs(predictions - batch_y)).item()
+                    epoch_mae += mae
                 num_batches += 1
 
-            # Record average loss for epoch
+            # Record average metrics for epoch
             avg_loss = epoch_loss / num_batches
+            avg_mae = epoch_mae / num_batches
             history["loss"].append(avg_loss)
+            history["mae"].append(avg_mae)
 
-            logger.info("training_epoch", epoch=epoch + 1, loss=avg_loss)
+            logger.info("training_epoch", epoch=epoch + 1, loss=avg_loss, mae=avg_mae)
 
         self.is_trained = True
         self.training_history = history
 
-        logger.info("training_complete", final_loss=history["loss"][-1])
+        logger.info(
+            "training_complete",
+            final_loss=history["loss"][-1],
+            final_mae=history["mae"][-1],
+        )
 
         return history
 
@@ -384,25 +352,22 @@ class LSTMStrategy(BettingStrategy):
         session: AsyncSession | None = None,
     ) -> list[BetOpportunity]:
         """
-        Evaluate betting opportunities using trained LSTM model.
+        Evaluate betting opportunities using line movement predictions.
 
-        This method is called by BacktestEngine for each event. It loads the
-        historical odds sequence, runs inference through the LSTM model, and
-        identifies betting opportunities where the model's probability estimate
-        differs significantly from the market consensus.
+        The strategy:
+        1. Load historical odds sequence for the event
+        2. Extract features for both home and away outcomes
+        3. Predict line movement delta for each
+        4. Bet on outcomes with significant predicted positive movement
 
         Args:
             event: Event with final scores
-            odds_snapshot: Odds at decision time (used for market odds comparison)
+            odds_snapshot: Odds at decision time (opening line)
             config: Backtest configuration
-            session: Database session for loading historical sequences (required for LSTM)
+            session: Database session for loading historical sequences (required)
 
         Returns:
             List of BetOpportunity objects (may be empty if no edge found)
-
-        Edge Detection:
-            If model predicts home win probability of 0.60 but market implies 0.52,
-            the edge is 0.08 (8%). If this exceeds min_edge_threshold, a bet is placed.
         """
         if not self.is_trained or self.model is None:
             logger.warning("model_not_trained", event_id=event.id)
@@ -413,7 +378,7 @@ class LSTMStrategy(BettingStrategy):
             logger.warning(
                 "lstm_requires_session",
                 event_id=event.id,
-                message="LSTMStrategy requires database session to load sequences",
+                message="LSTMLineMovementStrategy requires database session to load sequences",
             )
             return []
 
@@ -430,68 +395,80 @@ class LSTMStrategy(BettingStrategy):
             logger.debug("no_sequence_data", event_id=event.id)
             return []
 
-        # Extract features for home team prediction
-        try:
-            features_dict = self.feature_extractor.extract_features(
-                event=event,
-                odds_data=odds_sequences,
-                outcome=event.home_team,
-                market=self.params["market"],
-            )
-        except Exception as e:
-            logger.error("failed_to_extract_features", event_id=event.id, error=str(e))
-            return []
+        market = self.params["market"]
+        min_movement = self.params["min_predicted_movement"]
+        movement_scale = self.params["movement_confidence_scale"]
+        base_conf = self.params["base_confidence"]
 
-        sequence = features_dict["sequence"]  # (timesteps, num_features)
-        mask = features_dict["mask"]  # (timesteps,)
+        # Evaluate both home and away team
+        for outcome_name in [event.home_team, event.away_team]:
+            # Extract features for this outcome
+            try:
+                features_dict = self.feature_extractor.extract_features(
+                    event=event,
+                    odds_data=odds_sequences,
+                    outcome=outcome_name,
+                    market=market,
+                )
+            except Exception as e:
+                logger.error(
+                    "failed_to_extract_features",
+                    event_id=event.id,
+                    outcome=outcome_name,
+                    error=str(e),
+                )
+                continue
 
-        # Skip if no valid timesteps
-        if not mask.any():
-            logger.debug("no_valid_timesteps", event_id=event.id)
-            return []
+            sequence = features_dict["sequence"]  # (timesteps, num_features)
+            mask = features_dict["mask"]  # (timesteps,)
 
-        # Convert to PyTorch tensors and add batch dimension
-        X = torch.FloatTensor(sequence).unsqueeze(0).to(self.device)  # (1, timesteps, features)
+            # Skip if no valid timesteps
+            if not mask.any():
+                logger.debug("no_valid_timesteps", event_id=event.id, outcome=outcome_name)
+                continue
 
-        # Run inference
-        self.model.eval()
-        with torch.no_grad():
-            logits, probs = self.model(X)
-            home_win_prob = probs.item()
+            # Convert to PyTorch tensors and add batch dimension
+            X = torch.FloatTensor(sequence).unsqueeze(0).to(self.device)
 
-        # Calculate market consensus from odds snapshot
-        market_odds = [
-            o for o in odds_snapshot if o.market_key == self.params["market"] and o.outcome_name == event.home_team
-        ]
+            # Run inference
+            self.model.eval()
+            with torch.no_grad():
+                predicted_movement = self.model(X).item()
 
-        if not market_odds:
-            logger.debug("no_market_odds", event_id=event.id)
-            return []
+            # Only bet if significant positive movement is predicted
+            # Positive movement = line expected to move in favor of this outcome
+            if predicted_movement < min_movement:
+                continue
 
-        # Use average market implied probability as consensus
-        from odds_analytics.utils import calculate_implied_probability
+            # Find best available odds for this outcome in the snapshot
+            outcome_odds = [
+                o
+                for o in odds_snapshot
+                if o.market_key == market and o.outcome_name == outcome_name
+            ]
 
-        market_probs = [calculate_implied_probability(o.price) for o in market_odds]
-        market_consensus = float(np.mean(market_probs))
+            if not outcome_odds:
+                continue
 
-        # Calculate edge (model prob - market prob)
-        edge = home_win_prob - market_consensus
+            best_odd = max(outcome_odds, key=lambda o: o.price)
 
-        # Check if edge exceeds threshold and confidence is sufficient
-        if edge >= self.params["min_edge_threshold"] and home_win_prob >= self.params["min_confidence"]:
-            # Find best available odds for home team
-            best_odds = max(market_odds, key=lambda o: o.price)
+            # Convert predicted movement to confidence for Kelly sizing
+            # Higher predicted movement = higher confidence
+            confidence = base_conf + (predicted_movement - min_movement) * movement_scale
+            confidence = min(max(confidence, 0.5), 0.95)  # Clamp to reasonable range
 
             opportunities.append(
                 BetOpportunity(
                     event_id=event.id,
-                    market=self.params["market"],
-                    outcome=event.home_team,
-                    bookmaker=best_odds.bookmaker_key,
-                    odds=best_odds.price,
-                    line=best_odds.point,
-                    confidence=home_win_prob,  # Model probability used for Kelly sizing
-                    rationale=f"LSTM edge: {edge:.2%} (model: {home_win_prob:.2%}, market: {market_consensus:.2%})",
+                    market=market,
+                    outcome=outcome_name,
+                    bookmaker=best_odd.bookmaker_key,
+                    odds=best_odd.price,
+                    line=best_odd.point,
+                    confidence=confidence,
+                    rationale=f"LSTM predicted movement: {predicted_movement:+.3f} "
+                    f"({'prob' if market == 'h2h' else 'points'}) "
+                    f"at {best_odd.bookmaker_key}",
                 )
             )
 
@@ -505,7 +482,7 @@ class LSTMStrategy(BettingStrategy):
             filepath: Path to save model weights and metadata
 
         Example:
-            >>> strategy.save_model("models/lstm_h2h_v1.pt")
+            >>> strategy.save_model("models/lstm_line_movement_v1.pt")
         """
         if self.model is None:
             raise ValueError("No model to save (train first)")
@@ -533,8 +510,8 @@ class LSTMStrategy(BettingStrategy):
             filepath: Path to saved model file
 
         Example:
-            >>> strategy = LSTMStrategy()
-            >>> strategy.load_model("models/lstm_h2h_v1.pt")
+            >>> strategy = LSTMLineMovementStrategy()
+            >>> strategy.load_model("models/lstm_line_movement_v1.pt")
         """
         filepath = Path(filepath)
 
@@ -542,11 +519,19 @@ class LSTMStrategy(BettingStrategy):
             raise FileNotFoundError(f"Model file not found: {filepath}")
 
         # Load saved data
-        checkpoint = torch.load(filepath, map_location=self.device)
+        checkpoint = torch.load(filepath, map_location=self.device, weights_only=False)
 
         # Restore parameters (in case they differ from constructor args)
         self.params.update(checkpoint["params"])
         self.input_size = checkpoint["input_size"]
+
+        # Recreate feature extractor with loaded params
+        self.feature_extractor = SequenceFeatureExtractor(
+            lookback_hours=self.params["lookback_hours"],
+            timesteps=self.params["timesteps"],
+            sharp_bookmakers=self.params["sharp_bookmakers"],
+            retail_bookmakers=self.params["retail_bookmakers"],
+        )
 
         # Create model with loaded architecture
         self.model = self._create_model().to(self.device)
