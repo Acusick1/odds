@@ -54,6 +54,7 @@ class TestTrainingDataIntegration:
         """
         events = []
         base_time = datetime(2024, 10, 15, 19, 0, tzinfo=UTC)
+        bookmakers = ["pinnacle", "fanduel", "draftkings"]
 
         # Create 8 test events
         for i in range(8):
@@ -74,30 +75,6 @@ class TestTrainingDataIntegration:
             pglite_async_session.add(event)
             events.append(event)
 
-            # Create opening odds snapshot (48h before)
-            opening_time = commence_time - timedelta(hours=48)
-            opening_snapshot = OddsSnapshot(
-                event_id=event.id,
-                snapshot_time=opening_time,
-                raw_data={"bookmakers": []},
-                bookmaker_count=3,
-                fetch_tier="opening",
-                hours_until_commence=48.0,
-            )
-            pglite_async_session.add(opening_snapshot)
-
-            # Create closing odds snapshot (0.5h before)
-            closing_time = commence_time - timedelta(hours=0.5)
-            closing_snapshot = OddsSnapshot(
-                event_id=event.id,
-                snapshot_time=closing_time,
-                raw_data={"bookmakers": []},
-                bookmaker_count=3,
-                fetch_tier="closing",
-                hours_until_commence=0.5,
-            )
-            pglite_async_session.add(closing_snapshot)
-
             # Opening odds base prices (will move by closing)
             opening_home_price = -110 + i * 5
             opening_away_price = -110 - i * 5
@@ -106,8 +83,70 @@ class TestTrainingDataIntegration:
             closing_home_price = opening_home_price - 10  # Line moves toward home
             closing_away_price = opening_away_price + 10
 
-            # Create odds for each bookmaker at opening
-            for bookmaker in ["pinnacle", "fanduel", "draftkings"]:
+            # Create opening odds snapshot (48h before)
+            opening_time = commence_time - timedelta(hours=48)
+            opening_raw_data = {
+                "bookmakers": [
+                    {
+                        "key": bookmaker,
+                        "title": bookmaker.title(),
+                        "last_update": opening_time.isoformat(),
+                        "markets": [
+                            {
+                                "key": "h2h",
+                                "outcomes": [
+                                    {"name": event.home_team, "price": opening_home_price},
+                                    {"name": event.away_team, "price": opening_away_price},
+                                ],
+                            }
+                        ],
+                    }
+                    for bookmaker in bookmakers
+                ]
+            }
+            opening_snapshot = OddsSnapshot(
+                event_id=event.id,
+                snapshot_time=opening_time,
+                raw_data=opening_raw_data,
+                bookmaker_count=3,
+                fetch_tier="opening",
+                hours_until_commence=48.0,
+            )
+            pglite_async_session.add(opening_snapshot)
+
+            # Create closing odds snapshot (0.5h before)
+            closing_time = commence_time - timedelta(hours=0.5)
+            closing_raw_data = {
+                "bookmakers": [
+                    {
+                        "key": bookmaker,
+                        "title": bookmaker.title(),
+                        "last_update": closing_time.isoformat(),
+                        "markets": [
+                            {
+                                "key": "h2h",
+                                "outcomes": [
+                                    {"name": event.home_team, "price": closing_home_price},
+                                    {"name": event.away_team, "price": closing_away_price},
+                                ],
+                            }
+                        ],
+                    }
+                    for bookmaker in bookmakers
+                ]
+            }
+            closing_snapshot = OddsSnapshot(
+                event_id=event.id,
+                snapshot_time=closing_time,
+                raw_data=closing_raw_data,
+                bookmaker_count=3,
+                fetch_tier="closing",
+                hours_until_commence=0.5,
+            )
+            pglite_async_session.add(closing_snapshot)
+
+            # Also create Odds records for direct querying (used by some functions)
+            for bookmaker in bookmakers:
                 # Home outcome - opening
                 home_odds_opening = Odds(
                     event_id=event.id,
