@@ -71,6 +71,7 @@ class TargetType(str, Enum):
     CLASSIFICATION = "classification"
     REGRESSION = "regression"
 
+
 logger = structlog.get_logger()
 
 __all__ = [
@@ -118,9 +119,7 @@ def extract_opening_closing_odds(
     # Build list of valid snapshots with their timestamps
     valid_snapshots: list[tuple[datetime, list[Odds]]] = []
     for snapshot in odds_sequences:
-        filtered = [
-            o for o in snapshot if o.market_key == market and o.outcome_name == outcome
-        ]
+        filtered = [o for o in snapshot if o.market_key == market and o.outcome_name == outcome]
         if filtered:
             # Use odds_timestamp from first odds in snapshot
             timestamp = filtered[0].odds_timestamp
@@ -147,7 +146,7 @@ def extract_opening_closing_odds(
         best_idx = None
         best_diff = float("inf")
 
-        for idx, (timestamp, odds) in enumerate(valid_snapshots):
+        for idx, (timestamp, _odds) in enumerate(valid_snapshots):
             diff = abs((timestamp - target_time).total_seconds())
             if diff < best_diff:
                 best_diff = diff
@@ -200,12 +199,8 @@ def calculate_regression_target(
     if market == "h2h":
         # For h2h, use implied probability delta
         # Average across bookmakers if multiple
-        opening_probs = [
-            calculate_implied_probability(o.price) for o in opening_odds
-        ]
-        closing_probs = [
-            calculate_implied_probability(o.price) for o in closing_odds
-        ]
+        opening_probs = [calculate_implied_probability(o.price) for o in opening_odds]
+        closing_probs = [calculate_implied_probability(o.price) for o in closing_odds]
 
         if not opening_probs or not closing_probs:
             return None
@@ -586,9 +581,7 @@ async def prepare_lstm_training_data(
                 opening_hours_before=opening_hours_before,
                 closing_hours_before=closing_hours_before,
             )
-            regression_target = calculate_regression_target(
-                opening_odds, closing_odds, market
-            )
+            regression_target = calculate_regression_target(opening_odds, closing_odds, market)
 
             if regression_target is None:
                 logger.warning(

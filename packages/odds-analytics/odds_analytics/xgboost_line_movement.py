@@ -54,12 +54,10 @@ from odds_analytics.backtesting import (
 )
 from odds_analytics.feature_extraction import TabularFeatureExtractor
 from odds_analytics.sequence_loader import (
-    TargetType,
     calculate_regression_target,
     extract_opening_closing_odds,
     load_sequences_for_event,
 )
-from odds_analytics.utils import calculate_implied_probability
 
 logger = structlog.get_logger()
 
@@ -332,7 +330,10 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         train_predictions = self.model.predict(X_train)
         train_mse = float(np.mean((train_predictions - y_train) ** 2))
         train_mae = float(np.mean(np.abs(train_predictions - y_train)))
-        train_r2 = float(1 - np.sum((y_train - train_predictions) ** 2) / np.sum((y_train - np.mean(y_train)) ** 2))
+        train_r2 = float(
+            1
+            - np.sum((y_train - train_predictions) ** 2) / np.sum((y_train - np.mean(y_train)) ** 2)
+        )
 
         history = {
             "train_mse": train_mse,
@@ -346,12 +347,16 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             val_predictions = self.model.predict(X_val)
             val_mse = float(np.mean((val_predictions - y_val) ** 2))
             val_mae = float(np.mean(np.abs(val_predictions - y_val)))
-            val_r2 = float(1 - np.sum((y_val - val_predictions) ** 2) / np.sum((y_val - np.mean(y_val)) ** 2))
-            history.update({
-                "val_mse": val_mse,
-                "val_mae": val_mae,
-                "val_r2": val_r2,
-            })
+            val_r2 = float(
+                1 - np.sum((y_val - val_predictions) ** 2) / np.sum((y_val - np.mean(y_val)) ** 2)
+            )
+            history.update(
+                {
+                    "val_mse": val_mse,
+                    "val_mae": val_mae,
+                    "val_r2": val_r2,
+                }
+            )
 
         logger.info(
             "model_trained",
@@ -572,7 +577,11 @@ async def prepare_tabular_training_data(
             filtered = [
                 o for o in snapshot if o.market_key == market and o.outcome_name == target_outcome
             ]
-            if filtered and opening_odds and filtered[0].odds_timestamp == opening_odds[0].odds_timestamp:
+            if (
+                filtered
+                and opening_odds
+                and filtered[0].odds_timestamp == opening_odds[0].odds_timestamp
+            ):
                 opening_snapshot = snapshot
                 break
 
@@ -580,7 +589,9 @@ async def prepare_tabular_training_data(
             # Fallback: use first snapshot with relevant data
             for snapshot in odds_sequences:
                 filtered = [
-                    o for o in snapshot if o.market_key == market and o.outcome_name == target_outcome
+                    o
+                    for o in snapshot
+                    if o.market_key == market and o.outcome_name == target_outcome
                 ]
                 if filtered:
                     opening_snapshot = snapshot
