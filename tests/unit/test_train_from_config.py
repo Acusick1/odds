@@ -14,6 +14,7 @@ from odds_analytics.training.config import (
     TrainingConfig,
     TuningConfig,
     XGBoostConfig,
+    resolve_search_spaces,
 )
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 
@@ -226,79 +227,49 @@ class TestXGBoostStrategyTrainFromConfig:
         with pytest.raises(TypeError, match="Expected XGBoostConfig"):
             strategy.train_from_config(invalid_config, X_train, y_train, feature_names)
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"),
-        reason="requires xgboost",
-    )
     def test_resolve_search_spaces_int(self):
         """Test search space resolution for integer parameters."""
-        strategy = XGBoostStrategy()
-
         params = {"n_estimators": 100}
         search_spaces = {"n_estimators": SearchSpace(type="int", low=50, high=150)}
 
-        resolved = strategy._resolve_search_spaces(params, search_spaces)
+        resolved = resolve_search_spaces(params, search_spaces)
 
         assert resolved["n_estimators"] == 100  # (50 + 150) / 2
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"),
-        reason="requires xgboost",
-    )
     def test_resolve_search_spaces_int_with_step(self):
         """Test search space resolution for integer with step."""
-        strategy = XGBoostStrategy()
-
         params = {"n_estimators": 100}
         search_spaces = {"n_estimators": SearchSpace(type="int", low=50, high=150, step=25)}
 
-        resolved = strategy._resolve_search_spaces(params, search_spaces)
+        resolved = resolve_search_spaces(params, search_spaces)
 
         # Midpoint 100, rounded to nearest step of 25 = 100
         assert resolved["n_estimators"] == 100
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"),
-        reason="requires xgboost",
-    )
     def test_resolve_search_spaces_float_linear(self):
         """Test search space resolution for linear float parameters."""
-        strategy = XGBoostStrategy()
-
         params = {"subsample": 0.8}
         search_spaces = {"subsample": SearchSpace(type="float", low=0.5, high=1.0)}
 
-        resolved = strategy._resolve_search_spaces(params, search_spaces)
+        resolved = resolve_search_spaces(params, search_spaces)
 
         assert resolved["subsample"] == 0.75  # (0.5 + 1.0) / 2
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"),
-        reason="requires xgboost",
-    )
     def test_resolve_search_spaces_float_log(self):
         """Test search space resolution for log-scale float parameters."""
         import math
 
-        strategy = XGBoostStrategy()
-
         params = {"learning_rate": 0.1}
         search_spaces = {"learning_rate": SearchSpace(type="float", low=0.001, high=0.1, log=True)}
 
-        resolved = strategy._resolve_search_spaces(params, search_spaces)
+        resolved = resolve_search_spaces(params, search_spaces)
 
         # Geometric mean = exp((ln(0.001) + ln(0.1)) / 2)
         expected = math.exp((math.log(0.001) + math.log(0.1)) / 2)
         assert abs(resolved["learning_rate"] - expected) < 1e-6
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"),
-        reason="requires xgboost",
-    )
     def test_resolve_search_spaces_categorical(self):
         """Test search space resolution for categorical parameters."""
-        strategy = XGBoostStrategy()
-
         params = {"objective": "reg:squarederror"}
         search_spaces = {
             "objective": SearchSpace(
@@ -306,25 +277,19 @@ class TestXGBoostStrategyTrainFromConfig:
             )
         }
 
-        resolved = strategy._resolve_search_spaces(params, search_spaces)
+        resolved = resolve_search_spaces(params, search_spaces)
 
         # Should use first choice
         assert resolved["objective"] == "reg:absoluteerror"
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"),
-        reason="requires xgboost",
-    )
     def test_resolve_search_spaces_unknown_param(self):
         """Test that unknown search space parameters are logged but ignored."""
-        strategy = XGBoostStrategy()
-
         params = {"n_estimators": 100}
         search_spaces = {
             "unknown_param": SearchSpace(type="int", low=1, high=10),
         }
 
-        resolved = strategy._resolve_search_spaces(params, search_spaces)
+        resolved = resolve_search_spaces(params, search_spaces)
 
         # Original param should be unchanged
         assert resolved["n_estimators"] == 100
@@ -491,16 +456,8 @@ class TestLSTMStrategyTrainFromConfig:
         assert model_config.epochs == 5
         assert model_config.batch_size == 16
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"),
-        reason="requires xgboost",
-    )
     def test_lstm_resolve_search_spaces(self, sample_lstm_config):
         """Test LSTM search space resolution."""
-        from odds_analytics.lstm_strategy import LSTMStrategy
-
-        strategy = LSTMStrategy()
-
         params = {
             "epochs": 20,
             "hidden_size": 64,
@@ -512,7 +469,7 @@ class TestLSTMStrategyTrainFromConfig:
             "learning_rate": SearchSpace(type="float", low=0.0001, high=0.01, log=True),
         }
 
-        resolved = strategy._resolve_search_spaces(params, search_spaces)
+        resolved = resolve_search_spaces(params, search_spaces)
 
         # epochs: (10 + 50) / 2 = 30
         assert resolved["epochs"] == 30
@@ -525,16 +482,12 @@ class TestLSTMStrategyTrainFromConfig:
 class TestConfigValidation:
     """Test configuration validation in train_from_config methods."""
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"),
-        reason="requires xgboost",
-    )
-    def test_xgboost_accepts_xgboost_line_movement_type(self, training_data):
-        """Test that XGBoostStrategy accepts xgboost_line_movement strategy type."""
+    def test_xgboost_rejects_xgboost_line_movement_type(self, training_data):
+        """Test that XGBoostStrategy rejects xgboost_line_movement strategy type."""
         X_train, y_train, feature_names = training_data
         strategy = XGBoostStrategy()
 
-        # XGBoostStrategy should accept both xgboost and xgboost_line_movement
+        # XGBoostStrategy should only accept "xgboost", not "xgboost_line_movement"
         config = MLTrainingConfig(
             experiment=ExperimentConfig(name="test"),
             training=TrainingConfig(
@@ -547,9 +500,9 @@ class TestConfigValidation:
             ),
         )
 
-        # Should not raise
-        strategy.train_from_config(config, X_train, y_train, feature_names)
-        assert strategy.model is not None
+        # Should raise ValueError
+        with pytest.raises(ValueError, match="Invalid strategy_type"):
+            strategy.train_from_config(config, X_train, y_train, feature_names)
 
     def test_config_extracts_all_xgboost_params(self, sample_xgboost_config):
         """Test that all XGBoost parameters are extracted from config."""

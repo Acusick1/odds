@@ -41,7 +41,7 @@ from odds_analytics.feature_extraction import FeatureExtractor, TabularFeatureEx
 from odds_analytics.utils import calculate_implied_probability
 
 if TYPE_CHECKING:
-    from odds_analytics.training.config import MLTrainingConfig, SearchSpace
+    from odds_analytics.training.config import MLTrainingConfig
 
 logger = structlog.get_logger()
 
@@ -311,13 +311,13 @@ class XGBoostStrategy(BettingStrategy):
             >>> strategy = XGBoostStrategy()
             >>> strategy.train_from_config(config, X_train, y_train, feature_names)
         """
-        from odds_analytics.training.config import XGBoostConfig
+        from odds_analytics.training.config import XGBoostConfig, resolve_search_spaces
 
         # Validate strategy type
-        if config.training.strategy_type not in ("xgboost", "xgboost_line_movement"):
+        if config.training.strategy_type != "xgboost":
             raise ValueError(
                 f"Invalid strategy_type '{config.training.strategy_type}' for XGBoostStrategy. "
-                f"Expected 'xgboost' or 'xgboost_line_movement'."
+                f"Expected 'xgboost'."
             )
 
         # Validate model config type
@@ -354,7 +354,7 @@ class XGBoostStrategy(BettingStrategy):
 
         # Override with search space midpoints if tuning config exists
         if config.tuning and config.tuning.search_spaces:
-            xgb_params = self._resolve_search_spaces(xgb_params, config.tuning.search_spaces)
+            xgb_params = resolve_search_spaces(xgb_params, config.tuning.search_spaces)
 
         # Log all hyperparameters for experiment tracking
         logger.info(
@@ -375,84 +375,6 @@ class XGBoostStrategy(BettingStrategy):
             experiment_name=config.experiment.name,
             model_type="XGBoostClassifier",
         )
-
-    def _resolve_search_spaces(
-        self,
-        params: dict[str, Any],
-        search_spaces: dict[str, SearchSpace],
-    ) -> dict[str, Any]:
-        """
-        Resolve search spaces to concrete values using midpoints.
-
-        When Optuna is not available, this method converts search space
-        definitions to concrete values using the midpoint of the range
-        (for int/float types) or the first choice (for categorical types).
-
-        Args:
-            params: Current parameter dictionary
-            search_spaces: Search space definitions from tuning config
-
-        Returns:
-            Updated parameters with resolved values
-        """
-        resolved = params.copy()
-
-        for param_name, space in search_spaces.items():
-            if param_name not in resolved:
-                logger.warning(
-                    "unknown_search_space_param",
-                    param_name=param_name,
-                    message=f"Search space defined for unknown parameter '{param_name}'",
-                )
-                continue
-
-            if space.type == "int":
-                # Use midpoint for integer parameters
-                midpoint = int((space.low + space.high) / 2)
-                if space.step:
-                    # Round to nearest step
-                    midpoint = int(round(midpoint / space.step) * space.step)
-                resolved[param_name] = midpoint
-                logger.debug(
-                    "resolved_search_space",
-                    param_name=param_name,
-                    value=midpoint,
-                    space_type="int",
-                    low=space.low,
-                    high=space.high,
-                )
-
-            elif space.type == "float":
-                if space.log:
-                    # Use geometric mean for log-scale parameters
-                    import math
-
-                    midpoint = math.exp((math.log(space.low) + math.log(space.high)) / 2)
-                else:
-                    # Use arithmetic mean for linear-scale parameters
-                    midpoint = (space.low + space.high) / 2
-                resolved[param_name] = midpoint
-                logger.debug(
-                    "resolved_search_space",
-                    param_name=param_name,
-                    value=midpoint,
-                    space_type="float",
-                    log_scale=space.log,
-                )
-
-            elif space.type == "categorical":
-                # Use first choice for categorical parameters
-                if space.choices:
-                    resolved[param_name] = space.choices[0]
-                    logger.debug(
-                        "resolved_search_space",
-                        param_name=param_name,
-                        value=space.choices[0],
-                        space_type="categorical",
-                        choices=space.choices,
-                    )
-
-        return resolved
 
     def save_model(self, filepath: str) -> None:
         """
