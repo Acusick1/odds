@@ -7,13 +7,13 @@ Tests the full flow:
 3. Data preparation based on strategy type
 4. Output shape verification
 
-These tests require a database connection and test data.
+These tests use fixtures to create known test data for predictable results.
 """
 
 from __future__ import annotations
 
 import tempfile
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -32,7 +32,7 @@ from odds_analytics.training import (
     prepare_training_data_from_config,
 )
 from odds_analytics.xgboost_line_movement import prepare_tabular_training_data
-from odds_core.models import EventStatus
+from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 
 # Mark all tests in this module as integration tests
 pytestmark = pytest.mark.integration
@@ -42,8 +42,139 @@ class TestTrainingDataIntegration:
     """Integration tests for training data preparation pipeline."""
 
     @pytest.fixture
+    async def test_events_with_odds(self, pglite_async_session):
+        """
+        Create test events with odds snapshots for predictable test data.
+
+        Creates 8 events with:
+        - FINAL status and scores
+        - Opening odds snapshots (48h before)
+        - Closing odds snapshots (0.5h before)
+        - Bookmakers: pinnacle, fanduel, draftkings
+        """
+        events = []
+        base_time = datetime(2024, 10, 15, 19, 0, tzinfo=UTC)
+
+        # Create 8 test events
+        for i in range(8):
+            commence_time = base_time + timedelta(days=i)
+
+            event = Event(
+                id=f"test_event_{i}",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=commence_time,
+                home_team=f"Home Team {i}",
+                away_team=f"Away Team {i}",
+                status=EventStatus.FINAL,
+                home_score=100 + i * 2,
+                away_score=95 + i,
+                completed_at=commence_time + timedelta(hours=3),
+            )
+            pglite_async_session.add(event)
+            events.append(event)
+
+            # Create opening odds snapshot (48h before)
+            opening_time = commence_time - timedelta(hours=48)
+            opening_snapshot = OddsSnapshot(
+                event_id=event.id,
+                snapshot_time=opening_time,
+                raw_data={"bookmakers": []},
+                bookmaker_count=3,
+                fetch_tier="opening",
+                hours_until_commence=48.0,
+            )
+            pglite_async_session.add(opening_snapshot)
+
+            # Create closing odds snapshot (0.5h before)
+            closing_time = commence_time - timedelta(hours=0.5)
+            closing_snapshot = OddsSnapshot(
+                event_id=event.id,
+                snapshot_time=closing_time,
+                raw_data={"bookmakers": []},
+                bookmaker_count=3,
+                fetch_tier="closing",
+                hours_until_commence=0.5,
+            )
+            pglite_async_session.add(closing_snapshot)
+
+            # Opening odds base prices (will move by closing)
+            opening_home_price = -110 + i * 5
+            opening_away_price = -110 - i * 5
+
+            # Closing prices (line movement)
+            closing_home_price = opening_home_price - 10  # Line moves toward home
+            closing_away_price = opening_away_price + 10
+
+            # Create odds for each bookmaker at opening
+            for bookmaker in ["pinnacle", "fanduel", "draftkings"]:
+                # Home outcome - opening
+                home_odds_opening = Odds(
+                    event_id=event.id,
+                    bookmaker_key=bookmaker,
+                    bookmaker_title=bookmaker.title(),
+                    market_key="h2h",
+                    outcome_name=event.home_team,
+                    price=opening_home_price,
+                    point=None,
+                    odds_timestamp=opening_time,
+                    last_update=opening_time,
+                )
+                pglite_async_session.add(home_odds_opening)
+
+                # Away outcome - opening
+                away_odds_opening = Odds(
+                    event_id=event.id,
+                    bookmaker_key=bookmaker,
+                    bookmaker_title=bookmaker.title(),
+                    market_key="h2h",
+                    outcome_name=event.away_team,
+                    price=opening_away_price,
+                    point=None,
+                    odds_timestamp=opening_time,
+                    last_update=opening_time,
+                )
+                pglite_async_session.add(away_odds_opening)
+
+                # Home outcome - closing
+                home_odds_closing = Odds(
+                    event_id=event.id,
+                    bookmaker_key=bookmaker,
+                    bookmaker_title=bookmaker.title(),
+                    market_key="h2h",
+                    outcome_name=event.home_team,
+                    price=closing_home_price,
+                    point=None,
+                    odds_timestamp=closing_time,
+                    last_update=closing_time,
+                )
+                pglite_async_session.add(home_odds_closing)
+
+                # Away outcome - closing
+                away_odds_closing = Odds(
+                    event_id=event.id,
+                    bookmaker_key=bookmaker,
+                    bookmaker_title=bookmaker.title(),
+                    market_key="h2h",
+                    outcome_name=event.away_team,
+                    price=closing_away_price,
+                    point=None,
+                    odds_timestamp=closing_time,
+                    last_update=closing_time,
+                )
+                pglite_async_session.add(away_odds_closing)
+
+        await pglite_async_session.commit()
+
+        # Refresh events to get IDs
+        for event in events:
+            await pglite_async_session.refresh(event)
+
+        return events
+
+    @pytest.fixture
     def xgboost_config(self):
-        """Create XGBoost training configuration."""
+        """Create XGBoost training configuration matching test data."""
         return MLTrainingConfig(
             experiment=ExperimentConfig(
                 name="integration_test_xgboost",
@@ -54,7 +185,7 @@ class TestTrainingDataIntegration:
                 strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 10, 1),
-                    end_date=date(2024, 12, 31),
+                    end_date=date(2024, 10, 31),
                     test_split=0.2,
                     validation_split=0.1,
                     random_seed=42,
@@ -69,7 +200,7 @@ class TestTrainingDataIntegration:
                     outcome="home",
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],
-                    retail_bookmakers=["fanduel", "draftkings", "betmgm"],
+                    retail_bookmakers=["fanduel", "draftkings"],
                     opening_hours_before=48.0,
                     closing_hours_before=0.5,
                 ),
@@ -78,7 +209,7 @@ class TestTrainingDataIntegration:
 
     @pytest.fixture
     def lstm_config(self):
-        """Create LSTM training configuration."""
+        """Create LSTM training configuration matching test data."""
         return MLTrainingConfig(
             experiment=ExperimentConfig(
                 name="integration_test_lstm",
@@ -89,7 +220,7 @@ class TestTrainingDataIntegration:
                 strategy_type="lstm_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 10, 1),
-                    end_date=date(2024, 12, 31),
+                    end_date=date(2024, 10, 31),
                     test_split=0.2,
                     random_seed=42,
                 ),
@@ -121,7 +252,7 @@ class TestTrainingDataIntegration:
                 "strategy_type": "xgboost_line_movement",
                 "data": {
                     "start_date": "2024-10-01",
-                    "end_date": "2024-12-31",
+                    "end_date": "2024-10-31",
                     "test_split": 0.2,
                     "random_seed": 42,
                 },
@@ -152,7 +283,7 @@ class TestTrainingDataIntegration:
         assert config.experiment.name == "yaml_integration_test"
         assert config.training.strategy_type == "xgboost_line_movement"
         assert config.training.data.start_date == date(2024, 10, 1)
-        assert config.training.data.end_date == date(2024, 12, 31)
+        assert config.training.data.end_date == date(2024, 10, 31)
         assert config.training.data.test_split == 0.2
         assert isinstance(config.training.model, XGBoostConfig)
         assert config.training.model.n_estimators == 100
@@ -178,24 +309,11 @@ class TestTrainingDataIntegration:
             )
 
     @pytest.mark.asyncio
-    async def test_prepare_tabular_with_params_integration(self, pglite_async_session):
+    async def test_prepare_tabular_with_params_integration(
+        self, pglite_async_session, test_events_with_odds
+    ):
         """Test prepare_tabular_training_data with individual parameters."""
-        from odds_lambda.storage.readers import OddsReader
-
-        reader = OddsReader(pglite_async_session)
-
-        # Get events from database
-        start_date = datetime(2024, 10, 1, tzinfo=UTC)
-        end_date = datetime(2024, 12, 31, tzinfo=UTC)
-
-        events = await reader.get_events_by_date_range(
-            start_date=start_date,
-            end_date=end_date,
-            status=EventStatus.FINAL,
-        )
-
-        if not events:
-            pytest.skip("No events in test database for date range")
+        events = test_events_with_odds
 
         # Prepare data using individual params
         X, y, feature_names = await prepare_tabular_training_data(
@@ -209,33 +327,20 @@ class TestTrainingDataIntegration:
             retail_bookmakers=["fanduel", "draftkings"],
         )
 
-        # Verify output shapes
-        if len(X) > 0:
-            assert X.ndim == 2
-            assert y.ndim == 1
-            assert X.shape[0] == y.shape[0]
-            assert X.shape[1] == len(feature_names)
-            assert len(feature_names) > 0
+        # Verify output shapes - assertions always run
+        assert X.ndim == 2
+        assert y.ndim == 1
+        assert X.shape[0] == y.shape[0]
+        assert X.shape[1] == len(feature_names)
+        assert len(feature_names) > 0
+        assert X.shape[0] > 0  # We have data
 
     @pytest.mark.asyncio
-    async def test_prepare_lstm_with_params_integration(self, pglite_async_session):
+    async def test_prepare_lstm_with_params_integration(
+        self, pglite_async_session, test_events_with_odds
+    ):
         """Test prepare_lstm_training_data with individual parameters."""
-        from odds_lambda.storage.readers import OddsReader
-
-        reader = OddsReader(pglite_async_session)
-
-        # Get events from database
-        start_date = datetime(2024, 10, 1, tzinfo=UTC)
-        end_date = datetime(2024, 12, 31, tzinfo=UTC)
-
-        events = await reader.get_events_by_date_range(
-            start_date=start_date,
-            end_date=end_date,
-            status=EventStatus.FINAL,
-        )
-
-        if not events:
-            pytest.skip("No events in test database for date range")
+        events = test_events_with_odds
 
         # Prepare data using individual params
         X, y, masks = await prepare_lstm_training_data(
@@ -249,136 +354,122 @@ class TestTrainingDataIntegration:
             retail_bookmakers=["fanduel"],
         )
 
-        # Verify output shapes
-        if len(X) > 0:
-            assert X.ndim == 3  # (samples, timesteps, features)
-            assert y.ndim == 1
-            assert masks.ndim == 2
-            assert X.shape[0] == y.shape[0] == masks.shape[0]
-            assert X.shape[1] == masks.shape[1]  # timesteps match
+        # Verify output shapes - assertions always run
+        assert X.ndim == 3  # (samples, timesteps, features)
+        assert y.ndim == 1
+        assert masks.ndim == 2
+        assert X.shape[0] == y.shape[0] == masks.shape[0]
+        assert X.shape[1] == masks.shape[1]  # timesteps match
+        assert X.shape[0] > 0  # We have data
 
     @pytest.mark.asyncio
-    async def test_full_pipeline_xgboost(self, xgboost_config, pglite_async_session):
+    async def test_full_pipeline_xgboost(
+        self, xgboost_config, pglite_async_session, test_events_with_odds
+    ):
         """Test full XGBoost pipeline: config -> data -> result."""
-        try:
-            result = await prepare_training_data_from_config(xgboost_config, pglite_async_session)
+        result = await prepare_training_data_from_config(xgboost_config, pglite_async_session)
 
-            # Verify result structure
-            assert isinstance(result, TrainingDataResult)
-            assert result.strategy_type == "xgboost_line_movement"
+        # Verify result structure
+        assert isinstance(result, TrainingDataResult)
+        assert result.strategy_type == "xgboost_line_movement"
 
-            # Verify shapes
-            assert result.X_train.ndim == 2
-            assert result.X_test.ndim == 2
-            assert result.y_train.ndim == 1
-            assert result.y_test.ndim == 1
+        # Verify shapes
+        assert result.X_train.ndim == 2
+        assert result.X_test.ndim == 2
+        assert result.y_train.ndim == 1
+        assert result.y_test.ndim == 1
 
-            # Verify feature consistency
-            assert result.X_train.shape[1] == result.X_test.shape[1]
-            assert result.X_train.shape[1] == len(result.feature_names)
+        # Verify feature consistency
+        assert result.X_train.shape[1] == result.X_test.shape[1]
+        assert result.X_train.shape[1] == len(result.feature_names)
 
-            # Verify no masks for XGBoost
-            assert result.masks_train is None
-            assert result.masks_test is None
+        # Verify no masks for XGBoost
+        assert result.masks_train is None
+        assert result.masks_test is None
 
-            # Verify split ratio
-            total_samples = result.num_train_samples + result.num_test_samples
-            actual_test_ratio = result.num_test_samples / total_samples
-            expected_test_ratio = xgboost_config.training.data.test_split
-            assert abs(actual_test_ratio - expected_test_ratio) < 0.05  # Allow 5% tolerance
+        # Verify we have data
+        assert result.num_train_samples > 0
+        assert result.num_test_samples > 0
 
-        except ValueError as e:
-            if "No events found" in str(e):
-                pytest.skip("No events in test database for date range")
-            raise
+        # Verify split ratio (approximately)
+        total_samples = result.num_train_samples + result.num_test_samples
+        actual_test_ratio = result.num_test_samples / total_samples
+        expected_test_ratio = xgboost_config.training.data.test_split
+        assert (
+            abs(actual_test_ratio - expected_test_ratio) < 0.15
+        )  # Allow tolerance for small dataset
 
     @pytest.mark.asyncio
-    async def test_full_pipeline_lstm(self, lstm_config, pglite_async_session):
+    async def test_full_pipeline_lstm(
+        self, lstm_config, pglite_async_session, test_events_with_odds
+    ):
         """Test full LSTM pipeline: config -> data -> result with masks."""
-        try:
-            result = await prepare_training_data_from_config(lstm_config, pglite_async_session)
+        result = await prepare_training_data_from_config(lstm_config, pglite_async_session)
 
-            # Verify result structure
-            assert isinstance(result, TrainingDataResult)
-            assert result.strategy_type == "lstm_line_movement"
+        # Verify result structure
+        assert isinstance(result, TrainingDataResult)
+        assert result.strategy_type == "lstm_line_movement"
 
-            # Verify shapes
-            assert result.X_train.ndim == 3  # (samples, timesteps, features)
-            assert result.X_test.ndim == 3
-            assert result.y_train.ndim == 1
-            assert result.y_test.ndim == 1
+        # Verify shapes
+        assert result.X_train.ndim == 3  # (samples, timesteps, features)
+        assert result.X_test.ndim == 3
+        assert result.y_train.ndim == 1
+        assert result.y_test.ndim == 1
 
-            # Verify masks present
-            assert result.masks_train is not None
-            assert result.masks_test is not None
-            assert result.masks_train.ndim == 2
-            assert result.masks_test.ndim == 2
+        # Verify masks present
+        assert result.masks_train is not None
+        assert result.masks_test is not None
+        assert result.masks_train.ndim == 2
+        assert result.masks_test.ndim == 2
 
-            # Verify shape consistency
-            assert result.X_train.shape[0] == result.masks_train.shape[0]
-            assert result.X_test.shape[0] == result.masks_test.shape[0]
-            assert result.X_train.shape[1] == result.masks_train.shape[1]  # timesteps
+        # Verify shape consistency
+        assert result.X_train.shape[0] == result.masks_train.shape[0]
+        assert result.X_test.shape[0] == result.masks_test.shape[0]
+        assert result.X_train.shape[1] == result.masks_train.shape[1]  # timesteps
 
-        except ValueError as e:
-            if "No events found" in str(e):
-                pytest.skip("No events in test database for date range")
-            raise
+        # Verify we have data
+        assert result.num_train_samples > 0
+        assert result.num_test_samples > 0
 
     @pytest.mark.asyncio
-    async def test_result_to_dict_integration(self, xgboost_config, pglite_async_session):
+    async def test_result_to_dict_integration(
+        self, xgboost_config, pglite_async_session, test_events_with_odds
+    ):
         """Test that result can be converted to dict for serialization."""
-        try:
-            result = await prepare_training_data_from_config(xgboost_config, pglite_async_session)
+        result = await prepare_training_data_from_config(xgboost_config, pglite_async_session)
 
-            # Convert to dict
-            result_dict = result.to_dict()
+        # Convert to dict
+        result_dict = result.to_dict()
 
-            # Verify all expected keys present
-            expected_keys = [
-                "X_train",
-                "X_test",
-                "y_train",
-                "y_test",
-                "feature_names",
-                "strategy_type",
-                "num_train_samples",
-                "num_test_samples",
-                "num_features",
-            ]
-            for key in expected_keys:
-                assert key in result_dict
+        # Verify all expected keys present
+        expected_keys = [
+            "X_train",
+            "X_test",
+            "y_train",
+            "y_test",
+            "feature_names",
+            "strategy_type",
+            "num_train_samples",
+            "num_test_samples",
+            "num_features",
+        ]
+        for key in expected_keys:
+            assert key in result_dict
 
-            # Verify values match
-            assert result_dict["num_train_samples"] == result.num_train_samples
-            assert result_dict["num_test_samples"] == result.num_test_samples
-            assert result_dict["num_features"] == result.num_features
-            assert result_dict["strategy_type"] == result.strategy_type
-
-        except ValueError as e:
-            if "No events found" in str(e):
-                pytest.skip("No events in test database for date range")
-            raise
+        # Verify values match
+        assert result_dict["num_train_samples"] == result.num_train_samples
+        assert result_dict["num_test_samples"] == result.num_test_samples
+        assert result_dict["num_features"] == result.num_features
+        assert result_dict["strategy_type"] == result.strategy_type
 
     @pytest.mark.asyncio
-    async def test_backward_compatibility_legacy_params(self, pglite_async_session):
+    async def test_backward_compatibility_legacy_params(
+        self, pglite_async_session, test_events_with_odds
+    ):
         """Test that legacy parameter-based calls still work."""
-        from odds_lambda.storage.readers import OddsReader
+        events = test_events_with_odds
 
-        reader = OddsReader(pglite_async_session)
-
-        start_date = datetime(2024, 10, 1, tzinfo=UTC)
-        end_date = datetime(2024, 12, 31, tzinfo=UTC)
-
-        events = await reader.get_events_by_date_range(
-            start_date=start_date,
-            end_date=end_date,
-            status=EventStatus.FINAL,
-        )
-
-        if not events:
-            pytest.skip("No events in test database for date range")
-
-        # Call with legacy style (no FeatureConfig)
+        # Call with legacy style (individual parameters)
         X, y, feature_names = await prepare_tabular_training_data(
             events=events,
             session=pglite_async_session,
@@ -390,7 +481,9 @@ class TestTrainingDataIntegration:
             retail_bookmakers=["fanduel", "draftkings"],
         )
 
-        # Should work without error
+        # Verify results
         assert isinstance(X, np.ndarray)
         assert isinstance(y, np.ndarray)
         assert isinstance(feature_names, list)
+        assert X.shape[0] > 0
+        assert len(feature_names) > 0
