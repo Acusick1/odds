@@ -58,7 +58,6 @@ from odds_analytics.sequence_loader import (
     extract_opening_closing_odds,
     load_sequences_for_event,
 )
-from odds_analytics.training.config import FeatureConfig
 
 logger = structlog.get_logger()
 
@@ -434,13 +433,12 @@ class XGBoostLineMovementStrategy(BettingStrategy):
 async def prepare_tabular_training_data(
     events: list[Event],
     session: AsyncSession,
-    outcome: str | None = None,
-    market: str | None = None,
-    opening_hours_before: float | None = None,
-    closing_hours_before: float | None = None,
+    outcome: str = "home",
+    market: str = "h2h",
+    opening_hours_before: float = 48.0,
+    closing_hours_before: float = 0.5,
     sharp_bookmakers: list[str] | None = None,
     retail_bookmakers: list[str] | None = None,
-    feature_config: FeatureConfig | None = None,
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """
     Prepare training data for tabular XGBoost line movement model.
@@ -454,13 +452,12 @@ async def prepare_tabular_training_data(
     Args:
         events: List of Event objects with final scores (status=FINAL required)
         session: Async database session
-        outcome: What to predict - "home" or "away" (overrides feature_config)
-        market: Market to analyze (h2h, spreads, totals) (overrides feature_config)
-        opening_hours_before: Hours before game for opening line (overrides feature_config)
-        closing_hours_before: Hours before game for closing line (overrides feature_config)
-        sharp_bookmakers: Sharp bookmakers for features (overrides feature_config)
-        retail_bookmakers: Retail bookmakers for features (overrides feature_config)
-        feature_config: Optional FeatureConfig object for config-driven preparation
+        outcome: What to predict - "home" or "away"
+        market: Market to analyze (h2h, spreads, totals)
+        opening_hours_before: Hours before game for opening line (default: 48)
+        closing_hours_before: Hours before game for closing line (default: 0.5)
+        sharp_bookmakers: Sharp bookmakers for features (default: ["pinnacle"])
+        retail_bookmakers: Retail bookmakers for features
 
     Returns:
         Tuple of (X, y, feature_names):
@@ -480,7 +477,6 @@ async def prepare_tabular_training_data(
                 status=EventStatus.FINAL
             )
 
-            # Legacy style with individual parameters
             X, y, feature_names = await prepare_tabular_training_data(
                 events=events,
                 session=session,
@@ -488,54 +484,11 @@ async def prepare_tabular_training_data(
                 market="h2h"
             )
 
-            # Config-driven style
-            from odds_analytics.training import FeatureConfig
-            config = FeatureConfig(
-                outcome="home",
-                markets=["h2h"],
-                sharp_bookmakers=["pinnacle"],
-            )
-            X, y, feature_names = await prepare_tabular_training_data(
-                events=events,
-                session=session,
-                feature_config=config
-            )
-
             # Train model
             strategy = XGBoostLineMovementStrategy()
             strategy.train(X, y, feature_names)
         ```
     """
-    # Extract parameters from feature_config if provided, with explicit params taking precedence
-    if feature_config is not None:
-        outcome = outcome if outcome is not None else feature_config.outcome
-        market = (
-            market
-            if market is not None
-            else (feature_config.markets[0] if feature_config.markets else "h2h")
-        )
-        opening_hours_before = (
-            opening_hours_before
-            if opening_hours_before is not None
-            else feature_config.opening_hours_before
-        )
-        closing_hours_before = (
-            closing_hours_before
-            if closing_hours_before is not None
-            else feature_config.closing_hours_before
-        )
-        sharp_bookmakers = (
-            sharp_bookmakers if sharp_bookmakers is not None else feature_config.sharp_bookmakers
-        )
-        retail_bookmakers = (
-            retail_bookmakers if retail_bookmakers is not None else feature_config.retail_bookmakers
-        )
-
-    # Apply defaults for any remaining None values (backward compatibility)
-    outcome = outcome if outcome is not None else "home"
-    market = market if market is not None else "h2h"
-    opening_hours_before = opening_hours_before if opening_hours_before is not None else 48.0
-    closing_hours_before = closing_hours_before if closing_hours_before is not None else 0.5
     if not events:
         logger.warning("no_events_provided")
         return np.array([]), np.array([]), []

@@ -438,50 +438,6 @@ class TestLegacyFunctionCompatibility:
         assert len(X) == 0
 
     @pytest.mark.asyncio
-    async def test_prepare_tabular_with_feature_config(self):
-        """Test prepare_tabular_training_data with FeatureConfig."""
-        from odds_analytics.xgboost_line_movement import prepare_tabular_training_data
-
-        config = FeatureConfig(
-            outcome="away",
-            markets=["spreads"],
-            sharp_bookmakers=["pinnacle"],
-            retail_bookmakers=["draftkings"],
-            opening_hours_before=72.0,
-            closing_hours_before=1.0,
-        )
-
-        X, y, feature_names = await prepare_tabular_training_data(
-            events=[],
-            session=AsyncMock(),
-            feature_config=config,
-        )
-
-        # Should work without error
-        assert len(X) == 0
-
-    @pytest.mark.asyncio
-    async def test_prepare_tabular_explicit_overrides_config(self):
-        """Test that explicit parameters override FeatureConfig values."""
-        from odds_analytics.xgboost_line_movement import prepare_tabular_training_data
-
-        config = FeatureConfig(
-            outcome="home",
-            markets=["h2h"],
-        )
-
-        # This tests the priority logic - explicit params should win
-        X, y, feature_names = await prepare_tabular_training_data(
-            events=[],
-            session=AsyncMock(),
-            outcome="away",  # This should override config's "home"
-            feature_config=config,
-        )
-
-        # Should work without error
-        assert len(X) == 0
-
-    @pytest.mark.asyncio
     async def test_prepare_lstm_with_defaults(self):
         """Test prepare_lstm_training_data works with default parameters."""
         from odds_analytics.sequence_loader import prepare_lstm_training_data
@@ -495,27 +451,6 @@ class TestLegacyFunctionCompatibility:
         assert len(X) == 0
         assert len(y) == 0
         assert len(masks) == 0
-
-    @pytest.mark.asyncio
-    async def test_prepare_lstm_with_feature_config(self):
-        """Test prepare_lstm_training_data with FeatureConfig."""
-        from odds_analytics.sequence_loader import prepare_lstm_training_data
-
-        config = FeatureConfig(
-            outcome="away",
-            markets=["spreads"],
-            sharp_bookmakers=["pinnacle"],
-            retail_bookmakers=["draftkings"],
-        )
-
-        X, y, masks = await prepare_lstm_training_data(
-            events=[],
-            session=AsyncMock(),
-            feature_config=config,
-        )
-
-        # Should work without error
-        assert len(X) == 0
 
 
 # =============================================================================

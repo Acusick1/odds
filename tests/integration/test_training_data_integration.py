@@ -178,8 +178,8 @@ class TestTrainingDataIntegration:
             )
 
     @pytest.mark.asyncio
-    async def test_prepare_tabular_with_feature_config_integration(self, pglite_async_session):
-        """Test prepare_tabular_training_data with FeatureConfig parameter."""
+    async def test_prepare_tabular_with_params_integration(self, pglite_async_session):
+        """Test prepare_tabular_training_data with individual parameters."""
         from odds_lambda.storage.readers import OddsReader
 
         reader = OddsReader(pglite_async_session)
@@ -197,21 +197,16 @@ class TestTrainingDataIntegration:
         if not events:
             pytest.skip("No events in test database for date range")
 
-        # Create feature config
-        feature_config = FeatureConfig(
-            outcome="home",
-            markets=["h2h"],
-            sharp_bookmakers=["pinnacle"],
-            retail_bookmakers=["fanduel", "draftkings"],
-            opening_hours_before=48.0,
-            closing_hours_before=0.5,
-        )
-
-        # Prepare data using config
+        # Prepare data using individual params
         X, y, feature_names = await prepare_tabular_training_data(
             events=events,
             session=pglite_async_session,
-            feature_config=feature_config,
+            outcome="home",
+            market="h2h",
+            opening_hours_before=48.0,
+            closing_hours_before=0.5,
+            sharp_bookmakers=["pinnacle"],
+            retail_bookmakers=["fanduel", "draftkings"],
         )
 
         # Verify output shapes
@@ -223,8 +218,8 @@ class TestTrainingDataIntegration:
             assert len(feature_names) > 0
 
     @pytest.mark.asyncio
-    async def test_prepare_lstm_with_feature_config_integration(self, pglite_async_session):
-        """Test prepare_lstm_training_data with FeatureConfig parameter."""
+    async def test_prepare_lstm_with_params_integration(self, pglite_async_session):
+        """Test prepare_lstm_training_data with individual parameters."""
         from odds_lambda.storage.readers import OddsReader
 
         reader = OddsReader(pglite_async_session)
@@ -242,21 +237,16 @@ class TestTrainingDataIntegration:
         if not events:
             pytest.skip("No events in test database for date range")
 
-        # Create feature config
-        feature_config = FeatureConfig(
-            outcome="home",
-            markets=["h2h"],
-            sharp_bookmakers=["pinnacle"],
-            retail_bookmakers=["fanduel"],
-        )
-
-        # Prepare data using config
+        # Prepare data using individual params
         X, y, masks = await prepare_lstm_training_data(
             events=events,
             session=pglite_async_session,
+            outcome="home",
+            market="h2h",
             lookback_hours=72,
             timesteps=24,
-            feature_config=feature_config,
+            sharp_bookmakers=["pinnacle"],
+            retail_bookmakers=["fanduel"],
         )
 
         # Verify output shapes

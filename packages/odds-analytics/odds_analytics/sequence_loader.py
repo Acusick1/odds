@@ -62,7 +62,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import SequenceFeatureExtractor
-from odds_analytics.training.config import FeatureConfig
 from odds_analytics.utils import calculate_implied_probability
 
 
@@ -363,16 +362,15 @@ async def load_sequences_for_event(
 async def prepare_lstm_training_data(
     events: list[Event],
     session: AsyncSession,
-    outcome: str | None = None,
-    market: str | None = None,
-    lookback_hours: int | None = None,
-    timesteps: int | None = None,
+    outcome: str = "home",
+    market: str = "h2h",
+    lookback_hours: int = 72,
+    timesteps: int = 24,
     sharp_bookmakers: list[str] | None = None,
     retail_bookmakers: list[str] | None = None,
     target_type: TargetType | str = TargetType.CLASSIFICATION,
-    opening_hours_before: float | None = None,
-    closing_hours_before: float | None = None,
-    feature_config: FeatureConfig | None = None,
+    opening_hours_before: float = 48.0,
+    closing_hours_before: float = 0.5,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Process multiple events to generate LSTM training data.
@@ -389,24 +387,22 @@ async def prepare_lstm_training_data(
         events: List of Event objects with final scores (status=FINAL required)
         session: Async database session
         outcome: What to predict - "home" (home team wins), "away" (away team wins), or team name
-            (overrides feature_config)
-        market: Market to analyze (h2h, spreads, totals) (overrides feature_config)
+        market: Market to analyze (h2h, spreads, totals)
         lookback_hours: Hours before game to start sequence
         timesteps: Number of timesteps in sequence (fixed length)
-        sharp_bookmakers: Sharp bookmakers for features (overrides feature_config)
-        retail_bookmakers: Retail bookmakers for features (overrides feature_config)
+        sharp_bookmakers: Sharp bookmakers for features (default: ["pinnacle"])
+        retail_bookmakers: Retail bookmakers for features (default: ["fanduel", "draftkings", "betmgm"])
         target_type: Type of target to generate:
             - "classification": Binary win/loss labels (default)
             - "regression": Line movement delta (closing - opening)
               For h2h: implied probability change
               For spreads/totals: point change
-        opening_hours_before: Hours before game to find opening line (overrides feature_config).
+        opening_hours_before: Hours before game to find opening line (default: 48).
             Only used when target_type="regression". Finds snapshot closest to
             (commence_time - opening_hours_before).
-        closing_hours_before: Hours before game to find closing line (overrides feature_config).
+        closing_hours_before: Hours before game to find closing line (default: 0.5).
             Only used when target_type="regression". Finds snapshot closest to
             (commence_time - closing_hours_before).
-        feature_config: Optional FeatureConfig object for config-driven preparation
 
     Returns:
         Tuple of (X, y, masks):
@@ -451,53 +447,7 @@ async def prepare_lstm_training_data(
         ...         target_type="regression"
         ...     )
         ...     print(f"Labels shape: {y.shape}")  # Continuous deltas
-        ...
-        ...     # Config-driven style
-        ...     from odds_analytics.training import FeatureConfig
-        ...     config = FeatureConfig(
-        ...         outcome="home",
-        ...         markets=["h2h"],
-        ...         sharp_bookmakers=["pinnacle"],
-        ...     )
-        ...     X, y, masks = await prepare_lstm_training_data(
-        ...         events=events,
-        ...         session=session,
-        ...         feature_config=config,
-        ...         target_type="regression"
-        ...     )
     """
-    # Extract parameters from feature_config if provided, with explicit params taking precedence
-    if feature_config is not None:
-        outcome = outcome if outcome is not None else feature_config.outcome
-        market = (
-            market
-            if market is not None
-            else (feature_config.markets[0] if feature_config.markets else "h2h")
-        )
-        opening_hours_before = (
-            opening_hours_before
-            if opening_hours_before is not None
-            else feature_config.opening_hours_before
-        )
-        closing_hours_before = (
-            closing_hours_before
-            if closing_hours_before is not None
-            else feature_config.closing_hours_before
-        )
-        sharp_bookmakers = (
-            sharp_bookmakers if sharp_bookmakers is not None else feature_config.sharp_bookmakers
-        )
-        retail_bookmakers = (
-            retail_bookmakers if retail_bookmakers is not None else feature_config.retail_bookmakers
-        )
-
-    # Apply defaults for any remaining None values (backward compatibility)
-    outcome = outcome if outcome is not None else "home"
-    market = market if market is not None else "h2h"
-    lookback_hours = lookback_hours if lookback_hours is not None else 72
-    timesteps = timesteps if timesteps is not None else 24
-    opening_hours_before = opening_hours_before if opening_hours_before is not None else 48.0
-    closing_hours_before = closing_hours_before if closing_hours_before is not None else 0.5
     # Validate inputs
     if not events:
         logger.warning("no_events_provided")
