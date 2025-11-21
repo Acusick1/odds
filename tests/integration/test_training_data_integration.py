@@ -178,11 +178,11 @@ class TestTrainingDataIntegration:
             )
 
     @pytest.mark.asyncio
-    async def test_prepare_tabular_with_feature_config_integration(self, async_session):
+    async def test_prepare_tabular_with_feature_config_integration(self, pglite_async_session):
         """Test prepare_tabular_training_data with FeatureConfig parameter."""
         from odds_lambda.storage.readers import OddsReader
 
-        reader = OddsReader(async_session)
+        reader = OddsReader(pglite_async_session)
 
         # Get events from database
         start_date = datetime(2024, 10, 1, tzinfo=UTC)
@@ -210,7 +210,7 @@ class TestTrainingDataIntegration:
         # Prepare data using config
         X, y, feature_names = await prepare_tabular_training_data(
             events=events,
-            session=async_session,
+            session=pglite_async_session,
             feature_config=feature_config,
         )
 
@@ -223,11 +223,11 @@ class TestTrainingDataIntegration:
             assert len(feature_names) > 0
 
     @pytest.mark.asyncio
-    async def test_prepare_lstm_with_feature_config_integration(self, async_session):
+    async def test_prepare_lstm_with_feature_config_integration(self, pglite_async_session):
         """Test prepare_lstm_training_data with FeatureConfig parameter."""
         from odds_lambda.storage.readers import OddsReader
 
-        reader = OddsReader(async_session)
+        reader = OddsReader(pglite_async_session)
 
         # Get events from database
         start_date = datetime(2024, 10, 1, tzinfo=UTC)
@@ -253,7 +253,7 @@ class TestTrainingDataIntegration:
         # Prepare data using config
         X, y, masks = await prepare_lstm_training_data(
             events=events,
-            session=async_session,
+            session=pglite_async_session,
             lookback_hours=72,
             timesteps=24,
             feature_config=feature_config,
@@ -268,10 +268,10 @@ class TestTrainingDataIntegration:
             assert X.shape[1] == masks.shape[1]  # timesteps match
 
     @pytest.mark.asyncio
-    async def test_full_pipeline_xgboost(self, xgboost_config, async_session):
+    async def test_full_pipeline_xgboost(self, xgboost_config, pglite_async_session):
         """Test full XGBoost pipeline: config -> data -> result."""
         try:
-            result = await prepare_training_data_from_config(xgboost_config, async_session)
+            result = await prepare_training_data_from_config(xgboost_config, pglite_async_session)
 
             # Verify result structure
             assert isinstance(result, TrainingDataResult)
@@ -303,10 +303,10 @@ class TestTrainingDataIntegration:
             raise
 
     @pytest.mark.asyncio
-    async def test_full_pipeline_lstm(self, lstm_config, async_session):
+    async def test_full_pipeline_lstm(self, lstm_config, pglite_async_session):
         """Test full LSTM pipeline: config -> data -> result with masks."""
         try:
-            result = await prepare_training_data_from_config(lstm_config, async_session)
+            result = await prepare_training_data_from_config(lstm_config, pglite_async_session)
 
             # Verify result structure
             assert isinstance(result, TrainingDataResult)
@@ -335,10 +335,10 @@ class TestTrainingDataIntegration:
             raise
 
     @pytest.mark.asyncio
-    async def test_result_to_dict_integration(self, xgboost_config, async_session):
+    async def test_result_to_dict_integration(self, xgboost_config, pglite_async_session):
         """Test that result can be converted to dict for serialization."""
         try:
-            result = await prepare_training_data_from_config(xgboost_config, async_session)
+            result = await prepare_training_data_from_config(xgboost_config, pglite_async_session)
 
             # Convert to dict
             result_dict = result.to_dict()
@@ -370,11 +370,11 @@ class TestTrainingDataIntegration:
             raise
 
     @pytest.mark.asyncio
-    async def test_backward_compatibility_legacy_params(self, async_session):
+    async def test_backward_compatibility_legacy_params(self, pglite_async_session):
         """Test that legacy parameter-based calls still work."""
         from odds_lambda.storage.readers import OddsReader
 
-        reader = OddsReader(async_session)
+        reader = OddsReader(pglite_async_session)
 
         start_date = datetime(2024, 10, 1, tzinfo=UTC)
         end_date = datetime(2024, 12, 31, tzinfo=UTC)
@@ -391,7 +391,7 @@ class TestTrainingDataIntegration:
         # Call with legacy style (no FeatureConfig)
         X, y, feature_names = await prepare_tabular_training_data(
             events=events,
-            session=async_session,
+            session=pglite_async_session,
             outcome="home",
             market="h2h",
             opening_hours_before=48.0,
