@@ -57,9 +57,6 @@ def load_config(config_path: str) -> MLTrainingConfig:
                 f"[red]Error: Unsupported config format '{path.suffix}'. Use .yaml or .json[/red]"
             )
             raise typer.Exit(1)
-    except FileNotFoundError:
-        console.print(f"[red]Error: Configuration file not found: {config_path}[/red]")
-        raise typer.Exit(1) from None
     except Exception as e:
         console.print(f"[red]Error loading configuration: {e}[/red]")
         raise typer.Exit(1) from None
@@ -128,7 +125,7 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
     console.print(f"Strategy: {strategy_type}")
     console.print(f"Period: {config.training.data.start_date} to {config.training.data.end_date}\n")
 
-    async for session in get_session():
+    async with get_session() as session:
         # Step 1: Prepare training data
         with Progress(
             SpinnerColumn(),
@@ -380,7 +377,7 @@ def list_configs(
     console.print(f"\nTotal: {len(config_files)} configuration file(s)")
 
 
-def _display_config_summary(config: MLTrainingConfig, verbose: bool = False):
+def _display_config_summary(config: MLTrainingConfig, verbose: bool = False) -> None:
     """Display configuration summary."""
     # Experiment info
     console.print(
@@ -438,7 +435,7 @@ def _display_config_summary(config: MLTrainingConfig, verbose: bool = False):
         console.print(feature_table)
 
 
-def _display_training_metrics(history: dict, verbose: bool):
+def _display_training_metrics(history: dict, verbose: bool) -> None:
     """Display training metrics."""
     console.print("\n[bold]Training Metrics:[/bold]")
 
