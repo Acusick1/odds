@@ -68,6 +68,7 @@ Example:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import structlog
@@ -75,6 +76,9 @@ import torch
 import torch.nn as nn
 from odds_core.models import Event, Odds
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from odds_analytics.training.config import MLTrainingConfig, SearchSpace
 
 from odds_analytics.backtesting import (
     BacktestConfig,
@@ -123,7 +127,9 @@ class LSTMModel(nn.Module):
         super().__init__()
 
         if output_type not in ("classification", "regression"):
-            raise ValueError(f"output_type must be 'classification' or 'regression', got '{output_type}'")
+            raise ValueError(
+                f"output_type must be 'classification' or 'regression', got '{output_type}'"
+            )
 
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -143,9 +149,7 @@ class LSTMModel(nn.Module):
         # Output layer
         self.fc = nn.Linear(hidden_size, 1)
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         """
         Forward pass through LSTM.
 
@@ -347,7 +351,7 @@ class LSTMStrategy(BettingStrategy):
             epoch_loss = 0.0
             num_batches = 0
 
-            for batch_X, batch_y, batch_mask in dataloader:
+            for batch_X, batch_y, _batch_mask in dataloader:
                 optimizer.zero_grad()
 
                 # Forward pass
@@ -375,6 +379,220 @@ class LSTMStrategy(BettingStrategy):
         logger.info("training_complete", final_loss=history["loss"][-1])
 
         return history
+
+    async def train_from_config(
+        self,
+        config: MLTrainingConfig,
+        events: list[Event],
+        session: AsyncSession,
+        outcome: str = "home",
+    ) -> dict[str, list[float]]:
+        """
+        Train LSTM model using configuration object.
+
+        Extracts hyperparameters from the config, resolves any search spaces
+        to concrete values, validates parameters, and logs all settings for
+        experiment tracking.
+
+        Args:
+            config: ML training configuration with model hyperparameters
+            events: List of events with final scores (status=FINAL)
+            session: Async database session
+            outcome: What to predict - "home" or "away" (default: "home")
+
+        Returns:
+            Training history dict with "loss" key containing loss values per epoch
+
+        Raises:
+            ValueError: If config has invalid parameters or wrong strategy type
+            TypeError: If model config is not LSTMConfig
+
+        Example:
+            >>> config = MLTrainingConfig.from_yaml("experiments/lstm_v1.yaml")
+            >>> strategy = LSTMStrategy()
+            >>> history = await strategy.train_from_config(config, events, session)
+        """
+        from odds_analytics.training.config import LSTMConfig
+
+        # Validate strategy type
+        if config.training.strategy_type not in ("lstm", "lstm_line_movement"):
+            raise ValueError(
+                f"Invalid strategy_type '{config.training.strategy_type}' for LSTMStrategy. "
+                f"Expected 'lstm' or 'lstm_line_movement'."
+            )
+
+        # Validate model config type
+        if not isinstance(config.training.model, LSTMConfig):
+            raise TypeError(
+                f"Expected LSTMConfig, got {type(config.training.model).__name__}. "
+                f"Ensure strategy_type matches model configuration."
+            )
+
+        model_config = config.training.model
+
+        # Extract training hyperparameters
+        epochs = model_config.epochs
+        batch_size = model_config.batch_size
+        learning_rate = model_config.learning_rate
+
+        # Extract and apply architecture parameters to strategy
+        # Update params that affect model architecture
+        self.params["hidden_size"] = model_config.hidden_size
+        self.params["num_layers"] = model_config.num_layers
+        self.params["dropout"] = model_config.dropout
+        self.params["lookback_hours"] = model_config.lookback_hours
+        self.params["timesteps"] = model_config.timesteps
+
+        # Rebuild feature extractor with new params
+        self.feature_extractor = SequenceFeatureExtractor(
+            lookback_hours=model_config.lookback_hours,
+            timesteps=model_config.timesteps,
+            sharp_bookmakers=self.params.get("sharp_bookmakers", ["pinnacle"]),
+            retail_bookmakers=self.params.get(
+                "retail_bookmakers", ["fanduel", "draftkings", "betmgm"]
+            ),
+        )
+        self.input_size = len(self.feature_extractor.get_feature_names())
+
+        # Override with search space midpoints if tuning config exists
+        resolved_params = {
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "learning_rate": learning_rate,
+            "hidden_size": model_config.hidden_size,
+            "num_layers": model_config.num_layers,
+            "dropout": model_config.dropout,
+        }
+
+        if config.tuning and config.tuning.search_spaces:
+            resolved_params = self._resolve_search_spaces(
+                resolved_params, config.tuning.search_spaces
+            )
+            # Re-apply resolved architecture params
+            self.params["hidden_size"] = resolved_params["hidden_size"]
+            self.params["num_layers"] = resolved_params["num_layers"]
+            self.params["dropout"] = resolved_params["dropout"]
+            epochs = resolved_params["epochs"]
+            batch_size = resolved_params["batch_size"]
+            learning_rate = resolved_params["learning_rate"]
+
+        # Log all hyperparameters for experiment tracking
+        logger.info(
+            "train_from_config",
+            experiment_name=config.experiment.name,
+            strategy_type=config.training.strategy_type,
+            num_events=len(events),
+            outcome=outcome,
+            epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            hidden_size=self.params["hidden_size"],
+            num_layers=self.params["num_layers"],
+            dropout=self.params["dropout"],
+            lookback_hours=self.params["lookback_hours"],
+            timesteps=self.params["timesteps"],
+            loss_function=model_config.loss_function,
+            weight_decay=model_config.weight_decay,
+            patience=model_config.patience,
+        )
+
+        # Call existing train method
+        history = await self.train(
+            events=events,
+            session=session,
+            epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            outcome=outcome,
+        )
+
+        # Log training completion
+        logger.info(
+            "training_complete",
+            experiment_name=config.experiment.name,
+            model_type="LSTM",
+            final_loss=history["loss"][-1] if history["loss"] else None,
+        )
+
+        return history
+
+    def _resolve_search_spaces(
+        self,
+        params: dict[str, Any],
+        search_spaces: dict[str, SearchSpace],
+    ) -> dict[str, Any]:
+        """
+        Resolve search spaces to concrete values using midpoints.
+
+        When Optuna is not available, this method converts search space
+        definitions to concrete values using the midpoint of the range
+        (for int/float types) or the first choice (for categorical types).
+
+        Args:
+            params: Current parameter dictionary
+            search_spaces: Search space definitions from tuning config
+
+        Returns:
+            Updated parameters with resolved values
+        """
+        resolved = params.copy()
+
+        for param_name, space in search_spaces.items():
+            if param_name not in resolved:
+                logger.warning(
+                    "unknown_search_space_param",
+                    param_name=param_name,
+                    message=f"Search space defined for unknown parameter '{param_name}'",
+                )
+                continue
+
+            if space.type == "int":
+                # Use midpoint for integer parameters
+                midpoint = int((space.low + space.high) / 2)
+                if space.step:
+                    # Round to nearest step
+                    midpoint = int(round(midpoint / space.step) * space.step)
+                resolved[param_name] = midpoint
+                logger.debug(
+                    "resolved_search_space",
+                    param_name=param_name,
+                    value=midpoint,
+                    space_type="int",
+                    low=space.low,
+                    high=space.high,
+                )
+
+            elif space.type == "float":
+                if space.log:
+                    # Use geometric mean for log-scale parameters
+                    import math
+
+                    midpoint = math.exp((math.log(space.low) + math.log(space.high)) / 2)
+                else:
+                    # Use arithmetic mean for linear-scale parameters
+                    midpoint = (space.low + space.high) / 2
+                resolved[param_name] = midpoint
+                logger.debug(
+                    "resolved_search_space",
+                    param_name=param_name,
+                    value=midpoint,
+                    space_type="float",
+                    log_scale=space.log,
+                )
+
+            elif space.type == "categorical":
+                # Use first choice for categorical parameters
+                if space.choices:
+                    resolved[param_name] = space.choices[0]
+                    logger.debug(
+                        "resolved_search_space",
+                        param_name=param_name,
+                        value=space.choices[0],
+                        space_type="categorical",
+                        choices=space.choices,
+                    )
+
+        return resolved
 
     async def evaluate_opportunity(
         self,
@@ -461,7 +679,9 @@ class LSTMStrategy(BettingStrategy):
 
         # Calculate market consensus from odds snapshot
         market_odds = [
-            o for o in odds_snapshot if o.market_key == self.params["market"] and o.outcome_name == event.home_team
+            o
+            for o in odds_snapshot
+            if o.market_key == self.params["market"] and o.outcome_name == event.home_team
         ]
 
         if not market_odds:
@@ -478,7 +698,10 @@ class LSTMStrategy(BettingStrategy):
         edge = home_win_prob - market_consensus
 
         # Check if edge exceeds threshold and confidence is sufficient
-        if edge >= self.params["min_edge_threshold"] and home_win_prob >= self.params["min_confidence"]:
+        if (
+            edge >= self.params["min_edge_threshold"]
+            and home_win_prob >= self.params["min_confidence"]
+        ):
             # Find best available odds for home team
             best_odds = max(market_odds, key=lambda o: o.price)
 

@@ -39,12 +39,15 @@ from __future__ import annotations
 
 import pickle
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import structlog
 from odds_core.models import Event, Odds
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from odds_analytics.training.config import MLTrainingConfig, SearchSpace
 
 from odds_analytics.backtesting import (
     BacktestConfig,
@@ -367,6 +370,191 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         )
 
         return history
+
+    def train_from_config(
+        self,
+        config: MLTrainingConfig,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        feature_names: list[str],
+        X_val: np.ndarray | None = None,
+        y_val: np.ndarray | None = None,
+    ) -> dict[str, Any]:
+        """
+        Train XGBoost regressor using configuration object.
+
+        Extracts hyperparameters from the config, resolves any search spaces
+        to concrete values, validates parameters, and logs all settings for
+        experiment tracking.
+
+        Args:
+            config: ML training configuration with model hyperparameters
+            X_train: Training features (n_samples, n_features)
+            y_train: Training targets - line movement deltas (n_samples,)
+            feature_names: List of feature names in order
+            X_val: Validation features (optional)
+            y_val: Validation targets (optional)
+
+        Returns:
+            Training history dictionary with metrics
+
+        Raises:
+            ValueError: If config has invalid parameters or wrong strategy type
+            TypeError: If model config is not XGBoostConfig
+
+        Example:
+            >>> config = MLTrainingConfig.from_yaml("experiments/xgb_line_movement.yaml")
+            >>> strategy = XGBoostLineMovementStrategy()
+            >>> history = strategy.train_from_config(config, X_train, y_train, feature_names)
+        """
+        from odds_analytics.training.config import XGBoostConfig
+
+        # Validate strategy type
+        if config.training.strategy_type != "xgboost_line_movement":
+            raise ValueError(
+                f"Invalid strategy_type '{config.training.strategy_type}' for "
+                f"XGBoostLineMovementStrategy. Expected 'xgboost_line_movement'."
+            )
+
+        # Validate model config type
+        if not isinstance(config.training.model, XGBoostConfig):
+            raise TypeError(
+                f"Expected XGBoostConfig, got {type(config.training.model).__name__}. "
+                f"Ensure strategy_type matches model configuration."
+            )
+
+        model_config = config.training.model
+
+        # Extract hyperparameters from config
+        xgb_params = {
+            "n_estimators": model_config.n_estimators,
+            "max_depth": model_config.max_depth,
+            "min_child_weight": model_config.min_child_weight,
+            "learning_rate": model_config.learning_rate,
+            "gamma": model_config.gamma,
+            "subsample": model_config.subsample,
+            "colsample_bytree": model_config.colsample_bytree,
+            "colsample_bylevel": model_config.colsample_bylevel,
+            "colsample_bynode": model_config.colsample_bynode,
+            "reg_alpha": model_config.reg_alpha,
+            "reg_lambda": model_config.reg_lambda,
+            "objective": model_config.objective,
+            "random_state": model_config.random_state,
+            "n_jobs": model_config.n_jobs,
+        }
+
+        # Handle early stopping if configured
+        if model_config.early_stopping_rounds is not None:
+            xgb_params["early_stopping_rounds"] = model_config.early_stopping_rounds
+
+        # Override with search space midpoints if tuning config exists
+        if config.tuning and config.tuning.search_spaces:
+            xgb_params = self._resolve_search_spaces(xgb_params, config.tuning.search_spaces)
+
+        # Log all hyperparameters for experiment tracking
+        logger.info(
+            "train_from_config",
+            experiment_name=config.experiment.name,
+            strategy_type=config.training.strategy_type,
+            n_samples=len(X_train),
+            n_features=len(feature_names),
+            has_validation=X_val is not None,
+            **xgb_params,
+        )
+
+        # Call existing train method
+        history = self.train(
+            X_train, y_train, feature_names, X_val=X_val, y_val=y_val, **xgb_params
+        )
+
+        # Log training completion
+        logger.info(
+            "training_complete",
+            experiment_name=config.experiment.name,
+            model_type="XGBoostRegressor",
+            train_mse=history.get("train_mse"),
+            val_mse=history.get("val_mse"),
+        )
+
+        return history
+
+    def _resolve_search_spaces(
+        self,
+        params: dict[str, Any],
+        search_spaces: dict[str, SearchSpace],
+    ) -> dict[str, Any]:
+        """
+        Resolve search spaces to concrete values using midpoints.
+
+        When Optuna is not available, this method converts search space
+        definitions to concrete values using the midpoint of the range
+        (for int/float types) or the first choice (for categorical types).
+
+        Args:
+            params: Current parameter dictionary
+            search_spaces: Search space definitions from tuning config
+
+        Returns:
+            Updated parameters with resolved values
+        """
+        resolved = params.copy()
+
+        for param_name, space in search_spaces.items():
+            if param_name not in resolved:
+                logger.warning(
+                    "unknown_search_space_param",
+                    param_name=param_name,
+                    message=f"Search space defined for unknown parameter '{param_name}'",
+                )
+                continue
+
+            if space.type == "int":
+                # Use midpoint for integer parameters
+                midpoint = int((space.low + space.high) / 2)
+                if space.step:
+                    # Round to nearest step
+                    midpoint = int(round(midpoint / space.step) * space.step)
+                resolved[param_name] = midpoint
+                logger.debug(
+                    "resolved_search_space",
+                    param_name=param_name,
+                    value=midpoint,
+                    space_type="int",
+                    low=space.low,
+                    high=space.high,
+                )
+
+            elif space.type == "float":
+                if space.log:
+                    # Use geometric mean for log-scale parameters
+                    import math
+
+                    midpoint = math.exp((math.log(space.low) + math.log(space.high)) / 2)
+                else:
+                    # Use arithmetic mean for linear-scale parameters
+                    midpoint = (space.low + space.high) / 2
+                resolved[param_name] = midpoint
+                logger.debug(
+                    "resolved_search_space",
+                    param_name=param_name,
+                    value=midpoint,
+                    space_type="float",
+                    log_scale=space.log,
+                )
+
+            elif space.type == "categorical":
+                # Use first choice for categorical parameters
+                if space.choices:
+                    resolved[param_name] = space.choices[0]
+                    logger.debug(
+                        "resolved_search_space",
+                        param_name=param_name,
+                        value=space.choices[0],
+                        space_type="categorical",
+                        choices=space.choices,
+                    )
+
+        return resolved
 
     def save_model(self, filepath: str) -> None:
         """
