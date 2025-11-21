@@ -39,12 +39,15 @@ from __future__ import annotations
 
 import pickle
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import structlog
 from odds_core.models import Event, Odds
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from odds_analytics.training.config import MLTrainingConfig
 
 from odds_analytics.backtesting import (
     BacktestConfig,
@@ -364,6 +367,113 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             train_mae=train_mae,
             train_r2=train_r2,
             n_samples=len(X_train),
+        )
+
+        return history
+
+    def train_from_config(
+        self,
+        config: MLTrainingConfig,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        feature_names: list[str],
+        X_val: np.ndarray | None = None,
+        y_val: np.ndarray | None = None,
+    ) -> dict[str, Any]:
+        """
+        Train XGBoost regressor using configuration object.
+
+        Extracts hyperparameters from the config, resolves any search spaces
+        to concrete values, validates parameters, and logs all settings for
+        experiment tracking.
+
+        Args:
+            config: ML training configuration with model hyperparameters
+            X_train: Training features (n_samples, n_features)
+            y_train: Training targets - line movement deltas (n_samples,)
+            feature_names: List of feature names in order
+            X_val: Validation features (optional)
+            y_val: Validation targets (optional)
+
+        Returns:
+            Training history dictionary with metrics
+
+        Raises:
+            ValueError: If config has invalid parameters or wrong strategy type
+            TypeError: If model config is not XGBoostConfig
+
+        Example:
+            >>> config = MLTrainingConfig.from_yaml("experiments/xgb_line_movement.yaml")
+            >>> strategy = XGBoostLineMovementStrategy()
+            >>> history = strategy.train_from_config(config, X_train, y_train, feature_names)
+        """
+        from odds_analytics.training.config import XGBoostConfig, resolve_search_spaces
+
+        # Validate strategy type
+        if config.training.strategy_type != "xgboost_line_movement":
+            raise ValueError(
+                f"Invalid strategy_type '{config.training.strategy_type}' for "
+                f"XGBoostLineMovementStrategy. Expected 'xgboost_line_movement'."
+            )
+
+        # Validate model config type
+        if not isinstance(config.training.model, XGBoostConfig):
+            raise TypeError(
+                f"Expected XGBoostConfig, got {type(config.training.model).__name__}. "
+                f"Ensure strategy_type matches model configuration."
+            )
+
+        model_config = config.training.model
+
+        # Extract hyperparameters from config
+        xgb_params = {
+            "n_estimators": model_config.n_estimators,
+            "max_depth": model_config.max_depth,
+            "min_child_weight": model_config.min_child_weight,
+            "learning_rate": model_config.learning_rate,
+            "gamma": model_config.gamma,
+            "subsample": model_config.subsample,
+            "colsample_bytree": model_config.colsample_bytree,
+            "colsample_bylevel": model_config.colsample_bylevel,
+            "colsample_bynode": model_config.colsample_bynode,
+            "reg_alpha": model_config.reg_alpha,
+            "reg_lambda": model_config.reg_lambda,
+            "objective": model_config.objective,
+            "random_state": model_config.random_state,
+            "n_jobs": model_config.n_jobs,
+        }
+
+        # Handle early stopping if configured
+        if model_config.early_stopping_rounds is not None:
+            xgb_params["early_stopping_rounds"] = model_config.early_stopping_rounds
+
+        # Override with search space midpoints if tuning config exists
+        if config.tuning and config.tuning.search_spaces:
+            xgb_params = resolve_search_spaces(xgb_params, config.tuning.search_spaces)
+
+        # Log all hyperparameters for experiment tracking
+        logger.info(
+            "train_from_config",
+            experiment_name=config.experiment.name,
+            strategy_type=config.training.strategy_type,
+            n_samples=len(X_train),
+            n_features=len(feature_names),
+            has_validation=X_val is not None,
+            **xgb_params,
+        )
+
+        # Call existing train method
+        history = self.train(
+            X_train, y_train, feature_names, X_val=X_val, y_val=y_val, **xgb_params
+        )
+
+        # Log training completion
+        logger.info(
+            "training_complete",
+            experiment_name=config.experiment.name,
+            model_type="XGBoostRegressor",
+            train_mse=history.get("train_mse"),
+            val_mse=history.get("val_mse"),
         )
 
         return history
