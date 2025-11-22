@@ -7,11 +7,15 @@ Tests cover:
 - Clear validation error messages
 - YAML/JSON serialization capability
 - Search space validation alongside static values
+- Configuration inheritance and deep merging
+- Environment variable substitution
+- Circular inheritance detection
 """
 
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from datetime import date
 from pathlib import Path
@@ -1128,3 +1132,691 @@ class TestUnknownFieldRejection:
                 MLTrainingConfig.from_yaml(temp_path)
         finally:
             Path(temp_path).unlink()
+
+
+# =============================================================================
+# Configuration Inheritance Tests
+# =============================================================================
+
+
+class TestConfigInheritance:
+    """Tests for configuration inheritance functionality."""
+
+    def test_basic_inheritance(self):
+        """Test basic configuration inheritance from base file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir) / "base.yaml"
+            child_path = Path(tmpdir) / "child.yaml"
+
+            # Create base config
+            base_config = {
+                "experiment": {
+                    "name": "base_experiment",
+                    "tags": ["baseline"],
+                    "description": "Base configuration",
+                },
+                "training": {
+                    "strategy_type": "xgboost_line_movement",
+                    "data": {
+                        "start_date": "2024-01-01",
+                        "end_date": "2024-12-31",
+                        "test_split": 0.2,
+                    },
+                    "model": {
+                        "n_estimators": 100,
+                        "max_depth": 6,
+                    },
+                },
+            }
+
+            # Create child config that inherits from base
+            child_config = {
+                "base": "base.yaml",
+                "experiment": {
+                    "name": "child_experiment",
+                },
+            }
+
+            with open(base_path, "w") as f:
+                yaml.dump(base_config, f)
+
+            with open(child_path, "w") as f:
+                yaml.dump(child_config, f)
+
+            # Load child config
+            config = MLTrainingConfig.from_yaml(child_path)
+
+            # Child should override name but inherit everything else
+            assert config.experiment.name == "child_experiment"
+            assert config.experiment.tags == ["baseline"]  # Inherited
+            assert config.experiment.description == "Base configuration"  # Inherited
+            assert config.training.model.n_estimators == 100  # Inherited
+            assert config.training.model.max_depth == 6  # Inherited
+
+    def test_deep_merge_override(self):
+        """Test that child values properly override nested parent values."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir) / "base.yaml"
+            child_path = Path(tmpdir) / "child.yaml"
+
+            # Base config
+            base_config = {
+                "experiment": {"name": "base"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {
+                        "start_date": "2024-01-01",
+                        "end_date": "2024-12-31",
+                        "test_split": 0.2,
+                        "random_seed": 42,
+                    },
+                    "model": {
+                        "n_estimators": 100,
+                        "max_depth": 6,
+                        "learning_rate": 0.1,
+                    },
+                },
+            }
+
+            # Child config overrides specific nested values
+            child_config = {
+                "base": "base.yaml",
+                "training": {
+                    "data": {
+                        "test_split": 0.3,  # Override
+                    },
+                    "model": {
+                        "n_estimators": 200,  # Override
+                        "max_depth": 8,  # Override
+                    },
+                },
+            }
+
+            with open(base_path, "w") as f:
+                yaml.dump(base_config, f)
+
+            with open(child_path, "w") as f:
+                yaml.dump(child_config, f)
+
+            config = MLTrainingConfig.from_yaml(child_path)
+
+            # Overridden values
+            assert config.training.data.test_split == 0.3
+            assert config.training.model.n_estimators == 200
+            assert config.training.model.max_depth == 8
+            # Inherited values
+            assert config.training.data.random_seed == 42
+            assert config.training.model.learning_rate == 0.1
+
+    def test_multi_level_inheritance(self):
+        """Test inheritance chains with multiple levels."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            grandparent_path = Path(tmpdir) / "grandparent.yaml"
+            parent_path = Path(tmpdir) / "parent.yaml"
+            child_path = Path(tmpdir) / "child.yaml"
+
+            # Grandparent config
+            grandparent_config = {
+                "experiment": {
+                    "name": "grandparent",
+                    "tags": ["v1"],
+                    "description": "Original",
+                },
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {
+                        "start_date": "2024-01-01",
+                        "end_date": "2024-12-31",
+                    },
+                    "model": {
+                        "n_estimators": 50,
+                        "max_depth": 4,
+                    },
+                },
+            }
+
+            # Parent overrides some values
+            parent_config = {
+                "base": "grandparent.yaml",
+                "experiment": {
+                    "name": "parent",
+                    "tags": ["v2"],
+                },
+                "training": {
+                    "model": {
+                        "n_estimators": 100,
+                    },
+                },
+            }
+
+            # Child overrides more values
+            child_config = {
+                "base": "parent.yaml",
+                "experiment": {
+                    "name": "child",
+                },
+                "training": {
+                    "model": {
+                        "max_depth": 8,
+                    },
+                },
+            }
+
+            with open(grandparent_path, "w") as f:
+                yaml.dump(grandparent_config, f)
+            with open(parent_path, "w") as f:
+                yaml.dump(parent_config, f)
+            with open(child_path, "w") as f:
+                yaml.dump(child_config, f)
+
+            config = MLTrainingConfig.from_yaml(child_path)
+
+            # Check inheritance chain
+            assert config.experiment.name == "child"  # From child
+            assert config.experiment.tags == ["v2"]  # From parent
+            assert config.experiment.description == "Original"  # From grandparent
+            assert config.training.model.n_estimators == 100  # From parent
+            assert config.training.model.max_depth == 8  # From child
+
+    def test_circular_inheritance_detection(self):
+        """Test that circular inheritance is detected and raises error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_a_path = Path(tmpdir) / "config_a.yaml"
+            config_b_path = Path(tmpdir) / "config_b.yaml"
+
+            # A inherits from B
+            config_a = {
+                "base": "config_b.yaml",
+                "experiment": {"name": "config_a"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {},
+                },
+            }
+
+            # B inherits from A (circular!)
+            config_b = {
+                "base": "config_a.yaml",
+                "experiment": {"name": "config_b"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {},
+                },
+            }
+
+            with open(config_a_path, "w") as f:
+                yaml.dump(config_a, f)
+            with open(config_b_path, "w") as f:
+                yaml.dump(config_b, f)
+
+            with pytest.raises(ValueError, match="Circular inheritance detected"):
+                MLTrainingConfig.from_yaml(config_a_path)
+
+    def test_self_inheritance_detection(self):
+        """Test that self-inheritance is detected and raises error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+
+            # Config inherits from itself
+            config = {
+                "base": "config.yaml",
+                "experiment": {"name": "self_ref"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {},
+                },
+            }
+
+            with open(config_path, "w") as f:
+                yaml.dump(config, f)
+
+            with pytest.raises(ValueError, match="Circular inheritance detected"):
+                MLTrainingConfig.from_yaml(config_path)
+
+    def test_relative_path_resolution(self):
+        """Test that relative paths are resolved from config file directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create nested directory structure
+            configs_dir = Path(tmpdir) / "configs"
+            base_dir = configs_dir / "base"
+            base_dir.mkdir(parents=True)
+
+            base_path = base_dir / "base_config.yaml"
+            child_path = configs_dir / "child_config.yaml"
+
+            # Base config in subdirectory
+            base_config = {
+                "experiment": {"name": "base_in_subdir"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {"n_estimators": 100},
+                },
+            }
+
+            # Child references base with relative path
+            child_config = {
+                "base": "base/base_config.yaml",  # Relative path
+                "experiment": {"name": "child"},
+            }
+
+            with open(base_path, "w") as f:
+                yaml.dump(base_config, f)
+            with open(child_path, "w") as f:
+                yaml.dump(child_config, f)
+
+            config = MLTrainingConfig.from_yaml(child_path)
+            assert config.experiment.name == "child"
+            assert config.training.model.n_estimators == 100
+
+    def test_inheritance_with_json(self):
+        """Test inheritance works with JSON files too."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir) / "base.json"
+            child_path = Path(tmpdir) / "child.json"
+
+            base_config = {
+                "experiment": {"name": "json_base", "tags": ["json"]},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {"n_estimators": 100},
+                },
+            }
+
+            child_config = {
+                "base": "base.json",
+                "experiment": {"name": "json_child"},
+            }
+
+            with open(base_path, "w") as f:
+                json.dump(base_config, f)
+            with open(child_path, "w") as f:
+                json.dump(child_config, f)
+
+            config = MLTrainingConfig.from_json(child_path)
+            assert config.experiment.name == "json_child"
+            assert config.experiment.tags == ["json"]
+
+    def test_base_file_not_found(self):
+        """Test error when base configuration file doesn't exist."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            child_path = Path(tmpdir) / "child.yaml"
+
+            child_config = {
+                "base": "nonexistent_base.yaml",
+                "experiment": {"name": "child"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {},
+                },
+            }
+
+            with open(child_path, "w") as f:
+                yaml.dump(child_config, f)
+
+            with pytest.raises(FileNotFoundError, match="Configuration file not found"):
+                MLTrainingConfig.from_yaml(child_path)
+
+    def test_serialization_excludes_base_field(self):
+        """Test that serialized config doesn't include base reference."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir) / "base.yaml"
+            child_path = Path(tmpdir) / "child.yaml"
+            output_path = Path(tmpdir) / "output.yaml"
+
+            base_config = {
+                "experiment": {"name": "base"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {"n_estimators": 100},
+                },
+            }
+
+            child_config = {
+                "base": "base.yaml",
+                "experiment": {"name": "child"},
+            }
+
+            with open(base_path, "w") as f:
+                yaml.dump(base_config, f)
+            with open(child_path, "w") as f:
+                yaml.dump(child_config, f)
+
+            # Load and save
+            config = MLTrainingConfig.from_yaml(child_path)
+            config.to_yaml(output_path)
+
+            # Check that base field is not in output
+            with open(output_path) as f:
+                saved_data = yaml.safe_load(f)
+
+            assert "base" not in saved_data
+
+
+# =============================================================================
+# Environment Variable Substitution Tests
+# =============================================================================
+
+
+class TestEnvironmentVariableSubstitution:
+    """Tests for environment variable substitution functionality."""
+
+    def test_basic_env_var_substitution(self):
+        """Test basic ${VAR} substitution."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+
+            config_data = {
+                "experiment": {"name": "${TEST_EXPERIMENT_NAME}"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {},
+                    "output_path": "${TEST_OUTPUT_PATH}",
+                },
+            }
+
+            with open(config_path, "w") as f:
+                yaml.dump(config_data, f)
+
+            # Set environment variables
+            os.environ["TEST_EXPERIMENT_NAME"] = "env_test"
+            os.environ["TEST_OUTPUT_PATH"] = "/tmp/models"
+
+            try:
+                config = MLTrainingConfig.from_yaml(config_path)
+                assert config.experiment.name == "env_test"
+                assert config.training.output_path == "/tmp/models"
+            finally:
+                del os.environ["TEST_EXPERIMENT_NAME"]
+                del os.environ["TEST_OUTPUT_PATH"]
+
+    def test_env_var_with_default(self):
+        """Test ${VAR:-default} substitution with default value."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+
+            config_data = {
+                "experiment": {"name": "${MISSING_VAR:-default_name}"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {},
+                    "output_path": "${MISSING_PATH:-/default/path}",
+                },
+            }
+
+            with open(config_path, "w") as f:
+                yaml.dump(config_data, f)
+
+            # Don't set environment variables - should use defaults
+            config = MLTrainingConfig.from_yaml(config_path)
+            assert config.experiment.name == "default_name"
+            assert config.training.output_path == "/default/path"
+
+    def test_env_var_override_default(self):
+        """Test that set env var overrides default value."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+
+            config_data = {
+                "experiment": {"name": "${SET_VAR:-default_name}"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {},
+                },
+            }
+
+            with open(config_path, "w") as f:
+                yaml.dump(config_data, f)
+
+            os.environ["SET_VAR"] = "actual_value"
+
+            try:
+                config = MLTrainingConfig.from_yaml(config_path)
+                assert config.experiment.name == "actual_value"
+            finally:
+                del os.environ["SET_VAR"]
+
+    def test_missing_env_var_without_default_raises_error(self):
+        """Test that missing env var without default raises informative error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+
+            config_data = {
+                "experiment": {"name": "${MISSING_REQUIRED_VAR}"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {},
+                },
+            }
+
+            with open(config_path, "w") as f:
+                yaml.dump(config_data, f)
+
+            # Ensure the variable is not set
+            if "MISSING_REQUIRED_VAR" in os.environ:
+                del os.environ["MISSING_REQUIRED_VAR"]
+
+            with pytest.raises(ValueError, match="MISSING_REQUIRED_VAR.*not set"):
+                MLTrainingConfig.from_yaml(config_path)
+
+    def test_env_var_in_nested_config(self):
+        """Test env var substitution in deeply nested config."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+
+            config_data = {
+                "experiment": {
+                    "name": "nested_test",
+                    "tags": ["${ENV_TAG}"],
+                    "description": "Description with ${ENV_DESC:-default_desc}",
+                },
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {},
+                    "features": {
+                        "sharp_bookmakers": ["${SHARP_BOOK:-pinnacle}"],
+                    },
+                },
+            }
+
+            with open(config_path, "w") as f:
+                yaml.dump(config_data, f)
+
+            os.environ["ENV_TAG"] = "production"
+
+            try:
+                config = MLTrainingConfig.from_yaml(config_path)
+                assert config.experiment.tags == ["production"]
+                assert "default_desc" in config.experiment.description
+                assert config.training.features.sharp_bookmakers == ["pinnacle"]
+            finally:
+                del os.environ["ENV_TAG"]
+
+    def test_multiple_env_vars_in_string(self):
+        """Test multiple env vars in a single string."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+
+            config_data = {
+                "experiment": {"name": "${PREFIX}_${SUFFIX:-experiment}"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {},
+                },
+            }
+
+            with open(config_path, "w") as f:
+                yaml.dump(config_data, f)
+
+            os.environ["PREFIX"] = "test"
+
+            try:
+                config = MLTrainingConfig.from_yaml(config_path)
+                assert config.experiment.name == "test_experiment"
+            finally:
+                del os.environ["PREFIX"]
+
+    def test_env_var_empty_default(self):
+        """Test env var with empty default value."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+
+            config_data = {
+                "experiment": {
+                    "name": "test",
+                    "description": "${EMPTY_DEFAULT:-}",
+                },
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {},
+                },
+            }
+
+            with open(config_path, "w") as f:
+                yaml.dump(config_data, f)
+
+            config = MLTrainingConfig.from_yaml(config_path)
+            assert config.experiment.description == ""
+
+    def test_env_var_with_inheritance(self):
+        """Test env var substitution works with inheritance."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir) / "base.yaml"
+            child_path = Path(tmpdir) / "child.yaml"
+
+            base_config = {
+                "experiment": {"name": "${BASE_NAME:-base}"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {"n_estimators": 100},
+                    "output_path": "${OUTPUT:-models}",
+                },
+            }
+
+            child_config = {
+                "base": "base.yaml",
+                "experiment": {"name": "${CHILD_NAME:-child}"},
+            }
+
+            with open(base_path, "w") as f:
+                yaml.dump(base_config, f)
+            with open(child_path, "w") as f:
+                yaml.dump(child_config, f)
+
+            os.environ["CHILD_NAME"] = "my_child"
+
+            try:
+                config = MLTrainingConfig.from_yaml(child_path)
+                assert config.experiment.name == "my_child"
+                assert config.training.output_path == "models"  # Default used
+            finally:
+                del os.environ["CHILD_NAME"]
+
+    def test_env_var_in_json(self):
+        """Test env var substitution works with JSON files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+
+            config_data = {
+                "experiment": {"name": "${JSON_NAME:-json_test}"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {},
+                },
+            }
+
+            with open(config_path, "w") as f:
+                json.dump(config_data, f)
+
+            config = MLTrainingConfig.from_json(config_path)
+            assert config.experiment.name == "json_test"
+
+
+# =============================================================================
+# Deep Merge Tests
+# =============================================================================
+
+
+class TestDeepMerge:
+    """Tests for the deep merge functionality."""
+
+    def test_deep_merge_lists_override(self):
+        """Test that lists are replaced, not merged."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir) / "base.yaml"
+            child_path = Path(tmpdir) / "child.yaml"
+
+            base_config = {
+                "experiment": {"name": "base", "tags": ["tag1", "tag2"]},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {},
+                },
+            }
+
+            child_config = {
+                "base": "base.yaml",
+                "experiment": {"tags": ["new_tag"]},  # Replace entire list
+            }
+
+            with open(base_path, "w") as f:
+                yaml.dump(base_config, f)
+            with open(child_path, "w") as f:
+                yaml.dump(child_config, f)
+
+            config = MLTrainingConfig.from_yaml(child_path)
+            # List should be replaced, not merged
+            assert config.experiment.tags == ["new_tag"]
+
+    def test_deep_merge_preserves_unrelated_fields(self):
+        """Test that unrelated fields in parent are preserved."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir) / "base.yaml"
+            child_path = Path(tmpdir) / "child.yaml"
+
+            base_config = {
+                "experiment": {"name": "base"},
+                "training": {
+                    "strategy_type": "xgboost",
+                    "data": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+                    "model": {"n_estimators": 100, "max_depth": 6, "learning_rate": 0.1},
+                },
+                "tuning": {
+                    "n_trials": 50,
+                    "direction": "minimize",
+                },
+            }
+
+            child_config = {
+                "base": "base.yaml",
+                "training": {
+                    "model": {"n_estimators": 200},  # Only override this
+                },
+            }
+
+            with open(base_path, "w") as f:
+                yaml.dump(base_config, f)
+            with open(child_path, "w") as f:
+                yaml.dump(child_config, f)
+
+            config = MLTrainingConfig.from_yaml(child_path)
+            # Check preserved values
+            assert config.training.model.max_depth == 6
+            assert config.training.model.learning_rate == 0.1
+            assert config.tuning.n_trials == 50

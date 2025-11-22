@@ -35,6 +35,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import re
 from datetime import date
 from pathlib import Path
 from typing import Any, Literal
@@ -44,6 +46,9 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = structlog.get_logger()
+
+# Maximum inheritance depth to prevent infinite loops
+MAX_INHERITANCE_DEPTH = 10
 
 __all__ = [
     "ExperimentConfig",
@@ -702,52 +707,47 @@ class MLTrainingConfig(BaseModel):
     Combines all configuration sections and provides methods for
     loading from and saving to YAML/JSON files.
 
-    Example YAML:
+    Supports configuration inheritance via the `base` field and environment
+    variable substitution using `${VAR}` or `${VAR:-default}` syntax.
+
+    Example YAML with inheritance and env vars:
         ```yaml
+        # base_config.yaml
         experiment:
-          name: "xgboost_line_movement_v1"
-          tags: ["xgboost", "line_movement", "h2h"]
-          description: "XGBoost model for predicting line movements"
+          name: "base_experiment"
+          tags: ["baseline"]
 
         training:
           strategy_type: "xgboost_line_movement"
           data:
             start_date: "2024-10-01"
             end_date: "2024-12-31"
-            test_split: 0.2
-            random_seed: 42
           model:
             n_estimators: 100
-            max_depth: 6
+          output_path: "${MODEL_OUTPUT_PATH:-models}"
+
+        # child_config.yaml
+        base: "base_config.yaml"  # Inherit from base
+
+        experiment:
+          name: "xgboost_line_movement_v1"
+          tags: ["xgboost", "line_movement", "h2h"]
+          description: "XGBoost model for predicting line movements"
+
+        training:
+          model:
+            n_estimators: 200  # Override base value
             learning_rate: 0.1
-          features:
-            sharp_bookmakers: ["pinnacle"]
-            retail_bookmakers: ["fanduel", "draftkings", "betmgm"]
-          output_path: "models"
-
-        tuning:
-          n_trials: 100
-          direction: "minimize"
-          metric: "val_mse"
-          search_spaces:
-            n_estimators:
-              type: int
-              low: 50
-              high: 500
-            learning_rate:
-              type: float
-              low: 0.001
-              high: 0.3
-              log: true
-
-        tracking:
-          enabled: true
-          tracking_uri: "mlruns"
         ```
     """
 
     model_config = ConfigDict(extra="forbid")
 
+    base: str | None = Field(
+        default=None,
+        description="Path to base configuration file for inheritance",
+        exclude=True,  # Don't include in serialization
+    )
     experiment: ExperimentConfig = Field(
         ...,
         description="Experiment metadata",
@@ -765,10 +765,170 @@ class MLTrainingConfig(BaseModel):
         description="Experiment tracking configuration (optional)",
     )
 
+    @staticmethod
+    def _substitute_env_vars(data: Any) -> Any:
+        """
+        Recursively substitute environment variables in configuration data.
+
+        Supports two syntaxes:
+        - ${VAR} - raises error if VAR is not set
+        - ${VAR:-default} - uses 'default' if VAR is not set
+
+        Args:
+            data: Configuration data (dict, list, or scalar)
+
+        Returns:
+            Data with environment variables substituted
+
+        Raises:
+            ValueError: If an environment variable is not set and has no default
+        """
+        # Pattern matches ${VAR} or ${VAR:-default}
+        env_pattern = re.compile(r"\$\{([^}:]+)(?::-([^}]*))?\}")
+
+        def substitute_string(s: str) -> str:
+            """Substitute environment variables in a single string."""
+
+            def replace_match(match: re.Match) -> str:
+                var_name = match.group(1)
+                default_value = match.group(2)
+
+                value = os.environ.get(var_name)
+                if value is not None:
+                    return value
+                elif default_value is not None:
+                    return default_value
+                else:
+                    raise ValueError(
+                        f"Environment variable '{var_name}' is not set and has no default value"
+                    )
+
+            return env_pattern.sub(replace_match, s)
+
+        if isinstance(data, dict):
+            return {k: MLTrainingConfig._substitute_env_vars(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [MLTrainingConfig._substitute_env_vars(item) for item in data]
+        elif isinstance(data, str):
+            return substitute_string(data)
+        else:
+            return data
+
+    @staticmethod
+    def _deep_merge(base: dict, override: dict) -> dict:
+        """
+        Deep merge two dictionaries, with override values taking precedence.
+
+        Args:
+            base: Base dictionary (from parent config)
+            override: Override dictionary (from child config)
+
+        Returns:
+            Merged dictionary with child values overriding parent values
+        """
+        result = base.copy()
+
+        for key, value in override.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                # Recursively merge nested dictionaries
+                result[key] = MLTrainingConfig._deep_merge(result[key], value)
+            else:
+                # Override with child value
+                result[key] = value
+
+        return result
+
+    @classmethod
+    def _load_with_inheritance(
+        cls,
+        filepath: Path,
+        visited: set[str] | None = None,
+        depth: int = 0,
+    ) -> dict:
+        """
+        Load configuration with inheritance chain resolution.
+
+        Recursively loads base configurations and merges them with child configs.
+        Child values override parent values (deep merge).
+
+        Args:
+            filepath: Path to the configuration file
+            visited: Set of already-visited file paths (for circular detection)
+            depth: Current recursion depth
+
+        Returns:
+            Merged configuration dictionary
+
+        Raises:
+            ValueError: If circular inheritance is detected or max depth exceeded
+            FileNotFoundError: If configuration file doesn't exist
+        """
+        if visited is None:
+            visited = set()
+
+        # Resolve to absolute path for consistent tracking
+        filepath = filepath.resolve()
+        filepath_str = str(filepath)
+
+        # Check for circular inheritance
+        if filepath_str in visited:
+            raise ValueError(
+                f"Circular inheritance detected: {filepath_str} was already loaded. "
+                f"Inheritance chain: {' -> '.join(visited)} -> {filepath_str}"
+            )
+
+        # Check for maximum depth
+        if depth > MAX_INHERITANCE_DEPTH:
+            raise ValueError(
+                f"Maximum inheritance depth ({MAX_INHERITANCE_DEPTH}) exceeded. "
+                f"Check for circular references or overly deep inheritance chains."
+            )
+
+        # Mark this file as visited
+        visited.add(filepath_str)
+
+        # Load the configuration file
+        if not filepath.exists():
+            raise FileNotFoundError(f"Configuration file not found: {filepath}")
+
+        with open(filepath) as f:
+            if filepath.suffix in (".yaml", ".yml"):
+                data = yaml.safe_load(f)
+            elif filepath.suffix == ".json":
+                data = json.load(f)
+            else:
+                raise ValueError(f"Unsupported configuration file format: {filepath.suffix}")
+
+        if data is None:
+            raise ValueError(f"Empty configuration file: {filepath}")
+
+        # Check for base configuration
+        base_path = data.pop("base", None)
+        if base_path:
+            # Resolve relative path from the current config file's directory
+            base_filepath = filepath.parent / base_path
+            if not base_filepath.exists():
+                # Try as absolute path
+                base_filepath = Path(base_path)
+
+            # Recursively load base configuration
+            base_data = cls._load_with_inheritance(
+                base_filepath,
+                visited=visited.copy(),  # Copy to allow sibling inheritance
+                depth=depth + 1,
+            )
+
+            # Deep merge: child overrides parent
+            data = cls._deep_merge(base_data, data)
+
+        return data
+
     @classmethod
     def from_yaml(cls, filepath: str | Path) -> MLTrainingConfig:
         """
         Load configuration from a YAML file.
+
+        Supports configuration inheritance and environment variable substitution.
 
         Args:
             filepath: Path to YAML configuration file
@@ -778,21 +938,21 @@ class MLTrainingConfig(BaseModel):
 
         Raises:
             FileNotFoundError: If file doesn't exist
-            ValueError: If YAML is invalid or fails validation
+            ValueError: If YAML is invalid, fails validation, or has circular inheritance
 
         Example:
             >>> config = MLTrainingConfig.from_yaml("experiments/config.yaml")
+            >>> # With inheritance
+            >>> config = MLTrainingConfig.from_yaml("experiments/child_config.yaml")
+            >>> # Environment variables are automatically substituted
         """
         filepath = Path(filepath)
 
-        if not filepath.exists():
-            raise FileNotFoundError(f"Configuration file not found: {filepath}")
+        # Load with inheritance chain resolution
+        data = cls._load_with_inheritance(filepath)
 
-        with open(filepath) as f:
-            data = yaml.safe_load(f)
-
-        if data is None:
-            raise ValueError(f"Empty configuration file: {filepath}")
+        # Substitute environment variables
+        data = cls._substitute_env_vars(data)
 
         # Handle model config discriminated union
         data = cls._preprocess_model_config(data)
@@ -804,6 +964,8 @@ class MLTrainingConfig(BaseModel):
         """
         Load configuration from a JSON file.
 
+        Supports configuration inheritance and environment variable substitution.
+
         Args:
             filepath: Path to JSON configuration file
 
@@ -812,18 +974,21 @@ class MLTrainingConfig(BaseModel):
 
         Raises:
             FileNotFoundError: If file doesn't exist
-            ValueError: If JSON is invalid or fails validation
+            ValueError: If JSON is invalid, fails validation, or has circular inheritance
 
         Example:
             >>> config = MLTrainingConfig.from_json("experiments/config.json")
+            >>> # With inheritance
+            >>> config = MLTrainingConfig.from_json("experiments/child_config.json")
+            >>> # Environment variables are automatically substituted
         """
         filepath = Path(filepath)
 
-        if not filepath.exists():
-            raise FileNotFoundError(f"Configuration file not found: {filepath}")
+        # Load with inheritance chain resolution
+        data = cls._load_with_inheritance(filepath)
 
-        with open(filepath) as f:
-            data = json.load(f)
+        # Substitute environment variables
+        data = cls._substitute_env_vars(data)
 
         # Handle model config discriminated union
         data = cls._preprocess_model_config(data)
