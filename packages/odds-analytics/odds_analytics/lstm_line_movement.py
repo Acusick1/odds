@@ -71,6 +71,7 @@ Example:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import structlog
@@ -78,6 +79,9 @@ import torch
 import torch.nn as nn
 from odds_core.models import Event, Odds
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from odds_analytics.training.config import MLTrainingConfig
 
 from odds_analytics.backtesting import (
     BacktestConfig,
@@ -305,7 +309,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
             epoch_mae = 0.0
             num_batches = 0
 
-            for batch_X, batch_y, batch_mask in dataloader:
+            for batch_X, batch_y, _batch_mask in dataloader:
                 optimizer.zero_grad()
 
                 # Forward pass
@@ -544,3 +548,221 @@ class LSTMLineMovementStrategy(BettingStrategy):
         self.training_history = checkpoint.get("training_history")
 
         logger.info("model_loaded", filepath=str(filepath), is_trained=self.is_trained)
+
+    def train_from_config(
+        self,
+        config: MLTrainingConfig,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        feature_names: list[str],
+        X_val: np.ndarray | None = None,
+        y_val: np.ndarray | None = None,
+    ) -> dict[str, Any]:
+        """
+        Train LSTM model using configuration object.
+
+        Extracts hyperparameters from the config, resolves any search spaces
+        to concrete values, validates parameters, and logs all settings for
+        experiment tracking.
+
+        Args:
+            config: ML training configuration with model hyperparameters
+            X_train: Training features (n_samples, timesteps, n_features)
+            y_train: Training targets - line movement deltas (n_samples,)
+            feature_names: List of feature names in order
+            X_val: Validation features (optional)
+            y_val: Validation targets (optional)
+
+        Returns:
+            Training history dictionary with metrics
+
+        Raises:
+            ValueError: If config has invalid parameters or wrong strategy type
+            TypeError: If model config is not LSTMConfig
+
+        Example:
+            >>> config = MLTrainingConfig.from_yaml("experiments/lstm_line_movement.yaml")
+            >>> strategy = LSTMLineMovementStrategy()
+            >>> history = strategy.train_from_config(config, X_train, y_train, feature_names)
+        """
+        from odds_analytics.training.config import LSTMConfig, resolve_search_spaces
+
+        # Validate strategy type
+        if config.training.strategy_type != "lstm_line_movement":
+            raise ValueError(
+                f"Invalid strategy_type '{config.training.strategy_type}' for "
+                f"LSTMLineMovementStrategy. Expected 'lstm_line_movement'."
+            )
+
+        # Validate model config type
+        if not isinstance(config.training.model, LSTMConfig):
+            raise TypeError(
+                f"Expected LSTMConfig, got {type(config.training.model).__name__}. "
+                f"Ensure strategy_type matches model configuration."
+            )
+
+        model_config = config.training.model
+
+        # Extract hyperparameters from config
+        lstm_params = {
+            "hidden_size": model_config.hidden_size,
+            "num_layers": model_config.num_layers,
+            "dropout": model_config.dropout,
+            "epochs": model_config.epochs,
+            "batch_size": model_config.batch_size,
+            "learning_rate": model_config.learning_rate,
+            "loss_function": model_config.loss_function,
+            "weight_decay": model_config.weight_decay,
+        }
+
+        # Override with search space midpoints if tuning config exists
+        if config.tuning and config.tuning.search_spaces:
+            lstm_params = resolve_search_spaces(lstm_params, config.tuning.search_spaces)
+
+        # Update strategy params
+        self.params["hidden_size"] = lstm_params["hidden_size"]
+        self.params["num_layers"] = lstm_params["num_layers"]
+        self.params["dropout"] = lstm_params["dropout"]
+        self.params["loss_function"] = lstm_params["loss_function"]
+
+        # Update training parameters from config
+        training_config = config.training
+        self.params["min_predicted_movement"] = training_config.min_predicted_movement
+        self.params["movement_confidence_scale"] = training_config.movement_confidence_scale
+        self.params["base_confidence"] = training_config.base_confidence
+
+        # Log all hyperparameters for experiment tracking
+        logger.info(
+            "train_from_config",
+            experiment_name=config.experiment.name,
+            strategy_type=config.training.strategy_type,
+            n_samples=len(X_train),
+            n_features=len(feature_names),
+            has_validation=X_val is not None,
+            **lstm_params,
+        )
+
+        # Update input size from actual data
+        if len(X_train.shape) == 3:
+            self.input_size = X_train.shape[2]  # (samples, timesteps, features)
+        else:
+            self.input_size = len(feature_names)
+
+        # Create model with configured architecture
+        self.model = self._create_model().to(self.device)
+
+        # Convert to PyTorch tensors
+        X_tensor = torch.FloatTensor(X_train).to(self.device)
+        y_tensor = torch.FloatTensor(y_train).to(self.device)
+
+        # Create data loader
+        dataset = torch.utils.data.TensorDataset(X_tensor, y_tensor)
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=lstm_params["batch_size"],
+            shuffle=True,
+            drop_last=False,
+        )
+
+        # Validation data if provided
+        X_val_tensor = None
+        y_val_tensor = None
+        if X_val is not None and y_val is not None:
+            X_val_tensor = torch.FloatTensor(X_val).to(self.device)
+            y_val_tensor = torch.FloatTensor(y_val).to(self.device)
+
+        # Loss function and optimizer
+        criterion = self._get_loss_function()
+        optimizer = torch.optim.Adam(
+            self.model.parameters(),
+            lr=lstm_params["learning_rate"],
+            weight_decay=lstm_params["weight_decay"],
+        )
+
+        # Training loop
+        history: dict[str, Any] = {
+            "train_mse": 0.0,
+            "train_mae": 0.0,
+            "train_r2": 0.0,
+            "n_samples": len(X_train),
+            "n_features": len(feature_names),
+        }
+
+        epochs = lstm_params["epochs"]
+
+        for epoch in range(epochs):
+            self.model.train()
+            epoch_loss = 0.0
+            epoch_mae = 0.0
+            num_batches = 0
+
+            for batch_X, batch_y in dataloader:
+                optimizer.zero_grad()
+
+                # Forward pass
+                predictions = self.model(batch_X)
+
+                # Calculate loss
+                loss = criterion(predictions, batch_y)
+
+                # Backward pass
+                loss.backward()
+                optimizer.step()
+
+                epoch_loss += loss.item()
+                with torch.no_grad():
+                    mae = torch.mean(torch.abs(predictions - batch_y)).item()
+                    epoch_mae += mae
+                num_batches += 1
+
+            avg_loss = epoch_loss / num_batches
+            avg_mae = epoch_mae / num_batches
+
+            logger.debug("training_epoch", epoch=epoch + 1, loss=avg_loss, mae=avg_mae)
+
+        # Calculate final training metrics
+        self.model.eval()
+        with torch.no_grad():
+            train_predictions = self.model(X_tensor).cpu().numpy()
+            y_train_np = y_train
+
+            train_mse = float(np.mean((train_predictions - y_train_np) ** 2))
+            train_mae = float(np.mean(np.abs(train_predictions - y_train_np)))
+
+            # R² score
+            ss_res = np.sum((y_train_np - train_predictions) ** 2)
+            ss_tot = np.sum((y_train_np - np.mean(y_train_np)) ** 2)
+            train_r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+            history["train_mse"] = train_mse
+            history["train_mae"] = train_mae
+            history["train_r2"] = train_r2
+
+            # Validation metrics if provided
+            if X_val_tensor is not None and y_val_tensor is not None:
+                val_predictions = self.model(X_val_tensor).cpu().numpy()
+                y_val_np = y_val
+
+                val_mse = float(np.mean((val_predictions - y_val_np) ** 2))
+                val_mae = float(np.mean(np.abs(val_predictions - y_val_np)))
+
+                ss_res_val = np.sum((y_val_np - val_predictions) ** 2)
+                ss_tot_val = np.sum((y_val_np - np.mean(y_val_np)) ** 2)
+                val_r2 = float(1 - ss_res_val / ss_tot_val) if ss_tot_val > 0 else 0.0
+
+                history["val_mse"] = val_mse
+                history["val_mae"] = val_mae
+                history["val_r2"] = val_r2
+
+        self.is_trained = True
+        self.training_history = {"loss": [train_mse], "mae": [train_mae]}
+
+        logger.info(
+            "training_complete",
+            experiment_name=config.experiment.name,
+            model_type="LSTM",
+            train_mse=train_mse,
+            val_mse=history.get("val_mse"),
+        )
+
+        return history
