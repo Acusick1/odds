@@ -12,6 +12,7 @@ from odds_cli.commands import (
     quality,
     scheduler,
     status,
+    train,
     validate,
 )
 
@@ -26,6 +27,7 @@ app.add_typer(fetch.app, name="fetch", help="Fetch odds data")
 app.add_typer(status.app, name="status", help="System status and monitoring")
 app.add_typer(backfill.app, name="backfill", help="Historical data backfill")
 app.add_typer(backtest.app, name="backtest", help="Backtest betting strategies")
+app.add_typer(train.app, name="train", help="Train ML models from configuration")
 app.add_typer(scheduler.app, name="scheduler", help="Scheduler management (local testing)")
 app.add_typer(validate.app, name="validate", help="Validate data completeness")
 app.add_typer(quality.app, name="quality", help="Data quality coverage analysis")
