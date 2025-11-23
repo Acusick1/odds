@@ -1128,3 +1128,574 @@ class TestUnknownFieldRejection:
                 MLTrainingConfig.from_yaml(temp_path)
         finally:
             Path(temp_path).unlink()
+
+
+# =============================================================================
+# Config Inheritance Tests
+# =============================================================================
+
+
+class TestConfigInheritance:
+    """Tests for configuration inheritance via base field."""
+
+    @pytest.fixture
+    def base_config_data(self):
+        """Base config data for inheritance tests."""
+        return {
+            "experiment": {
+                "name": "base_experiment",
+                "tags": ["base", "xgboost"],
+                "description": "Base experiment configuration",
+            },
+            "training": {
+                "strategy_type": "xgboost_line_movement",
+                "data": {
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-12-31",
+                    "test_split": 0.2,
+                    "random_seed": 42,
+                },
+                "model": {
+                    "n_estimators": 100,
+                    "max_depth": 6,
+                    "learning_rate": 0.1,
+                },
+                "features": {
+                    "sharp_bookmakers": ["pinnacle"],
+                    "retail_bookmakers": ["fanduel", "draftkings", "betmgm"],
+                },
+                "output_path": "models/base",
+            },
+        }
+
+    def test_basic_inheritance(self, base_config_data):
+        """Test basic config inheritance from a base file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create base config
+            base_path = Path(tmpdir) / "base.yaml"
+            with open(base_path, "w") as f:
+                yaml.dump(base_config_data, f)
+
+            # Create child config that inherits from base
+            child_data = {
+                "base": "base.yaml",
+                "experiment": {
+                    "name": "child_experiment",
+                },
+                "training": {
+                    "model": {
+                        "n_estimators": 200,
+                    },
+                },
+            }
+            child_path = Path(tmpdir) / "child.yaml"
+            with open(child_path, "w") as f:
+                yaml.dump(child_data, f)
+
+            # Load child config
+            config = MLTrainingConfig.from_yaml(child_path)
+
+            # Child values should override base
+            assert config.experiment.name == "child_experiment"
+            assert config.training.model.n_estimators == 200
+
+            # Base values should be inherited
+            assert config.experiment.tags == ["base", "xgboost"]
+            assert config.experiment.description == "Base experiment configuration"
+            assert config.training.model.max_depth == 6
+            assert config.training.model.learning_rate == 0.1
+            assert config.training.data.start_date == date(2024, 1, 1)
+
+    def test_deep_merge_nested_dicts(self, base_config_data):
+        """Test that nested dictionaries are deep-merged correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create base config
+            base_path = Path(tmpdir) / "base.yaml"
+            with open(base_path, "w") as f:
+                yaml.dump(base_config_data, f)
+
+            # Child with nested overrides
+            child_data = {
+                "base": "base.yaml",
+                "experiment": {
+                    "name": "nested_test",
+                },
+                "training": {
+                    "data": {
+                        "start_date": "2024-06-01",
+                        # end_date should be inherited
+                    },
+                    "model": {
+                        "learning_rate": 0.05,
+                        # n_estimators and max_depth should be inherited
+                    },
+                    "features": {
+                        "retail_bookmakers": ["caesars"],
+                        # sharp_bookmakers should be inherited
+                    },
+                },
+            }
+            child_path = Path(tmpdir) / "child.yaml"
+            with open(child_path, "w") as f:
+                yaml.dump(child_data, f)
+
+            config = MLTrainingConfig.from_yaml(child_path)
+
+            # Child overrides
+            assert config.training.data.start_date == date(2024, 6, 1)
+            assert config.training.model.learning_rate == 0.05
+            assert config.training.features.retail_bookmakers == ["caesars"]
+
+            # Inherited from base
+            assert config.training.data.end_date == date(2024, 12, 31)
+            assert config.training.model.n_estimators == 100
+            assert config.training.model.max_depth == 6
+            assert config.training.features.sharp_bookmakers == ["pinnacle"]
+
+    def test_multi_level_inheritance(self, base_config_data):
+        """Test inheritance chains with multiple levels."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Level 1: base
+            base_path = Path(tmpdir) / "base.yaml"
+            with open(base_path, "w") as f:
+                yaml.dump(base_config_data, f)
+
+            # Level 2: intermediate inherits from base
+            intermediate_data = {
+                "base": "base.yaml",
+                "experiment": {
+                    "name": "intermediate",
+                    "tags": ["intermediate"],
+                },
+                "training": {
+                    "model": {
+                        "n_estimators": 150,
+                    },
+                },
+            }
+            intermediate_path = Path(tmpdir) / "intermediate.yaml"
+            with open(intermediate_path, "w") as f:
+                yaml.dump(intermediate_data, f)
+
+            # Level 3: final inherits from intermediate
+            final_data = {
+                "base": "intermediate.yaml",
+                "experiment": {
+                    "name": "final",
+                },
+                "training": {
+                    "model": {
+                        "learning_rate": 0.01,
+                    },
+                },
+            }
+            final_path = Path(tmpdir) / "final.yaml"
+            with open(final_path, "w") as f:
+                yaml.dump(final_data, f)
+
+            config = MLTrainingConfig.from_yaml(final_path)
+
+            # Final overrides
+            assert config.experiment.name == "final"
+            assert config.training.model.learning_rate == 0.01
+
+            # From intermediate
+            assert config.experiment.tags == ["intermediate"]
+            assert config.training.model.n_estimators == 150
+
+            # From base
+            assert config.training.model.max_depth == 6
+            assert config.training.data.start_date == date(2024, 1, 1)
+
+    def test_circular_inheritance_detection(self, base_config_data):
+        """Test that circular inheritance is detected and rejected."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Config A inherits from B
+            config_a_data = {
+                "base": "config_b.yaml",
+                "experiment": {"name": "config_a"},
+                "training": base_config_data["training"],
+            }
+            config_a_path = Path(tmpdir) / "config_a.yaml"
+            with open(config_a_path, "w") as f:
+                yaml.dump(config_a_data, f)
+
+            # Config B inherits from A (circular!)
+            config_b_data = {
+                "base": "config_a.yaml",
+                "experiment": {"name": "config_b"},
+                "training": base_config_data["training"],
+            }
+            config_b_path = Path(tmpdir) / "config_b.yaml"
+            with open(config_b_path, "w") as f:
+                yaml.dump(config_b_data, f)
+
+            with pytest.raises(ValueError, match="Circular inheritance detected"):
+                MLTrainingConfig.from_yaml(config_a_path)
+
+    def test_self_inheritance_detection(self, base_config_data):
+        """Test that self-inheritance is detected."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Config inherits from itself
+            self_inherit_data = {
+                "base": "self.yaml",
+                "experiment": {"name": "self_inherit"},
+                "training": base_config_data["training"],
+            }
+            self_path = Path(tmpdir) / "self.yaml"
+            with open(self_path, "w") as f:
+                yaml.dump(self_inherit_data, f)
+
+            with pytest.raises(ValueError, match="Circular inheritance detected"):
+                MLTrainingConfig.from_yaml(self_path)
+
+    def test_relative_path_resolution(self, base_config_data):
+        """Test that relative paths are resolved correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create nested directory structure
+            base_dir = Path(tmpdir) / "configs" / "base"
+            child_dir = Path(tmpdir) / "configs" / "experiments"
+            base_dir.mkdir(parents=True)
+            child_dir.mkdir(parents=True)
+
+            # Base config in base directory
+            base_path = base_dir / "base.yaml"
+            with open(base_path, "w") as f:
+                yaml.dump(base_config_data, f)
+
+            # Child config in experiments directory with relative path to base
+            child_data = {
+                "base": "../base/base.yaml",
+                "experiment": {"name": "relative_test"},
+                "training": {
+                    "model": {"n_estimators": 300},
+                },
+            }
+            child_path = child_dir / "child.yaml"
+            with open(child_path, "w") as f:
+                yaml.dump(child_data, f)
+
+            config = MLTrainingConfig.from_yaml(child_path)
+
+            assert config.experiment.name == "relative_test"
+            assert config.training.model.n_estimators == 300
+            assert config.training.model.max_depth == 6  # From base
+
+    def test_absolute_path_inheritance(self, base_config_data):
+        """Test inheritance with absolute paths."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create base config
+            base_path = Path(tmpdir) / "base.yaml"
+            with open(base_path, "w") as f:
+                yaml.dump(base_config_data, f)
+
+            # Child with absolute path to base
+            child_data = {
+                "base": str(base_path.absolute()),
+                "experiment": {"name": "absolute_test"},
+                "training": {
+                    "model": {"max_depth": 10},
+                },
+            }
+            child_path = Path(tmpdir) / "child.yaml"
+            with open(child_path, "w") as f:
+                yaml.dump(child_data, f)
+
+            config = MLTrainingConfig.from_yaml(child_path)
+
+            assert config.experiment.name == "absolute_test"
+            assert config.training.model.max_depth == 10
+            assert config.training.model.n_estimators == 100  # From base
+
+    def test_serialization_excludes_base_field(self, base_config_data):
+        """Test that serialized configs don't include the base field."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create base config
+            base_path = Path(tmpdir) / "base.yaml"
+            with open(base_path, "w") as f:
+                yaml.dump(base_config_data, f)
+
+            # Child config
+            child_data = {
+                "base": "base.yaml",
+                "experiment": {"name": "serialize_test"},
+                "training": {
+                    "model": {"n_estimators": 250},
+                },
+            }
+            child_path = Path(tmpdir) / "child.yaml"
+            with open(child_path, "w") as f:
+                yaml.dump(child_data, f)
+
+            # Load and serialize
+            config = MLTrainingConfig.from_yaml(child_path)
+            output_path = Path(tmpdir) / "resolved.yaml"
+            config.to_yaml(output_path)
+
+            # Verify serialized config has no base field
+            with open(output_path) as f:
+                resolved_data = yaml.safe_load(f)
+
+            assert "base" not in resolved_data
+            assert resolved_data["experiment"]["name"] == "serialize_test"
+            assert resolved_data["training"]["model"]["n_estimators"] == 250
+            # Inherited values should be present
+            assert resolved_data["training"]["model"]["max_depth"] == 6
+
+    def test_missing_base_file(self, base_config_data):
+        """Test error when base file doesn't exist."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            child_data = {
+                "base": "nonexistent.yaml",
+                "experiment": {"name": "missing_base"},
+                "training": base_config_data["training"],
+            }
+            child_path = Path(tmpdir) / "child.yaml"
+            with open(child_path, "w") as f:
+                yaml.dump(child_data, f)
+
+            with pytest.raises(FileNotFoundError, match="Configuration file not found"):
+                MLTrainingConfig.from_yaml(child_path)
+
+    def test_json_inheritance(self, base_config_data):
+        """Test inheritance with JSON files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create base JSON config
+            base_path = Path(tmpdir) / "base.json"
+            with open(base_path, "w") as f:
+                json.dump(base_config_data, f)
+
+            # Child JSON config
+            child_data = {
+                "base": "base.json",
+                "experiment": {"name": "json_inherit"},
+                "training": {
+                    "model": {"n_estimators": 175},
+                },
+            }
+            child_path = Path(tmpdir) / "child.json"
+            with open(child_path, "w") as f:
+                json.dump(child_data, f)
+
+            config = MLTrainingConfig.from_json(child_path)
+
+            assert config.experiment.name == "json_inherit"
+            assert config.training.model.n_estimators == 175
+            assert config.training.model.max_depth == 6  # From base
+
+    def test_mixed_format_inheritance(self, base_config_data):
+        """Test YAML inheriting from JSON and vice versa."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create base JSON config
+            base_path = Path(tmpdir) / "base.json"
+            with open(base_path, "w") as f:
+                json.dump(base_config_data, f)
+
+            # Child YAML inheriting from JSON
+            child_data = {
+                "base": "base.json",
+                "experiment": {"name": "mixed_format"},
+                "training": {
+                    "model": {"learning_rate": 0.2},
+                },
+            }
+            child_path = Path(tmpdir) / "child.yaml"
+            with open(child_path, "w") as f:
+                yaml.dump(child_data, f)
+
+            config = MLTrainingConfig.from_yaml(child_path)
+
+            assert config.experiment.name == "mixed_format"
+            assert config.training.model.learning_rate == 0.2
+            assert config.training.model.n_estimators == 100  # From base
+
+    def test_list_replacement_not_merge(self, base_config_data):
+        """Test that lists are replaced, not merged."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create base config
+            base_path = Path(tmpdir) / "base.yaml"
+            with open(base_path, "w") as f:
+                yaml.dump(base_config_data, f)
+
+            # Child with different tags (should replace, not append)
+            child_data = {
+                "base": "base.yaml",
+                "experiment": {
+                    "name": "list_test",
+                    "tags": ["child", "test"],
+                },
+                "training": {
+                    "model": {},
+                },
+            }
+            child_path = Path(tmpdir) / "child.yaml"
+            with open(child_path, "w") as f:
+                yaml.dump(child_data, f)
+
+            config = MLTrainingConfig.from_yaml(child_path)
+
+            # Tags should be replaced, not merged
+            assert config.experiment.tags == ["child", "test"]
+            assert "base" not in config.experiment.tags
+
+    def test_no_base_field_works_normally(self):
+        """Test that configs without base field work as before."""
+        config_data = {
+            "experiment": {"name": "no_base"},
+            "training": {
+                "strategy_type": "xgboost",
+                "data": {
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-12-31",
+                },
+                "model": {"n_estimators": 100},
+            },
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_data, f)
+            temp_path = f.name
+
+        try:
+            config = MLTrainingConfig.from_yaml(temp_path)
+            assert config.experiment.name == "no_base"
+            assert config.training.model.n_estimators == 100
+        finally:
+            Path(temp_path).unlink()
+
+    def test_unsupported_file_format(self, base_config_data):
+        """Test error for unsupported file formats."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a file with unsupported extension
+            unsupported_path = Path(tmpdir) / "config.txt"
+            with open(unsupported_path, "w") as f:
+                f.write("invalid")
+
+            # Create child that references unsupported format
+            child_data = {
+                "base": "config.txt",
+                "experiment": {"name": "unsupported"},
+                "training": base_config_data["training"],
+            }
+            child_path = Path(tmpdir) / "child.yaml"
+            with open(child_path, "w") as f:
+                yaml.dump(child_data, f)
+
+            with pytest.raises(ValueError, match="Unsupported config file format"):
+                MLTrainingConfig.from_yaml(child_path)
+
+    def test_tuning_and_tracking_inheritance(self, base_config_data):
+        """Test inheritance of optional sections (tuning, tracking)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Base with tuning and tracking
+            base_with_options = base_config_data.copy()
+            base_with_options["tuning"] = {
+                "n_trials": 100,
+                "direction": "minimize",
+                "search_spaces": {
+                    "n_estimators": {"type": "int", "low": 50, "high": 500},
+                },
+            }
+            base_with_options["tracking"] = {
+                "enabled": True,
+                "tracking_uri": "mlruns",
+            }
+
+            base_path = Path(tmpdir) / "base.yaml"
+            with open(base_path, "w") as f:
+                yaml.dump(base_with_options, f)
+
+            # Child that overrides tuning but keeps tracking
+            child_data = {
+                "base": "base.yaml",
+                "experiment": {"name": "options_test"},
+                "training": {
+                    "model": {},
+                },
+                "tuning": {
+                    "n_trials": 50,
+                },
+            }
+            child_path = Path(tmpdir) / "child.yaml"
+            with open(child_path, "w") as f:
+                yaml.dump(child_data, f)
+
+            config = MLTrainingConfig.from_yaml(child_path)
+
+            # Tuning overridden
+            assert config.tuning.n_trials == 50
+            # Tuning search_spaces inherited
+            assert "n_estimators" in config.tuning.search_spaces
+            # Tracking inherited
+            assert config.tracking.enabled is True
+            assert config.tracking.tracking_uri == "mlruns"
+
+
+# =============================================================================
+# Deep Merge Utility Tests
+# =============================================================================
+
+
+class TestDeepMerge:
+    """Tests for the deep_merge utility function."""
+
+    def test_simple_merge(self):
+        """Test simple dictionary merge."""
+        from odds_analytics.training.config import deep_merge
+
+        base = {"a": 1, "b": 2}
+        override = {"b": 3, "c": 4}
+        result = deep_merge(base, override)
+
+        assert result == {"a": 1, "b": 3, "c": 4}
+        # Original dicts should be unchanged
+        assert base == {"a": 1, "b": 2}
+        assert override == {"b": 3, "c": 4}
+
+    def test_nested_merge(self):
+        """Test nested dictionary merge."""
+        from odds_analytics.training.config import deep_merge
+
+        base = {"a": {"b": 1, "c": 2}, "d": 3}
+        override = {"a": {"b": 10}, "e": 5}
+        result = deep_merge(base, override)
+
+        assert result == {"a": {"b": 10, "c": 2}, "d": 3, "e": 5}
+
+    def test_deep_nested_merge(self):
+        """Test deeply nested dictionary merge."""
+        from odds_analytics.training.config import deep_merge
+
+        base = {"level1": {"level2": {"level3": {"a": 1, "b": 2}}}}
+        override = {"level1": {"level2": {"level3": {"b": 20, "c": 30}}}}
+        result = deep_merge(base, override)
+
+        assert result["level1"]["level2"]["level3"] == {"a": 1, "b": 20, "c": 30}
+
+    def test_list_replacement(self):
+        """Test that lists are replaced, not merged."""
+        from odds_analytics.training.config import deep_merge
+
+        base = {"items": [1, 2, 3]}
+        override = {"items": [4, 5]}
+        result = deep_merge(base, override)
+
+        assert result == {"items": [4, 5]}
+
+    def test_none_override(self):
+        """Test that None values in override replace base values."""
+        from odds_analytics.training.config import deep_merge
+
+        base = {"a": 1, "b": 2}
+        override = {"a": None}
+        result = deep_merge(base, override)
+
+        assert result == {"a": None, "b": 2}
+
+    def test_empty_dicts(self):
+        """Test merging with empty dictionaries."""
+        from odds_analytics.training.config import deep_merge
+
+        assert deep_merge({}, {"a": 1}) == {"a": 1}
+        assert deep_merge({"a": 1}, {}) == {"a": 1}
+        assert deep_merge({}, {}) == {}
