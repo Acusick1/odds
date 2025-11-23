@@ -326,10 +326,15 @@ async def _prepare_tabular_data(
     Returns:
         Tuple of (X, y, feature_names)
     """
+    from odds_analytics.feature_extraction import TabularFeatureExtractor
     from odds_analytics.xgboost_line_movement import prepare_tabular_training_data
 
     # Use the first market from config (h2h is most common)
     market = features_config.markets[0] if features_config.markets else "h2h"
+
+    # Create extractor from config using factory method
+    # This extractor can be used for feature extraction and to get feature names
+    extractor = TabularFeatureExtractor.from_config(features_config)
 
     X, y, feature_names = await prepare_tabular_training_data(
         events=events,
@@ -338,8 +343,8 @@ async def _prepare_tabular_data(
         market=market,
         opening_hours_before=features_config.opening_hours_before,
         closing_hours_before=features_config.closing_hours_before,
-        sharp_bookmakers=features_config.sharp_bookmakers,
-        retail_bookmakers=features_config.retail_bookmakers,
+        sharp_bookmakers=extractor.sharp_bookmakers,
+        retail_bookmakers=extractor.retail_bookmakers,
     )
 
     return X, y, feature_names
@@ -372,13 +377,16 @@ async def _prepare_sequence_data(
     # Use the first market from config
     market = features_config.markets[0] if features_config.markets else "h2h"
 
+    # Create extractor from config using factory method
+    extractor = SequenceFeatureExtractor.from_config(features_config)
+
     X, y, masks = await prepare_lstm_training_data(
         events=events,
         session=session,
         outcome=features_config.outcome,
         market=market,
-        lookback_hours=model_config.lookback_hours,
-        timesteps=model_config.timesteps,
+        lookback_hours=features_config.lookback_hours,
+        timesteps=features_config.timesteps,
         sharp_bookmakers=features_config.sharp_bookmakers,
         retail_bookmakers=features_config.retail_bookmakers,
         target_type=TargetType.REGRESSION,
@@ -387,12 +395,6 @@ async def _prepare_sequence_data(
     )
 
     # Get feature names from extractor
-    extractor = SequenceFeatureExtractor(
-        lookback_hours=model_config.lookback_hours,
-        timesteps=model_config.timesteps,
-        sharp_bookmakers=features_config.sharp_bookmakers,
-        retail_bookmakers=features_config.retail_bookmakers,
-    )
     feature_names = extractor.get_feature_names()
 
     return X, y, masks, feature_names
