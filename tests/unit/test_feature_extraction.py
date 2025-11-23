@@ -10,6 +10,7 @@ from odds_analytics.feature_extraction import (
     SequenceFeatureExtractor,
     TabularFeatureExtractor,
 )
+from odds_analytics.training.config import FeatureConfig
 from odds_core.models import EventStatus, Odds
 
 
@@ -222,7 +223,10 @@ class TestTabularFeatureExtractor:
         )
 
         # Should have retail-sharp difference features
-        assert features.retail_sharp_diff_home is not None or features.retail_sharp_diff_away is not None
+        assert (
+            features.retail_sharp_diff_home is not None
+            or features.retail_sharp_diff_away is not None
+        )
 
     def test_extract_features_includes_best_odds(self, sample_event, sample_odds_snapshot):
         """Test that best available odds are found."""
@@ -888,3 +892,180 @@ class TestFeatureExtractorIntegration:
 
             vector = extractor.create_feature_vector(features)
             assert isinstance(vector, np.ndarray)
+
+
+class TestFeatureExtractorFromConfig:
+    """Test factory methods for creating extractors from FeatureConfig."""
+
+    def test_tabular_extractor_from_config_default_values(self):
+        """Test that TabularFeatureExtractor.from_config uses config defaults correctly."""
+        config = FeatureConfig()
+        extractor = TabularFeatureExtractor.from_config(config)
+
+        # Should match config defaults
+        assert extractor.sharp_bookmakers == ["pinnacle"]
+        assert extractor.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
+
+    def test_tabular_extractor_from_config_custom_values(self):
+        """Test that TabularFeatureExtractor.from_config respects custom config values."""
+        config = FeatureConfig(
+            sharp_bookmakers=["pinnacle", "circa"],
+            retail_bookmakers=["fanduel", "betmgm"],
+        )
+        extractor = TabularFeatureExtractor.from_config(config)
+
+        assert extractor.sharp_bookmakers == ["pinnacle", "circa"]
+        assert extractor.retail_bookmakers == ["fanduel", "betmgm"]
+
+    def test_sequence_extractor_from_config_default_values(self):
+        """Test that SequenceFeatureExtractor.from_config uses config defaults correctly."""
+        config = FeatureConfig()
+        extractor = SequenceFeatureExtractor.from_config(config)
+
+        # Should match config defaults
+        assert extractor.lookback_hours == 72
+        assert extractor.timesteps == 24
+        assert extractor.sharp_bookmakers == ["pinnacle"]
+        assert extractor.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
+
+    def test_sequence_extractor_from_config_custom_values(self):
+        """Test that SequenceFeatureExtractor.from_config respects custom config values."""
+        config = FeatureConfig(
+            lookback_hours=48,
+            timesteps=16,
+            sharp_bookmakers=["pinnacle", "circa"],
+            retail_bookmakers=["fanduel"],
+        )
+        extractor = SequenceFeatureExtractor.from_config(config)
+
+        assert extractor.lookback_hours == 48
+        assert extractor.timesteps == 16
+        assert extractor.sharp_bookmakers == ["pinnacle", "circa"]
+        assert extractor.retail_bookmakers == ["fanduel"]
+
+    def test_tabular_extractor_from_config_produces_valid_features(
+        self, sample_event, sample_odds_snapshot
+    ):
+        """Test complete pipeline: config → extractor → features for tabular."""
+        config = FeatureConfig(
+            sharp_bookmakers=["pinnacle"],
+            retail_bookmakers=["fanduel", "draftkings"],
+        )
+        extractor = TabularFeatureExtractor.from_config(config)
+
+        # Extract features using extractor created from config
+        features = extractor.extract_features(
+            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+        )
+
+        # Should produce valid features
+        assert features.is_home_team == 1.0
+        assert features.consensus_prob is not None
+        assert features.sharp_prob is not None
+
+        # Convert to array
+        vector = extractor.create_feature_vector(features)
+        assert isinstance(vector, np.ndarray)
+        assert len(vector) == len(extractor.get_feature_names())
+
+    def test_sequence_extractor_from_config_produces_valid_features(self, sample_event):
+        """Test complete pipeline: config → extractor → features for sequence."""
+        config = FeatureConfig(
+            lookback_hours=24,
+            timesteps=8,
+            sharp_bookmakers=["pinnacle"],
+            retail_bookmakers=["fanduel"],
+        )
+        extractor = SequenceFeatureExtractor.from_config(config)
+
+        # Create sequence data
+        base_time = sample_event.commence_time - np.timedelta64(12, "h")
+        odds_sequence = []
+
+        for i in range(4):
+            snapshot_time = base_time + np.timedelta64(i * 3, "h")
+            snapshot = [
+                Odds(
+                    id=1100 + i,
+                    event_id=sample_event.id,
+                    bookmaker_key="pinnacle",
+                    bookmaker_title="Pinnacle",
+                    market_key="h2h",
+                    outcome_name=sample_event.home_team,
+                    price=-120,
+                    point=None,
+                    odds_timestamp=snapshot_time,
+                    last_update=snapshot_time,
+                )
+            ]
+            odds_sequence.append(snapshot)
+
+        # Extract features using extractor created from config
+        result = extractor.extract_features(
+            sample_event, odds_sequence, market="h2h", outcome=sample_event.home_team
+        )
+
+        # Should produce valid sequence and mask
+        assert result["sequence"].shape == (8, 15)  # (timesteps, num_features)
+        assert result["mask"].shape == (8,)
+        assert result["mask"].any()
+
+    def test_config_defaults_match_extractor_defaults(self):
+        """Test that FeatureConfig defaults align with extractor class defaults."""
+        config = FeatureConfig()
+
+        # Create extractors both ways
+        tabular_from_config = TabularFeatureExtractor.from_config(config)
+        tabular_default = TabularFeatureExtractor()
+
+        # Should have identical bookmaker lists
+        assert tabular_from_config.sharp_bookmakers == tabular_default.sharp_bookmakers
+        assert tabular_from_config.retail_bookmakers == tabular_default.retail_bookmakers
+
+        # Same for sequence extractor
+        sequence_from_config = SequenceFeatureExtractor.from_config(config)
+        sequence_default = SequenceFeatureExtractor()
+
+        assert sequence_from_config.lookback_hours == sequence_default.lookback_hours
+        assert sequence_from_config.timesteps == sequence_default.timesteps
+        assert sequence_from_config.sharp_bookmakers == sequence_default.sharp_bookmakers
+        assert sequence_from_config.retail_bookmakers == sequence_default.retail_bookmakers
+
+    def test_feature_config_normalize_field_exists(self):
+        """Test that FeatureConfig has normalize field."""
+        config = FeatureConfig()
+        assert hasattr(config, "normalize")
+        assert config.normalize is False  # Default value
+
+        config_with_normalize = FeatureConfig(normalize=True)
+        assert config_with_normalize.normalize is True
+
+    def test_feature_config_timing_parameters(self):
+        """Test that FeatureConfig timing parameters work correctly."""
+        config = FeatureConfig(
+            opening_hours_before=72.0,
+            closing_hours_before=1.0,
+        )
+
+        assert config.opening_hours_before == 72.0
+        assert config.closing_hours_before == 1.0
+
+    def test_feature_config_invalid_timing_raises_error(self):
+        """Test that invalid timing configuration raises validation error."""
+        with pytest.raises(ValueError, match="opening_hours_before.*must be greater than"):
+            FeatureConfig(
+                opening_hours_before=1.0,
+                closing_hours_before=2.0,
+            )
+
+    def test_tabular_extractor_from_config_type_annotation(self):
+        """Test that from_config has correct return type."""
+        config = FeatureConfig()
+        extractor = TabularFeatureExtractor.from_config(config)
+        assert isinstance(extractor, TabularFeatureExtractor)
+
+    def test_sequence_extractor_from_config_type_annotation(self):
+        """Test that from_config has correct return type."""
+        config = FeatureConfig()
+        extractor = SequenceFeatureExtractor.from_config(config)
+        assert isinstance(extractor, SequenceFeatureExtractor)

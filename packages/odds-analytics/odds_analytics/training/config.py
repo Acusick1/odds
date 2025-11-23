@@ -455,6 +455,26 @@ class FeatureConfig(BaseModel):
         description="Hours before game for closing line snapshot",
     )
 
+    # Sequence model configuration (LSTM)
+    lookback_hours: int = Field(
+        default=72,
+        ge=1,
+        le=168,
+        description="Hours of historical data to use for sequence models",
+    )
+    timesteps: int = Field(
+        default=24,
+        ge=1,
+        le=168,
+        description="Number of sequence timesteps for LSTM models",
+    )
+
+    # Feature processing
+    normalize: bool = Field(
+        default=False,
+        description="Whether to normalize features before model input",
+    )
+
     @model_validator(mode="after")
     def validate_timing(self) -> FeatureConfig:
         """Ensure opening is before closing."""

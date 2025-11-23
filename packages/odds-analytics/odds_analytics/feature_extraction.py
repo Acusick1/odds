@@ -29,7 +29,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from odds_core.models import Odds
@@ -40,6 +40,9 @@ from odds_analytics.utils import (
     calculate_implied_probability,
     calculate_market_hold,
 )
+
+if TYPE_CHECKING:
+    from odds_analytics.training.config import FeatureConfig
 
 __all__ = [
     "FeatureExtractor",
@@ -124,7 +127,10 @@ class TabularFeatures:
             Numpy array with shape (num_features,) where None → np.nan
         """
         return np.array(
-            [getattr(self, field.name) if getattr(self, field.name) is not None else np.nan for field in fields(self)],
+            [
+                getattr(self, field.name) if getattr(self, field.name) is not None else np.nan
+                for field in fields(self)
+            ],
             dtype=np.float64,
         )
 
@@ -193,7 +199,10 @@ class SequenceFeatures:
             Numpy array with shape (num_features,) where None → np.nan
         """
         return np.array(
-            [getattr(self, field.name) if getattr(self, field.name) is not None else np.nan for field in fields(self)],
+            [
+                getattr(self, field.name) if getattr(self, field.name) is not None else np.nan
+                for field in fields(self)
+            ],
             dtype=np.float64,
         )
 
@@ -322,6 +331,36 @@ class TabularFeatureExtractor(FeatureExtractor):
         self.sharp_bookmakers = sharp_bookmakers or ["pinnacle"]
         self.retail_bookmakers = retail_bookmakers or ["fanduel", "draftkings", "betmgm"]
 
+    @classmethod
+    def from_config(cls, config: FeatureConfig) -> TabularFeatureExtractor:
+        """
+        Create a TabularFeatureExtractor from a FeatureConfig object.
+
+        This factory method enables configuration-driven extractor instantiation,
+        mapping all relevant FeatureConfig fields to extractor parameters.
+
+        Args:
+            config: FeatureConfig object with extraction parameters
+
+        Returns:
+            Configured TabularFeatureExtractor instance
+
+        Example:
+            ```python
+            from odds_analytics.training.config import FeatureConfig
+
+            config = FeatureConfig(
+                sharp_bookmakers=["pinnacle", "circa"],
+                retail_bookmakers=["fanduel", "draftkings"],
+            )
+            extractor = TabularFeatureExtractor.from_config(config)
+            ```
+        """
+        return cls(
+            sharp_bookmakers=config.sharp_bookmakers,
+            retail_bookmakers=config.retail_bookmakers,
+        )
+
     def extract_features(
         self,
         event: BacktestEvent,
@@ -415,13 +454,17 @@ class TabularFeatureExtractor(FeatureExtractor):
                     avg_retail_home_prob = float(
                         np.mean([calculate_implied_probability(o.price) for o in retail_home_odds])
                     )
-                    feature_values["retail_sharp_diff_home"] = avg_retail_home_prob - sharp_home_prob
+                    feature_values["retail_sharp_diff_home"] = (
+                        avg_retail_home_prob - sharp_home_prob
+                    )
 
                 if retail_away_odds:
                     avg_retail_away_prob = float(
                         np.mean([calculate_implied_probability(o.price) for o in retail_away_odds])
                     )
-                    feature_values["retail_sharp_diff_away"] = avg_retail_away_prob - sharp_away_prob
+                    feature_values["retail_sharp_diff_away"] = (
+                        avg_retail_away_prob - sharp_away_prob
+                    )
 
                 # Set outcome-specific features
                 if outcome == event.home_team:
@@ -570,6 +613,40 @@ class SequenceFeatureExtractor(FeatureExtractor):
         self.timesteps = timesteps
         self.sharp_bookmakers = sharp_bookmakers or ["pinnacle"]
         self.retail_bookmakers = retail_bookmakers or ["fanduel", "draftkings", "betmgm"]
+
+    @classmethod
+    def from_config(cls, config: FeatureConfig) -> SequenceFeatureExtractor:
+        """
+        Create a SequenceFeatureExtractor from a FeatureConfig object.
+
+        This factory method enables configuration-driven extractor instantiation,
+        mapping all relevant FeatureConfig fields to extractor parameters.
+
+        Args:
+            config: FeatureConfig object with extraction parameters
+
+        Returns:
+            Configured SequenceFeatureExtractor instance
+
+        Example:
+            ```python
+            from odds_analytics.training.config import FeatureConfig
+
+            config = FeatureConfig(
+                lookback_hours=48,
+                timesteps=16,
+                sharp_bookmakers=["pinnacle"],
+                retail_bookmakers=["fanduel", "draftkings"],
+            )
+            extractor = SequenceFeatureExtractor.from_config(config)
+            ```
+        """
+        return cls(
+            lookback_hours=config.lookback_hours,
+            timesteps=config.timesteps,
+            sharp_bookmakers=config.sharp_bookmakers,
+            retail_bookmakers=config.retail_bookmakers,
+        )
 
     def extract_features(
         self,
@@ -804,7 +881,9 @@ class SequenceFeatureExtractor(FeatureExtractor):
                 feature_values["odds_change_from_prev"] = avg_price - prev_avg_price
 
                 prev_prob = calculate_implied_probability(int(prev_avg_price))
-                feature_values["implied_prob_change_from_prev"] = feature_values["implied_prob"] - prev_prob
+                feature_values["implied_prob_change_from_prev"] = (
+                    feature_values["implied_prob"] - prev_prob
+                )
             else:
                 feature_values["odds_change_from_prev"] = 0.0
                 feature_values["implied_prob_change_from_prev"] = 0.0
