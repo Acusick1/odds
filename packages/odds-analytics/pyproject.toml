@@ -25,6 +25,9 @@ ml = [
     "plotly>=6.3.1",
     "seaborn>=0.13.2",
 ]
+tracking = [
+    "mlflow>=2.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]
