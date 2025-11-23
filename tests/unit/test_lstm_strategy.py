@@ -599,3 +599,168 @@ class TestLSTMWorkflow:
         assert params["lookback_hours"] == 48
         assert params["market"] == "spreads"
         assert params["min_edge_threshold"] == 0.05
+
+
+class TestLSTMModelPersistenceWithConfig:
+    """Test LSTM model persistence with YAML config files."""
+
+    def test_save_model_creates_yaml_config(self):
+        """Test that save_model creates both model and YAML config files."""
+        import yaml
+
+        strategy = LSTMStrategy(hidden_size=128, num_layers=3, dropout=0.3)
+        strategy.model = strategy._create_model().to(strategy.device)
+        strategy.is_trained = True
+        strategy.training_history = {"loss": [0.5, 0.4, 0.3]}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = Path(tmpdir) / "lstm_model.pt"
+
+            strategy.save_model(model_path)
+
+            # Check both files exist
+            assert model_path.exists()
+            config_path = model_path.with_suffix(".yaml")
+            assert config_path.exists()
+
+            # Verify config content
+            with open(config_path) as f:
+                config_data = yaml.safe_load(f)
+
+            assert config_data["model_type"] == "LSTM"
+            assert "saved_at" in config_data
+            assert config_data["params"]["hidden_size"] == 128
+            assert config_data["params"]["num_layers"] == 3
+            assert config_data["params"]["dropout"] == 0.3
+            assert config_data["is_trained"] is True
+
+            # Check architecture section
+            assert config_data["architecture"]["hidden_size"] == 128
+            assert config_data["architecture"]["num_layers"] == 3
+            assert config_data["architecture"]["dropout"] == 0.3
+
+            # Check training summary
+            assert config_data["training_summary"]["final_loss"] == 0.3
+            assert config_data["training_summary"]["epochs_trained"] == 3
+
+    def test_load_model_with_config(self):
+        """Test that load_model logs config information when available."""
+        strategy = LSTMStrategy(hidden_size=256, num_layers=4)
+        strategy.model = strategy._create_model().to(strategy.device)
+        strategy.is_trained = True
+        strategy.training_history = {"loss": [0.6, 0.5, 0.4]}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = Path(tmpdir) / "lstm_model.pt"
+            strategy.save_model(model_path)
+
+            # Load into new strategy
+            loaded_strategy = LSTMStrategy()
+            loaded_strategy.load_model(model_path)
+
+            # Verify params were loaded correctly
+            assert loaded_strategy.params["hidden_size"] == 256
+            assert loaded_strategy.params["num_layers"] == 4
+            assert loaded_strategy.is_trained
+            assert loaded_strategy.training_history == {"loss": [0.6, 0.5, 0.4]}
+
+    def test_load_model_without_config_file(self):
+        """Test that load_model works when config file doesn't exist."""
+        strategy = LSTMStrategy(hidden_size=64, num_layers=2)
+        strategy.model = strategy._create_model().to(strategy.device)
+        strategy.is_trained = True
+        strategy.training_history = {"loss": [0.7, 0.6]}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Save only model file, no config
+            model_path = Path(tmpdir) / "model_only.pt"
+            save_dict = {
+                "model_state_dict": strategy.model.state_dict(),
+                "params": strategy.params,
+                "input_size": strategy.input_size,
+                "is_trained": strategy.is_trained,
+                "training_history": strategy.training_history,
+            }
+            torch.save(save_dict, model_path)
+
+            # Load - should work without config file
+            loaded_strategy = LSTMStrategy()
+            loaded_strategy.load_model(model_path)
+
+            assert loaded_strategy.model is not None
+            assert loaded_strategy.params["hidden_size"] == 64
+            assert loaded_strategy.is_trained
+
+    def test_save_model_without_training_history(self):
+        """Test that save_model works when training_history is None."""
+        import yaml
+
+        strategy = LSTMStrategy(hidden_size=64)
+        strategy.model = strategy._create_model().to(strategy.device)
+        strategy.is_trained = True
+        strategy.training_history = None  # No history
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = Path(tmpdir) / "lstm_model.pt"
+
+            strategy.save_model(model_path)
+
+            # Check files exist
+            assert model_path.exists()
+            config_path = model_path.with_suffix(".yaml")
+            assert config_path.exists()
+
+            # Verify config doesn't have training_summary
+            with open(config_path) as f:
+                config_data = yaml.safe_load(f)
+
+            assert "training_summary" not in config_data
+
+    def test_complete_save_load_cycle(self):
+        """Test complete save/load cycle preserves all data."""
+        # Create strategy with custom params
+        strategy = LSTMStrategy(
+            lookback_hours=48,
+            timesteps=16,
+            hidden_size=128,
+            num_layers=3,
+            dropout=0.25,
+            market="spreads",
+            min_edge_threshold=0.05,
+            min_confidence=0.60,
+        )
+        strategy.model = strategy._create_model().to(strategy.device)
+        strategy.is_trained = True
+        strategy.training_history = {"loss": [0.8, 0.7, 0.6, 0.5]}
+
+        # Get initial prediction
+        x = torch.randn(1, 16, strategy.input_size).to(strategy.device)
+        strategy.model.eval()
+        with torch.no_grad():
+            logits1, probs1 = strategy.model(x)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = Path(tmpdir) / "full_model.pt"
+            strategy.save_model(model_path)
+
+            # Load into new strategy
+            loaded_strategy = LSTMStrategy()
+            loaded_strategy.load_model(model_path)
+
+            # Verify all params preserved
+            assert loaded_strategy.params["lookback_hours"] == 48
+            assert loaded_strategy.params["timesteps"] == 16
+            assert loaded_strategy.params["hidden_size"] == 128
+            assert loaded_strategy.params["num_layers"] == 3
+            assert loaded_strategy.params["dropout"] == 0.25
+            assert loaded_strategy.params["market"] == "spreads"
+            assert loaded_strategy.params["min_edge_threshold"] == 0.05
+            assert loaded_strategy.params["min_confidence"] == 0.60
+
+            # Verify predictions match
+            loaded_strategy.model.eval()
+            with torch.no_grad():
+                logits2, probs2 = loaded_strategy.model(x)
+
+            assert torch.allclose(logits1, logits2, atol=1e-6)
+            assert torch.allclose(probs1, probs2, atol=1e-6)

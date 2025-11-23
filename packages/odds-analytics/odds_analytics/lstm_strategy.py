@@ -67,6 +67,7 @@ Example:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -74,6 +75,7 @@ import numpy as np
 import structlog
 import torch
 import torch.nn as nn
+import yaml
 from odds_core.models import Event, Odds
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -642,7 +644,10 @@ class LSTMStrategy(BettingStrategy):
 
     def save_model(self, filepath: str | Path) -> None:
         """
-        Save trained model to disk.
+        Save trained model to disk with configuration metadata.
+
+        Saves model weights using torch.save and configuration as YAML alongside it.
+        For example, 'models/lstm.pt' will also create 'models/lstm.yaml'.
 
         Args:
             filepath: Path to save model weights and metadata
@@ -666,11 +671,48 @@ class LSTMStrategy(BettingStrategy):
         }
 
         torch.save(save_dict, filepath)
-        logger.info("model_saved", filepath=str(filepath))
+
+        # Save configuration as YAML file alongside model
+        config_filepath = filepath.with_suffix(".yaml")
+        config_data = {
+            "model_type": "LSTM",
+            "saved_at": datetime.now(UTC).isoformat(),
+            "params": self.params,
+            "input_size": self.input_size,
+            "is_trained": self.is_trained,
+            "architecture": {
+                "hidden_size": self.params.get("hidden_size"),
+                "num_layers": self.params.get("num_layers"),
+                "dropout": self.params.get("dropout"),
+                "lookback_hours": self.params.get("lookback_hours"),
+                "timesteps": self.params.get("timesteps"),
+            },
+        }
+
+        # Add training history summary if available
+        if self.training_history:
+            config_data["training_summary"] = {
+                "final_loss": self.training_history["loss"][-1]
+                if self.training_history.get("loss")
+                else None,
+                "epochs_trained": len(self.training_history.get("loss", [])),
+            }
+
+        with open(config_filepath, "w") as f:
+            yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+
+        logger.info(
+            "model_saved",
+            filepath=str(filepath),
+            config_filepath=str(config_filepath),
+        )
 
     def load_model(self, filepath: str | Path) -> None:
         """
         Load trained model from disk.
+
+        Supports loading configuration from YAML file if available alongside model.
+        Maintains backward compatibility with models saved without config files.
 
         Args:
             filepath: Path to saved model file
@@ -685,7 +727,7 @@ class LSTMStrategy(BettingStrategy):
             raise FileNotFoundError(f"Model file not found: {filepath}")
 
         # Load saved data
-        checkpoint = torch.load(filepath, map_location=self.device)
+        checkpoint = torch.load(filepath, map_location=self.device, weights_only=False)
 
         # Restore parameters (in case they differ from constructor args)
         self.params.update(checkpoint["params"])
@@ -701,4 +743,30 @@ class LSTMStrategy(BettingStrategy):
         self.is_trained = checkpoint.get("is_trained", True)
         self.training_history = checkpoint.get("training_history")
 
-        logger.info("model_loaded", filepath=str(filepath), is_trained=self.is_trained)
+        # Try to load config file if it exists
+        config_filepath = filepath.with_suffix(".yaml")
+        config_loaded = False
+        if config_filepath.exists():
+            try:
+                with open(config_filepath) as f:
+                    config_data = yaml.safe_load(f)
+                config_loaded = True
+                logger.info(
+                    "config_loaded",
+                    config_filepath=str(config_filepath),
+                    model_type=config_data.get("model_type"),
+                    saved_at=config_data.get("saved_at"),
+                )
+            except Exception as e:
+                logger.warning(
+                    "config_load_failed",
+                    config_filepath=str(config_filepath),
+                    error=str(e),
+                )
+
+        logger.info(
+            "model_loaded",
+            filepath=str(filepath),
+            is_trained=self.is_trained,
+            config_loaded=config_loaded,
+        )
