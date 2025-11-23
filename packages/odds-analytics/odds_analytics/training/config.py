@@ -33,6 +33,7 @@ Example usage:
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 from datetime import date
@@ -44,6 +45,46 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = structlog.get_logger()
+
+# Maximum inheritance depth to prevent excessive nesting
+_MAX_INHERITANCE_DEPTH = 10
+
+
+# =============================================================================
+# Deep Merge Utility
+# =============================================================================
+
+
+def deep_merge(base: dict, override: dict) -> dict:
+    """
+    Deep merge two dictionaries, with override values taking precedence.
+
+    Recursively merges nested dictionaries while override values replace
+    base values at leaf nodes. Lists are not merged - override replaces base.
+
+    Args:
+        base: Base dictionary to merge into
+        override: Dictionary with override values
+
+    Returns:
+        New merged dictionary
+
+    Example:
+        >>> base = {"a": {"b": 1, "c": 2}, "d": 3}
+        >>> override = {"a": {"b": 10}, "e": 5}
+        >>> deep_merge(base, override)
+        {"a": {"b": 10, "c": 2}, "d": 3, "e": 5}
+    """
+    result = copy.deepcopy(base)
+
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+
+    return result
+
 
 __all__ = [
     "ExperimentConfig",
@@ -57,6 +98,7 @@ __all__ = [
     "TrackingConfig",
     "MLTrainingConfig",
     "resolve_search_spaces",
+    "deep_merge",
 ]
 
 
@@ -702,7 +744,26 @@ class MLTrainingConfig(BaseModel):
     Combines all configuration sections and provides methods for
     loading from and saving to YAML/JSON files.
 
-    Example YAML:
+    Supports configuration inheritance via the `base` field. When specified,
+    the base config is loaded first and the child config values are deep-merged
+    on top, with child values taking precedence.
+
+    Example YAML with inheritance:
+        ```yaml
+        # configs/training/xgboost_h2h_v2.yaml
+        base: configs/training/xgboost_base.yaml
+
+        experiment:
+          name: "xgboost_h2h_v2"
+
+        training:
+          data:
+            start_date: "2024-11-01"
+          model:
+            n_estimators: 200
+        ```
+
+    Example YAML without inheritance:
         ```yaml
         experiment:
           name: "xgboost_line_movement_v1"
@@ -770,6 +831,10 @@ class MLTrainingConfig(BaseModel):
         """
         Load configuration from a YAML file.
 
+        Supports configuration inheritance via the `base` field. When a base
+        config is specified, it is loaded recursively and the child config
+        values are deep-merged on top.
+
         Args:
             filepath: Path to YAML configuration file
 
@@ -778,21 +843,22 @@ class MLTrainingConfig(BaseModel):
 
         Raises:
             FileNotFoundError: If file doesn't exist
-            ValueError: If YAML is invalid or fails validation
+            ValueError: If YAML is invalid, fails validation, or has circular inheritance
 
         Example:
             >>> config = MLTrainingConfig.from_yaml("experiments/config.yaml")
+
+        Example with inheritance:
+            >>> # configs/child.yaml inherits from configs/base.yaml
+            >>> config = MLTrainingConfig.from_yaml("configs/child.yaml")
         """
         filepath = Path(filepath)
 
         if not filepath.exists():
             raise FileNotFoundError(f"Configuration file not found: {filepath}")
 
-        with open(filepath) as f:
-            data = yaml.safe_load(f)
-
-        if data is None:
-            raise ValueError(f"Empty configuration file: {filepath}")
+        # Load with inheritance support
+        data = cls._load_with_inheritance(filepath, visited=set(), depth=0)
 
         # Handle model config discriminated union
         data = cls._preprocess_model_config(data)
@@ -804,6 +870,10 @@ class MLTrainingConfig(BaseModel):
         """
         Load configuration from a JSON file.
 
+        Supports configuration inheritance via the `base` field. When a base
+        config is specified, it is loaded recursively and the child config
+        values are deep-merged on top.
+
         Args:
             filepath: Path to JSON configuration file
 
@@ -812,23 +882,106 @@ class MLTrainingConfig(BaseModel):
 
         Raises:
             FileNotFoundError: If file doesn't exist
-            ValueError: If JSON is invalid or fails validation
+            ValueError: If JSON is invalid, fails validation, or has circular inheritance
 
         Example:
             >>> config = MLTrainingConfig.from_json("experiments/config.json")
+
+        Example with inheritance:
+            >>> # configs/child.json inherits from configs/base.json
+            >>> config = MLTrainingConfig.from_json("configs/child.json")
         """
         filepath = Path(filepath)
 
         if not filepath.exists():
             raise FileNotFoundError(f"Configuration file not found: {filepath}")
 
-        with open(filepath) as f:
-            data = json.load(f)
+        # Load with inheritance support
+        data = cls._load_with_inheritance(filepath, visited=set(), depth=0)
 
         # Handle model config discriminated union
         data = cls._preprocess_model_config(data)
 
         return cls.model_validate(data)
+
+    @classmethod
+    def _load_with_inheritance(cls, filepath: Path, visited: set[str], depth: int) -> dict:
+        """
+        Load configuration file with inheritance support.
+
+        Recursively loads base configs and deep-merges child values on top.
+        Detects circular inheritance and enforces maximum depth limits.
+
+        Args:
+            filepath: Path to configuration file
+            visited: Set of already-visited file paths (for circular detection)
+            depth: Current inheritance depth
+
+        Returns:
+            Merged configuration dictionary
+
+        Raises:
+            ValueError: If circular inheritance detected or max depth exceeded
+            FileNotFoundError: If file doesn't exist
+        """
+        # Check for circular inheritance
+        resolved_path = str(filepath.resolve())
+        if resolved_path in visited:
+            raise ValueError(
+                f"Circular inheritance detected: {filepath} was already loaded in the chain"
+            )
+
+        # Check max depth
+        if depth > _MAX_INHERITANCE_DEPTH:
+            raise ValueError(
+                f"Maximum inheritance depth ({_MAX_INHERITANCE_DEPTH}) exceeded. "
+                f"Check for excessive nesting in your config files."
+            )
+
+        # Load the file
+        if not filepath.exists():
+            raise FileNotFoundError(f"Configuration file not found: {filepath}")
+
+        # Determine file type and load
+        suffix = filepath.suffix.lower()
+        with open(filepath) as f:
+            if suffix in (".yaml", ".yml"):
+                data = yaml.safe_load(f)
+            elif suffix == ".json":
+                data = json.load(f)
+            else:
+                raise ValueError(
+                    f"Unsupported config file format: {suffix}. Use .yaml, .yml, or .json"
+                )
+
+        if data is None:
+            raise ValueError(f"Empty configuration file: {filepath}")
+
+        # Mark this file as visited
+        visited.add(resolved_path)
+
+        # Check for base config
+        base_path = data.pop("base", None)
+        if base_path is not None:
+            # Resolve relative paths relative to the current config file
+            base_filepath = Path(base_path)
+            if not base_filepath.is_absolute():
+                base_filepath = filepath.parent / base_filepath
+
+            logger.debug(
+                "loading_base_config",
+                child_config=str(filepath),
+                base_config=str(base_filepath),
+                depth=depth,
+            )
+
+            # Recursively load base config
+            base_data = cls._load_with_inheritance(base_filepath, visited.copy(), depth + 1)
+
+            # Deep merge: child overrides base
+            data = deep_merge(base_data, data)
+
+        return data
 
     @classmethod
     def _preprocess_model_config(cls, data: dict) -> dict:
