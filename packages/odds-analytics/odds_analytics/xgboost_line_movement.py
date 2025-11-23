@@ -37,12 +37,14 @@ Example:
 
 from __future__ import annotations
 
-import pickle
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import joblib
 import numpy as np
 import structlog
+import yaml
 from odds_core.models import Event, Odds
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -478,40 +480,75 @@ class XGBoostLineMovementStrategy(BettingStrategy):
 
         return history
 
-    def save_model(self, filepath: str) -> None:
+    def save_model(self, filepath: str | Path) -> None:
         """
-        Save trained model to disk.
+        Save trained model to disk with configuration metadata.
+
+        Saves model using joblib and configuration as YAML alongside it.
+        For example, 'models/xgb.joblib' will also create 'models/xgb.yaml'.
 
         Args:
-            filepath: Path to save model (e.g., 'models/xgb_line_movement.pkl')
+            filepath: Path to save model (e.g., 'models/xgb_line_movement.joblib')
         """
         if self.model is None:
             raise ValueError("No model to save. Train model first.")
 
-        # Ensure directory exists
-        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+        filepath = Path(filepath)
 
-        # Save model and metadata
+        # Ensure directory exists
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+
+        # Save model and metadata using joblib
         model_data = {
             "model": self.model,
             "feature_names": self.feature_names,
             "params": self.params,
         }
 
-        with open(filepath, "wb") as f:
-            pickle.dump(model_data, f)
+        joblib.dump(model_data, filepath)
 
-        logger.info("model_saved", filepath=filepath)
+        # Save configuration as YAML file alongside model
+        config_filepath = filepath.with_suffix(".yaml")
+        config_data = {
+            "model_type": "XGBoostLineMovement",
+            "saved_at": datetime.now(UTC).isoformat(),
+            "params": self.params,
+            "feature_names": self.feature_names,
+            "n_features": len(self.feature_names),
+        }
 
-    def load_model(self, filepath: str) -> None:
+        with open(config_filepath, "w") as f:
+            yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+
+        logger.info(
+            "model_saved",
+            filepath=str(filepath),
+            config_filepath=str(config_filepath),
+        )
+
+    def load_model(self, filepath: str | Path) -> None:
         """
         Load trained model from disk.
+
+        Supports both new format (joblib + YAML config) and old format (pickle).
+        If a YAML config file exists alongside the model, it will be loaded
+        and logged for reproducibility tracking.
 
         Args:
             filepath: Path to saved model file
         """
-        with open(filepath, "rb") as f:
-            model_data = pickle.load(f)
+        import pickle
+
+        filepath = Path(filepath)
+
+        # Try joblib first, fall back to pickle for backward compatibility
+        try:
+            model_data = joblib.load(filepath)
+        except Exception:
+            # Fall back to pickle for old models
+            with open(filepath, "rb") as f:
+                model_data = pickle.load(f)
+            logger.debug("loaded_legacy_pickle_format", filepath=str(filepath))
 
         self.model = model_data["model"]
         self.feature_names = model_data["feature_names"]
@@ -520,10 +557,32 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         if "params" in model_data:
             self.params.update(model_data["params"])
 
+        # Try to load config file if it exists
+        config_filepath = filepath.with_suffix(".yaml")
+        config_loaded = False
+        if config_filepath.exists():
+            try:
+                with open(config_filepath) as f:
+                    config_data = yaml.safe_load(f)
+                config_loaded = True
+                logger.info(
+                    "config_loaded",
+                    config_filepath=str(config_filepath),
+                    model_type=config_data.get("model_type"),
+                    saved_at=config_data.get("saved_at"),
+                )
+            except Exception as e:
+                logger.warning(
+                    "config_load_failed",
+                    config_filepath=str(config_filepath),
+                    error=str(e),
+                )
+
         logger.info(
             "model_loaded",
-            filepath=filepath,
+            filepath=str(filepath),
             n_features=len(self.feature_names),
+            config_loaded=config_loaded,
         )
 
     def get_feature_importance(self) -> dict[str, float]:

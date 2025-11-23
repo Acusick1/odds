@@ -562,6 +562,151 @@ class TestModelPersistence:
             assert model_path.exists()
 
 
+class TestModelPersistenceWithConfig:
+    """Test model persistence with YAML config files."""
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
+    )
+    def test_save_model_creates_yaml_config(self):
+        """Test that save_model creates both model and YAML config files."""
+        import yaml
+
+        strategy = XGBoostLineMovementStrategy(
+            min_predicted_movement=0.03, movement_confidence_scale=6.0
+        )
+
+        # Train model
+        X_train = np.random.rand(100, 5)
+        y_train = np.random.uniform(-0.1, 0.1, 100)
+        feature_names = [f"feature_{i}" for i in range(5)]
+
+        strategy.train(X_train, y_train, feature_names, n_estimators=10)
+
+        # Save to temporary file
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = Path(tmpdir) / "test_model.joblib"
+
+            strategy.save_model(str(model_path))
+
+            # Check both files exist
+            assert model_path.exists()
+            config_path = model_path.with_suffix(".yaml")
+            assert config_path.exists()
+
+            # Verify config content
+            with open(config_path) as f:
+                config_data = yaml.safe_load(f)
+
+            assert config_data["model_type"] == "XGBoostLineMovement"
+            assert "saved_at" in config_data
+            assert config_data["params"]["min_predicted_movement"] == 0.03
+            assert config_data["params"]["movement_confidence_scale"] == 6.0
+            assert config_data["feature_names"] == feature_names
+            assert config_data["n_features"] == 5
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
+    )
+    def test_load_model_with_config(self):
+        """Test that load_model logs config information when available."""
+        strategy = XGBoostLineMovementStrategy(
+            min_predicted_movement=0.04, movement_confidence_scale=7.0
+        )
+
+        X_train = np.random.rand(100, 5)
+        y_train = np.random.uniform(-0.1, 0.1, 100)
+        feature_names = [f"feature_{i}" for i in range(5)]
+
+        strategy.train(X_train, y_train, feature_names, n_estimators=10)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = Path(tmpdir) / "test_model.joblib"
+            strategy.save_model(str(model_path))
+
+            # Load into new strategy
+            loaded_strategy = XGBoostLineMovementStrategy()
+            loaded_strategy.load_model(str(model_path))
+
+            # Verify params were loaded correctly
+            assert loaded_strategy.params["min_predicted_movement"] == 0.04
+            assert loaded_strategy.params["movement_confidence_scale"] == 7.0
+            assert loaded_strategy.feature_names == feature_names
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
+    )
+    def test_load_model_backward_compatibility_pickle(self):
+        """Test that load_model can still load old pickle format models."""
+        import pickle
+
+        strategy = XGBoostLineMovementStrategy(
+            min_predicted_movement=0.05, movement_confidence_scale=8.0
+        )
+
+        X_train = np.random.rand(100, 5)
+        y_train = np.random.uniform(-0.1, 0.1, 100)
+        feature_names = [f"feature_{i}" for i in range(5)]
+
+        strategy.train(X_train, y_train, feature_names, n_estimators=10)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Save using old pickle format directly
+            model_path = Path(tmpdir) / "old_model.pkl"
+            model_data = {
+                "model": strategy.model,
+                "feature_names": strategy.feature_names,
+                "params": strategy.params,
+            }
+            with open(model_path, "wb") as f:
+                pickle.dump(model_data, f)
+
+            # Load into new strategy
+            loaded_strategy = XGBoostLineMovementStrategy()
+            loaded_strategy.load_model(str(model_path))
+
+            # Verify model loaded correctly
+            assert loaded_strategy.model is not None
+            assert loaded_strategy.feature_names == feature_names
+            assert loaded_strategy.params["min_predicted_movement"] == 0.05
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
+    )
+    def test_load_model_without_config_file(self):
+        """Test that load_model works when config file doesn't exist."""
+        import joblib
+
+        strategy = XGBoostLineMovementStrategy()
+
+        X_train = np.random.rand(100, 5)
+        y_train = np.random.uniform(-0.1, 0.1, 100)
+        feature_names = [f"feature_{i}" for i in range(5)]
+
+        strategy.train(X_train, y_train, feature_names, n_estimators=10)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Save only model file, no config
+            model_path = Path(tmpdir) / "model_only.joblib"
+            model_data = {
+                "model": strategy.model,
+                "feature_names": strategy.feature_names,
+                "params": strategy.params,
+            }
+            joblib.dump(model_data, model_path)
+
+            # Load - should work without config file
+            loaded_strategy = XGBoostLineMovementStrategy()
+            loaded_strategy.load_model(str(model_path))
+
+            assert loaded_strategy.model is not None
+            assert loaded_strategy.feature_names == feature_names
+
+
 class TestTrainingDataPreparation:
     """Test prepare_tabular_training_data function."""
 
@@ -571,9 +716,7 @@ class TestTrainingDataPreparation:
 
         mock_session = MagicMock()
 
-        X, y, feature_names = await prepare_tabular_training_data(
-            events=[], session=mock_session
-        )
+        X, y, feature_names = await prepare_tabular_training_data(events=[], session=mock_session)
 
         assert len(X) == 0
         assert len(y) == 0
