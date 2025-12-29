@@ -18,9 +18,9 @@ def calculate_tier(hours_until: float) -> FetchTier:
     The fetch tier determines how frequently odds should be collected:
     - CLOSING (0-3 hours): Most critical period, fetch every 30 minutes
     - PREGAME (3-12 hours): Active betting period, fetch every 3 hours
-    - SHARP (12-24 hours): Professional betting period, fetch every 12 hours
-    - EARLY (1-3 days): Opening line establishment, fetch every 24 hours
-    - OPENING (3+ days): Initial line release, fetch every 48 hours
+    - SHARP (12-24 hours): Sharp book opening period (Pinnacle), fetch every 6 hours
+    - EARLY (1-3 days): Line establishment, fetch every 24 hours
+    - OPENING (3+ days): Soft book opening (DK/FD), fetch every 24 hours
 
     Args:
         hours_until: Hours until game commence time. Can be negative for
