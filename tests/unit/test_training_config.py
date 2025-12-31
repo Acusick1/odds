@@ -30,6 +30,7 @@ from odds_analytics.training import (
     TuningConfig,
     XGBoostConfig,
 )
+from odds_lambda.fetch_tier import FetchTier
 
 # =============================================================================
 # ExperimentConfig Tests
@@ -283,8 +284,8 @@ class TestFeatureConfig:
         assert config.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
         assert config.markets == ["h2h", "spreads", "totals"]
         assert config.outcome == "home"
-        assert config.opening_hours_before == 48.0
-        assert config.closing_hours_before == 0.5
+        assert config.opening_tier == FetchTier.EARLY
+        assert config.closing_tier == FetchTier.CLOSING
 
     def test_custom_bookmakers(self):
         """Test custom bookmaker lists."""
@@ -295,20 +296,20 @@ class TestFeatureConfig:
         assert config.sharp_bookmakers == ["pinnacle", "circasports"]
         assert config.retail_bookmakers == ["fanduel"]
 
-    def test_invalid_timing(self):
-        """Test invalid timing validation (opening <= closing)."""
-        with pytest.raises(ValueError, match="must be greater than"):
+    def test_invalid_tier_order(self):
+        """Test invalid tier order validation (opening must be earlier than closing)."""
+        with pytest.raises(ValueError, match="must be earlier than"):
             FeatureConfig(
-                opening_hours_before=1.0,
-                closing_hours_before=2.0,
+                opening_tier=FetchTier.CLOSING,
+                closing_tier=FetchTier.EARLY,
             )
 
-    def test_same_timing_fails(self):
-        """Test same opening/closing time fails."""
-        with pytest.raises(ValueError, match="must be greater than"):
+    def test_same_tier_fails(self):
+        """Test same opening/closing tier fails."""
+        with pytest.raises(ValueError, match="must be earlier than"):
             FeatureConfig(
-                opening_hours_before=24.0,
-                closing_hours_before=24.0,
+                opening_tier=FetchTier.SHARP,
+                closing_tier=FetchTier.SHARP,
             )
 
     def test_empty_bookmakers_fails(self):

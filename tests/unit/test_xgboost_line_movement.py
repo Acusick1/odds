@@ -8,10 +8,7 @@ import numpy as np
 import pytest
 from odds_analytics.backtesting import BacktestConfig, BacktestEvent, BetOpportunity
 from odds_analytics.feature_extraction import TabularFeatures
-from odds_analytics.xgboost_line_movement import (
-    XGBoostLineMovementStrategy,
-    prepare_tabular_training_data,
-)
+from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from odds_core.models import EventStatus, Odds
 
 
@@ -705,47 +702,3 @@ class TestModelPersistenceWithConfig:
 
             assert loaded_strategy.model is not None
             assert loaded_strategy.feature_names == feature_names
-
-
-class TestTrainingDataPreparation:
-    """Test prepare_tabular_training_data function."""
-
-    async def test_empty_events_returns_empty_arrays(self):
-        """Test that empty events list returns empty arrays."""
-        from unittest.mock import MagicMock
-
-        mock_session = MagicMock()
-
-        X, y, feature_names = await prepare_tabular_training_data(events=[], session=mock_session)
-
-        assert len(X) == 0
-        assert len(y) == 0
-        assert len(feature_names) == 0
-
-    async def test_events_without_scores_are_filtered(self):
-        """Test that events without scores are filtered out."""
-        from unittest.mock import MagicMock
-
-        from odds_core.models import Event
-
-        mock_session = MagicMock()
-
-        # Create event without scores (not FINAL)
-        event_no_scores = Event(
-            id="test_1",
-            sport_key="basketball_nba",
-            sport_title="NBA",
-            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
-            home_team="Lakers",
-            away_team="Celtics",
-            status=EventStatus.SCHEDULED,  # Not FINAL
-            home_score=None,
-            away_score=None,
-        )
-
-        X, y, feature_names = await prepare_tabular_training_data(
-            events=[event_no_scores], session=mock_session
-        )
-
-        assert len(X) == 0
-        assert len(y) == 0

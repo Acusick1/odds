@@ -83,6 +83,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 if TYPE_CHECKING:
     from odds_analytics.training.config import MLTrainingConfig
 
+from odds_lambda.fetch_tier import FetchTier
+
 from odds_analytics.backtesting import (
     BacktestConfig,
     BacktestEvent,
@@ -90,12 +92,10 @@ from odds_analytics.backtesting import (
     BettingStrategy,
 )
 from odds_analytics.feature_extraction import SequenceFeatureExtractor
+from odds_analytics.feature_groups import prepare_training_data
 from odds_analytics.lstm_strategy import LSTMModel
-from odds_analytics.sequence_loader import (
-    TargetType,
-    load_sequences_for_event,
-    prepare_lstm_training_data,
-)
+from odds_analytics.sequence_loader import load_sequences_for_event
+from odds_analytics.training.config import FeatureConfig
 
 logger = structlog.get_logger()
 
@@ -223,8 +223,8 @@ class LSTMLineMovementStrategy(BettingStrategy):
         batch_size: int = 32,
         learning_rate: float = 0.001,
         outcome: str = "home",
-        opening_hours_before: float = 48.0,
-        closing_hours_before: float = 0.5,
+        opening_tier: FetchTier = FetchTier.EARLY,
+        closing_tier: FetchTier = FetchTier.CLOSING,
     ) -> dict[str, list[float]]:
         """
         Train LSTM model on historical events for line movement regression.
@@ -236,8 +236,8 @@ class LSTMLineMovementStrategy(BettingStrategy):
             batch_size: Batch size for training (default: 32)
             learning_rate: Learning rate for Adam optimizer (default: 0.001)
             outcome: What to predict - "home" or "away" (default: "home")
-            opening_hours_before: Hours before game for opening line (default: 48)
-            closing_hours_before: Hours before game for closing line (default: 0.5)
+            opening_tier: Fetch tier for opening line (default: EARLY)
+            closing_tier: Fetch tier for closing line (default: CLOSING)
 
         Returns:
             Training history dict with loss values per epoch
@@ -255,20 +255,24 @@ class LSTMLineMovementStrategy(BettingStrategy):
             loss_function=self.params.get("loss_function", "mse"),
         )
 
-        # Prepare training data with regression targets
-        X, y, masks = await prepare_lstm_training_data(
-            events=events,
-            session=session,
+        # Prepare training data with regression targets using composable feature groups
+        feature_config = FeatureConfig(
             outcome=outcome,
-            market=self.params["market"],
-            lookback_hours=self.params["lookback_hours"],
-            timesteps=self.params["timesteps"],
+            markets=[self.params["market"]],
             sharp_bookmakers=self.params["sharp_bookmakers"],
             retail_bookmakers=self.params["retail_bookmakers"],
-            target_type=TargetType.REGRESSION,
-            opening_hours_before=opening_hours_before,
-            closing_hours_before=closing_hours_before,
+            lookback_hours=self.params["lookback_hours"],
+            timesteps=self.params["timesteps"],
+            opening_tier=opening_tier,
+            closing_tier=closing_tier,
+            feature_groups=["sequence_full"],  # LSTM uses full 3D sequences
         )
+        result = await prepare_training_data(
+            events=events,
+            session=session,
+            config=feature_config,
+        )
+        X, y, masks = result.X, result.y, result.masks
 
         if len(X) == 0:
             logger.error("no_training_data")

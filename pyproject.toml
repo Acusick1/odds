@@ -84,8 +84,9 @@ python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 env = [
+    "DATABASE_URL=postgresql+asyncpg://localhost:5434/test",
     "PGLITE_USE_TCP=1",
-    "PGLITE_TCP_PORT=5433",
+    "PGLITE_TCP_PORT=5434",
     "PGLITE_PERSIST=0",
     "ODDS_API_KEY=",
 ]

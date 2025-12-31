@@ -37,11 +37,13 @@ import copy
 import json
 import math
 from datetime import date
+from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
 import structlog
 import yaml
+from odds_lambda.fetch_tier import FetchTier
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = structlog.get_logger()
@@ -441,18 +443,18 @@ class FeatureConfig(BaseModel):
         description="Outcome to predict (home or away team)",
     )
 
-    # Timing configuration
-    opening_hours_before: float = Field(
-        default=48.0,
-        gt=0.0,
-        le=168.0,
-        description="Hours before game for opening line snapshot",
+    # Tier-based timing configuration
+    opening_tier: FetchTier = Field(
+        default=FetchTier.EARLY,
+        description="Tier for opening line (first snapshot in this tier)",
     )
-    closing_hours_before: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=24.0,
-        description="Hours before game for closing line snapshot",
+    closing_tier: FetchTier = Field(
+        default=FetchTier.CLOSING,
+        description="Tier for closing line (last snapshot in this tier)",
+    )
+    decision_tier: FetchTier = Field(
+        default=FetchTier.PREGAME,
+        description="Tier at which betting decision is made. Trajectory features only use data up to this tier.",
     )
 
     # Sequence model configuration (LSTM)
@@ -475,14 +477,70 @@ class FeatureConfig(BaseModel):
         description="Whether to normalize features before model input",
     )
 
+    # Feature groups to compose (replaces include_trajectory_features)
+    feature_groups: list[str] = Field(
+        default=["tabular"],
+        min_length=1,
+        description="List of feature groups to compose. Available: tabular, trajectory, sequence_full",
+    )
+
+    # Trajectory feature configuration
+    movement_threshold: float = Field(
+        default=0.005,
+        ge=0.0,
+        le=0.1,
+        description="Probability change threshold for counting significant movements (0.5% default)",
+    )
+
     @model_validator(mode="after")
-    def validate_timing(self) -> FeatureConfig:
-        """Ensure opening is before closing."""
-        if self.opening_hours_before <= self.closing_hours_before:
+    def validate_tiers(self) -> FeatureConfig:
+        """Ensure tier ordering: opening < decision <= closing (chronologically)."""
+        tier_order = FetchTier.get_priority_order()  # CLOSING first (closest to game)
+        opening_idx = tier_order.index(self.opening_tier)
+        closing_idx = tier_order.index(self.closing_tier)
+        decision_idx = tier_order.index(self.decision_tier)
+
+        # Opening should have higher index (further from game)
+        if opening_idx <= closing_idx:
             raise ValueError(
-                f"opening_hours_before ({self.opening_hours_before}) must be greater than "
-                f"closing_hours_before ({self.closing_hours_before})"
+                f"opening_tier ({self.opening_tier.value}) must be earlier than "
+                f"closing_tier ({self.closing_tier.value})"
             )
+
+        # Decision must be between opening and closing (inclusive of closing)
+        if decision_idx > opening_idx or decision_idx < closing_idx:
+            raise ValueError(
+                f"decision_tier ({self.decision_tier.value}) must be between "
+                f"opening_tier ({self.opening_tier.value}) and "
+                f"closing_tier ({self.closing_tier.value})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_feature_groups(self) -> FeatureConfig:
+        """Validate feature_groups are valid registry keys."""
+        # Import here to avoid circular imports
+        from odds_analytics.feature_groups import FEATURE_GROUP_REGISTRY
+
+        invalid_groups = [g for g in self.feature_groups if g not in FEATURE_GROUP_REGISTRY]
+        if invalid_groups:
+            raise ValueError(
+                f"Unknown feature groups: {invalid_groups}. "
+                f"Available: {list(FEATURE_GROUP_REGISTRY.keys())}"
+            )
+
+        # Validate output dimension compatibility
+        dims = set()
+        for group_name in self.feature_groups:
+            group_cls = FEATURE_GROUP_REGISTRY[group_name]
+            dims.add(group_cls.output_dim)
+
+        if len(dims) > 1:
+            raise ValueError(
+                f"Cannot mix feature groups with different output dimensions: {dims}. "
+                f"All groups must be either 2D (tabular, trajectory) or 3D (sequence_full)."
+            )
+
         return self
 
 
@@ -680,11 +738,11 @@ class TrainingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    strategy_type: Literal["xgboost", "xgboost_line_movement", "lstm", "lstm_line_movement"] = (
-        Field(
-            ...,
-            description="Type of ML strategy to train",
-        )
+    strategy_type: Literal[
+        "xgboost", "xgboost_line_movement", "lstm", "lstm_line_movement"
+    ] = Field(
+        ...,
+        description="Type of ML strategy to train",
     )
 
     # Data configuration
@@ -1073,6 +1131,8 @@ class MLTrainingConfig(BaseModel):
                 return value.isoformat()
             elif isinstance(value, Path):
                 return str(value)
+            elif isinstance(value, Enum):
+                return value.value
             elif isinstance(value, BaseModel):
                 return {k: serialize_value(v) for k, v in value.model_dump().items()}
             elif isinstance(value, dict):

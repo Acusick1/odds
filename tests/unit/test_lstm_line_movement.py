@@ -119,9 +119,7 @@ class TestLSTMModel:
         input_size = 16
         hidden_size = 64
 
-        model = LSTMModel(
-            input_size=input_size, hidden_size=hidden_size, output_type="regression"
-        )
+        model = LSTMModel(input_size=input_size, hidden_size=hidden_size, output_type="regression")
 
         # Create dummy input
         x = torch.randn(batch_size, seq_len, input_size)
@@ -273,7 +271,7 @@ class TestLSTMLineMovementStrategy:
             for i in range(10)
         ]
 
-        # Mock prepare_lstm_training_data to return dummy regression data
+        # Mock prepare_training_data to return dummy regression data
         n_samples = 10
         timesteps = 8
         num_features = strategy.input_size
@@ -283,10 +281,15 @@ class TestLSTMLineMovementStrategy:
         mock_y = np.random.randn(n_samples).astype(np.float32) * 0.1  # Small deltas
         mock_masks = np.random.randint(0, 2, (n_samples, timesteps)).astype(bool)
 
+        mock_result = MagicMock()
+        mock_result.X = mock_X
+        mock_result.y = mock_y
+        mock_result.masks = mock_masks
+
         with patch(
-            "odds_analytics.lstm_line_movement.prepare_lstm_training_data",
+            "odds_analytics.lstm_line_movement.prepare_training_data",
             new_callable=AsyncMock,
-            return_value=(mock_X, mock_y, mock_masks),
+            return_value=mock_result,
         ):
             mock_session = MagicMock()
 
@@ -319,10 +322,15 @@ class TestLSTMLineMovementStrategy:
             mock_y = np.random.randn(n_samples).astype(np.float32) * 0.1
             mock_masks = np.ones((n_samples, 8), dtype=bool)
 
+            mock_result = MagicMock()
+            mock_result.X = mock_X
+            mock_result.y = mock_y
+            mock_result.masks = mock_masks
+
             with patch(
-                "odds_analytics.lstm_line_movement.prepare_lstm_training_data",
+                "odds_analytics.lstm_line_movement.prepare_training_data",
                 new_callable=AsyncMock,
-                return_value=(mock_X, mock_y, mock_masks),
+                return_value=mock_result,
             ):
                 mock_session = MagicMock()
                 mock_events = [MagicMock() for _ in range(n_samples)]
@@ -341,11 +349,16 @@ class TestLSTMLineMovementStrategy:
 
         mock_events = []
 
-        # Mock prepare_lstm_training_data to return empty arrays
+        # Mock prepare_training_data to return empty arrays
+        mock_result = MagicMock()
+        mock_result.X = np.array([])
+        mock_result.y = np.array([])
+        mock_result.masks = np.array([])
+
         with patch(
-            "odds_analytics.lstm_line_movement.prepare_lstm_training_data",
+            "odds_analytics.lstm_line_movement.prepare_training_data",
             new_callable=AsyncMock,
-            return_value=(np.array([]), np.array([]), np.array([])),
+            return_value=mock_result,
         ):
             mock_session = MagicMock()
 
@@ -353,9 +366,7 @@ class TestLSTMLineMovementStrategy:
                 await strategy.train(events=mock_events, session=mock_session)
 
     @pytest.mark.asyncio
-    async def test_evaluate_opportunity_without_training(
-        self, sample_event, sample_odds_snapshot
-    ):
+    async def test_evaluate_opportunity_without_training(self, sample_event, sample_odds_snapshot):
         """Test that evaluate_opportunity returns empty list when not trained."""
         strategy = LSTMLineMovementStrategy()
         config = BacktestConfig(
@@ -371,9 +382,7 @@ class TestLSTMLineMovementStrategy:
         assert opportunities == []
 
     @pytest.mark.asyncio
-    async def test_evaluate_opportunity_with_session(
-        self, sample_event, sample_odds_snapshot
-    ):
+    async def test_evaluate_opportunity_with_session(self, sample_event, sample_odds_snapshot):
         """Test evaluate_opportunity with trained model and session."""
         strategy = LSTMLineMovementStrategy(
             lookback_hours=24,
@@ -532,9 +541,7 @@ class TestLSTMLineMovementStrategy:
         assert isinstance(opportunities, list)
 
     @pytest.mark.asyncio
-    async def test_evaluate_opportunity_with_no_sequences(
-        self, sample_event, sample_odds_snapshot
-    ):
+    async def test_evaluate_opportunity_with_no_sequences(self, sample_event, sample_odds_snapshot):
         """Test that evaluate_opportunity handles missing sequence data."""
         strategy = LSTMLineMovementStrategy()
         strategy.model = strategy._create_model().to(strategy.device)
@@ -560,9 +567,7 @@ class TestLSTMLineMovementStrategy:
         assert opportunities == []
 
     @pytest.mark.asyncio
-    async def test_evaluate_opportunity_without_session(
-        self, sample_event, sample_odds_snapshot
-    ):
+    async def test_evaluate_opportunity_without_session(self, sample_event, sample_odds_snapshot):
         """Test that evaluate_opportunity returns empty without session."""
         strategy = LSTMLineMovementStrategy()
         strategy.model = strategy._create_model().to(strategy.device)
@@ -608,9 +613,7 @@ class TestLSTMLineMovementStrategy:
     def test_load_model(self):
         """Test that model can be loaded from disk."""
         # Create and save model
-        strategy = LSTMLineMovementStrategy(
-            hidden_size=128, num_layers=2, loss_function="huber"
-        )
+        strategy = LSTMLineMovementStrategy(hidden_size=128, num_layers=2, loss_function="huber")
         strategy.model = strategy._create_model().to(strategy.device)
         strategy.is_trained = True
         strategy.training_history = {"loss": [0.05, 0.04, 0.03], "mae": [0.04, 0.03, 0.025]}
@@ -720,10 +723,15 @@ class TestLSTMLineMovementWorkflow:
         mock_y = np.random.randn(n_samples).astype(np.float32) * 0.05  # Small movements
         mock_masks = np.ones((n_samples, timesteps), dtype=bool)
 
+        mock_result = MagicMock()
+        mock_result.X = mock_X
+        mock_result.y = mock_y
+        mock_result.masks = mock_masks
+
         with patch(
-            "odds_analytics.lstm_line_movement.prepare_lstm_training_data",
+            "odds_analytics.lstm_line_movement.prepare_training_data",
             new_callable=AsyncMock,
-            return_value=(mock_X, mock_y, mock_masks),
+            return_value=mock_result,
         ):
             mock_session = MagicMock()
 

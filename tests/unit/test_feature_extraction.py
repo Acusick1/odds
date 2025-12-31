@@ -1040,22 +1040,29 @@ class TestFeatureExtractorFromConfig:
         config_with_normalize = FeatureConfig(normalize=True)
         assert config_with_normalize.normalize is True
 
-    def test_feature_config_timing_parameters(self):
-        """Test that FeatureConfig timing parameters work correctly."""
+    def test_feature_config_tier_parameters(self):
+        """Test that FeatureConfig tier parameters work correctly."""
+        from odds_lambda.fetch_tier import FetchTier
+
         config = FeatureConfig(
-            opening_hours_before=72.0,
-            closing_hours_before=1.0,
+            opening_tier=FetchTier.SHARP,
+            closing_tier=FetchTier.CLOSING,
+            decision_tier=FetchTier.PREGAME,
         )
 
-        assert config.opening_hours_before == 72.0
-        assert config.closing_hours_before == 1.0
+        assert config.opening_tier == FetchTier.SHARP
+        assert config.closing_tier == FetchTier.CLOSING
+        assert config.decision_tier == FetchTier.PREGAME
 
-    def test_feature_config_invalid_timing_raises_error(self):
-        """Test that invalid timing configuration raises validation error."""
-        with pytest.raises(ValueError, match="opening_hours_before.*must be greater than"):
+    def test_feature_config_invalid_tier_order_raises_error(self):
+        """Test that invalid tier ordering raises validation error."""
+        from odds_lambda.fetch_tier import FetchTier
+
+        # Opening must be before closing (chronologically)
+        with pytest.raises(ValueError, match="opening_tier.*must be earlier than.*closing_tier"):
             FeatureConfig(
-                opening_hours_before=1.0,
-                closing_hours_before=2.0,
+                opening_tier=FetchTier.CLOSING,
+                closing_tier=FetchTier.EARLY,
             )
 
     def test_tabular_extractor_from_config_type_annotation(self):

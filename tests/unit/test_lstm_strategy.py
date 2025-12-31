@@ -241,7 +241,7 @@ class TestLSTMStrategy:
             for i in range(10)
         ]
 
-        # Mock prepare_lstm_training_data to return dummy data
+        # Mock prepare_training_data to return dummy data
         n_samples = 10
         timesteps = 8
         num_features = strategy.input_size
@@ -250,10 +250,15 @@ class TestLSTMStrategy:
         mock_y = np.random.randint(0, 2, n_samples).astype(np.float32)
         mock_masks = np.random.randint(0, 2, (n_samples, timesteps)).astype(bool)
 
+        mock_result = MagicMock()
+        mock_result.X = mock_X
+        mock_result.y = mock_y
+        mock_result.masks = mock_masks
+
         with patch(
-            "odds_analytics.lstm_strategy.prepare_lstm_training_data",
+            "odds_analytics.lstm_strategy.prepare_training_data",
             new_callable=AsyncMock,
-            return_value=(mock_X, mock_y, mock_masks),
+            return_value=mock_result,
         ):
             mock_session = MagicMock()
 
@@ -277,11 +282,16 @@ class TestLSTMStrategy:
 
         mock_events = []
 
-        # Mock prepare_lstm_training_data to return empty arrays
+        # Mock prepare_training_data to return empty arrays
+        mock_result = MagicMock()
+        mock_result.X = np.array([])
+        mock_result.y = np.array([])
+        mock_result.masks = np.array([])
+
         with patch(
-            "odds_analytics.lstm_strategy.prepare_lstm_training_data",
+            "odds_analytics.lstm_strategy.prepare_training_data",
             new_callable=AsyncMock,
-            return_value=(np.array([]), np.array([]), np.array([])),
+            return_value=mock_result,
         ):
             mock_session = MagicMock()
 
@@ -557,10 +567,15 @@ class TestLSTMWorkflow:
         mock_y = np.random.randint(0, 2, n_samples).astype(np.float32)
         mock_masks = np.ones((n_samples, timesteps), dtype=bool)
 
+        mock_result = MagicMock()
+        mock_result.X = mock_X
+        mock_result.y = mock_y
+        mock_result.masks = mock_masks
+
         with patch(
-            "odds_analytics.lstm_strategy.prepare_lstm_training_data",
+            "odds_analytics.lstm_strategy.prepare_training_data",
             new_callable=AsyncMock,
-            return_value=(mock_X, mock_y, mock_masks),
+            return_value=mock_result,
         ):
             mock_session = MagicMock()
 
