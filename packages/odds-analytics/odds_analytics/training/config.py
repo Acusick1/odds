@@ -143,6 +143,11 @@ class DataConfig(BaseModel):
     Data loading and splitting configuration.
 
     Controls the date range for training data and train/test split settings.
+    Supports optional cross-validation for more robust model evaluation.
+
+    Cross-Validation Methods:
+        - kfold: Standard K-Fold cross-validation.
+        - timeseries: Walk-forward validation using TimeSeriesSplit.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -165,7 +170,8 @@ class DataConfig(BaseModel):
         default=0.1,
         ge=0.0,
         le=1.0,
-        description="Fraction of training data to use for validation (0.0 to 1.0)",
+        description="Fraction of training data to use for validation (0.0 to 1.0). "
+        "Ignored when use_kfold=True.",
     )
     random_seed: int = Field(
         default=42,
@@ -175,6 +181,28 @@ class DataConfig(BaseModel):
     shuffle: bool = Field(
         default=True,
         description="Whether to shuffle data before splitting",
+    )
+
+    # Cross-Validation settings
+    use_kfold: bool = Field(
+        default=False,
+        description="Enable cross-validation for model evaluation",
+    )
+    cv_method: Literal["kfold", "timeseries"] = Field(
+        default="timeseries",
+        description="Cross-validation method. 'timeseries' uses walk-forward validation "
+        "(recommended for temporal betting data), 'kfold' uses standard K-Fold.",
+    )
+    n_folds: int = Field(
+        default=5,
+        ge=2,
+        le=20,
+        description="Number of folds for cross-validation (only used when use_kfold=True)",
+    )
+    kfold_shuffle: bool = Field(
+        default=True,
+        description="Whether to shuffle data before splitting into folds. "
+        "Only applies when cv_method='kfold'; ignored for 'timeseries'.",
     )
 
     @model_validator(mode="after")
@@ -189,6 +217,10 @@ class DataConfig(BaseModel):
     @model_validator(mode="after")
     def validate_splits(self) -> DataConfig:
         """Ensure splits don't exceed 1.0 in total."""
+        # When using kfold, validation_split is ignored
+        if self.use_kfold:
+            return self
+
         total = self.test_split + self.validation_split
         if total >= 1.0:
             raise ValueError(

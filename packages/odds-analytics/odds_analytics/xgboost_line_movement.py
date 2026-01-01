@@ -474,6 +474,92 @@ class XGBoostLineMovementStrategy(BettingStrategy):
 
         return history
 
+    def train_with_cv(
+        self,
+        config: MLTrainingConfig,
+        X: np.ndarray,
+        y: np.ndarray,
+        feature_names: list[str],
+        X_test: np.ndarray | None = None,
+        y_test: np.ndarray | None = None,
+    ) -> tuple[dict[str, Any], Any]:
+        """
+        Train with K-Fold cross-validation, then train final model on all data.
+
+        This method:
+        1. Runs K-Fold CV to get robust performance estimates
+        2. Trains a final model on all training data
+        3. Returns both CV results and final model metrics
+
+        Args:
+            config: ML training configuration with kfold settings
+            X: Full training feature matrix (n_samples, n_features)
+            y: Full training target vector (n_samples,)
+            feature_names: List of feature names
+            X_test: Optional held-out test features for final evaluation
+            y_test: Optional held-out test targets for final evaluation
+
+        Returns:
+            Tuple of (training_history, cv_result) where:
+            - training_history: Dict with final model metrics + cv metrics
+            - cv_result: CVResult object with per-fold details
+
+        Example:
+            >>> strategy = XGBoostLineMovementStrategy()
+            >>> history, cv_result = strategy.train_with_cv(
+            ...     config, X_train, y_train, feature_names, X_test, y_test
+            ... )
+            >>> print(f"CV R²: {cv_result.mean_val_r2:.4f} ± {cv_result.std_val_r2:.4f}")
+            >>> print(f"Final test R²: {history['val_r2']:.4f}")
+        """
+        from odds_analytics.training.cross_validation import run_cv
+
+        logger.info(
+            "starting_train_with_cv",
+            experiment_name=config.experiment.name,
+            n_folds=config.training.data.n_folds,
+            n_samples=len(X),
+            n_features=len(feature_names),
+        )
+
+        # Step 1: Run cross-validation (time series or k-fold based on config)
+        cv_result = run_cv(
+            strategy=self,
+            config=config,
+            X=X,
+            y=y,
+            feature_names=feature_names,
+        )
+
+        logger.info(
+            "cv_complete_training_final",
+            cv_val_mse=f"{cv_result.mean_val_mse:.6f} ± {cv_result.std_val_mse:.6f}",
+            cv_val_r2=f"{cv_result.mean_val_r2:.4f} ± {cv_result.std_val_r2:.4f}",
+        )
+
+        # Step 2: Train final model on all training data
+        history = self.train_from_config(
+            config=config,
+            X_train=X,
+            y_train=y,
+            feature_names=feature_names,
+            X_val=X_test,
+            y_val=y_test,
+        )
+
+        # Step 3: Merge CV metrics into history
+        history.update(cv_result.to_dict())
+
+        logger.info(
+            "train_with_cv_complete",
+            experiment_name=config.experiment.name,
+            cv_val_mse_mean=cv_result.mean_val_mse,
+            final_train_mse=history.get("train_mse"),
+            final_test_mse=history.get("val_mse"),
+        )
+
+        return history, cv_result
+
     def save_model(self, filepath: str | Path) -> None:
         """
         Save trained model to disk with configuration metadata.
