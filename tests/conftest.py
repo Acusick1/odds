@@ -15,6 +15,24 @@ from sqlalchemy.orm import sessionmaker
 os.environ.setdefault("ODDS_API_KEY", "test_api_key")
 
 
+@pytest.fixture(scope="session")
+def pglite_config():
+    """
+    Override pglite config to force TCP mode.
+
+    This prevents intermittent Unix socket connection errors by ensuring
+    all tests use TCP connections on a dedicated port.
+    """
+    from py_pglite.config import PGliteConfig
+
+    return PGliteConfig(
+        use_tcp=True,
+        tcp_port=5434,
+        cleanup_on_exit=True,
+        timeout=30,
+    )
+
+
 @pytest.fixture
 def sample_odds_data() -> list[dict[str, Any]]:
     """Load sample odds response from fixture file."""
