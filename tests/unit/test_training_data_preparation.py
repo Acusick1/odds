@@ -164,24 +164,28 @@ class TestFeatureConfigExtraction:
         assert config.markets == ["h2h", "spreads", "totals"]
         assert config.sharp_bookmakers == ["pinnacle"]
         assert config.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
-        assert config.opening_hours_before == 48.0
-        assert config.closing_hours_before == 0.5
+        assert config.feature_groups == ["tabular"]
+        assert config.opening_tier.value == "early"
+        assert config.closing_tier.value == "closing"
 
     def test_feature_config_custom_values(self):
         """Test FeatureConfig with custom values."""
+        from odds_lambda.fetch_tier import FetchTier
+
         config = FeatureConfig(
             outcome="away",
             markets=["spreads"],
             sharp_bookmakers=["pinnacle", "circasports"],
             retail_bookmakers=["fanduel"],
-            opening_hours_before=72.0,
-            closing_hours_before=1.0,
+            opening_tier=FetchTier.SHARP,
+            closing_tier=FetchTier.CLOSING,
+            feature_groups=["tabular", "trajectory"],
         )
 
         assert config.outcome == "away"
         assert config.markets == ["spreads"]
         assert config.sharp_bookmakers == ["pinnacle", "circasports"]
-        assert config.opening_hours_before == 72.0
+        assert config.feature_groups == ["tabular", "trajectory"]
 
 
 # =============================================================================
@@ -255,6 +259,8 @@ class TestPrepareTrainingDataFromConfig:
     @pytest.mark.asyncio
     async def test_xgboost_data_preparation(self, basic_xgboost_config, mock_events):
         """Test XGBoost data preparation returns correct structure."""
+        from odds_analytics.feature_groups import TrainingDataResult as FGTrainingDataResult
+
         session = AsyncMock()
 
         # Mock the dependencies
@@ -262,14 +268,16 @@ class TestPrepareTrainingDataFromConfig:
             patch(
                 "odds_analytics.training.data_preparation.filter_events_by_date_range"
             ) as mock_filter,
-            patch("odds_analytics.training.data_preparation._prepare_tabular_data") as mock_prepare,
+            patch("odds_analytics.feature_groups.prepare_training_data") as mock_prepare,
         ):
             # Setup mocks
             mock_filter.return_value = mock_events
             X = np.random.randn(10, 31).astype(np.float32)
             y = np.random.randn(10).astype(np.float32)
             feature_names = [f"feature_{i}" for i in range(31)]
-            mock_prepare.return_value = (X, y, feature_names)
+            mock_prepare.return_value = FGTrainingDataResult(
+                X=X, y=y, feature_names=feature_names, masks=None
+            )
 
             # Call the function
             result = await prepare_training_data_from_config(basic_xgboost_config, session)
@@ -284,6 +292,8 @@ class TestPrepareTrainingDataFromConfig:
     @pytest.mark.asyncio
     async def test_lstm_data_preparation(self, basic_lstm_config, mock_events):
         """Test LSTM data preparation returns correct structure with masks."""
+        from odds_analytics.feature_groups import TrainingDataResult as FGTrainingDataResult
+
         session = AsyncMock()
 
         # Mock the dependencies
@@ -291,9 +301,7 @@ class TestPrepareTrainingDataFromConfig:
             patch(
                 "odds_analytics.training.data_preparation.filter_events_by_date_range"
             ) as mock_filter,
-            patch(
-                "odds_analytics.training.data_preparation._prepare_sequence_data"
-            ) as mock_prepare,
+            patch("odds_analytics.feature_groups.prepare_training_data") as mock_prepare,
         ):
             # Setup mocks
             mock_filter.return_value = mock_events
@@ -301,7 +309,9 @@ class TestPrepareTrainingDataFromConfig:
             y = np.random.randn(10).astype(np.float32)
             masks = np.ones((10, 24), dtype=bool)
             feature_names = [f"feature_{i}" for i in range(17)]
-            mock_prepare.return_value = (X, y, masks, feature_names)
+            mock_prepare.return_value = FGTrainingDataResult(
+                X=X, y=y, feature_names=feature_names, masks=masks
+            )
 
             # Call the function
             result = await prepare_training_data_from_config(basic_lstm_config, session)
@@ -328,63 +338,51 @@ class TestPrepareTrainingDataFromConfig:
     @pytest.mark.asyncio
     async def test_no_valid_training_data_raises_error(self, basic_xgboost_config, mock_events):
         """Test that empty training data raises ValueError."""
+        from odds_analytics.feature_groups import TrainingDataResult as FGTrainingDataResult
+
         session = AsyncMock()
 
         with (
             patch(
                 "odds_analytics.training.data_preparation.filter_events_by_date_range"
             ) as mock_filter,
-            patch("odds_analytics.training.data_preparation._prepare_tabular_data") as mock_prepare,
+            patch("odds_analytics.feature_groups.prepare_training_data") as mock_prepare,
         ):
             mock_filter.return_value = mock_events
             # Return empty arrays
-            mock_prepare.return_value = (np.array([]), np.array([]), [])
+            mock_prepare.return_value = FGTrainingDataResult(
+                X=np.array([]), y=np.array([]), feature_names=[], masks=None
+            )
 
             with pytest.raises(ValueError, match="No valid training data"):
                 await prepare_training_data_from_config(basic_xgboost_config, session)
 
-    @pytest.mark.asyncio
-    async def test_unsupported_strategy_type_raises_error(self):
-        """Test that unsupported strategy type raises ValueError."""
-        # Create config with invalid strategy type by bypassing validation
-        config = MagicMock()
-        config.experiment = MagicMock()
-        config.experiment.name = "test"
-        config.training = MagicMock()
-        config.training.strategy_type = "unsupported_type"
-        config.training.data = MagicMock()
-        config.training.data.start_date = date(2024, 1, 1)
-        config.training.data.end_date = date(2024, 12, 31)
-        config.training.data.test_split = 0.2
-        config.training.data.random_seed = 42
-        config.training.data.shuffle = True
-
-        session = AsyncMock()
-
-        with patch(
-            "odds_analytics.training.data_preparation.filter_events_by_date_range"
-        ) as mock_filter:
-            mock_filter.return_value = [MagicMock(spec=Event)]
-
-            with pytest.raises(ValueError, match="Unsupported strategy type"):
-                await prepare_training_data_from_config(config, session)
+    def test_unknown_feature_group_raises_error(self):
+        """Test that unknown feature group raises ValueError."""
+        # Create config with invalid feature group - should raise at validation time
+        with pytest.raises(ValueError, match="Unknown feature groups"):
+            FeatureConfig(feature_groups=["unknown_group"])
 
     @pytest.mark.asyncio
     async def test_train_test_split_ratio(self, basic_xgboost_config, mock_events):
         """Test that train/test split respects configuration."""
+        from odds_analytics.feature_groups import TrainingDataResult as FGTrainingDataResult
+
         session = AsyncMock()
 
         with (
             patch(
                 "odds_analytics.training.data_preparation.filter_events_by_date_range"
             ) as mock_filter,
-            patch("odds_analytics.training.data_preparation._prepare_tabular_data") as mock_prepare,
+            patch("odds_analytics.feature_groups.prepare_training_data") as mock_prepare,
         ):
             mock_filter.return_value = mock_events
             X = np.random.randn(100, 31).astype(np.float32)
             y = np.random.randn(100).astype(np.float32)
             feature_names = [f"feature_{i}" for i in range(31)]
-            mock_prepare.return_value = (X, y, feature_names)
+            mock_prepare.return_value = FGTrainingDataResult(
+                X=X, y=y, feature_names=feature_names, masks=None
+            )
 
             # Config has test_split=0.2
             result = await prepare_training_data_from_config(basic_xgboost_config, session)
@@ -392,65 +390,6 @@ class TestPrepareTrainingDataFromConfig:
             # Should be approximately 80/20 split
             assert result.num_train_samples == 80
             assert result.num_test_samples == 20
-
-
-# =============================================================================
-# Legacy Function Backward Compatibility Tests
-# =============================================================================
-
-
-class TestLegacyFunctionCompatibility:
-    """Tests for backward compatibility of refactored functions."""
-
-    @pytest.mark.asyncio
-    async def test_prepare_tabular_with_defaults(self):
-        """Test prepare_tabular_training_data works with default parameters."""
-        from odds_analytics.xgboost_line_movement import prepare_tabular_training_data
-
-        # Call with empty events to test parameter defaults
-        X, y, feature_names = await prepare_tabular_training_data(
-            events=[],
-            session=AsyncMock(),
-        )
-
-        # Should return empty arrays without error
-        assert len(X) == 0
-        assert len(y) == 0
-        assert len(feature_names) == 0
-
-    @pytest.mark.asyncio
-    async def test_prepare_tabular_with_explicit_params(self):
-        """Test prepare_tabular_training_data with explicit parameters."""
-        from odds_analytics.xgboost_line_movement import prepare_tabular_training_data
-
-        X, y, feature_names = await prepare_tabular_training_data(
-            events=[],
-            session=AsyncMock(),
-            outcome="away",
-            market="spreads",
-            opening_hours_before=72.0,
-            closing_hours_before=1.0,
-            sharp_bookmakers=["pinnacle", "circasports"],
-            retail_bookmakers=["fanduel"],
-        )
-
-        # Should work without error
-        assert len(X) == 0
-
-    @pytest.mark.asyncio
-    async def test_prepare_lstm_with_defaults(self):
-        """Test prepare_lstm_training_data works with default parameters."""
-        from odds_analytics.sequence_loader import prepare_lstm_training_data
-
-        X, y, masks = await prepare_lstm_training_data(
-            events=[],
-            session=AsyncMock(),
-        )
-
-        # Should return empty arrays without error
-        assert len(X) == 0
-        assert len(y) == 0
-        assert len(masks) == 0
 
 
 # =============================================================================
@@ -486,8 +425,9 @@ class TestConfigLoadingIntegration:
                     "markets": ["h2h"],
                     "sharp_bookmakers": ["pinnacle"],
                     "retail_bookmakers": ["fanduel", "draftkings"],
-                    "opening_hours_before": 48.0,
-                    "closing_hours_before": 0.5,
+                    "opening_tier": "early",
+                    "closing_tier": "closing",
+                    "feature_groups": ["tabular"],
                 },
             },
         }
@@ -512,6 +452,8 @@ class TestConfigLoadingIntegration:
     @pytest.mark.asyncio
     async def test_config_to_data_pipeline(self, yaml_config_file):
         """Test end-to-end: config loading -> data preparation -> output shape."""
+        from odds_analytics.feature_groups import TrainingDataResult as FGTrainingDataResult
+
         # Load config
         config = MLTrainingConfig.from_yaml(yaml_config_file)
 
@@ -522,7 +464,7 @@ class TestConfigLoadingIntegration:
             patch(
                 "odds_analytics.training.data_preparation.filter_events_by_date_range"
             ) as mock_filter,
-            patch("odds_analytics.training.data_preparation._prepare_tabular_data") as mock_prepare,
+            patch("odds_analytics.feature_groups.prepare_training_data") as mock_prepare,
         ):
             mock_filter.return_value = mock_events
 
@@ -532,7 +474,9 @@ class TestConfigLoadingIntegration:
             X = np.random.randn(num_samples, num_features).astype(np.float32)
             y = np.random.randn(num_samples).astype(np.float32)
             feature_names = [f"feature_{i}" for i in range(num_features)]
-            mock_prepare.return_value = (X, y, feature_names)
+            mock_prepare.return_value = FGTrainingDataResult(
+                X=X, y=y, feature_names=feature_names, masks=None
+            )
 
             # Execute pipeline
             result = await prepare_training_data_from_config(config, session)

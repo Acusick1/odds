@@ -465,6 +465,72 @@ class OddsReader:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def get_first_snapshot_in_tier(
+        self, event_id: str, tier: FetchTier
+    ) -> OddsSnapshot | None:
+        """
+        Get the earliest snapshot in a specific tier for an event.
+
+        Useful for finding the "opening" line when a tier first becomes active.
+
+        Args:
+            event_id: Event identifier
+            tier: FetchTier to query
+
+        Returns:
+            First OddsSnapshot in the tier, or None if no snapshots exist
+
+        Example:
+            reader = OddsReader(session)
+            opening = await reader.get_first_snapshot_in_tier(
+                event_id="abc123",
+                tier=FetchTier.EARLY
+            )
+        """
+        query = (
+            select(OddsSnapshot)
+            .where(OddsSnapshot.event_id == event_id)
+            .where(OddsSnapshot.fetch_tier == tier.value)
+            .order_by(OddsSnapshot.snapshot_time.asc())
+            .limit(1)
+        )
+
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_last_snapshot_in_tier(
+        self, event_id: str, tier: FetchTier
+    ) -> OddsSnapshot | None:
+        """
+        Get the latest snapshot in a specific tier for an event.
+
+        Useful for finding the "closing" line at the end of a tier period.
+
+        Args:
+            event_id: Event identifier
+            tier: FetchTier to query
+
+        Returns:
+            Last OddsSnapshot in the tier, or None if no snapshots exist
+
+        Example:
+            reader = OddsReader(session)
+            closing = await reader.get_last_snapshot_in_tier(
+                event_id="abc123",
+                tier=FetchTier.CLOSING
+            )
+        """
+        query = (
+            select(OddsSnapshot)
+            .where(OddsSnapshot.event_id == event_id)
+            .where(OddsSnapshot.fetch_tier == tier.value)
+            .order_by(OddsSnapshot.snapshot_time.desc())
+            .limit(1)
+        )
+
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
     async def get_tier_coverage_for_event(self, event_id: str) -> dict[str, int]:
         """
         Get count of snapshots per tier for an event.

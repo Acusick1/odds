@@ -29,6 +29,11 @@ from odds_analytics.training.config import (
     TuningConfig,
     XGBoostConfig,
 )
+from odds_analytics.training.cross_validation import (
+    CVFoldResult,
+    CVResult,
+    run_cv,
+)
 from odds_analytics.training.data_preparation import (
     TrainingDataResult,
     filter_events_by_date_range,
@@ -49,4 +54,7 @@ __all__ = [
     "prepare_training_data_from_config",
     "filter_events_by_date_range",
     "TrainingDataResult",
+    "CVFoldResult",
+    "CVResult",
+    "run_cv",
 ]

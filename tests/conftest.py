@@ -27,7 +27,7 @@ def pglite_config():
 
     return PGliteConfig(
         use_tcp=True,
-        tcp_port=5433,
+        tcp_port=5434,
         cleanup_on_exit=True,
         timeout=30,
     )

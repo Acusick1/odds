@@ -6,19 +6,21 @@ into 3D tensor format suitable for LSTM model training and prediction.
 
 Key Functions:
 - load_sequences_for_event(): Query odds snapshots and organize chronologically
-- prepare_lstm_training_data(): Process multiple events into training tensors
+- load_sequences_up_to_tier(): Query odds up to a decision tier
+- get_opening_closing_odds_by_tier(): Get odds at specific tiers
+- calculate_regression_target(): Calculate line movement for regression
 
 Architecture:
 - Queries OddsSnapshot.raw_data to reconstruct historical odds
 - Groups snapshots by odds_timestamp for chronological ordering
 - Converts to list[list[Odds]] format expected by SequenceFeatureExtractor
 - Handles variable-length sequences with attention masks
-- Generates binary labels from event outcomes (home win = 1, away win = 0)
+- Supports tier-based filtering for decision time simulation
 
 Example:
     ```python
     from odds_lambda.storage.readers import OddsReader
-    from odds_analytics.sequence_loader import load_sequences_for_event, prepare_lstm_training_data
+    from odds_analytics.sequence_loader import load_sequences_for_event
 
     # Load sequences for a single event
     async with get_async_session() as session:
@@ -31,21 +33,15 @@ Example:
         #     [Odds(...), Odds(...), ...],  # Second timestamp
         #     ...
         # ]
+    ```
 
-        # Prepare training data for multiple events
-        events = await reader.get_events_by_date_range(start, end, status=EventStatus.FINAL)
-        X, y, masks = await prepare_lstm_training_data(
-            events=events,
-            session=session,
-            outcome="home",  # Predict home team wins
-            market="h2h",
-            lookback_hours=72,
-            timesteps=24
-        )
+For training data preparation, use the composable feature group API in feature_groups.py:
+    ```python
+    from odds_analytics.feature_groups import prepare_training_data
+    from odds_analytics.training.config import FeatureConfig
 
-        # X: (n_events, 24, num_features)
-        # y: (n_events,) - 1 if home won, 0 if away won
-        # masks: (n_events, 24) - True for valid timesteps
+    config = FeatureConfig(feature_groups=["sequence_full"], ...)
+    result = await prepare_training_data(config, session)
     ```
 """
 
@@ -57,11 +53,10 @@ from enum import Enum
 
 import numpy as np
 import structlog
-from odds_core.models import Event, EventStatus, Odds
+from odds_core.models import Odds, OddsSnapshot
+from odds_lambda.fetch_tier import FetchTier
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_analytics.backtesting import BacktestEvent
-from odds_analytics.feature_extraction import SequenceFeatureExtractor
 from odds_analytics.utils import calculate_implied_probability
 
 
@@ -76,9 +71,9 @@ logger = structlog.get_logger()
 
 __all__ = [
     "load_sequences_for_event",
-    "prepare_lstm_training_data",
+    "load_sequences_up_to_tier",
     "TargetType",
-    "extract_opening_closing_odds",
+    "get_opening_closing_odds_by_tier",
     "calculate_regression_target",
 ]
 
@@ -229,6 +224,176 @@ def calculate_regression_target(
         return None
 
 
+def _extract_odds_from_snapshot(
+    snapshot: OddsSnapshot,
+    event_id: str,
+    market: str | None = None,
+    outcome: str | None = None,
+) -> list[Odds]:
+    """
+    Extract Odds objects from a snapshot's raw_data.
+
+    Args:
+        snapshot: OddsSnapshot with raw_data JSON
+        event_id: Event identifier
+        market: Market type to filter (h2h, spreads, totals). If None, includes all markets.
+        outcome: Outcome name to filter (team name or Over/Under). If None, includes all outcomes.
+
+    Returns:
+        List of Odds objects, optionally filtered by market and/or outcome
+    """
+    raw_data = snapshot.raw_data
+    if not raw_data or "bookmakers" not in raw_data:
+        return []
+
+    odds_list: list[Odds] = []
+    bookmakers = raw_data.get("bookmakers", [])
+
+    for bookmaker_data in bookmakers:
+        bookmaker_key = bookmaker_data.get("key")
+        bookmaker_title = bookmaker_data.get("title")
+        last_update_str = bookmaker_data.get("last_update")
+
+        # Parse last_update timestamp
+        if last_update_str:
+            try:
+                last_update = datetime.fromisoformat(last_update_str.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                last_update = snapshot.snapshot_time
+        else:
+            last_update = snapshot.snapshot_time
+
+        # Process each market for this bookmaker
+        markets = bookmaker_data.get("markets", [])
+        for market_data in markets:
+            market_key = market_data.get("key")
+            if market is not None and market_key != market:
+                continue
+
+            # Process each outcome in the market
+            outcomes = market_data.get("outcomes", [])
+            for outcome_data in outcomes:
+                outcome_name = outcome_data.get("name")
+                if outcome is not None and outcome_name != outcome:
+                    continue
+
+                price = outcome_data.get("price")
+                point = outcome_data.get("point")
+
+                odds = Odds(
+                    event_id=event_id,
+                    bookmaker_key=bookmaker_key,
+                    bookmaker_title=bookmaker_title,
+                    market_key=market_key,
+                    outcome_name=outcome_name,
+                    price=price,
+                    point=point,
+                    odds_timestamp=snapshot.snapshot_time,
+                    last_update=last_update,
+                    is_valid=True,
+                )
+                odds_list.append(odds)
+
+    return odds_list
+
+
+async def get_opening_closing_odds_by_tier(
+    session: AsyncSession,
+    event_id: str,
+    opening_tier: FetchTier,
+    closing_tier: FetchTier,
+    market: str,
+    outcome: str,
+) -> tuple[list[Odds] | None, list[Odds] | None]:
+    """
+    Get opening and closing odds by querying specific fetch tiers directly.
+
+    This is more efficient and accurate than time-window based extraction because
+    it uses the actual tier stored on each snapshot rather than calculating from
+    timestamps.
+
+    Args:
+        session: Async database session
+        event_id: Event identifier
+        opening_tier: Tier for opening line (uses first snapshot in tier)
+        closing_tier: Tier for closing line (uses last snapshot in tier)
+        market: Market type (h2h, spreads, totals)
+        outcome: Outcome name (team name or Over/Under)
+
+    Returns:
+        Tuple of (opening_odds, closing_odds) where each is a list of Odds
+        for the target outcome/market, or None if not found.
+
+    Example:
+        opening, closing = await get_opening_closing_odds_by_tier(
+            session=session,
+            event_id="abc123",
+            opening_tier=FetchTier.EARLY,
+            closing_tier=FetchTier.CLOSING,
+            market="h2h",
+            outcome="Los Angeles Lakers",
+        )
+    """
+    from odds_lambda.storage.readers import OddsReader
+
+    reader = OddsReader(session)
+
+    # Query for first snapshot in opening tier
+    opening_snapshot = await reader.get_first_snapshot_in_tier(event_id, opening_tier)
+    if opening_snapshot is None:
+        logger.debug(
+            "no_opening_snapshot",
+            event_id=event_id,
+            tier=opening_tier.value,
+        )
+        return None, None
+
+    # Query for last snapshot in closing tier
+    closing_snapshot = await reader.get_last_snapshot_in_tier(event_id, closing_tier)
+    if closing_snapshot is None:
+        logger.debug(
+            "no_closing_snapshot",
+            event_id=event_id,
+            tier=closing_tier.value,
+        )
+        return None, None
+
+    # Ensure we have different snapshots
+    if opening_snapshot.id == closing_snapshot.id:
+        logger.debug(
+            "same_opening_closing_snapshot",
+            event_id=event_id,
+            snapshot_id=opening_snapshot.id,
+        )
+        return None, None
+
+    # Extract odds from snapshots
+    opening_odds = _extract_odds_from_snapshot(opening_snapshot, event_id, market, outcome)
+    closing_odds = _extract_odds_from_snapshot(closing_snapshot, event_id, market, outcome)
+
+    if not opening_odds:
+        logger.debug(
+            "no_opening_odds_for_outcome",
+            event_id=event_id,
+            market=market,
+            outcome=outcome,
+            tier=opening_tier.value,
+        )
+        return None, None
+
+    if not closing_odds:
+        logger.debug(
+            "no_closing_odds_for_outcome",
+            event_id=event_id,
+            market=market,
+            outcome=outcome,
+            tier=closing_tier.value,
+        )
+        return None, None
+
+    return opening_odds, closing_odds
+
+
 async def load_sequences_for_event(
     event_id: str,
     session: AsyncSession,
@@ -359,269 +524,159 @@ async def load_sequences_for_event(
     return sequences
 
 
-async def prepare_lstm_training_data(
-    events: list[Event],
+async def load_sequences_up_to_tier(
+    event_id: str,
     session: AsyncSession,
-    outcome: str = "home",
-    market: str = "h2h",
-    lookback_hours: int = 72,
-    timesteps: int = 24,
-    sharp_bookmakers: list[str] | None = None,
-    retail_bookmakers: list[str] | None = None,
-    target_type: TargetType | str = TargetType.CLASSIFICATION,
-    opening_hours_before: float = 48.0,
-    closing_hours_before: float = 0.5,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    decision_tier: FetchTier,
+) -> list[list[Odds]]:
     """
-    Process multiple events to generate LSTM training data.
+    Load odds snapshots for an event, filtered to include only snapshots up to decision tier.
 
-    This function:
-    1. Loads odds sequences for each event
-    2. Uses SequenceFeatureExtractor to convert to feature tensors
-    3. Generates labels based on target_type:
-       - Classification: Binary labels from event outcomes (win/loss)
-       - Regression: Continuous line movement delta (closing - opening)
-    4. Creates attention masks for variable-length sequences
+    This prevents look-ahead bias by ensuring trajectory features are computed only
+    from data that would have been available at the time of the betting decision.
 
     Args:
-        events: List of Event objects with final scores (status=FINAL required)
+        event_id: Event identifier
         session: Async database session
-        outcome: What to predict - "home" (home team wins), "away" (away team wins), or team name
-        market: Market to analyze (h2h, spreads, totals)
-        lookback_hours: Hours before game to start sequence
-        timesteps: Number of timesteps in sequence (fixed length)
-        sharp_bookmakers: Sharp bookmakers for features (default: ["pinnacle"])
-        retail_bookmakers: Retail bookmakers for features (default: ["fanduel", "draftkings", "betmgm"])
-        target_type: Type of target to generate:
-            - "classification": Binary win/loss labels (default)
-            - "regression": Line movement delta (closing - opening)
-              For h2h: implied probability change
-              For spreads/totals: point change
-        opening_hours_before: Hours before game to find opening line (default: 48).
-            Only used when target_type="regression". Finds snapshot closest to
-            (commence_time - opening_hours_before).
-        closing_hours_before: Hours before game to find closing line (default: 0.5).
-            Only used when target_type="regression". Finds snapshot closest to
-            (commence_time - closing_hours_before).
+        decision_tier: Maximum tier to include (snapshots at or before this tier)
 
     Returns:
-        Tuple of (X, y, masks):
-        - X: Feature array of shape (n_samples, timesteps, num_features)
-        - y: Label array of shape (n_samples,)
-            - Classification: int32 binary (1=win, 0=loss)
-            - Regression: float32 continuous (line movement delta)
-        - masks: Attention mask of shape (n_samples, timesteps) - True for valid timesteps
-
-    Edge Cases:
-        - Skips events without final scores (status != FINAL)
-        - Skips events with no odds data
-        - Returns empty arrays if no valid events
-        - Handles variable-length sequences via attention masks
-        - For regression: Skips events without opening/closing odds data
+        List of snapshots filtered to include only those at or before decision_tier.
+        Each snapshot is a list of Odds objects.
+        Snapshots are ordered chronologically (earliest to latest).
 
     Example:
-        >>> from odds_lambda.storage.readers import OddsReader
-        >>> async with get_async_session() as session:
-        ...     reader = OddsReader(session)
-        ...     events = await reader.get_events_by_date_range(
-        ...         start_date=datetime(2024, 10, 1, tzinfo=UTC),
-        ...         end_date=datetime(2024, 10, 31, tzinfo=UTC),
-        ...         status=EventStatus.FINAL
-        ...     )
-        ...     # Classification mode (default)
-        ...     X, y, masks = await prepare_lstm_training_data(
-        ...         events=events,
-        ...         session=session,
-        ...         outcome="home",
-        ...         market="h2h"
-        ...     )
-        ...     print(f"Training data shape: {X.shape}")
-        ...     print(f"Labels shape: {y.shape}")  # Binary labels
-        ...
-        ...     # Regression mode
-        ...     X, y, masks = await prepare_lstm_training_data(
-        ...         events=events,
-        ...         session=session,
-        ...         outcome="home",
-        ...         market="h2h",
-        ...         target_type="regression"
-        ...     )
-        ...     print(f"Labels shape: {y.shape}")  # Continuous deltas
+        >>> # Load only snapshots up to PREGAME tier (excludes CLOSING tier data)
+        >>> sequences = await load_sequences_up_to_tier(
+        ...     event_id="abc123",
+        ...     session=session,
+        ...     decision_tier=FetchTier.PREGAME
+        ... )
     """
-    # Validate inputs
-    if not events:
-        logger.warning("no_events_provided")
-        return np.array([]), np.array([]), np.array([])
+    from odds_lambda.storage.readers import OddsReader
 
-    # Normalize target_type to enum
-    if isinstance(target_type, str):
-        target_type = TargetType(target_type.lower())
+    reader = OddsReader(session)
 
-    # Filter for events with final scores
-    valid_events = [
-        e
-        for e in events
-        if e.status == EventStatus.FINAL and e.home_score is not None and e.away_score is not None
-    ]
+    # Get all snapshots for the event, ordered by time
+    snapshots = await reader.get_snapshots_for_event(event_id)
 
-    if not valid_events:
-        logger.warning("no_valid_events", total_events=len(events))
-        return np.array([]), np.array([]), np.array([])
+    if not snapshots:
+        logger.warning("no_snapshots_found", event_id=event_id)
+        return []
 
-    # Initialize feature extractor
-    extractor = SequenceFeatureExtractor(
-        lookback_hours=lookback_hours,
-        timesteps=timesteps,
-        sharp_bookmakers=sharp_bookmakers,
-        retail_bookmakers=retail_bookmakers,
-    )
+    # Define tier ordering: CLOSING is closest to game, OPENING is furthest
+    tier_order = FetchTier.get_priority_order()  # [CLOSING, PREGAME, SHARP, EARLY, OPENING]
+    decision_tier_idx = tier_order.index(decision_tier)
 
-    # Get feature dimension from extractor
-    feature_names = extractor.get_feature_names()
-    num_features = len(feature_names)
+    # Filter snapshots to only include those at or before decision tier
+    # "Before" means further from game time, which is higher index in tier_order
+    filtered_snapshots = []
+    for snapshot in snapshots:
+        snapshot_tier = None
+        if snapshot.fetch_tier:
+            try:
+                snapshot_tier = FetchTier(snapshot.fetch_tier)
+            except ValueError:
+                # Unknown tier, include by default
+                pass
 
-    # Pre-allocate arrays
-    n_samples = len(valid_events)
-    X = np.zeros((n_samples, timesteps, num_features), dtype=np.float32)
-    # Use float32 for regression, int32 for classification
-    y_dtype = np.float32 if target_type == TargetType.REGRESSION else np.int32
-    y = np.zeros(n_samples, dtype=y_dtype)
-    masks = np.zeros((n_samples, timesteps), dtype=bool)
-
-    # Process each event
-    valid_sample_idx = 0
-    skipped_events = 0
-
-    for event in valid_events:
-        # Convert Event to BacktestEvent for feature extraction
-        backtest_event = BacktestEvent(
-            id=event.id,
-            commence_time=event.commence_time,
-            home_team=event.home_team,
-            away_team=event.away_team,
-            home_score=event.home_score,
-            away_score=event.away_score,
-            status=event.status,
-        )
-
-        # Load odds sequences for this event
-        try:
-            odds_sequences = await load_sequences_for_event(event.id, session)
-        except Exception as e:
-            logger.error(
-                "failed_to_load_sequences",
-                event_id=event.id,
-                error=str(e),
-            )
-            skipped_events += 1
-            continue
-
-        # Skip if no data
-        if not odds_sequences or all(len(seq) == 0 for seq in odds_sequences):
-            logger.warning("empty_sequences", event_id=event.id)
-            skipped_events += 1
-            continue
-
-        # Determine target outcome for feature extraction
-        if outcome == "home":
-            target_outcome = event.home_team
-        elif outcome == "away":
-            target_outcome = event.away_team
-        else:
-            # Assume outcome is a team name
-            target_outcome = outcome
-
-        # Extract features using SequenceFeatureExtractor
-        try:
-            features_dict = extractor.extract_features(
-                event=backtest_event,
-                odds_data=odds_sequences,
-                outcome=target_outcome,
-                market=market,
-            )
-        except Exception as e:
-            logger.error(
-                "failed_to_extract_features",
-                event_id=event.id,
-                error=str(e),
-            )
-            skipped_events += 1
-            continue
-
-        # Extract sequence and mask from result
-        sequence = features_dict["sequence"]  # (timesteps, num_features)
-        mask = features_dict["mask"]  # (timesteps,)
-
-        # Skip if all timesteps are invalid
-        if not mask.any():
-            logger.warning("no_valid_timesteps", event_id=event.id)
-            skipped_events += 1
-            continue
-
-        # Generate label based on target_type and outcome
-        if target_type == TargetType.CLASSIFICATION:
-            # Binary classification: win/loss
-            if outcome == "home":
-                label = 1 if event.home_score > event.away_score else 0
-            elif outcome == "away":
-                label = 1 if event.away_score > event.home_score else 0
+        if snapshot_tier is None:
+            # If tier is unknown, use hours_until_commence to determine
+            if snapshot.hours_until_commence is not None:
+                # Map hours to approximate tier
+                hours = snapshot.hours_until_commence
+                if hours > 72:  # OPENING
+                    snapshot_tier = FetchTier.OPENING
+                elif hours > 24:  # EARLY
+                    snapshot_tier = FetchTier.EARLY
+                elif hours > 12:  # SHARP
+                    snapshot_tier = FetchTier.SHARP
+                elif hours > 3:  # PREGAME
+                    snapshot_tier = FetchTier.PREGAME
+                else:  # CLOSING
+                    snapshot_tier = FetchTier.CLOSING
             else:
-                # Assume outcome is a team name
-                if target_outcome == event.home_team:
-                    label = 1 if event.home_score > event.away_score else 0
-                else:
-                    label = 1 if event.away_score > event.home_score else 0
-        else:
-            # Regression: line movement delta (closing - opening)
-            opening_odds, closing_odds = extract_opening_closing_odds(
-                odds_sequences,
-                target_outcome,
-                market,
-                commence_time=event.commence_time,
-                opening_hours_before=opening_hours_before,
-                closing_hours_before=closing_hours_before,
-            )
-            regression_target = calculate_regression_target(opening_odds, closing_odds, market)
-
-            if regression_target is None:
-                logger.warning(
-                    "missing_regression_target",
-                    event_id=event.id,
-                    reason="could not calculate opening/closing delta",
-                )
-                skipped_events += 1
+                # No tier info - include by default (conservative)
+                filtered_snapshots.append(snapshot)
                 continue
 
-            label = regression_target
+        # Check if snapshot is at or before decision tier
+        if snapshot_tier is not None:
+            snapshot_tier_idx = tier_order.index(snapshot_tier)
+            # Higher index = further from game = earlier tier
+            if snapshot_tier_idx >= decision_tier_idx:
+                filtered_snapshots.append(snapshot)
 
-        # Store in arrays
-        X[valid_sample_idx] = sequence
-        y[valid_sample_idx] = label
-        masks[valid_sample_idx] = mask
-
-        valid_sample_idx += 1
-
-    # Trim arrays to actual number of valid samples
-    if valid_sample_idx < n_samples:
-        logger.info(
-            "trimming_arrays",
-            original_size=n_samples,
-            valid_samples=valid_sample_idx,
-            skipped=skipped_events,
+    if not filtered_snapshots:
+        logger.warning(
+            "no_snapshots_after_tier_filter",
+            event_id=event_id,
+            decision_tier=decision_tier.value,
         )
-        X = X[:valid_sample_idx]
-        y = y[:valid_sample_idx]
-        masks = masks[:valid_sample_idx]
+        return []
+
+    # Group odds by timestamp (same logic as load_sequences_for_event)
+    odds_by_timestamp: dict[datetime, list[Odds]] = defaultdict(list)
+
+    for snapshot in filtered_snapshots:
+        raw_data = snapshot.raw_data
+
+        if not raw_data or "bookmakers" not in raw_data:
+            continue
+
+        bookmakers = raw_data.get("bookmakers", [])
+
+        for bookmaker_data in bookmakers:
+            bookmaker_key = bookmaker_data.get("key")
+            bookmaker_title = bookmaker_data.get("title")
+            last_update_str = bookmaker_data.get("last_update")
+
+            if last_update_str:
+                try:
+                    last_update = datetime.fromisoformat(last_update_str.replace("Z", "+00:00"))
+                except (ValueError, AttributeError):
+                    last_update = snapshot.snapshot_time
+            else:
+                last_update = snapshot.snapshot_time
+
+            markets = bookmaker_data.get("markets", [])
+            for market_data in markets:
+                market_key = market_data.get("key")
+                outcomes = market_data.get("outcomes", [])
+
+                for outcome_data in outcomes:
+                    outcome_name = outcome_data.get("name")
+                    price = outcome_data.get("price")
+                    point = outcome_data.get("point")
+
+                    if price is None:
+                        continue
+
+                    odds = Odds(
+                        event_id=event_id,
+                        bookmaker_key=bookmaker_key,
+                        bookmaker_title=bookmaker_title,
+                        market_key=market_key,
+                        outcome_name=outcome_name,
+                        price=price,
+                        point=point,
+                        odds_timestamp=snapshot.snapshot_time,
+                        last_update=last_update,
+                        is_valid=True,
+                    )
+
+                    odds_by_timestamp[snapshot.snapshot_time].append(odds)
+
+    # Convert to list of lists, sorted by timestamp
+    sorted_timestamps = sorted(odds_by_timestamp.keys())
+    sequences = [odds_by_timestamp[ts] for ts in sorted_timestamps]
 
     logger.info(
-        "prepared_training_data",
-        num_samples=valid_sample_idx,
-        timesteps=timesteps,
-        num_features=num_features,
-        outcome=outcome,
-        market=market,
-        target_type=target_type.value,
-        skipped_events=skipped_events,
+        "loaded_sequences_up_to_tier",
+        event_id=event_id,
+        decision_tier=decision_tier.value,
+        num_snapshots=len(sequences),
+        total_before_filter=len(snapshots),
     )
 
-    return X, y, masks
+    return sequences

@@ -2,12 +2,8 @@
 
 from datetime import UTC, datetime, timedelta
 
-import numpy as np
 import pytest
-from odds_analytics.sequence_loader import (
-    load_sequences_for_event,
-    prepare_lstm_training_data,
-)
+from odds_analytics.sequence_loader import load_sequences_for_event
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.storage.writers import OddsWriter
 
@@ -135,12 +131,16 @@ class TestSequenceLoaderIntegration:
         first_lakers_h2h = next(
             o
             for o in sequences[0]
-            if o.outcome_name == event.home_team and o.market_key == "h2h" and o.bookmaker_key == "pinnacle"
+            if o.outcome_name == event.home_team
+            and o.market_key == "h2h"
+            and o.bookmaker_key == "pinnacle"
         )
         last_lakers_h2h = next(
             o
             for o in sequences[2]
-            if o.outcome_name == event.home_team and o.market_key == "h2h" and o.bookmaker_key == "pinnacle"
+            if o.outcome_name == event.home_team
+            and o.market_key == "h2h"
+            and o.bookmaker_key == "pinnacle"
         )
 
         assert first_lakers_h2h.price != last_lakers_h2h.price, "Line should move over time"
@@ -217,259 +217,6 @@ class TestSequenceLoaderIntegration:
         # Should have all markets
         markets = {odds.market_key for odds in sequences[0]}
         assert markets == {"h2h", "spreads", "totals"}
-
-    async def test_prepare_training_data_from_database(self, test_session):
-        """Test preparing LSTM training data from database."""
-        # Create multiple test events
-        events = []
-        for i in range(3):
-            event = Event(
-                id=f"lstm_event_{i}",
-                sport_key="basketball_nba",
-                sport_title="NBA",
-                commence_time=datetime(2024, 11, i + 1, 19, 0, 0, tzinfo=UTC),
-                home_team="Lakers",
-                away_team="Celtics",
-                status=EventStatus.FINAL,
-                home_score=110 + i,
-                away_score=105,
-            )
-            events.append(event)
-
-            # Insert event
-            writer = OddsWriter(test_session)
-            await writer.upsert_event(event)
-
-            # Create snapshots
-            base_time = event.commence_time - timedelta(hours=24)
-            for j in range(4):
-                snapshot_time = base_time + timedelta(hours=j * 6)
-                raw_data = {
-                    "id": event.id,
-                    "sport_key": "basketball_nba",
-                    "commence_time": event.commence_time.isoformat(),
-                    "home_team": event.home_team,
-                    "away_team": event.away_team,
-                    "bookmakers": [
-                        {
-                            "key": "pinnacle",
-                            "title": "Pinnacle",
-                            "last_update": snapshot_time.isoformat(),
-                            "markets": [
-                                {
-                                    "key": "h2h",
-                                    "outcomes": [
-                                        {"name": event.home_team, "price": -120 - j},
-                                        {"name": event.away_team, "price": 100 + j},
-                                    ],
-                                }
-                            ],
-                        }
-                    ],
-                }
-
-                snapshot = OddsSnapshot(
-                    event_id=event.id,
-                    snapshot_time=snapshot_time,
-                    raw_data=raw_data,
-                    bookmaker_count=1,
-                )
-                test_session.add(snapshot)
-
-        await test_session.commit()
-
-        # Prepare training data
-        X, y, masks = await prepare_lstm_training_data(
-            events=events,
-            session=test_session,
-            outcome="home",
-            market="h2h",
-            timesteps=8,
-            lookback_hours=48,
-        )
-
-        # Verify shapes
-        assert X.shape[0] == 3, "Should have 3 samples"
-        assert X.shape[1] == 8, "Should have 8 timesteps"
-        assert X.shape[2] > 0, "Should have features"
-
-        assert y.shape == (3,), "Should have 3 labels"
-        assert masks.shape == (3, 8), "Masks should match shape"
-
-        # Verify labels (all home teams won)
-        assert np.all(y == 1), "All home teams won"
-
-        # Verify masks have some valid data
-        assert masks.any(), "Should have some valid timesteps"
-
-    async def test_prepare_training_data_mixed_outcomes(self, test_session):
-        """Test training data with mixed home/away wins."""
-        events = []
-
-        # Event 1: Home wins
-        event1 = Event(
-            id="mixed_1",
-            sport_key="basketball_nba",
-            sport_title="NBA",
-            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
-            home_team="Lakers",
-            away_team="Celtics",
-            status=EventStatus.FINAL,
-            home_score=110,
-            away_score=105,
-        )
-        events.append(event1)
-
-        # Event 2: Away wins
-        event2 = Event(
-            id="mixed_2",
-            sport_key="basketball_nba",
-            sport_title="NBA",
-            commence_time=datetime(2024, 11, 2, 19, 0, 0, tzinfo=UTC),
-            home_team="Lakers",
-            away_team="Celtics",
-            status=EventStatus.FINAL,
-            home_score=100,
-            away_score=105,
-        )
-        events.append(event2)
-
-        # Insert events and snapshots
-        writer = OddsWriter(test_session)
-        for event in events:
-            await writer.upsert_event(event)
-
-            snapshot_time = event.commence_time - timedelta(hours=12)
-            raw_data = {
-                "id": event.id,
-                "sport_key": "basketball_nba",
-                "commence_time": event.commence_time.isoformat(),
-                "home_team": event.home_team,
-                "away_team": event.away_team,
-                "bookmakers": [
-                    {
-                        "key": "pinnacle",
-                        "title": "Pinnacle",
-                        "last_update": snapshot_time.isoformat(),
-                        "markets": [
-                            {
-                                "key": "h2h",
-                                "outcomes": [
-                                    {"name": event.home_team, "price": -120},
-                                    {"name": event.away_team, "price": 100},
-                                ],
-                            }
-                        ],
-                    }
-                ],
-            }
-
-            snapshot = OddsSnapshot(
-                event_id=event.id,
-                snapshot_time=snapshot_time,
-                raw_data=raw_data,
-                bookmaker_count=1,
-            )
-            test_session.add(snapshot)
-
-        await test_session.commit()
-
-        # Prepare training data for home team predictions
-        X, y, masks = await prepare_lstm_training_data(
-            events=events,
-            session=test_session,
-            outcome="home",
-            market="h2h",
-            timesteps=8,
-        )
-
-        # Verify labels
-        assert y[0] == 1, "First event: home won"
-        assert y[1] == 0, "Second event: away won"
-
-    async def test_prepare_training_data_filters_incomplete(self, test_session):
-        """Test that incomplete events are filtered."""
-        events = []
-
-        # Complete event
-        complete_event = Event(
-            id="complete",
-            sport_key="basketball_nba",
-            sport_title="NBA",
-            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
-            home_team="Lakers",
-            away_team="Celtics",
-            status=EventStatus.FINAL,
-            home_score=110,
-            away_score=105,
-        )
-        events.append(complete_event)
-
-        # Incomplete event (no scores)
-        incomplete_event = Event(
-            id="incomplete",
-            sport_key="basketball_nba",
-            sport_title="NBA",
-            commence_time=datetime(2024, 11, 2, 19, 0, 0, tzinfo=UTC),
-            home_team="Lakers",
-            away_team="Celtics",
-            status=EventStatus.SCHEDULED,
-            home_score=None,
-            away_score=None,
-        )
-        events.append(incomplete_event)
-
-        # Insert events
-        writer = OddsWriter(test_session)
-        for event in events:
-            await writer.upsert_event(event)
-
-            # Only add snapshot for complete event
-            if event.status == EventStatus.FINAL:
-                snapshot_time = event.commence_time - timedelta(hours=12)
-                raw_data = {
-                    "id": event.id,
-                    "sport_key": "basketball_nba",
-                    "commence_time": event.commence_time.isoformat(),
-                    "home_team": event.home_team,
-                    "away_team": event.away_team,
-                    "bookmakers": [
-                        {
-                            "key": "pinnacle",
-                            "title": "Pinnacle",
-                            "last_update": snapshot_time.isoformat(),
-                            "markets": [
-                                {
-                                    "key": "h2h",
-                                    "outcomes": [
-                                        {"name": event.home_team, "price": -120},
-                                        {"name": event.away_team, "price": 100},
-                                    ],
-                                }
-                            ],
-                        }
-                    ],
-                }
-
-                snapshot = OddsSnapshot(
-                    event_id=event.id,
-                    snapshot_time=snapshot_time,
-                    raw_data=raw_data,
-                    bookmaker_count=1,
-                )
-                test_session.add(snapshot)
-
-        await test_session.commit()
-
-        # Prepare training data
-        X, y, masks = await prepare_lstm_training_data(
-            events=events,
-            session=test_session,
-            outcome="home",
-        )
-
-        # Should only have 1 sample (incomplete event filtered out)
-        assert X.shape[0] == 1, "Should filter out incomplete events"
 
     async def test_load_sequences_chronological_ordering(self, test_session):
         """Test that sequences are returned in chronological order."""

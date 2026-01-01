@@ -89,7 +89,9 @@ from odds_analytics.backtesting import (
     BettingStrategy,
 )
 from odds_analytics.feature_extraction import SequenceFeatureExtractor
-from odds_analytics.sequence_loader import load_sequences_for_event, prepare_lstm_training_data
+from odds_analytics.feature_groups import prepare_training_data
+from odds_analytics.sequence_loader import load_sequences_for_event
+from odds_analytics.training.config import FeatureConfig
 
 logger = structlog.get_logger()
 
@@ -309,17 +311,22 @@ class LSTMStrategy(BettingStrategy):
             outcome=outcome,
         )
 
-        # Prepare training data
-        X, y, masks = await prepare_lstm_training_data(
-            events=events,
-            session=session,
+        # Prepare training data using composable feature groups
+        feature_config = FeatureConfig(
             outcome=outcome,
-            market=self.params["market"],
-            lookback_hours=self.params["lookback_hours"],
-            timesteps=self.params["timesteps"],
+            markets=[self.params["market"]],
             sharp_bookmakers=self.params["sharp_bookmakers"],
             retail_bookmakers=self.params["retail_bookmakers"],
+            lookback_hours=self.params["lookback_hours"],
+            timesteps=self.params["timesteps"],
+            feature_groups=["sequence_full"],  # LSTM uses full 3D sequences
         )
+        result = await prepare_training_data(
+            events=events,
+            session=session,
+            config=feature_config,
+        )
+        X, y, masks = result.X, result.y, result.masks
 
         if len(X) == 0:
             logger.error("no_training_data")

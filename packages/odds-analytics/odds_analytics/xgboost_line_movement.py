@@ -45,7 +45,7 @@ import joblib
 import numpy as np
 import structlog
 import yaml
-from odds_core.models import Event, Odds
+from odds_core.models import Odds
 from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
@@ -58,17 +58,11 @@ from odds_analytics.backtesting import (
     BettingStrategy,
 )
 from odds_analytics.feature_extraction import TabularFeatureExtractor
-from odds_analytics.sequence_loader import (
-    calculate_regression_target,
-    extract_opening_closing_odds,
-    load_sequences_for_event,
-)
 
 logger = structlog.get_logger()
 
 __all__ = [
     "XGBoostLineMovementStrategy",
-    "prepare_tabular_training_data",
 ]
 
 
@@ -480,6 +474,92 @@ class XGBoostLineMovementStrategy(BettingStrategy):
 
         return history
 
+    def train_with_cv(
+        self,
+        config: MLTrainingConfig,
+        X: np.ndarray,
+        y: np.ndarray,
+        feature_names: list[str],
+        X_test: np.ndarray | None = None,
+        y_test: np.ndarray | None = None,
+    ) -> tuple[dict[str, Any], Any]:
+        """
+        Train with K-Fold cross-validation, then train final model on all data.
+
+        This method:
+        1. Runs K-Fold CV to get robust performance estimates
+        2. Trains a final model on all training data
+        3. Returns both CV results and final model metrics
+
+        Args:
+            config: ML training configuration with kfold settings
+            X: Full training feature matrix (n_samples, n_features)
+            y: Full training target vector (n_samples,)
+            feature_names: List of feature names
+            X_test: Optional held-out test features for final evaluation
+            y_test: Optional held-out test targets for final evaluation
+
+        Returns:
+            Tuple of (training_history, cv_result) where:
+            - training_history: Dict with final model metrics + cv metrics
+            - cv_result: CVResult object with per-fold details
+
+        Example:
+            >>> strategy = XGBoostLineMovementStrategy()
+            >>> history, cv_result = strategy.train_with_cv(
+            ...     config, X_train, y_train, feature_names, X_test, y_test
+            ... )
+            >>> print(f"CV R²: {cv_result.mean_val_r2:.4f} ± {cv_result.std_val_r2:.4f}")
+            >>> print(f"Final test R²: {history['val_r2']:.4f}")
+        """
+        from odds_analytics.training.cross_validation import run_cv
+
+        logger.info(
+            "starting_train_with_cv",
+            experiment_name=config.experiment.name,
+            n_folds=config.training.data.n_folds,
+            n_samples=len(X),
+            n_features=len(feature_names),
+        )
+
+        # Step 1: Run cross-validation (time series or k-fold based on config)
+        cv_result = run_cv(
+            strategy=self,
+            config=config,
+            X=X,
+            y=y,
+            feature_names=feature_names,
+        )
+
+        logger.info(
+            "cv_complete_training_final",
+            cv_val_mse=f"{cv_result.mean_val_mse:.6f} ± {cv_result.std_val_mse:.6f}",
+            cv_val_r2=f"{cv_result.mean_val_r2:.4f} ± {cv_result.std_val_r2:.4f}",
+        )
+
+        # Step 2: Train final model on all training data
+        history = self.train_from_config(
+            config=config,
+            X_train=X,
+            y_train=y,
+            feature_names=feature_names,
+            X_val=X_test,
+            y_val=y_test,
+        )
+
+        # Step 3: Merge CV metrics into history
+        history.update(cv_result.to_dict())
+
+        logger.info(
+            "train_with_cv_complete",
+            experiment_name=config.experiment.name,
+            cv_val_mse_mean=cv_result.mean_val_mse,
+            final_train_mse=history.get("train_mse"),
+            final_test_mse=history.get("val_mse"),
+        )
+
+        return history, cv_result
+
     def save_model(self, filepath: str | Path) -> None:
         """
         Save trained model to disk with configuration metadata.
@@ -597,239 +677,3 @@ class XGBoostLineMovementStrategy(BettingStrategy):
 
         importance_scores = self.model.feature_importances_
         return dict(zip(self.feature_names, importance_scores, strict=True))
-
-
-async def prepare_tabular_training_data(
-    events: list[Event],
-    session: AsyncSession,
-    outcome: str = "home",
-    market: str = "h2h",
-    opening_hours_before: float = 48.0,
-    closing_hours_before: float = 0.5,
-    sharp_bookmakers: list[str] | None = None,
-    retail_bookmakers: list[str] | None = None,
-) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    """
-    Prepare training data for tabular XGBoost line movement model.
-
-    This function:
-    1. Loads historical odds sequences for each event
-    2. Extracts features from opening line snapshot
-    3. Calculates regression targets (closing - opening line delta)
-    4. Returns arrays suitable for XGBoost training
-
-    Args:
-        events: List of Event objects with final scores (status=FINAL required)
-        session: Async database session
-        outcome: What to predict - "home" or "away"
-        market: Market to analyze (h2h, spreads, totals)
-        opening_hours_before: Hours before game for opening line (default: 48)
-        closing_hours_before: Hours before game for closing line (default: 0.5)
-        sharp_bookmakers: Sharp bookmakers for features (default: ["pinnacle"])
-        retail_bookmakers: Retail bookmakers for features
-
-    Returns:
-        Tuple of (X, y, feature_names):
-        - X: Feature array of shape (n_samples, n_features)
-        - y: Target array of shape (n_samples,) - line movement deltas
-        - feature_names: List of feature names
-
-    Example:
-        ```python
-        from odds_lambda.storage.readers import OddsReader
-
-        async with get_async_session() as session:
-            reader = OddsReader(session)
-            events = await reader.get_events_by_date_range(
-                start_date=datetime(2024, 10, 1, tzinfo=UTC),
-                end_date=datetime(2024, 12, 31, tzinfo=UTC),
-                status=EventStatus.FINAL
-            )
-
-            X, y, feature_names = await prepare_tabular_training_data(
-                events=events,
-                session=session,
-                outcome="home",
-                market="h2h"
-            )
-
-            # Train model
-            strategy = XGBoostLineMovementStrategy()
-            strategy.train(X, y, feature_names)
-        ```
-    """
-    if not events:
-        logger.warning("no_events_provided")
-        return np.array([]), np.array([]), []
-
-    # Filter for events with final scores
-    from odds_core.models import EventStatus
-
-    valid_events = [
-        e
-        for e in events
-        if e.status == EventStatus.FINAL and e.home_score is not None and e.away_score is not None
-    ]
-
-    if not valid_events:
-        logger.warning("no_valid_events", total_events=len(events))
-        return np.array([]), np.array([]), []
-
-    # Initialize feature extractor
-    extractor = TabularFeatureExtractor(
-        sharp_bookmakers=sharp_bookmakers,
-        retail_bookmakers=retail_bookmakers,
-    )
-
-    feature_names = extractor.get_feature_names()
-    n_features = len(feature_names)
-
-    # Pre-allocate arrays
-    n_samples = len(valid_events)
-    X = np.zeros((n_samples, n_features), dtype=np.float32)
-    y = np.zeros(n_samples, dtype=np.float32)
-
-    valid_sample_idx = 0
-    skipped_events = 0
-
-    for event in valid_events:
-        # Load odds sequences for this event
-        try:
-            odds_sequences = await load_sequences_for_event(event.id, session)
-        except Exception as e:
-            logger.error(
-                "failed_to_load_sequences",
-                event_id=event.id,
-                error=str(e),
-            )
-            skipped_events += 1
-            continue
-
-        if not odds_sequences:
-            skipped_events += 1
-            continue
-
-        # Determine target outcome
-        if outcome == "home":
-            target_outcome = event.home_team
-        elif outcome == "away":
-            target_outcome = event.away_team
-        else:
-            target_outcome = outcome
-
-        # Extract opening and closing odds for regression target
-        opening_odds, closing_odds = extract_opening_closing_odds(
-            odds_sequences,
-            target_outcome,
-            market,
-            commence_time=event.commence_time,
-            opening_hours_before=opening_hours_before,
-            closing_hours_before=closing_hours_before,
-        )
-
-        # Calculate regression target
-        regression_target = calculate_regression_target(opening_odds, closing_odds, market)
-
-        if regression_target is None:
-            logger.debug(
-                "missing_regression_target",
-                event_id=event.id,
-            )
-            skipped_events += 1
-            continue
-
-        # Find opening snapshot for feature extraction
-        # Use the snapshot that matches our opening_odds timing
-        opening_snapshot = None
-        for snapshot in odds_sequences:
-            # Filter for target market and outcome
-            filtered = [
-                o for o in snapshot if o.market_key == market and o.outcome_name == target_outcome
-            ]
-            if (
-                filtered
-                and opening_odds
-                and filtered[0].odds_timestamp == opening_odds[0].odds_timestamp
-            ):
-                opening_snapshot = snapshot
-                break
-
-        if not opening_snapshot:
-            # Fallback: use first snapshot with relevant data
-            for snapshot in odds_sequences:
-                filtered = [
-                    o
-                    for o in snapshot
-                    if o.market_key == market and o.outcome_name == target_outcome
-                ]
-                if filtered:
-                    opening_snapshot = snapshot
-                    break
-
-        if not opening_snapshot:
-            skipped_events += 1
-            continue
-
-        # Create BacktestEvent for feature extraction
-        backtest_event = BacktestEvent(
-            id=event.id,
-            commence_time=event.commence_time,
-            home_team=event.home_team,
-            away_team=event.away_team,
-            home_score=event.home_score,
-            away_score=event.away_score,
-            status=event.status,
-        )
-
-        # Extract features from opening snapshot
-        try:
-            features = extractor.extract_features(
-                event=backtest_event,
-                odds_data=opening_snapshot,
-                outcome=target_outcome,
-                market=market,
-            )
-        except Exception as e:
-            logger.error(
-                "failed_to_extract_features",
-                event_id=event.id,
-                error=str(e),
-            )
-            skipped_events += 1
-            continue
-
-        # Convert to feature vector
-        feature_vector = extractor.create_feature_vector(features)
-
-        # Store in arrays
-        X[valid_sample_idx] = feature_vector
-        y[valid_sample_idx] = regression_target
-
-        valid_sample_idx += 1
-
-    # Trim arrays to actual number of valid samples
-    if valid_sample_idx < n_samples:
-        logger.info(
-            "trimming_arrays",
-            original_size=n_samples,
-            valid_samples=valid_sample_idx,
-            skipped=skipped_events,
-        )
-        X = X[:valid_sample_idx]
-        y = y[:valid_sample_idx]
-
-    # Replace NaN with 0 for XGBoost compatibility
-    X = np.nan_to_num(X, nan=0.0)
-
-    logger.info(
-        "prepared_training_data",
-        num_samples=valid_sample_idx,
-        num_features=n_features,
-        outcome=outcome,
-        market=market,
-        skipped_events=skipped_events,
-        target_mean=float(np.mean(y)) if valid_sample_idx > 0 else 0.0,
-        target_std=float(np.std(y)) if valid_sample_idx > 0 else 0.0,
-    )
-
-    return X, y, feature_names

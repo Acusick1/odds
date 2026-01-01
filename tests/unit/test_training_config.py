@@ -30,6 +30,7 @@ from odds_analytics.training import (
     TuningConfig,
     XGBoostConfig,
 )
+from odds_lambda.fetch_tier import FetchTier
 
 # =============================================================================
 # ExperimentConfig Tests
@@ -139,6 +140,139 @@ class TestDataConfig:
                 end_date=date(2024, 12, 31),
                 test_split=1.1,
             )
+
+    def test_kfold_defaults(self):
+        """Test K-Fold cross-validation default values."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+        )
+        assert config.use_kfold is False
+        assert config.n_folds == 5
+        assert config.kfold_shuffle is True
+
+    def test_kfold_enabled(self):
+        """Test enabling K-Fold cross-validation."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            use_kfold=True,
+            n_folds=10,
+            kfold_shuffle=False,
+        )
+        assert config.use_kfold is True
+        assert config.n_folds == 10
+        assert config.kfold_shuffle is False
+
+    def test_kfold_ignores_validation_split(self):
+        """Test that validation_split check is skipped when use_kfold is True."""
+        # This should NOT raise even though test_split + validation_split >= 1.0
+        # because validation_split is ignored when use_kfold=True
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            test_split=0.2,
+            validation_split=0.9,  # Would exceed 1.0 normally
+            use_kfold=True,
+        )
+        assert config.use_kfold is True
+        assert config.validation_split == 0.9  # Still stored, just ignored
+
+    def test_kfold_n_folds_bounds(self):
+        """Test n_folds boundary validation."""
+        # Minimum valid
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            use_kfold=True,
+            n_folds=2,
+        )
+        assert config.n_folds == 2
+
+        # Maximum valid
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            use_kfold=True,
+            n_folds=20,
+        )
+        assert config.n_folds == 20
+
+        # Invalid - too low
+        with pytest.raises(ValueError):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                n_folds=1,
+            )
+
+        # Invalid - too high
+        with pytest.raises(ValueError):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                n_folds=21,
+            )
+
+    def test_cv_method_default(self):
+        """Test cv_method defaults to 'timeseries'."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+        )
+        assert config.cv_method == "timeseries"
+
+    def test_cv_method_kfold(self):
+        """Test cv_method can be set to 'kfold'."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            cv_method="kfold",
+        )
+        assert config.cv_method == "kfold"
+
+    def test_cv_method_timeseries(self):
+        """Test cv_method can be explicitly set to 'timeseries'."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            cv_method="timeseries",
+        )
+        assert config.cv_method == "timeseries"
+
+    def test_cv_method_invalid(self):
+        """Test invalid cv_method value raises error."""
+        with pytest.raises(ValueError):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                cv_method="invalid",
+            )
+
+    def test_cv_method_with_use_kfold(self):
+        """Test cv_method works with use_kfold=True."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            use_kfold=True,
+            cv_method="kfold",
+            n_folds=5,
+        )
+        assert config.use_kfold is True
+        assert config.cv_method == "kfold"
+        assert config.n_folds == 5
+
+    def test_cv_method_timeseries_with_shuffle(self):
+        """Test kfold_shuffle can be set with timeseries (will be ignored at runtime)."""
+        # This is allowed at config level - the warning is logged at runtime
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            cv_method="timeseries",
+            kfold_shuffle=True,
+        )
+        assert config.cv_method == "timeseries"
+        assert config.kfold_shuffle is True  # Stored but ignored for timeseries
 
 
 # =============================================================================
@@ -283,8 +417,8 @@ class TestFeatureConfig:
         assert config.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
         assert config.markets == ["h2h", "spreads", "totals"]
         assert config.outcome == "home"
-        assert config.opening_hours_before == 48.0
-        assert config.closing_hours_before == 0.5
+        assert config.opening_tier == FetchTier.EARLY
+        assert config.closing_tier == FetchTier.CLOSING
 
     def test_custom_bookmakers(self):
         """Test custom bookmaker lists."""
@@ -295,20 +429,20 @@ class TestFeatureConfig:
         assert config.sharp_bookmakers == ["pinnacle", "circasports"]
         assert config.retail_bookmakers == ["fanduel"]
 
-    def test_invalid_timing(self):
-        """Test invalid timing validation (opening <= closing)."""
-        with pytest.raises(ValueError, match="must be greater than"):
+    def test_invalid_tier_order(self):
+        """Test invalid tier order validation (opening must be earlier than closing)."""
+        with pytest.raises(ValueError, match="must be earlier than"):
             FeatureConfig(
-                opening_hours_before=1.0,
-                closing_hours_before=2.0,
+                opening_tier=FetchTier.CLOSING,
+                closing_tier=FetchTier.EARLY,
             )
 
-    def test_same_timing_fails(self):
-        """Test same opening/closing time fails."""
-        with pytest.raises(ValueError, match="must be greater than"):
+    def test_same_tier_fails(self):
+        """Test same opening/closing tier fails."""
+        with pytest.raises(ValueError, match="must be earlier than"):
             FeatureConfig(
-                opening_hours_before=24.0,
-                closing_hours_before=24.0,
+                opening_tier=FetchTier.SHARP,
+                closing_tier=FetchTier.SHARP,
             )
 
     def test_empty_bookmakers_fails(self):

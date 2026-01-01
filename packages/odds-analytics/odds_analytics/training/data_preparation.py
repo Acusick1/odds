@@ -2,13 +2,12 @@
 Config-driven data preparation for ML model training.
 
 This module bridges the MLTrainingConfig schema with data preparation functions,
-enabling configuration-file-based training workflows.
+enabling configuration-file-based training workflows using composable feature groups.
 
 Key Features:
-- Unified entry point that routes to appropriate preparation function
+- Unified entry point using composable feature groups
 - Event filtering by date range from DataConfig
-- Feature parameter extraction from FeatureConfig
-- Backward compatibility with legacy function signatures
+- Feature group composition via FeatureConfig.feature_groups
 - Train/test splitting from configuration
 
 Example usage:
@@ -16,7 +15,7 @@ Example usage:
     from odds_analytics.training import MLTrainingConfig
     from odds_analytics.training.data_preparation import prepare_training_data_from_config
 
-    # Load config
+    # Load config with feature_groups: ["tabular", "trajectory"]
     config = MLTrainingConfig.from_yaml("experiments/xgboost_v1.yaml")
 
     # Prepare data
@@ -24,12 +23,12 @@ Example usage:
         result = await prepare_training_data_from_config(config, session)
 
         # For XGBoost
-        X_train, X_test = result["X_train"], result["X_test"]
-        y_train, y_test = result["y_train"], result["y_test"]
-        feature_names = result["feature_names"]
+        X_train, X_test = result.X_train, result.X_test
+        y_train, y_test = result.y_train, result.y_test
+        feature_names = result.feature_names
 
-        # For LSTM
-        masks_train, masks_test = result["masks_train"], result["masks_test"]
+        # For LSTM (when using sequence_full group)
+        masks_train, masks_test = result.masks_train, result.masks_test
     ```
 """
 
@@ -43,7 +42,7 @@ from odds_core.models import Event, EventStatus
 from sklearn.model_selection import train_test_split
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_analytics.training.config import FeatureConfig, MLTrainingConfig
+from odds_analytics.training.config import MLTrainingConfig
 
 logger = structlog.get_logger()
 
@@ -184,9 +183,8 @@ async def prepare_training_data_from_config(
     This is the main entry point for config-driven data preparation. It:
     1. Extracts date range from DataConfig
     2. Filters events by date range
-    3. Routes to appropriate preparation function based on strategy_type
-    4. Passes feature parameters from FeatureConfig
-    5. Performs train/test split based on DataConfig
+    3. Uses composable feature groups from FeatureConfig.feature_groups
+    4. Performs train/test split based on DataConfig
 
     Args:
         config: MLTrainingConfig object with all training parameters
@@ -196,7 +194,7 @@ async def prepare_training_data_from_config(
         TrainingDataResult containing train/test splits and metadata
 
     Raises:
-        ValueError: If no valid events found or strategy type not supported
+        ValueError: If no valid events found or no valid training data
 
     Example:
         >>> config = MLTrainingConfig.from_yaml("experiments/config.yaml")
@@ -205,6 +203,8 @@ async def prepare_training_data_from_config(
         ...     print(f"Training samples: {result.num_train_samples}")
         ...     print(f"Test samples: {result.num_test_samples}")
     """
+    from odds_analytics.feature_groups import prepare_training_data
+
     # Extract configuration
     training_config = config.training
     data_config = training_config.data
@@ -215,6 +215,7 @@ async def prepare_training_data_from_config(
         "preparing_training_data_from_config",
         experiment_name=config.experiment.name,
         strategy_type=strategy_type,
+        feature_groups=features_config.feature_groups,
         start_date=data_config.start_date.isoformat(),
         end_date=data_config.end_date.isoformat(),
     )
@@ -244,30 +245,24 @@ async def prepare_training_data_from_config(
             f"No events found in date range {data_config.start_date} to {data_config.end_date}"
         )
 
-    # Route to appropriate preparation function based on strategy type
-    if strategy_type in ("xgboost", "xgboost_line_movement"):
-        X, y, feature_names = await _prepare_tabular_data(
-            events=events,
-            session=session,
-            features_config=features_config,
-        )
-        masks = None
-    elif strategy_type in ("lstm", "lstm_line_movement"):
-        X, y, masks, feature_names = await _prepare_sequence_data(
-            events=events,
-            session=session,
-            features_config=features_config,
-            model_config=training_config.model,
-        )
-    else:
-        raise ValueError(f"Unsupported strategy type: {strategy_type}")
+    # Use unified preparation with composable feature groups
+    prep_result = await prepare_training_data(
+        events=events,
+        session=session,
+        config=features_config,
+    )
+
+    X = prep_result.X
+    y = prep_result.y
+    feature_names = prep_result.feature_names
+    masks = prep_result.masks
 
     if len(X) == 0:
         raise ValueError(f"No valid training data after processing {len(events)} events")
 
     # Perform train/test split
     if masks is not None:
-        # LSTM with masks
+        # Sequence data with masks
         X_train, X_test, y_train, y_test, masks_train, masks_test = train_test_split(
             X,
             y,
@@ -277,7 +272,7 @@ async def prepare_training_data_from_config(
             shuffle=data_config.shuffle,
         )
     else:
-        # Tabular without masks
+        # Tabular data without masks
         X_train, X_test, y_train, y_test = train_test_split(
             X,
             y,
@@ -291,6 +286,7 @@ async def prepare_training_data_from_config(
     logger.info(
         "training_data_prepared_from_config",
         strategy_type=strategy_type,
+        feature_groups=features_config.feature_groups,
         total_samples=len(X),
         train_samples=len(X_train),
         test_samples=len(X_test),
@@ -308,93 +304,3 @@ async def prepare_training_data_from_config(
         masks_train=masks_train,
         masks_test=masks_test,
     )
-
-
-async def _prepare_tabular_data(
-    events: list[Event],
-    session: AsyncSession,
-    features_config: FeatureConfig,
-) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    """
-    Prepare tabular training data for XGBoost models.
-
-    Args:
-        events: List of events with final scores
-        session: Async database session
-        features_config: Feature extraction configuration
-
-    Returns:
-        Tuple of (X, y, feature_names)
-    """
-    from odds_analytics.feature_extraction import TabularFeatureExtractor
-    from odds_analytics.xgboost_line_movement import prepare_tabular_training_data
-
-    # Use the first market from config (h2h is most common)
-    market = features_config.markets[0] if features_config.markets else "h2h"
-
-    # Create extractor from config using factory method
-    # This extractor can be used for feature extraction and to get feature names
-    extractor = TabularFeatureExtractor.from_config(features_config)
-
-    X, y, feature_names = await prepare_tabular_training_data(
-        events=events,
-        session=session,
-        outcome=features_config.outcome,
-        market=market,
-        opening_hours_before=features_config.opening_hours_before,
-        closing_hours_before=features_config.closing_hours_before,
-        sharp_bookmakers=extractor.sharp_bookmakers,
-        retail_bookmakers=extractor.retail_bookmakers,
-    )
-
-    return X, y, feature_names
-
-
-async def _prepare_sequence_data(
-    events: list[Event],
-    session: AsyncSession,
-    features_config: FeatureConfig,
-    model_config,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
-    """
-    Prepare sequence training data for LSTM models.
-
-    Args:
-        events: List of events with final scores
-        session: Async database session
-        features_config: Feature extraction configuration
-        model_config: LSTM model configuration (for lookback_hours, timesteps)
-
-    Returns:
-        Tuple of (X, y, masks, feature_names)
-    """
-    from odds_analytics.feature_extraction import SequenceFeatureExtractor
-    from odds_analytics.sequence_loader import (
-        TargetType,
-        prepare_lstm_training_data,
-    )
-
-    # Use the first market from config
-    market = features_config.markets[0] if features_config.markets else "h2h"
-
-    # Create extractor from config using factory method
-    extractor = SequenceFeatureExtractor.from_config(features_config)
-
-    X, y, masks = await prepare_lstm_training_data(
-        events=events,
-        session=session,
-        outcome=features_config.outcome,
-        market=market,
-        lookback_hours=features_config.lookback_hours,
-        timesteps=features_config.timesteps,
-        sharp_bookmakers=features_config.sharp_bookmakers,
-        retail_bookmakers=features_config.retail_bookmakers,
-        target_type=TargetType.REGRESSION,
-        opening_hours_before=features_config.opening_hours_before,
-        closing_hours_before=features_config.closing_hours_before,
-    )
-
-    # Get feature names from extractor
-    feature_names = extractor.get_feature_names()
-
-    return X, y, masks, feature_names

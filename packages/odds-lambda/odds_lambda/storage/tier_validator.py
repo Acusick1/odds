@@ -272,10 +272,9 @@ class TierCoverageValidator:
         required_tiers = required_tiers or self.DEFAULT_REQUIRED_TIERS
 
         # Get games for the date
-        # When checking discovery, get ALL games (any status) to properly compare with API
-        # Otherwise, only get FINAL games for tier coverage validation
-        status_filter = None if check_discovery else EventStatus.FINAL
-        games = await self.reader.get_games_by_date(target_date, status=status_filter)
+        # Use date-based filtering only - include all past games regardless of status
+        # This ensures gap detection finds games that haven't been marked FINAL yet
+        games = await self.reader.get_games_by_date(target_date, status=None)
 
         # Temporary collections for building the report
         game_reports_list = []

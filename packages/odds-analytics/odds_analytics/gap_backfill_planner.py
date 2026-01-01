@@ -16,6 +16,7 @@ from odds_core.time import utc_isoformat
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.tier_validator import TierCoverageValidator
+from odds_lambda.tier_utils import calculate_tier_from_timestamps
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.game_selector import GameSelector
@@ -441,17 +442,17 @@ class GapBackfillPlanner:
             # Calculate all expected snapshot times
             expected_snapshots = selector.calculate_snapshot_times(game.commence_time)
 
-            # Filter to only missing snapshots
+            # Only include snapshots for tiers that are actually missing
+            # Use game.missing_tiers from gap analysis (based on fetch_tier field)
             missing_snapshot_times = []
             for snapshot_time in expected_snapshots:
-                exists = await self.reader.snapshot_exists(
-                    event_id=game.event_id,
-                    snapshot_time=snapshot_time,
-                    tolerance_minutes=5,
-                )
-
-                if not exists:
+                tier = calculate_tier_from_timestamps(snapshot_time, game.commence_time)
+                if tier in game.missing_tiers:
                     missing_snapshot_times.append(snapshot_time)
+
+            # Skip games with no missing snapshots
+            if not missing_snapshot_times:
+                continue
 
             game_plan = {
                 "event_id": game.event_id,

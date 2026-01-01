@@ -44,9 +44,18 @@ ENV/
 htmlcov/
 .tox/
 
+# Config files and data
+*.csv
+*.json
+
 # Database
 *.db
 *.sqlite3
+
+# Experiments
+experiments/
+models/
+*.html
 
 # Logs
 logs/

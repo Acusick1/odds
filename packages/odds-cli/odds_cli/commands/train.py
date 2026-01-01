@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
 from odds_analytics.lstm_strategy import LSTMStrategy
-from odds_analytics.training import MLTrainingConfig, prepare_training_data_from_config
+from odds_analytics.training import CVResult, MLTrainingConfig, prepare_training_data_from_config
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from odds_core.database import get_session
 from rich.console import Console
@@ -155,41 +155,75 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
 
         # Step 2: Initialize strategy and train
         strategy = strategy_class()
+        use_kfold = config.training.data.use_kfold
+        cv_result = None
 
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Training model...", total=None)
+        # Get test data for final evaluation
+        X_test = data_result.X_test if data_result.num_test_samples > 0 else None
+        y_test = data_result.y_test if data_result.num_test_samples > 0 else None
 
-            try:
-                # Split validation from test if configured
-                X_val = None
-                y_val = None
+        if use_kfold:
+            # Cross-Validation training
+            n_folds = config.training.data.n_folds
+            cv_method = config.training.data.cv_method
+            cv_method_display = "Time Series CV" if cv_method == "timeseries" else "K-Fold CV"
+            console.print(f"\n[bold]Running {n_folds}-Fold {cv_method_display}...[/bold]")
 
-                # Use test set as validation for metrics display
-                if data_result.num_test_samples > 0:
-                    X_val = data_result.X_test
-                    y_val = data_result.y_test
-
-                history = strategy.train_from_config(
-                    config,
-                    data_result.X_train,
-                    data_result.y_train,
-                    data_result.feature_names,
-                    X_val=X_val,
-                    y_val=y_val,
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                task = progress.add_task(
+                    f"Cross-validating ({n_folds} folds, {cv_method_display})...", total=None
                 )
-            except Exception as e:
-                progress.stop()
-                console.print(f"[red]Error during training: {e}[/red]")
-                raise typer.Exit(1) from None
 
-            progress.update(task, description="Training complete")
+                try:
+                    history, cv_result = strategy.train_with_cv(
+                        config,
+                        data_result.X_train,
+                        data_result.y_train,
+                        data_result.feature_names,
+                        X_test=X_test,
+                        y_test=y_test,
+                    )
+                except Exception as e:
+                    progress.stop()
+                    console.print(f"[red]Error during training: {e}[/red]")
+                    raise typer.Exit(1) from None
+
+                progress.update(task, description="Training complete")
+
+            # Display CV metrics
+            _display_cv_metrics(cv_result)
+
+        else:
+            # Standard training without CV
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                task = progress.add_task("Training model...", total=None)
+
+                try:
+                    history = strategy.train_from_config(
+                        config,
+                        data_result.X_train,
+                        data_result.y_train,
+                        data_result.feature_names,
+                        X_val=X_test,
+                        y_val=y_test,
+                    )
+                except Exception as e:
+                    progress.stop()
+                    console.print(f"[red]Error during training: {e}[/red]")
+                    raise typer.Exit(1) from None
+
+                progress.update(task, description="Training complete")
 
         # Display training metrics
-        _display_training_metrics(history, verbose)
+        _display_training_metrics(history, verbose, is_cv=use_kfold)
 
         # Step 3: Save model
         output_path = _get_output_path(config)
@@ -429,20 +463,54 @@ def _display_config_summary(config: MLTrainingConfig, verbose: bool = False) -> 
         feature_table.add_row("Retail Bookmakers", ", ".join(features.retail_bookmakers))
         feature_table.add_row("Markets", ", ".join(features.markets))
         feature_table.add_row("Outcome", features.outcome)
-        feature_table.add_row("Opening Hours Before", str(features.opening_hours_before))
-        feature_table.add_row("Closing Hours Before", str(features.closing_hours_before))
+        feature_table.add_row("Opening Tier", features.opening_tier.value)
+        feature_table.add_row("Closing Tier", features.closing_tier.value)
 
         console.print(feature_table)
 
 
-def _display_training_metrics(history: dict, verbose: bool) -> None:
+def _display_cv_metrics(cv_result: CVResult) -> None:
+    """Display cross-validation metrics with mean ± std."""
+    console.print(f"\n[bold]Cross-Validation Results ({cv_result.n_folds} folds):[/bold]")
+
+    table = Table(show_header=True)
+    table.add_column("Metric", style="cyan")
+    table.add_column("Mean", justify="right")
+    table.add_column("Std", justify="right")
+
+    # Validation MSE
+    table.add_row(
+        "Val MSE",
+        f"{cv_result.mean_val_mse:.6f}",
+        f"± {cv_result.std_val_mse:.6f}",
+    )
+
+    # Validation MAE
+    table.add_row(
+        "Val MAE",
+        f"{cv_result.mean_val_mae:.6f}",
+        f"± {cv_result.std_val_mae:.6f}",
+    )
+
+    # Validation R²
+    table.add_row(
+        "Val R²",
+        f"{cv_result.mean_val_r2:.4f}",
+        f"± {cv_result.std_val_r2:.4f}",
+    )
+
+    console.print(table)
+
+
+def _display_training_metrics(history: dict, verbose: bool, is_cv: bool = False) -> None:
     """Display training metrics."""
-    console.print("\n[bold]Training Metrics:[/bold]")
+    title = "Final Model Metrics" if is_cv else "Training Metrics"
+    console.print(f"\n[bold]{title}:[/bold]")
 
     table = Table(show_header=True)
     table.add_column("Metric", style="cyan")
     table.add_column("Training", justify="right")
-    table.add_column("Validation", justify="right")
+    table.add_column("Test" if is_cv else "Validation", justify="right")
 
     # MSE
     train_mse = history.get("train_mse", 0)
