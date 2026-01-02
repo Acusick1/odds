@@ -714,16 +714,21 @@ class TuningConfig(BaseModel):
 
 class TrackingConfig(BaseModel):
     """
-    Experiment tracking configuration for MLflow.
+    Experiment tracking configuration.
 
     Controls logging and artifact storage for experiment reproducibility.
+    Supports MLflow with extensibility for future backends (W&B, Neptune).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = Field(
         default=False,
-        description="Enable MLflow tracking",
+        description="Enable experiment tracking",
+    )
+    backend: str = Field(
+        default="mlflow",
+        description="Tracking backend to use (mlflow, wandb, neptune)",
     )
     tracking_uri: str = Field(
         default="mlruns",

@@ -2715,6 +2715,7 @@ version = "0.1.0"
 source = { editable = "packages/odds-analytics" }
 dependencies = [
     { name = "joblib" },
+    { name = "mlflow" },
     { name = "numpy" },
     { name = "odds-core" },
     { name = "odds-lambda" },
@@ -2730,13 +2731,11 @@ ml = [
     { name = "seaborn" },
     { name = "xgboost" },
 ]
-tracking = [
-    { name = "mlflow" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "joblib", specifier = ">=1.3.0" },
+    { name = "mlflow", specifier = ">=2.0.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "odds-core", editable = "packages/odds-core" },
     { name = "odds-lambda", editable = "packages/odds-lambda" },
@@ -2752,7 +2751,6 @@ ml = [
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "xgboost", specifier = ">=2.0.0" },
 ]
-tracking = [{ name = "mlflow", specifier = ">=2.0.0" }]
 
 [[package]]
 name = "odds-cli"

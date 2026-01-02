@@ -2,12 +2,11 @@
 Experiment Tracking Abstraction Layer.
 
 This module provides a backend-agnostic interface for experiment tracking,
-with initial support for MLflow and a no-op fallback for development/testing.
+with initial support for MLflow and extensibility for future backends (W&B, Neptune).
 
 Key Features:
 - Abstract base class defining the tracking interface
 - MLflow 2.x implementation with autologging support
-- NullTracker for graceful degradation when tracking is disabled
 - Factory function for configuration-based tracker creation
 - Context manager support for automatic run lifecycle management
 - Thread-safe design for parallel hyperparameter tuning
@@ -17,7 +16,7 @@ Example usage:
     from odds_analytics.training import TrackingConfig
     from odds_analytics.training.tracking import create_tracker
 
-    # Create tracker from config
+    # Create tracker from config (tracking must be enabled)
     config = TrackingConfig(
         enabled=True,
         tracking_uri="mlruns",
@@ -54,18 +53,48 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
+import mlflow
+import mlflow.pyfunc
+import mlflow.pytorch
+import mlflow.sklearn
+import mlflow.xgboost
 import structlog
 
 from odds_analytics.training.config import TrackingConfig
 
 logger = structlog.get_logger()
 
+
 __all__ = [
     "ExperimentTracker",
     "MLflowTracker",
-    "NullTracker",
     "create_tracker",
 ]
+
+
+# =============================================================================
+# Generic Model Wrapper for pyfunc
+# =============================================================================
+
+
+class _GenericModelWrapper:
+    """
+    Wrapper for logging arbitrary models via mlflow.pyfunc.
+
+    This is a fallback when specific MLflow flavors (xgboost, pytorch, sklearn)
+    are not available. The wrapper stores the model and delegates predict calls.
+    """
+
+    def __init__(self, model: Any) -> None:
+        self.model = model
+
+    def predict(self, context: Any, model_input: Any) -> Any:
+        """Delegate prediction to wrapped model."""
+        if hasattr(self.model, "predict"):
+            return self.model.predict(model_input)
+        raise NotImplementedError(
+            f"Model {type(self.model).__name__} does not have a predict method"
+        )
 
 
 class ExperimentTracker(ABC):
@@ -207,19 +236,7 @@ class MLflowTracker(ExperimentTracker):
 
         Args:
             config: TrackingConfig with MLflow settings
-
-        Raises:
-            ImportError: If mlflow is not installed
         """
-        try:
-            import mlflow
-
-            self._mlflow = mlflow
-        except ImportError as e:
-            raise ImportError(
-                "MLflow is required for MLflowTracker. Install with: pip install mlflow"
-            ) from e
-
         self.tracking_uri = config.tracking_uri
         self.experiment_name = config.experiment_name
         self.log_model_enabled = config.log_model
@@ -232,7 +249,7 @@ class MLflowTracker(ExperimentTracker):
         self._active_run = None
 
         # Configure MLflow
-        self._mlflow.set_tracking_uri(self.tracking_uri)
+        mlflow.set_tracking_uri(self.tracking_uri)
 
         logger.info(
             "mlflow_tracker_initialized",
@@ -260,10 +277,10 @@ class MLflowTracker(ExperimentTracker):
         with self._lock:
             # Set experiment if specified
             if self.experiment_name:
-                self._mlflow.set_experiment(self.experiment_name)
+                mlflow.set_experiment(self.experiment_name)
 
             # Start the run
-            self._active_run = self._mlflow.start_run(
+            self._active_run = mlflow.start_run(
                 run_name=run_name,
                 tags=tags,
                 nested=nested,
@@ -304,7 +321,7 @@ class MLflowTracker(ExperimentTracker):
                 value_str = str(value)[:500]  # MLflow value limit
                 truncated_params[key_str] = value_str
 
-            self._mlflow.log_params(truncated_params)
+            mlflow.log_params(truncated_params)
 
             logger.debug(
                 "mlflow_params_logged",
@@ -327,7 +344,7 @@ class MLflowTracker(ExperimentTracker):
             return
 
         with self._lock:
-            self._mlflow.log_metrics(metrics, step=step)
+            mlflow.log_metrics(metrics, step=step)
 
             logger.debug(
                 "mlflow_metrics_logged",
@@ -357,7 +374,7 @@ class MLflowTracker(ExperimentTracker):
                 )
                 return
 
-            self._mlflow.log_artifact(str(local_path), artifact_path)
+            mlflow.log_artifact(str(local_path), artifact_path)
 
             logger.debug(
                 "mlflow_artifact_logged",
@@ -396,58 +413,67 @@ class MLflowTracker(ExperimentTracker):
             model_type = type(model).__module__
 
             if "xgboost" in model_type:
-                try:
-                    import mlflow.xgboost
-
-                    mlflow.xgboost.log_model(
-                        model,
-                        artifact_path=artifact_path,
-                        registered_model_name=registered_name,
-                    )
-                    logger.info(
-                        "mlflow_xgboost_model_logged",
-                        artifact_path=artifact_path,
-                        registered_name=registered_name,
-                    )
-                except ImportError:
-                    self._log_model_generic(model, artifact_path, registered_name)
-
+                self._log_model_xgboost(model, artifact_path, registered_name)
             elif "torch" in model_type:
-                try:
-                    import mlflow.pytorch
-
-                    mlflow.pytorch.log_model(
-                        model,
-                        artifact_path=artifact_path,
-                        registered_model_name=registered_name,
-                    )
-                    logger.info(
-                        "mlflow_pytorch_model_logged",
-                        artifact_path=artifact_path,
-                        registered_name=registered_name,
-                    )
-                except ImportError:
-                    self._log_model_generic(model, artifact_path, registered_name)
-
+                self._log_model_pytorch(model, artifact_path, registered_name)
             elif "sklearn" in model_type:
-                try:
-                    import mlflow.sklearn
-
-                    mlflow.sklearn.log_model(
-                        model,
-                        artifact_path=artifact_path,
-                        registered_model_name=registered_name,
-                    )
-                    logger.info(
-                        "mlflow_sklearn_model_logged",
-                        artifact_path=artifact_path,
-                        registered_name=registered_name,
-                    )
-                except ImportError:
-                    self._log_model_generic(model, artifact_path, registered_name)
-
+                self._log_model_sklearn(model, artifact_path, registered_name)
             else:
                 self._log_model_generic(model, artifact_path, registered_name)
+
+    def _log_model_xgboost(
+        self, model: Any, artifact_path: str, registered_name: str | None
+    ) -> None:
+        """Log XGBoost model using mlflow.xgboost flavor."""
+        try:
+            mlflow.xgboost.log_model(
+                model,
+                artifact_path=artifact_path,
+                registered_model_name=registered_name,
+            )
+            logger.info(
+                "mlflow_xgboost_model_logged",
+                artifact_path=artifact_path,
+                registered_name=registered_name,
+            )
+        except Exception:
+            self._log_model_generic(model, artifact_path, registered_name)
+
+    def _log_model_pytorch(
+        self, model: Any, artifact_path: str, registered_name: str | None
+    ) -> None:
+        """Log PyTorch model using mlflow.pytorch flavor."""
+        try:
+            mlflow.pytorch.log_model(
+                model,
+                artifact_path=artifact_path,
+                registered_model_name=registered_name,
+            )
+            logger.info(
+                "mlflow_pytorch_model_logged",
+                artifact_path=artifact_path,
+                registered_name=registered_name,
+            )
+        except Exception:
+            self._log_model_generic(model, artifact_path, registered_name)
+
+    def _log_model_sklearn(
+        self, model: Any, artifact_path: str, registered_name: str | None
+    ) -> None:
+        """Log scikit-learn model using mlflow.sklearn flavor."""
+        try:
+            mlflow.sklearn.log_model(
+                model,
+                artifact_path=artifact_path,
+                registered_model_name=registered_name,
+            )
+            logger.info(
+                "mlflow_sklearn_model_logged",
+                artifact_path=artifact_path,
+                registered_name=registered_name,
+            )
+        except Exception:
+            self._log_model_generic(model, artifact_path, registered_name)
 
     def _log_model_generic(
         self,
@@ -460,21 +486,9 @@ class MLflowTracker(ExperimentTracker):
 
         Fallback when specific flavor is not available.
         """
-        import mlflow.pyfunc
-
-        # Create a simple wrapper for generic models
-        class ModelWrapper(mlflow.pyfunc.PythonModel):
-            def __init__(self, model: Any) -> None:
-                self.model = model
-
-            def predict(self, context: Any, model_input: Any) -> Any:
-                if hasattr(self.model, "predict"):
-                    return self.model.predict(model_input)
-                return None
-
         mlflow.pyfunc.log_model(
             artifact_path=artifact_path,
-            python_model=ModelWrapper(model),
+            python_model=_GenericModelWrapper(model),
             registered_model_name=registered_name,
         )
 
@@ -495,7 +509,7 @@ class MLflowTracker(ExperimentTracker):
         with self._lock:
             if self._active_run:
                 run_id = self._active_run.info.run_id
-                self._mlflow.end_run(status=status)
+                mlflow.end_run(status=status)
                 self._active_run = None
 
                 logger.info(
@@ -531,106 +545,20 @@ class MLflowTracker(ExperimentTracker):
         return dict(items)
 
 
-class NullTracker(ExperimentTracker):
+def create_tracker(config: TrackingConfig) -> ExperimentTracker:
     """
-    No-operation tracker for when tracking is disabled.
-
-    Implements all interface methods as no-ops, allowing code to use
-    the tracking interface without conditional checks everywhere.
-    Thread-safe by design (no shared state).
-
-    Useful for:
-    - Development/debugging without tracking overhead
-    - Testing without external dependencies
-    - Graceful degradation when MLflow is unavailable
-    """
-
-    def __init__(self, config: TrackingConfig | None = None) -> None:
-        """
-        Initialize NullTracker.
-
-        Args:
-            config: Optional config (ignored, for interface compatibility)
-        """
-        logger.debug("null_tracker_initialized")
-
-    def start_run(
-        self,
-        run_name: str | None = None,
-        tags: dict[str, str] | None = None,
-        nested: bool = False,
-    ) -> NullTracker:
-        """No-op start run."""
-        logger.debug(
-            "null_tracker_start_run",
-            run_name=run_name,
-            nested=nested,
-        )
-        return self
-
-    def log_params(self, params: dict[str, Any]) -> None:
-        """No-op log params."""
-        logger.debug(
-            "null_tracker_log_params",
-            param_count=len(params),
-        )
-
-    def log_metrics(
-        self,
-        metrics: dict[str, float],
-        step: int | None = None,
-    ) -> None:
-        """No-op log metrics."""
-        logger.debug(
-            "null_tracker_log_metrics",
-            metric_count=len(metrics),
-            step=step,
-        )
-
-    def log_artifact(
-        self,
-        local_path: str | Path,
-        artifact_path: str | None = None,
-    ) -> None:
-        """No-op log artifact."""
-        logger.debug(
-            "null_tracker_log_artifact",
-            local_path=str(local_path),
-        )
-
-    def log_model(
-        self,
-        model: Any,
-        artifact_path: str = "model",
-        registered_name: str | None = None,
-    ) -> None:
-        """No-op log model."""
-        logger.debug(
-            "null_tracker_log_model",
-            model_type=type(model).__name__,
-        )
-
-    def end_run(self, status: str = "FINISHED") -> None:
-        """No-op end run."""
-        logger.debug(
-            "null_tracker_end_run",
-            status=status,
-        )
-
-
-def create_tracker(config: TrackingConfig | None = None) -> ExperimentTracker:
-    """
-    Factory function to create the appropriate tracker based on configuration.
-
-    Creates an MLflowTracker if tracking is enabled and MLflow is available,
-    otherwise returns a NullTracker for graceful degradation.
+    Factory function to create a tracker based on configuration.
 
     Args:
         config: TrackingConfig specifying tracker settings.
-                If None or tracking disabled, returns NullTracker.
+                Must have enabled=True to create a tracker.
 
     Returns:
-        ExperimentTracker instance (MLflowTracker or NullTracker)
+        ExperimentTracker instance
+
+    Raises:
+        ValueError: If tracking is not enabled in config
+        ImportError: If the configured backend is not installed
 
     Example:
         ```python
@@ -643,38 +571,27 @@ def create_tracker(config: TrackingConfig | None = None) -> ExperimentTracker:
             tracking_uri="http://localhost:5000",
             experiment_name="my_experiment",
         )
-        tracker = create_tracker(config)  # Returns MLflowTracker
+        tracker = create_tracker(config)
 
-        # With tracking disabled
+        # With tracking disabled - raises ValueError
         config = TrackingConfig(enabled=False)
-        tracker = create_tracker(config)  # Returns NullTracker
-
-        # No config provided
-        tracker = create_tracker()  # Returns NullTracker
+        tracker = create_tracker(config)  # Raises ValueError
         ```
     """
-    # Return NullTracker if no config or tracking disabled
-    if config is None or not config.enabled:
-        logger.info(
-            "creating_null_tracker",
-            reason="tracking_disabled" if config else "no_config",
+    if not config.enabled:
+        raise ValueError(
+            "Tracking is not enabled. Set config.enabled=True or skip tracker creation."
         )
-        return NullTracker(config)
 
-    # Try to create MLflowTracker
-    try:
-        tracker = MLflowTracker(config)
+    backend = getattr(config, "backend", "mlflow")
+
+    if backend == "mlflow":
         logger.info(
             "creating_mlflow_tracker",
             tracking_uri=config.tracking_uri,
             experiment_name=config.experiment_name,
         )
-        return tracker
-    except ImportError as e:
-        # Graceful degradation when MLflow not available
-        logger.warning(
-            "mlflow_not_available",
-            error=str(e),
-            fallback="null_tracker",
-        )
-        return NullTracker(config)
+        return MLflowTracker(config)
+
+    # Future backends: wandb, neptune, etc.
+    raise ValueError(f"Unknown tracking backend: {backend}")

@@ -42,7 +42,6 @@ from odds_analytics.training.data_preparation import (
 from odds_analytics.training.tracking import (
     ExperimentTracker,
     MLflowTracker,
-    NullTracker,
     create_tracker,
 )
 
@@ -65,6 +64,5 @@ __all__ = [
     "run_cv",
     "ExperimentTracker",
     "MLflowTracker",
-    "NullTracker",
     "create_tracker",
 ]
