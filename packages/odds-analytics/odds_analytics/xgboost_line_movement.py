@@ -271,6 +271,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         feature_names: list[str],
         X_val: np.ndarray | None = None,
         y_val: np.ndarray | None = None,
+        tracker: Any | None = None,
         **xgb_params,
     ) -> dict[str, Any]:
         """
@@ -282,6 +283,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             feature_names: List of feature names in order
             X_val: Validation features (optional)
             y_val: Validation targets (optional)
+            tracker: Optional experiment tracker for logging (optional)
             **xgb_params: Additional XGBoost parameters
 
         Returns:
@@ -292,6 +294,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         """
         try:
             from xgboost import XGBRegressor
+            from xgboost.callback import TrainingCallback
         except ImportError as e:
             raise ImportError("xgboost not installed. Install with: uv add xgboost") from e
 
@@ -311,7 +314,39 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         # Merge with user-provided params
         params = {**default_params, **xgb_params}
 
-        self.model = XGBRegressor(**params)
+        # Create custom callback for MLflow tracking if tracker provided
+        callbacks = []
+        if tracker:
+
+            class MLflowCallback(TrainingCallback):
+                """Custom callback to log XGBoost metrics to MLflow per round."""
+
+                def __init__(self, tracker_instance):
+                    self.tracker = tracker_instance
+
+                def after_iteration(self, model, epoch, evals_log):
+                    """Called after each boosting round."""
+                    # Log training metrics
+                    if "validation_0" in evals_log:
+                        for metric_name, values in evals_log["validation_0"].items():
+                            if values:
+                                self.tracker.log_metrics(
+                                    {f"train_{metric_name}": values[-1]}, step=epoch
+                                )
+
+                    # Log validation metrics
+                    if "validation_1" in evals_log:
+                        for metric_name, values in evals_log["validation_1"].items():
+                            if values:
+                                self.tracker.log_metrics(
+                                    {f"val_{metric_name}": values[-1]}, step=epoch
+                                )
+
+                    return False  # Continue training
+
+            callbacks.append(MLflowCallback(tracker))
+
+        self.model = XGBRegressor(**params, callbacks=callbacks)
 
         # Prepare eval set if validation data provided
         eval_set = None
@@ -375,6 +410,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         feature_names: list[str],
         X_val: np.ndarray | None = None,
         y_val: np.ndarray | None = None,
+        tracker: Any | None = None,
     ) -> dict[str, Any]:
         """
         Train XGBoost regressor using configuration object.
@@ -390,6 +426,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             feature_names: List of feature names in order
             X_val: Validation features (optional)
             y_val: Validation targets (optional)
+            tracker: Optional experiment tracker for logging (optional)
 
         Returns:
             Training history dictionary with metrics
@@ -447,6 +484,43 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         if config.tuning and config.tuning.search_spaces:
             xgb_params = resolve_search_spaces(xgb_params, config.tuning.search_spaces)
 
+        # Log configuration parameters to tracker if enabled
+        if tracker:
+            # Flatten all configuration for logging
+            config_params = {
+                "experiment_name": config.experiment.name,
+                "experiment_description": config.experiment.description or "",
+                "strategy_type": config.training.strategy_type,
+                "n_samples": len(X_train),
+                "n_features": len(feature_names),
+                "has_validation": X_val is not None,
+                "data_start_date": str(config.training.data.start_date),
+                "data_end_date": str(config.training.data.end_date),
+                "test_split": config.training.data.test_split,
+                "validation_split": config.training.data.validation_split,
+            }
+            # Add all XGBoost params
+            config_params.update(xgb_params)
+
+            # Add feature config
+            features = config.training.features
+            config_params.update(
+                {
+                    "sharp_bookmakers": ",".join(features.sharp_bookmakers),
+                    "retail_bookmakers": ",".join(features.retail_bookmakers),
+                    "markets": ",".join(features.markets),
+                    "outcome": features.outcome,
+                    "opening_tier": features.opening_tier.value,
+                    "closing_tier": features.closing_tier.value,
+                }
+            )
+
+            # Add experiment tags if present
+            if config.experiment.tags:
+                config_params["tags"] = ",".join(config.experiment.tags)
+
+            tracker.log_params(config_params)
+
         # Log all hyperparameters for experiment tracking
         logger.info(
             "train_from_config",
@@ -458,10 +532,37 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             **xgb_params,
         )
 
-        # Call existing train method
+        # Call train method with tracker for per-round metrics
         history = self.train(
-            X_train, y_train, feature_names, X_val=X_val, y_val=y_val, **xgb_params
+            X_train,
+            y_train,
+            feature_names,
+            X_val=X_val,
+            y_val=y_val,
+            tracker=tracker,
+            **xgb_params,
         )
+
+        # Log final test metrics to tracker if enabled
+        if tracker:
+            final_metrics = {
+                "final_train_mse": history.get("train_mse"),
+                "final_train_mae": history.get("train_mae"),
+                "final_train_r2": history.get("train_r2"),
+            }
+            if X_val is not None:
+                final_metrics.update(
+                    {
+                        "final_val_mse": history.get("val_mse"),
+                        "final_val_mae": history.get("val_mae"),
+                        "final_val_r2": history.get("val_r2"),
+                    }
+                )
+            tracker.log_metrics(final_metrics)
+
+            # Log model artifact
+            if self.model is not None:
+                tracker.log_model(self.model, artifact_path="model")
 
         # Log training completion
         logger.info(

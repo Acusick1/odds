@@ -74,6 +74,10 @@ def run_training(
         False, "--dry-run", help="Show what would be done without executing"
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable detailed output logging"),
+    track: bool = typer.Option(False, "--track", help="Enable MLflow experiment tracking"),
+    tracking_uri: str | None = typer.Option(
+        None, "--tracking-uri", help="Override MLflow tracking URI (default: mlruns)"
+    ),
 ):
     """
     Train an ML model using a configuration file.
@@ -82,6 +86,8 @@ def run_training(
         odds train run --config experiments/xgb_line_movement.yaml
         odds train run --config experiments/lstm_v1.yaml --output models/custom_path.pkl
         odds train run --config experiments/config.yaml --dry-run
+        odds train run --config experiments/xgb_line_movement.yaml --track
+        odds train run --config experiments/lstm_v1.yaml --track --tracking-uri http://localhost:5000
     """
     # Load and validate configuration
     ml_config = load_config(config)
@@ -90,6 +96,15 @@ def run_training(
     if output:
         ml_config.training.output_path = str(Path(output).parent)
         ml_config.training.model_name = Path(output).name
+
+    # Override tracking configuration if flags provided
+    if track:
+        ml_config.tracking.enabled = True
+        if tracking_uri:
+            ml_config.tracking.tracking_uri = tracking_uri
+        # Set experiment name from config if not already set
+        if not ml_config.tracking.experiment_name:
+            ml_config.tracking.experiment_name = ml_config.experiment.name
 
     # Display configuration summary
     _display_config_summary(ml_config, verbose)
@@ -103,6 +118,10 @@ def run_training(
         console.print(f"  2. Prepare training data for {ml_config.training.strategy_type}")
         console.print(f"  3. Train model with {_get_model_params_count(ml_config)} parameters")
         console.print(f"  4. Save model to {_get_output_path(ml_config)}")
+        if ml_config.tracking.enabled:
+            console.print(
+                f"  5. Log to MLflow tracking server at {ml_config.tracking.tracking_uri}"
+            )
         return
 
     # Run training
@@ -125,126 +144,158 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
     console.print(f"Strategy: {strategy_type}")
     console.print(f"Period: {config.training.data.start_date} to {config.training.data.end_date}\n")
 
-    async with get_session() as session:
-        # Step 1: Prepare training data
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Loading and preparing training data...", total=None)
+    # Initialize experiment tracker if enabled
+    tracker = None
+    if config.tracking.enabled:
+        try:
+            from odds_analytics.training import create_tracker
+
+            tracker = create_tracker(config.tracking)
+            console.print(f"[cyan]MLflow tracking enabled: {config.tracking.tracking_uri}[/cyan]")
+            console.print(f"[cyan]Experiment: {config.tracking.experiment_name}[/cyan]\n")
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not initialize tracker: {e}[/yellow]")
+            console.print("[yellow]Continuing without tracking...[/yellow]\n")
+            tracker = None
+
+    # Start MLflow run if tracker is enabled
+    if tracker:
+        run_name = config.tracking.run_name or f"{config.experiment.name}_{strategy_type}"
+        tracker.start_run(run_name=run_name, tags={"strategy": strategy_type})
+
+    try:
+        async with get_session() as session:
+            # Step 1: Prepare training data
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                task = progress.add_task("Loading and preparing training data...", total=None)
+
+                try:
+                    data_result = await prepare_training_data_from_config(config, session)
+                except ValueError as e:
+                    progress.stop()
+                    console.print(f"[red]Error preparing data: {e}[/red]")
+                    raise typer.Exit(1) from None
+                except Exception as e:
+                    progress.stop()
+                    console.print(f"[red]Error: {e}[/red]")
+                    raise typer.Exit(1) from None
+
+                progress.update(task, description="Data preparation complete")
+
+            # Display data summary
+            console.print("\n[green]Data prepared successfully[/green]")
+            console.print(f"  Training samples: {data_result.num_train_samples:,}")
+            console.print(f"  Test samples: {data_result.num_test_samples:,}")
+            console.print(f"  Features: {data_result.num_features}")
+
+            # Step 2: Initialize strategy and train
+            strategy = strategy_class()
+            use_kfold = config.training.data.use_kfold
+            cv_result = None
+
+            # Get test data for final evaluation
+            X_test = data_result.X_test if data_result.num_test_samples > 0 else None
+            y_test = data_result.y_test if data_result.num_test_samples > 0 else None
+
+            if use_kfold:
+                # Cross-Validation training
+                n_folds = config.training.data.n_folds
+                cv_method = config.training.data.cv_method
+                cv_method_display = "Time Series CV" if cv_method == "timeseries" else "K-Fold CV"
+                console.print(f"\n[bold]Running {n_folds}-Fold {cv_method_display}...[/bold]")
+
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=console,
+                ) as progress:
+                    task = progress.add_task(
+                        f"Cross-validating ({n_folds} folds, {cv_method_display})...", total=None
+                    )
+
+                    try:
+                        history, cv_result = strategy.train_with_cv(
+                            config,
+                            data_result.X_train,
+                            data_result.y_train,
+                            data_result.feature_names,
+                            X_test=X_test,
+                            y_test=y_test,
+                        )
+                    except Exception as e:
+                        progress.stop()
+                        console.print(f"[red]Error during training: {e}[/red]")
+                        raise typer.Exit(1) from None
+
+                    progress.update(task, description="Training complete")
+
+                # Display CV metrics
+                _display_cv_metrics(cv_result)
+
+            else:
+                # Standard training without CV
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=console,
+                ) as progress:
+                    task = progress.add_task("Training model...", total=None)
+
+                    try:
+                        history = strategy.train_from_config(
+                            config,
+                            data_result.X_train,
+                            data_result.y_train,
+                            data_result.feature_names,
+                            X_val=X_test,
+                            y_val=y_test,
+                            tracker=tracker,
+                        )
+                    except Exception as e:
+                        progress.stop()
+                        console.print(f"[red]Error during training: {e}[/red]")
+                        raise typer.Exit(1) from None
+
+                    progress.update(task, description="Training complete")
+
+            # Display training metrics
+            _display_training_metrics(history, verbose, is_cv=use_kfold)
+
+            # Step 3: Save model
+            output_path = _get_output_path(config)
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
             try:
-                data_result = await prepare_training_data_from_config(config, session)
-            except ValueError as e:
-                progress.stop()
-                console.print(f"[red]Error preparing data: {e}[/red]")
-                raise typer.Exit(1) from None
+                strategy.save_model(output_path)
+                console.print(f"\n[green]Model saved to {output_path}[/green]")
             except Exception as e:
-                progress.stop()
-                console.print(f"[red]Error: {e}[/red]")
+                console.print(f"[red]Error saving model: {e}[/red]")
                 raise typer.Exit(1) from None
 
-            progress.update(task, description="Data preparation complete")
+            # Step 4: Save configuration alongside model
+            config_output = Path(output_path).with_suffix(".yaml")
+            try:
+                config.to_yaml(config_output)
+                console.print(f"[green]Configuration saved to {config_output}[/green]")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not save configuration: {e}[/yellow]")
 
-        # Display data summary
-        console.print("\n[green]Data prepared successfully[/green]")
-        console.print(f"  Training samples: {data_result.num_train_samples:,}")
-        console.print(f"  Test samples: {data_result.num_test_samples:,}")
-        console.print(f"  Features: {data_result.num_features}")
+            console.print("\n[bold green]Training complete![/bold green]")
 
-        # Step 2: Initialize strategy and train
-        strategy = strategy_class()
-        use_kfold = config.training.data.use_kfold
-        cv_result = None
-
-        # Get test data for final evaluation
-        X_test = data_result.X_test if data_result.num_test_samples > 0 else None
-        y_test = data_result.y_test if data_result.num_test_samples > 0 else None
-
-        if use_kfold:
-            # Cross-Validation training
-            n_folds = config.training.data.n_folds
-            cv_method = config.training.data.cv_method
-            cv_method_display = "Time Series CV" if cv_method == "timeseries" else "K-Fold CV"
-            console.print(f"\n[bold]Running {n_folds}-Fold {cv_method_display}...[/bold]")
-
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
-                task = progress.add_task(
-                    f"Cross-validating ({n_folds} folds, {cv_method_display})...", total=None
+            # Display MLflow run info if tracking was enabled
+            if tracker:
+                console.print(
+                    f"\n[cyan]MLflow run completed. View results at: {config.tracking.tracking_uri}[/cyan]"
                 )
 
-                try:
-                    history, cv_result = strategy.train_with_cv(
-                        config,
-                        data_result.X_train,
-                        data_result.y_train,
-                        data_result.feature_names,
-                        X_test=X_test,
-                        y_test=y_test,
-                    )
-                except Exception as e:
-                    progress.stop()
-                    console.print(f"[red]Error during training: {e}[/red]")
-                    raise typer.Exit(1) from None
-
-                progress.update(task, description="Training complete")
-
-            # Display CV metrics
-            _display_cv_metrics(cv_result)
-
-        else:
-            # Standard training without CV
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
-                task = progress.add_task("Training model...", total=None)
-
-                try:
-                    history = strategy.train_from_config(
-                        config,
-                        data_result.X_train,
-                        data_result.y_train,
-                        data_result.feature_names,
-                        X_val=X_test,
-                        y_val=y_test,
-                    )
-                except Exception as e:
-                    progress.stop()
-                    console.print(f"[red]Error during training: {e}[/red]")
-                    raise typer.Exit(1) from None
-
-                progress.update(task, description="Training complete")
-
-        # Display training metrics
-        _display_training_metrics(history, verbose, is_cv=use_kfold)
-
-        # Step 3: Save model
-        output_path = _get_output_path(config)
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            strategy.save_model(output_path)
-            console.print(f"\n[green]Model saved to {output_path}[/green]")
-        except Exception as e:
-            console.print(f"[red]Error saving model: {e}[/red]")
-            raise typer.Exit(1) from None
-
-        # Step 4: Save configuration alongside model
-        config_output = Path(output_path).with_suffix(".yaml")
-        try:
-            config.to_yaml(config_output)
-            console.print(f"[green]Configuration saved to {config_output}[/green]")
-        except Exception as e:
-            console.print(f"[yellow]Warning: Could not save configuration: {e}[/yellow]")
-
-        console.print("\n[bold green]Training complete![/bold green]")
+    finally:
+        # End MLflow run
+        if tracker:
+            tracker.end_run(status="FINISHED")
 
 
 @app.command("validate")
