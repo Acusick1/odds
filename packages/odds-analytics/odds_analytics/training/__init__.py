@@ -44,6 +44,11 @@ from odds_analytics.training.tracking import (
     MLflowTracker,
     create_tracker,
 )
+from odds_analytics.training.tuner import (
+    HyperparameterTuner,
+    OptunaTuner,
+    create_objective,
+)
 from odds_analytics.training.utils import flatten_config_for_tracking
 
 __all__ = [
@@ -67,4 +72,7 @@ __all__ = [
     "MLflowTracker",
     "create_tracker",
     "flatten_config_for_tracking",
+    "HyperparameterTuner",
+    "OptunaTuner",
+    "create_objective",
 ]
