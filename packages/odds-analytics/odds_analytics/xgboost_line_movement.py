@@ -50,6 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     from odds_analytics.training.config import MLTrainingConfig
+    from odds_analytics.training.tracking import ExperimentTracker
 
 from odds_analytics.backtesting import (
     BacktestConfig,
@@ -271,7 +272,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         feature_names: list[str],
         X_val: np.ndarray | None = None,
         y_val: np.ndarray | None = None,
-        tracker: Any | None = None,
+        tracker: ExperimentTracker | None = None,
         **xgb_params,
     ) -> dict[str, Any]:
         """
@@ -291,10 +292,10 @@ class XGBoostLineMovementStrategy(BettingStrategy):
 
         Note:
             Requires xgboost package installed
+            Per-round metrics are automatically logged via MLflow autolog when tracker is enabled
         """
         try:
             from xgboost import XGBRegressor
-            from xgboost.callback import TrainingCallback
         except ImportError as e:
             raise ImportError("xgboost not installed. Install with: uv add xgboost") from e
 
@@ -314,39 +315,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         # Merge with user-provided params
         params = {**default_params, **xgb_params}
 
-        # Create custom callback for MLflow tracking if tracker provided
-        callbacks = []
-        if tracker:
-
-            class MLflowCallback(TrainingCallback):
-                """Custom callback to log XGBoost metrics to MLflow per round."""
-
-                def __init__(self, tracker_instance):
-                    self.tracker = tracker_instance
-
-                def after_iteration(self, model, epoch, evals_log):
-                    """Called after each boosting round."""
-                    # Log training metrics
-                    if "validation_0" in evals_log:
-                        for metric_name, values in evals_log["validation_0"].items():
-                            if values:
-                                self.tracker.log_metrics(
-                                    {f"train_{metric_name}": values[-1]}, step=epoch
-                                )
-
-                    # Log validation metrics
-                    if "validation_1" in evals_log:
-                        for metric_name, values in evals_log["validation_1"].items():
-                            if values:
-                                self.tracker.log_metrics(
-                                    {f"val_{metric_name}": values[-1]}, step=epoch
-                                )
-
-                    return False  # Continue training
-
-            callbacks.append(MLflowCallback(tracker))
-
-        self.model = XGBRegressor(**params, callbacks=callbacks)
+        self.model = XGBRegressor(**params)
 
         # Prepare eval set if validation data provided
         eval_set = None
@@ -410,7 +379,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         feature_names: list[str],
         X_val: np.ndarray | None = None,
         y_val: np.ndarray | None = None,
-        tracker: Any | None = None,
+        tracker: ExperimentTracker | None = None,
     ) -> dict[str, Any]:
         """
         Train XGBoost regressor using configuration object.
@@ -486,39 +455,9 @@ class XGBoostLineMovementStrategy(BettingStrategy):
 
         # Log configuration parameters to tracker if enabled
         if tracker:
-            # Flatten all configuration for logging
-            config_params = {
-                "experiment_name": config.experiment.name,
-                "experiment_description": config.experiment.description or "",
-                "strategy_type": config.training.strategy_type,
-                "n_samples": len(X_train),
-                "n_features": len(feature_names),
-                "has_validation": X_val is not None,
-                "data_start_date": str(config.training.data.start_date),
-                "data_end_date": str(config.training.data.end_date),
-                "test_split": config.training.data.test_split,
-                "validation_split": config.training.data.validation_split,
-            }
-            # Add all XGBoost params
-            config_params.update(xgb_params)
+            from odds_analytics.training.utils import flatten_config_for_tracking
 
-            # Add feature config
-            features = config.training.features
-            config_params.update(
-                {
-                    "sharp_bookmakers": ",".join(features.sharp_bookmakers),
-                    "retail_bookmakers": ",".join(features.retail_bookmakers),
-                    "markets": ",".join(features.markets),
-                    "outcome": features.outcome,
-                    "opening_tier": features.opening_tier.value,
-                    "closing_tier": features.closing_tier.value,
-                }
-            )
-
-            # Add experiment tags if present
-            if config.experiment.tags:
-                config_params["tags"] = ",".join(config.experiment.tags)
-
+            config_params = flatten_config_for_tracking(config, X_train, feature_names, X_val)
             tracker.log_params(config_params)
 
         # Log all hyperparameters for experiment tracking

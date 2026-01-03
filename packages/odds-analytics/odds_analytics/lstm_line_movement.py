@@ -82,6 +82,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     from odds_analytics.training.config import MLTrainingConfig
+    from odds_analytics.training.tracking import ExperimentTracker
 
 from odds_lambda.fetch_tier import FetchTier
 
@@ -561,7 +562,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
         feature_names: list[str],
         X_val: np.ndarray | None = None,
         y_val: np.ndarray | None = None,
-        tracker: Any | None = None,
+        tracker: ExperimentTracker | None = None,
     ) -> dict[str, Any]:
         """
         Train LSTM model using configuration object.
@@ -639,41 +640,9 @@ class LSTMLineMovementStrategy(BettingStrategy):
 
         # Log configuration parameters to tracker if enabled
         if tracker:
-            # Flatten all configuration for logging
-            config_params = {
-                "experiment_name": config.experiment.name,
-                "experiment_description": config.experiment.description or "",
-                "strategy_type": config.training.strategy_type,
-                "n_samples": len(X_train),
-                "n_features": len(feature_names),
-                "has_validation": X_val is not None,
-                "data_start_date": str(config.training.data.start_date),
-                "data_end_date": str(config.training.data.end_date),
-                "test_split": config.training.data.test_split,
-                "validation_split": config.training.data.validation_split,
-            }
-            # Add all LSTM params
-            config_params.update(lstm_params)
+            from odds_analytics.training.utils import flatten_config_for_tracking
 
-            # Add feature config
-            features = config.training.features
-            config_params.update(
-                {
-                    "sharp_bookmakers": ",".join(features.sharp_bookmakers),
-                    "retail_bookmakers": ",".join(features.retail_bookmakers),
-                    "markets": ",".join(features.markets),
-                    "outcome": features.outcome,
-                    "opening_tier": features.opening_tier.value,
-                    "closing_tier": features.closing_tier.value,
-                    "lookback_hours": features.lookback_hours,
-                    "timesteps": features.timesteps,
-                }
-            )
-
-            # Add experiment tags if present
-            if config.experiment.tags:
-                config_params["tags"] = ",".join(config.experiment.tags)
-
+            config_params = flatten_config_for_tracking(config, X_train, feature_names, X_val)
             tracker.log_params(config_params)
 
         # Log all hyperparameters for experiment tracking
