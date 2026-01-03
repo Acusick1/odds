@@ -497,7 +497,11 @@ class XGBoostLineMovementStrategy(BettingStrategy):
                         "final_val_r2": history.get("val_r2"),
                     }
                 )
-            tracker.log_metrics(final_metrics)
+            # Filter out None values before logging
+            final_metrics_filtered: dict[str, float] = {
+                k: float(v) for k, v in final_metrics.items() if v is not None
+            }
+            tracker.log_metrics(final_metrics_filtered)
 
             # Log model artifact
             if self.model is not None:

@@ -6,7 +6,12 @@ from pathlib import Path
 import typer
 from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
 from odds_analytics.lstm_strategy import LSTMStrategy
-from odds_analytics.training import CVResult, MLTrainingConfig, prepare_training_data_from_config
+from odds_analytics.training import (
+    CVResult,
+    MLTrainingConfig,
+    TrackingConfig,
+    prepare_training_data_from_config,
+)
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from odds_core.database import get_session
 from rich.console import Console
@@ -99,6 +104,9 @@ def run_training(
 
     # Override tracking configuration if flags provided
     if track:
+        # Initialize tracking config if not present
+        if ml_config.tracking is None:
+            ml_config.tracking = TrackingConfig()
         ml_config.tracking.enabled = True
         if tracking_uri:
             ml_config.tracking.tracking_uri = tracking_uri
@@ -118,7 +126,7 @@ def run_training(
         console.print(f"  2. Prepare training data for {ml_config.training.strategy_type}")
         console.print(f"  3. Train model with {_get_model_params_count(ml_config)} parameters")
         console.print(f"  4. Save model to {_get_output_path(ml_config)}")
-        if ml_config.tracking.enabled:
+        if ml_config.tracking and ml_config.tracking.enabled:
             console.print(
                 f"  5. Log to MLflow tracking server at {ml_config.tracking.tracking_uri}"
             )
@@ -146,7 +154,7 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
 
     # Initialize experiment tracker if enabled
     tracker = None
-    if config.tracking.enabled:
+    if config.tracking and config.tracking.enabled:
         try:
             from odds_analytics.training import create_tracker
 
@@ -159,7 +167,7 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
             tracker = None
 
     # Start MLflow run if tracker is enabled
-    if tracker:
+    if tracker and config.tracking:
         run_name = config.tracking.run_name or f"{config.experiment.name}_{strategy_type}"
         tracker.start_run(run_name=run_name, tags={"strategy": strategy_type})
 
@@ -287,7 +295,7 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
             console.print("\n[bold green]Training complete![/bold green]")
 
             # Display MLflow run info if tracking was enabled
-            if tracker:
+            if tracker and config.tracking:
                 console.print(
                     f"\n[cyan]MLflow run completed. View results at: {config.tracking.tracking_uri}[/cyan]"
                 )
