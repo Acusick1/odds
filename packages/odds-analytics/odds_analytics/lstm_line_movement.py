@@ -82,6 +82,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     from odds_analytics.training.config import MLTrainingConfig
+    from odds_analytics.training.tracking import ExperimentTracker
 
 from odds_lambda.fetch_tier import FetchTier
 
@@ -561,6 +562,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
         feature_names: list[str],
         X_val: np.ndarray | None = None,
         y_val: np.ndarray | None = None,
+        tracker: ExperimentTracker | None = None,
     ) -> dict[str, Any]:
         """
         Train LSTM model using configuration object.
@@ -576,6 +578,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
             feature_names: List of feature names in order
             X_val: Validation features (optional)
             y_val: Validation targets (optional)
+            tracker: Optional experiment tracker for logging (optional)
 
         Returns:
             Training history dictionary with metrics
@@ -634,6 +637,13 @@ class LSTMLineMovementStrategy(BettingStrategy):
         self.params["min_predicted_movement"] = training_config.min_predicted_movement
         self.params["movement_confidence_scale"] = training_config.movement_confidence_scale
         self.params["base_confidence"] = training_config.base_confidence
+
+        # Log configuration parameters to tracker if enabled
+        if tracker:
+            from odds_analytics.training.utils import flatten_config_for_tracking
+
+            config_params = flatten_config_for_tracking(config, X_train, feature_names, X_val)
+            tracker.log_params(config_params)
 
         # Log all hyperparameters for experiment tracking
         logger.info(
@@ -722,6 +732,22 @@ class LSTMLineMovementStrategy(BettingStrategy):
             avg_loss = epoch_loss / num_batches
             avg_mae = epoch_mae / num_batches
 
+            # Log per-epoch metrics to tracker if enabled
+            if tracker:
+                epoch_metrics = {"train_loss": avg_loss, "train_mae": avg_mae}
+
+                # Add validation metrics if available
+                if X_val_tensor is not None and y_val_tensor is not None:
+                    self.model.eval()
+                    with torch.no_grad():
+                        val_predictions = self.model(X_val_tensor)
+                        val_loss = criterion(val_predictions, y_val_tensor).item()
+                        val_mae = torch.mean(torch.abs(val_predictions - y_val_tensor)).item()
+                        epoch_metrics["val_loss"] = val_loss
+                        epoch_metrics["val_mae"] = val_mae
+
+                tracker.log_metrics(epoch_metrics, step=epoch)
+
             logger.debug("training_epoch", epoch=epoch + 1, loss=avg_loss, mae=avg_mae)
 
         # Calculate final training metrics
@@ -757,6 +783,27 @@ class LSTMLineMovementStrategy(BettingStrategy):
                 history["val_mse"] = val_mse
                 history["val_mae"] = val_mae
                 history["val_r2"] = val_r2
+
+        # Log final test metrics to tracker if enabled
+        if tracker:
+            final_metrics = {
+                "final_train_mse": train_mse,
+                "final_train_mae": train_mae,
+                "final_train_r2": train_r2,
+            }
+            if X_val_tensor is not None:
+                final_metrics.update(
+                    {
+                        "final_val_mse": history.get("val_mse"),
+                        "final_val_mae": history.get("val_mae"),
+                        "final_val_r2": history.get("val_r2"),
+                    }
+                )
+            tracker.log_metrics(final_metrics)
+
+            # Log model artifact
+            if self.model is not None:
+                tracker.log_model(self.model, artifact_path="model")
 
         self.is_trained = True
         self.training_history = {"loss": [train_mse], "mae": [train_mae]}

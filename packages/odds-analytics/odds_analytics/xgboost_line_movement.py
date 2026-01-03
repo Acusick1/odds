@@ -50,6 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     from odds_analytics.training.config import MLTrainingConfig
+    from odds_analytics.training.tracking import ExperimentTracker
 
 from odds_analytics.backtesting import (
     BacktestConfig,
@@ -271,6 +272,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         feature_names: list[str],
         X_val: np.ndarray | None = None,
         y_val: np.ndarray | None = None,
+        tracker: ExperimentTracker | None = None,
         **xgb_params,
     ) -> dict[str, Any]:
         """
@@ -282,6 +284,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             feature_names: List of feature names in order
             X_val: Validation features (optional)
             y_val: Validation targets (optional)
+            tracker: Optional experiment tracker for logging (optional)
             **xgb_params: Additional XGBoost parameters
 
         Returns:
@@ -289,6 +292,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
 
         Note:
             Requires xgboost package installed
+            Per-round metrics are automatically logged via MLflow autolog when tracker is enabled
         """
         try:
             from xgboost import XGBRegressor
@@ -375,6 +379,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         feature_names: list[str],
         X_val: np.ndarray | None = None,
         y_val: np.ndarray | None = None,
+        tracker: ExperimentTracker | None = None,
     ) -> dict[str, Any]:
         """
         Train XGBoost regressor using configuration object.
@@ -390,6 +395,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             feature_names: List of feature names in order
             X_val: Validation features (optional)
             y_val: Validation targets (optional)
+            tracker: Optional experiment tracker for logging (optional)
 
         Returns:
             Training history dictionary with metrics
@@ -447,6 +453,13 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         if config.tuning and config.tuning.search_spaces:
             xgb_params = resolve_search_spaces(xgb_params, config.tuning.search_spaces)
 
+        # Log configuration parameters to tracker if enabled
+        if tracker:
+            from odds_analytics.training.utils import flatten_config_for_tracking
+
+            config_params = flatten_config_for_tracking(config, X_train, feature_names, X_val)
+            tracker.log_params(config_params)
+
         # Log all hyperparameters for experiment tracking
         logger.info(
             "train_from_config",
@@ -458,10 +471,41 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             **xgb_params,
         )
 
-        # Call existing train method
+        # Call train method with tracker for per-round metrics
         history = self.train(
-            X_train, y_train, feature_names, X_val=X_val, y_val=y_val, **xgb_params
+            X_train,
+            y_train,
+            feature_names,
+            X_val=X_val,
+            y_val=y_val,
+            tracker=tracker,
+            **xgb_params,
         )
+
+        # Log final test metrics to tracker if enabled
+        if tracker:
+            final_metrics = {
+                "final_train_mse": history.get("train_mse"),
+                "final_train_mae": history.get("train_mae"),
+                "final_train_r2": history.get("train_r2"),
+            }
+            if X_val is not None:
+                final_metrics.update(
+                    {
+                        "final_val_mse": history.get("val_mse"),
+                        "final_val_mae": history.get("val_mae"),
+                        "final_val_r2": history.get("val_r2"),
+                    }
+                )
+            # Filter out None values before logging
+            final_metrics_filtered: dict[str, float] = {
+                k: float(v) for k, v in final_metrics.items() if v is not None
+            }
+            tracker.log_metrics(final_metrics_filtered)
+
+            # Log model artifact
+            if self.model is not None:
+                tracker.log_model(self.model, artifact_path="model")
 
         # Log training completion
         logger.info(

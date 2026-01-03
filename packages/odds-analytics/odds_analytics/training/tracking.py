@@ -286,6 +286,15 @@ class MLflowTracker(ExperimentTracker):
                 nested=nested,
             )
 
+            # Enable autolog for supported frameworks
+            # This allows automatic per-epoch/round metric logging
+            if self.log_metrics_enabled:
+                try:
+                    mlflow.xgboost.autolog(log_models=False, log_input_examples=False)
+                    mlflow.pytorch.autolog(log_models=False, log_every_n_epoch=1)
+                except Exception as e:
+                    logger.warning("autolog_setup_failed", error=str(e))
+
             logger.info(
                 "mlflow_run_started",
                 run_id=self._active_run.info.run_id,
@@ -509,6 +518,14 @@ class MLflowTracker(ExperimentTracker):
         with self._lock:
             if self._active_run:
                 run_id = self._active_run.info.run_id
+
+                # Disable autolog to avoid affecting subsequent runs
+                try:
+                    mlflow.xgboost.autolog(disable=True)
+                    mlflow.pytorch.autolog(disable=True)
+                except Exception:
+                    pass  # Ignore errors during cleanup
+
                 mlflow.end_run(status=status)
                 self._active_run = None
 
