@@ -335,7 +335,7 @@ def test_create_objective_with_search_spaces(sample_config, sample_training_data
     assert callable(objective)
 
 
-@patch("odds_analytics.training.tuner.XGBoostLineMovementStrategy")
+@patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
 def test_objective_function_execution(mock_strategy_class, sample_config, sample_training_data):
     """Test objective function execution with mocked training."""
     X_train, y_train, X_val, y_val, feature_names = sample_training_data
@@ -372,7 +372,7 @@ def test_objective_function_execution(mock_strategy_class, sample_config, sample
     mock_strategy.train_from_config.assert_called_once()
 
 
-@patch("odds_analytics.training.tuner.XGBoostLineMovementStrategy")
+@patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
 def test_objective_function_handles_training_failure(
     mock_strategy_class, sample_config, sample_training_data
 ):
@@ -406,7 +406,7 @@ def test_objective_function_handles_training_failure(
     assert result == float("inf")  # Bad value for failed trial
 
 
-@patch("odds_analytics.training.tuner.XGBoostLineMovementStrategy")
+@patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
 def test_objective_function_metric_not_found(
     mock_strategy_class, sample_config, sample_training_data
 ):
@@ -460,7 +460,7 @@ def test_full_optimization_workflow(sample_config, sample_training_data):
     )
 
     # Patch XGBoost training to avoid actual model training
-    with patch("odds_analytics.training.tuner.XGBoostLineMovementStrategy") as mock_class:
+    with patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy") as mock_class:
         mock_strategy = MagicMock()
         mock_strategy.train_from_config.return_value = {
             "val_mse": np.random.uniform(0.1, 1.0),
@@ -533,10 +533,11 @@ def test_optuna_not_installed():
 
 def test_invalid_strategy_type():
     """Test error handling for invalid strategy type."""
+    # Create valid config first
     config = MLTrainingConfig(
         experiment=ExperimentConfig(name="test"),
         training=TrainingConfig(
-            strategy_type="invalid_strategy",
+            strategy_type="xgboost_line_movement",
             data=DataConfig(start_date="2024-10-01", end_date="2024-12-31"),
             model=XGBoostConfig(),
         ),
@@ -551,6 +552,10 @@ def test_invalid_strategy_type():
     y_train = np.random.randn(10)
 
     objective = create_objective(config, X_train, y_train, ["f1", "f2", "f3", "f4", "f5"])
+
+    # Manually change strategy_type to invalid value after config creation
+    # This bypasses Pydantic validation to test error handling in objective
+    config.training.strategy_type = "invalid_strategy"
 
     # Mock trial
     mock_trial = Mock()
