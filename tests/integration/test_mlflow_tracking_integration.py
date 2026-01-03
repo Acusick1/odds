@@ -239,7 +239,7 @@ class TestMLflowTrackingIntegration:
         assert "max_depth" in logged_params
         assert "learning_rate" in logged_params
         assert logged_params["strategy_type"] == "xgboost_line_movement"
-        assert logged_params["n_estimators"] == "10"
+        assert logged_params["n_estimators"] == 10  # Integer before MLflow conversion
 
     def test_tracker_logs_metrics_per_round(
         self, xgboost_config_with_tracking, sample_training_data, temp_mlflow_dir
