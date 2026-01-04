@@ -529,3 +529,108 @@ def test_optuna_not_installed():
     with patch.dict("sys.modules", {"optuna": None}):
         with pytest.raises(ImportError, match="optuna not installed"):
             OptunaTuner(study_name="test")
+
+
+# =============================================================================
+# Test Pruning Integration
+# =============================================================================
+
+
+@patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
+def test_pruning_trial_passed_to_training(mock_strategy_class, sample_config, sample_training_data):
+    """Test that trial object is passed to training for pruning."""
+    X_train, y_train, X_val, y_val, feature_names = sample_training_data
+
+    # Mock strategy instance
+    mock_strategy = MagicMock()
+    mock_strategy.train_from_config.return_value = {
+        "val_mse": 0.5,
+        "train_mse": 0.4,
+    }
+    mock_strategy_class.return_value = mock_strategy
+
+    objective = create_objective(
+        config=sample_config,
+        X_train=X_train,
+        y_train=y_train,
+        feature_names=feature_names,
+        X_val=X_val,
+        y_val=y_val,
+    )
+
+    # Mock trial
+    mock_trial = Mock()
+    mock_trial.number = 0
+    mock_trial.suggest_int.side_effect = [200, 6]
+    mock_trial.suggest_float.return_value = 0.05
+    mock_trial.suggest_categorical.return_value = "reg:squarederror"
+
+    # Execute objective
+    objective(mock_trial)
+
+    # Verify trial was passed to train_from_config
+    call_kwargs = mock_strategy.train_from_config.call_args[1]
+    assert "trial" in call_kwargs
+    assert call_kwargs["trial"] == mock_trial
+
+
+# =============================================================================
+# Test Feature Parameter Re-extraction
+# =============================================================================
+
+
+def test_feature_config_hash_stability():
+    """Test that feature config hash is stable for same parameters."""
+    from odds_analytics.training.tuner import _compute_feature_config_hash
+
+    params1 = {"normalize": True, "movement_threshold": 0.01}
+    params2 = {"movement_threshold": 0.01, "normalize": True}  # Different order
+
+    hash1 = _compute_feature_config_hash(params1)
+    hash2 = _compute_feature_config_hash(params2)
+
+    # Hashes should be identical regardless of parameter order
+    assert hash1 == hash2
+
+
+def test_feature_config_hash_uniqueness():
+    """Test that different feature configs produce different hashes."""
+    from odds_analytics.training.tuner import _compute_feature_config_hash
+
+    params1 = {"normalize": True, "movement_threshold": 0.01}
+    params2 = {"normalize": True, "movement_threshold": 0.02}  # Different value
+
+    hash1 = _compute_feature_config_hash(params1)
+    hash2 = _compute_feature_config_hash(params2)
+
+    # Hashes should be different for different configurations
+    assert hash1 != hash2
+
+
+def test_feature_params_warning_without_session(sample_config, sample_training_data):
+    """Test warning when feature params in search space but no session provided."""
+    X_train, y_train, X_val, y_val, feature_names = sample_training_data
+
+    # Add a feature parameter to search space
+    from odds_analytics.training.config import SearchSpace
+
+    sample_config.tuning.search_spaces["normalize"] = SearchSpace(
+        type="categorical", choices=[True, False]
+    )
+
+    # Create objective without session
+    with patch("odds_analytics.training.tuner.logger") as mock_logger:
+        create_objective(
+            config=sample_config,
+            X_train=X_train,
+            y_train=y_train,
+            feature_names=feature_names,
+            X_val=X_val,
+            y_val=y_val,
+            session=None,  # No session
+        )
+
+        # Should have logged a warning
+        mock_logger.warning.assert_called_once()
+        call_args = mock_logger.warning.call_args[0]
+        assert call_args[0] == "feature_params_without_session"

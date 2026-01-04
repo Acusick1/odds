@@ -380,6 +380,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         X_val: np.ndarray | None = None,
         y_val: np.ndarray | None = None,
         tracker: ExperimentTracker | None = None,
+        trial: Any | None = None,
     ) -> dict[str, Any]:
         """
         Train XGBoost regressor using configuration object.
@@ -396,6 +397,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             X_val: Validation features (optional)
             y_val: Validation targets (optional)
             tracker: Optional experiment tracker for logging (optional)
+            trial: Optional Optuna trial for pruning support (optional)
 
         Returns:
             Training history dictionary with metrics
@@ -470,6 +472,26 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             has_validation=X_val is not None,
             **xgb_params,
         )
+
+        # Add Optuna pruning callback if trial provided
+        if trial is not None and X_val is not None:
+            try:
+                from optuna.integration import XGBoostPruningCallback
+
+                # Create pruning callback that reports validation MSE
+                pruning_callback = XGBoostPruningCallback(trial, "validation_1-rmse")
+
+                # Add callback to xgb_params
+                if "callbacks" not in xgb_params:
+                    xgb_params["callbacks"] = []
+                xgb_params["callbacks"].append(pruning_callback)
+
+                logger.debug("optuna_pruning_enabled", trial_number=trial.number)
+            except ImportError:
+                logger.warning(
+                    "optuna_integration_unavailable",
+                    message="XGBoostPruningCallback not available, pruning disabled",
+                )
 
         # Call train method with tracker for per-round metrics
         history = self.train(

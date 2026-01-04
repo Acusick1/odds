@@ -361,6 +361,30 @@ class OptunaTuner(HyperparameterTuner):
 # =============================================================================
 
 
+def _compute_feature_config_hash(feature_params: dict[str, Any]) -> str:
+    """
+    Compute a stable hash of feature configuration parameters.
+
+    Args:
+        feature_params: Dictionary of feature configuration parameters
+
+    Returns:
+        Hex string hash of the parameters
+
+    Example:
+        >>> params = {"normalize": True, "movement_threshold": 0.01}
+        >>> hash1 = _compute_feature_config_hash(params)
+        >>> hash2 = _compute_feature_config_hash(params)
+        >>> assert hash1 == hash2  # Stable hash
+    """
+    import hashlib
+    import json
+
+    # Sort keys for stable hashing
+    sorted_params = json.dumps(feature_params, sort_keys=True)
+    return hashlib.md5(sorted_params.encode()).hexdigest()
+
+
 def suggest_params_from_search_space(
     trial: Any,
     search_spaces: dict[str, Any],
@@ -472,6 +496,18 @@ def create_objective(
     feature_param_names = set(FeatureConfig.model_fields.keys())
     model_param_names = {name for name in search_spaces.keys() if name not in feature_param_names}
 
+    # Check if feature parameters are being tuned
+    has_feature_params = bool(feature_param_names & search_spaces.keys())
+    if has_feature_params and session is None:
+        logger.warning(
+            "feature_params_without_session",
+            message="Feature parameters in search space but no session provided. "
+            "Feature re-extraction will be skipped. Pass session to enable.",
+        )
+
+    # Cache for feature extraction results (keyed by feature config hash)
+    feature_cache: dict[str, tuple[ndarray, ndarray, ndarray | None, ndarray | None]] = {}
+
     logger.info(
         "objective_created",
         strategy_type=strategy_type,
@@ -479,6 +515,7 @@ def create_objective(
         search_space_size=len(search_spaces),
         model_params=list(model_param_names),
         feature_params=list(feature_param_names & search_spaces.keys()),
+        has_feature_params=has_feature_params,
     )
 
     def objective(trial: Any) -> float:
@@ -518,9 +555,81 @@ def create_objective(
             if hasattr(modified_config.training.features, param_name):
                 setattr(modified_config.training.features, param_name, param_value)
 
-        # If feature parameters changed, we need to re-extract features
-        # For now, we assume features are pre-extracted and only model params are tuned
-        # TODO: Support feature parameter tuning with re-extraction
+        # Handle feature parameter re-extraction with caching
+        trial_X_train, trial_y_train = X_train, y_train
+        trial_X_val, trial_y_val = X_val, y_val
+        trial_feature_names = feature_names
+
+        if feature_params and session is not None:
+            # Compute hash of feature configuration
+            config_hash = _compute_feature_config_hash(feature_params)
+
+            # Check cache
+            if config_hash in feature_cache:
+                logger.debug(
+                    "using_cached_features",
+                    trial_number=trial.number,
+                    config_hash=config_hash,
+                )
+                trial_X_train, trial_y_train, trial_X_val, trial_y_val = feature_cache[config_hash]
+            else:
+                # Re-extract features with modified config
+                logger.info(
+                    "re_extracting_features",
+                    trial_number=trial.number,
+                    config_hash=config_hash,
+                    feature_params=feature_params,
+                )
+
+                try:
+                    # Import feature extraction function
+                    # Extract features using modified config
+                    # Note: This requires the config to have data.start_date and data.end_date set
+                    import asyncio
+
+                    from odds_analytics.training.data_preparation import (
+                        prepare_training_data_from_config,
+                    )
+
+                    result = asyncio.run(
+                        prepare_training_data_from_config(
+                            config=modified_config,
+                            session=session,
+                        )
+                    )
+
+                    trial_X_train = result.X_train
+                    trial_y_train = result.y_train
+                    trial_X_val = result.X_val
+                    trial_y_val = result.y_val
+                    trial_feature_names = result.feature_names
+
+                    # Cache the results
+                    feature_cache[config_hash] = (
+                        trial_X_train,
+                        trial_y_train,
+                        trial_X_val,
+                        trial_y_val,
+                    )
+
+                    logger.info(
+                        "features_re_extracted",
+                        trial_number=trial.number,
+                        n_train_samples=len(trial_X_train),
+                        n_val_samples=len(trial_X_val) if trial_X_val is not None else 0,
+                        n_features=len(trial_feature_names),
+                    )
+                except Exception as e:
+                    logger.error(
+                        "feature_extraction_failed",
+                        trial_number=trial.number,
+                        error=str(e),
+                    )
+                    # Fall back to original features
+                    logger.warning(
+                        "falling_back_to_original_features",
+                        trial_number=trial.number,
+                    )
 
         # Import strategy classes
         if strategy_type in ("xgboost", "xgboost_line_movement"):
@@ -534,17 +643,34 @@ def create_objective(
         else:
             raise ValueError(f"Unknown strategy type: {strategy_type}")
 
-        # Train with modified configuration
+        # Train with modified configuration (using trial-specific features if re-extracted)
         try:
             history = strategy.train_from_config(
                 config=modified_config,
-                X_train=X_train,
-                y_train=y_train,
-                feature_names=feature_names,
-                X_val=X_val,
-                y_val=y_val,
+                X_train=trial_X_train,
+                y_train=trial_y_train,
+                feature_names=trial_feature_names,
+                X_val=trial_X_val,
+                y_val=trial_y_val,
+                trial=trial,  # Pass trial for pruning support
             )
+        except ImportError:
+            # Re-raise TrialPruned exception to let Optuna handle it
+            import optuna
+
+            if hasattr(optuna, "TrialPruned"):
+                raise
+            # If it's a different ImportError, treat as failure
+            logger.error(
+                "trial_failed",
+                trial_number=trial.number,
+                error="Import error during training",
+            )
+            return float("inf") if config.tuning.direction == "minimize" else float("-inf")
         except Exception as e:
+            # Check if it's a TrialPruned exception (might not be ImportError)
+            if e.__class__.__name__ == "TrialPruned":
+                raise  # Re-raise for Optuna to handle
             logger.error(
                 "trial_failed",
                 trial_number=trial.number,
