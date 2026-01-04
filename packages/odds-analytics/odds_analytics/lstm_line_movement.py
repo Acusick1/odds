@@ -563,6 +563,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
         X_val: np.ndarray | None = None,
         y_val: np.ndarray | None = None,
         tracker: ExperimentTracker | None = None,
+        trial: Any | None = None,
     ) -> dict[str, Any]:
         """
         Train LSTM model using configuration object.
@@ -579,6 +580,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
             X_val: Validation features (optional)
             y_val: Validation targets (optional)
             tracker: Optional experiment tracker for logging (optional)
+            trial: Optional Optuna trial for pruning support (optional)
 
         Returns:
             Training history dictionary with metrics
@@ -732,21 +734,38 @@ class LSTMLineMovementStrategy(BettingStrategy):
             avg_loss = epoch_loss / num_batches
             avg_mae = epoch_mae / num_batches
 
+            # Calculate validation metrics for reporting
+            intermediate_value = avg_loss  # Default to train loss
+            if X_val_tensor is not None and y_val_tensor is not None:
+                self.model.eval()
+                with torch.no_grad():
+                    val_predictions = self.model(X_val_tensor)
+                    val_loss = criterion(val_predictions, y_val_tensor).item()
+                    val_mae = torch.mean(torch.abs(val_predictions - y_val_tensor)).item()
+                    intermediate_value = val_loss  # Use validation loss for pruning
+
             # Log per-epoch metrics to tracker if enabled
             if tracker:
                 epoch_metrics = {"train_loss": avg_loss, "train_mae": avg_mae}
-
-                # Add validation metrics if available
                 if X_val_tensor is not None and y_val_tensor is not None:
-                    self.model.eval()
-                    with torch.no_grad():
-                        val_predictions = self.model(X_val_tensor)
-                        val_loss = criterion(val_predictions, y_val_tensor).item()
-                        val_mae = torch.mean(torch.abs(val_predictions - y_val_tensor)).item()
-                        epoch_metrics["val_loss"] = val_loss
-                        epoch_metrics["val_mae"] = val_mae
-
+                    epoch_metrics["val_loss"] = val_loss
+                    epoch_metrics["val_mae"] = val_mae
                 tracker.log_metrics(epoch_metrics, step=epoch)
+
+            # Report to Optuna trial for pruning if enabled
+            if trial is not None:
+                trial.report(intermediate_value, epoch)
+                # Check if trial should be pruned
+                if trial.should_prune():
+                    import optuna
+
+                    logger.info(
+                        "trial_pruned",
+                        trial_number=trial.number,
+                        epoch=epoch,
+                        value=intermediate_value,
+                    )
+                    raise optuna.TrialPruned()
 
             logger.debug("training_epoch", epoch=epoch + 1, loss=avg_loss, mae=avg_mae)
 
