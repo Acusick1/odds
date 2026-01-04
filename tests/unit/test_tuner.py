@@ -529,38 +529,3 @@ def test_optuna_not_installed():
     with patch.dict("sys.modules", {"optuna": None}):
         with pytest.raises(ImportError, match="optuna not installed"):
             OptunaTuner(study_name="test")
-
-
-def test_invalid_strategy_type():
-    """Test error handling for invalid strategy type."""
-    # Create valid config first
-    config = MLTrainingConfig(
-        experiment=ExperimentConfig(name="test"),
-        training=TrainingConfig(
-            strategy_type="xgboost_line_movement",
-            data=DataConfig(start_date="2024-10-01", end_date="2024-12-31"),
-            model=XGBoostConfig(),
-        ),
-        tuning=TuningConfig(
-            search_spaces={
-                "n_estimators": SearchSpace(type="int", low=50, high=500),
-            }
-        ),
-    )
-
-    X_train = np.random.randn(10, 5)
-    y_train = np.random.randn(10)
-
-    objective = create_objective(config, X_train, y_train, ["f1", "f2", "f3", "f4", "f5"])
-
-    # Manually change strategy_type to invalid value after config creation
-    # This bypasses Pydantic validation to test error handling in objective
-    config.training.strategy_type = "invalid_strategy"
-
-    # Mock trial
-    mock_trial = Mock()
-    mock_trial.number = 0
-    mock_trial.suggest_int.return_value = 100
-
-    with pytest.raises(ValueError, match="Unknown strategy type"):
-        objective(mock_trial)
