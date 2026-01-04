@@ -2732,6 +2732,7 @@ dependencies = [
     { name = "odds-core" },
     { name = "odds-lambda" },
     { name = "optuna" },
+    { name = "optuna-integration", extra = ["xgboost"] },
     { name = "pandas" },
     { name = "scikit-learn" },
     { name = "torch" },
@@ -2753,6 +2754,7 @@ requires-dist = [
     { name = "odds-core", editable = "packages/odds-core" },
     { name = "odds-lambda", editable = "packages/odds-lambda" },
     { name = "optuna", specifier = ">=3.0.0" },
+    { name = "optuna-integration", extras = ["xgboost"], specifier = ">=4.0.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "scikit-learn", specifier = ">=1.3.0" },
     { name = "torch", specifier = ">=2.0.0" },
@@ -2923,6 +2925,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/6b/81/08f90f194eed78178064a9383432eca95611e2c5331e7b01e2418ce4b15a/optuna-4.6.0.tar.gz", hash = "sha256:89e38c2447c7f793a726617b8043f01e31f0bad54855040db17eb3b49404a369", size = 477444, upload-time = "2025-11-10T05:14:30.151Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/58/de/3d8455b08cb6312f8cc46aacdf16c71d4d881a1db4a4140fc5ef31108422/optuna-4.6.0-py3-none-any.whl", hash = "sha256:4c3a9facdef2b2dd7e3e2a8ae3697effa70fae4056fcf3425cfc6f5a40feb069", size = 404708, upload-time = "2025-11-10T05:14:28.6Z" },
+]
+
+[[package]]
+name = "optuna-integration"
+version = "4.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "optuna" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8a/88/205035ee7e17f628d64a9f4e1efbb2e8aa04141e89a89d6596352eae0bec/optuna_integration-4.6.0.tar.gz", hash = "sha256:fe563b21131656df35d19c05507893fc8cfa596866476225129021556496a09a", size = 86538, upload-time = "2025-11-10T05:27:09.556Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6a/86/7cdb7d23dfa2aec23ba63d51839e520489424a9ed7ded79e6c0e40783bf7/optuna_integration-4.6.0-py3-none-any.whl", hash = "sha256:a02ef2018c02d521d23e364110579c03e53a518894d9b9a76b246b5fb2e027fd", size = 99106, upload-time = "2025-11-10T05:27:07.901Z" },
+]
+
+[package.optional-dependencies]
+xgboost = [
+    { name = "xgboost" },
 ]
 
 [[package]]
