@@ -84,6 +84,5 @@ python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 env = [
-    "DATABASE_URL=postgresql+asyncpg://localhost:5434/test",
     "ODDS_API_KEY=",
 ]
