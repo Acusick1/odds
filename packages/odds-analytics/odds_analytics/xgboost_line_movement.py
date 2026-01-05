@@ -411,7 +411,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             >>> strategy = XGBoostLineMovementStrategy()
             >>> history = strategy.train_from_config(config, X_train, y_train, feature_names)
         """
-        from odds_analytics.training.config import XGBoostConfig, resolve_search_spaces
+        from odds_analytics.training.config import XGBoostConfig
 
         # Validate strategy type
         if config.training.strategy_type != "xgboost_line_movement":
@@ -450,10 +450,6 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         # Handle early stopping if configured
         if model_config.early_stopping_rounds is not None:
             xgb_params["early_stopping_rounds"] = model_config.early_stopping_rounds
-
-        # Override with search space midpoints if tuning config exists
-        if config.tuning and config.tuning.search_spaces:
-            xgb_params = resolve_search_spaces(xgb_params, config.tuning.search_spaces)
 
         # Log configuration parameters to tracker if enabled
         if tracker:

@@ -594,7 +594,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
             >>> strategy = LSTMLineMovementStrategy()
             >>> history = strategy.train_from_config(config, X_train, y_train, feature_names)
         """
-        from odds_analytics.training.config import LSTMConfig, resolve_search_spaces
+        from odds_analytics.training.config import LSTMConfig
 
         # Validate strategy type
         if config.training.strategy_type != "lstm_line_movement":
@@ -623,10 +623,6 @@ class LSTMLineMovementStrategy(BettingStrategy):
             "loss_function": model_config.loss_function,
             "weight_decay": model_config.weight_decay,
         }
-
-        # Override with search space midpoints if tuning config exists
-        if config.tuning and config.tuning.search_spaces:
-            lstm_params = resolve_search_spaces(lstm_params, config.tuning.search_spaces)
 
         # Update strategy params
         self.params["hidden_size"] = lstm_params["hidden_size"]
