@@ -61,13 +61,17 @@ class TrainingDataResult:
 
     Attributes:
         X_train: Training features
+        X_val: Validation features (optional, None if no validation split)
         X_test: Test features
         y_train: Training targets
+        y_val: Validation targets (optional, None if no validation split)
         y_test: Test targets
         feature_names: List of feature names
         masks_train: Training masks (LSTM only, None for XGBoost)
+        masks_val: Validation masks (LSTM only, None for XGBoost)
         masks_test: Test masks (LSTM only, None for XGBoost)
         num_train_samples: Number of training samples
+        num_val_samples: Number of validation samples (0 if no validation split)
         num_test_samples: Number of test samples
         strategy_type: Type of strategy (xgboost_line_movement, lstm_line_movement, etc.)
     """
@@ -82,21 +86,32 @@ class TrainingDataResult:
         strategy_type: str,
         masks_train: np.ndarray | None = None,
         masks_test: np.ndarray | None = None,
+        X_val: np.ndarray | None = None,
+        y_val: np.ndarray | None = None,
+        masks_val: np.ndarray | None = None,
     ):
         """Initialize training data result."""
         self.X_train = X_train
+        self.X_val = X_val
         self.X_test = X_test
         self.y_train = y_train
+        self.y_val = y_val
         self.y_test = y_test
         self.feature_names = feature_names
         self.strategy_type = strategy_type
         self.masks_train = masks_train
+        self.masks_val = masks_val
         self.masks_test = masks_test
 
     @property
     def num_train_samples(self) -> int:
         """Number of training samples."""
         return len(self.X_train)
+
+    @property
+    def num_val_samples(self) -> int:
+        """Number of validation samples."""
+        return len(self.X_val) if self.X_val is not None else 0
 
     @property
     def num_test_samples(self) -> int:
@@ -118,11 +133,18 @@ class TrainingDataResult:
             "feature_names": self.feature_names,
             "strategy_type": self.strategy_type,
             "num_train_samples": self.num_train_samples,
+            "num_val_samples": self.num_val_samples,
             "num_test_samples": self.num_test_samples,
             "num_features": self.num_features,
         }
+        if self.X_val is not None:
+            result["X_val"] = self.X_val
+        if self.y_val is not None:
+            result["y_val"] = self.y_val
         if self.masks_train is not None:
             result["masks_train"] = self.masks_train
+        if self.masks_val is not None:
+            result["masks_val"] = self.masks_val
         if self.masks_test is not None:
             result["masks_test"] = self.masks_test
         return result
@@ -260,10 +282,11 @@ async def prepare_training_data_from_config(
     if len(X) == 0:
         raise ValueError(f"No valid training data after processing {len(events)} events")
 
-    # Perform train/test split
+    # Perform train/val/test split
+    # First split: separate test set
     if masks is not None:
         # Sequence data with masks
-        X_train, X_test, y_train, y_test, masks_train, masks_test = train_test_split(
+        X_trainval, X_test, y_trainval, y_test, masks_trainval, masks_test = train_test_split(
             X,
             y,
             masks,
@@ -273,15 +296,51 @@ async def prepare_training_data_from_config(
         )
     else:
         # Tabular data without masks
-        X_train, X_test, y_train, y_test = train_test_split(
+        X_trainval, X_test, y_trainval, y_test = train_test_split(
             X,
             y,
             test_size=data_config.test_split,
             random_state=data_config.random_seed,
             shuffle=data_config.shuffle,
         )
-        masks_train = None
+        masks_trainval = None
         masks_test = None
+
+    # Second split: separate validation set from training set (if validation_split > 0)
+    X_val = None
+    y_val = None
+    masks_val = None
+    masks_train = None
+
+    if data_config.validation_split > 0:
+        # Calculate validation size relative to train+val set
+        # If test_split=0.2 and validation_split=0.1, we have 0.8 for train+val
+        # We want validation to be 0.1 of total, so it's 0.1/0.8 = 0.125 of train+val
+        remaining = 1.0 - data_config.test_split
+        val_size_relative = data_config.validation_split / remaining
+
+        if masks_trainval is not None:
+            X_train, X_val, y_train, y_val, masks_train, masks_val = train_test_split(
+                X_trainval,
+                y_trainval,
+                masks_trainval,
+                test_size=val_size_relative,
+                random_state=data_config.random_seed,
+                shuffle=data_config.shuffle,
+            )
+        else:
+            X_train, X_val, y_train, y_val = train_test_split(
+                X_trainval,
+                y_trainval,
+                test_size=val_size_relative,
+                random_state=data_config.random_seed,
+                shuffle=data_config.shuffle,
+            )
+    else:
+        # No validation split, use all trainval for training
+        X_train = X_trainval
+        y_train = y_trainval
+        masks_train = masks_trainval
 
     logger.info(
         "training_data_prepared_from_config",
@@ -289,9 +348,11 @@ async def prepare_training_data_from_config(
         feature_groups=features_config.feature_groups,
         total_samples=len(X),
         train_samples=len(X_train),
+        val_samples=len(X_val) if X_val is not None else 0,
         test_samples=len(X_test),
         num_features=len(feature_names),
         test_split=data_config.test_split,
+        validation_split=data_config.validation_split,
     )
 
     return TrainingDataResult(
@@ -303,4 +364,7 @@ async def prepare_training_data_from_config(
         strategy_type=strategy_type,
         masks_train=masks_train,
         masks_test=masks_test,
+        X_val=X_val,
+        y_val=y_val,
+        masks_val=masks_val,
     )

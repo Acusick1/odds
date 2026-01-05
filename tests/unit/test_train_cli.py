@@ -8,6 +8,7 @@ Tests cover:
 4. Best parameter export
 """
 
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -23,6 +24,12 @@ from odds_analytics.training.config import (
     XGBoostConfig,
 )
 from typer.testing import CliRunner
+
+
+def strip_ansi(text: str) -> str:
+    """Strip ANSI escape codes from text (Rich output formatting)."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
 
 # =============================================================================
 # Fixtures
@@ -117,8 +124,8 @@ def test_tune_command_requires_config(cli_runner):
     result = cli_runner.invoke(app, ["tune"])
 
     assert result.exit_code != 0
-    # Typer may output to stderr instead of stdout
-    output = result.stdout + result.stderr
+    # Strip ANSI codes from Rich output before checking
+    output = strip_ansi(result.stdout + result.stderr)
     assert "Missing option '--config'" in output or "required" in output.lower()
 
 
