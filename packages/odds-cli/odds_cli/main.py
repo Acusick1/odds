@@ -1,6 +1,8 @@
 """Main CLI entry point using Typer."""
 
 import typer
+from odds_core.config import get_settings
+from odds_core.logging_setup import configure_logging
 from rich.console import Console
 
 from odds_cli.commands import (
@@ -44,7 +46,9 @@ def callback():
 
     A single-user NBA betting odds data collection and analysis system.
     """
-    pass
+    # Initialize logging for CLI (human-readable output)
+    settings = get_settings()
+    configure_logging(settings, json_output=False)
 
 
 if __name__ == "__main__":

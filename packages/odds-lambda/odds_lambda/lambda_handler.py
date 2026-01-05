@@ -21,17 +21,11 @@ import asyncio
 import json
 
 import structlog
+from odds_core.config import get_settings
+from odds_core.logging_setup import configure_logging
 
-# Configure structured logging for Lambda
-structlog.configure(
-    processors=[
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.add_log_level,
-        structlog.processors.JSONRenderer(),
-    ],
-    context_class=dict,
-    logger_factory=structlog.PrintLoggerFactory(),
-)
+# Configure structured logging for Lambda (JSON output for CloudWatch)
+configure_logging(get_settings(), json_output=True)
 
 logger = structlog.get_logger()
 
