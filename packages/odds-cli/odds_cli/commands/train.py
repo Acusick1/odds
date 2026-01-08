@@ -780,6 +780,41 @@ async def _run_tuning_async(
         X_val = data_result.X_val if data_result.num_val_samples > 0 else data_result.X_test
         y_val = data_result.y_val if data_result.num_val_samples > 0 else data_result.y_test
 
+        # Pre-compute features for all feature_groups choices if being tuned
+        precomputed_features = None
+        if "feature_groups" in ml_config.tuning.search_spaces:
+            console.print(
+                "[cyan]Pre-computing features for all feature group combinations...[/cyan]"
+            )
+            precomputed_features = {}
+
+            for choice in ml_config.tuning.search_spaces["feature_groups"].choices:
+                fg_tuple = tuple(choice) if isinstance(choice, list) else choice
+
+                # Check if this is the same as the default (already computed)
+                if fg_tuple == ml_config.training.features.feature_groups:
+                    precomputed_features[fg_tuple] = data_result
+                    continue
+
+                # Create modified config and extract features
+                modified_config = ml_config.model_copy(deep=True)
+                modified_config.training.features.feature_groups = fg_tuple
+
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=console,
+                ) as progress:
+                    task = progress.add_task(f"Extracting features for {fg_tuple}...", total=None)
+                    result = await prepare_training_data_from_config(modified_config, session)
+                    progress.update(task, description=f"Extracted {result.num_features} features")
+
+                precomputed_features[fg_tuple] = result
+
+            console.print(
+                f"[green]Pre-computed {len(precomputed_features)} feature combinations[/green]\n"
+            )
+
         objective = create_objective(
             config=ml_config,
             X_train=data_result.X_train,
@@ -787,7 +822,7 @@ async def _run_tuning_async(
             feature_names=data_result.feature_names,
             X_val=X_val,
             y_val=y_val,
-            session=session,
+            precomputed_features=precomputed_features,
         )
 
         # Step 4: Run optimization

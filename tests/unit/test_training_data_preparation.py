@@ -164,7 +164,7 @@ class TestFeatureConfigExtraction:
         assert config.markets == ["h2h", "spreads", "totals"]
         assert config.sharp_bookmakers == ["pinnacle"]
         assert config.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
-        assert config.feature_groups == ["tabular"]
+        assert config.feature_groups == ("tabular",)
         assert config.opening_tier.value == "early"
         assert config.closing_tier.value == "closing"
 
@@ -185,7 +185,7 @@ class TestFeatureConfigExtraction:
         assert config.outcome == "away"
         assert config.markets == ["spreads"]
         assert config.sharp_bookmakers == ["pinnacle", "circasports"]
-        assert config.feature_groups == ["tabular", "trajectory"]
+        assert config.feature_groups == ("tabular", "trajectory")
 
 
 # =============================================================================

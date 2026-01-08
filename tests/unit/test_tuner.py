@@ -607,18 +607,18 @@ def test_feature_config_hash_uniqueness():
     assert hash1 != hash2
 
 
-def test_feature_params_warning_without_session(sample_config, sample_training_data):
-    """Test warning when feature params in search space but no session provided."""
+def test_feature_groups_warning_without_precomputed(sample_config, sample_training_data):
+    """Test warning when feature_groups in search space but no precomputed_features provided."""
     X_train, y_train, X_val, y_val, feature_names = sample_training_data
 
-    # Add a feature parameter to search space
+    # Add feature_groups to search space
     from odds_analytics.training.config import SearchSpace
 
-    sample_config.tuning.search_spaces["normalize"] = SearchSpace(
-        type="categorical", choices=[True, False]
+    sample_config.tuning.search_spaces["feature_groups"] = SearchSpace(
+        type="categorical", choices=[["tabular"], ["tabular", "trajectory"]]
     )
 
-    # Create objective without session
+    # Create objective without precomputed_features
     with patch("odds_analytics.training.tuner.logger") as mock_logger:
         create_objective(
             config=sample_config,
@@ -627,10 +627,10 @@ def test_feature_params_warning_without_session(sample_config, sample_training_d
             feature_names=feature_names,
             X_val=X_val,
             y_val=y_val,
-            session=None,  # No session
+            precomputed_features=None,  # No precomputed features
         )
 
         # Should have logged a warning
         mock_logger.warning.assert_called_once()
         call_args = mock_logger.warning.call_args[0]
-        assert call_args[0] == "feature_params_without_session"
+        assert call_args[0] == "feature_groups_without_precomputed"
