@@ -1174,7 +1174,7 @@ class MLTrainingConfig(BaseModel):
                 return {k: serialize_value(v) for k, v in value.model_dump().items()}
             elif isinstance(value, dict):
                 return {k: serialize_value(v) for k, v in value.items()}
-            elif isinstance(value, list):
+            elif isinstance(value, list | tuple):
                 return [serialize_value(v) for v in value]
             return value
 
