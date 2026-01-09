@@ -42,7 +42,10 @@ def parse_date(date_str: str) -> datetime:
 @app.command("run")
 def run_backtest(
     strategy: str = typer.Option(
-        ..., "--strategy", "-s", help="Strategy name (flat, basic_ev, arbitrage, lstm, lstm_line_movement, xgb_line_movement)"
+        ...,
+        "--strategy",
+        "-s",
+        help="Strategy name (flat, basic_ev, arbitrage, lstm, lstm_line_movement, xgb_line_movement)",
     ),
     start: str = typer.Option(..., "--start", help="Start date (YYYY-MM-DD)"),
     end: str = typer.Option(..., "--end", help="End date (YYYY-MM-DD)"),
@@ -60,7 +63,10 @@ def run_backtest(
         0.25, "--kelly-fraction", help="Kelly fraction (default: 0.25)"
     ),
     model_path: str | None = typer.Option(
-        None, "--model-path", "-m", help="Path to pre-trained model (for lstm, lstm_line_movement, xgb_line_movement)"
+        None,
+        "--model-path",
+        "-m",
+        help="Path to pre-trained model (for lstm, lstm_line_movement, xgb_line_movement)",
     ),
 ):
     """

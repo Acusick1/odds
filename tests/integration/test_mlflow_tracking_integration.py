@@ -17,7 +17,6 @@ import tempfile
 from datetime import date
 from pathlib import Path
 
-import numpy as np
 import pytest
 from odds_analytics.training import (
     DataConfig,
@@ -89,21 +88,6 @@ class TestMLflowTrackingIntegration:
                 log_metrics=True,
             ),
         )
-
-    @pytest.fixture
-    def sample_training_data(self):
-        """Create sample training data for testing."""
-        np.random.seed(42)
-        n_samples = 100
-        n_features = 10
-
-        X_train = np.random.randn(n_samples, n_features)
-        y_train = np.random.randn(n_samples)
-        X_val = np.random.randn(20, n_features)
-        y_val = np.random.randn(20)
-        feature_names = [f"feature_{i}" for i in range(n_features)]
-
-        return X_train, y_train, X_val, y_val, feature_names
 
     def test_tracker_creation_from_config(self, xgboost_config_with_tracking):
         """Test that tracker can be created from config."""
@@ -280,9 +264,9 @@ class TestMLflowTrackingIntegration:
         metric_names = list(run.data.metrics.keys())
 
         # Check for final metrics that we explicitly log
-        assert any("final_train_mse" in name for name in metric_names), (
-            "Final train metrics not logged"
-        )
+        assert any(
+            "final_train_mse" in name for name in metric_names
+        ), "Final train metrics not logged"
 
         # Note: Autolog metrics appear in the run but may have different naming
         # The important thing is that the run completed and has metrics

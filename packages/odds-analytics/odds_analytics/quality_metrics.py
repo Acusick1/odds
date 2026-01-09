@@ -60,7 +60,9 @@ class TierCoverage(BaseModel):
     tier: str = Field(description="FetchTier enum value (e.g., 'closing', 'pregame')")
     tier_name: str = Field(description="Lowercase tier identifier")
     hours_range: str = Field(description="Human-readable time window (e.g., '0-3 hours before')")
-    expected_interval_hours: float = Field(description="Expected sampling interval from tier properties")
+    expected_interval_hours: float = Field(
+        description="Expected sampling interval from tier properties"
+    )
     games_in_tier_range: int = Field(description="Games eligible for this tier")
     games_with_tier_snapshots: int = Field(description="Games with at least one snapshot in tier")
     total_snapshots_in_tier: int = Field(description="Total snapshots captured in this tier")
@@ -75,9 +77,13 @@ class BookmakerCoverage(BaseModel):
     bookmaker_title: str = Field(description="Bookmaker display name")
     total_games: int = Field(description="Total games in the analyzed date range")
     games_with_odds: int = Field(description="Games where this bookmaker provided odds")
-    coverage_pct: float = Field(description="Percentage of games with odds (games_with_odds / total_games * 100)")
+    coverage_pct: float = Field(
+        description="Percentage of games with odds (games_with_odds / total_games * 100)"
+    )
     total_snapshots: int = Field(description="Total odds records from this bookmaker")
-    avg_snapshots_per_game: float = Field(description="Average snapshots per game (total_snapshots / games_with_odds)")
+    avg_snapshots_per_game: float = Field(
+        description="Average snapshots per game (total_snapshots / games_with_odds)"
+    )
 
 
 class QualityMetrics:
@@ -553,9 +559,7 @@ class QualityMetrics:
             total_snapshots = row[3]
 
             # Calculate coverage percentage
-            coverage_pct = (
-                (games_with_odds / total_games * 100) if total_games > 0 else 0.0
-            )
+            coverage_pct = (games_with_odds / total_games * 100) if total_games > 0 else 0.0
 
             # Calculate average snapshots per game
             avg_snapshots_per_game = (

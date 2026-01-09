@@ -453,7 +453,7 @@ class TestTimeSeriesCV:
         for i in range(1, len(train_sizes)):
             assert train_sizes[i] > train_sizes[i - 1], (
                 f"Training window should expand: fold {i} has {train_sizes[i]} samples, "
-                f"but fold {i-1} has {train_sizes[i-1]} samples"
+                f"but fold {i - 1} has {train_sizes[i - 1]} samples"
             )
 
     def test_timeseries_cv_returns_cv_method(self, timeseries_config, sample_data):

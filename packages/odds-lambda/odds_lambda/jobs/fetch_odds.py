@@ -149,9 +149,7 @@ async def main():
         if app_settings.alerts.alert_enabled:
             from odds_cli.alerts.base import send_critical
 
-            await send_critical(
-                f"🚨 Fetch odds job failed: {type(e).__name__}: {str(e)}"
-            )
+            await send_critical(f"🚨 Fetch odds job failed: {type(e).__name__}: {str(e)}")
 
         # Don't schedule next run if we failed - let manual intervention happen
         raise
@@ -176,9 +174,7 @@ async def main():
             if app_settings.alerts.alert_enabled:
                 from odds_cli.alerts.base import send_error
 
-                await send_error(
-                    f"Fetch odds scheduling failed: {type(e).__name__}: {str(e)}"
-                )
+                await send_error(f"Fetch odds scheduling failed: {type(e).__name__}: {str(e)}")
 
             # Don't fail the job if scheduling fails - the fetch itself succeeded
 

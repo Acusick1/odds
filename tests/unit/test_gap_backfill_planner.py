@@ -3,7 +3,7 @@
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
-from odds_analytics.gap_backfill_planner import GapBackfillPlanner, GameGapInfo
+from odds_analytics.gap_backfill_planner import GapBackfillPlanner
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.fetch_tier import FetchTier
 
@@ -195,9 +195,7 @@ class TestGapBackfillPlanner:
         missing = frozenset([FetchTier.OPENING])
         assert planner._get_highest_priority_missing_tier(missing) == FetchTier.OPENING
 
-    async def test_generate_plan_respects_quota_limit(
-        self, test_session, sample_events_with_gaps
-    ):
+    async def test_generate_plan_respects_quota_limit(self, test_session, sample_events_with_gaps):
         """Test that generate_plan respects max_quota constraint."""
         planner = GapBackfillPlanner(test_session)
 

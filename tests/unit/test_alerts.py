@@ -146,14 +146,18 @@ class TestConvenienceFunctions:
     @pytest.mark.asyncio
     async def test_send_warning_calls_alert_manager(self):
         """send_warning should call alert manager with warning severity."""
-        with patch("odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
+        with patch(
+            "odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock
+        ) as mock_alert:
             await send_warning("Test warning")
             mock_alert.assert_called_once_with("Test warning", "warning")
 
     @pytest.mark.asyncio
     async def test_send_error_calls_alert_manager(self):
         """send_error should call alert manager with error severity."""
-        with patch("odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
+        with patch(
+            "odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock
+        ) as mock_alert:
             await send_error("Test error")
             mock_alert.assert_called_once_with("Test error", "error")
 

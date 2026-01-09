@@ -1,11 +1,9 @@
 """Unit tests for fetch_odds alert behavior."""
 
-from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_core.config import AlertConfig, APIConfig, Settings
-from odds_lambda.ingestion import IngestionResult, SportIngestionResult
 
 
 class TestQuotaAlerts:
@@ -28,7 +26,9 @@ class TestQuotaAlerts:
 
         # Mock the send_warning function
         with patch("odds_cli.alerts.base.send_warning", new_callable=AsyncMock) as mock_warning:
-            with patch("odds_cli.alerts.base.send_critical", new_callable=AsyncMock) as mock_critical:
+            with patch(
+                "odds_cli.alerts.base.send_critical", new_callable=AsyncMock
+            ) as mock_critical:
                 # Simulate the quota check logic from fetch_odds.py
                 quota_fraction = quota_remaining / mock_settings.api.quota
                 percentage_remaining = round(quota_fraction * 100, 1)
@@ -70,7 +70,9 @@ class TestQuotaAlerts:
         quota_remaining = int(20000 * 0.05)  # 1000 requests
 
         with patch("odds_cli.alerts.base.send_warning", new_callable=AsyncMock) as mock_warning:
-            with patch("odds_cli.alerts.base.send_critical", new_callable=AsyncMock) as mock_critical:
+            with patch(
+                "odds_cli.alerts.base.send_critical", new_callable=AsyncMock
+            ) as mock_critical:
                 # Simulate the quota check logic
                 quota_fraction = quota_remaining / mock_settings.api.quota
                 percentage_remaining = round(quota_fraction * 100, 1)
@@ -112,7 +114,9 @@ class TestQuotaAlerts:
         quota_remaining = int(20000 * 0.5)  # 10000 requests
 
         with patch("odds_cli.alerts.base.send_warning", new_callable=AsyncMock) as mock_warning:
-            with patch("odds_cli.alerts.base.send_critical", new_callable=AsyncMock) as mock_critical:
+            with patch(
+                "odds_cli.alerts.base.send_critical", new_callable=AsyncMock
+            ) as mock_critical:
                 # Simulate the quota check logic
                 quota_fraction = quota_remaining / mock_settings.api.quota
 
@@ -168,7 +172,9 @@ class TestQuotaAlerts:
         quota_remaining = int(20000 * 0.2)
 
         with patch("odds_cli.alerts.base.send_warning", new_callable=AsyncMock) as mock_warning:
-            with patch("odds_cli.alerts.base.send_critical", new_callable=AsyncMock) as mock_critical:
+            with patch(
+                "odds_cli.alerts.base.send_critical", new_callable=AsyncMock
+            ) as mock_critical:
                 quota_fraction = quota_remaining / mock_settings.api.quota
 
                 if quota_fraction < mock_settings.alerts.quota_critical_threshold:

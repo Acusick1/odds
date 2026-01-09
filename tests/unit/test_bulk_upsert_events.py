@@ -234,7 +234,7 @@ class TestBulkUpsertEvents:
                     sport_title="NBA",
                     commence_time=base_time + timedelta(hours=i),
                     home_team=f"Team{i}",
-                    away_team=f"Team{i+1}",
+                    away_team=f"Team{i + 1}",
                 )
             )
 
@@ -244,7 +244,9 @@ class TestBulkUpsertEvents:
         elapsed_time = time.time() - start_time
 
         assert result == {"inserted": 100, "updated": 0}
-        assert elapsed_time < 2.0, f"Performance test failed: took {elapsed_time:.2f}s (expected < 2.0s)"
+        assert (
+            elapsed_time < 2.0
+        ), f"Performance test failed: took {elapsed_time:.2f}s (expected < 2.0s)"
 
         # Verify all events were inserted
         test_session.expire_all()
@@ -267,7 +269,7 @@ class TestBulkUpsertEvents:
                     sport_title="NBA",
                     commence_time=base_time + timedelta(hours=i),
                     home_team=f"MixTeam{i}",
-                    away_team=f"MixTeam{i+1}",
+                    away_team=f"MixTeam{i + 1}",
                     status=EventStatus.SCHEDULED,
                 )
             )
@@ -285,7 +287,7 @@ class TestBulkUpsertEvents:
                     sport_title="NBA",
                     commence_time=base_time + timedelta(hours=i),
                     home_team=f"MixTeam{i}",
-                    away_team=f"MixTeam{i+1}",
+                    away_team=f"MixTeam{i + 1}",
                     status=EventStatus.LIVE if i < 50 else EventStatus.SCHEDULED,
                 )
             )
@@ -296,13 +298,13 @@ class TestBulkUpsertEvents:
         elapsed_time = time.time() - start_time
 
         assert result == {"inserted": 50, "updated": 50}
-        assert elapsed_time < 2.0, f"Performance test failed: took {elapsed_time:.2f}s (expected < 2.0s)"
+        assert (
+            elapsed_time < 2.0
+        ), f"Performance test failed: took {elapsed_time:.2f}s (expected < 2.0s)"
 
         # Expire session and verify all events exist
         test_session.expire_all()
-        db_result = await test_session.execute(
-            select(Event).where(Event.id.like("mixed_event%"))
-        )
+        db_result = await test_session.execute(select(Event).where(Event.id.like("mixed_event%")))
         db_events = db_result.scalars().all()
         assert len(db_events) == 100
 

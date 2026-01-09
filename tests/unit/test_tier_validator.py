@@ -38,13 +38,15 @@ class TestTierCoverageReport:
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
-            tiers_present=frozenset({
-                FetchTier.OPENING,
-                FetchTier.EARLY,
-                FetchTier.SHARP,
-                FetchTier.PREGAME,
-                FetchTier.CLOSING,
-            }),
+            tiers_present=frozenset(
+                {
+                    FetchTier.OPENING,
+                    FetchTier.EARLY,
+                    FetchTier.SHARP,
+                    FetchTier.PREGAME,
+                    FetchTier.CLOSING,
+                }
+            ),
             tiers_missing=frozenset(),
         )
 
@@ -66,7 +68,9 @@ class TestTierCoverageReport:
         assert report.is_complete is True
         assert report.has_tier_warnings is True
         assert report.critical_tiers_missing == frozenset()
-        assert report.warning_tiers_missing == frozenset({FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP})
+        assert report.warning_tiers_missing == frozenset(
+            {FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP}
+        )
 
     def test_is_complete_with_critical_tiers_missing(self):
         """Test is_complete returns False when critical tiers missing."""
@@ -107,13 +111,15 @@ class TestTierCoverageReport:
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
-            tiers_present=frozenset({
-                FetchTier.OPENING,
-                FetchTier.EARLY,
-                FetchTier.SHARP,
-                FetchTier.PREGAME,
-                FetchTier.CLOSING,
-            }),
+            tiers_present=frozenset(
+                {
+                    FetchTier.OPENING,
+                    FetchTier.EARLY,
+                    FetchTier.SHARP,
+                    FetchTier.PREGAME,
+                    FetchTier.CLOSING,
+                }
+            ),
             tiers_missing=frozenset(),
         )
 
@@ -141,13 +147,15 @@ class TestTierCoverageReport:
             away_team="Celtics",
             commence_time=datetime.now(UTC),
             tiers_present=frozenset(),
-            tiers_missing=frozenset({
-                FetchTier.OPENING,
-                FetchTier.EARLY,
-                FetchTier.SHARP,
-                FetchTier.PREGAME,
-                FetchTier.CLOSING,
-            }),
+            tiers_missing=frozenset(
+                {
+                    FetchTier.OPENING,
+                    FetchTier.EARLY,
+                    FetchTier.SHARP,
+                    FetchTier.PREGAME,
+                    FetchTier.CLOSING,
+                }
+            ),
         )
 
         assert report.coverage_percentage == 0.0
@@ -415,7 +423,11 @@ class TestTierCoverageValidatorDailyValidation:
             test_session.add(event)
 
             # First game gets all tiers, second game missing CLOSING
-            tiers = FetchTier if i == 0 else [FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP, FetchTier.PREGAME]
+            tiers = (
+                FetchTier
+                if i == 0
+                else [FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP, FetchTier.PREGAME]
+            )
 
             for tier in tiers:
                 snapshot = OddsSnapshot(

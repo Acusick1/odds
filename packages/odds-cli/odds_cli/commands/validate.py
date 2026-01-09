@@ -308,7 +308,9 @@ def _display_incomplete_games(report, verbose):
     if report.incomplete_games == 0:
         return
 
-    console.print(f"[bold red]Critical Issues - Missing Critical Tiers ({report.incomplete_games}):[/bold red]\n")
+    console.print(
+        f"[bold red]Critical Issues - Missing Critical Tiers ({report.incomplete_games}):[/bold red]\n"
+    )
 
     incomplete_reports = [r for r in report.game_reports if not r.is_complete]
 
@@ -321,12 +323,16 @@ def _display_incomplete_games(report, verbose):
 
         # Show critical missing tiers
         if game_report.critical_tiers_missing:
-            critical = ", ".join(sorted([t.value.upper() for t in game_report.critical_tiers_missing]))
+            critical = ", ".join(
+                sorted([t.value.upper() for t in game_report.critical_tiers_missing])
+            )
             console.print(f"     Critical Missing: [red]{critical}[/red]")
 
         # Show warning missing tiers
         if game_report.warning_tiers_missing:
-            warnings = ", ".join(sorted([t.value.upper() for t in game_report.warning_tiers_missing]))
+            warnings = ", ".join(
+                sorted([t.value.upper() for t in game_report.warning_tiers_missing])
+            )
             console.print(f"     Warning Missing: [yellow]{warnings}[/yellow]")
 
         if verbose:
@@ -345,7 +351,9 @@ def _display_warning_games(report, verbose):
     if report.games_with_warnings == 0:
         return
 
-    console.print(f"[bold yellow]Warnings - Missing Supplementary Tiers ({report.games_with_warnings}):[/bold yellow]\n")
+    console.print(
+        f"[bold yellow]Warnings - Missing Supplementary Tiers ({report.games_with_warnings}):[/bold yellow]\n"
+    )
 
     # Get games that are complete (have critical tiers) but have warnings
     warning_reports = [r for r in report.game_reports if r.is_complete and r.has_tier_warnings]

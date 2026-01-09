@@ -66,7 +66,7 @@ if TYPE_CHECKING:
     import optuna
     from numpy import ndarray
 
-    from odds_analytics.training.config import MLTrainingConfig
+    from odds_analytics.training.config import MLTrainingConfig, TrackingConfig
     from odds_analytics.training.data_preparation import TrainingDataResult
 
 logger = structlog.get_logger()
@@ -139,7 +139,7 @@ class HyperparameterTuner(ABC):
 
 class OptunaTuner(HyperparameterTuner):
     """
-    Optuna-based hyperparameter tuner with PostgreSQL persistence.
+    Optuna-based hyperparameter tuner with PostgreSQL persistence and MLflow integration.
 
     Supports multiple sampling strategies (TPE, Random, CMA-ES) and pruning
     approaches (Median, Hyperband, or none). Automatically maps configuration
@@ -152,6 +152,9 @@ class OptunaTuner(HyperparameterTuner):
         pruner: Pruning strategy ("median", "hyperband", "none")
         storage: Storage URL for persistence (e.g., "postgresql://...")
             If None, uses in-memory storage
+        tracking_config: Optional TrackingConfig for MLflow experiment tracking
+            If provided, each trial is logged as a nested run with the parent run
+            containing study metadata and the best model
 
     Example:
         >>> tuner = OptunaTuner(
@@ -171,6 +174,7 @@ class OptunaTuner(HyperparameterTuner):
         sampler: str = "tpe",
         pruner: str = "median",
         storage: str | None = None,
+        tracking_config: TrackingConfig | None = None,
     ):
         """Initialize Optuna tuner with specified configuration."""
         try:
@@ -181,6 +185,7 @@ class OptunaTuner(HyperparameterTuner):
         self.study_name = study_name
         self.direction = direction
         self.storage = storage
+        self.tracking_config = tracking_config
 
         # Create sampler
         self.sampler = self._create_sampler(sampler)
@@ -191,6 +196,10 @@ class OptunaTuner(HyperparameterTuner):
         # Study will be created on first optimize call
         self.study: optuna.Study | None = None
 
+        # MLflow tracker and parent run info
+        self._tracker = None
+        self._parent_run_id = None
+
         logger.info(
             "tuner_initialized",
             study_name=study_name,
@@ -198,6 +207,7 @@ class OptunaTuner(HyperparameterTuner):
             sampler=sampler,
             pruner=pruner,
             has_storage=storage is not None,
+            tracking_enabled=tracking_config is not None and tracking_config.enabled,
         )
 
     def _create_sampler(self, sampler_name: str) -> Any:
@@ -263,10 +273,16 @@ class OptunaTuner(HyperparameterTuner):
         timeout: int | None = None,
     ) -> Any:
         """
-        Run Optuna optimization.
+        Run Optuna optimization with optional MLflow tracking.
 
         Creates study if it doesn't exist and runs optimization with
         the specified number of trials or timeout.
+
+        When tracking is enabled (via tracking_config):
+        - Creates a parent MLflow run for study metadata
+        - Uses Optuna's MLflowCallback to log each trial as a nested run
+        - Logs study-level information (trial count, direction, sampler, pruner)
+        - After optimization, logs best parameters and value to parent run
 
         Args:
             objective: Objective function accepting Optuna trial
@@ -301,27 +317,151 @@ class OptunaTuner(HyperparameterTuner):
                 direction=self.direction,
             )
 
+        # Initialize MLflow tracking if enabled
+        callbacks = []
+        if self.tracking_config and self.tracking_config.enabled:
+            try:
+                from odds_analytics.training.tracking import create_tracker
+
+                # Create tracker and start parent run
+                self._tracker = create_tracker(self.tracking_config)
+                self._tracker.start_run(
+                    run_name=f"{self.study_name}_parent",
+                    tags={
+                        "mlflow.runName": f"{self.study_name}_parent",
+                        "study_name": self.study_name,
+                        "type": "hyperparameter_tuning",
+                    },
+                )
+
+                # Log study configuration
+                self._tracker.log_params(
+                    {
+                        "study_name": self.study_name,
+                        "direction": self.direction,
+                        "sampler": self.sampler.__class__.__name__,
+                        "pruner": self.pruner.__class__.__name__,
+                        "n_trials": n_trials or "unlimited",
+                        "timeout": timeout or "unlimited",
+                    }
+                )
+
+                # Get parent run ID for MLflowCallback
+                import mlflow
+
+                self._parent_run_id = mlflow.active_run().info.run_id
+
+                # Create MLflow callback for nested trial runs
+                mlflow_callback = optuna.integration.MLflowCallback(
+                    tracking_uri=self.tracking_config.tracking_uri,
+                    metric_name="value",
+                    create_experiment=False,
+                    mlflow_kwargs={
+                        "experiment_id": mlflow.active_run().info.experiment_id,
+                        "nested": True,
+                    },
+                )
+                callbacks.append(mlflow_callback)
+
+                logger.info(
+                    "mlflow_tracking_initialized",
+                    parent_run_id=self._parent_run_id,
+                    experiment_id=mlflow.active_run().info.experiment_id,
+                )
+
+            except Exception as e:
+                logger.warning(
+                    "mlflow_tracking_setup_failed",
+                    error=str(e),
+                    message="Continuing without tracking",
+                )
+                self._tracker = None
+                self._parent_run_id = None
+
         # Run optimization
         logger.info(
             "optimization_started",
             study_name=self.study_name,
             n_trials=n_trials,
             timeout=timeout,
+            tracking_enabled=bool(self._tracker),
         )
 
-        self.study.optimize(
-            objective,
-            n_trials=n_trials,
-            timeout=timeout,
-            show_progress_bar=True,
-        )
+        try:
+            self.study.optimize(
+                objective,
+                n_trials=n_trials,
+                timeout=timeout,
+                show_progress_bar=True,
+                callbacks=callbacks if callbacks else None,
+            )
+        finally:
+            # Log final results to parent run if tracking enabled
+            if self._tracker:
+                run_status = "FINISHED"
+                if self.study.best_trial:
+                    try:
+                        # Log best trial results
+                        self._tracker.log_params(
+                            {f"best_{k}": v for k, v in self.study.best_params.items()}
+                        )
+                        self._tracker.log_metrics(
+                            {
+                                "best_value": self.study.best_value,
+                                "n_completed_trials": len(
+                                    [
+                                        t
+                                        for t in self.study.trials
+                                        if t.state == optuna.trial.TrialState.COMPLETE
+                                    ]
+                                ),
+                                "n_pruned_trials": len(
+                                    [
+                                        t
+                                        for t in self.study.trials
+                                        if t.state == optuna.trial.TrialState.PRUNED
+                                    ]
+                                ),
+                                "n_failed_trials": len(
+                                    [
+                                        t
+                                        for t in self.study.trials
+                                        if t.state == optuna.trial.TrialState.FAIL
+                                    ]
+                                ),
+                            }
+                        )
+                        logger.info(
+                            "mlflow_parent_run_updated",
+                            best_value=self.study.best_value,
+                            n_trials=len(self.study.trials),
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "mlflow_parent_run_logging_failed",
+                            error=str(e),
+                        )
+                else:
+                    # No successful trials - mark as failed
+                    run_status = "FAILED"
+                    logger.warning(
+                        "optimization_no_successful_trials",
+                        study_name=self.study_name,
+                        n_trials=len(self.study.trials),
+                    )
 
-        logger.info(
-            "optimization_completed",
-            study_name=self.study_name,
-            n_trials=len(self.study.trials),
-            best_value=self.study.best_value,
-        )
+                # Always end parent run
+                self._tracker.end_run(status=run_status)
+
+        # Guard best_value access - only log if we have a best trial
+        log_data = {
+            "study_name": self.study_name,
+            "n_trials": len(self.study.trials),
+        }
+        if self.study.best_trial:
+            log_data["best_value"] = self.study.best_value
+
+        logger.info("optimization_completed", **log_data)
 
         return self.study
 
@@ -354,6 +494,51 @@ class OptunaTuner(HyperparameterTuner):
             raise ValueError("No study found. Run optimize() first.")
 
         return self.study.best_params
+
+    def log_best_model(self, model: Any, artifact_path: str = "best_model") -> None:
+        """
+        Log the best model to the parent MLflow run.
+
+        This should be called after training the final model with best parameters
+        to persist it alongside the hyperparameter tuning study metadata.
+
+        Args:
+            model: The trained model object (XGBoost, PyTorch, etc.)
+            artifact_path: Path within artifact store for the model
+
+        Raises:
+            ValueError: If tracking is not enabled or parent run doesn't exist
+
+        Example:
+            >>> study = tuner.optimize(objective, n_trials=100)
+            >>> # Train final model with best params
+            >>> final_model = train_with_best_params(study.best_params)
+            >>> tuner.log_best_model(final_model)
+        """
+        if not self._tracker or not self._parent_run_id:
+            raise ValueError(
+                "Cannot log model: tracking is not enabled or parent run doesn't exist. "
+                "Ensure tracking_config is provided and optimize() has been called."
+            )
+
+        try:
+            # Temporarily reactivate parent run to log model
+            import mlflow
+
+            with mlflow.start_run(run_id=self._parent_run_id):
+                self._tracker.log_model(model, artifact_path=artifact_path)
+                logger.info(
+                    "best_model_logged",
+                    run_id=self._parent_run_id,
+                    artifact_path=artifact_path,
+                )
+        except Exception as e:
+            logger.error(
+                "best_model_logging_failed",
+                error=str(e),
+                run_id=self._parent_run_id,
+            )
+            raise
 
 
 # =============================================================================

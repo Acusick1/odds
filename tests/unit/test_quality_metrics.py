@@ -1661,7 +1661,9 @@ class TestQualityMetricsBookmakerCoverage:
         # Should return empty list (no games in date range)
         assert len(result) == 0
 
-    async def test_get_bookmaker_coverage_multiple_snapshots_per_game(self, test_session: AsyncSession):
+    async def test_get_bookmaker_coverage_multiple_snapshots_per_game(
+        self, test_session: AsyncSession
+    ):
         """Test avg_snapshots_per_game calculation with multiple snapshots."""
         # Create one event
         event = Event(

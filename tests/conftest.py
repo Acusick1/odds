@@ -324,3 +324,26 @@ def mock_historical_events_response():
         "quota_remaining": 19990,
         "timestamp": datetime(2024, 10, 15, 12, 0, 0, tzinfo=UTC),
     }
+
+
+@pytest.fixture
+def sample_training_data():
+    """
+    Create sample training data for ML tests.
+
+    Returns:
+        Tuple of (X_train, y_train, X_val, y_val, feature_names)
+    """
+    import numpy as np
+
+    np.random.seed(42)
+    n_samples = 100
+    n_features = 10
+
+    X_train = np.random.randn(n_samples, n_features).astype(np.float32)
+    y_train = np.random.randn(n_samples).astype(np.float32)
+    X_val = np.random.randn(20, n_features).astype(np.float32)
+    y_val = np.random.randn(20).astype(np.float32)
+    feature_names = [f"feature_{i}" for i in range(n_features)]
+
+    return X_train, y_train, X_val, y_val, feature_names
