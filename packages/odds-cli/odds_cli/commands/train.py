@@ -642,6 +642,10 @@ def run_tuning(
     storage: str | None = typer.Option(
         None, "--storage", help="Optuna storage URL (defaults to DATABASE_URL from config)"
     ),
+    track: bool = typer.Option(False, "--track", help="Enable MLflow experiment tracking"),
+    tracking_uri: str | None = typer.Option(
+        None, "--tracking-uri", help="Override MLflow tracking URI (default: mlruns)"
+    ),
 ):
     """
     Run hyperparameter optimization using Optuna.
@@ -650,11 +654,15 @@ def run_tuning(
     for hyperparameters. After optimization, the best parameters are saved to a new
     configuration file.
 
+    When --track is enabled, each Optuna trial is logged as a nested MLflow run
+    with the parent run containing study metadata and the best model (if --train-best).
+
     Example:
         odds train tune --config experiments/xgboost_tuning.yaml
         odds train tune --config experiments/xgboost_tuning.yaml --train-best
         odds train tune --config experiments/xgboost_tuning.yaml --n-trials 50 --timeout 3600
         odds train tune --config experiments/xgboost_tuning.yaml --study-name xgb_opt --storage postgresql://...
+        odds train tune --config experiments/xgboost_tuning.yaml --track --tracking-uri http://localhost:5000
     """
     # Load and validate configuration
     ml_config = load_config(config)
@@ -709,6 +717,18 @@ def run_tuning(
     # Determine study name
     if study_name is None:
         study_name = f"{ml_config.experiment.name}_tuning"
+
+    # Override tracking configuration if flags provided
+    if track:
+        # Initialize tracking config if not present
+        if ml_config.tracking is None:
+            ml_config.tracking = TrackingConfig()
+        ml_config.tracking.enabled = True
+        if tracking_uri:
+            ml_config.tracking.tracking_uri = tracking_uri
+        # Set experiment name from config if not already set
+        if not ml_config.tracking.experiment_name:
+            ml_config.tracking.experiment_name = ml_config.experiment.name
 
     # Display tuning configuration
     _display_tuning_summary(ml_config, study_name, storage_url)
@@ -766,14 +786,22 @@ async def _run_tuning_async(
         console.print(f"  Test samples: {data_result.num_test_samples:,}")
         console.print(f"  Features: {data_result.num_features}\n")
 
-        # Step 2: Initialize tuner
+        # Step 2: Initialize tuner with tracking config
         tuner = OptunaTuner(
             study_name=study_name,
             direction=ml_config.tuning.direction,
             sampler=ml_config.tuning.sampler,
             pruner=ml_config.tuning.pruner,
             storage=storage_url,
+            tracking_config=ml_config.tracking,
         )
+
+        # Display tracking info if enabled
+        if ml_config.tracking and ml_config.tracking.enabled:
+            console.print(
+                f"[cyan]MLflow tracking enabled: {ml_config.tracking.tracking_uri}[/cyan]"
+            )
+            console.print(f"[cyan]Experiment: {ml_config.tracking.experiment_name}[/cyan]\n")
 
         # Step 3: Create objective function
         # Use validation data for optimization if available, otherwise use test data
@@ -924,6 +952,19 @@ async def _run_tuning_async(
             try:
                 strategy.save_model(output_model_path)
                 console.print(f"\n[green]Model saved to {output_model_path}[/green]")
+
+                # Log best model to parent MLflow run if tracking enabled
+                if ml_config.tracking and ml_config.tracking.enabled:
+                    try:
+                        tuner.log_best_model(strategy.model, artifact_path="best_model")
+                        console.print(
+                            f"[cyan]Best model logged to MLflow (run_id: {tuner._parent_run_id})[/cyan]"
+                        )
+                    except Exception as e:
+                        console.print(
+                            f"[yellow]Warning: Could not log model to MLflow: {e}[/yellow]"
+                        )
+
             except Exception as e:
                 console.print(f"[red]Error saving model: {e}[/red]")
                 raise typer.Exit(1) from None
