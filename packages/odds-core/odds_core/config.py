@@ -11,7 +11,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class APIConfig(BaseSettings):
     """The Odds API configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="ODDS_API_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="ODDS_API_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     key: str = Field(..., description="The Odds API key")
     base_url: str = Field(
@@ -23,7 +25,9 @@ class APIConfig(BaseSettings):
 class DatabaseConfig(BaseSettings):
     """Database connection configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="DATABASE_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="DATABASE_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     url: str = Field(..., description="PostgreSQL connection URL")
     pool_size: int = Field(default=5, description="Database connection pool size")
@@ -32,7 +36,7 @@ class DatabaseConfig(BaseSettings):
 class DataCollectionConfig(BaseSettings):
     """Data collection parameters."""
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     sports: list[str] = Field(default=["basketball_nba"], description="Sports to track")
     bookmakers: list[str] = Field(
@@ -57,7 +61,9 @@ class DataCollectionConfig(BaseSettings):
 class SchedulerConfig(BaseSettings):
     """Scheduler backend configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="SCHEDULER_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="SCHEDULER_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     backend: str = Field(
         default="local",
@@ -76,7 +82,9 @@ class SchedulerConfig(BaseSettings):
 class AWSConfig(BaseSettings):
     """AWS-specific configuration (only needed when scheduler_backend='aws')."""
 
-    model_config = SettingsConfigDict(env_prefix="AWS_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="AWS_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     region: str | None = Field(default=None, description="AWS region")
     lambda_arn: str | None = Field(
@@ -88,7 +96,7 @@ class AWSConfig(BaseSettings):
 class DataQualityConfig(BaseSettings):
     """Data quality and validation settings."""
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     enable_validation: bool = Field(default=True, description="Enable data quality validation")
     reject_invalid_odds: bool = Field(
@@ -99,7 +107,7 @@ class DataQualityConfig(BaseSettings):
 class AlertConfig(BaseSettings):
     """Alert configuration (infrastructure for future use)."""
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     discord_webhook_url: str | None = Field(default=None, description="Discord webhook URL")
     alert_enabled: bool = Field(default=False, description="Enable alerts")
@@ -142,7 +150,9 @@ class AlertConfig(BaseSettings):
 class LoggingConfig(BaseSettings):
     """Logging configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="LOG_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="LOG_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     level: str = Field(default="INFO", description="Logging level")
     file: str = Field(default="logs/odds_pipeline.log", description="Log file path")

@@ -27,9 +27,7 @@ class TestDiscoverIntegration:
         mock_session_context.__aenter__ = AsyncMock(return_value=test_session)
         mock_session_context.__aexit__ = AsyncMock()
 
-        with patch(
-            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
-        ):
+        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
             with patch(
                 "odds_cli.commands.discover.async_session_maker",
                 return_value=mock_session_context,
@@ -94,9 +92,7 @@ class TestDiscoverIntegration:
         mock_session_context.__aenter__ = AsyncMock(return_value=test_session)
         mock_session_context.__aexit__ = AsyncMock()
 
-        with patch(
-            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
-        ):
+        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
             with patch(
                 "odds_cli.commands.discover.async_session_maker",
                 return_value=mock_session_context,
@@ -123,9 +119,7 @@ class TestDiscoverIntegration:
         updated_event = next(e for e in events if e.id == "event1")
         assert updated_event.home_team == "Lakers"  # Updated
         assert updated_event.away_team == "Celtics"  # Updated
-        assert updated_event.commence_time == datetime(
-            2024, 10, 15, 19, 0, 0, tzinfo=UTC
-        )
+        assert updated_event.commence_time == datetime(2024, 10, 15, 19, 0, 0, tzinfo=UTC)
 
     @pytest.mark.asyncio
     async def test_discover_multiple_days(self, test_session, mock_api_client_factory):
@@ -177,9 +171,7 @@ class TestDiscoverIntegration:
         mock_session_context.__aenter__ = AsyncMock(return_value=test_session)
         mock_session_context.__aexit__ = AsyncMock()
 
-        with patch(
-            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
-        ):
+        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
             with patch(
                 "odds_cli.commands.discover.async_session_maker",
                 return_value=mock_session_context,
@@ -207,9 +199,7 @@ class TestDiscoverIntegration:
             assert mock_client.get_historical_events.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_discover_handles_empty_days(
-        self, test_session, mock_api_client_factory
-    ):
+    async def test_discover_handles_empty_days(self, test_session, mock_api_client_factory):
         """Test that discover handles days with no games gracefully."""
         from unittest.mock import AsyncMock
 
@@ -222,9 +212,7 @@ class TestDiscoverIntegration:
         mock_session_context.__aenter__ = AsyncMock(return_value=test_session)
         mock_session_context.__aexit__ = AsyncMock()
 
-        with patch(
-            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
-        ):
+        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
             with patch(
                 "odds_cli.commands.discover.async_session_maker",
                 return_value=mock_session_context,
@@ -244,9 +232,7 @@ class TestDiscoverIntegration:
             assert len(events) == 0
 
     @pytest.mark.asyncio
-    async def test_discover_preserves_existing_scores(
-        self, test_session, mock_api_client_factory
-    ):
+    async def test_discover_preserves_existing_scores(self, test_session, mock_api_client_factory):
         """Test that discover doesn't overwrite final scores if event already completed."""
         from unittest.mock import AsyncMock
 
@@ -290,9 +276,7 @@ class TestDiscoverIntegration:
         mock_session_context.__aenter__ = AsyncMock(return_value=test_session)
         mock_session_context.__aexit__ = AsyncMock()
 
-        with patch(
-            "odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client
-        ):
+        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
             with patch(
                 "odds_cli.commands.discover.async_session_maker",
                 return_value=mock_session_context,
@@ -306,9 +290,7 @@ class TestDiscoverIntegration:
                 )
 
             # Refresh the event from database
-            result = await test_session.execute(
-                select(Event).where(Event.id == "event1")
-            )
+            result = await test_session.execute(select(Event).where(Event.id == "event1"))
             event = result.scalar_one()
 
             # Note: bulk_upsert_events will update the event, but the discover command

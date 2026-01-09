@@ -6,8 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from odds_core.config import AlertConfig, APIConfig, Settings
 from odds_core.models import AlertHistory, FetchLog
-from sqlalchemy import select
-
 from odds_lambda.health_monitor import HealthMetrics, HealthMonitor, HealthStatus
 
 
@@ -312,9 +310,7 @@ class TestHealthMonitor:
 
             with patch.object(monitor, "check_stale_data", return_value=(True, None)):
                 with patch.object(monitor, "check_consecutive_failures", return_value=(True, 0)):
-                    with patch.object(
-                        monitor, "check_api_quota", return_value=(True, 15000, 0.75)
-                    ):
+                    with patch.object(monitor, "check_api_quota", return_value=(True, 15000, 0.75)):
                         with patch.object(monitor, "check_data_quality", return_value=(True, 2)):
                             status = await monitor.check_system_health()
 
@@ -346,9 +342,7 @@ class TestHealthMonitor:
                 monitor, "check_stale_data", return_value=(False, "Stale data issue")
             ):
                 with patch.object(monitor, "check_consecutive_failures", return_value=(False, 4)):
-                    with patch.object(
-                        monitor, "check_api_quota", return_value=(False, 1000, 0.05)
-                    ):
+                    with patch.object(monitor, "check_api_quota", return_value=(False, 1000, 0.05)):
                         with patch.object(monitor, "check_data_quality", return_value=(False, 15)):
                             # Mock alert sending
                             with patch.object(monitor, "_send_alert", return_value=True):
@@ -360,9 +354,7 @@ class TestHealthMonitor:
             assert "Stale data issue" in status.issues_detected[0]
 
     @pytest.mark.asyncio
-    async def test_check_system_health_handles_errors_gracefully(
-        self, mock_session, mock_settings
-    ):
+    async def test_check_system_health_handles_errors_gracefully(self, mock_session, mock_settings):
         """Should handle errors gracefully and return unhealthy status."""
         monitor = HealthMonitor(mock_session, mock_settings)
 

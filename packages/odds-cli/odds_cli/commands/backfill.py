@@ -525,8 +525,7 @@ async def _backfill_scores_async(start_date_str: str, end_date_str: str, dry_run
 
                 except Exception as e:
                     console.print(
-                        f"[red]✗[/red] {event.away_team} @ {event.home_team}: "
-                        f"Error: {str(e)[:60]}"
+                        f"[red]✗[/red] {event.away_team} @ {event.home_team}: Error: {str(e)[:60]}"
                     )
                     failed_count += 1
 
@@ -629,7 +628,6 @@ async def _detect_and_plan_gaps_async(
 
     # Import here to avoid circular dependencies
     from odds_analytics.gap_backfill_planner import GapBackfillPlanner
-    from odds_analytics.utils import create_tier_coverage_table
 
     # Analyze gaps
     console.print("[cyan]Analyzing tier coverage gaps...[/cyan]")

@@ -17,12 +17,11 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.config import Settings, get_settings
+from odds_core.database import get_session
 from odds_core.models import AlertHistory
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from odds_core.database import get_session
 
 logger = structlog.get_logger()
 
@@ -115,7 +114,9 @@ class HealthMonitor:
 
         logger.info("alert_recorded", alert_type=alert_type, severity=severity)
 
-    async def _send_alert(self, alert_type: str, severity: str, message: str, context: dict | None = None):
+    async def _send_alert(
+        self, alert_type: str, severity: str, message: str, context: dict | None = None
+    ):
         """
         Send alert if rate limiting allows.
 
@@ -173,7 +174,10 @@ class HealthMonitor:
         threshold_hours = self.settings.alerts.stale_data_hours
 
         if hours_since_fetch > threshold_hours:
-            return False, f"No data fetched in {hours_since_fetch:.1f} hours (threshold: {threshold_hours}h)"
+            return (
+                False,
+                f"No data fetched in {hours_since_fetch:.1f} hours (threshold: {threshold_hours}h)",
+            )
 
         return True, None
 
@@ -226,7 +230,6 @@ class HealthMonitor:
             return True, None, None
 
         quota_fraction = quota_remaining / self.settings.api.quota
-        critical_threshold = self.settings.alerts.quota_critical_threshold
         warning_threshold = self.settings.alerts.quota_warning_threshold
 
         is_healthy = quota_fraction >= warning_threshold
@@ -360,14 +363,19 @@ class HealthMonitor:
                 percentage_remaining = round(quota_fraction * 100, 1)
 
                 if quota_fraction < critical_threshold:
-                    issue = f"API quota critical: {quota_remaining} requests ({percentage_remaining}%)"
+                    issue = (
+                        f"API quota critical: {quota_remaining} requests ({percentage_remaining}%)"
+                    )
                     issues_detected.append(issue)
 
                     if await self._send_alert(
                         alert_type="quota_critical",
                         severity="critical",
                         message=f"🚨 {issue}",
-                        context={"quota_remaining": quota_remaining, "quota_fraction": quota_fraction},
+                        context={
+                            "quota_remaining": quota_remaining,
+                            "quota_fraction": quota_fraction,
+                        },
                     ):
                         alerts_sent.append("quota_critical")
 
@@ -379,7 +387,10 @@ class HealthMonitor:
                         alert_type="quota_low",
                         severity="warning",
                         message=f"⚠️ {issue}",
-                        context={"quota_remaining": quota_remaining, "quota_fraction": quota_fraction},
+                        context={
+                            "quota_remaining": quota_remaining,
+                            "quota_fraction": quota_fraction,
+                        },
                     ):
                         alerts_sent.append("quota_low")
 
@@ -427,7 +438,9 @@ class HealthMonitor:
                         context={"error_type": type(e).__name__, "error_message": str(e)},
                     )
                 except Exception as alert_error:
-                    logger.error("failed_to_send_health_check_failure_alert", error=str(alert_error))
+                    logger.error(
+                        "failed_to_send_health_check_failure_alert", error=str(alert_error)
+                    )
 
             # Return unhealthy status
             return HealthStatus(

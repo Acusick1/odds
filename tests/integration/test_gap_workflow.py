@@ -5,10 +5,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from odds_analytics.backfill_executor import BackfillExecutor
 from odds_analytics.gap_backfill_planner import GapBackfillPlanner
-from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.readers import OddsReader
-from sqlalchemy import select
 
 
 @pytest.fixture
@@ -286,7 +285,6 @@ class TestGapDetectionWorkflow:
         self, test_session, mock_session_factory, events_with_gaps, mock_api_response_factory
     ):
         """Test that games are executed in priority order (CLOSING gaps first)."""
-        from unittest.mock import AsyncMock
 
         planner = GapBackfillPlanner(test_session)
 
@@ -408,9 +406,10 @@ class TestGapDetectionWorkflow:
         )
 
         # Should have fewer games now (event1 should be skipped)
-        assert plan2["total_games"] < initial_games or plan2["total_snapshots"] < plan1[
-            "total_snapshots"
-        ]
+        assert (
+            plan2["total_games"] < initial_games
+            or plan2["total_snapshots"] < plan1["total_snapshots"]
+        )
 
 
 class TestGapPlanCompatibility:

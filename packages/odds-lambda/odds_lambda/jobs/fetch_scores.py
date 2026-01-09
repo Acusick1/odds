@@ -72,9 +72,7 @@ async def main():
         if app_settings.alerts.alert_enabled:
             from odds_cli.alerts.base import send_critical
 
-            await send_critical(
-                f"🚨 Fetch scores job failed: {type(e).__name__}: {str(e)}"
-            )
+            await send_critical(f"🚨 Fetch scores job failed: {type(e).__name__}: {str(e)}")
 
         raise
 
@@ -97,9 +95,7 @@ async def main():
             if app_settings.alerts.alert_enabled:
                 from odds_cli.alerts.base import send_error
 
-                await send_error(
-                    f"Fetch scores scheduling failed: {type(e).__name__}: {str(e)}"
-                )
+                await send_error(f"Fetch scores scheduling failed: {type(e).__name__}: {str(e)}")
 
 
 async def _fetch_and_update_scores(app_settings):
