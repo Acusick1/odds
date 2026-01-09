@@ -7,11 +7,10 @@ and model persistence.
 """
 
 import tempfile
-from pathlib import Path
 
 import mlflow
 import pytest
-from odds_analytics.training import MLTrainingConfig, TrackingConfig
+from odds_analytics.training import MLTrainingConfig
 from odds_analytics.training.tuner import OptunaTuner, create_objective
 
 
@@ -101,14 +100,14 @@ tracking:
             )
 
             # Create objective function with sample data
-            X_train, y_train, feature_names = sample_training_data
+            X_train, y_train, X_val, y_val, feature_names = sample_training_data
             objective = create_objective(
                 config=config,
                 X_train=X_train,
                 y_train=y_train,
                 feature_names=feature_names,
-                X_val=X_train[:20],  # Small validation set
-                y_val=y_train[:20],
+                X_val=X_val,
+                y_val=y_val,
             )
 
             # Run optimization
@@ -183,14 +182,14 @@ tracking:
         )
 
         # Create objective function with sample data
-        X_train, y_train, feature_names = sample_training_data
+        X_train, y_train, X_val, y_val, feature_names = sample_training_data
         objective = create_objective(
             config=config,
             X_train=X_train,
             y_train=y_train,
             feature_names=feature_names,
-            X_val=X_train[:20],  # Small validation set
-            y_val=y_train[:20],
+            X_val=X_val,
+            y_val=y_val,
         )
 
         # Run optimization
@@ -228,14 +227,14 @@ tracking:
             )
 
             # Create objective function with sample data
-            X_train, y_train, feature_names = sample_training_data
+            X_train, y_train, X_val, y_val, feature_names = sample_training_data
             objective = create_objective(
                 config=config,
                 X_train=X_train,
                 y_train=y_train,
                 feature_names=feature_names,
-                X_val=X_train[:20],
-                y_val=y_train[:20],
+                X_val=X_val,
+                y_val=y_val,
             )
 
             # Run optimization
@@ -279,14 +278,14 @@ tracking:
         )
 
         # Create objective function
-        X_train, y_train, feature_names = sample_training_data
+        X_train, y_train, X_val, y_val, feature_names = sample_training_data
         objective = create_objective(
             config=config,
             X_train=X_train,
             y_train=y_train,
             feature_names=feature_names,
-            X_val=X_train[:20],
-            y_val=y_train[:20],
+            X_val=X_val,
+            y_val=y_val,
         )
 
         # Run optimization (should succeed without tracking)
@@ -318,16 +317,16 @@ tracking:
         )
 
         # Create objective and run optimization
-        X_train, y_train, feature_names = sample_training_data
+        X_train, y_train, X_val, y_val, feature_names = sample_training_data
         objective = create_objective(
             config=config,
             X_train=X_train,
             y_train=y_train,
             feature_names=feature_names,
-            X_val=X_train[:20],
-            y_val=y_train[:20],
+            X_val=X_val,
+            y_val=y_val,
         )
-        study = tuner.optimize(objective, n_trials=2)
+        _ = tuner.optimize(objective, n_trials=2)
 
         # Create a simple model
         from xgboost import XGBRegressor
@@ -341,19 +340,3 @@ tracking:
             match="Cannot log model: tracking is not enabled or parent run doesn't exist",
         ):
             tuner.log_best_model(model)
-
-    @pytest.fixture
-    def sample_training_data(self):
-        """Create minimal sample training data for testing."""
-        import numpy as np
-
-        # Create small synthetic dataset
-        np.random.seed(42)
-        n_samples = 100
-        n_features = 5
-
-        X_train = np.random.randn(n_samples, n_features).astype(np.float32)
-        y_train = np.random.randn(n_samples).astype(np.float32)
-        feature_names = [f"feature_{i}" for i in range(n_features)]
-
-        return X_train, y_train, feature_names

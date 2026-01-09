@@ -84,18 +84,6 @@ def sample_config(sample_search_spaces):
     )
 
 
-@pytest.fixture
-def sample_training_data():
-    """Create sample training data."""
-    np.random.seed(42)
-    X_train = np.random.randn(100, 10)
-    y_train = np.random.randn(100)
-    X_val = np.random.randn(20, 10)
-    y_val = np.random.randn(20)
-    feature_names = [f"feature_{i}" for i in range(10)]
-    return X_train, y_train, X_val, y_val, feature_names
-
-
 # =============================================================================
 # Test Parameter Mapping
 # =============================================================================
