@@ -120,6 +120,7 @@ class TestDataConfig:
                 end_date=date(2024, 12, 31),
                 test_split=0.6,
                 validation_split=0.5,
+                use_kfold=False,  # Disable CV to test split validation
             )
 
     def test_test_split_bounds(self):
@@ -147,7 +148,8 @@ class TestDataConfig:
             start_date=date(2024, 1, 1),
             end_date=date(2024, 12, 31),
         )
-        assert config.use_kfold is False
+        assert config.use_kfold is True  # Changed default to True for robust model selection
+        assert config.cv_method == "timeseries"  # Default CV method for temporal data
         assert config.n_folds == 5
         assert config.kfold_shuffle is True
 
@@ -1043,6 +1045,7 @@ class TestValidationErrorMessages:
                 end_date=date(2024, 12, 31),
                 test_split=0.5,
                 validation_split=0.6,
+                use_kfold=False,  # Disable CV to test split validation
             )
         assert "must be less than 1.0" in str(excinfo.value)
 
