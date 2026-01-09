@@ -59,6 +59,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pandas as pd
 import structlog
 
@@ -774,17 +775,113 @@ def create_objective(
         else:
             raise ValueError(f"Unknown strategy type: {strategy_type}")
 
-        # Train with modified configuration (using trial-specific features if re-extracted)
+        # Check if we should use cross-validation
+        use_cv = modified_config.training.data.use_kfold
+
+        # Train with modified configuration
         try:
-            history = strategy.train_from_config(
-                config=modified_config,
-                X_train=trial_X_train,
-                y_train=trial_y_train,
-                feature_names=trial_feature_names,
-                X_val=trial_X_val,
-                y_val=trial_y_val,
-                trial=trial,  # Pass trial for pruning support
-            )
+            if use_cv:
+                # Use cross-validation for tuning
+                from odds_analytics.training.cross_validation import run_cv
+
+                # Combine train and validation sets for CV
+                if trial_X_val is not None and trial_y_val is not None:
+                    X_full = np.vstack([trial_X_train, trial_X_val])
+                    y_full = np.concatenate([trial_y_train, trial_y_val])
+                else:
+                    X_full = trial_X_train
+                    y_full = trial_y_train
+
+                logger.debug(
+                    "using_cv_for_tuning",
+                    trial_number=trial.number,
+                    n_samples=len(X_full),
+                    n_folds=modified_config.training.data.n_folds,
+                )
+
+                # Run cross-validation
+                cv_result = run_cv(
+                    strategy=strategy,
+                    config=modified_config,
+                    X=X_full,
+                    y=y_full,
+                    feature_names=trial_feature_names,
+                )
+
+                # Log per-fold metrics if trial has set_user_attr (for MLflow logging)
+                if hasattr(trial, "set_user_attr"):
+                    for fold_idx, fold_result in enumerate(cv_result.fold_results):
+                        trial.set_user_attr(f"cv_fold_{fold_idx}_val_mse", fold_result.val_mse)
+                        trial.set_user_attr(f"cv_fold_{fold_idx}_val_mae", fold_result.val_mae)
+                        trial.set_user_attr(f"cv_fold_{fold_idx}_val_r2", fold_result.val_r2)
+
+                # Use mean CV metric as optimization target
+                if metric_name == "val_mse":
+                    metric_value = cv_result.mean_val_mse
+                elif metric_name == "val_mae":
+                    metric_value = cv_result.mean_val_mae
+                elif metric_name == "val_r2":
+                    metric_value = cv_result.mean_val_r2
+                elif metric_name.startswith("cv_"):
+                    # Direct CV metric access (e.g., cv_val_mse_mean)
+                    cv_dict = cv_result.to_dict()
+                    metric_value = cv_dict.get(metric_name)
+                    if metric_value is None:
+                        logger.warning(
+                            "cv_metric_not_found",
+                            trial_number=trial.number,
+                            metric=metric_name,
+                            available_metrics=list(cv_dict.keys()),
+                        )
+                        return (
+                            float("inf") if config.tuning.direction == "minimize" else float("-inf")
+                        )
+                else:
+                    logger.warning(
+                        "unsupported_cv_metric",
+                        trial_number=trial.number,
+                        metric=metric_name,
+                        message=f"Metric '{metric_name}' not directly available from CV. Using mean_val_mse as fallback.",
+                    )
+                    metric_value = cv_result.mean_val_mse
+
+                logger.info(
+                    "trial_completed_with_cv",
+                    trial_number=trial.number,
+                    metric=metric_name,
+                    value=metric_value,
+                    cv_std=cv_result.std_val_mse if metric_name == "val_mse" else None,
+                )
+            else:
+                # Use simple train/validation split (backward compatibility)
+                history = strategy.train_from_config(
+                    config=modified_config,
+                    X_train=trial_X_train,
+                    y_train=trial_y_train,
+                    feature_names=trial_feature_names,
+                    X_val=trial_X_val,
+                    y_val=trial_y_val,
+                    trial=trial,  # Pass trial for pruning support
+                )
+
+                # Extract metric value
+                metric_value = history.get(metric_name)
+                if metric_value is None:
+                    logger.warning(
+                        "metric_not_found",
+                        trial_number=trial.number,
+                        metric=metric_name,
+                        available_metrics=list(history.keys()),
+                    )
+                    return float("inf") if config.tuning.direction == "minimize" else float("-inf")
+
+                logger.info(
+                    "trial_completed",
+                    trial_number=trial.number,
+                    metric=metric_name,
+                    value=metric_value,
+                )
+
         except ImportError:
             # Re-raise TrialPruned exception to let Optuna handle it
             import optuna
@@ -809,24 +906,6 @@ def create_objective(
             )
             # Return worst possible value for failed trials
             return float("inf") if config.tuning.direction == "minimize" else float("-inf")
-
-        # Extract metric value
-        metric_value = history.get(metric_name)
-        if metric_value is None:
-            logger.warning(
-                "metric_not_found",
-                trial_number=trial.number,
-                metric=metric_name,
-                available_metrics=list(history.keys()),
-            )
-            return float("inf") if config.tuning.direction == "minimize" else float("-inf")
-
-        logger.info(
-            "trial_completed",
-            trial_number=trial.number,
-            metric=metric_name,
-            value=metric_value,
-        )
 
         return float(metric_value)
 

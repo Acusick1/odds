@@ -328,6 +328,9 @@ def test_objective_function_execution(mock_strategy_class, sample_config, sample
     """Test objective function execution with mocked training."""
     X_train, y_train, X_val, y_val, feature_names = sample_training_data
 
+    # Disable cross-validation for this test (testing simple train/val split)
+    sample_config.training.data.use_kfold = False
+
     # Mock strategy instance
     mock_strategy = MagicMock()
     mock_strategy.train_from_config.return_value = {
@@ -529,6 +532,9 @@ def test_pruning_trial_passed_to_training(mock_strategy_class, sample_config, sa
     """Test that trial object is passed to training for pruning."""
     X_train, y_train, X_val, y_val, feature_names = sample_training_data
 
+    # Disable cross-validation for this test (testing simple train/val split)
+    sample_config.training.data.use_kfold = False
+
     # Mock strategy instance
     mock_strategy = MagicMock()
     mock_strategy.train_from_config.return_value = {
@@ -622,3 +628,298 @@ def test_feature_groups_warning_without_precomputed(sample_config, sample_traini
         mock_logger.warning.assert_called_once()
         call_args = mock_logger.warning.call_args[0]
         assert call_args[0] == "feature_groups_without_precomputed"
+
+
+# =============================================================================
+# Test Cross-Validation Integration
+# =============================================================================
+
+
+@patch("odds_analytics.training.cross_validation.run_cv")
+@patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
+def test_objective_uses_cv_when_enabled(
+    mock_strategy_class, mock_run_cv, sample_config, sample_training_data
+):
+    """Test that objective uses cross-validation when use_kfold=True."""
+    X_train, y_train, X_val, y_val, feature_names = sample_training_data
+
+    # Enable cross-validation in config
+    sample_config.training.data.use_kfold = True
+    sample_config.training.data.n_folds = 3
+
+    # Mock CV result
+    from odds_analytics.training.cross_validation import CVFoldResult, CVResult
+
+    mock_cv_result = CVResult(
+        fold_results=[
+            CVFoldResult(
+                fold_idx=i,
+                train_mse=0.01,
+                train_mae=0.05,
+                train_r2=0.9,
+                val_mse=0.02 + i * 0.001,
+                val_mae=0.08,
+                val_r2=0.8,
+                n_train=60,
+                n_val=20,
+            )
+            for i in range(3)
+        ],
+        n_folds=3,
+        random_seed=42,
+        cv_method="timeseries",
+    )
+    mock_run_cv.return_value = mock_cv_result
+
+    # Mock strategy instance
+    mock_strategy = MagicMock()
+    mock_strategy_class.return_value = mock_strategy
+
+    objective = create_objective(
+        config=sample_config,
+        X_train=X_train,
+        y_train=y_train,
+        feature_names=feature_names,
+        X_val=X_val,
+        y_val=y_val,
+    )
+
+    # Mock trial
+    mock_trial = Mock()
+    mock_trial.number = 0
+    mock_trial.suggest_int.side_effect = [200, 6]  # n_estimators, max_depth
+    mock_trial.suggest_float.return_value = 0.05  # learning_rate
+    mock_trial.suggest_categorical.return_value = "reg:squarederror"
+    mock_trial.set_user_attr = Mock()
+
+    # Execute objective
+    result = objective(mock_trial)
+
+    # Verify run_cv was called (not train_from_config)
+    mock_run_cv.assert_called_once()
+    mock_strategy.train_from_config.assert_not_called()
+
+    # Verify result is the mean CV metric (mean of [0.02, 0.021, 0.022] = 0.021)
+    assert result == pytest.approx(0.021, rel=1e-3)
+
+
+@patch("odds_analytics.training.cross_validation.run_cv")
+@patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
+def test_objective_logs_per_fold_metrics(
+    mock_strategy_class, mock_run_cv, sample_config, sample_training_data
+):
+    """Test that per-fold metrics are logged to MLflow via trial.set_user_attr."""
+    X_train, y_train, X_val, y_val, feature_names = sample_training_data
+
+    # Enable cross-validation in config
+    sample_config.training.data.use_kfold = True
+    sample_config.training.data.n_folds = 2
+
+    # Mock CV result
+    from odds_analytics.training.cross_validation import CVFoldResult, CVResult
+
+    mock_cv_result = CVResult(
+        fold_results=[
+            CVFoldResult(
+                fold_idx=0,
+                train_mse=0.01,
+                train_mae=0.05,
+                train_r2=0.9,
+                val_mse=0.02,
+                val_mae=0.08,
+                val_r2=0.8,
+                n_train=50,
+                n_val=25,
+            ),
+            CVFoldResult(
+                fold_idx=1,
+                train_mse=0.012,
+                train_mae=0.055,
+                train_r2=0.88,
+                val_mse=0.025,
+                val_mae=0.09,
+                val_r2=0.75,
+                n_train=50,
+                n_val=25,
+            ),
+        ],
+        n_folds=2,
+        random_seed=42,
+        cv_method="timeseries",
+    )
+    mock_run_cv.return_value = mock_cv_result
+
+    # Mock strategy instance
+    mock_strategy = MagicMock()
+    mock_strategy_class.return_value = mock_strategy
+
+    objective = create_objective(
+        config=sample_config,
+        X_train=X_train,
+        y_train=y_train,
+        feature_names=feature_names,
+        X_val=X_val,
+        y_val=y_val,
+    )
+
+    # Mock trial with set_user_attr
+    mock_trial = Mock()
+    mock_trial.number = 0
+    mock_trial.suggest_int.side_effect = [200, 6]
+    mock_trial.suggest_float.return_value = 0.05
+    mock_trial.suggest_categorical.return_value = "reg:squarederror"
+    mock_trial.set_user_attr = Mock()
+
+    # Execute objective
+    objective(mock_trial)
+
+    # Verify per-fold metrics were logged
+    assert mock_trial.set_user_attr.call_count == 6  # 2 folds * 3 metrics
+    mock_trial.set_user_attr.assert_any_call("cv_fold_0_val_mse", 0.02)
+    mock_trial.set_user_attr.assert_any_call("cv_fold_0_val_mae", 0.08)
+    mock_trial.set_user_attr.assert_any_call("cv_fold_0_val_r2", 0.8)
+    mock_trial.set_user_attr.assert_any_call("cv_fold_1_val_mse", 0.025)
+    mock_trial.set_user_attr.assert_any_call("cv_fold_1_val_mae", 0.09)
+    mock_trial.set_user_attr.assert_any_call("cv_fold_1_val_r2", 0.75)
+
+
+@patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
+def test_objective_backward_compatible_without_cv(
+    mock_strategy_class, sample_config, sample_training_data
+):
+    """Test that objective still works with use_kfold=False (backward compatibility)."""
+    X_train, y_train, X_val, y_val, feature_names = sample_training_data
+
+    # Disable cross-validation
+    sample_config.training.data.use_kfold = False
+
+    # Mock strategy instance
+    mock_strategy = MagicMock()
+    mock_strategy.train_from_config.return_value = {
+        "val_mse": 0.5,
+        "train_mse": 0.4,
+    }
+    mock_strategy_class.return_value = mock_strategy
+
+    objective = create_objective(
+        config=sample_config,
+        X_train=X_train,
+        y_train=y_train,
+        feature_names=feature_names,
+        X_val=X_val,
+        y_val=y_val,
+    )
+
+    # Mock trial
+    mock_trial = Mock()
+    mock_trial.number = 0
+    mock_trial.suggest_int.side_effect = [200, 6]
+    mock_trial.suggest_float.return_value = 0.05
+    mock_trial.suggest_categorical.return_value = "reg:squarederror"
+
+    # Execute objective
+    result = objective(mock_trial)
+
+    # Verify train_from_config was called (not run_cv)
+    mock_strategy.train_from_config.assert_called_once()
+
+    # Should return the metric value from history
+    assert result == 0.5
+
+
+@patch("odds_analytics.training.cross_validation.run_cv")
+@patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
+def test_cv_with_precomputed_features(
+    mock_strategy_class, mock_run_cv, sample_config, sample_training_data
+):
+    """Test that cross-validation works with precomputed features."""
+    X_train, y_train, X_val, y_val, feature_names = sample_training_data
+
+    # Enable cross-validation
+    sample_config.training.data.use_kfold = True
+    sample_config.training.data.n_folds = 3
+
+    # Add feature_groups to search space
+    from odds_analytics.training.config import SearchSpace
+
+    sample_config.tuning.search_spaces["feature_groups"] = SearchSpace(
+        type="categorical", choices=[("tabular",), ("tabular", "trajectory")]
+    )
+
+    # Mock precomputed features
+    from odds_analytics.training.data_preparation import TrainingDataResult
+
+    precomputed_features = {
+        ("tabular",): TrainingDataResult(
+            X_train=X_train,
+            y_train=y_train,
+            X_val=X_val,
+            y_val=y_val,
+            X_test=np.random.randn(10, 5),
+            y_test=np.random.randn(10),
+            feature_names=feature_names,
+            strategy_type="xgboost_line_movement",
+        ),
+    }
+
+    # Mock CV result
+    from odds_analytics.training.cross_validation import CVFoldResult, CVResult
+
+    mock_cv_result = CVResult(
+        fold_results=[
+            CVFoldResult(
+                fold_idx=i,
+                train_mse=0.01,
+                train_mae=0.05,
+                train_r2=0.9,
+                val_mse=0.02,
+                val_mae=0.08,
+                val_r2=0.8,
+                n_train=60,
+                n_val=20,
+            )
+            for i in range(3)
+        ],
+        n_folds=3,
+        random_seed=42,
+        cv_method="timeseries",
+    )
+    mock_run_cv.return_value = mock_cv_result
+
+    # Mock strategy
+    mock_strategy = MagicMock()
+    mock_strategy_class.return_value = mock_strategy
+
+    objective = create_objective(
+        config=sample_config,
+        X_train=X_train,
+        y_train=y_train,
+        feature_names=feature_names,
+        X_val=X_val,
+        y_val=y_val,
+        precomputed_features=precomputed_features,
+    )
+
+    # Mock trial
+    mock_trial = Mock()
+    mock_trial.number = 0
+    mock_trial.suggest_int.side_effect = [200, 6]
+    mock_trial.suggest_float.return_value = 0.05
+    mock_trial.suggest_categorical.side_effect = ["reg:squarederror", ("tabular",)]
+    mock_trial.set_user_attr = Mock()
+
+    # Execute objective
+    result = objective(mock_trial)
+
+    # Verify run_cv was called with combined train+val data
+    mock_run_cv.assert_called_once()
+    call_args = mock_run_cv.call_args
+    X_full = call_args[1]["X"]
+    y_full = call_args[1]["y"]
+
+    # Should have combined train and val sets
+    assert len(X_full) == len(X_train) + len(X_val)
+    assert len(y_full) == len(y_train) + len(y_val)
+
+    # Should return mean CV metric
+    assert result == 0.02
