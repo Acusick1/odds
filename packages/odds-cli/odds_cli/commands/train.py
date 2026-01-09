@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import typer
 from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
@@ -613,6 +614,388 @@ def _get_output_path(config: MLTrainingConfig) -> str:
 def _get_model_params_count(config: MLTrainingConfig) -> int:
     """Get count of configurable model parameters."""
     return len(config.training.model.model_dump())
+
+
+@app.command("tune")
+def run_tuning(
+    config: str = typer.Option(
+        ..., "--config", "-c", help="Path to training configuration file with tuning section"
+    ),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Override output path for best config (default: {name}_best.yaml)",
+    ),
+    train_best: bool = typer.Option(
+        False, "--train-best", help="Train final model with best parameters after tuning"
+    ),
+    n_trials: int | None = typer.Option(
+        None, "--n-trials", help="Override number of trials from config"
+    ),
+    timeout: int | None = typer.Option(
+        None, "--timeout", help="Override timeout in seconds from config"
+    ),
+    study_name: str | None = typer.Option(
+        None, "--study-name", help="Optuna study name for persistence/resumption"
+    ),
+    storage: str | None = typer.Option(
+        None, "--storage", help="Optuna storage URL (defaults to DATABASE_URL from config)"
+    ),
+):
+    """
+    Run hyperparameter optimization using Optuna.
+
+    Requires a configuration file with a tuning section that defines search spaces
+    for hyperparameters. After optimization, the best parameters are saved to a new
+    configuration file.
+
+    Example:
+        odds train tune --config experiments/xgboost_tuning.yaml
+        odds train tune --config experiments/xgboost_tuning.yaml --train-best
+        odds train tune --config experiments/xgboost_tuning.yaml --n-trials 50 --timeout 3600
+        odds train tune --config experiments/xgboost_tuning.yaml --study-name xgb_opt --storage postgresql://...
+    """
+    # Load and validate configuration
+    ml_config = load_config(config)
+
+    # Validate tuning section exists
+    if ml_config.tuning is None:
+        console.print("[red]Error: Configuration must include a 'tuning' section[/red]")
+        console.print("\nAdd a tuning section to your config:")
+        console.print("  tuning:")
+        console.print("    n_trials: 100")
+        console.print("    direction: minimize")
+        console.print("    metric: val_mse")
+        console.print("    search_spaces:")
+        console.print("      n_estimators:")
+        console.print("        type: int")
+        console.print("        low: 50")
+        console.print("        high: 500")
+        raise typer.Exit(1)
+
+    if not ml_config.tuning.search_spaces:
+        console.print("[red]Error: tuning section must define search_spaces[/red]")
+        console.print("\nDefine search spaces for parameters to tune:")
+        console.print("  search_spaces:")
+        console.print("    parameter_name:")
+        console.print("      type: int|float|categorical")
+        console.print("      low: value  # for int/float")
+        console.print("      high: value  # for int/float")
+        raise typer.Exit(1)
+
+    # Override tuning parameters if specified
+    if n_trials is not None:
+        ml_config.tuning.n_trials = n_trials
+    if timeout is not None:
+        ml_config.tuning.timeout = timeout
+
+    # Determine storage URL (default to DATABASE_URL if not specified)
+    storage_url = storage
+    if storage_url is None:
+        try:
+            from odds_core.config import get_config
+
+            db_url = get_config().database.url
+            # Convert asyncpg URL to psycopg2 URL for Optuna
+            if db_url.startswith("postgresql+asyncpg://"):
+                storage_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+            else:
+                storage_url = db_url
+        except Exception:
+            # If DATABASE_URL not available, use in-memory storage
+            storage_url = None
+
+    # Determine study name
+    if study_name is None:
+        study_name = f"{ml_config.experiment.name}_tuning"
+
+    # Display tuning configuration
+    _display_tuning_summary(ml_config, study_name, storage_url)
+
+    # Run tuning
+    asyncio.run(_run_tuning_async(ml_config, study_name, storage_url, config, output, train_best))
+
+
+async def _run_tuning_async(
+    ml_config: MLTrainingConfig,
+    study_name: str,
+    storage_url: str | None,
+    config_path: str,
+    output_path: str | None,
+    train_best: bool,
+):
+    """Execute tuning workflow asynchronously."""
+    from odds_analytics.training.tuner import OptunaTuner, create_objective
+    from odds_core.database import get_session
+
+    console.print("\n[bold]Starting Hyperparameter Optimization[/bold]")
+    console.print(f"Study: {study_name}")
+    console.print(f"Trials: {ml_config.tuning.n_trials}")
+    console.print(f"Direction: {ml_config.tuning.direction}")
+    console.print(f"Metric: {ml_config.tuning.metric}\n")
+
+    async with get_session() as session:
+        # Step 1: Prepare training data
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Loading and preparing training data...", total=None)
+
+            try:
+                from odds_analytics.training import prepare_training_data_from_config
+
+                data_result = await prepare_training_data_from_config(ml_config, session)
+            except ValueError as e:
+                progress.stop()
+                console.print(f"[red]Error preparing data: {e}[/red]")
+                raise typer.Exit(1) from None
+            except Exception as e:
+                progress.stop()
+                console.print(f"[red]Error: {e}[/red]")
+                raise typer.Exit(1) from None
+
+            progress.update(task, description="Data preparation complete")
+
+        # Display data summary
+        console.print("\n[green]Data prepared successfully[/green]")
+        console.print(f"  Training samples: {data_result.num_train_samples:,}")
+        console.print(f"  Validation samples: {data_result.num_val_samples:,}")
+        console.print(f"  Test samples: {data_result.num_test_samples:,}")
+        console.print(f"  Features: {data_result.num_features}\n")
+
+        # Step 2: Initialize tuner
+        tuner = OptunaTuner(
+            study_name=study_name,
+            direction=ml_config.tuning.direction,
+            sampler=ml_config.tuning.sampler,
+            pruner=ml_config.tuning.pruner,
+            storage=storage_url,
+        )
+
+        # Step 3: Create objective function
+        # Use validation data for optimization if available, otherwise use test data
+        X_val = data_result.X_val if data_result.num_val_samples > 0 else data_result.X_test
+        y_val = data_result.y_val if data_result.num_val_samples > 0 else data_result.y_test
+
+        # Pre-compute features for all feature_groups choices if being tuned
+        precomputed_features = None
+        if "feature_groups" in ml_config.tuning.search_spaces:
+            console.print(
+                "[cyan]Pre-computing features for all feature group combinations...[/cyan]"
+            )
+            precomputed_features = {}
+
+            for choice in ml_config.tuning.search_spaces["feature_groups"].choices:
+                fg_tuple = tuple(choice) if isinstance(choice, list) else choice
+
+                # Check if this is the same as the default (already computed)
+                if fg_tuple == ml_config.training.features.feature_groups:
+                    precomputed_features[fg_tuple] = data_result
+                    continue
+
+                # Create modified config and extract features
+                modified_config = ml_config.model_copy(deep=True)
+                modified_config.training.features.feature_groups = fg_tuple
+
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=console,
+                ) as progress:
+                    task = progress.add_task(f"Extracting features for {fg_tuple}...", total=None)
+                    result = await prepare_training_data_from_config(modified_config, session)
+                    progress.update(task, description=f"Extracted {result.num_features} features")
+
+                precomputed_features[fg_tuple] = result
+
+            console.print(
+                f"[green]Pre-computed {len(precomputed_features)} feature combinations[/green]\n"
+            )
+
+        objective = create_objective(
+            config=ml_config,
+            X_train=data_result.X_train,
+            y_train=data_result.y_train,
+            feature_names=data_result.feature_names,
+            X_val=X_val,
+            y_val=y_val,
+            precomputed_features=precomputed_features,
+        )
+
+        # Step 4: Run optimization
+        console.print("[bold]Running optimization...[/bold]\n")
+
+        try:
+            study = tuner.optimize(
+                objective=objective,
+                n_trials=ml_config.tuning.n_trials,
+                timeout=ml_config.tuning.timeout,
+            )
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Optimization interrupted by user[/yellow]")
+            if tuner.study is None or len(tuner.study.trials) == 0:
+                console.print("[red]No trials completed. Exiting.[/red]")
+                raise typer.Exit(1) from None
+            console.print(
+                f"[yellow]Completed {len(tuner.study.trials)} trials before interruption[/yellow]"
+            )
+            study = tuner.study
+        except Exception as e:
+            console.print(f"\n[red]Error during optimization: {e}[/red]")
+            raise typer.Exit(1) from None
+
+        # Step 5: Display best parameters
+        console.print("\n[bold green]Optimization complete![/bold green]")
+        console.print(f"Completed trials: {len(study.trials)}")
+        console.print(f"Best {ml_config.tuning.metric}: {study.best_value:.6f}\n")
+
+        _display_best_parameters(study.best_params)
+
+        # Step 6: Export best configuration
+        best_config = ml_config.model_copy(deep=True)
+
+        # Update model parameters with best values
+        for param_name, param_value in study.best_params.items():
+            if hasattr(best_config.training.model, param_name):
+                setattr(best_config.training.model, param_name, param_value)
+            elif hasattr(best_config.training.features, param_name):
+                setattr(best_config.training.features, param_name, param_value)
+
+        # Determine output path
+        if output_path is None:
+            config_file = Path(config_path)
+            output_path = str(config_file.parent / f"{config_file.stem}_best.yaml")
+
+        # Save best configuration
+        try:
+            best_config.to_yaml(Path(output_path))
+            console.print(f"\n[green]Best configuration saved to {output_path}[/green]")
+        except Exception as e:
+            console.print(f"\n[red]Error saving best configuration: {e}[/red]")
+            raise typer.Exit(1) from None
+
+        # Step 7: Optionally train model with best parameters
+        if train_best:
+            console.print("\n[bold]Training model with best parameters...[/bold]")
+
+            # Get strategy class
+            strategy_type = best_config.training.strategy_type
+            if strategy_type not in STRATEGY_CLASSES:
+                console.print(f"[red]Error: Unknown strategy type '{strategy_type}'[/red]")
+                raise typer.Exit(1)
+
+            strategy_class = STRATEGY_CLASSES[strategy_type]
+            strategy = strategy_class()
+
+            # Train with best config
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                task = progress.add_task("Training model...", total=None)
+
+                try:
+                    history = strategy.train_from_config(
+                        config=best_config,
+                        X_train=data_result.X_train,
+                        y_train=data_result.y_train,
+                        feature_names=data_result.feature_names,
+                        X_val=X_val,
+                        y_val=y_val,
+                    )
+                except Exception as e:
+                    progress.stop()
+                    console.print(f"[red]Error during training: {e}[/red]")
+                    raise typer.Exit(1) from None
+
+                progress.update(task, description="Training complete")
+
+            # Display training metrics
+            _display_training_metrics(history, verbose=False)
+
+            # Save model
+            output_model_path = _get_output_path(best_config)
+            Path(output_model_path).parent.mkdir(parents=True, exist_ok=True)
+
+            try:
+                strategy.save_model(output_model_path)
+                console.print(f"\n[green]Model saved to {output_model_path}[/green]")
+            except Exception as e:
+                console.print(f"[red]Error saving model: {e}[/red]")
+                raise typer.Exit(1) from None
+
+            console.print("\n[bold green]Training complete![/bold green]")
+
+
+def _display_tuning_summary(config: MLTrainingConfig, study_name: str, storage_url: str | None):
+    """Display tuning configuration summary."""
+    console.print(
+        Panel.fit(
+            f"[bold]{config.experiment.name}[/bold]\n"
+            f"{config.experiment.description or 'No description'}",
+            title="Experiment",
+        )
+    )
+
+    # Tuning config table
+    table = Table(title="Tuning Configuration", show_header=False)
+    table.add_column("Parameter", style="cyan")
+    table.add_column("Value")
+
+    table.add_row("Study Name", study_name)
+    table.add_row("Number of Trials", str(config.tuning.n_trials))
+    table.add_row("Timeout", str(config.tuning.timeout) if config.tuning.timeout else "None")
+    table.add_row("Direction", config.tuning.direction)
+    table.add_row("Metric", config.tuning.metric)
+    table.add_row("Sampler", config.tuning.sampler)
+    table.add_row("Pruner", config.tuning.pruner)
+    table.add_row("Storage", storage_url if storage_url else "In-memory")
+    table.add_row("Search Spaces", str(len(config.tuning.search_spaces)))
+
+    console.print(table)
+
+    # Search spaces table
+    if config.tuning.search_spaces:
+        search_table = Table(title="Search Spaces", show_header=True)
+        search_table.add_column("Parameter", style="cyan")
+        search_table.add_column("Type", style="yellow")
+        search_table.add_column("Range/Choices")
+
+        for param_name, space in config.tuning.search_spaces.items():
+            if space.type == "categorical":
+                range_str = f"{space.choices}"
+            elif space.type in ("int", "float"):
+                log_str = " (log)" if space.log else ""
+                step_str = f", step={space.step}" if space.step else ""
+                range_str = f"[{space.low}, {space.high}]{step_str}{log_str}"
+            else:
+                range_str = "unknown"
+
+            search_table.add_row(param_name, space.type, range_str)
+
+        console.print(search_table)
+
+
+def _display_best_parameters(best_params: dict[str, Any]):
+    """Display best parameters in table format."""
+    table = Table(title="Best Parameters", show_header=True)
+    table.add_column("Parameter", style="cyan")
+    table.add_column("Value", style="green")
+
+    for param_name, param_value in best_params.items():
+        # Format value based on type
+        if isinstance(param_value, float):
+            value_str = f"{param_value:.6f}"
+        else:
+            value_str = str(param_value)
+
+        table.add_row(param_name, value_str)
+
+    console.print(table)
 
 
 if __name__ == "__main__":

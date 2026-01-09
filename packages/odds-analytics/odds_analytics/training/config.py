@@ -510,10 +510,10 @@ class FeatureConfig(BaseModel):
     )
 
     # Feature groups to compose (replaces include_trajectory_features)
-    feature_groups: list[str] = Field(
-        default=["tabular"],
+    feature_groups: tuple[str, ...] = Field(
+        default=("tabular",),
         min_length=1,
-        description="List of feature groups to compose. Available: tabular, trajectory, sequence_full",
+        description="Feature groups to compose. Available: tabular, trajectory, sequence_full",
     )
 
     # Trajectory feature configuration
@@ -1174,7 +1174,7 @@ class MLTrainingConfig(BaseModel):
                 return {k: serialize_value(v) for k, v in value.model_dump().items()}
             elif isinstance(value, dict):
                 return {k: serialize_value(v) for k, v in value.items()}
-            elif isinstance(value, list):
+            elif isinstance(value, list | tuple):
                 return [serialize_value(v) for v in value]
             return value
 

@@ -164,7 +164,7 @@ class TestFeatureConfigExtraction:
         assert config.markets == ["h2h", "spreads", "totals"]
         assert config.sharp_bookmakers == ["pinnacle"]
         assert config.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
-        assert config.feature_groups == ["tabular"]
+        assert config.feature_groups == ("tabular",)
         assert config.opening_tier.value == "early"
         assert config.closing_tier.value == "closing"
 
@@ -185,7 +185,7 @@ class TestFeatureConfigExtraction:
         assert config.outcome == "away"
         assert config.markets == ["spreads"]
         assert config.sharp_bookmakers == ["pinnacle", "circasports"]
-        assert config.feature_groups == ["tabular", "trajectory"]
+        assert config.feature_groups == ("tabular", "trajectory")
 
 
 # =============================================================================
@@ -210,6 +210,7 @@ class TestPrepareTrainingDataFromConfig:
                     start_date=date(2024, 10, 1),
                     end_date=date(2024, 10, 31),
                     test_split=0.2,
+                    validation_split=0.0,  # No validation split for basic tests
                     random_seed=42,
                 ),
                 model=XGBoostConfig(n_estimators=100),
@@ -230,6 +231,7 @@ class TestPrepareTrainingDataFromConfig:
                     start_date=date(2024, 10, 1),
                     end_date=date(2024, 10, 31),
                     test_split=0.2,
+                    validation_split=0.0,  # No validation split for basic tests
                     random_seed=42,
                 ),
                 model=LSTMConfig(
@@ -286,6 +288,7 @@ class TestPrepareTrainingDataFromConfig:
             assert isinstance(result, TrainingDataResult)
             assert result.strategy_type == "xgboost_line_movement"
             assert result.num_train_samples + result.num_test_samples == 10
+            assert result.num_val_samples == 0  # No validation split
             assert result.num_features == 31
             assert result.masks_train is None  # XGBoost has no masks
 
@@ -414,6 +417,7 @@ class TestConfigLoadingIntegration:
                     "start_date": "2024-10-01",
                     "end_date": "2024-10-31",
                     "test_split": 0.2,
+                    "validation_split": 0.0,  # No validation split for this test
                     "random_seed": 42,
                 },
                 "model": {

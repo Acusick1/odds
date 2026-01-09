@@ -65,9 +65,9 @@ import structlog
 if TYPE_CHECKING:
     import optuna
     from numpy import ndarray
-    from sqlalchemy.ext.asyncio import AsyncSession
 
     from odds_analytics.training.config import MLTrainingConfig
+    from odds_analytics.training.data_preparation import TrainingDataResult
 
 logger = structlog.get_logger()
 
@@ -430,10 +430,9 @@ def suggest_params_from_search_space(
                 log=space.log,
             )
         elif space.type == "categorical":
-            suggested_params[param_name] = trial.suggest_categorical(
-                param_name,
-                choices=space.choices,
-            )
+            # Convert unhashable choices (lists) to tuples for Optuna
+            choices = [tuple(c) if isinstance(c, list) else c for c in space.choices]
+            suggested_params[param_name] = trial.suggest_categorical(param_name, choices=choices)
         else:
             logger.warning(
                 "unknown_search_space_type",
@@ -451,7 +450,7 @@ def create_objective(
     feature_names: list[str],
     X_val: ndarray | None = None,
     y_val: ndarray | None = None,
-    session: AsyncSession | None = None,
+    precomputed_features: dict[tuple[str, ...], TrainingDataResult] | None = None,
 ) -> Callable[[Any], float]:
     """
     Create objective function for hyperparameter optimization.
@@ -459,18 +458,20 @@ def create_objective(
     Factory function that creates a trial objective integrating with the
     training pipeline. The objective function:
     1. Extracts suggested parameters from trial
-    2. Distinguishes between model parameters and feature parameters
+    2. Looks up pre-computed features for feature_groups parameter
     3. Invokes appropriate training methods
     4. Returns validation metric for optimization
 
     Args:
         config: ML training configuration with search spaces
-        X_train: Training features
-        y_train: Training targets
-        feature_names: List of feature names
+        X_train: Training features (default features)
+        y_train: Training targets (default targets)
+        feature_names: List of feature names (default feature names)
         X_val: Validation features (optional)
         y_val: Validation targets (optional)
-        session: Database session for data extraction (optional)
+        precomputed_features: Pre-computed features for each feature_groups choice.
+            Dict mapping feature_groups tuple to TrainingDataResult.
+            Pre-compute these before calling create_objective to avoid async calls during trials.
 
     Returns:
         Objective function accepting Optuna trial and returning metric
@@ -480,7 +481,9 @@ def create_objective(
 
     Example:
         >>> config = MLTrainingConfig.from_yaml("experiments/tune.yaml")
-        >>> objective = create_objective(config, X_train, y_train, feature_names, X_val, y_val)
+        >>> # Pre-compute features for all feature_groups choices
+        >>> precomputed = {("tabular",): data_result1, ("tabular", "trajectory"): data_result2}
+        >>> objective = create_objective(config, X_train, y_train, feature_names, X_val, y_val, precomputed)
         >>> study = tuner.optimize(objective, n_trials=50)
     """
     if config.tuning is None or not config.tuning.search_spaces:
@@ -496,17 +499,14 @@ def create_objective(
     feature_param_names = set(FeatureConfig.model_fields.keys())
     model_param_names = {name for name in search_spaces.keys() if name not in feature_param_names}
 
-    # Check if feature parameters are being tuned
-    has_feature_params = bool(feature_param_names & search_spaces.keys())
-    if has_feature_params and session is None:
+    # Check if feature_groups is being tuned and we have pre-computed features
+    tuning_feature_groups = "feature_groups" in search_spaces
+    if tuning_feature_groups and precomputed_features is None:
         logger.warning(
-            "feature_params_without_session",
-            message="Feature parameters in search space but no session provided. "
-            "Feature re-extraction will be skipped. Pass session to enable.",
+            "feature_groups_without_precomputed",
+            message="feature_groups in search space but no precomputed_features provided. "
+            "Will use default features for all trials.",
         )
-
-    # Cache for feature extraction results (keyed by feature config hash)
-    feature_cache: dict[str, tuple[ndarray, ndarray, ndarray | None, ndarray | None]] = {}
 
     logger.info(
         "objective_created",
@@ -515,7 +515,8 @@ def create_objective(
         search_space_size=len(search_spaces),
         model_params=list(model_param_names),
         feature_params=list(feature_param_names & search_spaces.keys()),
-        has_feature_params=has_feature_params,
+        tuning_feature_groups=tuning_feature_groups,
+        has_precomputed=precomputed_features is not None,
     )
 
     def objective(trial: Any) -> float:
@@ -555,81 +556,26 @@ def create_objective(
             if hasattr(modified_config.training.features, param_name):
                 setattr(modified_config.training.features, param_name, param_value)
 
-        # Handle feature parameter re-extraction with caching
+        # Select features: use pre-computed if available for feature_groups, otherwise default
         trial_X_train, trial_y_train = X_train, y_train
         trial_X_val, trial_y_val = X_val, y_val
         trial_feature_names = feature_names
 
-        if feature_params and session is not None:
-            # Compute hash of feature configuration
-            config_hash = _compute_feature_config_hash(feature_params)
-
-            # Check cache
-            if config_hash in feature_cache:
+        if "feature_groups" in feature_params and precomputed_features is not None:
+            fg_key = feature_params["feature_groups"]
+            if fg_key in precomputed_features:
+                data = precomputed_features[fg_key]
+                trial_X_train = data.X_train
+                trial_y_train = data.y_train
+                trial_X_val = data.X_val if data.num_val_samples > 0 else data.X_test
+                trial_y_val = data.y_val if data.num_val_samples > 0 else data.y_test
+                trial_feature_names = data.feature_names
                 logger.debug(
-                    "using_cached_features",
+                    "using_precomputed_features",
                     trial_number=trial.number,
-                    config_hash=config_hash,
+                    feature_groups=fg_key,
+                    n_features=len(trial_feature_names),
                 )
-                trial_X_train, trial_y_train, trial_X_val, trial_y_val = feature_cache[config_hash]
-            else:
-                # Re-extract features with modified config
-                logger.info(
-                    "re_extracting_features",
-                    trial_number=trial.number,
-                    config_hash=config_hash,
-                    feature_params=feature_params,
-                )
-
-                try:
-                    # Import feature extraction function
-                    # Extract features using modified config
-                    # Note: This requires the config to have data.start_date and data.end_date set
-                    import asyncio
-
-                    from odds_analytics.training.data_preparation import (
-                        prepare_training_data_from_config,
-                    )
-
-                    result = asyncio.run(
-                        prepare_training_data_from_config(
-                            config=modified_config,
-                            session=session,
-                        )
-                    )
-
-                    trial_X_train = result.X_train
-                    trial_y_train = result.y_train
-                    trial_X_val = result.X_val
-                    trial_y_val = result.y_val
-                    trial_feature_names = result.feature_names
-
-                    # Cache the results
-                    feature_cache[config_hash] = (
-                        trial_X_train,
-                        trial_y_train,
-                        trial_X_val,
-                        trial_y_val,
-                    )
-
-                    logger.info(
-                        "features_re_extracted",
-                        trial_number=trial.number,
-                        n_train_samples=len(trial_X_train),
-                        n_val_samples=len(trial_X_val) if trial_X_val is not None else 0,
-                        n_features=len(trial_feature_names),
-                    )
-                except Exception as e:
-                    logger.error(
-                        "feature_extraction_failed",
-                        trial_number=trial.number,
-                        error=str(e),
-                    )
-                    # Fall back to original features
-                    logger.warning(
-                        "falling_back_to_original_features",
-                        trial_number=trial.number,
-                    )
 
         # Import strategy classes
         if strategy_type in ("xgboost", "xgboost_line_movement"):
