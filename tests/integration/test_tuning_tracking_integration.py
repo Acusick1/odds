@@ -300,6 +300,48 @@ tracking:
         assert tuner._tracker is None
         assert tuner._parent_run_id is None
 
+    @pytest.mark.asyncio
+    async def test_log_best_model_raises_without_tracking(
+        self, minimal_tuning_config_path, sample_training_data
+    ):
+        """Test that log_best_model raises ValueError when tracking is not enabled."""
+        # Load configuration
+        config = MLTrainingConfig.from_yaml(minimal_tuning_config_path)
+
+        # Create tuner without tracking
+        tuner = OptunaTuner(
+            study_name="test_no_tracking_model_log",
+            direction=config.tuning.direction,
+            sampler=config.tuning.sampler,
+            pruner=config.tuning.pruner,
+            tracking_config=None,  # No tracking
+        )
+
+        # Create objective and run optimization
+        X_train, y_train, feature_names = sample_training_data
+        objective = create_objective(
+            config=config,
+            X_train=X_train,
+            y_train=y_train,
+            feature_names=feature_names,
+            X_val=X_train[:20],
+            y_val=y_train[:20],
+        )
+        study = tuner.optimize(objective, n_trials=2)
+
+        # Create a simple model
+        from xgboost import XGBRegressor
+
+        model = XGBRegressor(n_estimators=10)
+        model.fit(X_train, y_train)
+
+        # Attempt to log model should raise ValueError
+        with pytest.raises(
+            ValueError,
+            match="Cannot log model: tracking is not enabled or parent run doesn't exist",
+        ):
+            tuner.log_best_model(model)
+
     @pytest.fixture
     def sample_training_data(self):
         """Create minimal sample training data for testing."""

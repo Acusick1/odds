@@ -397,58 +397,71 @@ class OptunaTuner(HyperparameterTuner):
             )
         finally:
             # Log final results to parent run if tracking enabled
-            if self._tracker and self.study.best_trial:
-                try:
-                    # Log best trial results
-                    self._tracker.log_params(
-                        {f"best_{k}": v for k, v in self.study.best_params.items()}
-                    )
-                    self._tracker.log_metrics(
-                        {
-                            "best_value": self.study.best_value,
-                            "n_completed_trials": len(
-                                [
-                                    t
-                                    for t in self.study.trials
-                                    if t.state == optuna.trial.TrialState.COMPLETE
-                                ]
-                            ),
-                            "n_pruned_trials": len(
-                                [
-                                    t
-                                    for t in self.study.trials
-                                    if t.state == optuna.trial.TrialState.PRUNED
-                                ]
-                            ),
-                            "n_failed_trials": len(
-                                [
-                                    t
-                                    for t in self.study.trials
-                                    if t.state == optuna.trial.TrialState.FAIL
-                                ]
-                            ),
-                        }
-                    )
-                    logger.info(
-                        "mlflow_parent_run_updated",
-                        best_value=self.study.best_value,
+            if self._tracker:
+                run_status = "FINISHED"
+                if self.study.best_trial:
+                    try:
+                        # Log best trial results
+                        self._tracker.log_params(
+                            {f"best_{k}": v for k, v in self.study.best_params.items()}
+                        )
+                        self._tracker.log_metrics(
+                            {
+                                "best_value": self.study.best_value,
+                                "n_completed_trials": len(
+                                    [
+                                        t
+                                        for t in self.study.trials
+                                        if t.state == optuna.trial.TrialState.COMPLETE
+                                    ]
+                                ),
+                                "n_pruned_trials": len(
+                                    [
+                                        t
+                                        for t in self.study.trials
+                                        if t.state == optuna.trial.TrialState.PRUNED
+                                    ]
+                                ),
+                                "n_failed_trials": len(
+                                    [
+                                        t
+                                        for t in self.study.trials
+                                        if t.state == optuna.trial.TrialState.FAIL
+                                    ]
+                                ),
+                            }
+                        )
+                        logger.info(
+                            "mlflow_parent_run_updated",
+                            best_value=self.study.best_value,
+                            n_trials=len(self.study.trials),
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "mlflow_parent_run_logging_failed",
+                            error=str(e),
+                        )
+                else:
+                    # No successful trials - mark as failed
+                    run_status = "FAILED"
+                    logger.warning(
+                        "optimization_no_successful_trials",
+                        study_name=self.study_name,
                         n_trials=len(self.study.trials),
                     )
-                except Exception as e:
-                    logger.warning(
-                        "mlflow_parent_run_logging_failed",
-                        error=str(e),
-                    )
 
-                # End parent run
-                self._tracker.end_run(status="FINISHED")
+                # Always end parent run
+                self._tracker.end_run(status=run_status)
 
-        logger.info(
-            "optimization_completed",
-            study_name=self.study_name,
-            n_trials=len(self.study.trials),
-            best_value=self.study.best_value,
-        )
+        # Guard best_value access - only log if we have a best trial
+        log_data = {
+            "study_name": self.study_name,
+            "n_trials": len(self.study.trials),
+        }
+        if self.study.best_trial:
+            log_data["best_value"] = self.study.best_value
+
+        logger.info("optimization_completed", **log_data)
 
         return self.study
 
