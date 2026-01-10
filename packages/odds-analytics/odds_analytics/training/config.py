@@ -94,6 +94,7 @@ __all__ = [
     "XGBoostConfig",
     "LSTMConfig",
     "FeatureConfig",
+    "FeatureSelectionConfig",
     "SearchSpace",
     "TrainingConfig",
     "TuningConfig",
@@ -577,6 +578,103 @@ class FeatureConfig(BaseModel):
 
 
 # =============================================================================
+# Feature Selection Configuration
+# =============================================================================
+
+
+class FeatureSelectionConfig(BaseModel):
+    """
+    Feature selection configuration for pre-HPO feature reduction.
+
+    Supports multiple selection methods with configurable parameters.
+    Designed to be nested in TrainingConfig hierarchy.
+
+    Example:
+        ```python
+        config = FeatureSelectionConfig(
+            enabled=True,
+            method="ensemble",
+            n_ensemble_models=3,
+            ensemble_seeds=[42, 123, 456],
+        )
+        ```
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable feature selection before HPO",
+    )
+    method: str = Field(
+        default="ensemble",
+        description="Selection method: manual, filter, ensemble, hybrid",
+    )
+
+    # Manual selection
+    feature_names: list[str] | None = Field(
+        default=None,
+        description="Explicit feature list (only used when method='manual')",
+    )
+
+    # Filter method settings
+    min_correlation: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=1.0,
+        description="Minimum absolute correlation with target",
+    )
+    min_variance: float = Field(
+        default=0.01,
+        ge=0.0,
+        description="Minimum feature variance threshold",
+    )
+
+    # Ensemble settings
+    n_ensemble_models: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of models in ensemble",
+    )
+    ensemble_seeds: list[int] = Field(
+        default=[42, 123, 456],
+        description="Random seeds for ensemble models",
+    )
+    model_types: list[str] = Field(
+        default=["xgboost", "random_forest", "extra_trees"],
+        description="Model types for ensemble importance",
+    )
+
+    # Hybrid settings
+    hybrid_filter_weight: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Weight for filter method in hybrid (1-weight goes to ensemble)",
+    )
+
+    @model_validator(mode="after")
+    def validate_method_specific_fields(self) -> FeatureSelectionConfig:
+        """Validate required fields for each method."""
+        if self.method == "manual" and not self.feature_names:
+            raise ValueError("method='manual' requires feature_names to be set")
+
+        if self.method == "ensemble" and len(self.ensemble_seeds) != self.n_ensemble_models:
+            raise ValueError(
+                f"ensemble_seeds length ({len(self.ensemble_seeds)}) must match "
+                f"n_ensemble_models ({self.n_ensemble_models})"
+            )
+
+        # Validate method is known (will be caught by factory too, but fail fast)
+        valid_methods = ["manual", "filter", "ensemble", "hybrid"]
+        if self.method not in valid_methods:
+            raise ValueError(f"Unknown method '{self.method}'. Valid methods: {valid_methods}")
+
+        return self
+
+
+# =============================================================================
 # Search Space for Hyperparameter Tuning (Optuna)
 # =============================================================================
 
@@ -775,11 +873,11 @@ class TrainingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    strategy_type: Literal["xgboost", "xgboost_line_movement", "lstm", "lstm_line_movement"] = (
-        Field(
-            ...,
-            description="Type of ML strategy to train",
-        )
+    strategy_type: Literal[
+        "xgboost", "xgboost_line_movement", "lstm", "lstm_line_movement"
+    ] = Field(
+        ...,
+        description="Type of ML strategy to train",
     )
 
     # Data configuration
@@ -798,6 +896,12 @@ class TrainingConfig(BaseModel):
     features: FeatureConfig = Field(
         default_factory=FeatureConfig,
         description="Feature extraction settings",
+    )
+
+    # Feature selection configuration
+    feature_selection: FeatureSelectionConfig = Field(
+        default_factory=FeatureSelectionConfig,
+        description="Feature selection settings for pre-HPO reduction",
     )
 
     # Strategy-specific parameters

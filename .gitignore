@@ -55,6 +55,7 @@ htmlcov/
 # Experiments
 experiments/
 models/
+mlruns/
 *.html
 
 # Logs
