@@ -107,7 +107,7 @@ class TestFeatureSelectionConfig:
 
     def test_unknown_method(self):
         """Test that unknown method raises validation error."""
-        with pytest.raises(ValidationError, match="Unknown method"):
+        with pytest.raises(ValidationError, match="Input should be"):
             FeatureSelectionConfig(method="invalid_method")
 
     def test_correlation_bounds(self):

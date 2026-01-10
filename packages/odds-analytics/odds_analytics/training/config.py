@@ -606,7 +606,7 @@ class FeatureSelectionConfig(BaseModel):
         default=True,
         description="Enable feature selection before HPO",
     )
-    method: str = Field(
+    method: Literal["manual", "filter", "ensemble", "hybrid"] = Field(
         default="ensemble",
         description="Selection method: manual, filter, ensemble, hybrid",
     )
@@ -665,11 +665,6 @@ class FeatureSelectionConfig(BaseModel):
                 f"ensemble_seeds length ({len(self.ensemble_seeds)}) must match "
                 f"n_ensemble_models ({self.n_ensemble_models})"
             )
-
-        # Validate method is known (will be caught by factory too, but fail fast)
-        valid_methods = ["manual", "filter", "ensemble", "hybrid"]
-        if self.method not in valid_methods:
-            raise ValueError(f"Unknown method '{self.method}'. Valid methods: {valid_methods}")
 
         return self
 

@@ -60,6 +60,7 @@ mlruns/
 
 # Logs
 logs/
+plans/
 *.log
 
 # OS
