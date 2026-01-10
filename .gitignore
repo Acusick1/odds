@@ -53,7 +53,10 @@ htmlcov/
 *.sqlite3
 
 # Experiments
-experiments/
+experiments/*
+!experiments/configs/
+experiments/configs/*
+!experiments/configs/*.yaml
 models/
 mlruns/
 *.html
