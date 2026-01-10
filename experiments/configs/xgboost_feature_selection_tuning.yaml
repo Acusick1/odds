@@ -1,0 +1,141 @@
+# Example configuration for XGBoost with feature selection and top_k_features tuning
+#
+# This configuration demonstrates how to integrate feature selection into the
+# hyperparameter optimization process. The optimizer will:
+# 1. Run feature selection once on the first trial
+# 2. Tune the number of features (top_k_features) as a hyperparameter
+# 3. Use the pre-computed feature rankings to subset features per trial
+#
+# Usage:
+#   uv run odds train run --config experiments/configs/xgboost_feature_selection_tuning.yaml
+
+experiment:
+  name: "xgboost_feature_selection_h2h"
+  tags: ["xgboost", "feature_selection", "h2h", "tuning"]
+  description: |
+    XGBoost model with integrated feature selection and top_k_features tuning.
+    Uses ensemble feature selection method to rank features, then tunes the
+    number of features to use alongside other hyperparameters.
+
+training:
+  strategy_type: "xgboost_line_movement"
+
+  data:
+    start_date: "2024-10-01"
+    end_date: "2024-12-31"
+    test_split: 0.2
+    validation_split: 0.1
+    random_seed: 42
+    shuffle: true
+    # Use cross-validation for more robust tuning
+    use_kfold: true
+    cv_method: "timeseries"
+    n_folds: 5
+
+  model:
+    # Base XGBoost parameters (will be tuned via search spaces)
+    n_estimators: 100
+    max_depth: 6
+    learning_rate: 0.1
+    min_child_weight: 1
+    gamma: 0.0
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_alpha: 0.0
+    reg_lambda: 1.0
+    objective: "reg:squarederror"
+    random_state: 42
+    n_jobs: -1
+    early_stopping_rounds: 10
+
+  features:
+    sharp_bookmakers: ["pinnacle"]
+    retail_bookmakers: ["fanduel", "draftkings", "betmgm"]
+    markets: ["h2h", "spreads", "totals"]
+    outcome: "home"
+    normalize: false
+    feature_groups: ["tabular", "trajectory"]
+
+  # Feature selection configuration
+  feature_selection:
+    enabled: true  # CRITICAL: Must be true for top_k_features tuning to work
+    method: "ensemble"  # Options: manual, filter, ensemble, hybrid
+    n_ensemble_models: 3
+    ensemble_seeds: [42, 123, 456]
+    model_types: ["xgboost", "random_forest", "extra_trees"]
+    # Filter settings (used if method is filter or hybrid)
+    min_correlation: 0.02
+    min_variance: 0.01
+    # Hybrid settings (used if method is hybrid)
+    hybrid_filter_weight: 0.3
+
+  output_path: "models"
+
+# Hyperparameter tuning configuration
+tuning:
+  n_trials: 50  # Number of optimization trials
+  timeout: null  # No timeout (run all trials)
+  direction: "minimize"  # Minimize validation error
+  metric: "val_mse"  # Metric to optimize
+  pruner: "median"  # Early stopping for unpromising trials
+  sampler: "tpe"  # Tree-structured Parzen Estimator
+
+  # Search spaces for hyperparameters
+  search_spaces:
+    # Model hyperparameters
+    n_estimators:
+      type: int
+      low: 50
+      high: 300
+      step: 50
+
+    max_depth:
+      type: int
+      low: 3
+      high: 10
+
+    learning_rate:
+      type: float
+      low: 0.01
+      high: 0.3
+      log: true  # Use log scale for learning rate
+
+    subsample:
+      type: float
+      low: 0.6
+      high: 1.0
+      step: 0.1
+
+    colsample_bytree:
+      type: float
+      low: 0.6
+      high: 1.0
+      step: 0.1
+
+    reg_alpha:
+      type: float
+      low: 0.0
+      high: 1.0
+
+    reg_lambda:
+      type: float
+      low: 0.0
+      high: 2.0
+
+    # Feature selection hyperparameter
+    # This is the key addition: tune the number of features to use
+    top_k_features:
+      type: int
+      low: 5  # Minimum number of features
+      high: 40  # Maximum number of features
+      step: 1
+
+# Experiment tracking configuration
+tracking:
+  enabled: true
+  backend: "mlflow"
+  tracking_uri: "mlruns"
+  experiment_name: "xgboost_feature_selection_experiments"
+  log_model: true
+  log_params: true
+  log_metrics: true

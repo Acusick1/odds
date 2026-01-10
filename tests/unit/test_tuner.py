@@ -923,3 +923,364 @@ def test_cv_with_precomputed_features(
 
     # Should return mean CV metric
     assert result == 0.02
+
+
+# =============================================================================
+# Test Feature Selection Integration with top_k_features
+# =============================================================================
+
+
+def test_top_k_features_in_search_space(sample_config, sample_training_data):
+    """Test that top_k_features can be added to search space."""
+    X_train, y_train, X_val, y_val, feature_names = sample_training_data
+
+    # Add top_k_features to search space
+    from odds_analytics.training.config import SearchSpace
+
+    sample_config.tuning.search_spaces["top_k_features"] = SearchSpace(
+        type="int", low=5, high=40, step=1
+    )
+
+    # Enable feature selection
+    sample_config.training.feature_selection.enabled = True
+    sample_config.training.feature_selection.method = "ensemble"
+
+    # Create objective should recognize top_k_features
+    objective = create_objective(
+        config=sample_config,
+        X_train=X_train,
+        y_train=y_train,
+        feature_names=feature_names,
+        X_val=X_val,
+        y_val=y_val,
+    )
+
+    assert callable(objective)
+
+
+@patch("odds_analytics.training.feature_selection.get_feature_selector")
+@patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
+def test_feature_selection_runs_on_first_trial(
+    mock_strategy_class, mock_selector_factory, sample_config, sample_training_data
+):
+    """Test that feature selection runs once on first trial."""
+    X_train, y_train, X_val, y_val, feature_names = sample_training_data
+
+    # Add top_k_features to search space
+    from odds_analytics.training.config import SearchSpace
+
+    sample_config.tuning.search_spaces["top_k_features"] = SearchSpace(
+        type="int", low=5, high=10, step=1
+    )
+
+    # Enable feature selection
+    sample_config.training.feature_selection.enabled = True
+    sample_config.training.data.use_kfold = False
+
+    # Mock feature selector - use actual feature names from sample data
+    from odds_analytics.training.feature_selection import FeatureRanking
+
+    mock_ranking = FeatureRanking(
+        feature_names=feature_names[:5],  # Top 5 features from actual data
+        scores=[0.9, 0.7, 0.5, 0.3, 0.1],
+        method="ensemble",
+        metadata={"n_models": 3},
+    )
+
+    mock_selector = Mock()
+    mock_selector.select.return_value = mock_ranking
+    mock_selector_factory.return_value = mock_selector
+
+    # Mock strategy
+    mock_strategy = MagicMock()
+    mock_strategy.train_from_config.return_value = {"val_mse": 0.5}
+    mock_strategy_class.return_value = mock_strategy
+
+    objective = create_objective(
+        config=sample_config,
+        X_train=X_train,
+        y_train=y_train,
+        feature_names=feature_names,
+        X_val=X_val,
+        y_val=y_val,
+    )
+
+    # Mock trial 0 (should run feature selection)
+    mock_trial = Mock()
+    mock_trial.number = 0
+    mock_trial.suggest_int.side_effect = [100, 6, 8]  # n_estimators, max_depth, top_k_features
+    mock_trial.suggest_float.return_value = 0.1
+    mock_trial.suggest_categorical.return_value = "reg:squarederror"
+
+    # Mock study attributes
+    mock_study = Mock()
+    mock_study.user_attrs = {}
+
+    def set_user_attr(key, value):
+        mock_study.user_attrs[key] = value
+
+    def get_user_attr(key):
+        return mock_study.user_attrs.get(key)
+
+    mock_study.set_user_attr.side_effect = set_user_attr
+    mock_trial.study = mock_study
+
+    # Execute first trial
+    objective(mock_trial)
+
+    # Verify feature selection was called
+    mock_selector.select.assert_called_once()
+
+    # Verify rankings were stored in study attributes
+    assert "feature_ranking_names" in mock_study.user_attrs
+    assert "feature_ranking_scores" in mock_study.user_attrs
+    assert mock_study.user_attrs["feature_ranking_names"] == feature_names[:5]
+
+
+@patch("odds_analytics.training.feature_selection.get_feature_selector")
+@patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
+def test_feature_selection_only_runs_once(
+    mock_strategy_class, mock_selector_factory, sample_config, sample_training_data
+):
+    """Test that feature selection only runs on first trial, not on subsequent trials."""
+    X_train, y_train, X_val, y_val, feature_names = sample_training_data
+
+    # Add top_k_features to search space
+    from odds_analytics.training.config import SearchSpace
+
+    sample_config.tuning.search_spaces["top_k_features"] = SearchSpace(
+        type="int", low=5, high=10, step=1
+    )
+
+    # Enable feature selection
+    sample_config.training.feature_selection.enabled = True
+    sample_config.training.data.use_kfold = False
+
+    # Mock feature selector - use actual feature names from sample data
+    from odds_analytics.training.feature_selection import FeatureRanking
+
+    mock_ranking = FeatureRanking(
+        feature_names=feature_names[:5],  # Top 5 features from actual data
+        scores=[0.9, 0.7, 0.5, 0.3, 0.1],
+        method="ensemble",
+        metadata={"n_models": 3},
+    )
+
+    mock_selector = Mock()
+    mock_selector.select.return_value = mock_ranking
+    mock_selector_factory.return_value = mock_selector
+
+    # Mock strategy
+    mock_strategy = MagicMock()
+    mock_strategy.train_from_config.return_value = {"val_mse": 0.5}
+    mock_strategy_class.return_value = mock_strategy
+
+    objective = create_objective(
+        config=sample_config,
+        X_train=X_train,
+        y_train=y_train,
+        feature_names=feature_names,
+        X_val=X_val,
+        y_val=y_val,
+    )
+
+    # Mock study with shared user attributes
+    mock_study = Mock()
+    mock_study.user_attrs = {}
+
+    def set_user_attr(key, value):
+        mock_study.user_attrs[key] = value
+
+    mock_study.set_user_attr.side_effect = set_user_attr
+
+    # Trial 0 (should run feature selection)
+    mock_trial_0 = Mock()
+    mock_trial_0.number = 0
+    mock_trial_0.suggest_int.side_effect = [100, 6, 8]
+    mock_trial_0.suggest_float.return_value = 0.1
+    mock_trial_0.suggest_categorical.return_value = "reg:squarederror"
+    mock_trial_0.study = mock_study
+
+    objective(mock_trial_0)
+
+    # Trial 1 (should NOT run feature selection)
+    mock_trial_1 = Mock()
+    mock_trial_1.number = 1
+    mock_trial_1.suggest_int.side_effect = [150, 7, 7]
+    mock_trial_1.suggest_float.return_value = 0.05
+    mock_trial_1.suggest_categorical.return_value = "reg:squarederror"
+    mock_trial_1.study = mock_study
+
+    objective(mock_trial_1)
+
+    # Feature selection should only have been called once (on trial 0)
+    assert mock_selector.select.call_count == 1
+
+
+@patch("odds_analytics.training.feature_selection.get_feature_selector")
+@patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
+def test_feature_subsetting_with_top_k(
+    mock_strategy_class, mock_selector_factory, sample_config, sample_training_data
+):
+    """Test that features are subsetted based on top_k_features parameter."""
+    X_train, y_train, X_val, y_val, feature_names = sample_training_data
+
+    # Add top_k_features to search space
+    from odds_analytics.training.config import SearchSpace
+
+    sample_config.tuning.search_spaces["top_k_features"] = SearchSpace(
+        type="int", low=2, high=5, step=1
+    )
+
+    # Enable feature selection
+    sample_config.training.feature_selection.enabled = True
+    sample_config.training.data.use_kfold = False
+
+    # Mock feature selector with ranked features - use actual feature names
+    from odds_analytics.training.feature_selection import FeatureRanking
+
+    mock_ranking = FeatureRanking(
+        feature_names=feature_names[:5],  # Ranked by importance
+        scores=[0.9, 0.7, 0.5, 0.3, 0.1],
+        method="ensemble",
+        metadata={"n_models": 3},
+    )
+
+    mock_selector = Mock()
+    mock_selector.select.return_value = mock_ranking
+    mock_selector_factory.return_value = mock_selector
+
+    # Mock strategy - check feature count
+    mock_strategy = MagicMock()
+
+    def check_feature_count(config, X_train, y_train, feature_names, **kwargs):
+        # Verify we receive subsetted features
+        return {"val_mse": 0.5}
+
+    mock_strategy.train_from_config.side_effect = check_feature_count
+    mock_strategy_class.return_value = mock_strategy
+
+    objective = create_objective(
+        config=sample_config,
+        X_train=X_train,
+        y_train=y_train,
+        feature_names=feature_names,
+        X_val=X_val,
+        y_val=y_val,
+    )
+
+    # Mock study with shared attributes
+    mock_study = Mock()
+    mock_study.user_attrs = {}
+
+    def set_user_attr(key, value):
+        mock_study.user_attrs[key] = value
+
+    mock_study.set_user_attr.side_effect = set_user_attr
+
+    # Trial 0 with top_k_features=3 (should use top 3 features: f1, f2, f3)
+    mock_trial = Mock()
+    mock_trial.number = 0
+    mock_trial.suggest_int.side_effect = [100, 6, 3]  # n_estimators, max_depth, top_k=3
+    mock_trial.suggest_float.return_value = 0.1
+    mock_trial.suggest_categorical.return_value = "reg:squarederror"
+    mock_trial.study = mock_study
+
+    objective(mock_trial)
+
+    # Verify training was called with subset of features
+    call_kwargs = mock_strategy.train_from_config.call_args[1]
+    assert len(call_kwargs["feature_names"]) == 3
+    assert call_kwargs["feature_names"] == feature_names[:3]  # Top 3 features
+    assert call_kwargs["X_train"].shape[1] == 3  # Only 3 features
+
+
+@patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
+def test_no_feature_selection_when_disabled(
+    mock_strategy_class, sample_config, sample_training_data
+):
+    """Test that feature selection is skipped when disabled in config."""
+    X_train, y_train, X_val, y_val, feature_names = sample_training_data
+
+    # Add top_k_features to search space
+    from odds_analytics.training.config import SearchSpace
+
+    sample_config.tuning.search_spaces["top_k_features"] = SearchSpace(
+        type="int", low=5, high=10, step=1
+    )
+
+    # Disable feature selection
+    sample_config.training.feature_selection.enabled = False
+    sample_config.training.data.use_kfold = False
+
+    # Mock strategy
+    mock_strategy = MagicMock()
+    mock_strategy.train_from_config.return_value = {"val_mse": 0.5}
+    mock_strategy_class.return_value = mock_strategy
+
+    objective = create_objective(
+        config=sample_config,
+        X_train=X_train,
+        y_train=y_train,
+        feature_names=feature_names,
+        X_val=X_val,
+        y_val=y_val,
+    )
+
+    # Mock trial
+    mock_trial = Mock()
+    mock_trial.number = 0
+    mock_trial.suggest_int.side_effect = [100, 6, 8]
+    mock_trial.suggest_float.return_value = 0.1
+    mock_trial.suggest_categorical.return_value = "reg:squarederror"
+    mock_study = Mock()
+    mock_study.user_attrs = {}
+    mock_trial.study = mock_study
+
+    # Execute trial
+    objective(mock_trial)
+
+    # Verify no feature selection attributes were set
+    assert "feature_ranking_names" not in mock_study.user_attrs
+
+
+@patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
+def test_no_feature_selection_without_top_k_in_search_space(
+    mock_strategy_class, sample_config, sample_training_data
+):
+    """Test that feature selection is skipped when top_k_features not in search space."""
+    X_train, y_train, X_val, y_val, feature_names = sample_training_data
+
+    # Enable feature selection but don't add top_k_features to search space
+    sample_config.training.feature_selection.enabled = True
+    sample_config.training.data.use_kfold = False
+
+    # Mock strategy
+    mock_strategy = MagicMock()
+    mock_strategy.train_from_config.return_value = {"val_mse": 0.5}
+    mock_strategy_class.return_value = mock_strategy
+
+    objective = create_objective(
+        config=sample_config,
+        X_train=X_train,
+        y_train=y_train,
+        feature_names=feature_names,
+        X_val=X_val,
+        y_val=y_val,
+    )
+
+    # Mock trial
+    mock_trial = Mock()
+    mock_trial.number = 0
+    mock_trial.suggest_int.side_effect = [100, 6]  # No top_k_features
+    mock_trial.suggest_float.return_value = 0.1
+    mock_trial.suggest_categorical.return_value = "reg:squarederror"
+    mock_study = Mock()
+    mock_study.user_attrs = {}
+    mock_trial.study = mock_study
+
+    # Execute trial
+    objective(mock_trial)
+
+    # Verify no feature selection attributes were set
+    assert "feature_ranking_names" not in mock_study.user_attrs

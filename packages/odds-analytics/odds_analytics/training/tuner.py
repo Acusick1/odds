@@ -454,6 +454,69 @@ class OptunaTuner(HyperparameterTuner):
                 # Always end parent run
                 self._tracker.end_run(status=run_status)
 
+        # Log feature selection results to MLflow if available
+        if self._tracker and self._parent_run_id:
+            try:
+                ranking_names = self.study.user_attrs.get("feature_ranking_names")
+                ranking_scores = self.study.user_attrs.get("feature_ranking_scores")
+                ranking_method = self.study.user_attrs.get("feature_ranking_method")
+                ranking_metadata = self.study.user_attrs.get("feature_ranking_metadata")
+
+                if ranking_names:
+                    import mlflow
+
+                    with mlflow.start_run(run_id=self._parent_run_id):
+                        # Log feature ranking parameters
+                        self._tracker.log_params(
+                            {
+                                "feature_selection_method": ranking_method,
+                                "n_ranked_features": len(ranking_names),
+                            }
+                        )
+
+                        # Log top features as parameters (limit to 10)
+                        for i, (name, score) in enumerate(
+                            zip(ranking_names[:10], ranking_scores[:10], strict=False)
+                        ):
+                            self._tracker.log_params(
+                                {
+                                    f"top_feature_{i + 1}_name": name,
+                                    f"top_feature_{i + 1}_score": score,
+                                }
+                            )
+
+                        # Log complete rankings as artifact (JSON)
+                        import json
+                        import tempfile
+                        from pathlib import Path
+
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            ranking_file = Path(tmpdir) / "feature_ranking.json"
+                            with open(ranking_file, "w") as f:
+                                json.dump(
+                                    {
+                                        "feature_names": ranking_names,
+                                        "scores": ranking_scores,
+                                        "method": ranking_method,
+                                        "metadata": ranking_metadata,
+                                    },
+                                    f,
+                                    indent=2,
+                                )
+                            mlflow.log_artifact(str(ranking_file), "feature_selection")
+
+                        logger.info(
+                            "feature_ranking_logged_to_mlflow",
+                            n_features=len(ranking_names),
+                            method=ranking_method,
+                        )
+
+            except Exception as e:
+                logger.warning(
+                    "feature_ranking_mlflow_logging_failed",
+                    error=str(e),
+                )
+
         # Guard best_value access - only log if we have a best trial
         log_data = {
             "study_name": self.study_name,
@@ -645,8 +708,10 @@ def create_objective(
     training pipeline. The objective function:
     1. Extracts suggested parameters from trial
     2. Looks up pre-computed features for feature_groups parameter
-    3. Invokes appropriate training methods
-    4. Returns validation metric for optimization
+    3. Runs feature selection once on first trial (if enabled and top_k_features in search space)
+    4. Subsets features based on top_k_features parameter (if in search space)
+    5. Invokes appropriate training methods
+    6. Returns validation metric for optimization
 
     Args:
         config: ML training configuration with search spaces
@@ -694,6 +759,9 @@ def create_objective(
             "Will use default features for all trials.",
         )
 
+    # Check if top_k_features is being tuned
+    tuning_top_k_features = "top_k_features" in search_spaces
+
     logger.info(
         "objective_created",
         strategy_type=strategy_type,
@@ -702,6 +770,7 @@ def create_objective(
         model_params=list(model_param_names),
         feature_params=list(feature_param_names & search_spaces.keys()),
         tuning_feature_groups=tuning_feature_groups,
+        tuning_top_k_features=tuning_top_k_features,
         has_precomputed=precomputed_features is not None,
     )
 
@@ -718,15 +787,21 @@ def create_objective(
         # Suggest parameters from search spaces
         suggested_params = suggest_params_from_search_space(trial, search_spaces)
 
-        # Split into model and feature parameters
+        # Split into model and feature parameters (excluding top_k_features)
         model_params = {k: v for k, v in suggested_params.items() if k in model_param_names}
-        feature_params = {k: v for k, v in suggested_params.items() if k in feature_param_names}
+        feature_params = {
+            k: v
+            for k, v in suggested_params.items()
+            if k in feature_param_names and k != "top_k_features"
+        }
+        top_k = suggested_params.get("top_k_features")
 
         logger.info(
             "trial_started",
             trial_number=trial.number,
             model_params=model_params,
             feature_params=feature_params,
+            top_k_features=top_k,
         )
 
         # Create modified config with suggested parameters
@@ -761,6 +836,60 @@ def create_objective(
                     trial_number=trial.number,
                     feature_groups=fg_key,
                     n_features=len(trial_feature_names),
+                )
+
+        # Feature selection integration for top_k_features tuning
+        if tuning_top_k_features and config.training.feature_selection.enabled:
+            # Run feature selection once on first trial and store rankings
+            if trial.number == 0:
+                from odds_analytics.training.feature_selection import get_feature_selector
+
+                logger.info(
+                    "running_feature_selection",
+                    trial_number=trial.number,
+                    method=config.training.feature_selection.method,
+                    n_features=len(trial_feature_names),
+                )
+
+                # Run feature selection
+                selector = get_feature_selector(config.training.feature_selection)
+                ranking = selector.select(trial_X_train, trial_y_train, trial_feature_names)
+
+                # Store rankings in study user attributes (as JSON)
+                trial.study.set_user_attr("feature_ranking_names", ranking.feature_names)
+                trial.study.set_user_attr("feature_ranking_scores", ranking.scores)
+                trial.study.set_user_attr("feature_ranking_method", ranking.method)
+                trial.study.set_user_attr("feature_ranking_metadata", ranking.metadata)
+
+                logger.info(
+                    "feature_selection_completed",
+                    trial_number=trial.number,
+                    method=ranking.method,
+                    n_features=len(ranking.feature_names),
+                    top_5_features=ranking.feature_names[:5],
+                    top_5_scores=ranking.scores[:5],
+                )
+
+            # Retrieve stored rankings (available in all trials after first)
+            ranking_names = trial.study.user_attrs.get("feature_ranking_names")
+
+            if ranking_names and top_k:
+                # Subset to top_k features
+                selected_features = ranking_names[: int(top_k)]
+                selected_indices = [trial_feature_names.index(f) for f in selected_features]
+
+                # Apply subsetting to training and validation data
+                trial_X_train = trial_X_train[:, selected_indices]
+                if trial_X_val is not None:
+                    trial_X_val = trial_X_val[:, selected_indices]
+                trial_feature_names = selected_features
+
+                logger.debug(
+                    "applied_feature_subsetting",
+                    trial_number=trial.number,
+                    top_k=top_k,
+                    n_features=len(trial_feature_names),
+                    selected_features=selected_features[:10],  # Log first 10
                 )
 
         # Import strategy classes
