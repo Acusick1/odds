@@ -55,10 +55,12 @@ htmlcov/
 # Experiments
 experiments/
 models/
+mlruns/
 *.html
 
 # Logs
 logs/
+plans/
 *.log
 
 # OS
