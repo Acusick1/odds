@@ -30,15 +30,20 @@ Example usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypeAlias
 
 import numpy as np
 import structlog
 from sklearn.model_selection import KFold, TimeSeriesSplit
 
 if TYPE_CHECKING:
+    from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
     from odds_analytics.training.config import MLTrainingConfig
     from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
+
+# Type alias for strategies that support train_from_config()
+# Both must return history dict with keys: train_mse, train_mae, train_r2, val_mse, val_mae, val_r2
+TrainableStrategy: TypeAlias = "XGBoostLineMovementStrategy | LSTMLineMovementStrategy"
 
 logger = structlog.get_logger()
 
@@ -231,7 +236,7 @@ class CVResult:
 
 
 def run_cv(
-    strategy: XGBoostLineMovementStrategy,
+    strategy: TrainableStrategy,
     config: MLTrainingConfig,
     X: np.ndarray,
     y: np.ndarray,
@@ -256,7 +261,10 @@ def run_cv(
     train_from_config() separately to train the final model on all data.
 
     Args:
-        strategy: XGBoostLineMovementStrategy instance (will be trained K times)
+        strategy: Strategy instance implementing train_from_config() that returns
+            a history dict with keys: train_mse, train_mae, train_r2, val_mse,
+            val_mae, val_r2. Supports XGBoostLineMovementStrategy and
+            LSTMLineMovementStrategy (after #90 is complete).
         config: MLTrainingConfig with data.cv_method, data.n_folds, etc.
         X: Feature matrix (n_samples, n_features). Must be sorted chronologically
            when using cv_method='timeseries'.

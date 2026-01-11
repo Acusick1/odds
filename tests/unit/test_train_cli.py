@@ -350,6 +350,11 @@ async def test_run_tuning_async_workflow(sample_config_with_tuning, tmp_path):
         mock_study.best_value = 0.123456
         mock_study.best_params = {"n_estimators": 200, "learning_rate": 0.05}
         mock_study.trials = [Mock(), Mock(), Mock()]  # 3 trials
+        # Set user_attrs to a dict so .items() works in CLI display
+        mock_study.best_trial.user_attrs = {
+            "mean_val_mse": 0.123456,
+            "std_val_mse": 0.01,
+        }
         mock_tuner.optimize.return_value = mock_study
         mock_tuner_class.return_value = mock_tuner
 
@@ -414,6 +419,11 @@ async def test_run_tuning_async_with_train_best(sample_config_with_tuning, tmp_p
         mock_study.best_value = 0.123456
         mock_study.best_params = {"n_estimators": 200, "learning_rate": 0.05}
         mock_study.trials = [Mock(), Mock()]
+        # Set user_attrs to a dict so .items() works in CLI display
+        mock_study.best_trial.user_attrs = {
+            "mean_val_mse": 0.123456,
+            "std_val_mse": 0.01,
+        }
         mock_tuner.optimize.return_value = mock_study
         mock_tuner_class.return_value = mock_tuner
 
