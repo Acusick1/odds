@@ -226,7 +226,10 @@ class LSTMLineMovementStrategy(BettingStrategy):
         outcome: str = "home",
         opening_tier: FetchTier = FetchTier.EARLY,
         closing_tier: FetchTier = FetchTier.CLOSING,
-    ) -> dict[str, list[float]]:
+        validation_split: float = 0.2,
+        patience: int | None = None,
+        min_delta: float = 0.0001,
+    ) -> dict[str, Any]:
         """
         Train LSTM model on historical events for line movement regression.
 
@@ -239,13 +242,16 @@ class LSTMLineMovementStrategy(BettingStrategy):
             outcome: What to predict - "home" or "away" (default: "home")
             opening_tier: Fetch tier for opening line (default: EARLY)
             closing_tier: Fetch tier for closing line (default: CLOSING)
+            validation_split: Fraction of data for validation (default: 0.2)
+            patience: Stop if no improvement for N epochs (default: None)
+            min_delta: Minimum change to qualify as improvement (default: 0.0001)
 
         Returns:
-            Training history dict with loss values per epoch
+            Training history dict with final scalar metrics (MSE, MAE, R²)
 
         Example:
-            >>> history = await strategy.train(events, session, epochs=20)
-            >>> print(f"Final loss: {history['loss'][-1]:.4f}")
+            >>> history = await strategy.train(events, session, epochs=20, patience=5)
+            >>> print(f"Final MSE: {history['train_mse']:.4f}")
         """
         logger.info(
             "training_lstm_line_movement",
@@ -254,6 +260,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
             batch_size=batch_size,
             outcome=outcome,
             loss_function=self.params.get("loss_function", "mse"),
+            patience=patience,
         )
 
         # Prepare training data with regression targets using composable feature groups
@@ -287,16 +294,38 @@ class LSTMLineMovementStrategy(BettingStrategy):
             target_std=float(np.std(y)),
         )
 
+        # Split into train and validation sets
+        n_samples = len(X)
+        n_val = int(n_samples * validation_split)
+        n_train = n_samples - n_val
+
+        X_train = X[:n_train]
+        y_train = y[:n_train]
+        masks_train = masks[:n_train]
+
+        X_val = X[n_train:]
+        y_val = y[n_train:]
+
+        logger.info(
+            "data_split",
+            n_train=n_train,
+            n_val=n_val,
+            validation_split=validation_split,
+        )
+
         # Create model
         self.model = self._create_model().to(self.device)
 
         # Convert to PyTorch tensors
-        X_tensor = torch.FloatTensor(X).to(self.device)
-        y_tensor = torch.FloatTensor(y).to(self.device)
-        masks_tensor = torch.BoolTensor(masks).to(self.device)
+        X_train_tensor = torch.FloatTensor(X_train).to(self.device)
+        y_train_tensor = torch.FloatTensor(y_train).to(self.device)
+        masks_train_tensor = torch.BoolTensor(masks_train).to(self.device)
+
+        X_val_tensor = torch.FloatTensor(X_val).to(self.device)
+        y_val_tensor = torch.FloatTensor(y_val).to(self.device)
 
         # Create data loader
-        dataset = torch.utils.data.TensorDataset(X_tensor, y_tensor, masks_tensor)
+        dataset = torch.utils.data.TensorDataset(X_train_tensor, y_train_tensor, masks_train_tensor)
         dataloader = torch.utils.data.DataLoader(
             dataset, batch_size=batch_size, shuffle=True, drop_last=False
         )
@@ -305,9 +334,12 @@ class LSTMLineMovementStrategy(BettingStrategy):
         criterion = self._get_loss_function()
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
 
-        # Training loop
-        history: dict[str, list[float]] = {"loss": [], "mae": []}
+        # Early stopping setup
+        best_val_loss = float("inf")
+        best_model_state = None
+        epochs_without_improvement = 0
 
+        # Training loop
         for epoch in range(epochs):
             self.model.train()
             epoch_loss = 0.0
@@ -334,21 +366,102 @@ class LSTMLineMovementStrategy(BettingStrategy):
                     epoch_mae += mae
                 num_batches += 1
 
-            # Record average metrics for epoch
-            avg_loss = epoch_loss / num_batches
-            avg_mae = epoch_mae / num_batches
-            history["loss"].append(avg_loss)
-            history["mae"].append(avg_mae)
+            avg_train_loss = epoch_loss / num_batches
+            avg_train_mae = epoch_mae / num_batches
 
-            logger.info("training_epoch", epoch=epoch + 1, loss=avg_loss, mae=avg_mae)
+            # Validation evaluation
+            self.model.eval()
+            with torch.no_grad():
+                val_predictions = self.model(X_val_tensor)
+                val_loss = criterion(val_predictions, y_val_tensor).item()
+                val_mae = torch.mean(torch.abs(val_predictions - y_val_tensor)).item()
+
+            logger.info(
+                "training_epoch",
+                epoch=epoch + 1,
+                train_loss=avg_train_loss,
+                train_mae=avg_train_mae,
+                val_loss=val_loss,
+                val_mae=val_mae,
+            )
+
+            # Early stopping check
+            if patience is not None:
+                if val_loss < best_val_loss - min_delta:
+                    best_val_loss = val_loss
+                    best_model_state = {
+                        k: v.cpu().clone() for k, v in self.model.state_dict().items()
+                    }
+                    epochs_without_improvement = 0
+                    logger.debug(
+                        "new_best_model",
+                        epoch=epoch + 1,
+                        val_loss=val_loss,
+                    )
+                else:
+                    epochs_without_improvement += 1
+                    logger.debug(
+                        "no_improvement",
+                        epoch=epoch + 1,
+                        epochs_without_improvement=epochs_without_improvement,
+                        patience=patience,
+                    )
+
+                    if epochs_without_improvement >= patience:
+                        logger.info(
+                            "early_stopping_triggered",
+                            epoch=epoch + 1,
+                            best_val_loss=best_val_loss,
+                            epochs_without_improvement=epochs_without_improvement,
+                            patience=patience,
+                        )
+                        break
+
+        # Restore best model if early stopping was used
+        if patience is not None and best_model_state is not None:
+            self.model.load_state_dict(best_model_state)
+            logger.info("restored_best_model", val_loss=best_val_loss)
+
+        # Calculate final metrics on full training and validation sets
+        self.model.eval()
+        with torch.no_grad():
+            train_predictions = self.model(X_train_tensor).cpu().numpy()
+            val_predictions = self.model(X_val_tensor).cpu().numpy()
+
+            # Training metrics
+            train_mse = float(np.mean((train_predictions - y_train) ** 2))
+            train_mae = float(np.mean(np.abs(train_predictions - y_train)))
+            ss_res_train = np.sum((y_train - train_predictions) ** 2)
+            ss_tot_train = np.sum((y_train - np.mean(y_train)) ** 2)
+            train_r2 = float(1 - ss_res_train / ss_tot_train) if ss_tot_train > 0 else 0.0
+
+            # Validation metrics
+            val_mse = float(np.mean((val_predictions - y_val) ** 2))
+            val_mae = float(np.mean(np.abs(val_predictions - y_val)))
+            ss_res_val = np.sum((y_val - val_predictions) ** 2)
+            ss_tot_val = np.sum((y_val - np.mean(y_val)) ** 2)
+            val_r2 = float(1 - ss_res_val / ss_tot_val) if ss_tot_val > 0 else 0.0
+
+        history: dict[str, Any] = {
+            "train_mse": train_mse,
+            "train_mae": train_mae,
+            "train_r2": train_r2,
+            "val_mse": val_mse,
+            "val_mae": val_mae,
+            "val_r2": val_r2,
+            "n_samples": n_train,
+            "n_features": self.input_size,
+        }
 
         self.is_trained = True
-        self.training_history = history
+        self.training_history = {"loss": [train_mse], "mae": [train_mae]}
 
         logger.info(
             "training_complete",
-            final_loss=history["loss"][-1],
-            final_mae=history["mae"][-1],
+            train_mse=train_mse,
+            train_r2=train_r2,
+            val_mse=val_mse,
+            val_r2=val_r2,
         )
 
         return history
@@ -622,6 +735,8 @@ class LSTMLineMovementStrategy(BettingStrategy):
             "learning_rate": model_config.learning_rate,
             "loss_function": model_config.loss_function,
             "weight_decay": model_config.weight_decay,
+            "patience": model_config.patience,
+            "min_delta": model_config.min_delta,
         }
 
         # Update strategy params
@@ -691,6 +806,13 @@ class LSTMLineMovementStrategy(BettingStrategy):
             weight_decay=lstm_params["weight_decay"],
         )
 
+        # Early stopping setup
+        patience = lstm_params.get("patience")
+        min_delta = lstm_params.get("min_delta", 0.0001)
+        best_val_loss = float("inf")
+        best_model_state = None
+        epochs_without_improvement = 0
+
         # Training loop
         history: dict[str, Any] = {
             "train_mse": 0.0,
@@ -732,6 +854,8 @@ class LSTMLineMovementStrategy(BettingStrategy):
 
             # Calculate validation metrics for reporting
             intermediate_value = avg_loss  # Default to train loss
+            val_loss = None
+            val_mae = None
             if X_val_tensor is not None and y_val_tensor is not None:
                 self.model.eval()
                 with torch.no_grad():
@@ -763,7 +887,38 @@ class LSTMLineMovementStrategy(BettingStrategy):
                     )
                     raise optuna.TrialPruned()
 
+            # Early stopping check (only if validation data provided)
+            if patience is not None and X_val_tensor is not None and val_loss is not None:
+                if val_loss < best_val_loss - min_delta:
+                    best_val_loss = val_loss
+                    best_model_state = {
+                        k: v.cpu().clone() for k, v in self.model.state_dict().items()
+                    }
+                    epochs_without_improvement = 0
+                    logger.debug(
+                        "new_best_model",
+                        epoch=epoch + 1,
+                        val_loss=val_loss,
+                    )
+                else:
+                    epochs_without_improvement += 1
+
+                    if epochs_without_improvement >= patience:
+                        logger.info(
+                            "early_stopping_triggered",
+                            epoch=epoch + 1,
+                            best_val_loss=best_val_loss,
+                            epochs_without_improvement=epochs_without_improvement,
+                            patience=patience,
+                        )
+                        break
+
             logger.debug("training_epoch", epoch=epoch + 1, loss=avg_loss, mae=avg_mae)
+
+        # Restore best model if early stopping was used
+        if patience is not None and best_model_state is not None and X_val_tensor is not None:
+            self.model.load_state_dict(best_model_state)
+            logger.info("restored_best_model", val_loss=best_val_loss)
 
         # Calculate final training metrics
         self.model.eval()
@@ -832,3 +987,89 @@ class LSTMLineMovementStrategy(BettingStrategy):
         )
 
         return history
+
+    def train_with_cv(
+        self,
+        config: MLTrainingConfig,
+        X: np.ndarray,
+        y: np.ndarray,
+        feature_names: list[str],
+        X_test: np.ndarray | None = None,
+        y_test: np.ndarray | None = None,
+    ) -> tuple[dict[str, Any], Any]:
+        """
+        Train with K-Fold cross-validation, then train final model on all data.
+
+        This method:
+        1. Runs K-Fold CV to get robust performance estimates
+        2. Trains a final model on all training data
+        3. Returns both CV results and final model metrics
+
+        Args:
+            config: ML training configuration with kfold settings
+            X: Full training feature matrix (n_samples, timesteps, n_features)
+            y: Full training target vector (n_samples,)
+            feature_names: List of feature names
+            X_test: Optional held-out test features for final evaluation
+            y_test: Optional held-out test targets for final evaluation
+
+        Returns:
+            Tuple of (training_history, cv_result) where:
+            - training_history: Dict with final model metrics + cv metrics
+            - cv_result: CVResult object with per-fold details
+
+        Example:
+            >>> strategy = LSTMLineMovementStrategy()
+            >>> history, cv_result = strategy.train_with_cv(
+            ...     config, X_train, y_train, feature_names, X_test, y_test
+            ... )
+            >>> print(f"CV R²: {cv_result.mean_val_r2:.4f} ± {cv_result.std_val_r2:.4f}")
+            >>> print(f"Final test R²: {history['val_r2']:.4f}")
+        """
+        from odds_analytics.training.cross_validation import run_cv
+
+        logger.info(
+            "starting_train_with_cv",
+            experiment_name=config.experiment.name,
+            n_folds=config.training.data.n_folds,
+            n_samples=len(X),
+            n_features=len(feature_names),
+        )
+
+        # Step 1: Run cross-validation (time series or k-fold based on config)
+        cv_result = run_cv(
+            strategy=self,
+            config=config,
+            X=X,
+            y=y,
+            feature_names=feature_names,
+        )
+
+        logger.info(
+            "cv_complete_training_final",
+            cv_val_mse=f"{cv_result.mean_val_mse:.6f} ± {cv_result.std_val_mse:.6f}",
+            cv_val_r2=f"{cv_result.mean_val_r2:.4f} ± {cv_result.std_val_r2:.4f}",
+        )
+
+        # Step 2: Train final model on all training data
+        history = self.train_from_config(
+            config=config,
+            X_train=X,
+            y_train=y,
+            feature_names=feature_names,
+            X_val=X_test,
+            y_val=y_test,
+        )
+
+        # Step 3: Merge CV metrics into history
+        history.update(cv_result.to_dict())
+
+        logger.info(
+            "train_with_cv_complete",
+            experiment_name=config.experiment.name,
+            cv_val_mse_mean=cv_result.mean_val_mse,
+            final_train_mse=history.get("train_mse"),
+            final_test_mse=history.get("val_mse"),
+        )
+
+        return history, cv_result
