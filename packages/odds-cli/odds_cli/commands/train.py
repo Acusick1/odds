@@ -878,8 +878,33 @@ async def _run_tuning_async(
         # Step 5: Display best parameters
         console.print("\n[bold green]Optimization complete![/bold green]")
         console.print(f"Completed trials: {len(study.trials)}")
-        console.print(f"Best {ml_config.tuning.metric}: {study.best_value:.6f}\n")
+        console.print(f"Best trial: #{study.best_trial.number}")
+        console.print(f"Best {ml_config.tuning.metric}: {study.best_value:.6f}")
 
+        # Display additional best model metrics from CV if available
+        if hasattr(study.best_trial, "user_attrs") and study.best_trial.user_attrs:
+            # Group mean and std metrics together
+            mean_metrics = {
+                k: v
+                for k, v in study.best_trial.user_attrs.items()
+                if isinstance(v, int | float) and k.startswith("mean_")
+            }
+            std_metrics = {
+                k: v
+                for k, v in study.best_trial.user_attrs.items()
+                if isinstance(v, int | float) and k.startswith("std_")
+            }
+
+            if mean_metrics:
+                console.print("\n[bold]Best model cross-validation metrics:[/bold]")
+                for mean_key in sorted(mean_metrics.keys()):
+                    metric_name = mean_key.replace("mean_", "")
+                    std_key = f"std_{metric_name}"
+                    mean_val = mean_metrics[mean_key]
+                    std_val = std_metrics.get(std_key, 0.0)
+                    console.print(f"  {metric_name}: {mean_val:.6f} ± {std_val:.6f}")
+
+        console.print()  # Blank line before parameters
         _display_best_parameters(study.best_params)
 
         # Step 6: Export best configuration

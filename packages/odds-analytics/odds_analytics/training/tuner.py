@@ -524,6 +524,13 @@ class OptunaTuner(HyperparameterTuner):
         }
         if self.study.best_trial:
             log_data["best_value"] = self.study.best_value
+            log_data["best_trial_number"] = self.study.best_trial.number
+
+            # Include mean/std CV metrics from best trial if available
+            if hasattr(self.study.best_trial, "user_attrs"):
+                for key, value in self.study.best_trial.user_attrs.items():
+                    if isinstance(value, int | float) and key.startswith(("mean_", "std_")):
+                        log_data[key] = value
 
         logger.info("optimization_completed", **log_data)
 
@@ -762,6 +769,20 @@ def create_objective(
     # Check if top_k_features is being tuned
     tuning_top_k_features = "top_k_features" in search_spaces
 
+    # Check if this is an LSTM strategy (feature selection not supported for 3D sequences)
+    is_lstm_strategy = strategy_type in ("lstm", "lstm_line_movement")
+
+    # Warn if LSTM + feature selection combination detected
+    if is_lstm_strategy and tuning_top_k_features:
+        logger.warning(
+            "feature_selection_not_supported_for_lstm",
+            strategy_type=strategy_type,
+            message="top_k_features tuning is not supported for LSTM strategies. "
+            "LSTM uses 3D sequences while feature selectors expect 2D data. "
+            "LSTM gating mechanisms handle implicit feature weighting. "
+            "Ignoring top_k_features parameter.",
+        )
+
     logger.info(
         "objective_created",
         strategy_type=strategy_type,
@@ -839,7 +860,12 @@ def create_objective(
                 )
 
         # Feature selection integration for top_k_features tuning
-        if tuning_top_k_features and config.training.feature_selection.enabled:
+        # Skip for LSTM strategies - they use 3D sequences incompatible with 2D selectors
+        if (
+            tuning_top_k_features
+            and config.training.feature_selection.enabled
+            and not is_lstm_strategy
+        ):
             # Run feature selection once on first trial and store rankings
             if trial.number == 0:
                 from odds_analytics.training.feature_selection import get_feature_selector
@@ -937,12 +963,14 @@ def create_objective(
                     feature_names=trial_feature_names,
                 )
 
-                # Log per-fold metrics if trial has set_user_attr (for MLflow logging)
+                # Log mean and std CV metrics if trial has set_user_attr (for MLflow logging)
                 if hasattr(trial, "set_user_attr"):
-                    for fold_idx, fold_result in enumerate(cv_result.fold_results):
-                        trial.set_user_attr(f"cv_fold_{fold_idx}_val_mse", fold_result.val_mse)
-                        trial.set_user_attr(f"cv_fold_{fold_idx}_val_mae", fold_result.val_mae)
-                        trial.set_user_attr(f"cv_fold_{fold_idx}_val_r2", fold_result.val_r2)
+                    trial.set_user_attr("mean_val_mse", cv_result.mean_val_mse)
+                    trial.set_user_attr("std_val_mse", cv_result.std_val_mse)
+                    trial.set_user_attr("mean_val_mae", cv_result.mean_val_mae)
+                    trial.set_user_attr("std_val_mae", cv_result.std_val_mae)
+                    trial.set_user_attr("mean_val_r2", cv_result.mean_val_r2)
+                    trial.set_user_attr("std_val_r2", cv_result.std_val_r2)
 
                 # Use mean CV metric as optimization target
                 if metric_name == "val_mse":

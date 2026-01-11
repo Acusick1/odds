@@ -705,10 +705,10 @@ def test_objective_uses_cv_when_enabled(
 
 @patch("odds_analytics.training.cross_validation.run_cv")
 @patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
-def test_objective_logs_per_fold_metrics(
+def test_objective_logs_cv_aggregate_metrics(
     mock_strategy_class, mock_run_cv, sample_config, sample_training_data
 ):
-    """Test that per-fold metrics are logged to MLflow via trial.set_user_attr."""
+    """Test that aggregate CV metrics (mean/std) are logged via trial.set_user_attr."""
     X_train, y_train, X_val, y_val, feature_names = sample_training_data
 
     # Enable cross-validation in config
@@ -773,14 +773,14 @@ def test_objective_logs_per_fold_metrics(
     # Execute objective
     objective(mock_trial)
 
-    # Verify per-fold metrics were logged
-    assert mock_trial.set_user_attr.call_count == 6  # 2 folds * 3 metrics
-    mock_trial.set_user_attr.assert_any_call("cv_fold_0_val_mse", 0.02)
-    mock_trial.set_user_attr.assert_any_call("cv_fold_0_val_mae", 0.08)
-    mock_trial.set_user_attr.assert_any_call("cv_fold_0_val_r2", 0.8)
-    mock_trial.set_user_attr.assert_any_call("cv_fold_1_val_mse", 0.025)
-    mock_trial.set_user_attr.assert_any_call("cv_fold_1_val_mae", 0.09)
-    mock_trial.set_user_attr.assert_any_call("cv_fold_1_val_r2", 0.75)
+    # Verify aggregate CV metrics (mean/std) were logged
+    assert mock_trial.set_user_attr.call_count == 6  # 3 metrics * 2 (mean + std)
+    mock_trial.set_user_attr.assert_any_call("mean_val_mse", mock_cv_result.mean_val_mse)
+    mock_trial.set_user_attr.assert_any_call("std_val_mse", mock_cv_result.std_val_mse)
+    mock_trial.set_user_attr.assert_any_call("mean_val_mae", mock_cv_result.mean_val_mae)
+    mock_trial.set_user_attr.assert_any_call("std_val_mae", mock_cv_result.std_val_mae)
+    mock_trial.set_user_attr.assert_any_call("mean_val_r2", mock_cv_result.mean_val_r2)
+    mock_trial.set_user_attr.assert_any_call("std_val_r2", mock_cv_result.std_val_r2)
 
 
 @patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
