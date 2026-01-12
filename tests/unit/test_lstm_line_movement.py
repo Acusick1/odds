@@ -300,14 +300,22 @@ class TestLSTMLineMovementStrategy:
         # Check training completed
         assert strategy.is_trained
         assert strategy.model is not None
-        assert "loss" in history
-        assert "mae" in history  # MAE is tracked regardless of loss function
-        assert len(history["loss"]) == 3  # 3 epochs
-        assert len(history["mae"]) == 3
 
-        # Loss and MAE should be finite
-        assert all(np.isfinite(loss) for loss in history["loss"])
-        assert all(np.isfinite(mae) for mae in history["mae"])
+        # Check new standardized history format
+        assert "train_mse" in history
+        assert "train_mae" in history
+        assert "train_r2" in history
+        assert "val_mse" in history
+        assert "val_mae" in history
+        assert "val_r2" in history
+        assert "n_samples" in history
+        assert "n_features" in history
+
+        # Metrics should be finite scalars
+        assert np.isfinite(history["train_mse"])
+        assert np.isfinite(history["train_mae"])
+        assert np.isfinite(history["val_mse"])
+        assert np.isfinite(history["val_mae"])
 
     @pytest.mark.asyncio
     async def test_train_with_different_loss_functions(self):
@@ -340,7 +348,11 @@ class TestLSTMLineMovementStrategy:
                 )
 
             assert strategy.is_trained
-            assert len(history["loss"]) == 2
+            # Check new standardized format
+            assert "train_mse" in history
+            assert "val_mse" in history
+            assert np.isfinite(history["train_mse"])
+            assert np.isfinite(history["val_mse"])
 
     @pytest.mark.asyncio
     async def test_train_with_no_data_raises_error(self):
@@ -742,8 +754,13 @@ class TestLSTMLineMovementWorkflow:
 
         # Verify training
         assert strategy.is_trained
-        assert len(history["loss"]) == 5
-        assert len(history["mae"]) == 5
+        # Check new standardized format
+        assert "train_mse" in history
+        assert "train_mae" in history
+        assert "val_mse" in history
+        assert "val_mae" in history
+        assert np.isfinite(history["train_mse"])
+        assert np.isfinite(history["val_mse"])
 
         # Save and reload
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -755,7 +772,12 @@ class TestLSTMLineMovementWorkflow:
             loaded_strategy.load_model(model_path)
 
             assert loaded_strategy.is_trained
-            assert loaded_strategy.training_history == history
+            # Training history is simplified for storage
+            assert "loss" in loaded_strategy.training_history
+            assert "mae" in loaded_strategy.training_history
+            # Verify the stored history matches the final metrics
+            assert loaded_strategy.training_history["loss"][0] == history["train_mse"]
+            assert loaded_strategy.training_history["mae"][0] == history["train_mae"]
 
     def test_get_strategy_name_and_params(self):
         """Test that strategy name and params are accessible."""
