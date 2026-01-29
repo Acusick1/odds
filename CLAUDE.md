@@ -79,6 +79,8 @@ packages/
 
 ## Key Commands
 
+**Before running commands:** Check docs/CLI.md for full command reference and options.
+
 ```bash
 # Fetch data
 uv run odds fetch current
