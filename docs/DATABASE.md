@@ -50,17 +50,18 @@ All models defined in `packages/odds-core/odds_core/models.py` using SQLModel.
 
 - **Purpose:** Automated testing only (pytest)
 - **Setup:** Managed by pytest fixtures in `tests/conftest.py`
-- **Connection:** `postgresql+asyncpg://postgres:dev_password@localhost:5432/odds_test`
+- **Connection:** `postgresql+asyncpg://postgres:postgres@localhost:5432/odds_test`
 - **Behavior:** Tables created/dropped per test run
 - **Usage:** Never set manually - pytest uses automatically
 
 ### Local Database (`odds`)
 
 - **Purpose:** Local development and experimentation
-- **Setup:** Docker Compose PostgreSQL container
-- **Connection:** Set `DATABASE_URL=${LOCAL_DATABASE_URL}` in `.env`
-- **Usage:** Daily development, testing migrations
-- **Start:** `docker-compose up -d`
+- **Setup:** Docker Compose PostgreSQL container (postgres:15)
+- **Host:** localhost:5433 (not 5432 - avoids conflicts with system postgres)
+- **Credentials:** postgres/postgres
+- **Database:** odds
+- **Start:** `docker compose up -d`
 
 ### Dev Database (remote)
 
@@ -80,7 +81,7 @@ All models defined in `packages/odds-core/odds_core/models.py` using SQLModel.
 
 **Local development** (`.env` file):
 - `DATABASE_URL=${LOCAL_DATABASE_URL}`
-- `LOCAL_DATABASE_URL=postgresql+asyncpg://postgres:dev_password@localhost:5432/odds`
+- `LOCAL_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/odds`
 
 **Tests:** Automatic - pytest uses `odds_test` via `conftest.py`
 

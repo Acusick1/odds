@@ -32,6 +32,16 @@ odds discover games --start YYYY-MM-DD --end YYYY-MM-DD
 
 Discovers historical games from The Odds API for potential backfill.
 
+### Detect Gaps and Generate Plan
+
+```bash
+odds backfill gaps --start YYYY-MM-DD --end YYYY-MM-DD
+odds backfill gaps --start YYYY-MM-DD --end YYYY-MM-DD --max-quota 5000
+odds backfill gaps --start YYYY-MM-DD --end YYYY-MM-DD --output gap_plan.json
+```
+
+Analyzes tier coverage gaps (OPENING, EARLY, SHARP, PREGAME, CLOSING) and generates a prioritized backfill plan. Prioritizes CLOSING tier (highest value) down to OPENING (lowest). Use `--max-quota` to limit API usage.
+
 ### Plan Backfill
 
 ```bash
