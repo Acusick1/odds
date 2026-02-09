@@ -17,6 +17,12 @@ from tenacity import (
 
 logger = structlog.get_logger()
 
+# Request timeout in seconds
+REQUEST_TIMEOUT = 30
+
+# Maximum concurrent requests for batch operations
+MAX_CONCURRENT_REQUESTS = 10
+
 
 class PolymarketClient:
     """Client for Polymarket Gamma + CLOB APIs. No authentication required."""
@@ -42,7 +48,7 @@ class PolymarketClient:
         self.session = aiohttp.ClientSession()
         return self
 
-    async def __aexit__(self, _exc_type, _exc_val, _exc_tb):
+    async def __aexit__(self, _exc_type, _exc_val, _exc_tb) -> None:
         """Async context manager exit."""
         if self.session:
             await self.session.close()
@@ -78,7 +84,7 @@ class PolymarketClient:
         start_time = time.time()
 
         try:
-            timeout = aiohttp.ClientTimeout(total=30)
+            timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
             async with self.session.get(url, params=params, timeout=timeout) as response:
                 response.raise_for_status()
 
@@ -154,7 +160,7 @@ class PolymarketClient:
 
         return events
 
-    async def get_event_by_id(self, event_id: str) -> dict:
+    async def get_event_by_id(self, event_id: str) -> dict | None:
         """
         Fetch specific event by ID from Gamma API.
 
@@ -162,7 +168,7 @@ class PolymarketClient:
             event_id: Polymarket event ID
 
         Returns:
-            Event dict
+            Event dict or None if not found
         """
         params = {"id": event_id}
 
@@ -170,17 +176,18 @@ class PolymarketClient:
 
         # API returns list with single event
         events = data if isinstance(data, list) else []
-        event = events[0] if events else {}
+        event = events[0] if events else None
 
         logger.info(
             "event_fetched",
             event_id=event_id,
+            found=event is not None,
             response_time_ms=response_time,
         )
 
         return event
 
-    async def get_price(self, token_id: str, side: str = "buy") -> float:
+    async def get_price(self, token_id: str, side: str = "buy") -> float | None:
         """
         Fetch price for a token from CLOB API.
 
@@ -189,13 +196,26 @@ class PolymarketClient:
             side: Order side ('buy' or 'sell')
 
         Returns:
-            Price as float (0.0-1.0)
+            Price as float (0.0-1.0) or None if price unavailable
+
+        Note:
+            Returns None (not 0.0) when price is missing, since 0.0 is a valid
+            price representing an impossible event in prediction markets.
         """
         params = {"token_id": token_id, "side": side}
 
         data, response_time = await self._make_request(self.clob_url, "/price", params=params)
 
-        price = float(data.get("price", 0.0)) if isinstance(data, dict) else 0.0
+        if not isinstance(data, dict) or "price" not in data:
+            logger.warning(
+                "price_missing",
+                token_id=token_id,
+                side=side,
+                response_time_ms=response_time,
+            )
+            return None
+
+        price = float(data["price"])
 
         logger.debug(
             "price_fetched",
@@ -308,17 +328,26 @@ class PolymarketClient:
 
         return history
 
-    async def get_prices_batch(self, token_ids: list[str]) -> dict[str, float]:
+    async def get_prices_batch(
+        self, token_ids: list[str], max_concurrent: int = MAX_CONCURRENT_REQUESTS
+    ) -> dict[str, float | None]:
         """
-        Fetch prices for multiple tokens concurrently.
+        Fetch prices for multiple tokens concurrently with rate limiting.
 
         Args:
             token_ids: List of CLOB token IDs
+            max_concurrent: Maximum concurrent requests (default: 10)
 
         Returns:
-            Dict mapping token_id -> price (excludes failed fetches)
+            Dict mapping token_id -> price (excludes failed fetches, includes None for missing prices)
         """
-        tasks = [self.get_price(token_id) for token_id in token_ids]
+        sem = asyncio.Semaphore(max_concurrent)
+
+        async def _fetch_with_limit(token_id: str) -> float | None:
+            async with sem:
+                return await self.get_price(token_id)
+
+        tasks = [_fetch_with_limit(token_id) for token_id in token_ids]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -333,17 +362,26 @@ class PolymarketClient:
 
         return prices
 
-    async def get_order_books_batch(self, token_ids: list[str]) -> dict[str, dict]:
+    async def get_order_books_batch(
+        self, token_ids: list[str], max_concurrent: int = MAX_CONCURRENT_REQUESTS
+    ) -> dict[str, dict]:
         """
-        Fetch order books for multiple tokens concurrently.
+        Fetch order books for multiple tokens concurrently with rate limiting.
 
         Args:
             token_ids: List of CLOB token IDs
+            max_concurrent: Maximum concurrent requests (default: 10)
 
         Returns:
             Dict mapping token_id -> order_book (excludes failed fetches)
         """
-        tasks = [self.get_order_book(token_id) for token_id in token_ids]
+        sem = asyncio.Semaphore(max_concurrent)
+
+        async def _fetch_with_limit(token_id: str) -> dict:
+            async with sem:
+                return await self.get_order_book(token_id)
+
+        tasks = [_fetch_with_limit(token_id) for token_id in token_ids]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -367,7 +405,7 @@ def process_order_book(raw_book: dict) -> dict | None:
         raw_book: Raw order book from API {bids: [{price, size}], asks: [{price, size}]}
 
     Returns:
-        Dict with derived metrics or None if either side is empty:
+        Dict with derived metrics or None if either side is empty or book is crossed:
         {
             best_bid: float,
             best_ask: float,
@@ -395,6 +433,16 @@ def process_order_book(raw_book: dict) -> dict | None:
     # Extract best prices
     best_bid = float(sorted_bids[0]["price"])
     best_ask = float(sorted_asks[0]["price"])
+
+    # Check for crossed book (best_bid >= best_ask)
+    if best_bid >= best_ask:
+        logger.warning(
+            "crossed_order_book_detected",
+            best_bid=best_bid,
+            best_ask=best_ask,
+            spread=best_ask - best_bid,
+        )
+        return None
 
     # Calculate basic metrics
     spread = best_ask - best_bid
@@ -475,7 +523,7 @@ def classify_market(question: str, event_title: str) -> tuple[PolymarketMarketTy
         total_value = float(total_match.group(1))
         return PolymarketMarketType.TOTAL, total_value
 
-    # Player prop: contains colon and stat keywords
+    # Player prop: stat keyword AFTER colon AND contains Over/Under
     if ":" in question:
         stat_keywords = [
             "points",
@@ -491,8 +539,16 @@ def classify_market(question: str, event_title: str) -> tuple[PolymarketMarketTy
             "stl",
             "blk",
         ]
+        # Split on colon and check if stat keyword is in the part after colon
+        colon_index = question.index(":")
+        after_colon = question[colon_index:].lower()
         question_lower = question.lower()
-        if any(keyword in question_lower for keyword in stat_keywords):
+
+        # Check if stat keyword appears after colon AND question contains over/under
+        has_stat_after_colon = any(keyword in after_colon for keyword in stat_keywords)
+        has_over_under = "over" in question_lower or "under" in question_lower
+
+        if has_stat_after_colon and has_over_under:
             return PolymarketMarketType.PLAYER_PROP, None
 
     # Fallback

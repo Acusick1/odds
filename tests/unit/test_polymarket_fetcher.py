@@ -179,6 +179,26 @@ class TestClassifyMarket:
         assert market_type == PolymarketMarketType.OTHER
         assert point is None
 
+    def test_other_false_positive_quarter_points(self):
+        """Test that 'First Quarter: Points Leader' is not classified as player prop."""
+        market_type, point = classify_market(
+            question="First Quarter: Points Leader", event_title="Lakers vs Celtics"
+        )
+
+        # Should be OTHER because no Over/Under keyword
+        assert market_type == PolymarketMarketType.OTHER
+        assert point is None
+
+    def test_other_colon_with_stat_no_over_under(self):
+        """Test that stat keyword after colon but no Over/Under is OTHER."""
+        market_type, point = classify_market(
+            question="Team with Most: Points", event_title="Lakers vs Celtics"
+        )
+
+        # Should be OTHER because no Over/Under keyword
+        assert market_type == PolymarketMarketType.OTHER
+        assert point is None
+
 
 class TestProcessOrderBook:
     """Tests for process_order_book function."""
@@ -357,3 +377,25 @@ class TestProcessOrderBook:
         assert result["best_ask"] == 0.234567
         assert result["bid_depth_total"] == 100.5
         assert result["ask_depth_total"] == 200.75
+
+    def test_crossed_book_bid_equals_ask(self):
+        """Test that crossed book (bid == ask) returns None."""
+        raw_book = {
+            "bids": [{"price": "0.60", "size": "100"}],
+            "asks": [{"price": "0.60", "size": "80"}],
+        }
+
+        result = process_order_book(raw_book)
+
+        assert result is None
+
+    def test_crossed_book_bid_greater_than_ask(self):
+        """Test that crossed book (bid > ask) returns None."""
+        raw_book = {
+            "bids": [{"price": "0.62", "size": "100"}],
+            "asks": [{"price": "0.60", "size": "80"}],
+        }
+
+        result = process_order_book(raw_book)
+
+        assert result is None
