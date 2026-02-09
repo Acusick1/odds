@@ -178,64 +178,53 @@ class PolymarketReader:
         self, market_id: int, target_time: datetime, tolerance_minutes: int = 5
     ) -> PolymarketOrderBookSnapshot | None:
         """
-        Get order book snapshot closest to target time.
+        Get order book snapshot closest to target time without look-ahead bias.
+
+        CRITICAL: Only returns snapshots at or before target_time to prevent look-ahead bias.
+        This matches get_price_at_time() behavior for consistency in backtesting.
 
         Args:
             market_id: PolymarketMarket database ID
             target_time: Target timestamp
-            tolerance_minutes: Maximum minutes before/after target to search
+            tolerance_minutes: Maximum minutes before target to search
 
         Returns:
-            Closest PolymarketOrderBookSnapshot or None
+            Closest PolymarketOrderBookSnapshot at or before target_time, or None
         """
         time_lower = target_time - timedelta(minutes=tolerance_minutes)
-        time_upper = target_time + timedelta(minutes=tolerance_minutes)
 
-        # Find all distinct timestamps in tolerance window
-        distinct_timestamps_query = (
-            select(PolymarketOrderBookSnapshot.snapshot_time)
+        # Only look backward from target time (never future data)
+        query = (
+            select(PolymarketOrderBookSnapshot)
             .where(
                 and_(
                     PolymarketOrderBookSnapshot.polymarket_market_id == market_id,
                     PolymarketOrderBookSnapshot.snapshot_time >= time_lower,
-                    PolymarketOrderBookSnapshot.snapshot_time <= time_upper,
+                    PolymarketOrderBookSnapshot.snapshot_time <= target_time,
                 )
             )
-            .distinct()
+            .order_by(PolymarketOrderBookSnapshot.snapshot_time.desc())
+            .limit(1)
         )
 
-        result = await self.session.execute(distinct_timestamps_query)
-        all_timestamps = list(result.scalars().all())
-
-        if not all_timestamps:
-            logger.warning(
-                "polymarket_orderbook_at_time_not_found",
-                market_id=market_id,
-                target_time=target_time,
-                tolerance_minutes=tolerance_minutes,
-            )
-            return None
-
-        # Find closest timestamp in Python
-        closest_time = min(all_timestamps, key=lambda t: abs((t - target_time).total_seconds()))
-
-        # Fetch snapshot at exact closest time
-        snapshot_query = select(PolymarketOrderBookSnapshot).where(
-            and_(
-                PolymarketOrderBookSnapshot.polymarket_market_id == market_id,
-                PolymarketOrderBookSnapshot.snapshot_time == closest_time,
-            )
-        )
-
-        result = await self.session.execute(snapshot_query)
+        result = await self.session.execute(query)
         snapshot = result.scalar_one_or_none()
 
         if snapshot:
+            time_diff = (target_time - snapshot.snapshot_time).total_seconds() / 60
             logger.info(
                 "polymarket_orderbook_at_time_found",
                 market_id=market_id,
                 target_time=target_time,
                 snapshot_time=snapshot.snapshot_time,
+                time_diff_minutes=round(time_diff, 2),
+            )
+        else:
+            logger.warning(
+                "polymarket_orderbook_at_time_not_found",
+                market_id=market_id,
+                target_time=target_time,
+                tolerance_minutes=tolerance_minutes,
             )
 
         return snapshot

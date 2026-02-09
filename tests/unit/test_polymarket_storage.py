@@ -731,6 +731,129 @@ class TestPolymarketReader:
             assert series[i].snapshot_time < series[i + 1].snapshot_time
 
     @pytest.mark.asyncio
+    async def test_get_orderbook_at_time_no_lookahead(self, pglite_async_session):
+        """Test that get_orderbook_at_time never returns future data (prevents look-ahead bias)."""
+        writer = PolymarketWriter(pglite_async_session)
+        reader = PolymarketReader(pglite_async_session)
+
+        # Create event and market
+        event_data = {
+            "id": "event_ob_lookahead",
+            "ticker": "nba-ob-lookahead",
+            "slug": "ob-lookahead",
+            "title": "OrderBook Lookahead Test",
+            "startDate": "2026-02-27T01:00:00Z",
+            "endDate": "2026-02-27T04:00:00Z",
+            "active": True,
+            "closed": False,
+            "markets": [],
+        }
+        event = await writer.upsert_event(event_data)
+
+        markets_data = [
+            {
+                "id": "market_ob_lookahead",
+                "conditionId": "cond_ob_lookahead",
+                "question": "OrderBook Lookahead Test",
+                "clobTokenIds": ["ob_t1", "ob_t2"],
+                "outcomes": ["Team OB1", "Team OB2"],
+            }
+        ]
+        markets = await writer.upsert_markets(event.id, markets_data, event.title)
+        market = markets[0]
+
+        commence_time = datetime(2026, 2, 27, 1, 0, 0, tzinfo=UTC)
+        target_time = commence_time - timedelta(hours=4)
+
+        # Create order book snapshots before and after target time
+        raw_book_before = {
+            "bids": [{"price": "0.50", "size": "100"}],
+            "asks": [{"price": "0.52", "size": "100"}],
+        }
+        await writer.store_orderbook_snapshot(
+            market, raw_book_before, commence_time, target_time - timedelta(minutes=2)
+        )
+
+        raw_book_after = {
+            "bids": [{"price": "0.60", "size": "100"}],
+            "asks": [{"price": "0.62", "size": "100"}],
+        }
+        await writer.store_orderbook_snapshot(
+            market, raw_book_after, commence_time, target_time + timedelta(minutes=2)
+        )
+        await pglite_async_session.flush()
+
+        # Get order book at target time - should only return the "before" snapshot
+        snapshot = await reader.get_orderbook_at_time(market.id, target_time)
+
+        assert snapshot is not None
+        assert snapshot.best_bid == 0.50  # Before snapshot
+        assert snapshot.snapshot_time < target_time  # Never returns future data
+
+    @pytest.mark.asyncio
+    async def test_get_linked_events(self, pglite_async_session):
+        """Test that get_linked_events returns events linked to internal NBA events."""
+        from odds_core.models import Event, EventStatus
+
+        writer = PolymarketWriter(pglite_async_session)
+        reader = PolymarketReader(pglite_async_session)
+
+        # Create internal NBA event first
+        nba_event = Event(
+            id="nba_game_123",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            home_team="Lakers",
+            away_team="Celtics",
+            commence_time=datetime(2026, 2, 28, 1, 0, 0, tzinfo=UTC),
+            status=EventStatus.SCHEDULED,
+        )
+        pglite_async_session.add(nba_event)
+        await pglite_async_session.flush()
+
+        # Create Polymarket event linked to NBA event
+        linked_event_data = {
+            "id": "pm_linked_event",
+            "ticker": "nba-lal-bos-2026-02-28",
+            "slug": "lakers-vs-celtics",
+            "title": "Lakers vs Celtics",
+            "startDate": "2026-02-28T01:00:00Z",
+            "endDate": "2026-02-28T04:00:00Z",
+            "active": True,
+            "closed": False,
+            "markets": [],
+        }
+        pm_event = await writer.upsert_event(linked_event_data)
+
+        # Link the Polymarket event to the NBA event
+        pm_event.event_id = nba_event.id
+        await pglite_async_session.flush()
+
+        # Create unlinked Polymarket event (should not be returned)
+        unlinked_event_data = {
+            "id": "pm_unlinked_event",
+            "ticker": "nba-unlinked",
+            "slug": "unlinked",
+            "title": "Unlinked Event",
+            "startDate": "2026-03-01T01:00:00Z",
+            "endDate": "2026-03-01T04:00:00Z",
+            "active": True,
+            "closed": False,
+            "markets": [],
+        }
+        await writer.upsert_event(unlinked_event_data)
+        await pglite_async_session.flush()
+
+        # Get linked events
+        linked_events = await reader.get_linked_events()
+
+        assert len(linked_events) == 1
+        pm_evt, nba_evt = linked_events[0]
+        assert pm_evt.pm_event_id == "pm_linked_event"
+        assert nba_evt.id == "nba_game_123"
+        assert pm_evt.event_id == nba_evt.id
+
+    @pytest.mark.asyncio
     async def test_get_backfilled_market_ids(self, pglite_async_session):
         """Test that get_backfilled_market_ids correctly identifies markets with sufficient history."""
         writer = PolymarketWriter(pglite_async_session)

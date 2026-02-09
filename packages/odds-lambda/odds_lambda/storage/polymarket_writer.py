@@ -12,7 +12,7 @@ from odds_core.polymarket_models import (
     PolymarketOrderBookSnapshot,
     PolymarketPriceSnapshot,
 )
-from odds_core.time import ensure_utc
+from odds_core.time import ensure_utc, parse_api_datetime
 from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,10 +48,8 @@ class PolymarketWriter:
         pm_event_id = event_data["id"]
 
         # Parse timestamps from Gamma API format
-        start_date = ensure_utc(
-            datetime.fromisoformat(event_data["startDate"].replace("Z", "+00:00"))
-        )
-        end_date = ensure_utc(datetime.fromisoformat(event_data["endDate"].replace("Z", "+00:00")))
+        start_date = parse_api_datetime(event_data["startDate"])
+        end_date = parse_api_datetime(event_data["endDate"])
 
         # Build event dict
         event_dict = {
@@ -367,7 +365,11 @@ class PolymarketWriter:
             }
             snapshot_dicts.append(snapshot_dict)
 
-        # Check which snapshots already exist
+        # Pre-filter to check which snapshots already exist
+        # Note: For very large datasets (thousands of points), WHERE IN (...) could be expensive.
+        # We use this approach to provide accurate inserted/skipped counts for logging.
+        # Alternative: Add unique constraint on (market_id, snapshot_time) and use ON CONFLICT DO NOTHING,
+        # which would be more efficient but lose granular count reporting.
         if snapshot_dicts:
             existing_query = select(PolymarketPriceSnapshot.snapshot_time).where(
                 and_(
