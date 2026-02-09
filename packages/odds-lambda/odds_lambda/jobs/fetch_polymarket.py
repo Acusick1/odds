@@ -29,8 +29,11 @@ from odds_lambda.tier_utils import calculate_tier
 
 logger = structlog.get_logger()
 
+# Delay between CLOB calls to be rate-limit friendly (milliseconds)
+CLOB_DELAY_MS = 100
 
-async def should_fetch_orderbooks(tier_value: str, settings: Settings) -> bool:
+
+def should_fetch_orderbooks(tier_value: str, settings: Settings) -> bool:
     """
     Check if current tier should collect order books.
 
@@ -42,25 +45,6 @@ async def should_fetch_orderbooks(tier_value: str, settings: Settings) -> bool:
         True if order books should be collected for this tier
     """
     return tier_value in settings.polymarket.orderbook_tiers
-
-
-async def get_closest_polymarket_game(reader: PolymarketReader) -> datetime | None:
-    """
-    Find the soonest upcoming Polymarket event start time.
-
-    Args:
-        reader: PolymarketReader instance
-
-    Returns:
-        Datetime of closest event start, or None if no active events
-    """
-    active_events = await reader.get_active_events()
-
-    if not active_events:
-        return None
-
-    # Return earliest start_date
-    return min(event.start_date for event in active_events)
 
 
 async def main():
@@ -114,21 +98,30 @@ async def main():
             if not events_data:
                 logger.info(
                     "fetch_polymarket_skipped",
-                    reason="no_active_polymarket_events",
+                    reason="no_active_polymarket_events_from_api",
                 )
 
-                # Still schedule next check even if no events
-                closest_game = await get_closest_polymarket_game(reader)
-                if closest_game:
+                # Check DB for any existing active events to determine schedule
+                db_active_events = await reader.get_active_events()
+                if db_active_events:
+                    # We have events in DB, schedule based on closest game
+                    closest_game = min(event.start_date for event in db_active_events)
                     now = datetime.now(UTC)
                     hours_until = (closest_game - now).total_seconds() / 3600
                     fetch_tier = calculate_tier(hours_until)
                     next_execution = now + timedelta(
                         seconds=app_settings.polymarket.price_poll_interval
                     )
+                    logger.info(
+                        "fetch_polymarket_scheduled_from_db",
+                        closest_game=closest_game.isoformat(),
+                        hours_until=round(hours_until, 2),
+                        tier=fetch_tier.value,
+                    )
                 else:
-                    # No active events - check daily for new events
+                    # No events in API or DB - check daily for new events
                     next_execution = datetime.now(UTC) + timedelta(hours=24)
+                    logger.info("fetch_polymarket_scheduled_daily_check")
 
                 backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
                 await backend.schedule_next_execution(
@@ -170,10 +163,10 @@ async def main():
             # Commit event and market upserts
             await session.commit()
 
-            # Determine current fetch tier from closest game
-            closest_game = await get_closest_polymarket_game(reader)
+            # Get active events for processing
+            active_events = await reader.get_active_events()
 
-            if not closest_game:
+            if not active_events:
                 logger.warning("no_active_events_after_upsert")
 
                 # Schedule next check even if no events to process
@@ -184,10 +177,12 @@ async def main():
                 )
                 return
 
+            # Determine current fetch tier from closest game
+            closest_game = min(event.start_date for event in active_events)
             now = datetime.now(UTC)
             hours_until = (closest_game - now).total_seconds() / 3600
             fetch_tier = calculate_tier(hours_until)
-            should_fetch_books = await should_fetch_orderbooks(fetch_tier.value, app_settings)
+            should_fetch_books = should_fetch_orderbooks(fetch_tier.value, app_settings)
 
             logger.info(
                 "fetch_polymarket_executing",
@@ -197,22 +192,21 @@ async def main():
                 fetch_orderbooks=should_fetch_books,
             )
 
+            # Build market types to collect once (config-derived constant)
+            market_types_to_collect = []
+            if app_settings.polymarket.collect_moneyline:
+                market_types_to_collect.append(PolymarketMarketType.MONEYLINE)
+            if app_settings.polymarket.collect_spreads:
+                market_types_to_collect.append(PolymarketMarketType.SPREAD)
+            if app_settings.polymarket.collect_totals:
+                market_types_to_collect.append(PolymarketMarketType.TOTAL)
+            if app_settings.polymarket.collect_player_props:
+                market_types_to_collect.append(PolymarketMarketType.PLAYER_PROP)
+
             # Fetch prices for all active events
-            active_events = await reader.get_active_events()
 
             for event in active_events:
                 try:
-                    # Get markets for this event based on config
-                    market_types_to_collect = []
-                    if app_settings.polymarket.collect_moneyline:
-                        market_types_to_collect.append(PolymarketMarketType.MONEYLINE)
-                    if app_settings.polymarket.collect_spreads:
-                        market_types_to_collect.append(PolymarketMarketType.SPREAD)
-                    if app_settings.polymarket.collect_totals:
-                        market_types_to_collect.append(PolymarketMarketType.TOTAL)
-                    if app_settings.polymarket.collect_player_props:
-                        market_types_to_collect.append(PolymarketMarketType.PLAYER_PROP)
-
                     for market_type in market_types_to_collect:
                         markets = await reader.get_markets_by_type(event.id, market_type)
 
@@ -231,20 +225,43 @@ async def main():
                             # Fetch prices for both outcomes
                             prices = await client.get_prices_batch(token_ids)
 
-                            if len(prices) >= 2:
-                                # Store price snapshot
-                                price_data = {
-                                    "outcome_0_price": prices.get(token_ids[0], 0.0) or 0.0,
-                                    "outcome_1_price": prices.get(token_ids[1], 0.0) or 0.0,
-                                }
+                            # Rate-limit delay after CLOB batch call
+                            await asyncio.sleep(CLOB_DELAY_MS / 1000)
 
-                                await writer.store_price_snapshot(
-                                    market=market,
-                                    prices=price_data,
-                                    commence_time=event.start_date,
-                                    snapshot_time=now,
+                            # Only store snapshot if both token prices were successfully fetched
+                            # Note: get_prices_batch excludes failed fetches and returns None for missing prices
+                            if token_ids[0] in prices and token_ids[1] in prices:
+                                price_0 = prices[token_ids[0]]
+                                price_1 = prices[token_ids[1]]
+
+                                # Skip if either price is None (legitimate 0.0 is valid in prediction markets)
+                                if price_0 is not None and price_1 is not None:
+                                    price_data = {
+                                        "outcome_0_price": price_0,
+                                        "outcome_1_price": price_1,
+                                    }
+
+                                    await writer.store_price_snapshot(
+                                        market=market,
+                                        prices=price_data,
+                                        commence_time=event.start_date,
+                                        snapshot_time=now,
+                                    )
+                                    stats["price_snapshots_stored"] += 1
+                                else:
+                                    logger.warning(
+                                        "price_snapshot_skipped_none_price",
+                                        market_id=market.id,
+                                        question=market.question,
+                                    )
+                            else:
+                                logger.warning(
+                                    "price_snapshot_skipped_missing_tokens",
+                                    market_id=market.id,
+                                    question=market.question,
+                                    available_tokens=list(prices.keys()),
+                                    expected_tokens=token_ids,
                                 )
-                                stats["price_snapshots_stored"] += 1
 
                             # Fetch order books for moneyline markets if tier-gated
                             if should_fetch_books and market_type == PolymarketMarketType.MONEYLINE:
@@ -252,16 +269,19 @@ async def main():
                                 token_id = token_ids[0]
                                 raw_book = await client.get_order_book(token_id)
 
-                                if raw_book:
-                                    snapshot = await writer.store_orderbook_snapshot(
-                                        market=market,
-                                        raw_book=raw_book,
-                                        commence_time=event.start_date,
-                                        snapshot_time=now,
-                                    )
+                                # Rate-limit delay after CLOB call
+                                await asyncio.sleep(CLOB_DELAY_MS / 1000)
 
-                                    if snapshot:
-                                        stats["orderbook_snapshots_stored"] += 1
+                                # store_orderbook_snapshot validates book and returns None if invalid
+                                snapshot = await writer.store_orderbook_snapshot(
+                                    market=market,
+                                    raw_book=raw_book,
+                                    commence_time=event.start_date,
+                                    snapshot_time=now,
+                                )
+
+                                if snapshot:
+                                    stats["orderbook_snapshots_stored"] += 1
 
                 except Exception as e:
                     logger.error(
