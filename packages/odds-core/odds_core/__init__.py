@@ -23,6 +23,14 @@ from odds_core.models import (
     Odds,
     OddsSnapshot,
 )
+from odds_core.polymarket_models import (
+    PolymarketEvent,
+    PolymarketFetchLog,
+    PolymarketMarket,
+    PolymarketMarketType,
+    PolymarketOrderBookSnapshot,
+    PolymarketPriceSnapshot,
+)
 
 __all__ = [
     # Models
@@ -32,6 +40,13 @@ __all__ = [
     "OddsSnapshot",
     "DataQualityLog",
     "FetchLog",
+    # Polymarket Models
+    "PolymarketMarketType",
+    "PolymarketEvent",
+    "PolymarketMarket",
+    "PolymarketPriceSnapshot",
+    "PolymarketOrderBookSnapshot",
+    "PolymarketFetchLog",
     # Database
     "engine",
     "get_session",

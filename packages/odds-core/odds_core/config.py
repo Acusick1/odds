@@ -147,6 +147,43 @@ class AlertConfig(BaseSettings):
     )
 
 
+class PolymarketConfig(BaseSettings):
+    """Polymarket prediction market configuration."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="POLYMARKET_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+    gamma_base_url: str = Field(
+        default="https://gamma-api.polymarket.com", description="Gamma API base URL"
+    )
+    clob_base_url: str = Field(
+        default="https://clob.polymarket.com", description="CLOB API base URL"
+    )
+    nba_series_id: str = Field(default="10345", description="NBA series tag ID")
+    game_tag_id: str = Field(default="100639", description="NBA game tag ID")
+    enabled: bool = Field(default=True, description="Enable Polymarket data collection")
+
+    # Polling intervals (seconds)
+    price_poll_interval: int = Field(
+        default=300, description="Price snapshot poll interval (seconds)"
+    )
+    orderbook_poll_interval: int = Field(
+        default=1800, description="Order book poll interval (seconds)"
+    )
+
+    # Market type collection toggles
+    collect_moneyline: bool = Field(default=True, description="Collect moneyline markets")
+    collect_spreads: bool = Field(default=True, description="Collect spread markets")
+    collect_totals: bool = Field(default=True, description="Collect totals markets")
+    collect_player_props: bool = Field(default=False, description="Collect player prop markets")
+
+    # Order book collection tiers
+    orderbook_tiers: list[str] = Field(
+        default=["closing", "pregame"], description="Tiers for order book collection"
+    )
+
+
 class LoggingConfig(BaseSettings):
     """Logging configuration."""
 
@@ -183,6 +220,7 @@ class Settings(BaseSettings):
     data_quality: DataQualityConfig = Field(default_factory=DataQualityConfig)
     alerts: AlertConfig = Field(default_factory=AlertConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    polymarket: PolymarketConfig = Field(default_factory=PolymarketConfig)
 
 
 @lru_cache

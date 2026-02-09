@@ -104,3 +104,47 @@ class TestSettings:
             assert (
                 settings.aws.lambda_arn == "arn:aws:lambda:us-east-1:123456789:function:fetch-odds"
             )
+
+    def test_polymarket_defaults(self):
+        """Test Polymarket configuration defaults."""
+        with patch.dict(
+            os.environ,
+            {"ODDS_API_KEY": "test_key", "DATABASE_URL": "postgresql://test:test@localhost/test"},
+            clear=True,
+        ):
+            settings = Settings(_env_file=None)
+
+            assert settings.polymarket.gamma_base_url == "https://gamma-api.polymarket.com"
+            assert settings.polymarket.clob_base_url == "https://clob.polymarket.com"
+            assert settings.polymarket.nba_series_id == "10345"
+            assert settings.polymarket.game_tag_id == "100639"
+            assert settings.polymarket.enabled is True
+            assert settings.polymarket.price_poll_interval == 300
+            assert settings.polymarket.orderbook_poll_interval == 1800
+            assert settings.polymarket.collect_moneyline is True
+            assert settings.polymarket.collect_spreads is True
+            assert settings.polymarket.collect_totals is True
+            assert settings.polymarket.collect_player_props is False
+            assert settings.polymarket.orderbook_tiers == ["closing", "pregame"]
+
+    def test_polymarket_env_overrides(self):
+        """Test Polymarket configuration from environment variables."""
+        with patch.dict(
+            os.environ,
+            {
+                "ODDS_API_KEY": "test_key",
+                "DATABASE_URL": "postgresql://test:test@localhost/test",
+                "POLYMARKET_ENABLED": "false",
+                "POLYMARKET_PRICE_POLL_INTERVAL": "60",
+                "POLYMARKET_ORDERBOOK_POLL_INTERVAL": "900",
+                "POLYMARKET_COLLECT_PLAYER_PROPS": "true",
+                "POLYMARKET_NBA_SERIES_ID": "99999",
+            },
+        ):
+            settings = Settings()
+
+            assert settings.polymarket.enabled is False
+            assert settings.polymarket.price_poll_interval == 60
+            assert settings.polymarket.orderbook_poll_interval == 900
+            assert settings.polymarket.collect_player_props is True
+            assert settings.polymarket.nba_series_id == "99999"
