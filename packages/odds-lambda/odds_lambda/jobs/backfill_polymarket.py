@@ -303,6 +303,9 @@ async def _backfill_market_history(
             fidelity=5,  # 5-minute resolution
         )
 
+        # Rate-limit delay after CLOB API call (applies to both dry-run and normal mode)
+        await asyncio.sleep(CLOB_DELAY_MS / 1000)
+
         if not history:
             logger.info(
                 "market_history_empty",
@@ -325,9 +328,6 @@ async def _backfill_market_history(
                 points_fetched=len(history),
                 points_inserted=inserted,
             )
-
-            # Small delay to be rate-limit friendly
-            await asyncio.sleep(CLOB_DELAY_MS / 1000)
 
             return {"status": "success", "points": inserted}
         else:

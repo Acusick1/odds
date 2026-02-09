@@ -130,14 +130,14 @@ class TestBackfillMarketHistory:
         mock_sleep.assert_called_once_with(0.1)
 
     @pytest.mark.asyncio
-    async def test_dry_run_skips_storage_no_sleep(
+    async def test_dry_run_skips_storage_but_throttles(
         self,
         mock_polymarket_client,
         mock_polymarket_writer,
         sample_polymarket_market,
         sample_price_history,
     ):
-        """Dry run returns success without calling bulk_store or sleep."""
+        """Dry run skips storage but still throttles API calls."""
         mock_polymarket_client.get_price_history.return_value = sample_price_history
         commence_time = datetime(2024, 1, 15, 19, 0, 0, tzinfo=UTC)
 
@@ -154,7 +154,8 @@ class TestBackfillMarketHistory:
         assert result["status"] == "success"
         assert result["points"] == len(sample_price_history)
         mock_polymarket_writer.bulk_store_price_history.assert_not_called()
-        mock_sleep.assert_not_called()
+        # Dry run DOES call sleep after API call (rate limiting applies to both paths)
+        mock_sleep.assert_called_once_with(0.1)
 
     @pytest.mark.asyncio
     async def test_rate_limit_sleep_called_after_store(
