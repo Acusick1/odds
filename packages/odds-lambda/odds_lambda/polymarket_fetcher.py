@@ -227,7 +227,7 @@ class PolymarketClient:
 
         return price
 
-    async def get_midpoint(self, token_id: str) -> float:
+    async def get_midpoint(self, token_id: str) -> float | None:
         """
         Fetch midpoint price for a token from CLOB API.
 
@@ -235,13 +235,25 @@ class PolymarketClient:
             token_id: CLOB token ID (as string)
 
         Returns:
-            Midpoint price as float (0.0-1.0)
+            Midpoint price as float (0.0-1.0) or None if midpoint unavailable
+
+        Note:
+            Returns None (not 0.0) when midpoint is missing, since 0.0 is a valid
+            price representing an impossible event in prediction markets.
         """
         params = {"token_id": token_id}
 
         data, response_time = await self._make_request(self.clob_url, "/midpoint", params=params)
 
-        midpoint = float(data.get("mid", 0.0)) if isinstance(data, dict) else 0.0
+        if not isinstance(data, dict) or "mid" not in data:
+            logger.warning(
+                "midpoint_missing",
+                token_id=token_id,
+                response_time_ms=response_time,
+            )
+            return None
+
+        midpoint = float(data["mid"])
 
         logger.debug(
             "midpoint_fetched",
