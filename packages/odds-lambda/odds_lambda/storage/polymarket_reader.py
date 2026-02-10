@@ -8,6 +8,7 @@ import structlog
 from odds_core.models import Event
 from odds_core.polymarket_models import (
     PolymarketEvent,
+    PolymarketFetchLog,
     PolymarketMarket,
     PolymarketMarketType,
     PolymarketOrderBookSnapshot,
@@ -274,3 +275,61 @@ class PolymarketReader:
         logger.info("backfilled_polymarket_markets_identified", count=len(market_ids))
 
         return market_ids
+
+    async def get_unlinked_events(self) -> list[PolymarketEvent]:
+        """Get all PolymarketEvents that have not yet been linked to an internal Event."""
+        query = (
+            select(PolymarketEvent)
+            .where(PolymarketEvent.event_id.is_(None))
+            .order_by(PolymarketEvent.start_date)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_event_by_ticker(self, ticker: str) -> PolymarketEvent | None:
+        """Get a PolymarketEvent by its ticker."""
+        query = select(PolymarketEvent).where(PolymarketEvent.ticker == ticker)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_pipeline_stats(self) -> dict:
+        """Return aggregate counts and coverage stats for the Polymarket pipeline."""
+        total_events_result = await self.session.execute(select(func.count(PolymarketEvent.id)))
+        total_events = total_events_result.scalar_one()
+
+        linked_result = await self.session.execute(
+            select(func.count(PolymarketEvent.id)).where(PolymarketEvent.event_id.isnot(None))
+        )
+        linked = linked_result.scalar_one()
+
+        total_markets_result = await self.session.execute(select(func.count(PolymarketMarket.id)))
+        total_markets = total_markets_result.scalar_one()
+
+        total_snapshots_result = await self.session.execute(
+            select(func.count(PolymarketPriceSnapshot.id))
+        )
+        total_snapshots = total_snapshots_result.scalar_one()
+
+        date_range_result = await self.session.execute(
+            select(
+                func.min(PolymarketEvent.start_date),
+                func.max(PolymarketEvent.start_date),
+            )
+        )
+        date_range_row = date_range_result.one()
+
+        latest_log_result = await self.session.execute(
+            select(PolymarketFetchLog).order_by(PolymarketFetchLog.fetch_time.desc()).limit(1)
+        )
+        latest_log = latest_log_result.scalar_one_or_none()
+
+        return {
+            "total_events": total_events,
+            "linked_events": linked,
+            "unlinked_events": total_events - linked,
+            "total_markets": total_markets,
+            "total_snapshots": total_snapshots,
+            "earliest_event": date_range_row[0],
+            "latest_event": date_range_row[1],
+            "latest_fetch_log": latest_log,
+        }
