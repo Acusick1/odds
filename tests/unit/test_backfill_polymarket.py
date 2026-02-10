@@ -245,11 +245,14 @@ class TestMainIntegration:
     """Integration tests for main backfill job function."""
 
     @pytest.mark.asyncio
-    async def test_early_return_when_polymarket_disabled(self, mock_settings):
+    async def test_early_return_when_polymarket_disabled(self, mock_polymarket_settings):
         """Returns early when polymarket.enabled=False."""
-        mock_settings.polymarket.enabled = False
+        mock_polymarket_settings.polymarket.enabled = False
 
-        with patch("odds_lambda.jobs.backfill_polymarket.get_settings", return_value=mock_settings):
+        with patch(
+            "odds_lambda.jobs.backfill_polymarket.get_settings",
+            return_value=mock_polymarket_settings,
+        ):
             await backfill_polymarket.main(dry_run=True)
 
         # No assertions needed - just verifies no exceptions raised and early return
