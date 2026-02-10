@@ -195,19 +195,84 @@ class TestMatchPolymarketEvent:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_queries_correct_time_window(self):
-        """Verify the session is called with expected arguments."""
-        pm_start = datetime(2026, 1, 25, 2, 0, 0, tzinfo=UTC)
-        expected_window_start = pm_start - timedelta(hours=24)
-        expected_window_end = pm_start + timedelta(hours=24)
-
+    async def test_execute_called_once(self):
+        """match_polymarket_event issues exactly one DB query for a valid ticker."""
         session = self._make_session([])
-        await match_polymarket_event(session, "nba-dal-mil-2026-01-25", pm_start)
-
-        # Session must have been queried exactly once
+        await match_polymarket_event(
+            session, "nba-dal-mil-2026-01-25", datetime(2026, 1, 25, 2, 0, tzinfo=UTC)
+        )
         session.execute.assert_called_once()
 
-        # The window bounds are used in the query — verify by checking they're
-        # derivable from the pm_start passed in
-        assert expected_window_start == pm_start - timedelta(hours=24)
-        assert expected_window_end == pm_start + timedelta(hours=24)
+
+class TestMatchPolymarketEventDB:
+    """Integration-level tests using a real DB (pglite) to verify window filtering."""
+
+    @pytest.mark.asyncio
+    async def test_event_inside_window_matches(self, pglite_async_session):
+        from odds_core.models import Event, EventStatus
+
+        game_time = datetime(2026, 1, 25, 2, 0, 0, tzinfo=UTC)
+        event = Event(
+            id="test_evt_inside",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=game_time,
+            home_team="Milwaukee Bucks",
+            away_team="Dallas Mavericks",
+            status=EventStatus.SCHEDULED,
+        )
+        pglite_async_session.add(event)
+        await pglite_async_session.commit()
+
+        pm_start = game_time  # exact match
+        result = await match_polymarket_event(
+            pglite_async_session, "nba-dal-mil-2026-01-25", pm_start
+        )
+        assert result == "test_evt_inside"
+
+    @pytest.mark.asyncio
+    async def test_event_outside_window_not_matched(self, pglite_async_session):
+        from odds_core.models import Event, EventStatus
+
+        game_time = datetime(2026, 1, 25, 2, 0, 0, tzinfo=UTC)
+        event = Event(
+            id="test_evt_outside",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=game_time,
+            home_team="Milwaukee Bucks",
+            away_team="Dallas Mavericks",
+            status=EventStatus.SCHEDULED,
+        )
+        pglite_async_session.add(event)
+        await pglite_async_session.commit()
+
+        # pm_start is >24h away from game_time — should not match
+        pm_start = game_time + timedelta(hours=25)
+        result = await match_polymarket_event(
+            pglite_async_session, "nba-dal-mil-2026-01-25", pm_start
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_wrong_teams_not_matched(self, pglite_async_session):
+        from odds_core.models import Event, EventStatus
+
+        game_time = datetime(2026, 1, 25, 2, 0, 0, tzinfo=UTC)
+        # Store Lakers vs Celtics but query for dal vs mil
+        event = Event(
+            id="test_evt_wrong_teams",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=game_time,
+            home_team="Boston Celtics",
+            away_team="Los Angeles Lakers",
+            status=EventStatus.SCHEDULED,
+        )
+        pglite_async_session.add(event)
+        await pglite_async_session.commit()
+
+        result = await match_polymarket_event(
+            pglite_async_session, "nba-dal-mil-2026-01-25", game_time
+        )
+        assert result is None

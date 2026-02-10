@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import TypedDict
 
 import structlog
 from odds_core.models import Event
@@ -16,6 +17,18 @@ from odds_core.polymarket_models import (
 )
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+class PipelineStats(TypedDict):
+    total_events: int
+    linked_events: int
+    unlinked_events: int
+    total_markets: int
+    total_snapshots: int
+    earliest_event: datetime | None
+    latest_event: datetime | None
+    latest_fetch_log: PolymarketFetchLog | None
+
 
 logger = structlog.get_logger()
 
@@ -292,7 +305,7 @@ class PolymarketReader:
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def get_pipeline_stats(self) -> dict:
+    async def get_pipeline_stats(self) -> PipelineStats:
         """Return aggregate counts and coverage stats for the Polymarket pipeline."""
         total_events_result = await self.session.execute(select(func.count(PolymarketEvent.id)))
         total_events = total_events_result.scalar_one()

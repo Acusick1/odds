@@ -122,10 +122,8 @@ def discover():
 
 async def _discover_async():
     """Async implementation of discover command."""
-    from odds_core.config import get_settings
     from odds_lambda.polymarket_fetcher import PolymarketClient
 
-    settings = get_settings()
     console.print("\n[bold cyan]Active Polymarket NBA Events[/bold cyan]\n")
 
     with Progress(
@@ -135,7 +133,7 @@ async def _discover_async():
     ) as progress:
         task = progress.add_task("Fetching events from Gamma API...", total=None)
         try:
-            async with PolymarketClient(settings.polymarket) as client:
+            async with PolymarketClient() as client:
                 events = await client.get_nba_events(active=True, closed=False)
             progress.update(task, completed=True)
         except Exception as e:
@@ -319,12 +317,18 @@ def book(
 
 async def _book_async(ticker: str):
     """Async implementation of book command."""
-    from odds_core.config import get_settings
     from odds_core.database import async_session_maker
     from odds_lambda.polymarket_fetcher import PolymarketClient
+    from odds_lambda.polymarket_matching import parse_ticker
     from odds_lambda.storage.polymarket_reader import PolymarketReader
 
-    settings = get_settings()
+    if not parse_ticker(ticker):
+        console.print(
+            f"[red]Invalid ticker format: {ticker!r}. "
+            "Expected nba-{{away}}-{{home}}-{{yyyy}}-{{mm}}-{{dd}}[/red]\n"
+        )
+        raise typer.Exit(1)
+
     console.print(f"\n[bold cyan]Order Book: {ticker}[/bold cyan]\n")
 
     try:
@@ -336,13 +340,22 @@ async def _book_async(ticker: str):
                 console.print(f"[red]No Polymarket event found for ticker: {ticker}[/red]\n")
                 raise typer.Exit(1)
 
+            if pm_event.id is None:
+                console.print("[red]Event record has no database ID[/red]\n")
+                raise typer.Exit(1)
+
             market = await reader.get_moneyline_market(pm_event.id)
 
-        if not market:
-            console.print(f"[yellow]No moneyline market found for: {ticker}[/yellow]\n")
-            raise typer.Exit(1)
+            if not market:
+                console.print(f"[yellow]No moneyline market found for: {ticker}[/yellow]\n")
+                raise typer.Exit(1)
 
-        if len(market.clob_token_ids) < 2:
+            token_ids = list(market.clob_token_ids[:2])
+            outcomes = (
+                list(market.outcomes) if len(market.outcomes) >= 2 else ["Outcome 0", "Outcome 1"]
+            )
+
+        if len(token_ids) < 2:
             console.print("[red]Market has insufficient token IDs[/red]\n")
             raise typer.Exit(1)
 
@@ -352,13 +365,11 @@ async def _book_async(ticker: str):
             console=console,
         ) as progress:
             task = progress.add_task("Fetching order books...", total=None)
-            async with PolymarketClient(settings.polymarket) as client:
-                books = await client.get_order_books_batch(market.clob_token_ids[:2])
+            async with PolymarketClient() as client:
+                books = await client.get_order_books_batch(token_ids)
             progress.update(task, completed=True)
 
-        outcomes = market.outcomes if len(market.outcomes) >= 2 else ["Outcome 0", "Outcome 1"]
-
-        for token_id, outcome in zip(market.clob_token_ids[:2], outcomes, strict=False):
+        for token_id, outcome in zip(token_ids, outcomes, strict=False):
             raw_book = books.get(token_id, {})
             bids = sorted(raw_book.get("bids", []), key=lambda x: float(x["price"]), reverse=True)
             asks = sorted(raw_book.get("asks", []), key=lambda x: float(x["price"]))
