@@ -183,6 +183,53 @@ odds copy from-prod --start YYYY-MM-DD --end YYYY-MM-DD
 
 Copies data from production database to local database.
 
+## Polymarket Commands
+
+### Discover Events
+
+```bash
+odds polymarket discover
+```
+
+Lists active NBA events currently on Polymarket from the Gamma API.
+
+### Pipeline Status
+
+```bash
+odds polymarket status
+```
+
+Shows collection health: event counts (linked/unlinked), total snapshots, date coverage, last fetch result.
+
+### Backfill Price History
+
+```bash
+odds polymarket backfill
+odds polymarket backfill --include-spreads --include-totals
+odds polymarket backfill --dry-run
+```
+
+Fetches historical price data for closed markets from the CLOB API. Moneyline only by default. Safe to run repeatedly — skips markets with ≥10 existing snapshots.
+
+**CRITICAL:** Must run every 3–5 days. CLOB `/prices-history` data expires on a ~30-day rolling basis.
+
+### Link Events
+
+```bash
+odds polymarket link
+odds polymarket link --dry-run
+```
+
+Matches unlinked Polymarket events to internal sportsbook Event records via ticker parsing.
+
+### View Order Book
+
+```bash
+odds polymarket book <ticker>
+```
+
+Shows the live order book for a game's moneyline market. Ticker format: `nba-{away}-{home}-{yyyy}-{mm}-{dd}`.
+
 ## Scheduler Commands
 
 ### Start Scheduler
