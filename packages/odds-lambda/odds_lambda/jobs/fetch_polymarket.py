@@ -14,14 +14,12 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from odds_core.config import Settings, get_settings
+from odds_core.config import get_settings
 from odds_core.database import async_session_maker
-from odds_core.polymarket_models import (
-    PolymarketFetchLog,
-    PolymarketMarketType,
-)
+from odds_core.polymarket_models import PolymarketFetchLog
 
 from odds_lambda.polymarket_fetcher import PolymarketClient
+from odds_lambda.polymarket_ingestion import PolymarketIngestionResult, PolymarketIngestionService
 from odds_lambda.scheduling.backends import get_scheduler_backend
 from odds_lambda.storage.polymarket_reader import PolymarketReader
 from odds_lambda.storage.polymarket_writer import PolymarketWriter
@@ -29,67 +27,89 @@ from odds_lambda.tier_utils import calculate_tier
 
 logger = structlog.get_logger()
 
-# Delay between CLOB calls to be rate-limit friendly (milliseconds)
-CLOB_DELAY_MS = 100
+
+def build_ingestion_service(
+    client: PolymarketClient,
+    reader: PolymarketReader,
+    writer: PolymarketWriter,
+) -> PolymarketIngestionService:
+    """Factory to create ingestion service; exposed for test patching."""
+    return PolymarketIngestionService(
+        client=client,
+        reader=reader,
+        writer=writer,
+        settings=get_settings(),
+    )
 
 
-def should_fetch_orderbooks(tier_value: str, settings: Settings) -> bool:
-    """
-    Check if current tier should collect order books.
-
-    Args:
-        tier_value: Current tier value string (e.g., "closing", "pregame")
-        settings: Application settings
-
-    Returns:
-        True if order books should be collected for this tier
-    """
-    return tier_value in settings.polymarket.orderbook_tiers
+async def _schedule(job_name: str, next_time: datetime, *, dry_run: bool) -> None:
+    """Schedule next execution via the configured backend."""
+    backend = get_scheduler_backend(dry_run=dry_run)
+    await backend.schedule_next_execution(job_name=job_name, next_time=next_time)
 
 
-async def main():
-    """
-    Main job execution flow.
+async def _handle_no_api_events(
+    reader: PolymarketReader,
+    *,
+    price_poll_interval: int,
+    dry_run: bool,
+) -> None:
+    """When API returns no events, schedule based on DB state or daily fallback."""
+    db_active_events = await reader.get_active_events()
+    if db_active_events:
+        closest_game = min(event.start_date for event in db_active_events)
+        now = datetime.now(UTC)
+        hours_until = (closest_game - now).total_seconds() / 3600
+        fetch_tier = calculate_tier(hours_until)
+        next_execution = now + timedelta(seconds=price_poll_interval)
+        logger.info(
+            "fetch_polymarket_scheduled_from_db",
+            closest_game=closest_game.isoformat(),
+            hours_until=round(hours_until, 2),
+            tier=fetch_tier.value,
+        )
+    else:
+        next_execution = datetime.now(UTC) + timedelta(hours=24)
+        logger.info("fetch_polymarket_scheduled_daily_check")
 
-    Flow:
-    1. Check if Polymarket collection is enabled
-    2. Discover active NBA events from Gamma API
-    3. Upsert events and markets to DB
-    4. Determine current fetch tier from closest game
-    5. Fetch prices for relevant markets (based on config)
-    6. If tier is in orderbook_tiers, fetch order books for moneyline markets
-    7. Store snapshots with tier metadata
-    8. Log fetch results
-    9. Schedule next execution
-    """
+    await _schedule("fetch-polymarket", next_execution, dry_run=dry_run)
+
+
+async def _log_fetch(
+    result: PolymarketIngestionResult, *, success: bool, error_message: str | None = None
+) -> None:
+    """Persist a PolymarketFetchLog on a dedicated session."""
+    fetch_log = PolymarketFetchLog(
+        job_type="fetch-polymarket",
+        events_count=result.events_processed,
+        markets_count=result.markets_discovered,
+        snapshots_stored=result.total_snapshots,
+        success=success,
+        error_message=error_message,
+    )
+    async with async_session_maker() as log_session:
+        log_writer = PolymarketWriter(log_session)
+        await log_writer.log_fetch(fetch_log)
+        await log_session.commit()
+
+
+async def main() -> None:
+    """Main job execution flow."""
     app_settings = get_settings()
 
     logger.info("fetch_polymarket_job_started", backend=app_settings.scheduler.backend)
 
-    # Check if Polymarket collection is enabled
     if not app_settings.polymarket.enabled:
-        logger.info(
-            "fetch_polymarket_skipped",
-            reason="polymarket.enabled=False",
-        )
+        logger.info("fetch_polymarket_skipped", reason="polymarket.enabled=False")
         return
 
-    # Statistics tracking
-    stats = {
-        "events_processed": 0,
-        "markets_discovered": 0,
-        "price_snapshots_stored": 0,
-        "orderbook_snapshots_stored": 0,
-        "errors": 0,
-    }
-
-    fetch_tier = None
-    hours_until = None
+    result = PolymarketIngestionResult()
 
     try:
         async with PolymarketClient() as client, async_session_maker() as session:
             reader = PolymarketReader(session)
             writer = PolymarketWriter(session)
+            service = build_ingestion_service(client, reader, writer)
 
             # Discover active NBA events from Gamma API
             logger.info("discovering_active_polymarket_events")
@@ -100,262 +120,65 @@ async def main():
                     "fetch_polymarket_skipped",
                     reason="no_active_polymarket_events_from_api",
                 )
-
-                # Check DB for any existing active events to determine schedule
-                db_active_events = await reader.get_active_events()
-                if db_active_events:
-                    # We have events in DB, schedule based on closest game
-                    closest_game = min(event.start_date for event in db_active_events)
-                    now = datetime.now(UTC)
-                    hours_until = (closest_game - now).total_seconds() / 3600
-                    fetch_tier = calculate_tier(hours_until)
-                    next_execution = now + timedelta(
-                        seconds=app_settings.polymarket.price_poll_interval
-                    )
-                    logger.info(
-                        "fetch_polymarket_scheduled_from_db",
-                        closest_game=closest_game.isoformat(),
-                        hours_until=round(hours_until, 2),
-                        tier=fetch_tier.value,
-                    )
-                else:
-                    # No events in API or DB - check daily for new events
-                    next_execution = datetime.now(UTC) + timedelta(hours=24)
-                    logger.info("fetch_polymarket_scheduled_daily_check")
-
-                backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
-                await backend.schedule_next_execution(
-                    job_name="fetch-polymarket", next_time=next_execution
+                await _handle_no_api_events(
+                    reader,
+                    price_poll_interval=app_settings.polymarket.price_poll_interval,
+                    dry_run=app_settings.scheduler.dry_run,
                 )
-
                 return
 
             logger.info("active_polymarket_events_discovered", count=len(events_data))
 
-            # Process each event: upsert event and markets
-            for event_data in events_data:
-                try:
-                    # Upsert event
-                    event = await writer.upsert_event(event_data)
-                    stats["events_processed"] += 1
+            # Phase 1: Upsert events + markets
+            discovery_result = await service.discover_and_upsert_events(events_data)
+            result.events_processed = discovery_result.events_processed
+            result.markets_discovered = discovery_result.markets_discovered
+            result.errors = discovery_result.errors
 
-                    # Upsert markets
-                    markets_data = event_data.get("markets", [])
-                    if markets_data:
-                        markets = await writer.upsert_markets(
-                            pm_event_id=event.id,
-                            markets_data=markets_data,
-                            event_title=event.title,
-                        )
-                        stats["markets_discovered"] += len(markets)
+            # Phase 2: Collect price/orderbook snapshots
+            snapshot_result = await service.collect_snapshots()
+            result.price_snapshots_stored = snapshot_result.price_snapshots_stored
+            result.orderbook_snapshots_stored = snapshot_result.orderbook_snapshots_stored
+            result.errors += snapshot_result.errors
+            result.fetch_tier = snapshot_result.fetch_tier
 
-                except Exception as e:
-                    logger.error(
-                        "event_processing_failed",
-                        pm_event_id=event_data.get("id"),
-                        title=event_data.get("title"),
-                        error=str(e),
-                        exc_info=True,
-                    )
-                    stats["errors"] += 1
-                    # Continue processing other events
-
-            # Commit event and market upserts
-            await session.commit()
-
-            # Get active events for processing
-            active_events = await reader.get_active_events()
-
-            if not active_events:
-                logger.warning("no_active_events_after_upsert")
-
-                # Schedule next check even if no events to process
+            if result.fetch_tier is None:
+                # No active events after upsert — schedule daily check
                 next_execution = datetime.now(UTC) + timedelta(hours=24)
-                backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
-                await backend.schedule_next_execution(
-                    job_name="fetch-polymarket", next_time=next_execution
+                await _schedule(
+                    "fetch-polymarket", next_execution, dry_run=app_settings.scheduler.dry_run
                 )
                 return
 
-            # Determine current fetch tier from closest game
-            closest_game = min(event.start_date for event in active_events)
-            now = datetime.now(UTC)
-            hours_until = (closest_game - now).total_seconds() / 3600
-            fetch_tier = calculate_tier(hours_until)
-            should_fetch_books = should_fetch_orderbooks(fetch_tier.value, app_settings)
-
-            logger.info(
-                "fetch_polymarket_executing",
-                closest_game=closest_game.isoformat(),
-                hours_until=round(hours_until, 2),
-                tier=fetch_tier.value,
-                fetch_orderbooks=should_fetch_books,
-            )
-
-            # Build market types to collect once (config-derived constant)
-            market_types_to_collect = []
-            if app_settings.polymarket.collect_moneyline:
-                market_types_to_collect.append(PolymarketMarketType.MONEYLINE)
-            if app_settings.polymarket.collect_spreads:
-                market_types_to_collect.append(PolymarketMarketType.SPREAD)
-            if app_settings.polymarket.collect_totals:
-                market_types_to_collect.append(PolymarketMarketType.TOTAL)
-            if app_settings.polymarket.collect_player_props:
-                market_types_to_collect.append(PolymarketMarketType.PLAYER_PROP)
-
-            # Fetch prices for all active events
-
-            for event in active_events:
-                try:
-                    for market_type in market_types_to_collect:
-                        markets = await reader.get_markets_by_type(event.id, market_type)
-
-                        for market in markets:
-                            # Collect token IDs for price fetching
-                            token_ids = market.clob_token_ids
-
-                            if not token_ids or len(token_ids) < 2:
-                                logger.warning(
-                                    "market_missing_tokens",
-                                    market_id=market.id,
-                                    question=market.question,
-                                )
-                                continue
-
-                            # Fetch prices for both outcomes
-                            prices = await client.get_prices_batch(token_ids)
-
-                            # Rate-limit delay after CLOB batch call
-                            await asyncio.sleep(CLOB_DELAY_MS / 1000)
-
-                            # Only store snapshot if both token prices were successfully fetched
-                            # Note: get_prices_batch excludes failed fetches and returns None for missing prices
-                            if token_ids[0] in prices and token_ids[1] in prices:
-                                price_0 = prices[token_ids[0]]
-                                price_1 = prices[token_ids[1]]
-
-                                # Skip if either price is None (legitimate 0.0 is valid in prediction markets)
-                                if price_0 is not None and price_1 is not None:
-                                    price_data = {
-                                        "outcome_0_price": price_0,
-                                        "outcome_1_price": price_1,
-                                    }
-
-                                    await writer.store_price_snapshot(
-                                        market=market,
-                                        prices=price_data,
-                                        commence_time=event.start_date,
-                                        snapshot_time=now,
-                                    )
-                                    stats["price_snapshots_stored"] += 1
-                                else:
-                                    logger.warning(
-                                        "price_snapshot_skipped_none_price",
-                                        market_id=market.id,
-                                        question=market.question,
-                                    )
-                            else:
-                                logger.warning(
-                                    "price_snapshot_skipped_missing_tokens",
-                                    market_id=market.id,
-                                    question=market.question,
-                                    available_tokens=list(prices.keys()),
-                                    expected_tokens=token_ids,
-                                )
-
-                            # Fetch order books for moneyline markets if tier-gated
-                            if should_fetch_books and market_type == PolymarketMarketType.MONEYLINE:
-                                # Fetch order book for first token (typically the "Yes" side)
-                                token_id = token_ids[0]
-                                raw_book = await client.get_order_book(token_id)
-
-                                # Rate-limit delay after CLOB call
-                                await asyncio.sleep(CLOB_DELAY_MS / 1000)
-
-                                # store_orderbook_snapshot validates book and returns None if invalid
-                                snapshot = await writer.store_orderbook_snapshot(
-                                    market=market,
-                                    raw_book=raw_book,
-                                    commence_time=event.start_date,
-                                    snapshot_time=now,
-                                )
-
-                                if snapshot:
-                                    stats["orderbook_snapshots_stored"] += 1
-
-                except Exception as e:
-                    logger.error(
-                        "market_fetch_failed",
-                        pm_event_id=event.pm_event_id,
-                        title=event.title,
-                        error=str(e),
-                        exc_info=True,
-                    )
-                    stats["errors"] += 1
-                    # Continue processing other markets
-
-            # Commit all snapshots
-            await session.commit()
-
-            logger.info(
-                "fetch_polymarket_completed",
-                events_processed=stats["events_processed"],
-                markets_discovered=stats["markets_discovered"],
-                price_snapshots_stored=stats["price_snapshots_stored"],
-                orderbook_snapshots_stored=stats["orderbook_snapshots_stored"],
-                errors=stats["errors"],
-            )
-
-        # Log fetch operation
-        fetch_log = PolymarketFetchLog(
-            job_type="fetch-polymarket",
-            events_count=stats["events_processed"],
-            markets_count=stats["markets_discovered"],
-            snapshots_stored=stats["price_snapshots_stored"] + stats["orderbook_snapshots_stored"],
-            success=True,
-            error_message=None,
+        logger.info(
+            "fetch_polymarket_completed",
+            events_processed=result.events_processed,
+            markets_discovered=result.markets_discovered,
+            price_snapshots_stored=result.price_snapshots_stored,
+            orderbook_snapshots_stored=result.orderbook_snapshots_stored,
+            errors=result.errors,
         )
 
-        async with async_session_maker() as log_session:
-            log_writer = PolymarketWriter(log_session)
-            await log_writer.log_fetch(fetch_log)
-            await log_session.commit()
+        await _log_fetch(result, success=True)
 
     except Exception as e:
         logger.error("fetch_polymarket_failed", error=str(e), exc_info=True)
 
-        # Log failed fetch
-        fetch_log = PolymarketFetchLog(
-            job_type="fetch-polymarket",
-            events_count=stats["events_processed"],
-            markets_count=stats["markets_discovered"],
-            snapshots_stored=stats["price_snapshots_stored"] + stats["orderbook_snapshots_stored"],
-            success=False,
-            error_message=str(e),
-        )
+        await _log_fetch(result, success=False, error_message=str(e))
 
-        async with async_session_maker() as log_session:
-            log_writer = PolymarketWriter(log_session)
-            await log_writer.log_fetch(fetch_log)
-            await log_session.commit()
-
-        # Send critical alert
         if app_settings.alerts.alert_enabled:
             from odds_cli.alerts.base import send_critical
 
             await send_critical(f"🚨 Fetch Polymarket job failed: {type(e).__name__}: {str(e)}")
 
-        # Don't schedule next run if we failed - let manual intervention happen
         raise
 
     # Self-schedule next execution
-    if fetch_tier:
+    if result.fetch_tier:
         try:
-            # Use price poll interval for next execution
             next_execution = datetime.now(UTC) + timedelta(
                 seconds=app_settings.polymarket.price_poll_interval
             )
-
             backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
             await backend.schedule_next_execution(
                 job_name="fetch-polymarket", next_time=next_execution
@@ -364,20 +187,17 @@ async def main():
                 "fetch_polymarket_next_scheduled",
                 next_time=next_execution.isoformat(),
                 backend=backend.get_backend_name(),
-                tier=fetch_tier.value,
+                tier=result.fetch_tier.value,
             )
         except Exception as e:
             logger.error("fetch_polymarket_scheduling_failed", error=str(e), exc_info=True)
 
-            # Send error alert
             if app_settings.alerts.alert_enabled:
                 from odds_cli.alerts.base import send_error
 
                 await send_error(
                     f"Fetch Polymarket scheduling failed: {type(e).__name__}: {str(e)}"
                 )
-
-            # Don't fail the job if scheduling fails - the fetch itself succeeded
 
 
 if __name__ == "__main__":
