@@ -24,6 +24,7 @@ def get_job_registry() -> dict[str, Callable[[], Awaitable[None]]]:
             backfill_polymarket,
             check_health,
             fetch_odds,
+            fetch_polymarket,
             fetch_scores,
             update_status,
         )
@@ -33,6 +34,7 @@ def get_job_registry() -> dict[str, Callable[[], Awaitable[None]]]:
             "fetch-scores": fetch_scores.main,
             "update-status": update_status.main,
             "check-health": check_health.main,
+            "fetch-polymarket": fetch_polymarket.main,
             "backfill-polymarket": backfill_polymarket.main,
         }
 
