@@ -94,6 +94,28 @@ async def verify_database() -> bool:
                     print("✗ Latest fetch failed!")
                     return False
 
+            # Check Polymarket tables
+            print("\n→ Polymarket tables:")
+
+            result = await conn.execute(text("SELECT COUNT(*) FROM polymarket_events"))
+            pm_event_count = result.scalar()
+            print(f"  Events: {pm_event_count}")
+
+            result = await conn.execute(text("SELECT COUNT(*) FROM polymarket_price_snapshots"))
+            pm_snapshot_count = result.scalar()
+            print(f"  Price snapshots: {pm_snapshot_count}")
+
+            result = await conn.execute(
+                text(
+                    """
+                SELECT COUNT(*) FROM polymarket_fetch_logs
+                WHERE created_at > NOW() - INTERVAL '10 minutes'
+            """
+                )
+            )
+            pm_recent_fetches = result.scalar()
+            print(f"  Recent fetches (10min): {pm_recent_fetches}")
+
             print("\n" + "=" * 60)
             print("✓ Database verification passed")
             print("=" * 60)

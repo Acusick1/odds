@@ -146,18 +146,20 @@ def main():
 
     success = True
 
-    # Test fetch-odds job
-    test_success, request_id = test_lambda_job(args.lambda_name, args.region, "fetch-odds")
-    if not test_success:
-        success = False
+    jobs = ["fetch-odds", "fetch-polymarket"]
 
-    # Wait for execution to complete
-    print("\n→ Waiting for execution...")
-    time.sleep(10)
+    for job in jobs:
+        test_success, request_id = test_lambda_job(args.lambda_name, args.region, job)
+        if not test_success:
+            success = False
 
-    # Check logs for this specific invocation
-    if not check_logs(args.lambda_name, args.region, request_id):
-        success = False
+        # Wait for execution to complete
+        print("\n→ Waiting for execution...")
+        time.sleep(10)
+
+        # Check logs for this specific invocation
+        if not check_logs(args.lambda_name, args.region, request_id):
+            success = False
 
     print("\n" + "=" * 60)
     if success:
