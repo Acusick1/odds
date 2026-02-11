@@ -213,7 +213,7 @@ resource "aws_cloudwatch_event_target" "dynamic" {
   for_each = toset(local.self_scheduling_jobs)
 
   rule      = aws_cloudwatch_event_rule.dynamic[each.key].name
-  target_id = "lambda"
+  target_id = "1"
   arn       = aws_lambda_function.odds_scheduler.arn
 
   input = jsonencode({
