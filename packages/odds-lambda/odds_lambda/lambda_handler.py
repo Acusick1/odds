@@ -32,38 +32,10 @@ logger = structlog.get_logger()
 
 async def _run_job_async(job_name: str):
     """Run the job module's main function asynchronously."""
-    if job_name == "fetch-odds":
-        from odds_lambda.jobs import fetch_odds
+    from odds_lambda.scheduling.jobs import get_job_function
 
-        await fetch_odds.main()
-
-    elif job_name == "fetch-scores":
-        from odds_lambda.jobs import fetch_scores
-
-        await fetch_scores.main()
-
-    elif job_name == "update-status":
-        from odds_lambda.jobs import update_status
-
-        await update_status.main()
-
-    elif job_name == "check-health":
-        from odds_lambda.jobs import check_health
-
-        await check_health.main()
-
-    elif job_name == "fetch-polymarket":
-        from odds_lambda.jobs import fetch_polymarket
-
-        await fetch_polymarket.main()
-
-    elif job_name == "backfill-polymarket":
-        from odds_lambda.jobs import backfill_polymarket
-
-        await backfill_polymarket.main()
-
-    else:
-        raise ValueError(f"Unknown job: {job_name}")
+    job_fn = get_job_function(job_name)
+    await job_fn()
 
 
 def lambda_handler(event, context):
