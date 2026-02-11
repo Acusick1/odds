@@ -6,7 +6,7 @@ The event payload specifies which job to execute.
 
 Event payload format:
 {
-    "job": "fetch-odds" | "fetch-scores" | "update-status" | "check-health"
+    "job": "fetch-odds" | "fetch-scores" | "update-status" | "check-health" | "fetch-polymarket" | "backfill-polymarket"
 }
 
 Environment variables required:
@@ -51,6 +51,16 @@ async def _run_job_async(job_name: str):
         from odds_lambda.jobs import check_health
 
         await check_health.main()
+
+    elif job_name == "fetch-polymarket":
+        from odds_lambda.jobs import fetch_polymarket
+
+        await fetch_polymarket.main()
+
+    elif job_name == "backfill-polymarket":
+        from odds_lambda.jobs import backfill_polymarket
+
+        await backfill_polymarket.main()
 
     else:
         raise ValueError(f"Unknown job: {job_name}")
