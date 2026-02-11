@@ -188,20 +188,57 @@ resource "aws_lambda_permission" "allow_eventbridge_backfill_polymarket" {
   ]
 }
 
-# Allow dynamic rules (created by Lambda at runtime) to invoke the function
-# This covers dynamic rules (e.g., odds-fetch-odds, odds-fetch-polymarket)
-# created and updated by Lambda's self-scheduling logic
-resource "aws_lambda_permission" "allow_dynamic_rules" {
-  statement_id  = format("AllowExecutionFromDynamicRules-%s", var.project_name)
+# Self-scheduling rules: pre-created by Terraform, schedule updated by Lambda at runtime.
+# Lambda's put_rule() updates the schedule_expression; Terraform ignores those changes
+# but owns the lifecycle (create/destroy).
+
+locals {
+  self_scheduling_jobs = ["fetch-odds", "fetch-scores", "update-status", "check-health", "fetch-polymarket"]
+}
+
+resource "aws_cloudwatch_event_rule" "dynamic" {
+  for_each = toset(local.self_scheduling_jobs)
+
+  name                = "odds-${each.key}"
+  description         = "Self-scheduling rule for ${each.key} (updated by Lambda)"
+  schedule_expression = "rate(1 day)"
+  state               = "ENABLED"
+
+  lifecycle {
+    ignore_changes = [schedule_expression]
+  }
+}
+
+resource "aws_cloudwatch_event_target" "dynamic" {
+  for_each = toset(local.self_scheduling_jobs)
+
+  rule      = aws_cloudwatch_event_rule.dynamic[each.key].name
+  target_id = "lambda"
+  arn       = aws_lambda_function.odds_scheduler.arn
+
+  input = jsonencode({
+    job = each.key
+  })
+}
+
+resource "aws_lambda_permission" "allow_dynamic" {
+  for_each = toset(local.self_scheduling_jobs)
+
+  statement_id  = format("AllowDynamic-%s-%s", each.key, var.project_name)
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.odds_scheduler.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = format("arn:aws:events:%s:%s:rule/odds-*", var.aws_region, data.aws_caller_identity.current.account_id)
+  source_arn    = aws_cloudwatch_event_rule.dynamic[each.key].arn
+
+  depends_on = [
+    aws_cloudwatch_event_rule.dynamic,
+    aws_cloudwatch_event_target.dynamic
+  ]
 }
 
 # Outputs
 output "bootstrap_rules" {
-  description = "Bootstrap EventBridge rules (will be updated by Lambda)"
+  description = "Bootstrap EventBridge rules (initial triggers)"
   value = {
     fetch_odds           = aws_cloudwatch_event_rule.bootstrap_fetch_odds.name
     fetch_scores         = aws_cloudwatch_event_rule.bootstrap_fetch_scores.name
@@ -210,4 +247,9 @@ output "bootstrap_rules" {
     fetch_polymarket     = aws_cloudwatch_event_rule.bootstrap_fetch_polymarket.name
     backfill_polymarket  = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket.name
   }
+}
+
+output "dynamic_rules" {
+  description = "Self-scheduling EventBridge rules (schedule updated by Lambda)"
+  value = { for k, v in aws_cloudwatch_event_rule.dynamic : k => v.name }
 }
