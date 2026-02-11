@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import structlog
@@ -129,13 +130,21 @@ class PolymarketWriter:
             question = market_data["question"]
             market_type, point = classify_market(question, event_title)
 
+            # Gamma API returns these as JSON strings; parse to native lists
+            raw_token_ids = market_data["clobTokenIds"]
+            clob_token_ids = (
+                json.loads(raw_token_ids) if isinstance(raw_token_ids, str) else raw_token_ids
+            )
+            raw_outcomes = market_data["outcomes"]
+            outcomes = json.loads(raw_outcomes) if isinstance(raw_outcomes, str) else raw_outcomes
+
             market_dict = {
                 "polymarket_event_id": pm_event_id,
                 "pm_market_id": pm_market_id,
                 "condition_id": market_data["conditionId"],
                 "question": question,
-                "clob_token_ids": market_data["clobTokenIds"],
-                "outcomes": market_data["outcomes"],
+                "clob_token_ids": clob_token_ids,
+                "outcomes": outcomes,
                 "market_type": market_type,
                 "group_item_title": market_data.get("groupItemTitle"),
                 "point": point,

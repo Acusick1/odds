@@ -87,7 +87,7 @@ CLOB `/prices-history` data expires on a ~30-day rolling basis. The backfill job
 - Event matching parses ticker format (`nba-{away}-{home}-{yyyy}-{mm}-{dd}`) against sportsbook Events with ±24h date window
 - `PolymarketEvent.event_id` FK starts `NULL`, linked lazily via `match_polymarket_event()`
 - Market type classified from question text via regex in `classify_market()`
-- Snapshot frequency driven by existing `FetchTier` system (hours until game start)
+- Polling uses fixed `price_poll_interval` (default 300s); `FetchTier` filters which events to collect, not frequency
 
 ## Code Style
 

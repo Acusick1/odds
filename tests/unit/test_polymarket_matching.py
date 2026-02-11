@@ -1,6 +1,6 @@
 """Unit tests for Polymarket event matching logic."""
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -234,7 +234,8 @@ class TestMatchPolymarketEventDB:
     async def test_event_outside_window_not_matched(self, pglite_async_session):
         from odds_core.models import Event, EventStatus
 
-        game_time = datetime(2026, 1, 25, 2, 0, 0, tzinfo=UTC)
+        # Game is on Jan 27, but ticker says Jan 25 — outside ±24h window
+        game_time = datetime(2026, 1, 27, 2, 0, 0, tzinfo=UTC)
         event = Event(
             id="test_evt_outside",
             sport_key="basketball_nba",
@@ -247,11 +248,8 @@ class TestMatchPolymarketEventDB:
         pglite_async_session.add(event)
         await pglite_async_session.commit()
 
-        # pm_start is >24h away from game_time — should not match
-        pm_start = game_time + timedelta(hours=25)
-        result = await match_polymarket_event(
-            pglite_async_session, "nba-dal-mil-2026-01-25", pm_start
-        )
+        # Ticker date is Jan 25, game is Jan 27 — >24h apart, should not match
+        result = await match_polymarket_event(pglite_async_session, "nba-dal-mil-2026-01-25")
         assert result is None
 
     @pytest.mark.asyncio

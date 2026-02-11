@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import structlog
 from odds_core.models import Event
@@ -116,12 +116,17 @@ def parse_ticker(ticker: str) -> tuple[str, str, date] | None:
 async def match_polymarket_event(
     session: AsyncSession,
     ticker: str,
-    pm_start_date: datetime,
+    pm_start_date: datetime | None = None,
 ) -> str | None:
     """Find the matching internal Event record for a Polymarket event.
 
     Uses the ticker to derive team abbreviations and game date, then queries
-    the Event table within a ±24-hour window of pm_start_date.
+    the Event table within a ±24-hour window of the ticker's game date.
+
+    Args:
+        session: Async database session
+        ticker: Polymarket ticker (e.g. "nba-dal-mil-2026-01-25")
+        pm_start_date: Unused, kept for backward compatibility
 
     Returns event_id if a confident single match is found, None otherwise.
     Never produces false positives — returns None when uncertain.
@@ -131,7 +136,7 @@ async def match_polymarket_event(
         logger.warning("polymarket_ticker_parse_failed", ticker=ticker)
         return None
 
-    away_abbrev, home_abbrev, _game_date = parsed
+    away_abbrev, home_abbrev, game_date = parsed
 
     away_canonical = NBA_ABBREV_MAP.get(away_abbrev)
     home_canonical = NBA_ABBREV_MAP.get(home_abbrev)
@@ -145,8 +150,12 @@ async def match_polymarket_event(
         )
         return None
 
-    window_start = pm_start_date - timedelta(hours=24)
-    window_end = pm_start_date + timedelta(hours=24)
+    # Ticker dates use US local dates but sportsbook stores UTC timestamps.
+    # Evening ET games on "Nov 22" have UTC commence times on Nov 23 (00:00-05:00 UTC).
+    # Center the window on noon UTC to safely capture all US timezone games.
+    game_noon_utc = datetime(game_date.year, game_date.month, game_date.day, 12, tzinfo=UTC)
+    window_start = game_noon_utc - timedelta(hours=24)
+    window_end = game_noon_utc + timedelta(hours=24)
 
     query = select(Event).where(
         and_(
