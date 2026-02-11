@@ -7,6 +7,7 @@ import sys
 import time
 
 import boto3
+from botocore.config import Config
 
 
 def test_lambda_job(lambda_name: str, region: str, job_name: str) -> tuple[bool, str | None]:
@@ -23,10 +24,14 @@ def test_lambda_job(lambda_name: str, region: str, job_name: str) -> tuple[bool,
     """
     print(f"\n→ Testing {job_name} job...")
 
-    lambda_client = boto3.client("lambda", region_name=region)
+    lambda_client = boto3.client(
+        "lambda",
+        region_name=region,
+        config=Config(read_timeout=300),
+    )
 
     try:
-        # Invoke Lambda
+        # Invoke Lambda (synchronous, waits for completion)
         response = lambda_client.invoke(
             FunctionName=lambda_name,
             Payload=json.dumps({"job": job_name}).encode(),
