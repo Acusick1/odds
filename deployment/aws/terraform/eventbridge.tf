@@ -124,9 +124,73 @@ resource "aws_lambda_permission" "allow_eventbridge_check_health" {
   ]
 }
 
+# Bootstrap rule for Polymarket live data collection
+# After first execution, job self-schedules at price_poll_interval via dynamic rules
+resource "aws_cloudwatch_event_rule" "bootstrap_fetch_polymarket" {
+  name                = format("%s-fetch-polymarket-bootstrap", var.project_name)
+  description         = "Bootstrap trigger for Polymarket data collection"
+  schedule_expression = "rate(5 minutes)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "bootstrap_fetch_polymarket_target" {
+  rule      = aws_cloudwatch_event_rule.bootstrap_fetch_polymarket.name
+  target_id = "lambda"
+  arn       = aws_lambda_function.odds_scheduler.arn
+
+  input = jsonencode({
+    job = "fetch-polymarket"
+  })
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_fetch_polymarket" {
+  statement_id  = format("AllowExecutionFromEventBridgeFetchPolymarket-%s", var.project_name)
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.odds_scheduler.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.bootstrap_fetch_polymarket.arn
+
+  depends_on = [
+    aws_cloudwatch_event_rule.bootstrap_fetch_polymarket,
+    aws_cloudwatch_event_target.bootstrap_fetch_polymarket_target
+  ]
+}
+
+# Bootstrap rule for Polymarket price history backfill
+# Runs on fixed schedule (not self-scheduling) to stay ahead of 30-day CLOB retention window
+resource "aws_cloudwatch_event_rule" "bootstrap_backfill_polymarket" {
+  name                = format("%s-backfill-polymarket-bootstrap", var.project_name)
+  description         = "Recurring Polymarket price history backfill (30-day CLOB retention)"
+  schedule_expression = "rate(3 days)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "bootstrap_backfill_polymarket_target" {
+  rule      = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket.name
+  target_id = "lambda"
+  arn       = aws_lambda_function.odds_scheduler.arn
+
+  input = jsonencode({
+    job = "backfill-polymarket"
+  })
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_backfill_polymarket" {
+  statement_id  = format("AllowExecutionFromEventBridgeBackfillPolymarket-%s", var.project_name)
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.odds_scheduler.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket.arn
+
+  depends_on = [
+    aws_cloudwatch_event_rule.bootstrap_backfill_polymarket,
+    aws_cloudwatch_event_target.bootstrap_backfill_polymarket_target
+  ]
+}
+
 # Allow dynamic rules (created by Lambda at runtime) to invoke the function
-# This covers rules like odds-fetch-odds, odds-fetch-scores, odds-update-status, odds-check-health
-# that are created and updated by the Lambda's self-scheduling logic
+# This covers dynamic rules (e.g., odds-fetch-odds, odds-fetch-polymarket)
+# created and updated by Lambda's self-scheduling logic
 resource "aws_lambda_permission" "allow_dynamic_rules" {
   statement_id  = format("AllowExecutionFromDynamicRules-%s", var.project_name)
   action        = "lambda:InvokeFunction"
@@ -139,9 +203,11 @@ resource "aws_lambda_permission" "allow_dynamic_rules" {
 output "bootstrap_rules" {
   description = "Bootstrap EventBridge rules (will be updated by Lambda)"
   value = {
-    fetch_odds    = aws_cloudwatch_event_rule.bootstrap_fetch_odds.name
-    fetch_scores  = aws_cloudwatch_event_rule.bootstrap_fetch_scores.name
-    update_status = aws_cloudwatch_event_rule.bootstrap_update_status.name
-    check_health  = aws_cloudwatch_event_rule.bootstrap_check_health.name
+    fetch_odds           = aws_cloudwatch_event_rule.bootstrap_fetch_odds.name
+    fetch_scores         = aws_cloudwatch_event_rule.bootstrap_fetch_scores.name
+    update_status        = aws_cloudwatch_event_rule.bootstrap_update_status.name
+    check_health         = aws_cloudwatch_event_rule.bootstrap_check_health.name
+    fetch_polymarket     = aws_cloudwatch_event_rule.bootstrap_fetch_polymarket.name
+    backfill_polymarket  = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket.name
   }
 }
