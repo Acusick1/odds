@@ -109,7 +109,7 @@ async def verify_database() -> bool:
                 text(
                     """
                 SELECT COUNT(*) FROM polymarket_fetch_logs
-                WHERE created_at > NOW() - INTERVAL '10 minutes'
+                WHERE fetch_time > NOW() - INTERVAL '10 minutes'
             """
                 )
             )

@@ -62,6 +62,16 @@ jobs:
           cd deployment/aws/terraform
           terraform init -backend-config=backend.dev.hcl
 
+      - name: Remove EventBridge targets before destroy
+        continue-on-error: true
+        run: |
+          for RULE in odds-fetch-odds odds-fetch-scores odds-update-status odds-check-health odds-fetch-polymarket; do
+            TARGET_IDS=$(aws events list-targets-by-rule --rule "$RULE" --query 'Targets[].Id' --output text 2>/dev/null || true)
+            if [ -n "$TARGET_IDS" ]; then
+              aws events remove-targets --rule "$RULE" --ids $TARGET_IDS || true
+            fi
+          done
+
       - name: Destroy existing dev infrastructure
         run: |
           cd deployment/aws/terraform
@@ -107,6 +117,17 @@ jobs:
           echo "Environment: development"
           echo "Region: ${{ env.AWS_REGION }}"
           echo "Note: Infrastructure will be destroyed in cleanup step"
+
+      - name: Cleanup - Remove EventBridge targets
+        if: always()
+        continue-on-error: true
+        run: |
+          for RULE in odds-fetch-odds odds-fetch-scores odds-update-status odds-check-health odds-fetch-polymarket; do
+            TARGET_IDS=$(aws events list-targets-by-rule --rule "$RULE" --query 'Targets[].Id' --output text 2>/dev/null || true)
+            if [ -n "$TARGET_IDS" ]; then
+              aws events remove-targets --rule "$RULE" --ids $TARGET_IDS || true
+            fi
+          done
 
       - name: Cleanup - Destroy dev infrastructure
         if: always()
