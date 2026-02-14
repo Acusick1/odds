@@ -1076,7 +1076,11 @@ async def prepare_multi_horizon_data(
                     parts.append(np.zeros(len(TrajectoryFeatures.get_feature_names())))
 
             # PM features
-            if use_pm and pm_context is not None:
+            if use_pm and pm_context is None:
+                n_pm = len(PolymarketTabularFeatures.get_feature_names())
+                n_xsrc = len(CrossSourceFeatures.get_feature_names())
+                parts.append(np.full(n_pm + n_xsrc, np.nan))
+            elif use_pm and pm_context is not None:
                 pm_data = await _load_pm_snapshot_data(
                     event_id=event.id,
                     pm_context=pm_context,
