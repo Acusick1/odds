@@ -14,7 +14,7 @@ from odds_analytics.training import (
     prepare_training_data_from_config,
 )
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
-from odds_core.database import get_session
+from odds_core.database import async_session_maker
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -173,7 +173,7 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
         tracker.start_run(run_name=run_name, tags={"strategy": strategy_type})
 
     try:
-        async with get_session() as session:
+        async with async_session_maker() as session:
             # Step 1: Prepare training data
             with Progress(
                 SpinnerColumn(),
@@ -747,7 +747,7 @@ async def _run_tuning_async(
 ):
     """Execute tuning workflow asynchronously."""
     from odds_analytics.training.tuner import OptunaTuner, create_objective
-    from odds_core.database import get_session
+    from odds_core.database import async_session_maker
 
     console.print("\n[bold]Starting Hyperparameter Optimization[/bold]")
     console.print(f"Study: {study_name}")
@@ -755,7 +755,7 @@ async def _run_tuning_async(
     console.print(f"Direction: {ml_config.tuning.direction}")
     console.print(f"Metric: {ml_config.tuning.metric}\n")
 
-    async with get_session() as session:
+    async with async_session_maker() as session:
         # Step 1: Prepare training data
         with Progress(
             SpinnerColumn(),

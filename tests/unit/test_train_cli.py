@@ -320,7 +320,7 @@ async def test_run_tuning_async_workflow(sample_config_with_tuning, tmp_path):
 
     # Mock all the components (patch where they're imported/used)
     with (
-        patch("odds_core.database.get_session") as mock_get_session,
+        patch("odds_core.database.async_session_maker") as mock_get_session,
         patch("odds_analytics.training.prepare_training_data_from_config") as mock_prepare_data,
         patch("odds_analytics.training.tuner.OptunaTuner") as mock_tuner_class,
         patch("odds_analytics.training.tuner.create_objective") as mock_create_objective,
@@ -388,7 +388,7 @@ async def test_run_tuning_async_with_train_best(sample_config_with_tuning, tmp_p
     output_path = str(tmp_path / "best_config.yaml")
 
     with (
-        patch("odds_core.database.get_session") as mock_get_session,
+        patch("odds_core.database.async_session_maker") as mock_get_session,
         patch("odds_analytics.training.prepare_training_data_from_config") as mock_prepare_data,
         patch("odds_analytics.training.tuner.OptunaTuner") as mock_tuner_class,
         patch("odds_analytics.training.tuner.create_objective") as mock_create_objective,
@@ -471,7 +471,7 @@ async def test_run_tuning_async_data_preparation_error(sample_config_with_tuning
     config = load_config(str(sample_config_with_tuning))
 
     with (
-        patch("odds_core.database.get_session") as mock_get_session,
+        patch("odds_core.database.async_session_maker") as mock_get_session,
         patch("odds_analytics.training.prepare_training_data_from_config") as mock_prepare_data,
     ):
         mock_session = AsyncMock()
@@ -495,7 +495,7 @@ async def test_run_tuning_async_optimization_error(sample_config_with_tuning, tm
     config = load_config(str(sample_config_with_tuning))
 
     with (
-        patch("odds_core.database.get_session") as mock_get_session,
+        patch("odds_core.database.async_session_maker") as mock_get_session,
         patch("odds_analytics.training.prepare_training_data_from_config") as mock_prepare_data,
         patch("odds_analytics.training.tuner.OptunaTuner") as mock_tuner_class,
         patch("odds_analytics.training.tuner.create_objective") as mock_create_objective,

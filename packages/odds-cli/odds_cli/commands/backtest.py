@@ -11,7 +11,7 @@ from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
 from odds_analytics.lstm_strategy import LSTMStrategy
 from odds_analytics.strategies import ArbitrageStrategy, BasicEVStrategy, FlatBettingStrategy
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
-from odds_core.database import get_session
+from odds_core.database import async_session_maker
 from odds_lambda.storage.readers import OddsReader
 from rich.console import Console
 from rich.table import Table
@@ -139,7 +139,7 @@ async def _run_backtest_async(
     )
 
     # Get database session
-    async for session in get_session():
+    async with async_session_maker() as session:
         # Create engine and run
         reader = OddsReader(session)
         engine = BacktestEngine(strategy, config, reader)
