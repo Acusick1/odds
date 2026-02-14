@@ -39,6 +39,7 @@ training:
     patience: 20
     min_delta: 0.0001
   features:
+    adapter: lstm
     sharp_bookmakers:
     - pinnacle
     retail_bookmakers:
@@ -50,15 +51,16 @@ training:
     - spreads
     - totals
     outcome: home
-    opening_tier: early
     closing_tier: closing
-    decision_tier: pregame
     lookback_hours: 72
     timesteps: 24
     normalize: false
     feature_groups:
-    - sequence_full
+    - tabular
     movement_threshold: 0.005
+    sampling:
+      strategy: tier
+      decision_tier: pregame
   feature_selection:
     enabled: false
     method: ensemble

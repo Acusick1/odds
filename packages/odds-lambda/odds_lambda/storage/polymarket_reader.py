@@ -289,6 +289,26 @@ class PolymarketReader:
 
         return market_ids
 
+    async def get_prices_for_market(self, market_id: int) -> list[PolymarketPriceSnapshot]:
+        """Get all price snapshots for a market, ordered by snapshot_time."""
+        query = (
+            select(PolymarketPriceSnapshot)
+            .where(PolymarketPriceSnapshot.polymarket_market_id == market_id)
+            .order_by(PolymarketPriceSnapshot.snapshot_time)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_orderbooks_for_market(self, market_id: int) -> list[PolymarketOrderBookSnapshot]:
+        """Get all order book snapshots for a market, ordered by snapshot_time."""
+        query = (
+            select(PolymarketOrderBookSnapshot)
+            .where(PolymarketOrderBookSnapshot.polymarket_market_id == market_id)
+            .order_by(PolymarketOrderBookSnapshot.snapshot_time)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
     async def get_unlinked_events(self) -> list[PolymarketEvent]:
         """Get all PolymarketEvents that have not yet been linked to an internal Event."""
         query = (

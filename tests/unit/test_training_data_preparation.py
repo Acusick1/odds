@@ -165,8 +165,9 @@ class TestFeatureConfigExtraction:
         assert config.sharp_bookmakers == ["pinnacle"]
         assert config.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
         assert config.feature_groups == ("tabular",)
-        assert config.opening_tier.value == "early"
         assert config.closing_tier.value == "closing"
+        assert config.adapter == "xgboost"
+        assert config.sampling.strategy == "time_range"
 
     def test_feature_config_custom_values(self):
         """Test FeatureConfig with custom values."""
@@ -177,7 +178,6 @@ class TestFeatureConfigExtraction:
             markets=["spreads"],
             sharp_bookmakers=["pinnacle", "circasports"],
             retail_bookmakers=["fanduel"],
-            opening_tier=FetchTier.SHARP,
             closing_tier=FetchTier.CLOSING,
             feature_groups=["tabular", "trajectory"],
         )
@@ -360,11 +360,10 @@ class TestPrepareTrainingDataFromConfig:
             with pytest.raises(ValueError, match="No valid training data"):
                 await prepare_training_data_from_config(basic_xgboost_config, session)
 
-    def test_unknown_feature_group_raises_error(self):
-        """Test that unknown feature group raises ValueError."""
-        # Create config with invalid feature group - should raise at validation time
-        with pytest.raises(ValueError, match="Unknown feature groups"):
-            FeatureConfig(feature_groups=["unknown_group"])
+    def test_unknown_feature_group_accepted(self):
+        """Unknown feature groups are accepted at config time; unknown groups produce no features at runtime."""
+        config = FeatureConfig(feature_groups=["unknown_group"])
+        assert "unknown_group" in config.feature_groups
 
     @pytest.mark.asyncio
     async def test_train_test_split_ratio(self, basic_xgboost_config, mock_events):
@@ -429,7 +428,6 @@ class TestConfigLoadingIntegration:
                     "markets": ["h2h"],
                     "sharp_bookmakers": ["pinnacle"],
                     "retail_bookmakers": ["fanduel", "draftkings"],
-                    "opening_tier": "early",
                     "closing_tier": "closing",
                     "feature_groups": ["tabular"],
                 },

@@ -93,6 +93,7 @@ __all__ = [
     "DataConfig",
     "XGBoostConfig",
     "LSTMConfig",
+    "SamplingConfig",
     "FeatureConfig",
     "FeatureSelectionConfig",
     "SearchSpace",
@@ -440,6 +441,56 @@ class LSTMConfig(BaseModel):
 
 
 # =============================================================================
+# Sampling Configuration
+# =============================================================================
+
+
+class SamplingConfig(BaseModel):
+    """
+    Snapshot sampling strategy for training data preparation.
+
+    Controls how decision-time snapshots are selected per event.
+    'tier' returns the last snapshot in the specified tier (single row per event).
+    'time_range' uses stratified sampling across a time window (multiple rows per event).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    strategy: Literal["tier", "time_range"] = Field(
+        default="time_range",
+        description="Sampling strategy: 'tier' for single snapshot, 'time_range' for multi-horizon",
+    )
+    decision_tier: FetchTier = Field(
+        default=FetchTier.PREGAME,
+        description="Tier to sample from when strategy='tier'",
+    )
+    min_hours: float = Field(
+        default=3.0,
+        ge=0.0,
+        description="Minimum hours before game for sampling window (strategy='time_range')",
+    )
+    max_hours: float = Field(
+        default=12.0,
+        gt=0.0,
+        description="Maximum hours before game for sampling window (strategy='time_range')",
+    )
+    max_samples_per_event: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Maximum snapshots to sample per event (strategy='time_range')",
+    )
+
+    @model_validator(mode="after")
+    def validate_hours_range(self) -> SamplingConfig:
+        if self.min_hours >= self.max_hours:
+            raise ValueError(
+                f"min_hours ({self.min_hours}) must be less than max_hours ({self.max_hours})"
+            )
+        return self
+
+
+# =============================================================================
 # Feature Configuration
 # =============================================================================
 
@@ -452,6 +503,12 @@ class FeatureConfig(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    # Adapter selection
+    adapter: Literal["xgboost", "lstm"] = Field(
+        default="xgboost",
+        description="Model adapter type for feature formatting",
+    )
 
     # Bookmaker configuration
     sharp_bookmakers: list[str] = Field(
@@ -478,18 +535,16 @@ class FeatureConfig(BaseModel):
         description="Outcome to predict (home or away team)",
     )
 
-    # Tier-based timing configuration
-    opening_tier: FetchTier = Field(
-        default=FetchTier.EARLY,
-        description="Tier for opening line (first snapshot in this tier)",
-    )
+    # Tier-based closing line configuration
     closing_tier: FetchTier = Field(
         default=FetchTier.CLOSING,
         description="Tier for closing line (last snapshot in this tier)",
     )
-    decision_tier: FetchTier = Field(
-        default=FetchTier.PREGAME,
-        description="Tier at which betting decision is made. Trajectory features only use data up to this tier.",
+
+    # Sampling configuration
+    sampling: SamplingConfig = Field(
+        default_factory=SamplingConfig,
+        description="Snapshot sampling strategy",
     )
 
     # Sequence model configuration (LSTM)
@@ -512,11 +567,11 @@ class FeatureConfig(BaseModel):
         description="Whether to normalize features before model input",
     )
 
-    # Feature groups to compose (replaces include_trajectory_features)
+    # Feature groups to compose
     feature_groups: tuple[str, ...] = Field(
         default=("tabular",),
         min_length=1,
-        description="Feature groups to compose. Available: tabular, trajectory, sequence_full",
+        description="Feature groups to compose. Available: tabular, trajectory, polymarket",
     )
 
     # Trajectory feature configuration
@@ -541,84 +596,12 @@ class FeatureConfig(BaseModel):
         description="Tolerance in minutes for matching PM snapshots to a target timestamp",
     )
 
-    # Multi-horizon target configuration
+    # Target formulation
     target_type: Literal["raw", "devigged_pinnacle"] = Field(
         default="raw",
-        description="Target formulation. 'raw': all-bookmaker avg implied prob delta. "
+        description="Target formulation. 'raw': avg implied prob delta at snapshot vs closing. "
         "'devigged_pinnacle': Pinnacle close vs Pinnacle at snapshot, both devigged.",
     )
-    decision_hours_range: tuple[float, float] = Field(
-        default=(3.0, 12.0),
-        description="(min, max) hours before game for decision snapshot sampling. "
-        "Only used when target_type='devigged_pinnacle'.",
-    )
-    max_samples_per_event: int = Field(
-        default=5,
-        ge=1,
-        le=50,
-        description="Maximum snapshot samples per event for multi-horizon training.",
-    )
-
-    @model_validator(mode="after")
-    def validate_decision_hours_range(self) -> FeatureConfig:
-        """Ensure decision_hours_range is valid."""
-        min_h, max_h = self.decision_hours_range
-        if min_h < 0:
-            raise ValueError(f"decision_hours_range min ({min_h}) must be >= 0")
-        if min_h >= max_h:
-            raise ValueError(f"decision_hours_range min ({min_h}) must be less than max ({max_h})")
-        return self
-
-    @model_validator(mode="after")
-    def validate_tiers(self) -> FeatureConfig:
-        """Ensure tier ordering: opening < decision <= closing (chronologically)."""
-        tier_order = FetchTier.get_priority_order()  # CLOSING first (closest to game)
-        opening_idx = tier_order.index(self.opening_tier)
-        closing_idx = tier_order.index(self.closing_tier)
-        decision_idx = tier_order.index(self.decision_tier)
-
-        # Opening should have higher index (further from game)
-        if opening_idx <= closing_idx:
-            raise ValueError(
-                f"opening_tier ({self.opening_tier.value}) must be earlier than "
-                f"closing_tier ({self.closing_tier.value})"
-            )
-
-        # Decision must be between opening and closing (inclusive of closing)
-        if decision_idx > opening_idx or decision_idx < closing_idx:
-            raise ValueError(
-                f"decision_tier ({self.decision_tier.value}) must be between "
-                f"opening_tier ({self.opening_tier.value}) and "
-                f"closing_tier ({self.closing_tier.value})"
-            )
-        return self
-
-    @model_validator(mode="after")
-    def validate_feature_groups(self) -> FeatureConfig:
-        """Validate feature_groups are valid registry keys."""
-        # Import here to avoid circular imports
-        from odds_analytics.feature_groups import FEATURE_GROUP_REGISTRY
-
-        invalid_groups = [g for g in self.feature_groups if g not in FEATURE_GROUP_REGISTRY]
-        if invalid_groups:
-            raise ValueError(
-                f"Unknown feature groups: {invalid_groups}. "
-                f"Available: {list(FEATURE_GROUP_REGISTRY.keys())}"
-            )
-
-        # Validate output dimension compatibility
-        dims = set()
-        for group_name in self.feature_groups:
-            group_cls = FEATURE_GROUP_REGISTRY[group_name]
-            dims.add(group_cls.output_dim)
-
-        if len(dims) > 1:
-            raise ValueError(
-                f"Cannot mix feature groups with different output dimensions: {dims}. "
-                f"All groups must be either 2D (tabular, trajectory) or 3D (sequence_full)."
-            )
-
-        return self
 
 
 # =============================================================================
