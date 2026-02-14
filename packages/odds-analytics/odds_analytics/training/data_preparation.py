@@ -19,7 +19,7 @@ Example usage:
     config = MLTrainingConfig.from_yaml("experiments/xgboost_v1.yaml")
 
     # Prepare data
-    async with get_async_session() as session:
+    async with async_session_maker() as session:
         result = await prepare_training_data_from_config(config, session)
 
         # For XGBoost
@@ -220,7 +220,7 @@ async def prepare_training_data_from_config(
 
     Example:
         >>> config = MLTrainingConfig.from_yaml("experiments/config.yaml")
-        >>> async with get_async_session() as session:
+        >>> async with async_session_maker() as session:
         ...     result = await prepare_training_data_from_config(config, session)
         ...     print(f"Training samples: {result.num_train_samples}")
         ...     print(f"Test samples: {result.num_test_samples}")

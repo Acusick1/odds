@@ -760,7 +760,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
         )
 
         # Query historical odds using OddsReader
-        async with get_async_session() as session:
+        async with async_session_maker() as session:
             reader = OddsReader(session)
             odds_history = await reader.get_line_movement(
                 event_id="abc123",

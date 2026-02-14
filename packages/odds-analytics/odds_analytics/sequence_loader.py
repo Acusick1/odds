@@ -23,7 +23,7 @@ Example:
     from odds_analytics.sequence_loader import load_sequences_for_event
 
     # Load sequences for a single event
-    async with get_async_session() as session:
+    async with async_session_maker() as session:
         reader = OddsReader(session)
         event = await reader.get_event_by_id("abc123")
         sequences = await load_sequences_for_event("abc123", session)
@@ -426,7 +426,7 @@ async def load_sequences_for_event(
         - Skips snapshots with no valid odds data
 
     Example:
-        >>> async with get_async_session() as session:
+        >>> async with async_session_maker() as session:
         ...     sequences = await load_sequences_for_event("abc123", session)
         ...     print(f"Found {len(sequences)} snapshots")
         ...     if sequences:

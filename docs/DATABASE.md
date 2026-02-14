@@ -154,7 +154,7 @@ Composite indexes on frequently queried combinations:
 
 - Default: 5 connections
 - Lambda: NullPool (no connection reuse)
-- Always use async context manager: `async with get_async_session() as session`
+- Always use async context manager: `async with async_session_maker() as session`
 - Never share sessions across async tasks
 
 ### Batch Operations

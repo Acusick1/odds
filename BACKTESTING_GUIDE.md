@@ -246,7 +246,7 @@ import asyncio
 from datetime import datetime
 from odds_analytics.backtesting import BacktestConfig, BacktestEngine, BetSizingConfig
 from odds_analytics.strategies import BasicEVStrategy
-from odds_core.database import get_session
+from odds_core.database import async_session_maker
 
 async def run_backtest():
     strategy = BasicEVStrategy()
@@ -261,7 +261,7 @@ async def run_backtest():
         ),
     )
 
-    async for session in get_session():
+    async with async_session_maker() as session:
         engine = BacktestEngine(strategy, config, session)
         result = await engine.run()
 

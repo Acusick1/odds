@@ -30,7 +30,7 @@ Example:
     )
 
     # Train on historical data
-    async with get_async_session() as session:
+    async with async_session_maker() as session:
         reader = OddsReader(session)
         events = await reader.get_events_by_date_range(
             start_date=datetime(2024, 10, 1, tzinfo=UTC),
@@ -58,7 +58,7 @@ Example:
         kelly_fraction=0.25
     )
 
-    async with get_async_session() as session:
+    async with async_session_maker() as session:
         reader = OddsReader(session)
         engine = BacktestEngine(strategy, config, reader)
         result = await engine.run()
