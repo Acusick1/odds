@@ -187,21 +187,21 @@ class TestGroupTimeseriesCV:
                 fold_splits[i][0] <= fold_splits[i + 1][0]
             ), f"Fold {i} train size ({fold_splits[i][0]}) > fold {i + 1} ({fold_splits[i + 1][0]})"
 
-    def test_group_timeseries_with_no_event_ids_falls_back(self):
-        """group_timeseries without event_ids should not crash (falls through to else)."""
+    def test_group_timeseries_with_no_event_ids_falls_back_to_timeseries(self):
+        """group_timeseries without event_ids warns and falls back to timeseries CV."""
         n_rows = 20
         n_features = 3
         X = np.random.randn(n_rows, n_features).astype(np.float32)
         y = np.random.randn(n_rows).astype(np.float32)
         feature_names = [f"f_{i}" for i in range(n_features)]
 
-        # cv_method=group_timeseries but event_ids=None → falls to kfold branch
         config = self._make_config(n_folds=3)
         strategy = self._make_mock_strategy()
 
         result = run_cv(strategy, config, X, y, feature_names, event_ids=None)
         assert isinstance(result, CVResult)
         assert result.n_folds == 3
+        assert result.cv_method == "timeseries"
 
     def test_fold_results_populated(self):
         """Each fold should produce valid metrics."""

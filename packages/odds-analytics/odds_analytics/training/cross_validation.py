@@ -287,6 +287,14 @@ def run_cv(
     random_seed = data_config.random_seed
 
     # Select cross-validation splitter based on method
+    if cv_method == "group_timeseries" and event_ids is None:
+        logger.warning(
+            "group_timeseries_missing_event_ids",
+            message="cv_method='group_timeseries' but event_ids not provided. "
+            "Falling back to standard timeseries CV.",
+        )
+        cv_method = "timeseries"
+
     if cv_method == "group_timeseries" and event_ids is not None:
         # Group-aware timeseries: split on event boundaries, not row boundaries
         unique_events = list(dict.fromkeys(event_ids))  # preserve chronological order

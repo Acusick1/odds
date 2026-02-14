@@ -962,7 +962,6 @@ async def prepare_multi_horizon_data(
         else None
     )
     xsrc_extractor = CrossSourceFeatureExtractor() if use_pm else None
-    sb_extractor_for_pm = TabularFeatureExtractor.from_config(config) if use_pm else None
 
     X_list: list[np.ndarray] = []
     y_list: list[float] = []
@@ -1041,6 +1040,11 @@ async def prepare_multi_horizon_data(
                     )
                     parts.append(tab_feats.to_array())
                 except Exception:
+                    logger.debug(
+                        "tabular_extraction_failed",
+                        event_id=event.id,
+                        snapshot_time=str(snapshot.snapshot_time),
+                    )
                     continue
 
             # Trajectory features
@@ -1058,7 +1062,11 @@ async def prepare_multi_horizon_data(
                         )
                         parts.append(traj_feats.to_array())
                     except Exception:
-                        # Fill with zeros if trajectory extraction fails
+                        logger.debug(
+                            "trajectory_extraction_failed",
+                            event_id=event.id,
+                            snapshot_time=str(snapshot.snapshot_time),
+                        )
                         from odds_analytics.feature_extraction import TrajectoryFeatures
 
                         parts.append(np.zeros(len(TrajectoryFeatures.get_feature_names())))
@@ -1086,21 +1094,30 @@ async def prepare_multi_horizon_data(
                             home_outcome_index=pm_data["home_outcome_index"],
                         )
                         sb_feats = None
-                        if pm_data.get("sb_odds") and sb_extractor_for_pm:
+                        if pm_data.get("sb_odds") and tab_extractor:
                             try:
-                                sb_feats = sb_extractor_for_pm.extract_features(
+                                sb_feats = tab_extractor.extract_features(
                                     event=backtest_event,
                                     odds_data=pm_data["sb_odds"],
                                     outcome=outcome,
                                     market=market,
                                 )
                             except Exception:
-                                pass
+                                logger.debug(
+                                    "sb_extraction_for_xsrc_failed",
+                                    event_id=event.id,
+                                    snapshot_time=str(snapshot.snapshot_time),
+                                )
                         xsrc_feats = xsrc_extractor.extract(
                             pm_features=pm_feats, sb_features=sb_feats
                         )
                         parts.append(np.concatenate([pm_feats.to_array(), xsrc_feats.to_array()]))
                     except Exception:
+                        logger.debug(
+                            "pm_feature_extraction_failed",
+                            event_id=event.id,
+                            snapshot_time=str(snapshot.snapshot_time),
+                        )
                         n_pm = len(PolymarketTabularFeatures.get_feature_names())
                         n_xsrc = len(CrossSourceFeatures.get_feature_names())
                         parts.append(np.full(n_pm + n_xsrc, np.nan))
