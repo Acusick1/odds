@@ -525,6 +525,20 @@ class FeatureConfig(BaseModel):
         description="Probability change threshold for counting significant movements (0.5% default)",
     )
 
+    # Polymarket feature configuration
+    pm_velocity_window_hours: float = Field(
+        default=2.0,
+        ge=0.5,
+        le=12.0,
+        description="Hours of recent PM price history used for velocity/acceleration features",
+    )
+    pm_price_tolerance_minutes: int = Field(
+        default=30,
+        ge=5,
+        le=120,
+        description="Tolerance in minutes for matching PM snapshots to a target timestamp",
+    )
+
     @model_validator(mode="after")
     def validate_tiers(self) -> FeatureConfig:
         """Ensure tier ordering: opening < decision <= closing (chronologically)."""
