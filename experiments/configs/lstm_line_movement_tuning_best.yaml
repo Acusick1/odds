@@ -1,0 +1,143 @@
+experiment:
+  name: lstm_line_movement_h2h
+  tags:
+  - lstm
+  - line_movement
+  - h2h
+  - tuning
+  description: 'LSTM line movement predictor with HPO tuning.
+
+    Uses sequence features to predict probability movement from opening to closing.
+
+    '
+training:
+  strategy_type: lstm_line_movement
+  data:
+    start_date: '2025-10-25'
+    end_date: '2025-12-29'
+    test_split: 0.2
+    validation_split: 0.1
+    random_seed: 42
+    shuffle: true
+    use_kfold: true
+    cv_method: timeseries
+    n_folds: 5
+    kfold_shuffle: true
+  model:
+    hidden_size: 48
+    num_layers: 3
+    dropout: 0.4
+    bidirectional: false
+    lookback_hours: 72
+    timesteps: 24
+    epochs: 500
+    batch_size: 16
+    learning_rate: 0.0055227855405356185
+    loss_function: mse
+    weight_decay: 8.551302504210352e-05
+    clip_grad_norm: null
+    patience: 20
+    min_delta: 0.0001
+  features:
+    sharp_bookmakers:
+    - pinnacle
+    retail_bookmakers:
+    - fanduel
+    - draftkings
+    - betmgm
+    markets:
+    - h2h
+    - spreads
+    - totals
+    outcome: home
+    opening_tier: early
+    closing_tier: closing
+    decision_tier: pregame
+    lookback_hours: 72
+    timesteps: 24
+    normalize: false
+    feature_groups:
+    - sequence_full
+    movement_threshold: 0.005
+  feature_selection:
+    enabled: false
+    method: ensemble
+    feature_names: null
+    min_correlation: 0.02
+    min_variance: 0.01
+    n_ensemble_models: 3
+    ensemble_seeds:
+    - 42
+    - 123
+    - 456
+    model_types:
+    - xgboost
+    - random_forest
+    - extra_trees
+    hybrid_filter_weight: 0.3
+  min_predicted_movement: 0.02
+  movement_confidence_scale: 5.0
+  base_confidence: 0.52
+  output_path: models
+  model_name: null
+tuning:
+  n_trials: 100
+  timeout: null
+  direction: minimize
+  metric: val_mse
+  pruner: median
+  sampler: tpe
+  search_spaces:
+    hidden_size:
+      type: int
+      low: 32.0
+      high: 128.0
+      step: 16.0
+      log: false
+      choices: null
+    num_layers:
+      type: int
+      low: 1.0
+      high: 3.0
+      step: null
+      log: false
+      choices: null
+    dropout:
+      type: float
+      low: 0.1
+      high: 0.5
+      step: 0.1
+      log: false
+      choices: null
+    learning_rate:
+      type: float
+      low: 0.0001
+      high: 0.01
+      step: null
+      log: true
+      choices: null
+    batch_size:
+      type: categorical
+      low: null
+      high: null
+      step: null
+      log: false
+      choices:
+      - 16
+      - 32
+      - 64
+    weight_decay:
+      type: float
+      low: 0.0
+      high: 0.001
+      step: null
+      log: false
+      choices: null
+    patience:
+      type: int
+      low: 5.0
+      high: 20.0
+      step: 5.0
+      log: false
+      choices: null
+tracking: null
