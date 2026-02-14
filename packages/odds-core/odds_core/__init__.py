@@ -14,7 +14,7 @@ from odds_core.api_models import (
     parse_scores_from_api_dict,
 )
 from odds_core.config import Settings, get_settings
-from odds_core.database import engine, get_session
+from odds_core.database import async_session_maker, engine
 from odds_core.models import (
     DataQualityLog,
     Event,
@@ -49,7 +49,7 @@ __all__ = [
     "PolymarketFetchLog",
     # Database
     "engine",
-    "get_session",
+    "async_session_maker",
     # Config
     "Settings",
     "get_settings",

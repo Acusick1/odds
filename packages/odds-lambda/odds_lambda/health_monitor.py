@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.config import Settings, get_settings
-from odds_core.database import get_session
+from odds_core.database import async_session_maker
 from odds_core.models import AlertHistory
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
@@ -472,6 +472,6 @@ async def check_system_health() -> HealthStatus:
     """
     settings = get_settings()
 
-    async with get_session() as session:
+    async with async_session_maker() as session:
         monitor = HealthMonitor(session, settings)
         return await monitor.check_system_health()

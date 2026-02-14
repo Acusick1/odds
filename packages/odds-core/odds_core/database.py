@@ -1,10 +1,8 @@
 """Database connection and session management."""
 
 import os
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 
@@ -39,25 +37,6 @@ else:
 
 # Create async session factory
 async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
-
-
-@asynccontextmanager
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Get async database session.
-
-    Yields:
-        AsyncSession: Database session
-
-    Example:
-        async with get_session() as session:
-            result = await session.execute(select(Event))
-    """
-    async with async_session_maker() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
 
 
 async def init_db() -> None:

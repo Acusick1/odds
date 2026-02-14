@@ -49,7 +49,7 @@ packages/
 
 ### Database Connections
 
-- ALWAYS use async context manager: `async with get_async_session() as session`
+- ALWAYS use async context manager: `async with async_session_maker() as session`
 - NEVER share sessions across async tasks
 - Lambda uses NullPool automatically. Local/Railway use pool of 5
 
