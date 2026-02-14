@@ -1042,28 +1042,23 @@ class TestFeatureExtractorFromConfig:
 
     def test_feature_config_tier_parameters(self):
         """Test that FeatureConfig tier parameters work correctly."""
+        from odds_analytics.training import SamplingConfig
         from odds_lambda.fetch_tier import FetchTier
 
         config = FeatureConfig(
-            opening_tier=FetchTier.SHARP,
             closing_tier=FetchTier.CLOSING,
-            decision_tier=FetchTier.PREGAME,
+            sampling=SamplingConfig(strategy="tier", decision_tier=FetchTier.PREGAME),
         )
 
-        assert config.opening_tier == FetchTier.SHARP
         assert config.closing_tier == FetchTier.CLOSING
-        assert config.decision_tier == FetchTier.PREGAME
+        assert config.sampling.decision_tier == FetchTier.PREGAME
 
-    def test_feature_config_invalid_tier_order_raises_error(self):
-        """Test that invalid tier ordering raises validation error."""
-        from odds_lambda.fetch_tier import FetchTier
+    def test_feature_config_invalid_hours_range_raises_error(self):
+        """Test that invalid time range in SamplingConfig raises validation error."""
+        from odds_analytics.training import SamplingConfig
 
-        # Opening must be before closing (chronologically)
-        with pytest.raises(ValueError, match="opening_tier.*must be earlier than.*closing_tier"):
-            FeatureConfig(
-                opening_tier=FetchTier.CLOSING,
-                closing_tier=FetchTier.EARLY,
-            )
+        with pytest.raises(ValueError, match="min_hours.*must be less than max_hours"):
+            SamplingConfig(strategy="time_range", min_hours=12.0, max_hours=3.0)
 
     def test_tabular_extractor_from_config_type_annotation(self):
         """Test that from_config has correct return type."""

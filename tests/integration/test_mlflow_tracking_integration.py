@@ -71,7 +71,6 @@ class TestMLflowTrackingIntegration:
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],
                     retail_bookmakers=["fanduel", "draftkings"],
-                    opening_tier=FetchTier.EARLY,
                     closing_tier=FetchTier.CLOSING,
                 ),
                 output_path="models/test",

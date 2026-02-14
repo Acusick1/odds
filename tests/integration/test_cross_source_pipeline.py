@@ -1,20 +1,23 @@
 """Integration tests for the cross-source Polymarket feature pipeline.
 
-Verifies that PolymarketFeatureGroup correctly:
-- Skips events without linked PM data
-- Extracts features for events with complete PM + SB data
-- Integrates with prepare_training_data()
+Verifies that the 5-layer adapter pipeline correctly:
+- NaN-fills Polymarket features for events without PM data (keeps row)
+- Extracts PM features for events with complete PM + SB data
+- Integrates with prepare_training_data() via EventDataBundle
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import numpy as np
 import pytest
-from odds_analytics.feature_groups import PolymarketFeatureGroup, prepare_training_data
-from odds_analytics.training import (
-    FeatureConfig,
+from odds_analytics.feature_groups import (
+    XGBoostAdapter,
+    collect_event_data,
+    prepare_training_data,
 )
+from odds_analytics.training import FeatureConfig, SamplingConfig
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.polymarket_models import (
     PolymarketEvent,
@@ -59,7 +62,7 @@ def make_odds_snapshots(
     home_team: str,
     away_team: str,
 ) -> list[OddsSnapshot]:
-    """Create opening and closing SB snapshots."""
+    """Create SB snapshots at early, pregame, and closing tiers."""
     snapshots = []
     bookmakers = ["pinnacle", "fanduel", "draftkings"]
     for tier_name, hours_before in [("early", 48.0), ("pregame", 7.5), ("closing", 0.5)]:
@@ -155,8 +158,7 @@ def make_pm_event(event_id: str, commence_time: datetime) -> PolymarketEvent:
 
 
 def make_pm_market(pm_event_id: int, home_team: str, away_team: str) -> PolymarketMarket:
-    # Use short canonical aliases matching TEAM_ALIASES
-    home_alias = home_team.split()[-1]  # e.g. "Los Angeles Lakers" → "Lakers"
+    home_alias = home_team.split()[-1]
     away_alias = away_team.split()[-1]
     return PolymarketMarket(
         polymarket_event_id=pm_event_id,
@@ -174,10 +176,9 @@ def make_pm_price_snapshots(
     commence_time: datetime,
     home_prob: float = 0.62,
 ) -> list[PolymarketPriceSnapshot]:
-    """Create PM price snapshots: velocity window + decision time."""
+    """Create PM price snapshots in velocity window + at decision time (~7.5h before game)."""
     snapshots = []
     base_prob = home_prob - 0.04
-    # 4 snapshots over ~1.5h ending at decision time (7.5h before game)
     decision_time = commence_time - timedelta(hours=7.5)
     for i in range(4):
         t = decision_time - timedelta(minutes=90 - i * 30)
@@ -198,7 +199,6 @@ def make_pm_price_snapshots(
                 hours_until_commence=(decision_time - t).total_seconds() / 3600 + 7.5,
             )
         )
-    # Final snapshot at decision time
     snapshots.append(
         PolymarketPriceSnapshot(
             polymarket_market_id=market_id,
@@ -255,7 +255,6 @@ async def cross_source_test_data(pglite_async_session):
 
     await pglite_async_session.flush()
 
-    # Seed PM events for first two games only
     for i in range(2):
         home, away = games[i]
         commence = base_time + timedelta(days=i)
@@ -267,7 +266,6 @@ async def cross_source_test_data(pglite_async_session):
 
     for i, pm_ev in enumerate(pm_events):
         home, away = games[i]
-        commence = base_time + timedelta(days=i)
         pm_mkt = make_pm_market(pm_ev.id, home, away)
         pglite_async_session.add(pm_mkt)
         pm_markets.append(pm_mkt)
@@ -297,115 +295,116 @@ async def cross_source_test_data(pglite_async_session):
 # =============================================================================
 
 
-class TestPolymarketFeatureGroupIntegration:
-    """Integration tests for PolymarketFeatureGroup with real DB."""
+class TestCollectEventData:
+    """Integration tests for collect_event_data (Layer 1)."""
 
-    @pytest.fixture
-    def feature_config(self):
+    def _make_config(self, with_pm: bool = True) -> FeatureConfig:
+        groups = ("tabular", "polymarket") if with_pm else ("tabular",)
         return FeatureConfig(
             sharp_bookmakers=["pinnacle"],
             retail_bookmakers=["fanduel", "draftkings"],
             markets=["h2h"],
             outcome="home",
-            opening_tier=FetchTier.EARLY,
             closing_tier=FetchTier.CLOSING,
-            decision_tier=FetchTier.PREGAME,
-            feature_groups=("polymarket",),
+            feature_groups=groups,
             pm_velocity_window_hours=2.0,
             pm_price_tolerance_minutes=60,
         )
 
-    async def test_load_data_returns_none_for_sb_only_event(
-        self, pglite_async_session, cross_source_test_data, feature_config
+    async def test_pm_context_none_for_sb_only_event(
+        self, pglite_async_session, cross_source_test_data
     ):
-        group = PolymarketFeatureGroup(feature_config)
-        sb_only_event_id = cross_source_test_data["events"][2].id
-        result = await group.load_data(sb_only_event_id, pglite_async_session)
-        assert result is None
+        """SB-only event (event_2) should have pm_context=None in bundle."""
+        sb_only_event = cross_source_test_data["events"][2]
+        config = self._make_config(with_pm=True)
+        bundle = await collect_event_data(sb_only_event, pglite_async_session, config)
+        assert bundle.pm_context is None
 
-    async def test_load_data_returns_dict_for_pm_event(
-        self, pglite_async_session, cross_source_test_data, feature_config
+    async def test_pm_context_populated_for_pm_event(
+        self, pglite_async_session, cross_source_test_data
     ):
-        group = PolymarketFeatureGroup(feature_config)
-        pm_event_id = cross_source_test_data["events"][0].id
-        result = await group.load_data(pm_event_id, pglite_async_session)
-        assert result is not None
-        assert "price_snapshot" in result
-        assert "home_outcome_index" in result
-        assert result["price_snapshot"] is not None
-        assert result["home_outcome_index"] in (0, 1)
+        """PM-linked event (event_0) should have pm_context with valid market/home_idx."""
+        pm_event = cross_source_test_data["events"][0]
+        config = self._make_config(with_pm=True)
+        bundle = await collect_event_data(pm_event, pglite_async_session, config)
+        assert bundle.pm_context is not None
+        assert bundle.pm_context.home_idx in (0, 1)
+        assert len(bundle.pm_prices) > 0
 
-    async def test_extract_returns_correct_feature_count(
-        self, pglite_async_session, cross_source_test_data, feature_config
+    async def test_no_pm_context_when_group_not_requested(
+        self, pglite_async_session, cross_source_test_data
     ):
-        from odds_analytics.backtesting import BacktestEvent
+        """When polymarket not in feature_groups, pm_context should be None."""
+        pm_event = cross_source_test_data["events"][0]
+        config = self._make_config(with_pm=False)
+        bundle = await collect_event_data(pm_event, pglite_async_session, config)
+        assert bundle.pm_context is None
+        assert bundle.pm_prices == []
+
+
+class TestXGBoostAdapterFeatureCount:
+    """Tests for XGBoostAdapter feature counts."""
+
+    def test_tabular_only_feature_names(self):
+        from odds_analytics.feature_extraction import TabularFeatures
+
+        config = FeatureConfig(feature_groups=["tabular"])
+        adapter = XGBoostAdapter()
+        names = adapter.feature_names(config)
+        expected = len(TabularFeatures.get_feature_names()) + 1  # +1 for hours_until_event
+        assert len(names) == expected
+        assert "hours_until_event" in names
+
+    def test_tabular_polymarket_feature_names(self):
+        from odds_analytics.feature_extraction import TabularFeatures
         from odds_analytics.polymarket_features import (
             CrossSourceFeatures,
             PolymarketTabularFeatures,
         )
 
-        group = PolymarketFeatureGroup(feature_config)
-        event = cross_source_test_data["events"][0]
-        data = await group.load_data(event.id, pglite_async_session)
-        assert data is not None
-
-        be = BacktestEvent(
-            id=event.id,
-            commence_time=event.commence_time,
-            home_team=event.home_team,
-            away_team=event.away_team,
-            home_score=event.home_score,
-            away_score=event.away_score,
-            status=event.status,
-        )
-        arr = group.extract(data, be, event.home_team, "h2h")
-        assert arr is not None
-        expected_len = len(PolymarketTabularFeatures.get_feature_names()) + len(
-            CrossSourceFeatures.get_feature_names()
-        )
-        assert len(arr) == expected_len
-
-    async def test_feature_names_match_array_length(self, feature_config):
-        group = PolymarketFeatureGroup(feature_config)
-        names = group.get_feature_names()
-        from odds_analytics.polymarket_features import (
-            CrossSourceFeatures,
-            PolymarketTabularFeatures,
-        )
-
-        expected = len(PolymarketTabularFeatures.get_feature_names()) + len(
-            CrossSourceFeatures.get_feature_names()
+        config = FeatureConfig(feature_groups=["tabular", "polymarket"])
+        adapter = XGBoostAdapter()
+        names = adapter.feature_names(config)
+        expected = (
+            len(TabularFeatures.get_feature_names())
+            + len(PolymarketTabularFeatures.get_feature_names())
+            + len(CrossSourceFeatures.get_feature_names())
+            + 1  # hours_until_event
         )
         assert len(names) == expected
 
 
 class TestPrepareTrainingDataWithPolymarket:
-    """Test that prepare_training_data filters to PM-linked events only."""
+    """Tests for prepare_training_data with polymarket feature group."""
 
-    @pytest.fixture
-    def config(self):
+    def _make_config(self) -> FeatureConfig:
         return FeatureConfig(
             sharp_bookmakers=["pinnacle"],
             retail_bookmakers=["fanduel", "draftkings"],
             markets=["h2h"],
             outcome="home",
-            opening_tier=FetchTier.EARLY,
             closing_tier=FetchTier.CLOSING,
-            decision_tier=FetchTier.PREGAME,
             feature_groups=("tabular", "polymarket"),
             pm_velocity_window_hours=2.0,
             pm_price_tolerance_minutes=60,
+            target_type="raw",
+            sampling=SamplingConfig(
+                strategy="time_range",
+                min_hours=3.0,
+                max_hours=12.0,
+                max_samples_per_event=5,
+            ),
         )
 
-    async def test_only_pm_linked_events_in_training_data(
-        self, pglite_async_session, cross_source_test_data, config
-    ):
-        events = cross_source_test_data["events"]  # 3 events, 2 with PM
+    async def test_all_events_produce_rows(self, pglite_async_session, cross_source_test_data):
+        """PM NaN-fill means all events produce rows (not just PM-linked ones)."""
+        events = cross_source_test_data["events"]  # 3 events (2 with PM, 1 without)
+        config = self._make_config()
         result = await prepare_training_data(events, pglite_async_session, config)
-        # Only 2 events have PM data
-        assert result.num_samples == 2
+        # The pregame snapshot (7.5h before) falls in [3h, 12h] range → 1 row each
+        assert result.num_samples == 3
 
-    async def test_output_shape_correct(self, pglite_async_session, cross_source_test_data, config):
+    async def test_output_shape_correct(self, pglite_async_session, cross_source_test_data):
         from odds_analytics.feature_extraction import TabularFeatures
         from odds_analytics.polymarket_features import (
             CrossSourceFeatures,
@@ -413,12 +412,41 @@ class TestPrepareTrainingDataWithPolymarket:
         )
 
         events = cross_source_test_data["events"]
+        config = self._make_config()
         result = await prepare_training_data(events, pglite_async_session, config)
 
         expected_features = (
             len(TabularFeatures.get_feature_names())
             + len(PolymarketTabularFeatures.get_feature_names())
             + len(CrossSourceFeatures.get_feature_names())
+            + 1  # hours_until_event
         )
-        assert result.X.shape == (2, expected_features)
-        assert result.y.shape == (2,)
+        assert result.X.shape[1] == expected_features
+        assert result.y.shape == (result.num_samples,)
+
+    async def test_sb_only_event_has_zero_pm_features(
+        self, pglite_async_session, cross_source_test_data
+    ):
+        """The SB-only event row should have zeros (NaN→0) for PM feature columns."""
+        from odds_analytics.feature_extraction import TabularFeatures
+        from odds_analytics.polymarket_features import (
+            CrossSourceFeatures,
+            PolymarketTabularFeatures,
+        )
+
+        events = cross_source_test_data["events"]
+        config = self._make_config()
+        result = await prepare_training_data(events, pglite_async_session, config)
+
+        n_tab = len(TabularFeatures.get_feature_names())
+        n_pm = len(PolymarketTabularFeatures.get_feature_names())
+        n_xsrc = len(CrossSourceFeatures.get_feature_names())
+
+        # Find the row for the SB-only event (event_2)
+        sb_only_id = cross_source_test_data["events"][2].id
+        sb_only_rows = result.X[result.event_ids == sb_only_id]
+        assert len(sb_only_rows) > 0
+
+        # PM features should be 0 (NaN-filled and then nan_to_num)
+        pm_block = sb_only_rows[0, n_tab : n_tab + n_pm + n_xsrc]
+        assert np.all(pm_block == 0.0)
