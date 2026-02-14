@@ -5,10 +5,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_analytics.sequence_loader import (
+    calculate_devigged_pinnacle_target,
     calculate_regression_target,
     extract_opening_closing_odds,
+    extract_pinnacle_h2h_probs,
+    get_snapshots_in_time_range,
     load_sequences_for_event,
 )
+from odds_analytics.utils import devig_probabilities
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 
 
@@ -789,3 +793,341 @@ class TestCalculateRegressionTarget:
         # Closing avg: (-4.5 + -5.5) / 2 = -5.0
         # Delta: -5.0 - (-3.0) = -2.0
         assert result == -2.0
+
+
+class TestDevigProbabilities:
+    """Tests for devig_probabilities utility."""
+
+    def test_symmetric_overround(self):
+        """Equal vig on both sides normalizes to 0.5/0.5."""
+        home, away = devig_probabilities(0.524, 0.524)
+        assert home == pytest.approx(0.5)
+        assert away == pytest.approx(0.5)
+
+    def test_no_vig(self):
+        """Probabilities already summing to 1 are unchanged."""
+        home, away = devig_probabilities(0.6, 0.4)
+        assert home == pytest.approx(0.6)
+        assert away == pytest.approx(0.4)
+
+    def test_zero_total(self):
+        """Zero total returns 0.5/0.5 fallback."""
+        home, away = devig_probabilities(0.0, 0.0)
+        assert home == 0.5
+        assert away == 0.5
+
+    def test_typical_nba_vig(self):
+        """Typical -110/-110 line: both ~0.524, devig to 0.5."""
+        # -110 American = 1/1.909 ≈ 0.5238
+        home_raw = 110 / 210  # 0.5238
+        away_raw = 110 / 210
+        home, away = devig_probabilities(home_raw, away_raw)
+        assert home == pytest.approx(0.5, abs=0.001)
+        assert away == pytest.approx(0.5, abs=0.001)
+        assert home + away == pytest.approx(1.0)
+
+    def test_asymmetric_line(self):
+        """Asymmetric line preserves ratio after devigging."""
+        # -150/+130: home=150/250=0.60, away=100/230≈0.4348
+        home_raw = 0.60
+        away_raw = 0.4348
+        home, away = devig_probabilities(home_raw, away_raw)
+        assert home + away == pytest.approx(1.0)
+        assert home > away
+        # Ratio should be preserved: home/away ≈ 0.60/0.4348
+        assert home / away == pytest.approx(home_raw / away_raw, rel=1e-4)
+
+
+class TestExtractPinnacleH2hProbs:
+    """Tests for extract_pinnacle_h2h_probs."""
+
+    @pytest.fixture
+    def timestamp(self):
+        return datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+    def _make_odds(
+        self,
+        bookmaker: str,
+        outcome: str,
+        price: int,
+        timestamp: datetime,
+        market: str = "h2h",
+    ) -> Odds:
+        return Odds(
+            event_id="test",
+            bookmaker_key=bookmaker,
+            bookmaker_title=bookmaker.title(),
+            market_key=market,
+            outcome_name=outcome,
+            price=price,
+            point=None,
+            odds_timestamp=timestamp,
+            last_update=timestamp,
+        )
+
+    def test_extracts_and_devigs_pinnacle(self, timestamp):
+        """Extracts Pinnacle h2h, ignores other bookmakers, devigs."""
+        odds = [
+            self._make_odds("pinnacle", "Lakers", -150, timestamp),
+            self._make_odds("pinnacle", "Celtics", 130, timestamp),
+            self._make_odds("fanduel", "Lakers", -160, timestamp),
+            self._make_odds("fanduel", "Celtics", 140, timestamp),
+        ]
+        result = extract_pinnacle_h2h_probs(odds, "Lakers", "Celtics")
+        assert result is not None
+        home, away = result
+        assert home + away == pytest.approx(1.0)
+        assert home > away  # -150 favorite
+        # Raw: home=150/250=0.6, away=100/230≈0.4348, total≈1.0348
+        # Devigged: home≈0.60/1.0348≈0.5800, away≈0.4200
+        assert home == pytest.approx(0.60 / (0.60 + 100 / 230), rel=1e-3)
+
+    def test_no_pinnacle_returns_none(self, timestamp):
+        """No Pinnacle odds returns None."""
+        odds = [
+            self._make_odds("fanduel", "Lakers", -160, timestamp),
+            self._make_odds("fanduel", "Celtics", 140, timestamp),
+        ]
+        assert extract_pinnacle_h2h_probs(odds, "Lakers", "Celtics") is None
+
+    def test_pinnacle_missing_one_side(self, timestamp):
+        """Pinnacle present but only one side → None."""
+        odds = [
+            self._make_odds("pinnacle", "Lakers", -150, timestamp),
+        ]
+        assert extract_pinnacle_h2h_probs(odds, "Lakers", "Celtics") is None
+
+    def test_pinnacle_spreads_ignored(self, timestamp):
+        """Pinnacle spreads not treated as h2h."""
+        odds = [
+            self._make_odds("pinnacle", "Lakers", -110, timestamp, market="spreads"),
+            self._make_odds("pinnacle", "Celtics", -110, timestamp, market="spreads"),
+        ]
+        assert extract_pinnacle_h2h_probs(odds, "Lakers", "Celtics") is None
+
+    def test_empty_odds_list(self, timestamp):
+        assert extract_pinnacle_h2h_probs([], "Lakers", "Celtics") is None
+
+
+class TestCalculateDeviggedPinnacleTarget:
+    """Tests for calculate_devigged_pinnacle_target."""
+
+    @pytest.fixture
+    def timestamp(self):
+        return datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+    def _make_odds(self, outcome: str, price: int, timestamp: datetime) -> Odds:
+        return Odds(
+            event_id="test",
+            bookmaker_key="pinnacle",
+            bookmaker_title="Pinnacle",
+            market_key="h2h",
+            outcome_name=outcome,
+            price=price,
+            point=None,
+            odds_timestamp=timestamp,
+            last_update=timestamp,
+        )
+
+    def test_correct_delta(self, timestamp):
+        """Target is fair_close_home - fair_snapshot_home."""
+        snapshot_odds = [
+            self._make_odds("Lakers", -150, timestamp),
+            self._make_odds("Celtics", 130, timestamp),
+        ]
+        closing_odds = [
+            self._make_odds("Lakers", -200, timestamp),
+            self._make_odds("Celtics", 170, timestamp),
+        ]
+        result = calculate_devigged_pinnacle_target(
+            snapshot_odds, closing_odds, "Lakers", "Celtics"
+        )
+        assert result is not None
+
+        # Verify manually
+        snap_probs = extract_pinnacle_h2h_probs(snapshot_odds, "Lakers", "Celtics")
+        close_probs = extract_pinnacle_h2h_probs(closing_odds, "Lakers", "Celtics")
+        expected = close_probs[0] - snap_probs[0]
+        assert result == pytest.approx(expected)
+        # Line moved toward Lakers (more negative = bigger favorite)
+        assert result > 0
+
+    def test_no_movement(self, timestamp):
+        """Same odds → target is 0."""
+        odds = [
+            self._make_odds("Lakers", -150, timestamp),
+            self._make_odds("Celtics", 130, timestamp),
+        ]
+        result = calculate_devigged_pinnacle_target(odds, odds, "Lakers", "Celtics")
+        assert result == pytest.approx(0.0)
+
+    def test_missing_snapshot_pinnacle(self, timestamp):
+        """No Pinnacle in snapshot → None."""
+        snapshot_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="fanduel",
+                bookmaker_title="FanDuel",
+                market_key="h2h",
+                outcome_name="Lakers",
+                price=-150,
+                point=None,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+        closing_odds = [
+            self._make_odds("Lakers", -200, timestamp),
+            self._make_odds("Celtics", 170, timestamp),
+        ]
+        assert (
+            calculate_devigged_pinnacle_target(snapshot_odds, closing_odds, "Lakers", "Celtics")
+            is None
+        )
+
+    def test_missing_closing_pinnacle(self, timestamp):
+        """No Pinnacle in closing → None."""
+        snapshot_odds = [
+            self._make_odds("Lakers", -150, timestamp),
+            self._make_odds("Celtics", 130, timestamp),
+        ]
+        closing_odds = []
+        assert (
+            calculate_devigged_pinnacle_target(snapshot_odds, closing_odds, "Lakers", "Celtics")
+            is None
+        )
+
+
+class TestGetSnapshotsInTimeRange:
+    """Tests for get_snapshots_in_time_range."""
+
+    @pytest.fixture
+    def commence_time(self):
+        return datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC)
+
+    def _make_snapshot(self, idx: int, event_id: str, snapshot_time: datetime) -> OddsSnapshot:
+        return OddsSnapshot(
+            id=idx,
+            event_id=event_id,
+            snapshot_time=snapshot_time,
+            raw_data={},
+            bookmaker_count=1,
+        )
+
+    @pytest.mark.asyncio
+    async def test_returns_snapshots_in_range(self, commence_time):
+        """Returns only snapshots within the time range."""
+        event_id = "test_event"
+        # Create snapshots at various hours before game
+        snapshots = [
+            self._make_snapshot(1, event_id, commence_time - timedelta(hours=24)),
+            self._make_snapshot(2, event_id, commence_time - timedelta(hours=8)),
+            self._make_snapshot(3, event_id, commence_time - timedelta(hours=6)),
+            self._make_snapshot(4, event_id, commence_time - timedelta(hours=4)),
+            self._make_snapshot(5, event_id, commence_time - timedelta(hours=2)),
+            self._make_snapshot(6, event_id, commence_time - timedelta(hours=1)),
+        ]
+
+        mock_session = AsyncMock()
+        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
+            mock_reader = MagicMock()
+            mock_reader.get_snapshots_for_event = AsyncMock(return_value=snapshots)
+            mock_reader_class.return_value = mock_reader
+
+            result = await get_snapshots_in_time_range(
+                mock_session,
+                event_id,
+                commence_time,
+                min_hours_before=3.0,
+                max_hours_before=12.0,
+                max_samples=10,
+            )
+
+        # Should include 8h, 6h, 4h but not 24h (>12h), 2h (<3h), 1h (<3h)
+        assert len(result) == 3
+        for s in result:
+            hours_before = (commence_time - s.snapshot_time).total_seconds() / 3600
+            assert 3.0 <= hours_before <= 12.0
+
+    @pytest.mark.asyncio
+    async def test_stratified_sampling(self, commence_time):
+        """When more snapshots than max_samples, picks one per bin."""
+        event_id = "test_event"
+        # 10 snapshots evenly spaced 3-12h before game
+        snapshots = [
+            self._make_snapshot(i, event_id, commence_time - timedelta(hours=3 + i))
+            for i in range(10)
+        ]
+
+        mock_session = AsyncMock()
+        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
+            mock_reader = MagicMock()
+            mock_reader.get_snapshots_for_event = AsyncMock(return_value=snapshots)
+            mock_reader_class.return_value = mock_reader
+
+            result = await get_snapshots_in_time_range(
+                mock_session,
+                event_id,
+                commence_time,
+                min_hours_before=3.0,
+                max_hours_before=12.0,
+                max_samples=3,
+            )
+
+        assert len(result) <= 3
+        # Should be sorted chronologically
+        for i in range(len(result) - 1):
+            assert result[i].snapshot_time < result[i + 1].snapshot_time
+
+    @pytest.mark.asyncio
+    async def test_no_snapshots_in_range(self, commence_time):
+        """Returns empty list when no snapshots in range."""
+        event_id = "test_event"
+        # All snapshots outside the range
+        snapshots = [
+            self._make_snapshot(1, event_id, commence_time - timedelta(hours=24)),
+            self._make_snapshot(2, event_id, commence_time - timedelta(hours=1)),
+        ]
+
+        mock_session = AsyncMock()
+        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
+            mock_reader = MagicMock()
+            mock_reader.get_snapshots_for_event = AsyncMock(return_value=snapshots)
+            mock_reader_class.return_value = mock_reader
+
+            result = await get_snapshots_in_time_range(
+                mock_session,
+                event_id,
+                commence_time,
+                min_hours_before=3.0,
+                max_hours_before=12.0,
+                max_samples=5,
+            )
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_fewer_snapshots_than_max(self, commence_time):
+        """Returns all snapshots when fewer than max_samples."""
+        event_id = "test_event"
+        snapshots = [
+            self._make_snapshot(1, event_id, commence_time - timedelta(hours=6)),
+            self._make_snapshot(2, event_id, commence_time - timedelta(hours=4)),
+        ]
+
+        mock_session = AsyncMock()
+        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
+            mock_reader = MagicMock()
+            mock_reader.get_snapshots_for_event = AsyncMock(return_value=snapshots)
+            mock_reader_class.return_value = mock_reader
+
+            result = await get_snapshots_in_time_range(
+                mock_session,
+                event_id,
+                commence_time,
+                min_hours_before=3.0,
+                max_hours_before=12.0,
+                max_samples=5,
+            )
+
+        assert len(result) == 2

@@ -26,7 +26,7 @@ Example:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -51,8 +51,11 @@ from odds_analytics.polymarket_features import (
 )
 from odds_analytics.sequence_loader import (
     _extract_odds_from_snapshot,
+    calculate_devigged_pinnacle_target,
     calculate_regression_target,
+    extract_pinnacle_h2h_probs,
     get_opening_closing_odds_by_tier,
+    get_snapshots_in_time_range,
     load_sequences_for_event,
     load_sequences_up_to_tier,
 )
@@ -71,6 +74,7 @@ __all__ = [
     "FEATURE_GROUP_REGISTRY",
     "get_feature_groups",
     "prepare_training_data",
+    "prepare_multi_horizon_data",
     "filter_completed_events",
 ]
 
@@ -454,6 +458,103 @@ class SequenceFullFeatureGroup(FeatureGroup):
 # =============================================================================
 
 
+async def _load_pm_event_context(
+    event_id: str,
+    session: AsyncSession,
+) -> dict | None:
+    """Load per-event Polymarket context (PM event, market, home outcome index).
+
+    Returns dict with keys {pm_event, sb_event, market, home_idx, pm_reader}
+    or None if any required piece is missing.
+    """
+    from odds_lambda.storage.polymarket_reader import PolymarketReader
+
+    pm_result = await session.execute(
+        select(PolymarketEvent).where(PolymarketEvent.event_id == event_id)
+    )
+    pm_event = pm_result.scalars().first()
+    if pm_event is None:
+        return None
+
+    from odds_core.models import Event as SbEvent
+
+    sb_result = await session.execute(select(SbEvent).where(SbEvent.id == event_id))
+    sb_event = sb_result.scalar_one_or_none()
+    if sb_event is None:
+        return None
+
+    pm_reader = PolymarketReader(session)
+    market = await pm_reader.get_moneyline_market(pm_event.id)
+    if market is None:
+        return None
+
+    home_idx = resolve_home_outcome_index(market, sb_event.home_team)
+    if home_idx is None:
+        logger.debug(
+            "pm_home_outcome_unresolved",
+            event_id=event_id,
+            home_team=sb_event.home_team,
+            outcomes=market.outcomes,
+        )
+        return None
+
+    return {
+        "pm_event": pm_event,
+        "sb_event": sb_event,
+        "market": market,
+        "home_idx": home_idx,
+        "pm_reader": pm_reader,
+    }
+
+
+async def _load_pm_snapshot_data(
+    event_id: str,
+    pm_context: dict,
+    decision_time: datetime,
+    session: AsyncSession,
+    velocity_window_hours: float = 2.0,
+    tolerance_minutes: int = 30,
+) -> dict | None:
+    """Load PM price/orderbook/velocity data at a specific decision time.
+
+    Returns the data dict expected by PolymarketFeatureGroup.extract(),
+    or None if no PM price snapshot is available within tolerance.
+    """
+    from datetime import timedelta as td
+
+    from odds_lambda.storage.readers import OddsReader
+
+    pm_reader = pm_context["pm_reader"]
+    market = pm_context["market"]
+    home_idx = pm_context["home_idx"]
+
+    price_snapshot = await pm_reader.get_price_at_time(
+        market.id, decision_time, tolerance_minutes=tolerance_minutes
+    )
+    if price_snapshot is None:
+        return None
+
+    orderbook_snapshot = await pm_reader.get_orderbook_at_time(
+        market.id, decision_time, tolerance_minutes=tolerance_minutes
+    )
+
+    velocity_start = decision_time - td(hours=velocity_window_hours)
+    recent_prices = await pm_reader.get_price_series(market.id, velocity_start, decision_time)
+
+    odds_reader = OddsReader(session)
+    sb_odds = await odds_reader.get_odds_at_time(
+        event_id, price_snapshot.snapshot_time, tolerance_minutes=tolerance_minutes
+    )
+
+    return {
+        "price_snapshot": price_snapshot,
+        "orderbook_snapshot": orderbook_snapshot,
+        "recent_prices": recent_prices,
+        "home_outcome_index": home_idx,
+        "sb_odds": sb_odds if sb_odds else None,
+    }
+
+
 class PolymarketFeatureGroup(FeatureGroup):
     """
     Point-in-time features from Polymarket price/order book data, plus
@@ -493,73 +594,22 @@ class PolymarketFeatureGroup(FeatureGroup):
         - Home team outcome cannot be resolved from PM outcome names
         - No PM price snapshot available within tolerance of decision time
         """
-        from odds_lambda.storage.polymarket_reader import PolymarketReader
-        from odds_lambda.storage.readers import OddsReader
-
-        # Load linked PM event (take first if multiple are linked)
-        pm_result = await session.execute(
-            select(PolymarketEvent).where(PolymarketEvent.event_id == event_id)
-        )
-        pm_event = pm_result.scalars().first()
-        if pm_event is None:
+        ctx = await _load_pm_event_context(event_id, session)
+        if ctx is None:
             return None
 
-        # Load sportsbook Event for home team name and commence time
-        from odds_core.models import Event as SbEvent
-
-        sb_result = await session.execute(select(SbEvent).where(SbEvent.id == event_id))
-        sb_event = sb_result.scalar_one_or_none()
-        if sb_event is None:
-            return None
-
-        pm_reader = PolymarketReader(session)
-
-        market = await pm_reader.get_moneyline_market(pm_event.id)
-        if market is None:
-            return None
-
-        home_idx = resolve_home_outcome_index(market, sb_event.home_team)
-        if home_idx is None:
-            logger.debug(
-                "pm_home_outcome_unresolved",
-                event_id=event_id,
-                home_team=sb_event.home_team,
-                outcomes=market.outcomes,
-            )
-            return None
-
-        # Decision time from FetchTier midpoint
         tier_value = self.config.decision_tier.value
         decision_hours = _TIER_DECISION_HOURS.get(tier_value, 7.5)
-        decision_time = sb_event.commence_time - timedelta(hours=decision_hours)
-        tolerance = self.config.pm_price_tolerance_minutes
+        decision_time = ctx["sb_event"].commence_time - timedelta(hours=decision_hours)
 
-        price_snapshot = await pm_reader.get_price_at_time(
-            market.id, decision_time, tolerance_minutes=tolerance
+        return await _load_pm_snapshot_data(
+            event_id=event_id,
+            pm_context=ctx,
+            decision_time=decision_time,
+            session=session,
+            velocity_window_hours=self.config.pm_velocity_window_hours,
+            tolerance_minutes=self.config.pm_price_tolerance_minutes,
         )
-        if price_snapshot is None:
-            return None
-
-        orderbook_snapshot = await pm_reader.get_orderbook_at_time(
-            market.id, decision_time, tolerance_minutes=tolerance
-        )
-
-        velocity_start = decision_time - timedelta(hours=self.config.pm_velocity_window_hours)
-        recent_prices = await pm_reader.get_price_series(market.id, velocity_start, decision_time)
-
-        # SB odds aligned to PM snapshot time (for cross-source divergence)
-        odds_reader = OddsReader(session)
-        sb_odds = await odds_reader.get_odds_at_time(
-            event_id, price_snapshot.snapshot_time, tolerance_minutes=tolerance
-        )
-
-        return {
-            "price_snapshot": price_snapshot,
-            "orderbook_snapshot": orderbook_snapshot,
-            "recent_prices": recent_prices,
-            "home_outcome_index": home_idx,
-            "sb_odds": sb_odds if sb_odds else None,
-        }
 
     def extract(
         self,
@@ -676,11 +726,13 @@ class TrainingDataResult:
         y: np.ndarray,
         feature_names: list[str],
         masks: np.ndarray | None = None,
+        event_ids: np.ndarray | None = None,
     ):
         self.X = X
         self.y = y
         self.feature_names = feature_names
         self.masks = masks
+        self.event_ids = event_ids
 
     @property
     def num_samples(self) -> int:
@@ -855,4 +907,247 @@ async def prepare_training_data(
         y=y,
         feature_names=all_feature_names,
         masks=masks_array,
+    )
+
+
+async def prepare_multi_horizon_data(
+    events: list[Event],
+    session: AsyncSession,
+    config: FeatureConfig,
+) -> TrainingDataResult:
+    """Prepare multi-horizon training data with devigged Pinnacle target.
+
+    Creates multiple rows per event by sampling snapshots across the configured
+    decision_hours_range. Each row's target is the devigged Pinnacle closing
+    probability minus the devigged Pinnacle probability at that snapshot.
+
+    Events without Pinnacle closing data are dropped entirely.
+
+    Returns TrainingDataResult with event_ids populated for group-aware CV.
+    """
+    from odds_lambda.storage.readers import OddsReader
+
+    valid_events = filter_completed_events(events)
+    if not valid_events:
+        raise ValueError(f"No valid events found in {len(events)} total events")
+
+    reader = OddsReader(session)
+    market = config.markets[0] if config.markets else "h2h"
+    min_hours, max_hours = config.decision_hours_range
+    use_tabular = "tabular" in config.feature_groups
+    use_trajectory = "trajectory" in config.feature_groups
+    use_pm = "polymarket" in config.feature_groups
+
+    # Build feature names
+    feature_names: list[str] = []
+    if use_tabular:
+        from odds_analytics.feature_extraction import TabularFeatures
+
+        feature_names.extend(f"tab_{n}" for n in TabularFeatures.get_feature_names())
+    if use_trajectory:
+        from odds_analytics.feature_extraction import TrajectoryFeatures
+
+        feature_names.extend(f"traj_{n}" for n in TrajectoryFeatures.get_feature_names())
+    if use_pm:
+        feature_names.extend(f"pm_{n}" for n in PolymarketTabularFeatures.get_feature_names())
+        feature_names.extend(f"xsrc_{n}" for n in CrossSourceFeatures.get_feature_names())
+    feature_names.append("hours_until_event")
+
+    # Instantiate extractors
+    tab_extractor = TabularFeatureExtractor.from_config(config) if use_tabular else None
+    traj_extractor = TrajectoryFeatureExtractor.from_config(config) if use_trajectory else None
+    pm_extractor = (
+        PolymarketFeatureExtractor(velocity_window_hours=config.pm_velocity_window_hours)
+        if use_pm
+        else None
+    )
+    xsrc_extractor = CrossSourceFeatureExtractor() if use_pm else None
+    sb_extractor_for_pm = TabularFeatureExtractor.from_config(config) if use_pm else None
+
+    X_list: list[np.ndarray] = []
+    y_list: list[float] = []
+    event_id_list: list[str] = []
+    skipped_events = 0
+    total_rows = 0
+
+    for event in valid_events:
+        home = event.home_team
+        away = event.away_team
+        outcome = home if config.outcome == "home" else away
+        backtest_event = make_backtest_event(event)
+
+        # Get closing snapshot and check Pinnacle presence
+        closing_snapshot = await reader.get_last_snapshot_in_tier(event.id, config.closing_tier)
+        if closing_snapshot is None:
+            skipped_events += 1
+            continue
+
+        closing_odds_all = _extract_odds_from_snapshot(closing_snapshot, event.id, market=market)
+        if extract_pinnacle_h2h_probs(closing_odds_all, home, away) is None:
+            skipped_events += 1
+            continue
+
+        # Get sampled snapshots in decision range
+        sampled_snapshots = await get_snapshots_in_time_range(
+            session=session,
+            event_id=event.id,
+            commence_time=event.commence_time,
+            min_hours_before=min_hours,
+            max_hours_before=max_hours,
+            max_samples=config.max_samples_per_event,
+        )
+        if not sampled_snapshots:
+            skipped_events += 1
+            continue
+
+        # Load full sequence once for trajectory slicing
+        all_sequences: list[list[Odds]] | None = None
+        if use_trajectory:
+            all_sequences = await load_sequences_for_event(event.id, session)
+
+        # Load PM event context once
+        pm_context: dict | None = None
+        if use_pm:
+            pm_context = await _load_pm_event_context(event.id, session)
+
+        event_had_rows = False
+        for snapshot in sampled_snapshots:
+            # Extract odds (unfiltered for target, outcome-filtered for features)
+            snapshot_odds_all = _extract_odds_from_snapshot(snapshot, event.id, market=market)
+            target = calculate_devigged_pinnacle_target(
+                snapshot_odds_all, closing_odds_all, home, away
+            )
+            if target is None:
+                continue
+
+            hours_until = (event.commence_time - snapshot.snapshot_time).total_seconds() / 3600
+
+            # Build feature vector
+            parts: list[np.ndarray] = []
+
+            # Tabular features
+            if use_tabular and tab_extractor is not None:
+                snapshot_odds_for_outcome = _extract_odds_from_snapshot(
+                    snapshot, event.id, market=market, outcome=outcome
+                )
+                if not snapshot_odds_for_outcome:
+                    continue
+                try:
+                    tab_feats = tab_extractor.extract_features(
+                        event=backtest_event,
+                        odds_data=snapshot_odds_for_outcome,
+                        outcome=outcome,
+                        market=market,
+                    )
+                    parts.append(tab_feats.to_array())
+                except Exception:
+                    continue
+
+            # Trajectory features
+            if use_trajectory and traj_extractor is not None and all_sequences:
+                snapshots_up_to = [
+                    s for s in all_sequences if s and s[0].odds_timestamp <= snapshot.snapshot_time
+                ]
+                if len(snapshots_up_to) >= 2:
+                    try:
+                        traj_feats = traj_extractor.extract_features(
+                            event=backtest_event,
+                            odds_data=snapshots_up_to,
+                            outcome=outcome,
+                            market=market,
+                        )
+                        parts.append(traj_feats.to_array())
+                    except Exception:
+                        # Fill with zeros if trajectory extraction fails
+                        from odds_analytics.feature_extraction import TrajectoryFeatures
+
+                        parts.append(np.zeros(len(TrajectoryFeatures.get_feature_names())))
+                else:
+                    from odds_analytics.feature_extraction import TrajectoryFeatures
+
+                    parts.append(np.zeros(len(TrajectoryFeatures.get_feature_names())))
+
+            # PM features
+            if use_pm and pm_context is not None:
+                pm_data = await _load_pm_snapshot_data(
+                    event_id=event.id,
+                    pm_context=pm_context,
+                    decision_time=snapshot.snapshot_time,
+                    session=session,
+                    velocity_window_hours=config.pm_velocity_window_hours,
+                    tolerance_minutes=config.pm_price_tolerance_minutes,
+                )
+                if pm_data is not None and pm_extractor and xsrc_extractor:
+                    try:
+                        pm_feats = pm_extractor.extract(
+                            price_snapshot=pm_data["price_snapshot"],
+                            orderbook_snapshot=pm_data["orderbook_snapshot"],
+                            recent_prices=pm_data["recent_prices"],
+                            home_outcome_index=pm_data["home_outcome_index"],
+                        )
+                        sb_feats = None
+                        if pm_data.get("sb_odds") and sb_extractor_for_pm:
+                            try:
+                                sb_feats = sb_extractor_for_pm.extract_features(
+                                    event=backtest_event,
+                                    odds_data=pm_data["sb_odds"],
+                                    outcome=outcome,
+                                    market=market,
+                                )
+                            except Exception:
+                                pass
+                        xsrc_feats = xsrc_extractor.extract(
+                            pm_features=pm_feats, sb_features=sb_feats
+                        )
+                        parts.append(np.concatenate([pm_feats.to_array(), xsrc_feats.to_array()]))
+                    except Exception:
+                        n_pm = len(PolymarketTabularFeatures.get_feature_names())
+                        n_xsrc = len(CrossSourceFeatures.get_feature_names())
+                        parts.append(np.full(n_pm + n_xsrc, np.nan))
+                else:
+                    n_pm = len(PolymarketTabularFeatures.get_feature_names())
+                    n_xsrc = len(CrossSourceFeatures.get_feature_names())
+                    parts.append(np.full(n_pm + n_xsrc, np.nan))
+
+            # hours_until_event feature
+            parts.append(np.array([hours_until]))
+
+            X_list.append(np.concatenate(parts))
+            y_list.append(target)
+            event_id_list.append(event.id)
+            event_had_rows = True
+            total_rows += 1
+
+        if not event_had_rows:
+            skipped_events += 1
+
+    if not X_list:
+        raise ValueError(
+            f"No valid training data after processing {len(valid_events)} events "
+            f"(skipped {skipped_events})"
+        )
+
+    X = np.array(X_list, dtype=np.float32)
+    y = np.array(y_list, dtype=np.float32)
+    X = np.nan_to_num(X, nan=0.0)
+    event_ids = np.array(event_id_list)
+
+    n_events = len(set(event_id_list))
+    logger.info(
+        "prepared_multi_horizon_data",
+        num_samples=len(X),
+        num_events=n_events,
+        num_features=len(feature_names),
+        avg_rows_per_event=total_rows / max(n_events, 1),
+        skipped_events=skipped_events,
+        target_mean=float(np.mean(y)),
+        target_std=float(np.std(y)),
+        decision_hours_range=config.decision_hours_range,
+    )
+
+    return TrainingDataResult(
+        X=X,
+        y=y,
+        feature_names=feature_names,
+        event_ids=event_ids,
     )

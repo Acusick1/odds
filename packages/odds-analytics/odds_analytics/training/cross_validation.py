@@ -241,6 +241,7 @@ def run_cv(
     X: np.ndarray,
     y: np.ndarray,
     feature_names: list[str],
+    event_ids: np.ndarray | None = None,
 ) -> CVResult:
     """
     Run cross-validation on the provided data.
@@ -286,9 +287,33 @@ def run_cv(
     random_seed = data_config.random_seed
 
     # Select cross-validation splitter based on method
-    if cv_method == "timeseries":
-        # TimeSeriesSplit for walk-forward validation
-        # Warn if shuffle is True since it will be ignored
+    if cv_method == "group_timeseries" and event_ids is not None:
+        # Group-aware timeseries: split on event boundaries, not row boundaries
+        unique_events = list(dict.fromkeys(event_ids))  # preserve chronological order
+        event_splitter = TimeSeriesSplit(n_splits=n_folds)
+        event_indices = np.arange(len(unique_events))
+
+        # Build row-level splits from event-level splits
+        group_splits: list[tuple[np.ndarray, np.ndarray]] = []
+        for ev_train_idx, ev_val_idx in event_splitter.split(event_indices):
+            train_events = {unique_events[i] for i in ev_train_idx}
+            val_events = {unique_events[i] for i in ev_val_idx}
+            row_train = np.where([eid in train_events for eid in event_ids])[0]
+            row_val = np.where([eid in val_events for eid in event_ids])[0]
+            group_splits.append((row_train, row_val))
+
+        logger.info(
+            "starting_group_timeseries_cv",
+            n_folds=n_folds,
+            n_samples=len(X),
+            n_events=len(unique_events),
+            n_features=len(feature_names),
+            cv_method=cv_method,
+        )
+
+        fold_iter: list[tuple[np.ndarray, np.ndarray]] = group_splits
+
+    elif cv_method == "timeseries":
         if shuffle:
             logger.warning(
                 "timeseries_cv_ignoring_shuffle",
@@ -305,8 +330,8 @@ def run_cv(
             cv_method=cv_method,
             message="Using walk-forward validation. Ensure data is sorted chronologically.",
         )
+        fold_iter = list(splitter.split(X))
     else:
-        # Standard KFold
         splitter = KFold(n_splits=n_folds, shuffle=shuffle, random_state=random_seed)
         logger.info(
             "starting_kfold_cv",
@@ -317,10 +342,11 @@ def run_cv(
             random_seed=random_seed,
             cv_method=cv_method,
         )
+        fold_iter = list(splitter.split(X))
 
     fold_results: list[CVFoldResult] = []
 
-    for fold_idx, (train_idx, val_idx) in enumerate(splitter.split(X)):
+    for fold_idx, (train_idx, val_idx) in enumerate(fold_iter):
         X_train_fold = X[train_idx]
         y_train_fold = y[train_idx]
         X_val_fold = X[val_idx]

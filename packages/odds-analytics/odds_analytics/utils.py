@@ -1,7 +1,13 @@
 """Utility functions for odds calculations and backtesting metrics."""
 
+from __future__ import annotations
+
 import math
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from rich.table import Table
 
 
 def american_to_decimal(american_odds: int) -> float:
@@ -66,6 +72,14 @@ def calculate_implied_probability(american_odds: int) -> float:
     """
     decimal_odds = american_to_decimal(american_odds)
     return 1 / decimal_odds
+
+
+def devig_probabilities(home_prob: float, away_prob: float) -> tuple[float, float]:
+    """Proportional devigging: remove overround by normalizing to sum=1."""
+    total = home_prob + away_prob
+    if total <= 0:
+        return 0.5, 0.5
+    return home_prob / total, away_prob / total
 
 
 def calculate_ev(
@@ -355,7 +369,7 @@ def detect_arbitrage(odds_list: list[tuple[str, int]]) -> tuple[bool, float, dic
 def create_tier_coverage_table(
     total_games: int,
     missing_tier_breakdown: dict,  # dict[FetchTier, int] but avoiding circular import
-) -> "Table":
+) -> Table:
     """
     Create a Rich table showing tier coverage breakdown.
 

@@ -89,6 +89,8 @@ class TrainingDataResult:
         X_val: np.ndarray | None = None,
         y_val: np.ndarray | None = None,
         masks_val: np.ndarray | None = None,
+        event_ids_train: np.ndarray | None = None,
+        event_ids_test: np.ndarray | None = None,
     ):
         """Initialize training data result."""
         self.X_train = X_train
@@ -102,6 +104,8 @@ class TrainingDataResult:
         self.masks_train = masks_train
         self.masks_val = masks_val
         self.masks_test = masks_test
+        self.event_ids_train = event_ids_train
+        self.event_ids_test = event_ids_test
 
     @property
     def num_train_samples(self) -> int:
@@ -225,7 +229,7 @@ async def prepare_training_data_from_config(
         ...     print(f"Training samples: {result.num_train_samples}")
         ...     print(f"Test samples: {result.num_test_samples}")
     """
-    from odds_analytics.feature_groups import prepare_training_data
+    from odds_analytics.feature_groups import prepare_multi_horizon_data, prepare_training_data
 
     # Extract configuration
     training_config = config.training
@@ -238,6 +242,7 @@ async def prepare_training_data_from_config(
         experiment_name=config.experiment.name,
         strategy_type=strategy_type,
         feature_groups=features_config.feature_groups,
+        target_type=features_config.target_type,
         start_date=data_config.start_date.isoformat(),
         end_date=data_config.end_date.isoformat(),
     )
@@ -267,25 +272,51 @@ async def prepare_training_data_from_config(
             f"No events found in date range {data_config.start_date} to {data_config.end_date}"
         )
 
-    # Use unified preparation with composable feature groups
-    prep_result = await prepare_training_data(
-        events=events,
-        session=session,
-        config=features_config,
-    )
+    # Branch on target type
+    if features_config.target_type == "devigged_pinnacle":
+        prep_result = await prepare_multi_horizon_data(
+            events=events,
+            session=session,
+            config=features_config,
+        )
+    else:
+        prep_result = await prepare_training_data(
+            events=events,
+            session=session,
+            config=features_config,
+        )
 
     X = prep_result.X
     y = prep_result.y
     feature_names = prep_result.feature_names
     masks = prep_result.masks
+    event_ids = prep_result.event_ids
 
     if len(X) == 0:
         raise ValueError(f"No valid training data after processing {len(events)} events")
 
-    # Perform train/val/test split
-    # First split: separate test set
-    if masks is not None:
-        # Sequence data with masks
+    # Split: event-level for multi-horizon, row-level for raw
+    event_ids_train = None
+    event_ids_test = None
+
+    if event_ids is not None:
+        # Event-level split: sort by event commence time, split at event boundary
+        unique_events = list(dict.fromkeys(event_ids))  # preserve order
+        n_test_events = max(1, int(len(unique_events) * data_config.test_split))
+        train_events = set(unique_events[:-n_test_events])
+
+        train_mask = np.array([eid in train_events for eid in event_ids])
+        test_mask = ~train_mask
+
+        X_trainval = X[train_mask]
+        y_trainval = y[train_mask]
+        X_test = X[test_mask]
+        y_test = y[test_mask]
+        event_ids_train = event_ids[train_mask]
+        event_ids_test = event_ids[test_mask]
+        masks_trainval = None
+        masks_test = None
+    elif masks is not None:
         X_trainval, X_test, y_trainval, y_test, masks_trainval, masks_test = train_test_split(
             X,
             y,
@@ -295,7 +326,6 @@ async def prepare_training_data_from_config(
             shuffle=data_config.shuffle,
         )
     else:
-        # Tabular data without masks
         X_trainval, X_test, y_trainval, y_test = train_test_split(
             X,
             y,
@@ -313,9 +343,6 @@ async def prepare_training_data_from_config(
     masks_train = None
 
     if data_config.validation_split > 0:
-        # Calculate validation size relative to train+val set
-        # If test_split=0.2 and validation_split=0.1, we have 0.8 for train+val
-        # We want validation to be 0.1 of total, so it's 0.1/0.8 = 0.125 of train+val
         remaining = 1.0 - data_config.test_split
         val_size_relative = data_config.validation_split / remaining
 
@@ -337,7 +364,6 @@ async def prepare_training_data_from_config(
                 shuffle=data_config.shuffle,
             )
     else:
-        # No validation split, use all trainval for training
         X_train = X_trainval
         y_train = y_trainval
         masks_train = masks_trainval
@@ -346,6 +372,7 @@ async def prepare_training_data_from_config(
         "training_data_prepared_from_config",
         strategy_type=strategy_type,
         feature_groups=features_config.feature_groups,
+        target_type=features_config.target_type,
         total_samples=len(X),
         train_samples=len(X_train),
         val_samples=len(X_val) if X_val is not None else 0,
@@ -367,4 +394,6 @@ async def prepare_training_data_from_config(
         X_val=X_val,
         y_val=y_val,
         masks_val=masks_val,
+        event_ids_train=event_ids_train,
+        event_ids_test=event_ids_test,
     )
