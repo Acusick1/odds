@@ -26,11 +26,14 @@ Example:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import structlog
 from odds_core.models import Event, EventStatus, Odds
+from odds_core.polymarket_models import PolymarketEvent
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backtesting import BacktestEvent
@@ -38,6 +41,13 @@ from odds_analytics.feature_extraction import (
     SequenceFeatureExtractor,
     TabularFeatureExtractor,
     TrajectoryFeatureExtractor,
+)
+from odds_analytics.polymarket_features import (
+    CrossSourceFeatureExtractor,
+    CrossSourceFeatures,
+    PolymarketFeatureExtractor,
+    PolymarketTabularFeatures,
+    resolve_home_outcome_index,
 )
 from odds_analytics.sequence_loader import (
     _extract_odds_from_snapshot,
@@ -57,11 +67,23 @@ __all__ = [
     "TabularFeatureGroup",
     "TrajectoryFeatureGroup",
     "SequenceFullFeatureGroup",
+    "PolymarketFeatureGroup",
     "FEATURE_GROUP_REGISTRY",
     "get_feature_groups",
     "prepare_training_data",
     "filter_completed_events",
 ]
+
+# Maps FetchTier to approximate hours before game (midpoint of tier range).
+# Used to convert a tier-based decision point into a concrete timestamp for
+# Polymarket snapshot queries (PM doesn't use tier-tagged data).
+_TIER_DECISION_HOURS: dict[str, float] = {
+    "closing": 1.5,  # 0–3 h
+    "pregame": 7.5,  # 3–12 h
+    "sharp": 18.0,  # 12–24 h
+    "early": 48.0,  # 24–72 h
+    "opening": 84.0,  # 72 h+
+}
 
 
 # =============================================================================
@@ -432,13 +454,169 @@ class SequenceFullFeatureGroup(FeatureGroup):
 # =============================================================================
 
 
+class PolymarketFeatureGroup(FeatureGroup):
+    """
+    Point-in-time features from Polymarket price/order book data, plus
+    cross-source divergence features comparing PM against sportsbook odds.
+
+    Produces a combined 22-feature vector (14 PM + 8 cross-source).
+    Events without a linked Polymarket moneyline market are skipped (load_data
+    returns None), so this group naturally filters training data to the
+    dual-source subset.
+
+    Output shape: 2D (n_features,)
+    """
+
+    name = "polymarket"
+    output_dim: Literal["2d", "3d"] = "2d"
+
+    def __init__(self, config: FeatureConfig) -> None:
+        super().__init__(config)
+        self._pm_extractor = PolymarketFeatureExtractor(
+            velocity_window_hours=config.pm_velocity_window_hours,
+        )
+        self._xsrc_extractor = CrossSourceFeatureExtractor()
+        self._sb_extractor = TabularFeatureExtractor.from_config(config)
+
+    def get_feature_names(self) -> list[str]:
+        pm_names = [f"pm_{n}" for n in PolymarketTabularFeatures.get_feature_names()]
+        xsrc_names = [f"xsrc_{n}" for n in CrossSourceFeatures.get_feature_names()]
+        return pm_names + xsrc_names
+
+    async def load_data(self, event_id: str, session: AsyncSession) -> dict | None:
+        """
+        Load Polymarket and aligned sportsbook data for cross-source feature extraction.
+
+        Returns None (skipping the event) when:
+        - No linked PolymarketEvent exists for this event_id
+        - No moneyline market found for the PM event
+        - Home team outcome cannot be resolved from PM outcome names
+        - No PM price snapshot available within tolerance of decision time
+        """
+        from odds_lambda.storage.polymarket_reader import PolymarketReader
+        from odds_lambda.storage.readers import OddsReader
+
+        # Load linked PM event (take first if multiple are linked)
+        pm_result = await session.execute(
+            select(PolymarketEvent).where(PolymarketEvent.event_id == event_id)
+        )
+        pm_event = pm_result.scalars().first()
+        if pm_event is None:
+            return None
+
+        # Load sportsbook Event for home team name and commence time
+        from odds_core.models import Event as SbEvent
+
+        sb_result = await session.execute(select(SbEvent).where(SbEvent.id == event_id))
+        sb_event = sb_result.scalar_one_or_none()
+        if sb_event is None:
+            return None
+
+        pm_reader = PolymarketReader(session)
+
+        market = await pm_reader.get_moneyline_market(pm_event.id)
+        if market is None:
+            return None
+
+        home_idx = resolve_home_outcome_index(market, sb_event.home_team)
+        if home_idx is None:
+            logger.debug(
+                "pm_home_outcome_unresolved",
+                event_id=event_id,
+                home_team=sb_event.home_team,
+                outcomes=market.outcomes,
+            )
+            return None
+
+        # Decision time from FetchTier midpoint
+        tier_value = self.config.decision_tier.value
+        decision_hours = _TIER_DECISION_HOURS.get(tier_value, 7.5)
+        decision_time = sb_event.commence_time - timedelta(hours=decision_hours)
+        tolerance = self.config.pm_price_tolerance_minutes
+
+        price_snapshot = await pm_reader.get_price_at_time(
+            market.id, decision_time, tolerance_minutes=tolerance
+        )
+        if price_snapshot is None:
+            return None
+
+        orderbook_snapshot = await pm_reader.get_orderbook_at_time(
+            market.id, decision_time, tolerance_minutes=tolerance
+        )
+
+        velocity_start = decision_time - timedelta(hours=self.config.pm_velocity_window_hours)
+        recent_prices = await pm_reader.get_price_series(market.id, velocity_start, decision_time)
+
+        # SB odds aligned to PM snapshot time (for cross-source divergence)
+        odds_reader = OddsReader(session)
+        sb_odds = await odds_reader.get_odds_at_time(
+            event_id, price_snapshot.snapshot_time, tolerance_minutes=tolerance
+        )
+
+        return {
+            "price_snapshot": price_snapshot,
+            "orderbook_snapshot": orderbook_snapshot,
+            "recent_prices": recent_prices,
+            "home_outcome_index": home_idx,
+            "sb_odds": sb_odds if sb_odds else None,
+        }
+
+    def extract(
+        self,
+        data: dict | None,
+        event: BacktestEvent,
+        outcome: str,
+        market: str,
+    ) -> np.ndarray | None:
+        """Extract combined PM + cross-source features."""
+        if data is None:
+            return None
+
+        try:
+            pm_features = self._pm_extractor.extract(
+                price_snapshot=data["price_snapshot"],
+                orderbook_snapshot=data["orderbook_snapshot"],
+                recent_prices=data["recent_prices"],
+                home_outcome_index=data["home_outcome_index"],
+            )
+
+            sb_features = None
+            if data.get("sb_odds"):
+                try:
+                    sb_features = self._sb_extractor.extract_features(
+                        event=event,
+                        odds_data=data["sb_odds"],
+                        outcome=outcome,
+                        market=market,
+                    )
+                except Exception as e:
+                    logger.debug(
+                        "polymarket_sb_extract_failed",
+                        event_id=event.id,
+                        error=str(e),
+                    )
+
+            xsrc_features = self._xsrc_extractor.extract(
+                pm_features=pm_features,
+                sb_features=sb_features,
+            )
+
+            return np.concatenate([pm_features.to_array(), xsrc_features.to_array()])
+
+        except Exception as e:
+            logger.debug(
+                "polymarket_extract_failed",
+                event_id=event.id,
+                error=str(e),
+            )
+            return None
+
+
 FEATURE_GROUP_REGISTRY: dict[str, type[FeatureGroup]] = {
     "tabular": TabularFeatureGroup,
     "trajectory": TrajectoryFeatureGroup,
     "sequence_full": SequenceFullFeatureGroup,
-    # Future groups can be registered here:
-    # "historical": HistoricalFeatureGroup,
-    # "external": ExternalFeatureGroup,
+    "polymarket": PolymarketFeatureGroup,
 }
 
 

@@ -188,9 +188,9 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                     progress.stop()
                     console.print(f"[red]Error preparing data: {e}[/red]")
                     raise typer.Exit(1) from None
-                except Exception as e:
+                except Exception:
                     progress.stop()
-                    console.print(f"[red]Error: {e}[/red]")
+                    console.print_exception()
                     raise typer.Exit(1) from None
 
                 progress.update(task, description="Data preparation complete")
@@ -235,9 +235,9 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             X_test=X_test,
                             y_test=y_test,
                         )
-                    except Exception as e:
+                    except Exception:
                         progress.stop()
-                        console.print(f"[red]Error during training: {e}[/red]")
+                        console.print_exception()
                         raise typer.Exit(1) from None
 
                     progress.update(task, description="Training complete")
@@ -264,9 +264,9 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             y_val=y_test,
                             tracker=tracker,
                         )
-                    except Exception as e:
+                    except Exception:
                         progress.stop()
-                        console.print(f"[red]Error during training: {e}[/red]")
+                        console.print_exception()
                         raise typer.Exit(1) from None
 
                     progress.update(task, description="Training complete")
@@ -281,8 +281,8 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
             try:
                 strategy.save_model(output_path)
                 console.print(f"\n[green]Model saved to {output_path}[/green]")
-            except Exception as e:
-                console.print(f"[red]Error saving model: {e}[/red]")
+            except Exception:
+                console.print_exception()
                 raise typer.Exit(1) from None
 
             # Step 4: Save configuration alongside model
@@ -772,9 +772,9 @@ async def _run_tuning_async(
                 progress.stop()
                 console.print(f"[red]Error preparing data: {e}[/red]")
                 raise typer.Exit(1) from None
-            except Exception as e:
+            except Exception:
                 progress.stop()
-                console.print(f"[red]Error: {e}[/red]")
+                console.print_exception()
                 raise typer.Exit(1) from None
 
             progress.update(task, description="Data preparation complete")
@@ -960,9 +960,9 @@ async def _run_tuning_async(
                         X_val=X_val,
                         y_val=y_val,
                     )
-                except Exception as e:
+                except Exception:
                     progress.stop()
-                    console.print(f"[red]Error during training: {e}[/red]")
+                    console.print_exception()
                     raise typer.Exit(1) from None
 
                 progress.update(task, description="Training complete")
@@ -990,8 +990,8 @@ async def _run_tuning_async(
                             f"[yellow]Warning: Could not log model to MLflow: {e}[/yellow]"
                         )
 
-            except Exception as e:
-                console.print(f"[red]Error saving model: {e}[/red]")
+            except Exception:
+                console.print_exception()
                 raise typer.Exit(1) from None
 
             console.print("\n[bold green]Training complete![/bold green]")
