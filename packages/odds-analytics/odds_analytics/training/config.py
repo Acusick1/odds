@@ -189,10 +189,12 @@ class DataConfig(BaseModel):
         default=True,
         description="Enable cross-validation for model evaluation",
     )
-    cv_method: Literal["kfold", "timeseries"] = Field(
+    cv_method: Literal["kfold", "timeseries", "group_timeseries"] = Field(
         default="timeseries",
         description="Cross-validation method. 'timeseries' uses walk-forward validation "
-        "(recommended for temporal betting data), 'kfold' uses standard K-Fold.",
+        "(recommended for temporal betting data), 'kfold' uses standard K-Fold, "
+        "'group_timeseries' uses walk-forward with event-level grouping "
+        "(required for multi-horizon data where events have multiple rows).",
     )
     n_folds: int = Field(
         default=5,
@@ -538,6 +540,34 @@ class FeatureConfig(BaseModel):
         le=120,
         description="Tolerance in minutes for matching PM snapshots to a target timestamp",
     )
+
+    # Multi-horizon target configuration
+    target_type: Literal["raw", "devigged_pinnacle"] = Field(
+        default="raw",
+        description="Target formulation. 'raw': all-bookmaker avg implied prob delta. "
+        "'devigged_pinnacle': Pinnacle close vs Pinnacle at snapshot, both devigged.",
+    )
+    decision_hours_range: tuple[float, float] = Field(
+        default=(3.0, 12.0),
+        description="(min, max) hours before game for decision snapshot sampling. "
+        "Only used when target_type='devigged_pinnacle'.",
+    )
+    max_samples_per_event: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Maximum snapshot samples per event for multi-horizon training.",
+    )
+
+    @model_validator(mode="after")
+    def validate_decision_hours_range(self) -> FeatureConfig:
+        """Ensure decision_hours_range is valid."""
+        min_h, max_h = self.decision_hours_range
+        if min_h < 0:
+            raise ValueError(f"decision_hours_range min ({min_h}) must be >= 0")
+        if min_h >= max_h:
+            raise ValueError(f"decision_hours_range min ({min_h}) must be less than max ({max_h})")
+        return self
 
     @model_validator(mode="after")
     def validate_tiers(self) -> FeatureConfig:

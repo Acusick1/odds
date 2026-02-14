@@ -57,7 +57,7 @@ from odds_core.models import Odds, OddsSnapshot
 from odds_lambda.fetch_tier import FetchTier
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_analytics.utils import calculate_implied_probability
+from odds_analytics.utils import calculate_implied_probability, devig_probabilities
 
 
 class TargetType(str, Enum):
@@ -75,6 +75,9 @@ __all__ = [
     "TargetType",
     "get_opening_closing_odds_by_tier",
     "calculate_regression_target",
+    "extract_pinnacle_h2h_probs",
+    "calculate_devigged_pinnacle_target",
+    "get_snapshots_in_time_range",
 ]
 
 
@@ -222,6 +225,118 @@ def calculate_regression_target(
     else:
         # Unknown market
         return None
+
+
+def extract_pinnacle_h2h_probs(
+    odds: list[Odds],
+    home_team: str,
+    away_team: str,
+) -> tuple[float, float] | None:
+    """Extract devigged Pinnacle h2h probabilities for home and away teams.
+
+    Filters odds to Pinnacle h2h market, finds home and away outcomes,
+    converts to implied probabilities, and applies proportional devigging.
+
+    Returns:
+        (fair_home_prob, fair_away_prob) or None if Pinnacle h2h not found
+        for both sides.
+    """
+    pinnacle_h2h = [o for o in odds if o.bookmaker_key == "pinnacle" and o.market_key == "h2h"]
+    if not pinnacle_h2h:
+        return None
+
+    home_odds: Odds | None = None
+    away_odds: Odds | None = None
+    for o in pinnacle_h2h:
+        if o.outcome_name == home_team:
+            home_odds = o
+        elif o.outcome_name == away_team:
+            away_odds = o
+
+    if home_odds is None or away_odds is None:
+        return None
+
+    home_raw = calculate_implied_probability(home_odds.price)
+    away_raw = calculate_implied_probability(away_odds.price)
+    return devig_probabilities(home_raw, away_raw)
+
+
+def calculate_devigged_pinnacle_target(
+    snapshot_odds: list[Odds],
+    closing_odds: list[Odds],
+    home_team: str,
+    away_team: str,
+) -> float | None:
+    """Calculate target as devigged Pinnacle close minus devigged Pinnacle at snapshot.
+
+    Returns:
+        fair_close_home - fair_snapshot_home, or None if Pinnacle data missing
+        on either side.
+    """
+    snapshot_probs = extract_pinnacle_h2h_probs(snapshot_odds, home_team, away_team)
+    closing_probs = extract_pinnacle_h2h_probs(closing_odds, home_team, away_team)
+
+    if snapshot_probs is None or closing_probs is None:
+        return None
+
+    fair_snapshot_home = snapshot_probs[0]
+    fair_close_home = closing_probs[0]
+    return fair_close_home - fair_snapshot_home
+
+
+async def get_snapshots_in_time_range(
+    session: AsyncSession,
+    event_id: str,
+    commence_time: datetime,
+    min_hours_before: float,
+    max_hours_before: float,
+    max_samples: int,
+) -> list[OddsSnapshot]:
+    """Get stratified-sampled snapshots within a time range before game start.
+
+    Divides [commence_time - max_hours, commence_time - min_hours] into
+    max_samples equal bins and picks the snapshot nearest to each bin's
+    midpoint. Bins with no snapshot are skipped.
+
+    Returns snapshots sorted chronologically.
+    """
+    from odds_lambda.storage.readers import OddsReader
+
+    reader = OddsReader(session)
+    all_snapshots = await reader.get_snapshots_for_event(event_id)
+
+    range_start = commence_time - timedelta(hours=max_hours_before)
+    range_end = commence_time - timedelta(hours=min_hours_before)
+
+    in_range = [s for s in all_snapshots if range_start <= s.snapshot_time <= range_end]
+
+    if not in_range:
+        return []
+
+    if len(in_range) <= max_samples:
+        return in_range
+
+    # Stratified sampling: divide range into equal bins, pick nearest to midpoint
+    range_seconds = (range_end - range_start).total_seconds()
+    bin_size = range_seconds / max_samples
+    selected: list[OddsSnapshot] = []
+
+    for i in range(max_samples):
+        bin_mid = range_start + timedelta(seconds=(i + 0.5) * bin_size)
+        best: OddsSnapshot | None = None
+        best_diff = float("inf")
+
+        for s in in_range:
+            diff = abs((s.snapshot_time - bin_mid).total_seconds())
+            if diff < best_diff:
+                best_diff = diff
+                best = s
+
+        if best is not None and best not in selected:
+            selected.append(best)
+
+    selected.sort(key=lambda s: s.snapshot_time)
+    return selected
 
 
 def _extract_odds_from_snapshot(

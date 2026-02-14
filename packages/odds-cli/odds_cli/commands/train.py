@@ -234,6 +234,7 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             data_result.feature_names,
                             X_test=X_test,
                             y_test=y_test,
+                            event_ids=getattr(data_result, "event_ids_train", None),
                         )
                     except Exception:
                         progress.stop()

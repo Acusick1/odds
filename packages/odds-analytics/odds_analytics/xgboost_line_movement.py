@@ -544,6 +544,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         feature_names: list[str],
         X_test: np.ndarray | None = None,
         y_test: np.ndarray | None = None,
+        event_ids: np.ndarray | None = None,
     ) -> tuple[dict[str, Any], Any]:
         """
         Train with K-Fold cross-validation, then train final model on all data.
@@ -591,6 +592,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             X=X,
             y=y,
             feature_names=feature_names,
+            event_ids=event_ids,
         )
 
         logger.info(

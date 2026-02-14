@@ -1,0 +1,141 @@
+experiment:
+  name: xgboost_cross_source_clv_v1
+  tags:
+  - xgboost
+  - cross_source
+  - polymarket
+  - clv
+  - h2h
+  description: >
+    Initial CLV prediction model using cross-source Polymarket + sportsbook
+    features. Combines sportsbook tabular and trajectory features with
+    Polymarket price, order book, and cross-source divergence features.
+    Training data limited to ~222 events with dual-source moneyline coverage
+    (Jan 10 – Feb 10, 2026). Heavily regularized for small sample size.
+training:
+  strategy_type: xgboost_line_movement
+  data:
+    start_date: '2026-01-10'
+    end_date: '2026-02-10'
+    test_split: 0.2
+    validation_split: 0.0
+    random_seed: 42
+    shuffle: false
+    use_kfold: true
+    cv_method: group_timeseries
+    n_folds: 3
+    kfold_shuffle: false
+  model:
+    n_estimators: 50
+    max_depth: 3
+    min_child_weight: 5
+    learning_rate: 0.05
+    gamma: 0.1
+    subsample: 0.7
+    colsample_bytree: 0.6
+    colsample_bylevel: 0.8
+    colsample_bynode: 1.0
+    reg_alpha: 0.5
+    reg_lambda: 2.0
+    objective: reg:squarederror
+    random_state: 42
+    n_jobs: -1
+    early_stopping_rounds: 10
+  features:
+    sharp_bookmakers:
+    - pinnacle
+    retail_bookmakers:
+    - fanduel
+    - draftkings
+    - betmgm
+    markets:
+    - h2h
+    outcome: home
+    opening_tier: early
+    closing_tier: closing
+    decision_tier: pregame
+    lookback_hours: 72
+    timesteps: 24
+    normalize: false
+    feature_groups:
+    - tabular
+    - trajectory
+    - polymarket
+    movement_threshold: 0.005
+    pm_velocity_window_hours: 2.0
+    pm_price_tolerance_minutes: 30
+    target_type: devigged_pinnacle
+    decision_hours_range: [3.0, 12.0]
+    max_samples_per_event: 5
+  feature_selection:
+    enabled: true
+    method: ensemble
+    feature_names: null
+    min_correlation: 0.02
+    min_variance: 0.01
+    n_ensemble_models: 3
+    ensemble_seeds:
+    - 42
+    - 123
+    - 456
+    model_types:
+    - xgboost
+    - random_forest
+    - extra_trees
+    hybrid_filter_weight: 0.3
+  min_predicted_movement: 0.02
+  movement_confidence_scale: 5.0
+  base_confidence: 0.52
+  output_path: models
+  model_name: null
+tuning:
+  n_trials: 30
+  timeout: null
+  direction: minimize
+  metric: val_mse
+  pruner: median
+  sampler: tpe
+  search_spaces:
+    n_estimators:
+      type: int
+      low: 30.0
+      high: 150.0
+      step: 10.0
+      log: false
+      choices: null
+    max_depth:
+      type: int
+      low: 2.0
+      high: 5.0
+      step: null
+      log: false
+      choices: null
+    learning_rate:
+      type: float
+      low: 0.01
+      high: 0.15
+      step: null
+      log: true
+      choices: null
+    reg_alpha:
+      type: float
+      low: 0.1
+      high: 2.0
+      step: null
+      log: false
+      choices: null
+    reg_lambda:
+      type: float
+      low: 0.5
+      high: 5.0
+      step: null
+      log: false
+      choices: null
+    top_k_features:
+      type: int
+      low: 5.0
+      high: 25.0
+      step: 1.0
+      log: false
+      choices: null
+tracking: null
