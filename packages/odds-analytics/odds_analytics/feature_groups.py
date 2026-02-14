@@ -5,7 +5,7 @@ Separates data collection from model-specific formatting via five layers:
   1. Collection   — EventDataBundle (loads all data once per event)
   2. Sampling     — SnapshotSampler protocol (TierSampler / TimeRangeSampler)
   3. Target       — pure functions from sequence_loader
-  4. Adapters     — FeatureAdapter protocol (XGBoostAdapter / LSTMAdapter)
+  4. Adapters     — FeatureAdapter protocol (XGBoostAdapter)
   5. Orchestrator — single prepare_training_data() entry point
 
 Example:
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 import structlog
@@ -48,9 +48,9 @@ from odds_analytics.polymarket_features import (
     resolve_home_outcome_index,
 )
 from odds_analytics.sequence_loader import (
-    _extract_odds_from_snapshot,
     calculate_devigged_pinnacle_target,
     calculate_regression_target,
+    extract_odds_from_snapshot,
     extract_pinnacle_h2h_probs,
     load_sequences_for_event,
 )
@@ -67,7 +67,6 @@ __all__ = [
     "TierSampler",
     "TimeRangeSampler",
     "XGBoostAdapter",
-    "LSTMAdapter",
     "TrainingDataResult",
     "prepare_training_data",
     "filter_completed_events",
@@ -138,33 +137,27 @@ async def collect_event_data(
         pm_event = pm_result.scalars().first()
 
         if pm_event is not None:
-            from odds_core.models import Event as SbEvent
+            pm_reader = PolymarketReader(session)
+            market = await pm_reader.get_moneyline_market(pm_event.id)
 
-            sb_result = await session.execute(select(SbEvent).where(SbEvent.id == event.id))
-            sb_event = sb_result.scalar_one_or_none()
-
-            if sb_event is not None:
-                pm_reader = PolymarketReader(session)
-                market = await pm_reader.get_moneyline_market(pm_event.id)
-
-                if market is not None:
-                    home_idx = resolve_home_outcome_index(market, sb_event.home_team)
-                    if home_idx is not None:
-                        pm_context = PMEventContext(
-                            pm_event=pm_event,
-                            sb_event=sb_event,
-                            market=market,
-                            home_idx=home_idx,
-                        )
-                        # Bulk-load all PM data for this market (2 queries)
-                        pm_prices = await pm_reader.get_prices_for_market(market.id)
-                        pm_orderbooks = await pm_reader.get_orderbooks_for_market(market.id)
-                    else:
-                        logger.debug(
-                            "pm_home_outcome_unresolved",
-                            event_id=event.id,
-                            home_team=sb_event.home_team,
-                        )
+            if market is not None:
+                home_idx = resolve_home_outcome_index(market, event.home_team)
+                if home_idx is not None:
+                    pm_context = PMEventContext(
+                        pm_event=pm_event,
+                        sb_event=event,
+                        market=market,
+                        home_idx=home_idx,
+                    )
+                    # Bulk-load all PM data for this market (2 queries)
+                    pm_prices = await pm_reader.get_prices_for_market(market.id)
+                    pm_orderbooks = await pm_reader.get_orderbooks_for_market(market.id)
+                else:
+                    logger.debug(
+                        "pm_home_outcome_unresolved",
+                        event_id=event.id,
+                        home_team=event.home_team,
+                    )
 
     # Sequences for trajectory features
     sequences: list[list[Odds]] = []
@@ -187,7 +180,6 @@ async def collect_event_data(
 # =============================================================================
 
 
-@runtime_checkable
 class SnapshotSampler(Protocol):
     """Protocol for snapshot sampling strategies."""
 
@@ -197,7 +189,11 @@ class SnapshotSampler(Protocol):
 
 
 class TierSampler:
-    """Returns the last snapshot in the configured decision tier (single row per event)."""
+    """Returns the latest snapshot no closer to game than the decision tier (single row per event).
+
+    Snapshots in the decision tier or any earlier tier (further from game) are
+    candidates. The most recent candidate by wall-clock time is returned.
+    """
 
     def __init__(self, decision_tier: str) -> None:
         from odds_lambda.fetch_tier import FetchTier
@@ -207,7 +203,7 @@ class TierSampler:
     def sample(self, bundle: EventDataBundle) -> list[OddsSnapshot]:
         from odds_lambda.fetch_tier import FetchTier
 
-        tier_order = FetchTier.get_priority_order()
+        tier_order = FetchTier.get_priority_order()  # CLOSING first (closest)
         decision_idx = tier_order.index(self._decision_tier)
 
         candidates = []
@@ -216,7 +212,6 @@ class TierSampler:
                 try:
                     tier = FetchTier(s.fetch_tier)
                     tier_idx = tier_order.index(tier)
-                    # Same tier or further from game (higher index) is OK
                     if tier_idx >= decision_idx:
                         candidates.append(s)
                 except ValueError:
@@ -225,7 +220,6 @@ class TierSampler:
         if not candidates:
             return []
 
-        # Return last snapshot in/before decision tier
         return [max(candidates, key=lambda s: s.snapshot_time)]
 
 
@@ -351,7 +345,6 @@ def _find_velocity_prices(
 # =============================================================================
 
 
-@runtime_checkable
 class FeatureAdapter(Protocol):
     """Protocol for model-specific feature formatting."""
 
@@ -398,13 +391,13 @@ class XGBoostAdapter:
         market = config.markets[0] if config.markets else "h2h"
         outcome = event.home_team if config.outcome == "home" else event.away_team
         backtest_event = make_backtest_event(event)
+        tab_extractor = TabularFeatureExtractor.from_config(config)
 
         parts: list[np.ndarray] = []
 
         # --- Tabular features ---
         if "tabular" in config.feature_groups:
-            tab_extractor = TabularFeatureExtractor.from_config(config)
-            snap_odds = _extract_odds_from_snapshot(
+            snap_odds = extract_odds_from_snapshot(
                 snapshot, event.id, market=market, outcome=outcome
             )
             if not snap_odds:
@@ -484,12 +477,11 @@ class XGBoostAdapter:
 
                         # Try to align SB odds for cross-source features
                         sb_feats = None
-                        sb_odds_at_time = _extract_odds_from_snapshot(
+                        sb_odds_at_time = extract_odds_from_snapshot(
                             snapshot, event.id, market=market, outcome=outcome
                         )
-                        if sb_odds_at_time and "tabular" in config.feature_groups:
+                        if sb_odds_at_time:
                             try:
-                                tab_extractor = TabularFeatureExtractor.from_config(config)
                                 sb_feats = tab_extractor.extract_features(
                                     event=backtest_event,
                                     odds_data=sb_odds_at_time,
@@ -515,24 +507,9 @@ class XGBoostAdapter:
         return np.concatenate(parts)
 
 
-class LSTMAdapter:
-    """Stub adapter for LSTM models. Not yet implemented."""
-
-    def feature_names(self, config: FeatureConfig) -> list[str]:
-        raise NotImplementedError("LSTMAdapter is not yet implemented")
-
-    def transform(
-        self,
-        bundle: EventDataBundle,
-        snapshot: OddsSnapshot,
-        config: FeatureConfig,
-    ) -> np.ndarray | None:
-        raise NotImplementedError("LSTMAdapter is not yet implemented")
-
-
-def _make_adapter(config: FeatureConfig) -> XGBoostAdapter | LSTMAdapter:
-    if config.adapter == "lstm":
-        return LSTMAdapter()
+def _make_adapter(config: FeatureConfig) -> XGBoostAdapter:
+    if config.adapter != "xgboost":
+        raise NotImplementedError(f"Adapter '{config.adapter}' is not yet implemented")
     return XGBoostAdapter()
 
 
@@ -550,18 +527,18 @@ def _compute_target(
     """Compute regression target for one (snapshot, closing) pair."""
     market = config.markets[0] if config.markets else "h2h"
 
-    closing_odds_all = _extract_odds_from_snapshot(closing_snapshot, event.id, market=market)
+    closing_odds_all = extract_odds_from_snapshot(closing_snapshot, event.id, market=market)
 
     if config.target_type == "devigged_pinnacle":
-        snapshot_odds_all = _extract_odds_from_snapshot(snapshot, event.id, market=market)
+        snapshot_odds_all = extract_odds_from_snapshot(snapshot, event.id, market=market)
         return calculate_devigged_pinnacle_target(
             snapshot_odds_all, closing_odds_all, event.home_team, event.away_team
         )
     else:
         # "raw": avg implied prob delta (snapshot → closing)
         outcome = event.home_team if config.outcome == "home" else event.away_team
-        snap_odds = _extract_odds_from_snapshot(snapshot, event.id, market=market, outcome=outcome)
-        closing_odds = _extract_odds_from_snapshot(
+        snap_odds = extract_odds_from_snapshot(snapshot, event.id, market=market, outcome=outcome)
+        closing_odds = extract_odds_from_snapshot(
             closing_snapshot, event.id, market=market, outcome=outcome
         )
         return calculate_regression_target(snap_odds, closing_odds, market)
@@ -570,7 +547,7 @@ def _compute_target(
 def _has_pinnacle_closing(closing_snapshot: OddsSnapshot, event: Event) -> bool:
     """Check if closing snapshot has Pinnacle h2h data (required for devigged_pinnacle target)."""
     market = "h2h"
-    closing_odds_all = _extract_odds_from_snapshot(closing_snapshot, event.id, market=market)
+    closing_odds_all = extract_odds_from_snapshot(closing_snapshot, event.id, market=market)
     return (
         extract_pinnacle_h2h_probs(closing_odds_all, event.home_team, event.away_team) is not None
     )
@@ -613,9 +590,6 @@ async def prepare_training_data(
     config: FeatureConfig,
 ) -> TrainingDataResult:
     """Unified training data preparation using the 5-layer adapter architecture.
-
-    Replaces both the old prepare_training_data() (single-horizon) and
-    prepare_multi_horizon_data() (multi-horizon) functions.
 
     Sampling strategy and target type are both controlled via config:
       - config.sampling.strategy="tier"        → single row per event

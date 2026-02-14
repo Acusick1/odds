@@ -1,54 +1,18 @@
 """
-Sequence Data Loader for LSTM Training.
-
-This module provides utilities to fetch historical line movement data and convert it
-into 3D tensor format suitable for LSTM model training and prediction.
+Sequence Data Loader and Odds Utilities.
 
 Key Functions:
 - load_sequences_for_event(): Query odds snapshots and organize chronologically
-- load_sequences_up_to_tier(): Query odds up to a decision tier
-- get_opening_closing_odds_by_tier(): Get odds at specific tiers
+- extract_odds_from_snapshot(): Parse Odds from OddsSnapshot.raw_data
 - calculate_regression_target(): Calculate line movement for regression
-
-Architecture:
-- Queries OddsSnapshot.raw_data to reconstruct historical odds
-- Groups snapshots by odds_timestamp for chronological ordering
-- Converts to list[list[Odds]] format expected by SequenceFeatureExtractor
-- Handles variable-length sequences with attention masks
-- Supports tier-based filtering for decision time simulation
-
-Example:
-    ```python
-    from odds_lambda.storage.readers import OddsReader
-    from odds_analytics.sequence_loader import load_sequences_for_event
-
-    # Load sequences for a single event
-    async with async_session_maker() as session:
-        reader = OddsReader(session)
-        event = await reader.get_event_by_id("abc123")
-        sequences = await load_sequences_for_event("abc123", session)
-
-        # sequences = [
-        #     [Odds(...), Odds(...), ...],  # First timestamp
-        #     [Odds(...), Odds(...), ...],  # Second timestamp
-        #     ...
-        # ]
-    ```
-
-For training data preparation, use the composable feature group API in feature_groups.py:
-    ```python
-    from odds_analytics.feature_groups import prepare_training_data
-    from odds_analytics.training.config import FeatureConfig
-
-    config = FeatureConfig(feature_groups=["sequence_full"], ...)
-    result = await prepare_training_data(config, session)
-    ```
+- extract_pinnacle_h2h_probs(): Extract devigged Pinnacle probabilities
+- calculate_devigged_pinnacle_target(): Devigged Pinnacle close vs snapshot delta
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 
 import numpy as np
@@ -74,7 +38,7 @@ __all__ = [
     "calculate_regression_target",
     "extract_pinnacle_h2h_probs",
     "calculate_devigged_pinnacle_target",
-    "get_snapshots_in_time_range",
+    "extract_odds_from_snapshot",
 ]
 
 
@@ -192,62 +156,7 @@ def calculate_devigged_pinnacle_target(
     return fair_close_home - fair_snapshot_home
 
 
-async def get_snapshots_in_time_range(
-    session: AsyncSession,
-    event_id: str,
-    commence_time: datetime,
-    min_hours_before: float,
-    max_hours_before: float,
-    max_samples: int,
-) -> list[OddsSnapshot]:
-    """Get stratified-sampled snapshots within a time range before game start.
-
-    Divides [commence_time - max_hours, commence_time - min_hours] into
-    max_samples equal bins and picks the snapshot nearest to each bin's
-    midpoint. Bins with no snapshot are skipped.
-
-    Returns snapshots sorted chronologically.
-    """
-    from odds_lambda.storage.readers import OddsReader
-
-    reader = OddsReader(session)
-    all_snapshots = await reader.get_snapshots_for_event(event_id)
-
-    range_start = commence_time - timedelta(hours=max_hours_before)
-    range_end = commence_time - timedelta(hours=min_hours_before)
-
-    in_range = [s for s in all_snapshots if range_start <= s.snapshot_time <= range_end]
-
-    if not in_range:
-        return []
-
-    if len(in_range) <= max_samples:
-        return in_range
-
-    # Stratified sampling: divide range into equal bins, pick nearest to midpoint
-    range_seconds = (range_end - range_start).total_seconds()
-    bin_size = range_seconds / max_samples
-    selected: list[OddsSnapshot] = []
-
-    for i in range(max_samples):
-        bin_mid = range_start + timedelta(seconds=(i + 0.5) * bin_size)
-        best: OddsSnapshot | None = None
-        best_diff = float("inf")
-
-        for s in in_range:
-            diff = abs((s.snapshot_time - bin_mid).total_seconds())
-            if diff < best_diff:
-                best_diff = diff
-                best = s
-
-        if best is not None and best not in selected:
-            selected.append(best)
-
-    selected.sort(key=lambda s: s.snapshot_time)
-    return selected
-
-
-def _extract_odds_from_snapshot(
+def extract_odds_from_snapshot(
     snapshot: OddsSnapshot,
     event_id: str,
     market: str | None = None,
