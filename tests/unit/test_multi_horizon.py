@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
-from odds_analytics.feature_groups import EventDataBundle, prepare_training_data
+from odds_analytics.feature_groups import (
+    EventDataBundle,
+    TierSampler,
+    TimeRangeSampler,
+    prepare_training_data,
+)
 from odds_analytics.training.config import FeatureConfig, MLTrainingConfig, SamplingConfig
 from odds_analytics.training.cross_validation import CVResult, run_cv
 from odds_core.models import Event, EventStatus, OddsSnapshot
@@ -302,6 +307,255 @@ class TestFeatureConfigValidation:
     def test_adapter_lstm(self):
         config = FeatureConfig(adapter="lstm")
         assert config.adapter == "lstm"
+
+
+class TestTierSampler:
+    """Tests for TierSampler snapshot selection."""
+
+    @pytest.fixture
+    def event(self):
+        return Event(
+            id="tier_test",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
+            home_team="Los Angeles Lakers",
+            away_team="Boston Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+
+    def _make_bundle(self, event: Event, snapshots: list[OddsSnapshot]) -> EventDataBundle:
+        return EventDataBundle(
+            event=event,
+            snapshots=snapshots,
+            closing_snapshot=None,
+            pm_context=None,
+        )
+
+    def test_returns_latest_snapshot_in_decision_tier(self, event):
+        """Should pick the most recent pregame snapshot."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=10),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="pregame",
+            ),
+            OddsSnapshot(
+                id=2,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=5),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="pregame",
+            ),
+            OddsSnapshot(
+                id=3,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=1),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="closing",
+            ),
+        ]
+        sampler = TierSampler("pregame")
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 1
+        assert result[0].id == 2  # Latest pregame, not the closing one
+
+    def test_includes_earlier_tiers(self, event):
+        """When no snapshot in decision tier, falls back to earlier tiers."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=50),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="early",
+            ),
+            OddsSnapshot(
+                id=2,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=1),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="closing",
+            ),
+        ]
+        sampler = TierSampler("pregame")
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 1
+        assert result[0].fetch_tier == "early"
+
+    def test_excludes_closer_tiers(self, event):
+        """Closing-tier snapshot should not be selected when decision_tier=pregame."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=1),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="closing",
+            ),
+        ]
+        sampler = TierSampler("pregame")
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert result == []
+
+    def test_empty_snapshots(self, event):
+        sampler = TierSampler("pregame")
+        assert sampler.sample(self._make_bundle(event, [])) == []
+
+
+class TestTimeRangeSampler:
+    """Tests for TimeRangeSampler stratified snapshot selection."""
+
+    @pytest.fixture
+    def event(self):
+        return Event(
+            id="range_test",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
+            home_team="Los Angeles Lakers",
+            away_team="Boston Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+
+    def _make_bundle(self, event: Event, snapshots: list[OddsSnapshot]) -> EventDataBundle:
+        return EventDataBundle(
+            event=event,
+            snapshots=snapshots,
+            closing_snapshot=None,
+            pm_context=None,
+        )
+
+    def test_returns_snapshots_in_range(self, event):
+        """Only snapshots within [min_hours, max_hours] before game are included."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=24),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+            OddsSnapshot(
+                id=2,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=8),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+            OddsSnapshot(
+                id=3,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=6),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+            OddsSnapshot(
+                id=4,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=4),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+            OddsSnapshot(
+                id=5,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=1),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+        ]
+        sampler = TimeRangeSampler(min_hours=3.0, max_hours=12.0, max_samples=10)
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 3
+        result_ids = {s.id for s in result}
+        assert result_ids == {2, 3, 4}
+
+    def test_stratified_sampling_caps_at_max(self, event):
+        """When more snapshots than max_samples, picks one per bin."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=i,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=3 + i * 0.9),
+                raw_data={},
+                bookmaker_count=1,
+            )
+            for i in range(10)
+        ]
+        sampler = TimeRangeSampler(min_hours=3.0, max_hours=12.0, max_samples=3)
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) <= 3
+        # Results should be chronologically sorted
+        for i in range(len(result) - 1):
+            assert result[i].snapshot_time < result[i + 1].snapshot_time
+
+    def test_no_duplicates_in_stratified_sample(self, event):
+        """Same snapshot shouldn't appear twice even if it's nearest to multiple bins."""
+        commence = event.commence_time
+        # Only 2 snapshots, ask for 5 bins — should get at most 2, no dupes
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=6),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+            OddsSnapshot(
+                id=2,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=4),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+        ]
+        sampler = TimeRangeSampler(min_hours=3.0, max_hours=12.0, max_samples=5)
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 2
+        assert result[0].id != result[1].id
+
+    def test_empty_range(self, event):
+        """No snapshots in range returns empty list."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=24),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+        ]
+        sampler = TimeRangeSampler(min_hours=3.0, max_hours=12.0, max_samples=5)
+        assert sampler.sample(self._make_bundle(event, snaps)) == []
+
+    def test_empty_snapshots(self, event):
+        sampler = TimeRangeSampler(min_hours=3.0, max_hours=12.0, max_samples=5)
+        assert sampler.sample(self._make_bundle(event, [])) == []
 
 
 class TestPrepareTrainingData:
