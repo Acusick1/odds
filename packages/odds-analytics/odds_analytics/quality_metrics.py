@@ -474,6 +474,7 @@ class QualityMetrics:
             Human-readable string describing the time window
         """
         ranges = {
+            FetchTier.IN_PLAY: "After game start",
             FetchTier.CLOSING: "0-3 hours before",
             FetchTier.PREGAME: "3-12 hours before",
             FetchTier.SHARP: "12-24 hours before",

@@ -737,7 +737,7 @@ class TestQualityMetricsTierCoverage:
 
         # Should return coverage for all tiers
         assert isinstance(result, list)
-        assert len(result) == 5  # One for each FetchTier
+        assert len(result) == 6  # One for each FetchTier
 
         # All tiers should have zero coverage
         for tier_info in result:
@@ -848,8 +848,8 @@ class TestQualityMetricsTierCoverage:
             end_date=datetime(2024, 10, 31, tzinfo=UTC),
         )
 
-        # Should return 5 tiers
-        assert len(result) == 5
+        # Should return 6 tiers
+        assert len(result) == 6
 
         # Convert to dict for easier testing
         tier_map = {tier.tier_name: tier for tier in result}

@@ -16,6 +16,7 @@ def calculate_tier(hours_until: float) -> FetchTier:
     Determine fetch tier based on hours until game commence time.
 
     The fetch tier determines how frequently odds should be collected:
+    - IN_PLAY (<0 hours): Odds collected during the game
     - CLOSING (0-3 hours): Most critical period, fetch every 30 minutes
     - PREGAME (3-12 hours): Active betting period, fetch every 3 hours
     - SHARP (12-24 hours): Professional betting period, fetch every 12 hours
@@ -39,6 +40,8 @@ def calculate_tier(hours_until: float) -> FetchTier:
         >>> calculate_tier(100.0)  # >3 days before game
         <FetchTier.OPENING: 'opening'>
     """
+    if hours_until < 0:
+        return FetchTier.IN_PLAY
     if hours_until <= 3:
         return FetchTier.CLOSING
     elif hours_until <= 12:

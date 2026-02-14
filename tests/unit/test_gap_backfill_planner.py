@@ -292,22 +292,24 @@ class TestFetchTierPriorityOrder:
     """Test FetchTier.get_priority_order() classmethod."""
 
     def test_priority_order_is_correct(self):
-        """Test that priority order is CLOSING to OPENING."""
+        """Test that priority order is CLOSING to OPENING, with IN_PLAY last."""
         order = FetchTier.get_priority_order()
 
         assert order[0] == FetchTier.CLOSING  # Highest priority
         assert order[1] == FetchTier.PREGAME
         assert order[2] == FetchTier.SHARP
         assert order[3] == FetchTier.EARLY
-        assert order[4] == FetchTier.OPENING  # Lowest priority
+        assert order[4] == FetchTier.OPENING
+        assert order[5] == FetchTier.IN_PLAY  # Lowest priority (incidental)
 
     def test_priority_order_includes_all_tiers(self):
-        """Test that all 5 tiers are in priority order."""
+        """Test that all tiers are in priority order."""
         order = FetchTier.get_priority_order()
 
-        assert len(order) == 5
+        assert len(order) == 6
         assert FetchTier.CLOSING in order
         assert FetchTier.PREGAME in order
         assert FetchTier.SHARP in order
         assert FetchTier.EARLY in order
         assert FetchTier.OPENING in order
+        assert FetchTier.IN_PLAY in order

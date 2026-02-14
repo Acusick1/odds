@@ -70,12 +70,24 @@ class TestCalculateTier:
         """Test OPENING tier with large value."""
         assert calculate_tier(200.0) == FetchTier.OPENING
 
-    def test_negative_hours_returns_closing(self):
-        """Test that negative hours (game already started) returns CLOSING."""
-        assert calculate_tier(-1.0) == FetchTier.CLOSING
+    def test_negative_hours_returns_in_play(self):
+        """Test that negative hours (game already started) returns IN_PLAY."""
+        assert calculate_tier(-1.0) == FetchTier.IN_PLAY
+
+    def test_in_play_large_negative(self):
+        """Test IN_PLAY tier with large negative value (deep into game)."""
+        assert calculate_tier(-3.0) == FetchTier.IN_PLAY
+
+    def test_closing_at_zero_hours(self):
+        """Test that exactly 0 hours returns CLOSING, not IN_PLAY."""
+        assert calculate_tier(0.0) == FetchTier.CLOSING
 
     def test_tier_intervals_match_enum(self):
         """Test that tier calculation boundaries match FetchTier.interval_hours."""
+        # IN_PLAY: negative hours (interval 0.5)
+        assert calculate_tier(-1.0) == FetchTier.IN_PLAY
+        assert FetchTier.IN_PLAY.interval_hours == 0.5
+
         # CLOSING: 0-3 hours (interval 0.5)
         assert calculate_tier(0.0) == FetchTier.CLOSING
         assert calculate_tier(3.0) == FetchTier.CLOSING
@@ -150,7 +162,7 @@ class TestCalculateTierFromTimestamps:
         game_time = now - timedelta(hours=1)  # Game started 1 hour ago
 
         tier = calculate_tier_from_timestamps(now, game_time)
-        assert tier == FetchTier.CLOSING
+        assert tier == FetchTier.IN_PLAY
 
     def test_exact_boundary_3_hours(self):
         """Test exact 3-hour boundary between CLOSING and PREGAME."""
@@ -250,7 +262,7 @@ class TestTierUtilsConsistency:
     def test_calculate_tier_matches_from_timestamps(self):
         """Test that both methods produce same result."""
         now = datetime.now(UTC)
-        hours_list = [0.5, 2.5, 5.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0]
+        hours_list = [-2.0, -0.5, 0.5, 2.5, 5.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0]
 
         for hours in hours_list:
             game_time = now + timedelta(hours=hours)

@@ -115,25 +115,25 @@ class GapBackfillPlanner:
             # Process each game with any missing tiers (for backfill purposes)
             # Note: is_complete only checks critical tiers; backfill should fill all gaps
             for game_report in report.game_reports:
-                if len(game_report.tiers_missing) > 0:
+                # Exclude IN_PLAY — these arrive incidentally and should never trigger backfill
+                tiers_missing = game_report.tiers_missing - frozenset({FetchTier.IN_PLAY})
+                if len(tiers_missing) > 0:
                     # Calculate missing snapshots for this game
                     missing_snapshot_count = await self._calculate_missing_snapshots(
                         game_report.event_id,
                         game_report.commence_time,
-                        game_report.tiers_missing,
+                        tiers_missing,
                     )
 
                     # Determine highest priority missing tier
-                    highest_priority = self._get_highest_priority_missing_tier(
-                        game_report.tiers_missing
-                    )
+                    highest_priority = self._get_highest_priority_missing_tier(tiers_missing)
 
                     gap_info = GameGapInfo(
                         event_id=game_report.event_id,
                         home_team=game_report.home_team,
                         away_team=game_report.away_team,
                         commence_time=game_report.commence_time,
-                        missing_tiers=game_report.tiers_missing,
+                        missing_tiers=tiers_missing,
                         highest_priority_missing=highest_priority,
                         missing_snapshot_count=missing_snapshot_count,
                     )

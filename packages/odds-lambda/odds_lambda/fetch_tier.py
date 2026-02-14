@@ -18,6 +18,7 @@ class FetchTier(Enum):
     - OPENING: Initial line release
     """
 
+    IN_PLAY = "in_play"  # Game started: every 30 min (incidental collection)
     CLOSING = "closing"  # 0-3 hours before: every 30 min
     PREGAME = "pregame"  # 3-12 hours before: every 3 hours
     SHARP = "sharp"  # 12-24 hours before: every 12 hours
@@ -28,6 +29,7 @@ class FetchTier(Enum):
     def interval_hours(self) -> float:
         """Get interval in hours for this tier."""
         intervals = {
+            FetchTier.IN_PLAY: 0.5,  # 30 minutes
             FetchTier.CLOSING: 0.5,  # 30 minutes
             FetchTier.PREGAME: 3.0,
             FetchTier.SHARP: 12.0,
@@ -49,9 +51,10 @@ class FetchTier(Enum):
             [CLOSING, PREGAME, SHARP, EARLY, OPENING]
         """
         return [
-            cls.CLOSING,  # Highest priority (closest to game)
+            cls.CLOSING,  # Highest priority (closest to game start)
             cls.PREGAME,
             cls.SHARP,
             cls.EARLY,
-            cls.OPENING,  # Lowest priority (earliest)
+            cls.OPENING,
+            cls.IN_PLAY,  # Lowest priority (incidental collection)
         ]
