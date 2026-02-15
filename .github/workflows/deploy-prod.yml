@@ -96,7 +96,6 @@ jobs:
       - name: Verify schedule activation
         run: |
           bash scripts/verify-schedules.sh \
-            --lambda-name odds-scheduler \
             --rule-prefix odds \
             --region ${{ env.AWS_REGION }}
 
