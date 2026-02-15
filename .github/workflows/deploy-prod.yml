@@ -67,6 +67,7 @@ jobs:
         run: |
           cd deployment/aws/terraform
           terraform plan \
+            -lock-timeout=300s \
             -var-file="terraform.tfvars.example" \
             -var="environment=production" \
             -var="project_name=odds-scheduler" \
