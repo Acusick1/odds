@@ -13,6 +13,10 @@ on:
       - 'alembic.ini'
   workflow_dispatch:
 
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Run Tests

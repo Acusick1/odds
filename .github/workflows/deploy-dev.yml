@@ -62,21 +62,11 @@ jobs:
           cd deployment/aws/terraform
           terraform init -backend-config=backend.dev.hcl
 
-      - name: Destroy existing dev infrastructure
-        run: |
-          cd deployment/aws/terraform
-          terraform destroy \
-            -var-file="terraform.tfvars.example" \
-            -var="database_url=$DATABASE_URL" \
-            -var="odds_api_key=$ODDS_API_KEY" \
-            -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
-            -auto-approve
-        continue-on-error: true
-
       - name: Terraform Plan
         run: |
           cd deployment/aws/terraform
           terraform plan \
+            -lock-timeout=300s \
             -var-file="terraform.tfvars.example" \
             -var="database_url=$DATABASE_URL" \
             -var="odds_api_key=$ODDS_API_KEY" \
@@ -113,6 +103,7 @@ jobs:
         run: |
           cd deployment/aws/terraform
           terraform destroy \
+            -lock-timeout=300s \
             -var-file="terraform.tfvars.example" \
             -var="database_url=$DATABASE_URL" \
             -var="odds_api_key=$ODDS_API_KEY" \
