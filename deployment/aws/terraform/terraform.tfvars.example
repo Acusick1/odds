@@ -24,6 +24,14 @@ environment = "development"  # "development" or "production"
 # Production:  "odds-scheduler"
 project_name = "odds-scheduler-dev"
 
+# Prefix for EventBridge rule names (decoupled from project_name)
+# Development: "odds-dev" → rules named odds-dev-fetch-odds, etc.
+# Production:  "odds"    → rules named odds-fetch-odds, etc.
+rule_prefix = "odds-dev"
+
+# Deploy Polymarket EventBridge rules (fetch + backfill)
+enable_polymarket = false
+
 # ============================================================================
 # Lambda Configuration
 # ============================================================================

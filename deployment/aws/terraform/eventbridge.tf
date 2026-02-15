@@ -1,172 +1,18 @@
-# Bootstrap EventBridge rule to trigger initial Lambda execution
-# After first execution, Lambda will self-schedule using dynamic rules
-
-resource "aws_cloudwatch_event_rule" "bootstrap_fetch_odds" {
-  name                = format("%s-fetch-odds-bootstrap", var.project_name)
-  description         = "Bootstrap trigger for odds fetching (will be updated dynamically)"
-  schedule_expression = "rate(1 day)"
-  state               = "ENABLED"
-}
-
-resource "aws_cloudwatch_event_target" "bootstrap_fetch_odds_target" {
-  rule      = aws_cloudwatch_event_rule.bootstrap_fetch_odds.name
-  target_id = "1"
-  arn       = aws_lambda_function.odds_scheduler.arn
-
-  input = jsonencode({
-    job = "fetch-odds"
-  })
-}
-
-resource "aws_lambda_permission" "allow_eventbridge_fetch_odds" {
-  statement_id  = format("AllowExecutionFromEventBridgeFetchOdds-%s", var.project_name)
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.odds_scheduler.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.bootstrap_fetch_odds.arn
-
-  depends_on = [
-    aws_cloudwatch_event_rule.bootstrap_fetch_odds,
-    aws_cloudwatch_event_target.bootstrap_fetch_odds_target
-  ]
-}
-
-# Bootstrap rule for scores fetching
-resource "aws_cloudwatch_event_rule" "bootstrap_fetch_scores" {
-  name                = format("%s-fetch-scores-bootstrap", var.project_name)
-  description         = "Bootstrap trigger for scores fetching"
-  schedule_expression = "rate(6 hours)"
-  state               = "ENABLED"
-}
-
-resource "aws_cloudwatch_event_target" "bootstrap_fetch_scores_target" {
-  rule      = aws_cloudwatch_event_rule.bootstrap_fetch_scores.name
-  target_id = "1"
-  arn       = aws_lambda_function.odds_scheduler.arn
-
-  input = jsonencode({
-    job = "fetch-scores"
-  })
-}
-
-resource "aws_lambda_permission" "allow_eventbridge_fetch_scores" {
-  statement_id  = format("AllowExecutionFromEventBridgeFetchScores-%s", var.project_name)
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.odds_scheduler.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.bootstrap_fetch_scores.arn
-
-  depends_on = [
-    aws_cloudwatch_event_rule.bootstrap_fetch_scores,
-    aws_cloudwatch_event_target.bootstrap_fetch_scores_target
-  ]
-}
-
-# Bootstrap rule for status updates
-resource "aws_cloudwatch_event_rule" "bootstrap_update_status" {
-  name                = format("%s-update-status-bootstrap", var.project_name)
-  description         = "Bootstrap trigger for status updates"
-  schedule_expression = "rate(1 hour)"
-  state               = "ENABLED"
-}
-
-resource "aws_cloudwatch_event_target" "bootstrap_update_status_target" {
-  rule      = aws_cloudwatch_event_rule.bootstrap_update_status.name
-  target_id = "1"
-  arn       = aws_lambda_function.odds_scheduler.arn
-
-  input = jsonencode({
-    job = "update-status"
-  })
-}
-
-resource "aws_lambda_permission" "allow_eventbridge_update_status" {
-  statement_id  = format("AllowExecutionFromEventBridgeUpdateStatus-%s", var.project_name)
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.odds_scheduler.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.bootstrap_update_status.arn
-
-  depends_on = [
-    aws_cloudwatch_event_rule.bootstrap_update_status,
-    aws_cloudwatch_event_target.bootstrap_update_status_target
-  ]
-}
-
-# Bootstrap rule for health checks
-resource "aws_cloudwatch_event_rule" "bootstrap_check_health" {
-  name                = format("%s-check-health-bootstrap", var.project_name)
-  description         = "Bootstrap trigger for health checks"
-  schedule_expression = "rate(60 minutes)"
-  state               = "ENABLED"
-}
-
-resource "aws_cloudwatch_event_target" "bootstrap_check_health_target" {
-  rule      = aws_cloudwatch_event_rule.bootstrap_check_health.name
-  target_id = "1"
-  arn       = aws_lambda_function.odds_scheduler.arn
-
-  input = jsonencode({
-    job = "check-health"
-  })
-}
-
-resource "aws_lambda_permission" "allow_eventbridge_check_health" {
-  statement_id  = format("AllowExecutionFromEventBridgeCheckHealth-%s", var.project_name)
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.odds_scheduler.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.bootstrap_check_health.arn
-
-  depends_on = [
-    aws_cloudwatch_event_rule.bootstrap_check_health,
-    aws_cloudwatch_event_target.bootstrap_check_health_target
-  ]
-}
-
-# Bootstrap rule for Polymarket live data collection
-# After first execution, job self-schedules at price_poll_interval via dynamic rules
-resource "aws_cloudwatch_event_rule" "bootstrap_fetch_polymarket" {
-  name                = format("%s-fetch-polymarket-bootstrap", var.project_name)
-  description         = "Bootstrap trigger for Polymarket data collection"
-  schedule_expression = "rate(5 minutes)"
-  state               = "ENABLED"
-}
-
-resource "aws_cloudwatch_event_target" "bootstrap_fetch_polymarket_target" {
-  rule      = aws_cloudwatch_event_rule.bootstrap_fetch_polymarket.name
-  target_id = "1"
-  arn       = aws_lambda_function.odds_scheduler.arn
-
-  input = jsonencode({
-    job = "fetch-polymarket"
-  })
-}
-
-resource "aws_lambda_permission" "allow_eventbridge_fetch_polymarket" {
-  statement_id  = format("AllowExecutionFromEventBridgeFetchPolymarket-%s", var.project_name)
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.odds_scheduler.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.bootstrap_fetch_polymarket.arn
-
-  depends_on = [
-    aws_cloudwatch_event_rule.bootstrap_fetch_polymarket,
-    aws_cloudwatch_event_target.bootstrap_fetch_polymarket_target
-  ]
-}
-
 # Bootstrap rule for Polymarket price history backfill
 # Runs on fixed schedule (not self-scheduling) to stay ahead of 30-day CLOB retention window
 resource "aws_cloudwatch_event_rule" "bootstrap_backfill_polymarket" {
-  name                = format("%s-backfill-polymarket-bootstrap", var.project_name)
+  count = var.enable_polymarket ? 1 : 0
+
+  name                = format("%s-backfill-polymarket-bootstrap", var.rule_prefix)
   description         = "Recurring Polymarket price history backfill (30-day CLOB retention)"
   schedule_expression = "rate(3 days)"
   state               = "ENABLED"
 }
 
 resource "aws_cloudwatch_event_target" "bootstrap_backfill_polymarket_target" {
-  rule      = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket.name
+  count = var.enable_polymarket ? 1 : 0
+
+  rule      = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket[0].name
   target_id = "1"
   arn       = aws_lambda_function.odds_scheduler.arn
 
@@ -176,11 +22,13 @@ resource "aws_cloudwatch_event_target" "bootstrap_backfill_polymarket_target" {
 }
 
 resource "aws_lambda_permission" "allow_eventbridge_backfill_polymarket" {
-  statement_id  = format("AllowExecutionFromEventBridgeBackfillPolymarket-%s", var.project_name)
+  count = var.enable_polymarket ? 1 : 0
+
+  statement_id  = format("AllowExecutionFromEventBridgeBackfillPolymarket-%s", var.rule_prefix)
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.odds_scheduler.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket.arn
+  source_arn    = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket[0].arn
 
   depends_on = [
     aws_cloudwatch_event_rule.bootstrap_backfill_polymarket,
@@ -189,23 +37,26 @@ resource "aws_lambda_permission" "allow_eventbridge_backfill_polymarket" {
 }
 
 # Self-scheduling rules: pre-created by Terraform, schedule updated by Lambda at runtime.
-# Lambda's put_rule() updates the schedule_expression; Terraform ignores those changes
-# but owns the lifecycle (create/destroy).
+# Lambda's put_rule() updates the schedule_expression and sets State=ENABLED; Terraform
+# ignores those changes but owns the lifecycle (create/destroy).
+# Initial state is DISABLED with a placeholder schedule; the post-deploy invocation activates them.
 
 locals {
-  self_scheduling_jobs = ["fetch-odds", "fetch-scores", "update-status", "check-health", "fetch-polymarket"]
+  core_jobs        = ["fetch-odds", "fetch-scores", "update-status", "check-health"]
+  polymarket_jobs  = var.enable_polymarket ? ["fetch-polymarket"] : []
+  self_scheduling_jobs = concat(local.core_jobs, local.polymarket_jobs)
 }
 
 resource "aws_cloudwatch_event_rule" "dynamic" {
   for_each = toset(local.self_scheduling_jobs)
 
-  name                = "${var.project_name}-${each.key}"
+  name                = "${var.rule_prefix}-${each.key}"
   description         = "Self-scheduling rule for ${each.key} (updated by Lambda)"
   schedule_expression = "rate(1 day)"
-  state               = "ENABLED"
+  state               = "DISABLED"
 
   lifecycle {
-    ignore_changes = [schedule_expression]
+    ignore_changes = [schedule_expression, state]
   }
 }
 
@@ -224,7 +75,7 @@ resource "aws_cloudwatch_event_target" "dynamic" {
 resource "aws_lambda_permission" "allow_dynamic" {
   for_each = toset(local.self_scheduling_jobs)
 
-  statement_id  = format("AllowDynamic-%s-%s", each.key, var.project_name)
+  statement_id  = format("AllowDynamic-%s-%s", each.key, var.rule_prefix)
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.odds_scheduler.function_name
   principal     = "events.amazonaws.com"
@@ -238,18 +89,18 @@ resource "aws_lambda_permission" "allow_dynamic" {
 
 # Outputs
 output "bootstrap_rules" {
-  description = "Bootstrap EventBridge rules (initial triggers)"
-  value = {
-    fetch_odds           = aws_cloudwatch_event_rule.bootstrap_fetch_odds.name
-    fetch_scores         = aws_cloudwatch_event_rule.bootstrap_fetch_scores.name
-    update_status        = aws_cloudwatch_event_rule.bootstrap_update_status.name
-    check_health         = aws_cloudwatch_event_rule.bootstrap_check_health.name
-    fetch_polymarket     = aws_cloudwatch_event_rule.bootstrap_fetch_polymarket.name
-    backfill_polymarket  = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket.name
-  }
+  description = "Bootstrap EventBridge rules (fixed-schedule, not self-scheduling)"
+  value = var.enable_polymarket ? {
+    backfill_polymarket = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket[0].name
+  } : {}
 }
 
 output "dynamic_rules" {
   description = "Self-scheduling EventBridge rules (schedule updated by Lambda)"
   value = { for k, v in aws_cloudwatch_event_rule.dynamic : k => v.name }
+}
+
+output "self_scheduling_jobs" {
+  description = "Job names that use self-scheduling (CSV for scripts)"
+  value       = join(",", local.self_scheduling_jobs)
 }

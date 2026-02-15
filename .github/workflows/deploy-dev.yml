@@ -73,10 +73,15 @@ jobs:
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
             -out=tfplan
 
+      - name: Clean up stale log group
+        run: aws logs delete-log-group --log-group-name /aws/lambda/odds-scheduler-dev --region $AWS_REGION 2>/dev/null || true
+
       - name: Deploy to Dev
+        id: deploy
         run: |
           cd deployment/aws/terraform
           terraform apply -auto-approve tfplan
+          echo "jobs=$(terraform output -raw self_scheduling_jobs)" >> $GITHUB_OUTPUT
 
       - name: Run database migrations
         run: uv run alembic upgrade head
@@ -85,10 +90,16 @@ jobs:
         run: uv run pytest tests/migration -v
 
       - name: Test Lambda functions
-        run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler-dev --region ${{ env.AWS_REGION }}
+        run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler-dev --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
 
       - name: Verify database writes
         run: uv run python scripts/ci/verify_database.py
+
+      - name: Activate self-scheduling rules
+        run: bash scripts/activate-schedules.sh --lambda-name odds-scheduler-dev --rule-prefix odds-dev --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
+
+      - name: Verify schedule activation
+        run: bash scripts/verify-schedules.sh --rule-prefix odds-dev --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
 
       - name: Deployment Summary
         if: success()
@@ -109,7 +120,6 @@ jobs:
             -var="odds_api_key=$ODDS_API_KEY" \
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
             -auto-approve
-          aws logs delete-log-group --log-group-name /aws/lambda/odds-scheduler-dev --region $AWS_REGION 2>/dev/null || true
         continue-on-error: true
 
       - name: Upload logs on failure

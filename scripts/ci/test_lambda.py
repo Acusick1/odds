@@ -141,6 +141,11 @@ def main():
         default="eu-west-1",
         help="AWS region (default: eu-west-1)",
     )
+    parser.add_argument(
+        "--jobs",
+        default="fetch-odds",
+        help="Comma-separated job names to test (default: fetch-odds)",
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -151,7 +156,7 @@ def main():
 
     success = True
 
-    jobs = ["fetch-odds", "fetch-polymarket"]
+    jobs = [j.strip() for j in args.jobs.split(",")]
 
     for job in jobs:
         test_success, request_id = test_lambda_job(args.lambda_name, args.region, job)

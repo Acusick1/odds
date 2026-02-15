@@ -67,18 +67,22 @@ jobs:
         run: |
           cd deployment/aws/terraform
           terraform plan \
+            -lock-timeout=300s \
             -var-file="terraform.tfvars.example" \
             -var="environment=production" \
             -var="project_name=odds-scheduler" \
+            -var="rule_prefix=odds" \
             -var="database_url=$DATABASE_URL" \
             -var="odds_api_key=$ODDS_API_KEY" \
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
             -out=tfplan
 
       - name: Deploy to Production
+        id: deploy
         run: |
           cd deployment/aws/terraform
           terraform apply -auto-approve tfplan
+          echo "jobs=$(terraform output -raw self_scheduling_jobs)" >> $GITHUB_OUTPUT
 
       - name: Run database migrations
         run: uv run alembic upgrade head
@@ -90,7 +94,13 @@ jobs:
         run: uv run pytest tests/migration/test_cli_readonly.py -v
 
       - name: Test Lambda functions
-        run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler --region ${{ env.AWS_REGION }}
+        run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
+
+      - name: Activate self-scheduling rules
+        run: bash scripts/activate-schedules.sh --lambda-name odds-scheduler --rule-prefix odds --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
+
+      - name: Verify schedule activation
+        run: bash scripts/verify-schedules.sh --rule-prefix odds --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
 
       - name: Verify database writes
         run: uv run python scripts/ci/verify_database.py
