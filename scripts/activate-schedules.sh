@@ -2,20 +2,20 @@
 # Invokes Lambda for each self-scheduling job and polls until rules activate.
 #
 # Usage:
-#   ./scripts/activate-schedules.sh --lambda-name <name> --rule-prefix <prefix> [--region <region>]
+#   ./scripts/activate-schedules.sh --lambda-name <name> --rule-prefix <prefix> \
+#     [--jobs fetch-odds,fetch-scores,...] [--region <region>]
 
 set -euo pipefail
 
 LAMBDA_NAME=""
 RULE_PREFIX=""
 REGION="${AWS_REGION:-eu-west-1}"
+JOBS_CSV=""
 POLL_INTERVAL=10
 POLL_TIMEOUT=120
 
-JOBS=("fetch-odds" "fetch-scores" "update-status" "check-health" "fetch-polymarket")
-
 usage() {
-  echo "Usage: $0 --lambda-name <name> --rule-prefix <prefix> [--region <region>]"
+  echo "Usage: $0 --lambda-name <name> --rule-prefix <prefix> --jobs <csv> [--region <region>]"
   exit 1
 }
 
@@ -23,12 +23,15 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --lambda-name) LAMBDA_NAME="$2"; shift 2 ;;
     --rule-prefix) RULE_PREFIX="$2"; shift 2 ;;
+    --jobs)        JOBS_CSV="$2"; shift 2 ;;
     --region)      REGION="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
 
-[[ -z "$LAMBDA_NAME" || -z "$RULE_PREFIX" ]] && usage
+[[ -z "$LAMBDA_NAME" || -z "$RULE_PREFIX" || -z "$JOBS_CSV" ]] && usage
+
+IFS=',' read -ra JOBS <<< "$JOBS_CSV"
 
 echo "==> Invoking Lambda for each self-scheduling job..."
 for job in "${JOBS[@]}"; do

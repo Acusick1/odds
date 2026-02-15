@@ -46,6 +46,12 @@ variable "rule_prefix" {
   default     = "odds"
 }
 
+variable "enable_polymarket" {
+  description = "Deploy Polymarket EventBridge rules (fetch + backfill)"
+  type        = bool
+  default     = false
+}
+
 variable "image_tag" {
   description = "Docker image tag to deploy (e.g., dev-a1b2c3d or dev-latest)"
   type        = string

@@ -29,6 +29,9 @@ project_name = "odds-scheduler-dev"
 # Production:  "odds"    → rules named odds-fetch-odds, etc.
 rule_prefix = "odds-dev"
 
+# Deploy Polymarket EventBridge rules (fetch + backfill)
+enable_polymarket = false
+
 # ============================================================================
 # Lambda Configuration
 # ============================================================================

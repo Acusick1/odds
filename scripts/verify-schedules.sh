@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Verifies that all self-scheduling EventBridge rules are active.
+# Verifies that self-scheduling EventBridge rules are active.
 #
 # Usage:
-#   ./scripts/verify-schedules.sh --rule-prefix <prefix> [--region <region>]
+#   ./scripts/verify-schedules.sh --rule-prefix <prefix> [--jobs <csv>] [--region <region>]
+#
+# With --jobs: checks the specified rules.
+# Without --jobs: discovers rules by prefix (skips bootstrap rules).
 #
 # Checks for each rule:
-#   - Rule exists
 #   - State is ENABLED
 #   - Schedule is a cron expression (not a placeholder rate)
 #   - Cron year (if present) is not in the past
@@ -14,17 +16,17 @@ set -euo pipefail
 
 RULE_PREFIX=""
 REGION="${AWS_REGION:-eu-west-1}"
-
-JOBS=("fetch-odds" "fetch-scores" "update-status" "check-health" "fetch-polymarket")
+JOBS_CSV=""
 
 usage() {
-  echo "Usage: $0 --rule-prefix <prefix> [--region <region>]"
+  echo "Usage: $0 --rule-prefix <prefix> [--jobs <csv>] [--region <region>]"
   exit 1
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --rule-prefix) RULE_PREFIX="$2"; shift 2 ;;
+    --jobs)        JOBS_CSV="$2"; shift 2 ;;
     --region)      REGION="$2"; shift 2 ;;
     *) usage ;;
   esac
@@ -32,11 +34,28 @@ done
 
 [[ -z "$RULE_PREFIX" ]] && usage
 
-echo "==> Verifying dynamic rule states (prefix=$RULE_PREFIX, region=$REGION)..."
+if [[ -n "$JOBS_CSV" ]]; then
+  IFS=',' read -ra RULES <<< "$JOBS_CSV"
+  RULES=("${RULES[@]/#/$RULE_PREFIX-}")
+else
+  echo "==> Discovering rules with prefix '$RULE_PREFIX-'..."
+  mapfile -t RULES < <(
+    aws events list-rules \
+      --name-prefix "${RULE_PREFIX}-" \
+      --region "$REGION" \
+      --query 'Rules[].Name' \
+      --output text | tr '\t' '\n' | grep -v -- '-bootstrap$' | sort
+  )
+  if [[ ${#RULES[@]} -eq 0 ]]; then
+    echo "ERROR: No dynamic rules found with prefix '${RULE_PREFIX}-'"
+    exit 1
+  fi
+fi
+
+echo "==> Verifying ${#RULES[@]} dynamic rules (prefix=$RULE_PREFIX, region=$REGION)..."
 FAILED=0
 
-for job in "${JOBS[@]}"; do
-  rule_name="${RULE_PREFIX}-${job}"
+for rule_name in "${RULES[@]}"; do
   echo -n "    $rule_name: "
 
   rule_json=$(aws events describe-rule \
@@ -83,4 +102,4 @@ if [[ "$FAILED" -gt 0 ]]; then
 fi
 
 echo ""
-echo "All ${#JOBS[@]} dynamic rules verified successfully."
+echo "All ${#RULES[@]} dynamic rules verified successfully."
