@@ -1,7 +1,7 @@
 # Bootstrap rule for Polymarket price history backfill
 # Runs on fixed schedule (not self-scheduling) to stay ahead of 30-day CLOB retention window
 resource "aws_cloudwatch_event_rule" "bootstrap_backfill_polymarket" {
-  name                = format("%s-backfill-polymarket-bootstrap", var.project_name)
+  name                = format("%s-backfill-polymarket-bootstrap", var.rule_prefix)
   description         = "Recurring Polymarket price history backfill (30-day CLOB retention)"
   schedule_expression = "rate(3 days)"
   state               = "ENABLED"
@@ -18,7 +18,7 @@ resource "aws_cloudwatch_event_target" "bootstrap_backfill_polymarket_target" {
 }
 
 resource "aws_lambda_permission" "allow_eventbridge_backfill_polymarket" {
-  statement_id  = format("AllowExecutionFromEventBridgeBackfillPolymarket-%s", var.project_name)
+  statement_id  = format("AllowExecutionFromEventBridgeBackfillPolymarket-%s", var.rule_prefix)
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.odds_scheduler.function_name
   principal     = "events.amazonaws.com"
