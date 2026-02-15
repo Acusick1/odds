@@ -93,11 +93,11 @@ jobs:
       - name: Test Lambda functions
         run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler --region ${{ env.AWS_REGION }}
 
+      - name: Activate self-scheduling rules
+        run: bash scripts/activate-schedules.sh --lambda-name odds-scheduler --rule-prefix odds --region ${{ env.AWS_REGION }}
+
       - name: Verify schedule activation
-        run: |
-          bash scripts/verify-schedules.sh \
-            --rule-prefix odds \
-            --region ${{ env.AWS_REGION }}
+        run: bash scripts/verify-schedules.sh --rule-prefix odds --region ${{ env.AWS_REGION }}
 
       - name: Verify database writes
         run: uv run python scripts/ci/verify_database.py
