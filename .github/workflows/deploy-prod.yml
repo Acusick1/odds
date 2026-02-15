@@ -70,6 +70,7 @@ jobs:
             -var-file="terraform.tfvars.example" \
             -var="environment=production" \
             -var="project_name=odds-scheduler" \
+            -var="rule_prefix=odds" \
             -var="database_url=$DATABASE_URL" \
             -var="odds_api_key=$ODDS_API_KEY" \
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
@@ -91,6 +92,13 @@ jobs:
 
       - name: Test Lambda functions
         run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler --region ${{ env.AWS_REGION }}
+
+      - name: Verify schedule activation
+        run: |
+          bash scripts/verify-schedules.sh \
+            --lambda-name odds-scheduler \
+            --rule-prefix odds \
+            --region ${{ env.AWS_REGION }}
 
       - name: Verify database writes
         run: uv run python scripts/ci/verify_database.py

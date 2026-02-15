@@ -35,9 +35,15 @@ variable "odds_api_key" {
 }
 
 variable "project_name" {
-  description = "Project name for resource naming"
+  description = "Project name for resource naming (Lambda, IAM, ECR)"
   type        = string
   default     = "odds-scheduler-dev"
+}
+
+variable "rule_prefix" {
+  description = "Prefix for EventBridge rule names (decoupled from project_name)"
+  type        = string
+  default     = "odds"
 }
 
 variable "image_tag" {

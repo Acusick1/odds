@@ -1,0 +1,80 @@
+name: Schedule Health Check
+
+on:
+  schedule:
+    - cron: '0 10 * * *'  # Daily at 10:00 UTC
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-west-1
+  RULE_PREFIX: odds
+
+jobs:
+  check-schedules:
+    name: Verify EventBridge Rule Schedules
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check dynamic rule states
+        run: |
+          JOBS=("fetch-odds" "fetch-scores" "update-status" "check-health" "fetch-polymarket")
+          FAILED=0
+
+          for job in "${JOBS[@]}"; do
+            rule_name="${RULE_PREFIX}-${job}"
+            echo -n "Checking $rule_name: "
+
+            rule_json=$(aws events describe-rule \
+              --name "$rule_name" \
+              --region "$AWS_REGION" \
+              --output json 2>&1) || {
+              echo "FAIL (rule not found)"
+              FAILED=$((FAILED + 1))
+              continue
+            }
+
+            state=$(echo "$rule_json" | python3 -c "import json,sys; print(json.load(sys.stdin)['State'])")
+            schedule=$(echo "$rule_json" | python3 -c "import json,sys; print(json.load(sys.stdin)['ScheduleExpression'])")
+
+            if [[ "$state" != "ENABLED" ]]; then
+              echo "FAIL (State=$state)"
+              FAILED=$((FAILED + 1))
+              continue
+            fi
+
+            if [[ "$schedule" == rate* ]]; then
+              echo "FAIL (Schedule='$schedule' — rule not self-scheduled)"
+              FAILED=$((FAILED + 1))
+              continue
+            fi
+
+            # For cron expressions with a specific year, verify the year is current or future
+            if [[ "$schedule" =~ cron\(.*([0-9]{4})\) ]]; then
+              cron_year="${BASH_REMATCH[1]}"
+              current_year=$(date -u +%Y)
+              if [[ "$cron_year" -lt "$current_year" ]]; then
+                echo "FAIL (Schedule='$schedule' — cron year $cron_year is in the past)"
+                FAILED=$((FAILED + 1))
+                continue
+              fi
+            fi
+
+            echo "OK (State=$state, Schedule=$schedule)"
+          done
+
+          if [[ "$FAILED" -gt 0 ]]; then
+            echo ""
+            echo "ERROR: $FAILED rule(s) are stale or inactive."
+            exit 1
+          fi
+
+          echo ""
+          echo "All dynamic rules are healthy."
