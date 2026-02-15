@@ -10,7 +10,7 @@ resource "aws_cloudwatch_event_rule" "bootstrap_fetch_odds" {
 
 resource "aws_cloudwatch_event_target" "bootstrap_fetch_odds_target" {
   rule      = aws_cloudwatch_event_rule.bootstrap_fetch_odds.name
-  target_id = "lambda"
+  target_id = "1"
   arn       = aws_lambda_function.odds_scheduler.arn
 
   input = jsonencode({
@@ -41,7 +41,7 @@ resource "aws_cloudwatch_event_rule" "bootstrap_fetch_scores" {
 
 resource "aws_cloudwatch_event_target" "bootstrap_fetch_scores_target" {
   rule      = aws_cloudwatch_event_rule.bootstrap_fetch_scores.name
-  target_id = "lambda"
+  target_id = "1"
   arn       = aws_lambda_function.odds_scheduler.arn
 
   input = jsonencode({
@@ -72,7 +72,7 @@ resource "aws_cloudwatch_event_rule" "bootstrap_update_status" {
 
 resource "aws_cloudwatch_event_target" "bootstrap_update_status_target" {
   rule      = aws_cloudwatch_event_rule.bootstrap_update_status.name
-  target_id = "lambda"
+  target_id = "1"
   arn       = aws_lambda_function.odds_scheduler.arn
 
   input = jsonencode({
@@ -103,7 +103,7 @@ resource "aws_cloudwatch_event_rule" "bootstrap_check_health" {
 
 resource "aws_cloudwatch_event_target" "bootstrap_check_health_target" {
   rule      = aws_cloudwatch_event_rule.bootstrap_check_health.name
-  target_id = "lambda"
+  target_id = "1"
   arn       = aws_lambda_function.odds_scheduler.arn
 
   input = jsonencode({
@@ -135,7 +135,7 @@ resource "aws_cloudwatch_event_rule" "bootstrap_fetch_polymarket" {
 
 resource "aws_cloudwatch_event_target" "bootstrap_fetch_polymarket_target" {
   rule      = aws_cloudwatch_event_rule.bootstrap_fetch_polymarket.name
-  target_id = "lambda"
+  target_id = "1"
   arn       = aws_lambda_function.odds_scheduler.arn
 
   input = jsonencode({
@@ -167,7 +167,7 @@ resource "aws_cloudwatch_event_rule" "bootstrap_backfill_polymarket" {
 
 resource "aws_cloudwatch_event_target" "bootstrap_backfill_polymarket_target" {
   rule      = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket.name
-  target_id = "lambda"
+  target_id = "1"
   arn       = aws_lambda_function.odds_scheduler.arn
 
   input = jsonencode({
