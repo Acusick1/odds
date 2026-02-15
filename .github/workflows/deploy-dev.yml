@@ -90,7 +90,7 @@ jobs:
         run: uv run pytest tests/migration -v
 
       - name: Test Lambda functions
-        run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler-dev --region ${{ env.AWS_REGION }}
+        run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler-dev --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
 
       - name: Verify database writes
         run: uv run python scripts/ci/verify_database.py
