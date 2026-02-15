@@ -68,6 +68,8 @@ aws ecr get-login-password --region "$AWS_REGION" | \
 # Build image
 echo -e "${YELLOW}Building Docker image...${NC}"
 docker build \
+    --provenance=false \
+    --platform linux/amd64 \
     -f deployment/aws/Dockerfile.lambda \
     -t "${ECR_FULL_URL}:${IMAGE_TAG}" \
     -t "${ECR_FULL_URL}:${LATEST_TAG}" \
