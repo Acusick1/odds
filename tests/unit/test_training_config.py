@@ -419,8 +419,9 @@ class TestFeatureConfig:
         assert config.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
         assert config.markets == ["h2h", "spreads", "totals"]
         assert config.outcome == "home"
-        assert config.opening_tier == FetchTier.EARLY
+        assert config.adapter == "xgboost"
         assert config.closing_tier == FetchTier.CLOSING
+        assert config.sampling.strategy == "time_range"
 
     def test_custom_bookmakers(self):
         """Test custom bookmaker lists."""
@@ -431,21 +432,19 @@ class TestFeatureConfig:
         assert config.sharp_bookmakers == ["pinnacle", "circasports"]
         assert config.retail_bookmakers == ["fanduel"]
 
-    def test_invalid_tier_order(self):
-        """Test invalid tier order validation (opening must be earlier than closing)."""
-        with pytest.raises(ValueError, match="must be earlier than"):
-            FeatureConfig(
-                opening_tier=FetchTier.CLOSING,
-                closing_tier=FetchTier.EARLY,
-            )
+    def test_sampling_hours_range_validated(self):
+        """Test that SamplingConfig rejects invalid hours range."""
+        from odds_analytics.training import SamplingConfig
 
-    def test_same_tier_fails(self):
-        """Test same opening/closing tier fails."""
-        with pytest.raises(ValueError, match="must be earlier than"):
-            FeatureConfig(
-                opening_tier=FetchTier.SHARP,
-                closing_tier=FetchTier.SHARP,
-            )
+        with pytest.raises(ValueError, match="min_hours.*must be less than max_hours"):
+            SamplingConfig(strategy="time_range", min_hours=12.0, max_hours=3.0)
+
+    def test_sampling_equal_hours_fails(self):
+        """Test that equal min/max hours fails."""
+        from odds_analytics.training import SamplingConfig
+
+        with pytest.raises(ValueError, match="min_hours.*must be less than max_hours"):
+            SamplingConfig(strategy="time_range", min_hours=6.0, max_hours=6.0)
 
     def test_empty_bookmakers_fails(self):
         """Test that empty bookmaker lists fail."""

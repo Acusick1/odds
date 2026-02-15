@@ -313,13 +313,14 @@ class LSTMStrategy(BettingStrategy):
 
         # Prepare training data using composable feature groups
         feature_config = FeatureConfig(
+            adapter="lstm",
             outcome=outcome,
             markets=[self.params["market"]],
             sharp_bookmakers=self.params["sharp_bookmakers"],
             retail_bookmakers=self.params["retail_bookmakers"],
             lookback_hours=self.params["lookback_hours"],
             timesteps=self.params["timesteps"],
-            feature_groups=["sequence_full"],  # LSTM uses full 3D sequences
+            feature_groups=["tabular"],
         )
         result = await prepare_training_data(
             events=events,

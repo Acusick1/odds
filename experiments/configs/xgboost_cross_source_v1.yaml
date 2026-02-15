@@ -6,12 +6,13 @@ experiment:
   - polymarket
   - clv
   - h2h
-  description: >
-    Initial CLV prediction model using cross-source Polymarket + sportsbook
-    features. Combines sportsbook tabular and trajectory features with
-    Polymarket price, order book, and cross-source divergence features.
-    Training data limited to ~222 events with dual-source moneyline coverage
-    (Jan 10 – Feb 10, 2026). Heavily regularized for small sample size.
+  description: 'Initial CLV prediction model using cross-source Polymarket + sportsbook
+    features. Combines sportsbook tabular and trajectory features with Polymarket
+    price, order book, and cross-source divergence features. Training data limited
+    to ~222 events with dual-source moneyline coverage (Jan 10 – Feb 10, 2026). Heavily
+    regularized for small sample size.
+
+    '
 training:
   strategy_type: xgboost_line_movement
   data:
@@ -42,6 +43,7 @@ training:
     n_jobs: -1
     early_stopping_rounds: 10
   features:
+    adapter: xgboost
     sharp_bookmakers:
     - pinnacle
     retail_bookmakers:
@@ -51,9 +53,7 @@ training:
     markets:
     - h2h
     outcome: home
-    opening_tier: early
     closing_tier: closing
-    decision_tier: pregame
     lookback_hours: 72
     timesteps: 24
     normalize: false
@@ -65,8 +65,11 @@ training:
     pm_velocity_window_hours: 2.0
     pm_price_tolerance_minutes: 30
     target_type: devigged_pinnacle
-    decision_hours_range: [3.0, 12.0]
-    max_samples_per_event: 5
+    sampling:
+      strategy: time_range
+      min_hours: 3.0
+      max_hours: 12.0
+      max_samples_per_event: 5
   feature_selection:
     enabled: true
     method: ensemble

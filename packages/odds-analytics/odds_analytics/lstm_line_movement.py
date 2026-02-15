@@ -224,7 +224,6 @@ class LSTMLineMovementStrategy(BettingStrategy):
         batch_size: int = 32,
         learning_rate: float = 0.001,
         outcome: str = "home",
-        opening_tier: FetchTier = FetchTier.EARLY,
         closing_tier: FetchTier = FetchTier.CLOSING,
         validation_split: float = 0.2,
         patience: int | None = None,
@@ -240,7 +239,6 @@ class LSTMLineMovementStrategy(BettingStrategy):
             batch_size: Batch size for training (default: 32)
             learning_rate: Learning rate for Adam optimizer (default: 0.001)
             outcome: What to predict - "home" or "away" (default: "home")
-            opening_tier: Fetch tier for opening line (default: EARLY)
             closing_tier: Fetch tier for closing line (default: CLOSING)
             validation_split: Fraction of data for validation (default: 0.2)
             patience: Stop if no improvement for N epochs (default: None)
@@ -265,15 +263,15 @@ class LSTMLineMovementStrategy(BettingStrategy):
 
         # Prepare training data with regression targets using composable feature groups
         feature_config = FeatureConfig(
+            adapter="lstm",
             outcome=outcome,
             markets=[self.params["market"]],
             sharp_bookmakers=self.params["sharp_bookmakers"],
             retail_bookmakers=self.params["retail_bookmakers"],
             lookback_hours=self.params["lookback_hours"],
             timesteps=self.params["timesteps"],
-            opening_tier=opening_tier,
             closing_tier=closing_tier,
-            feature_groups=["sequence_full"],  # LSTM uses full 3D sequences
+            feature_groups=["tabular"],
         )
         result = await prepare_training_data(
             events=events,

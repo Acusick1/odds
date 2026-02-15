@@ -524,8 +524,8 @@ def _display_config_summary(config: MLTrainingConfig, verbose: bool = False) -> 
         feature_table.add_row("Retail Bookmakers", ", ".join(features.retail_bookmakers))
         feature_table.add_row("Markets", ", ".join(features.markets))
         feature_table.add_row("Outcome", features.outcome)
-        feature_table.add_row("Opening Tier", features.opening_tier.value)
         feature_table.add_row("Closing Tier", features.closing_tier.value)
+        feature_table.add_row("Sampling Strategy", features.sampling.strategy)
 
         console.print(feature_table)
 

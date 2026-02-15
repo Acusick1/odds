@@ -85,6 +85,39 @@ async def test_events_with_odds(pglite_async_session):
         )
         pglite_async_session.add(opening_snapshot)
 
+        # Create pregame odds snapshot (7.5h before) - falls in [3h, 12h] decision window
+        pregame_time = commence_time - timedelta(hours=7.5)
+        pregame_home_price = opening_home_price - 5
+        pregame_away_price = opening_away_price + 5
+        pregame_raw_data = {
+            "bookmakers": [
+                {
+                    "key": bookmaker,
+                    "title": bookmaker.title(),
+                    "last_update": pregame_time.isoformat(),
+                    "markets": [
+                        {
+                            "key": "h2h",
+                            "outcomes": [
+                                {"name": event.home_team, "price": pregame_home_price},
+                                {"name": event.away_team, "price": pregame_away_price},
+                            ],
+                        }
+                    ],
+                }
+                for bookmaker in bookmakers
+            ]
+        }
+        pregame_snapshot = OddsSnapshot(
+            event_id=event.id,
+            snapshot_time=pregame_time,
+            raw_data=pregame_raw_data,
+            bookmaker_count=3,
+            fetch_tier="pregame",
+            hours_until_commence=7.5,
+        )
+        pglite_async_session.add(pregame_snapshot)
+
         # Create closing odds snapshot (0.5h before)
         closing_time = commence_time - timedelta(hours=0.5)
         closing_raw_data = {
