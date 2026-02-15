@@ -101,6 +101,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
 
         self.aws_region = aws_region or os.getenv("AWS_REGION")
         self.lambda_arn = lambda_arn or os.getenv("LAMBDA_ARN")
+        self.rule_prefix = os.getenv("RULE_PREFIX")
 
         # Health check caching (5-minute TTL)
         self._health_check_cache: tuple[BackendHealth, datetime] | None = None
@@ -146,6 +147,9 @@ class AWSEventBridgeBackend(SchedulerBackend):
         )
         builder.check_required(
             self.lambda_arn, "LAMBDA_ARN", "LAMBDA_ARN environment variable is required"
+        )
+        builder.check_required(
+            self.rule_prefix, "RULE_PREFIX", "RULE_PREFIX environment variable is required"
         )
 
         # Check boto3 availability
@@ -237,7 +241,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
         try:
             # Try to describe a non-existent rule to test permissions
             try:
-                self.events_client.describe_rule(Name="odds-permission-test")
+                self.events_client.describe_rule(Name=f"{self.rule_prefix}-permission-test")
             except self.events_client.exceptions.ResourceNotFoundException:
                 # Expected - we just want to verify we have describe permissions
                 builder.pass_check("IAM permissions verified")
@@ -254,12 +258,12 @@ class AWSEventBridgeBackend(SchedulerBackend):
             return []
 
         try:
-            # List all EventBridge rules with odds- prefix
-            response = self.events_client.list_rules(NamePrefix="odds-")
+            # List all EventBridge rules with project prefix
+            response = self.events_client.list_rules(NamePrefix=f"{self.rule_prefix}-")
 
             jobs = []
             for rule in response.get("Rules", []):
-                job_name = rule["Name"].replace("odds-", "", 1)
+                job_name = rule["Name"].replace(f"{self.rule_prefix}-", "", 1)
 
                 # Parse schedule expression to get next run time
                 schedule_expr = rule.get("ScheduleExpression", "")
@@ -288,7 +292,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
             logger.info("dry_run_get_job_status", job=job_name)
             return None
 
-        rule_name = f"odds-{job_name}"
+        rule_name = f"{self.rule_prefix}-{job_name}"
 
         try:
             response = self.events_client.describe_rule(Name=rule_name)
@@ -369,7 +373,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
         # Apply retry decorator and execute
         @retry_decorator
         async def _execute():
-            rule_name = f"odds-{job_name}"
+            rule_name = f"{self.rule_prefix}-{job_name}"
             schedule_expression = _format_aws_schedule(next_time)
 
             # Debug: Log the exact schedule expression
@@ -427,7 +431,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
             logger.info("dry_run_cancel", job=job_name, backend="aws_eventbridge")
             return
 
-        rule_name = f"odds-{job_name}"
+        rule_name = f"{self.rule_prefix}-{job_name}"
 
         try:
             self.events_client.disable_rule(Name=rule_name)

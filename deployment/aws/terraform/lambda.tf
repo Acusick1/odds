@@ -37,7 +37,7 @@ resource "aws_iam_role_policy" "eventbridge_access" {
           "events:EnableRule",
           "events:DescribeRule"
         ]
-        Resource = "arn:aws:events:${var.aws_region}:*:rule/odds-*"
+        Resource = "arn:aws:events:${var.aws_region}:*:rule/${var.project_name}-*"
       }
     ]
   })
@@ -58,6 +58,7 @@ resource "aws_lambda_function" "odds_scheduler" {
       DATABASE_URL      = var.database_url
       ODDS_API_KEY      = var.odds_api_key
       LAMBDA_ARN        = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}"
+      RULE_PREFIX       = var.project_name
 
       # Optional: Configure other settings
       LOG_LEVEL         = "INFO"

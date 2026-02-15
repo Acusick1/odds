@@ -199,7 +199,7 @@ locals {
 resource "aws_cloudwatch_event_rule" "dynamic" {
   for_each = toset(local.self_scheduling_jobs)
 
-  name                = "odds-${each.key}"
+  name                = "${var.project_name}-${each.key}"
   description         = "Self-scheduling rule for ${each.key} (updated by Lambda)"
   schedule_expression = "rate(1 day)"
   state               = "ENABLED"
