@@ -73,6 +73,9 @@ jobs:
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
             -out=tfplan
 
+      - name: Clean up stale log group
+        run: aws logs delete-log-group --log-group-name /aws/lambda/odds-scheduler-dev --region $AWS_REGION 2>/dev/null || true
+
       - name: Deploy to Dev
         run: |
           cd deployment/aws/terraform
@@ -109,7 +112,6 @@ jobs:
             -var="odds_api_key=$ODDS_API_KEY" \
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
             -auto-approve
-          aws logs delete-log-group --log-group-name /aws/lambda/odds-scheduler-dev --region $AWS_REGION 2>/dev/null || true
         continue-on-error: true
 
       - name: Upload logs on failure
