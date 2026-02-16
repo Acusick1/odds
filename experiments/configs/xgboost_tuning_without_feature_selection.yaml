@@ -1,28 +1,35 @@
-experiment:
-  name: xgboost_baseline_h2h
-  tags:
-  - xgboost
-  - baseline
-  - h2h
-  - tuning
-  description: 'Baseline XGBoost model with standard hyperparameter tuning (no feature
-    selection).
+# Example configuration for XGBoost tuning WITHOUT feature selection
+#
+# This configuration demonstrates standard hyperparameter tuning without
+# integrating feature selection. All features from the selected feature_groups
+# will be used in all trials.
+#
+# Compare this with xgboost_feature_selection_tuning.yaml to see the difference.
+#
+# Usage:
+#   uv run odds train run --config experiments/configs/xgboost_tuning_without_feature_selection.yaml
 
+experiment:
+  name: "xgboost_baseline_h2h"
+  tags: ["xgboost", "baseline", "h2h", "tuning"]
+  description: |
+    Baseline XGBoost model with standard hyperparameter tuning (no feature selection).
     Uses all features from the selected feature groups.
 
-    '
 training:
-  strategy_type: xgboost_line_movement
+  strategy_type: "xgboost_line_movement"
+
   data:
-    start_date: '2024-10-01'
-    end_date: '2024-12-31'
+    start_date: "2024-10-01"
+    end_date: "2024-12-31"
     test_split: 0.2
     validation_split: 0.1
     random_seed: 42
     shuffle: true
     use_kfold: true
-    cv_method: timeseries
+    cv_method: "timeseries"
     n_folds: 5
+
   model:
     n_estimators: 100
     max_depth: 6
@@ -33,78 +40,85 @@ training:
     colsample_bytree: 0.8
     reg_alpha: 0.0
     reg_lambda: 1.0
-    objective: reg:squarederror
+    objective: "reg:squarederror"
     random_state: 42
     n_jobs: -1
     early_stopping_rounds: 10
+
   features:
-    adapter: xgboost
-    sharp_bookmakers:
-    - pinnacle
-    retail_bookmakers:
-    - fanduel
-    - draftkings
-    - betmgm
-    markets:
-    - h2h
-    - spreads
-    - totals
-    outcome: home
+    adapter: "xgboost"
+    sharp_bookmakers: ["pinnacle"]
+    retail_bookmakers: ["fanduel", "draftkings", "betmgm"]
+    markets: ["h2h", "spreads", "totals"]
+    outcome: "home"
     normalize: false
-    feature_groups:
-    - tabular
-    - trajectory
+    feature_groups: ["tabular", "trajectory"]
     sampling:
-      strategy: tier
-      decision_tier: pregame
+      strategy: "tier"
+      decision_tier: "pregame"
+
+  # Feature selection disabled
   feature_selection:
     enabled: false
-  output_path: models
+
+  output_path: "models"
+
+# Hyperparameter tuning configuration
 tuning:
   n_trials: 50
   timeout: null
-  direction: minimize
-  metric: val_mse
-  pruner: median
-  sampler: tpe
+  direction: "minimize"
+  metric: "val_mse"
+  pruner: "median"
+  sampler: "tpe"
+
+  # Search spaces (same as feature selection example, but no top_k_features)
   search_spaces:
     n_estimators:
       type: int
       low: 50
       high: 300
       step: 50
+
     max_depth:
       type: int
       low: 3
       high: 10
+
     learning_rate:
       type: float
       low: 0.01
       high: 0.3
       log: true
+
     subsample:
       type: float
       low: 0.6
       high: 1.0
       step: 0.1
+
     colsample_bytree:
       type: float
       low: 0.6
       high: 1.0
       step: 0.1
+
     reg_alpha:
       type: float
       low: 0.0
       high: 1.0
+
     reg_lambda:
       type: float
       low: 0.0
       high: 2.0
+
+# Experiment tracking configuration
 tracking:
   enabled: true
-  backend: mlflow
-  tracking_uri: mlruns
-  experiment_name: xgboost_baseline_experiments
+  backend: "mlflow"
+  tracking_uri: "mlruns"
+  experiment_name: "xgboost_baseline_experiments"
   log_model: true
   log_params: true
   log_metrics: true

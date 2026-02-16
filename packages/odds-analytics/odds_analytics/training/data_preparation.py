@@ -27,7 +27,7 @@ Example usage:
         y_train, y_test = result.y_train, result.y_test
         feature_names = result.feature_names
 
-        # For LSTM (when using sequence_full group)
+        # For LSTM
         masks_train, masks_test = result.masks_train, result.masks_test
     ```
 """

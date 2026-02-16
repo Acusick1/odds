@@ -67,7 +67,7 @@ __all__ = [
     "TierSampler",
     "TimeRangeSampler",
     "XGBoostAdapter",
-    "TrainingDataResult",
+    "PreparedFeatureData",
     "prepare_training_data",
     "filter_completed_events",
 ]
@@ -507,7 +507,7 @@ class XGBoostAdapter:
         return np.concatenate(parts)
 
 
-def _make_adapter(config: FeatureConfig) -> XGBoostAdapter:
+def _make_adapter(config: FeatureConfig) -> FeatureAdapter:
     if config.adapter != "xgboost":
         raise NotImplementedError(f"Adapter '{config.adapter}' is not yet implemented")
     return XGBoostAdapter()
@@ -558,8 +558,8 @@ def _has_pinnacle_closing(closing_snapshot: OddsSnapshot, event: Event) -> bool:
 # =============================================================================
 
 
-class TrainingDataResult:
-    """Container for training data preparation results."""
+class PreparedFeatureData:
+    """Pre-split feature matrix with targets and metadata."""
 
     def __init__(
         self,
@@ -588,7 +588,7 @@ async def prepare_training_data(
     events: list[Event],
     session: AsyncSession,
     config: FeatureConfig,
-) -> TrainingDataResult:
+) -> PreparedFeatureData:
     """Unified training data preparation using the 5-layer adapter architecture.
 
     Sampling strategy and target type are both controlled via config:
@@ -689,7 +689,7 @@ async def prepare_training_data(
         target_std=float(np.std(y)),
     )
 
-    return TrainingDataResult(
+    return PreparedFeatureData(
         X=X,
         y=y,
         feature_names=feature_names,

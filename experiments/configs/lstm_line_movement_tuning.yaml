@@ -1,105 +1,141 @@
-experiment:
-  name: lstm_line_movement_h2h
-  tags:
-  - lstm
-  - line_movement
-  - h2h
-  - tuning
-  description: 'LSTM line movement predictor with HPO tuning.
+# LSTM Line Movement HPO Tuning Configuration
+#
+# This configuration demonstrates hyperparameter optimization for LSTM line movement
+# prediction models using Optuna with pruning and cross-validation.
+#
+# Key Features:
+# - Early stopping with patience/min_delta
+# - Cross-validation with TimeSeriesSplit (recommended for temporal data)
+# - Optuna pruning to terminate unpromising trials
+# - Feature selection DISABLED (LSTM learns feature importance via gating)
+#
+# Usage:
+#   uv run odds tune run --config experiments/configs/lstm_line_movement_tuning.yaml
 
+experiment:
+  name: "lstm_line_movement_h2h"
+  tags: ["lstm", "line_movement", "h2h", "tuning"]
+  description: |
+    LSTM line movement predictor with HPO tuning.
     Uses sequence features to predict probability movement from opening to closing.
 
-    '
 training:
-  strategy_type: lstm_line_movement
+  strategy_type: "lstm_line_movement"
+
   data:
-    start_date: '2025-10-25'
-    end_date: '2025-12-29'
+    start_date: "2025-10-25"
+    end_date: "2025-12-29"
     test_split: 0.2
     validation_split: 0.1
     random_seed: 42
     shuffle: true
     use_kfold: true
-    cv_method: timeseries
+    cv_method: "timeseries"
     n_folds: 5
+
   model:
+    # Architecture
     hidden_size: 64
     num_layers: 2
     dropout: 0.2
     bidirectional: false
+
+    # Sequence parameters
     lookback_hours: 72
     timesteps: 24
+
+    # Training parameters
     epochs: 500
     batch_size: 32
     learning_rate: 0.001
-    loss_function: mse
+    loss_function: "mse"
     weight_decay: 0.0
+
+    # Early stopping
     patience: 10
     min_delta: 0.0001
+
+  # Strategy-specific parameters
   min_predicted_movement: 0.02
   movement_confidence_scale: 5.0
   base_confidence: 0.52
+
   features:
-    adapter: lstm
-    sharp_bookmakers:
-    - pinnacle
-    retail_bookmakers:
-    - fanduel
-    - draftkings
-    - betmgm
-    markets:
-    - h2h
-    - spreads
-    - totals
-    outcome: home
+    adapter: "lstm"
+    sharp_bookmakers: ["pinnacle"]
+    retail_bookmakers: ["fanduel", "draftkings", "betmgm"]
+    markets: ["h2h", "spreads", "totals"]
+    outcome: "home"
     normalize: false
-    feature_groups:
-    - tabular
+    feature_groups: ["tabular"]
     sampling:
-      strategy: tier
-      decision_tier: pregame
+      strategy: "tier"
+      decision_tier: "pregame"
+
+  # Feature selection disabled for LSTM (learns feature importance via gating)
   feature_selection:
     enabled: false
-  output_path: models
+
+  output_path: "models"
+
+# Hyperparameter tuning configuration
 tuning:
   n_trials: 100
   timeout: null
-  direction: minimize
-  metric: val_mse
-  pruner: median
-  sampler: tpe
+  direction: "minimize"
+  metric: "val_mse"
+  pruner: "median"  # Prunes unpromising trials based on intermediate values
+  sampler: "tpe"
+
+  # LSTM-specific search spaces
   search_spaces:
+    # Architecture
     hidden_size:
       type: int
       low: 32
       high: 128
       step: 16
+
     num_layers:
       type: int
       low: 1
       high: 3
+
     dropout:
       type: float
       low: 0.1
       high: 0.5
       step: 0.1
+
+    # Training
     learning_rate:
       type: float
       low: 0.0001
       high: 0.01
       log: true
+
     batch_size:
       type: categorical
-      choices:
-      - 16
-      - 32
-      - 64
+      choices: [16, 32, 64]
+
     weight_decay:
       type: float
       low: 0.0
       high: 0.001
+
+    # Early stopping
     patience:
       type: int
       low: 5
       high: 20
       step: 5
+
+# Experiment tracking configuration
+# tracking:
+#   enabled: true
+#   backend: "mlflow"
+#   tracking_uri: "mlruns"
+#   experiment_name: "lstm_line_movement_experiments"
+#   log_model: true
+#   log_params: true
+#   log_metrics: true

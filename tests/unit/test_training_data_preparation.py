@@ -261,7 +261,7 @@ class TestPrepareTrainingDataFromConfig:
     @pytest.mark.asyncio
     async def test_xgboost_data_preparation(self, basic_xgboost_config, mock_events):
         """Test XGBoost data preparation returns correct structure."""
-        from odds_analytics.feature_groups import TrainingDataResult as FGTrainingDataResult
+        from odds_analytics.feature_groups import PreparedFeatureData
 
         session = AsyncMock()
 
@@ -277,7 +277,7 @@ class TestPrepareTrainingDataFromConfig:
             X = np.random.randn(10, 31).astype(np.float32)
             y = np.random.randn(10).astype(np.float32)
             feature_names = [f"feature_{i}" for i in range(31)]
-            mock_prepare.return_value = FGTrainingDataResult(
+            mock_prepare.return_value = PreparedFeatureData(
                 X=X, y=y, feature_names=feature_names, masks=None
             )
 
@@ -295,7 +295,7 @@ class TestPrepareTrainingDataFromConfig:
     @pytest.mark.asyncio
     async def test_lstm_data_preparation(self, basic_lstm_config, mock_events):
         """Test LSTM data preparation returns correct structure with masks."""
-        from odds_analytics.feature_groups import TrainingDataResult as FGTrainingDataResult
+        from odds_analytics.feature_groups import PreparedFeatureData
 
         session = AsyncMock()
 
@@ -312,7 +312,7 @@ class TestPrepareTrainingDataFromConfig:
             y = np.random.randn(10).astype(np.float32)
             masks = np.ones((10, 24), dtype=bool)
             feature_names = [f"feature_{i}" for i in range(17)]
-            mock_prepare.return_value = FGTrainingDataResult(
+            mock_prepare.return_value = PreparedFeatureData(
                 X=X, y=y, feature_names=feature_names, masks=masks
             )
 
@@ -341,7 +341,7 @@ class TestPrepareTrainingDataFromConfig:
     @pytest.mark.asyncio
     async def test_no_valid_training_data_raises_error(self, basic_xgboost_config, mock_events):
         """Test that empty training data raises ValueError."""
-        from odds_analytics.feature_groups import TrainingDataResult as FGTrainingDataResult
+        from odds_analytics.feature_groups import PreparedFeatureData
 
         session = AsyncMock()
 
@@ -353,7 +353,7 @@ class TestPrepareTrainingDataFromConfig:
         ):
             mock_filter.return_value = mock_events
             # Return empty arrays
-            mock_prepare.return_value = FGTrainingDataResult(
+            mock_prepare.return_value = PreparedFeatureData(
                 X=np.array([]), y=np.array([]), feature_names=[], masks=None
             )
 
@@ -368,7 +368,7 @@ class TestPrepareTrainingDataFromConfig:
     @pytest.mark.asyncio
     async def test_train_test_split_ratio(self, basic_xgboost_config, mock_events):
         """Test that train/test split respects configuration."""
-        from odds_analytics.feature_groups import TrainingDataResult as FGTrainingDataResult
+        from odds_analytics.feature_groups import PreparedFeatureData
 
         session = AsyncMock()
 
@@ -382,7 +382,7 @@ class TestPrepareTrainingDataFromConfig:
             X = np.random.randn(100, 31).astype(np.float32)
             y = np.random.randn(100).astype(np.float32)
             feature_names = [f"feature_{i}" for i in range(31)]
-            mock_prepare.return_value = FGTrainingDataResult(
+            mock_prepare.return_value = PreparedFeatureData(
                 X=X, y=y, feature_names=feature_names, masks=None
             )
 
@@ -454,7 +454,7 @@ class TestConfigLoadingIntegration:
     @pytest.mark.asyncio
     async def test_config_to_data_pipeline(self, yaml_config_file):
         """Test end-to-end: config loading -> data preparation -> output shape."""
-        from odds_analytics.feature_groups import TrainingDataResult as FGTrainingDataResult
+        from odds_analytics.feature_groups import PreparedFeatureData
 
         # Load config
         config = MLTrainingConfig.from_yaml(yaml_config_file)
@@ -476,7 +476,7 @@ class TestConfigLoadingIntegration:
             X = np.random.randn(num_samples, num_features).astype(np.float32)
             y = np.random.randn(num_samples).astype(np.float32)
             feature_names = [f"feature_{i}" for i in range(num_features)]
-            mock_prepare.return_value = FGTrainingDataResult(
+            mock_prepare.return_value = PreparedFeatureData(
                 X=X, y=y, feature_names=feature_names, masks=None
             )
 
