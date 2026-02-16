@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 
 import typer
 from odds_core.api_models import create_scheduled_event
-from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import Event
 from odds_lambda.data_fetcher import TheOddsAPIClient
@@ -228,15 +227,12 @@ def upcoming(
 
 async def _discover_upcoming(sport: str) -> None:
     """Async implementation of discover upcoming."""
-    app_settings = get_settings()
-    sports = [sport] if sport else app_settings.data_collection.sports
-
     console.print(f"\n[bold blue]Discovering upcoming {sport} games (free endpoint)[/bold blue]")
     console.print()
 
     async with TheOddsAPIClient() as client:
         service = EventSyncService(client=client)
-        results = await service.sync_sports(sports)
+        results = await service.sync_sports([sport])
 
     for result in results:
         console.print(f"[bold]{result.sport_key}[/bold]")

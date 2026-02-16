@@ -22,7 +22,7 @@ odds fetch scores --sport basketball_nba --days 3
 
 Fetches game scores and updates event status.
 
-## Backfill Commands
+## Discovery Commands
 
 ### Discover Upcoming Games (free)
 
@@ -40,6 +40,8 @@ odds discover games --start YYYY-MM-DD --end YYYY-MM-DD
 ```
 
 Discovers historical games from The Odds API for potential backfill.
+
+## Backfill Commands
 
 ### Detect Gaps and Generate Plan
 

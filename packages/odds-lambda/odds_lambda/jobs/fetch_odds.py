@@ -47,18 +47,22 @@ async def main():
 
     logger.info("fetch_odds_job_started", backend=app_settings.scheduler.backend)
 
-    # Sync upcoming events first (free, 0 quota units)
-    async with TheOddsAPIClient() as client:
-        event_sync = build_event_sync_service(client)
-        sync_results = await event_sync.sync_sports(app_settings.data_collection.sports)
+    # Sync upcoming events first (free, 0 quota units).
+    # Failures here should not block odds ingestion.
+    try:
+        async with TheOddsAPIClient() as client:
+            event_sync = build_event_sync_service(client)
+            sync_results = await event_sync.sync_sports(app_settings.data_collection.sports)
 
-    for sync_result in sync_results:
-        logger.info(
-            "event_sync_result",
-            sport=sync_result.sport_key,
-            inserted=sync_result.inserted,
-            updated=sync_result.updated,
-        )
+        for sync_result in sync_results:
+            logger.info(
+                "event_sync_result",
+                sport=sync_result.sport_key,
+                inserted=sync_result.inserted,
+                updated=sync_result.updated,
+            )
+    except Exception as e:
+        logger.warning("event_sync_failed", error=str(e), exc_info=True)
 
     # Smart execution gating
     intelligence = SchedulingIntelligence(lookahead_days=app_settings.scheduler.lookahead_days)
