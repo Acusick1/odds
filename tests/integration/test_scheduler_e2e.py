@@ -160,8 +160,13 @@ async def test_scheduler_end_to_end(
 
     async def wrapped_fetch_odds():
         """Wrapped job with mocked dependencies."""
+        mock_event_sync = AsyncMock()
+        mock_event_sync.sync_sports = AsyncMock(return_value=[])
         with (
             patch("odds_lambda.jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
+            patch(
+                "odds_lambda.jobs.fetch_odds.build_event_sync_service", return_value=mock_event_sync
+            ),
             patch("odds_lambda.scheduling.intelligence.async_session_maker", mock_session_factory),
         ):
             # Track execution
@@ -293,9 +298,14 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
                 session_factory=mock_session_factory,
             )
 
+        mock_event_sync = AsyncMock()
+        mock_event_sync.sync_sports = AsyncMock(return_value=[])
         with (
             freeze_time(test_time),
             patch("odds_lambda.jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
+            patch(
+                "odds_lambda.jobs.fetch_odds.build_event_sync_service", return_value=mock_event_sync
+            ),
             patch("odds_lambda.scheduling.intelligence.async_session_maker", mock_session_factory),
             patch("odds_lambda.jobs.fetch_odds.get_scheduler_backend") as mock_backend_getter,
         ):
