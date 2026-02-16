@@ -552,8 +552,8 @@ class LSTMAdapter:
                 outcome=outcome,
                 market=market,
             )
-        except Exception:
-            logger.debug("sequence_extraction_failed", event_id=event.id)
+        except Exception as e:
+            logger.debug("sequence_extraction_failed", event_id=event.id, error=str(e))
             return None
 
         return AdapterOutput(features=result["sequence"], mask=result["mask"])
@@ -661,7 +661,7 @@ async def prepare_training_data(
         config: FeatureConfig controlling sampling, features, and target
 
     Returns:
-        TrainingDataResult with X, y, feature_names, and event_ids for CV
+        PreparedFeatureData with X, y, feature_names, masks, and event_ids for CV
     """
     valid_events = filter_completed_events(events)
     if not valid_events:
