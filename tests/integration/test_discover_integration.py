@@ -37,7 +37,6 @@ class TestDiscoverIntegration:
                     start_date_str="2024-10-15",
                     end_date_str="2024-10-15",
                     sport="basketball_nba",
-                    dry_run=False,
                 )
 
             # Verify events were stored in database
@@ -102,7 +101,6 @@ class TestDiscoverIntegration:
                     start_date_str="2024-10-15",
                     end_date_str="2024-10-15",
                     sport="basketball_nba",
-                    dry_run=False,
                 )
 
         # Refresh test_session to get updated data from database
@@ -181,7 +179,6 @@ class TestDiscoverIntegration:
                     start_date_str="2024-10-15",
                     end_date_str="2024-10-16",
                     sport="basketball_nba",
-                    dry_run=False,
                 )
 
             # Verify events in database
@@ -222,7 +219,6 @@ class TestDiscoverIntegration:
                     start_date_str="2024-07-01",  # Off-season
                     end_date_str="2024-07-05",
                     sport="basketball_nba",
-                    dry_run=False,
                 )
 
             # Verify no events in database
@@ -286,7 +282,6 @@ class TestDiscoverIntegration:
                     start_date_str="2024-10-15",
                     end_date_str="2024-10-15",
                     sport="basketball_nba",
-                    dry_run=False,
                 )
 
             # Refresh the event from database
