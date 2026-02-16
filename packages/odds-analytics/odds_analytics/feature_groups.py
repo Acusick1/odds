@@ -5,7 +5,7 @@ Separates data collection from model-specific formatting via five layers:
   1. Collection   — EventDataBundle (loads all data once per event)
   2. Sampling     — SnapshotSampler protocol (TierSampler / TimeRangeSampler)
   3. Target       — pure functions from sequence_loader
-  4. Adapters     — FeatureAdapter protocol (XGBoostAdapter)
+  4. Adapters     — FeatureAdapter protocol (XGBoostAdapter, LSTMAdapter)
   5. Orchestrator — single prepare_training_data() entry point
 
 Example:
@@ -66,7 +66,9 @@ __all__ = [
     "collect_event_data",
     "TierSampler",
     "TimeRangeSampler",
+    "AdapterOutput",
     "XGBoostAdapter",
+    "LSTMAdapter",
     "PreparedFeatureData",
     "prepare_training_data",
     "filter_completed_events",
@@ -159,9 +161,9 @@ async def collect_event_data(
                         home_team=event.home_team,
                     )
 
-    # Sequences for trajectory features
+    # Sequences for trajectory features or LSTM adapter
     sequences: list[list[Odds]] = []
-    if "trajectory" in config.feature_groups:
+    if "trajectory" in config.feature_groups or config.adapter == "lstm":
         sequences = await load_sequences_for_event(event.id, session)
 
     return EventDataBundle(
@@ -345,6 +347,14 @@ def _find_velocity_prices(
 # =============================================================================
 
 
+@dataclass
+class AdapterOutput:
+    """Structured output from a FeatureAdapter.transform() call."""
+
+    features: np.ndarray  # 1D for XGBoost, 2D (timesteps, features) for LSTM
+    mask: np.ndarray | None = None  # (timesteps,) boolean, LSTM only
+
+
 class FeatureAdapter(Protocol):
     """Protocol for model-specific feature formatting."""
 
@@ -357,7 +367,7 @@ class FeatureAdapter(Protocol):
         bundle: EventDataBundle,
         snapshot: OddsSnapshot,
         config: FeatureConfig,
-    ) -> np.ndarray | None:
+    ) -> AdapterOutput | None:
         """Extract features for one (event, snapshot) pair. Returns None to skip row."""
         ...
 
@@ -386,7 +396,7 @@ class XGBoostAdapter:
         bundle: EventDataBundle,
         snapshot: OddsSnapshot,
         config: FeatureConfig,
-    ) -> np.ndarray | None:
+    ) -> AdapterOutput | None:
         event = bundle.event
         market = config.markets[0] if config.markets else "h2h"
         outcome = event.home_team if config.outcome == "home" else event.away_team
@@ -504,13 +514,57 @@ class XGBoostAdapter:
         hours_until = (event.commence_time - snapshot.snapshot_time).total_seconds() / 3600
         parts.append(np.array([hours_until]))
 
-        return np.concatenate(parts)
+        return AdapterOutput(features=np.concatenate(parts))
+
+
+class LSTMAdapter:
+    """Sequence feature adapter for LSTM (and other recurrent) models."""
+
+    def feature_names(self, config: FeatureConfig) -> list[str]:
+        from odds_analytics.feature_extraction import SequenceFeatures
+
+        return SequenceFeatures.get_feature_names()
+
+    def transform(
+        self,
+        bundle: EventDataBundle,
+        snapshot: OddsSnapshot,
+        config: FeatureConfig,
+    ) -> AdapterOutput | None:
+        from odds_analytics.feature_extraction import SequenceFeatureExtractor
+
+        event = bundle.event
+        market = config.markets[0] if config.markets else "h2h"
+        outcome = event.home_team if config.outcome == "home" else event.away_team
+        backtest_event = make_backtest_event(event)
+
+        # Filter sequences to those whose first entry is at or before the snapshot time,
+        # ensuring no look-ahead bias: snapshot_time is the look-ahead cutoff.
+        seqs_up_to = [
+            s for s in bundle.sequences if s and s[0].odds_timestamp <= snapshot.snapshot_time
+        ]
+
+        extractor = SequenceFeatureExtractor.from_config(config)
+        try:
+            result = extractor.extract_features(
+                event=backtest_event,
+                odds_data=seqs_up_to,
+                outcome=outcome,
+                market=market,
+            )
+        except Exception as e:
+            logger.debug("sequence_extraction_failed", event_id=event.id, error=str(e))
+            return None
+
+        return AdapterOutput(features=result["sequence"], mask=result["mask"])
 
 
 def _make_adapter(config: FeatureConfig) -> FeatureAdapter:
-    if config.adapter != "xgboost":
-        raise NotImplementedError(f"Adapter '{config.adapter}' is not yet implemented")
-    return XGBoostAdapter()
+    if config.adapter == "xgboost":
+        return XGBoostAdapter()
+    if config.adapter == "lstm":
+        return LSTMAdapter()
+    raise NotImplementedError(f"Adapter '{config.adapter}' is not yet implemented")
 
 
 # =============================================================================
@@ -607,7 +661,7 @@ async def prepare_training_data(
         config: FeatureConfig controlling sampling, features, and target
 
     Returns:
-        TrainingDataResult with X, y, feature_names, and event_ids for CV
+        PreparedFeatureData with X, y, feature_names, masks, and event_ids for CV
     """
     valid_events = filter_completed_events(events)
     if not valid_events:
@@ -619,6 +673,7 @@ async def prepare_training_data(
 
     X_list: list[np.ndarray] = []
     y_list: list[float] = []
+    masks_list: list[np.ndarray] = []
     event_id_list: list[str] = []
     skipped_events = 0
     total_rows = 0
@@ -651,11 +706,13 @@ async def prepare_training_data(
             if target is None:
                 continue
 
-            row = adapter.transform(bundle, snapshot, config)
-            if row is None:
+            output = adapter.transform(bundle, snapshot, config)
+            if output is None:
                 continue
 
-            X_list.append(row)
+            X_list.append(output.features)
+            if output.mask is not None:
+                masks_list.append(output.mask)
             y_list.append(target)
             event_id_list.append(event.id)
             event_had_rows = True
@@ -674,6 +731,7 @@ async def prepare_training_data(
     y = np.array(y_list, dtype=np.float32)
     X = np.nan_to_num(X, nan=0.0)
     event_ids = np.array(event_id_list)
+    masks = np.array(masks_list, dtype=bool) if masks_list else None
 
     n_events = len(set(event_id_list))
     logger.info(
@@ -693,5 +751,6 @@ async def prepare_training_data(
         X=X,
         y=y,
         feature_names=feature_names,
+        masks=masks,
         event_ids=event_ids,
     )

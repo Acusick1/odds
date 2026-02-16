@@ -97,6 +97,7 @@ class TestTrainingDataIntegration:
                     epochs=20,
                 ),
                 features=FeatureConfig(
+                    adapter="lstm",
                     outcome="home",
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],
@@ -211,7 +212,6 @@ class TestTrainingDataIntegration:
             abs(actual_test_ratio - expected_test_ratio) < 0.15
         )  # Allow tolerance for small dataset
 
-    @pytest.mark.skip("LSTM currently broken")
     @pytest.mark.asyncio
     async def test_full_pipeline_lstm(
         self, lstm_config, pglite_async_session, test_events_with_odds

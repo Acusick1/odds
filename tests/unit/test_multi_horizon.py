@@ -6,9 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 from odds_analytics.feature_groups import (
+    AdapterOutput,
     EventDataBundle,
+    LSTMAdapter,
     TierSampler,
     TimeRangeSampler,
+    XGBoostAdapter,
     prepare_training_data,
 )
 from odds_analytics.training.config import FeatureConfig, MLTrainingConfig, SamplingConfig
@@ -807,3 +810,309 @@ class TestPrepareTrainingData:
             )
 
         assert result.num_samples <= 3
+
+
+class TestAdapterOutput:
+    """Tests for the AdapterOutput dataclass."""
+
+    def test_xgboost_adapter_output_has_no_mask(self):
+        features = np.array([1.0, 2.0, 3.0])
+        output = AdapterOutput(features=features)
+        assert output.mask is None
+        np.testing.assert_array_equal(output.features, features)
+
+    def test_lstm_adapter_output_has_mask(self):
+        timesteps, n_features = 8, 4
+        features = np.zeros((timesteps, n_features))
+        mask = np.ones(timesteps, dtype=bool)
+        output = AdapterOutput(features=features, mask=mask)
+        assert output.mask is not None
+        assert output.features.shape == (timesteps, n_features)
+        assert output.mask.shape == (timesteps,)
+
+
+class TestLSTMAdapter:
+    """Tests for LSTMAdapter feature extraction."""
+
+    @pytest.fixture
+    def event(self):
+        return Event(
+            id="lstm_test",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
+            home_team="Los Angeles Lakers",
+            away_team="Boston Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+
+    @pytest.fixture
+    def config(self):
+        return FeatureConfig(
+            adapter="lstm",
+            feature_groups=["tabular"],
+            markets=["h2h"],
+            outcome="home",
+            closing_tier="closing",
+            lookback_hours=72,
+            timesteps=8,
+        )
+
+    def _make_bundle(self, event: Event, sequences=None) -> EventDataBundle:
+        return EventDataBundle(
+            event=event,
+            snapshots=[],
+            closing_snapshot=None,
+            pm_context=None,
+            sequences=sequences or [],
+        )
+
+    def _make_snapshot(self, event_id: str, snapshot_time: datetime) -> OddsSnapshot:
+        return OddsSnapshot(
+            id=1,
+            event_id=event_id,
+            snapshot_time=snapshot_time,
+            bookmaker_count=1,
+            raw_data={},
+        )
+
+    def test_feature_names_returns_sequence_feature_names(self, config):
+        from odds_analytics.feature_extraction import SequenceFeatures
+
+        adapter = LSTMAdapter()
+        names = adapter.feature_names(config)
+        assert names == SequenceFeatures.get_feature_names()
+        assert len(names) > 0
+
+    def test_transform_returns_adapter_output_with_mask(self, event, config):
+        adapter = LSTMAdapter()
+        snapshot_time = event.commence_time - timedelta(hours=6)
+        snapshot = self._make_snapshot(event.id, snapshot_time)
+        bundle = self._make_bundle(event)
+
+        mock_sequence = np.zeros((8, 10))
+        mock_mask = np.ones(8, dtype=bool)
+
+        with patch(
+            "odds_analytics.feature_extraction.SequenceFeatureExtractor.extract_features",
+            return_value={"sequence": mock_sequence, "mask": mock_mask},
+        ):
+            output = adapter.transform(bundle, snapshot, config)
+
+        assert output is not None
+        assert isinstance(output, AdapterOutput)
+        assert output.features.shape == (8, 10)
+        assert output.mask is not None
+        assert output.mask.shape == (8,)
+
+    def test_transform_filters_sequences_by_snapshot_time(self, event, config):
+        """Only sequences with first-entry timestamp <= snapshot_time are passed."""
+        from odds_core.models import Odds
+
+        snapshot_time = event.commence_time - timedelta(hours=6)
+        snapshot = self._make_snapshot(event.id, snapshot_time)
+
+        # Two sequences: one before snapshot, one after
+        early_odds = Odds(
+            event_id=event.id,
+            bookmaker_key="pinnacle",
+            bookmaker_title="Pinnacle",
+            market_key="h2h",
+            outcome_name=event.home_team,
+            price=-150,
+            point=None,
+            odds_timestamp=snapshot_time - timedelta(hours=1),
+            last_update=snapshot_time - timedelta(hours=1),
+        )
+        late_odds = Odds(
+            event_id=event.id,
+            bookmaker_key="pinnacle",
+            bookmaker_title="Pinnacle",
+            market_key="h2h",
+            outcome_name=event.home_team,
+            price=-140,
+            point=None,
+            odds_timestamp=snapshot_time + timedelta(hours=1),
+            last_update=snapshot_time + timedelta(hours=1),
+        )
+
+        sequences = [[early_odds], [late_odds]]
+        bundle = self._make_bundle(event, sequences=sequences)
+
+        captured_odds_data = []
+
+        def fake_extract(self_extractor, event, odds_data, outcome=None, market="h2h", **kwargs):
+            captured_odds_data.append(odds_data)
+            n = config.timesteps
+            return {"sequence": np.zeros((n, 10)), "mask": np.zeros(n, dtype=bool)}
+
+        adapter = LSTMAdapter()
+
+        with patch(
+            "odds_analytics.feature_extraction.SequenceFeatureExtractor.extract_features",
+            new=fake_extract,
+        ):
+            adapter.transform(bundle, snapshot, config)
+
+        assert len(captured_odds_data) == 1
+        passed_seqs = captured_odds_data[0]
+        # Only the early sequence (timestamp <= snapshot_time) should be passed
+        assert len(passed_seqs) == 1
+        assert passed_seqs[0][0].odds_timestamp <= snapshot_time
+
+    def test_transform_returns_none_on_extraction_failure(self, event, config):
+        adapter = LSTMAdapter()
+        snapshot = self._make_snapshot(event.id, event.commence_time - timedelta(hours=6))
+        bundle = self._make_bundle(event)
+
+        with patch(
+            "odds_analytics.feature_extraction.SequenceFeatureExtractor.extract_features",
+            side_effect=ValueError("extraction failed"),
+        ):
+            output = adapter.transform(bundle, snapshot, config)
+
+        assert output is None
+
+
+class TestPrepareTrainingDataMaskCollection:
+    """Tests that prepare_training_data correctly collects masks for LSTM adapter."""
+
+    @pytest.fixture
+    def event(self):
+        return Event(
+            id="mask_test",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
+            home_team="Los Angeles Lakers",
+            away_team="Boston Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+
+    def _make_bundle(self, event: Event, closing_snap: OddsSnapshot) -> EventDataBundle:
+        return EventDataBundle(
+            event=event,
+            snapshots=[closing_snap],
+            closing_snapshot=closing_snap,
+            pm_context=None,
+            pm_prices=[],
+            pm_orderbooks=[],
+            sequences=[],
+        )
+
+    @pytest.mark.asyncio
+    async def test_xgboost_adapter_produces_no_masks(self, event):
+        """XGBoostAdapter.mask=None → result.masks is None."""
+        commence = event.commence_time
+        closing_snap = _make_snapshot(100, event.id, commence - timedelta(hours=0.5))
+        decision_snap = _make_snapshot(1, event.id, commence - timedelta(hours=6))
+        decision_snap.fetch_tier = "pregame"
+        closing_snap.fetch_tier = "closing"
+        all_snaps = [decision_snap, closing_snap]
+        bundle = EventDataBundle(
+            event=event,
+            snapshots=all_snaps,
+            closing_snapshot=closing_snap,
+            pm_context=None,
+            pm_prices=[],
+            pm_orderbooks=[],
+            sequences=[],
+        )
+
+        config = FeatureConfig(
+            adapter="xgboost",
+            feature_groups=["tabular"],
+            markets=["h2h"],
+            outcome="home",
+            closing_tier="closing",
+            target_type="devigged_pinnacle",
+            sampling=SamplingConfig(strategy="tier", decision_tier="pregame"),
+        )
+
+        mock_features = np.array([0.5, 0.4, 6.0])
+        mock_output = AdapterOutput(features=mock_features, mask=None)
+
+        with (
+            patch(
+                "odds_analytics.feature_groups.collect_event_data",
+                new=AsyncMock(return_value=bundle),
+            ),
+            patch.object(XGBoostAdapter, "transform", return_value=mock_output),
+            patch.object(XGBoostAdapter, "feature_names", return_value=["f1", "f2", "f3"]),
+            patch(
+                "odds_analytics.feature_groups._compute_target",
+                return_value=0.05,
+            ),
+        ):
+            result = await prepare_training_data(
+                events=[event],
+                session=AsyncMock(),
+                config=config,
+            )
+
+        assert result.masks is None
+        assert result.X.shape == (1, 3)
+
+    @pytest.mark.asyncio
+    async def test_lstm_adapter_produces_masks(self, event):
+        """LSTMAdapter.mask is not None → result.masks stacked into 2D array."""
+        commence = event.commence_time
+        closing_snap = _make_snapshot(100, event.id, commence - timedelta(hours=0.5))
+        decision_snap = _make_snapshot(1, event.id, commence - timedelta(hours=6))
+        decision_snap.fetch_tier = "pregame"
+        closing_snap.fetch_tier = "closing"
+        all_snaps = [decision_snap, closing_snap]
+        bundle = EventDataBundle(
+            event=event,
+            snapshots=all_snaps,
+            closing_snapshot=closing_snap,
+            pm_context=None,
+            pm_prices=[],
+            pm_orderbooks=[],
+            sequences=[],
+        )
+
+        timesteps, n_features = 8, 4
+        mock_sequence = np.zeros((timesteps, n_features))
+        mock_mask = np.ones(timesteps, dtype=bool)
+        mock_output = AdapterOutput(features=mock_sequence, mask=mock_mask)
+
+        config = FeatureConfig(
+            adapter="lstm",
+            feature_groups=["tabular"],
+            markets=["h2h"],
+            outcome="home",
+            closing_tier="closing",
+            target_type="devigged_pinnacle",
+            lookback_hours=72,
+            timesteps=timesteps,
+            sampling=SamplingConfig(strategy="tier", decision_tier="pregame"),
+        )
+
+        with (
+            patch(
+                "odds_analytics.feature_groups.collect_event_data",
+                new=AsyncMock(return_value=bundle),
+            ),
+            patch.object(LSTMAdapter, "transform", return_value=mock_output),
+            patch.object(
+                LSTMAdapter, "feature_names", return_value=[f"f{i}" for i in range(n_features)]
+            ),
+            patch(
+                "odds_analytics.feature_groups._compute_target",
+                return_value=0.05,
+            ),
+        ):
+            result = await prepare_training_data(
+                events=[event],
+                session=AsyncMock(),
+                config=config,
+            )
+
+        assert result.masks is not None
+        assert result.masks.shape == (1, timesteps)
+        assert result.X.shape == (1, timesteps, n_features)

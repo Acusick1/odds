@@ -307,8 +307,8 @@ async def prepare_training_data_from_config(
         y_test = y[test_mask]
         event_ids_train = event_ids[train_mask]
         event_ids_test = event_ids[test_mask]
-        masks_trainval = None
-        masks_test = None
+        masks_trainval = masks[train_mask] if masks is not None else None
+        masks_test = masks[test_mask] if masks is not None else None
     elif masks is not None:
         X_trainval, X_test, y_trainval, y_test, masks_trainval, masks_test = train_test_split(
             X,
