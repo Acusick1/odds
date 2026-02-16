@@ -14,6 +14,7 @@ import structlog
 from odds_core.config import Settings, get_settings
 
 from odds_lambda.data_fetcher import TheOddsAPIClient
+from odds_lambda.event_sync import EventSyncService
 from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.scheduling.backends import get_scheduler_backend
 from odds_lambda.scheduling.intelligence import SchedulingIntelligence
@@ -26,19 +27,38 @@ def build_ingestion_service(client: TheOddsAPIClient, settings: Settings) -> Odd
     return OddsIngestionService(client=client, settings=settings)
 
 
+def build_event_sync_service(client: TheOddsAPIClient) -> EventSyncService:
+    """Factory to create event sync service; exposed for test patching."""
+    return EventSyncService(client=client)
+
+
 async def main():
     """
     Main job execution flow.
 
     Flow:
-    1. Check if we should execute (smart gating)
-    2. If yes: fetch and store odds
-    3. Calculate next execution time
-    4. Schedule next run via backend
+    1. Sync upcoming events from free /events endpoint (discovery)
+    2. Check if we should execute odds fetch (smart gating)
+    3. If yes: fetch and store odds
+    4. Calculate next execution time
+    5. Schedule next run via backend
     """
     app_settings = get_settings()
 
     logger.info("fetch_odds_job_started", backend=app_settings.scheduler.backend)
+
+    # Sync upcoming events first (free, 0 quota units)
+    async with TheOddsAPIClient() as client:
+        event_sync = build_event_sync_service(client)
+        sync_results = await event_sync.sync_sports(app_settings.data_collection.sports)
+
+    for sync_result in sync_results:
+        logger.info(
+            "event_sync_result",
+            sport=sync_result.sport_key,
+            inserted=sync_result.inserted,
+            updated=sync_result.updated,
+        )
 
     # Smart execution gating
     intelligence = SchedulingIntelligence(lookahead_days=app_settings.scheduler.lookahead_days)
@@ -72,7 +92,6 @@ async def main():
             ingestion_service = build_ingestion_service(client, app_settings)
             results = await ingestion_service.ingest_sports(
                 app_settings.data_collection.sports,
-                fetch_tier=decision.tier,
             )
 
         for sport_result in results.sport_results:

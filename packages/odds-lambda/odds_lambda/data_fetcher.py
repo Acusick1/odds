@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import aiohttp
 import structlog
 from odds_core.api_models import (
+    EventsResponse,
     HistoricalOddsResponse,
     OddsResponse,
     ScoresResponse,
@@ -179,6 +180,39 @@ class TheOddsAPIClient:
         return OddsResponse(
             events=events,
             raw_events_data=raw_events_data,
+            response_time_ms=response_time,
+            quota_remaining=self._quota_remaining,
+            timestamp=datetime.now(UTC),
+        )
+
+    async def get_events(self, sport: str) -> EventsResponse:
+        """
+        Fetch upcoming events for a sport using the free events endpoint.
+
+        Args:
+            sport: Sport key (e.g., 'basketball_nba')
+
+        Returns:
+            EventsResponse with parsed Event instances (no odds data)
+
+        Note:
+            This endpoint costs 0 quota units. Use it for event discovery
+            instead of get_odds() which costs 3+ units.
+        """
+        data, response_time = await self._make_request(f"sports/{sport}/events")
+
+        raw_events_data = data if isinstance(data, list) else [data] if data else []
+        events = [create_scheduled_event(event_dict) for event_dict in raw_events_data]
+
+        logger.info(
+            "events_fetched",
+            sport=sport,
+            events_count=len(events),
+            response_time_ms=response_time,
+        )
+
+        return EventsResponse(
+            events=events,
             response_time_ms=response_time,
             quota_remaining=self._quota_remaining,
             timestamp=datetime.now(UTC),

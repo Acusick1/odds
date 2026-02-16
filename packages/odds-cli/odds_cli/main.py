@@ -35,7 +35,7 @@ app.add_typer(scheduler.app, name="scheduler", help="Scheduler management (local
 app.add_typer(validate.app, name="validate", help="Validate data completeness")
 app.add_typer(quality.app, name="quality", help="Data quality coverage analysis")
 app.add_typer(copy_from_prod.app, name="copy", help="Copy data from production database")
-app.add_typer(discover.app, name="discover", help="Discover historical games")
+app.add_typer(discover.app, name="discover", help="Discover upcoming and historical games")
 app.add_typer(polymarket.app, name="polymarket", help="Polymarket data operations")
 
 console = Console()

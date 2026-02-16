@@ -64,7 +64,7 @@ class SchedulingIntelligence:
 
         Logic:
         1. Find closest upcoming game in database
-        2. If no games: EXECUTE to discover new games from API (bootstrap/off-season)
+        2. If no games: do NOT execute - EventSyncService handles discovery
         3. If game already started: don't execute, check again soon
         4. If game exists and upcoming: determine tier based on time until game
         5. Calculate next execution based on tier interval
@@ -72,12 +72,12 @@ class SchedulingIntelligence:
         closest_game = await self.get_closest_game()
 
         if not closest_game:
-            # No upcoming games in database - fetch from API to discover new games
-            # This handles both initial bootstrap and end-of-season scenarios
+            # No upcoming games in database - event sync (EventSyncService) is responsible
+            # for discovery; this scheduler only decides when to collect odds
             return ScheduleDecision(
-                should_execute=True,
-                reason="No games in database - fetching from API to discover new games",
-                next_execution=datetime.now(UTC) + timedelta(hours=24),  # Check daily for new games
+                should_execute=False,
+                reason="No games in database - run event sync to discover upcoming games",
+                next_execution=datetime.now(UTC) + timedelta(hours=24),  # Check daily
                 tier=None,
             )
 

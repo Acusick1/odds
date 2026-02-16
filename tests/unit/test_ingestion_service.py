@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from odds_core.api_models import OddsResponse, api_dict_to_event
 from odds_core.models import Event, FetchLog, Odds, OddsSnapshot
-from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.ingestion import (
     EventIngestionFailure,
     OddsIngestionCallbacks,
@@ -83,7 +82,6 @@ class TestOddsIngestionService:
 
         result = await service.ingest_sport(
             "basketball_nba",
-            fetch_tier=FetchTier.CLOSING,
             callbacks=callbacks,
         )
 
@@ -110,7 +108,7 @@ class TestOddsIngestionService:
             )
         ).scalar_one()
         assert snapshot.bookmaker_count == 1
-        assert snapshot.fetch_tier == FetchTier.CLOSING.value
+        assert snapshot.fetch_tier == "closing"  # 2h before game = CLOSING tier
         assert snapshot.hours_until_commence is not None
 
         odds_records = (
@@ -179,7 +177,6 @@ class TestOddsIngestionService:
 
         result = await service.ingest_sport(
             "basketball_nba",
-            fetch_tier=FetchTier.PREGAME,
             callbacks=callbacks,
         )
 
