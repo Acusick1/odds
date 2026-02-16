@@ -27,7 +27,7 @@ Example usage:
         y_train, y_test = result.y_train, result.y_test
         feature_names = result.feature_names
 
-        # For LSTM (when using sequence_full group)
+        # For LSTM
         masks_train, masks_test = result.masks_train, result.masks_test
     ```
 """
@@ -229,7 +229,7 @@ async def prepare_training_data_from_config(
         ...     print(f"Training samples: {result.num_train_samples}")
         ...     print(f"Test samples: {result.num_test_samples}")
     """
-    from odds_analytics.feature_groups import prepare_multi_horizon_data, prepare_training_data
+    from odds_analytics.feature_groups import prepare_training_data
 
     # Extract configuration
     training_config = config.training
@@ -243,6 +243,7 @@ async def prepare_training_data_from_config(
         strategy_type=strategy_type,
         feature_groups=features_config.feature_groups,
         target_type=features_config.target_type,
+        sampling_strategy=features_config.sampling.strategy,
         start_date=data_config.start_date.isoformat(),
         end_date=data_config.end_date.isoformat(),
     )
@@ -272,19 +273,11 @@ async def prepare_training_data_from_config(
             f"No events found in date range {data_config.start_date} to {data_config.end_date}"
         )
 
-    # Branch on target type
-    if features_config.target_type == "devigged_pinnacle":
-        prep_result = await prepare_multi_horizon_data(
-            events=events,
-            session=session,
-            config=features_config,
-        )
-    else:
-        prep_result = await prepare_training_data(
-            events=events,
-            session=session,
-            config=features_config,
-        )
+    prep_result = await prepare_training_data(
+        events=events,
+        session=session,
+        config=features_config,
+    )
 
     X = prep_result.X
     y = prep_result.y
@@ -373,6 +366,7 @@ async def prepare_training_data_from_config(
         strategy_type=strategy_type,
         feature_groups=features_config.feature_groups,
         target_type=features_config.target_type,
+        sampling_strategy=features_config.sampling.strategy,
         total_samples=len(X),
         train_samples=len(X_train),
         val_samples=len(X_val) if X_val is not None else 0,

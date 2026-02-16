@@ -46,12 +46,16 @@ training:
     early_stopping_rounds: 10
 
   features:
+    adapter: "xgboost"
     sharp_bookmakers: ["pinnacle"]
     retail_bookmakers: ["fanduel", "draftkings", "betmgm"]
     markets: ["h2h", "spreads", "totals"]
     outcome: "home"
     normalize: false
     feature_groups: ["tabular", "trajectory"]
+    sampling:
+      strategy: "tier"
+      decision_tier: "pregame"
 
   # Feature selection disabled
   feature_selection:

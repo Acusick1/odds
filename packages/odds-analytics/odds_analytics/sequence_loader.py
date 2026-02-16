@@ -1,60 +1,23 @@
 """
-Sequence Data Loader for LSTM Training.
-
-This module provides utilities to fetch historical line movement data and convert it
-into 3D tensor format suitable for LSTM model training and prediction.
+Sequence Data Loader and Odds Utilities.
 
 Key Functions:
 - load_sequences_for_event(): Query odds snapshots and organize chronologically
-- load_sequences_up_to_tier(): Query odds up to a decision tier
-- get_opening_closing_odds_by_tier(): Get odds at specific tiers
+- extract_odds_from_snapshot(): Parse Odds from OddsSnapshot.raw_data
 - calculate_regression_target(): Calculate line movement for regression
-
-Architecture:
-- Queries OddsSnapshot.raw_data to reconstruct historical odds
-- Groups snapshots by odds_timestamp for chronological ordering
-- Converts to list[list[Odds]] format expected by SequenceFeatureExtractor
-- Handles variable-length sequences with attention masks
-- Supports tier-based filtering for decision time simulation
-
-Example:
-    ```python
-    from odds_lambda.storage.readers import OddsReader
-    from odds_analytics.sequence_loader import load_sequences_for_event
-
-    # Load sequences for a single event
-    async with async_session_maker() as session:
-        reader = OddsReader(session)
-        event = await reader.get_event_by_id("abc123")
-        sequences = await load_sequences_for_event("abc123", session)
-
-        # sequences = [
-        #     [Odds(...), Odds(...), ...],  # First timestamp
-        #     [Odds(...), Odds(...), ...],  # Second timestamp
-        #     ...
-        # ]
-    ```
-
-For training data preparation, use the composable feature group API in feature_groups.py:
-    ```python
-    from odds_analytics.feature_groups import prepare_training_data
-    from odds_analytics.training.config import FeatureConfig
-
-    config = FeatureConfig(feature_groups=["sequence_full"], ...)
-    result = await prepare_training_data(config, session)
-    ```
+- extract_pinnacle_h2h_probs(): Extract devigged Pinnacle probabilities
+- calculate_devigged_pinnacle_target(): Devigged Pinnacle close vs snapshot delta
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 
 import numpy as np
 import structlog
 from odds_core.models import Odds, OddsSnapshot
-from odds_lambda.fetch_tier import FetchTier
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.utils import calculate_implied_probability, devig_probabilities
@@ -71,103 +34,12 @@ logger = structlog.get_logger()
 
 __all__ = [
     "load_sequences_for_event",
-    "load_sequences_up_to_tier",
     "TargetType",
-    "get_opening_closing_odds_by_tier",
     "calculate_regression_target",
     "extract_pinnacle_h2h_probs",
     "calculate_devigged_pinnacle_target",
-    "get_snapshots_in_time_range",
+    "extract_odds_from_snapshot",
 ]
-
-
-def extract_opening_closing_odds(
-    odds_sequences: list[list[Odds]],
-    outcome: str,
-    market: str,
-    commence_time: datetime | None = None,
-    opening_hours_before: float = 48.0,
-    closing_hours_before: float = 0.5,
-) -> tuple[list[Odds] | None, list[Odds] | None]:
-    """
-    Extract opening and closing odds from a sequence of snapshots.
-
-    When commence_time is provided, finds snapshots closest to the target times:
-    - Opening: snapshot closest to (commence_time - opening_hours_before)
-    - Closing: snapshot closest to (commence_time - closing_hours_before)
-
-    When commence_time is None (legacy mode), uses first/last snapshots.
-
-    Args:
-        odds_sequences: List of snapshots ordered chronologically
-        outcome: Target outcome name (team name or Over/Under)
-        market: Market type (h2h, spreads, totals)
-        commence_time: Game start time for calculating target windows
-        opening_hours_before: Hours before game for opening line (default: 48)
-        closing_hours_before: Hours before game for closing line (default: 0.5)
-
-    Returns:
-        Tuple of (opening_odds, closing_odds) where each is a list of Odds
-        for the target outcome/market, or None if not found.
-        Returns (None, None) if opening and closing resolve to same snapshot.
-    """
-    if not odds_sequences:
-        return None, None
-
-    # Build list of valid snapshots with their timestamps
-    valid_snapshots: list[tuple[datetime, list[Odds]]] = []
-    for snapshot in odds_sequences:
-        filtered = [o for o in snapshot if o.market_key == market and o.outcome_name == outcome]
-        if filtered:
-            # Use odds_timestamp from first odds in snapshot
-            timestamp = filtered[0].odds_timestamp
-            valid_snapshots.append((timestamp, filtered))
-
-    if not valid_snapshots:
-        return None, None
-
-    # Legacy mode: use first/last snapshots
-    if commence_time is None:
-        if len(valid_snapshots) == 1:
-            # Only one snapshot - can't calculate delta
-            return None, None
-        return valid_snapshots[0][1], valid_snapshots[-1][1]
-
-    # Time-window mode: find snapshots closest to target times
-    opening_target = commence_time - timedelta(hours=opening_hours_before)
-    closing_target = commence_time - timedelta(hours=closing_hours_before)
-
-    def find_closest_snapshot(
-        target_time: datetime,
-    ) -> tuple[int, list[Odds]] | None:
-        """Find snapshot closest to target time, returning (index, odds)."""
-        best_idx = None
-        best_diff = float("inf")
-
-        for idx, (timestamp, _odds) in enumerate(valid_snapshots):
-            diff = abs((timestamp - target_time).total_seconds())
-            if diff < best_diff:
-                best_diff = diff
-                best_idx = idx
-
-        if best_idx is not None:
-            return best_idx, valid_snapshots[best_idx][1]
-        return None
-
-    opening_result = find_closest_snapshot(opening_target)
-    closing_result = find_closest_snapshot(closing_target)
-
-    if opening_result is None or closing_result is None:
-        return None, None
-
-    opening_idx, opening_odds = opening_result
-    closing_idx, closing_odds = closing_result
-
-    # If opening and closing resolve to same snapshot, can't calculate delta
-    if opening_idx == closing_idx:
-        return None, None
-
-    return opening_odds, closing_odds
 
 
 def calculate_regression_target(
@@ -284,62 +156,7 @@ def calculate_devigged_pinnacle_target(
     return fair_close_home - fair_snapshot_home
 
 
-async def get_snapshots_in_time_range(
-    session: AsyncSession,
-    event_id: str,
-    commence_time: datetime,
-    min_hours_before: float,
-    max_hours_before: float,
-    max_samples: int,
-) -> list[OddsSnapshot]:
-    """Get stratified-sampled snapshots within a time range before game start.
-
-    Divides [commence_time - max_hours, commence_time - min_hours] into
-    max_samples equal bins and picks the snapshot nearest to each bin's
-    midpoint. Bins with no snapshot are skipped.
-
-    Returns snapshots sorted chronologically.
-    """
-    from odds_lambda.storage.readers import OddsReader
-
-    reader = OddsReader(session)
-    all_snapshots = await reader.get_snapshots_for_event(event_id)
-
-    range_start = commence_time - timedelta(hours=max_hours_before)
-    range_end = commence_time - timedelta(hours=min_hours_before)
-
-    in_range = [s for s in all_snapshots if range_start <= s.snapshot_time <= range_end]
-
-    if not in_range:
-        return []
-
-    if len(in_range) <= max_samples:
-        return in_range
-
-    # Stratified sampling: divide range into equal bins, pick nearest to midpoint
-    range_seconds = (range_end - range_start).total_seconds()
-    bin_size = range_seconds / max_samples
-    selected: list[OddsSnapshot] = []
-
-    for i in range(max_samples):
-        bin_mid = range_start + timedelta(seconds=(i + 0.5) * bin_size)
-        best: OddsSnapshot | None = None
-        best_diff = float("inf")
-
-        for s in in_range:
-            diff = abs((s.snapshot_time - bin_mid).total_seconds())
-            if diff < best_diff:
-                best_diff = diff
-                best = s
-
-        if best is not None and best not in selected:
-            selected.append(best)
-
-    selected.sort(key=lambda s: s.snapshot_time)
-    return selected
-
-
-def _extract_odds_from_snapshot(
+def extract_odds_from_snapshot(
     snapshot: OddsSnapshot,
     event_id: str,
     market: str | None = None,
@@ -410,103 +227,6 @@ def _extract_odds_from_snapshot(
                 odds_list.append(odds)
 
     return odds_list
-
-
-async def get_opening_closing_odds_by_tier(
-    session: AsyncSession,
-    event_id: str,
-    opening_tier: FetchTier,
-    closing_tier: FetchTier,
-    market: str,
-    outcome: str,
-) -> tuple[list[Odds] | None, list[Odds] | None]:
-    """
-    Get opening and closing odds by querying specific fetch tiers directly.
-
-    This is more efficient and accurate than time-window based extraction because
-    it uses the actual tier stored on each snapshot rather than calculating from
-    timestamps.
-
-    Args:
-        session: Async database session
-        event_id: Event identifier
-        opening_tier: Tier for opening line (uses first snapshot in tier)
-        closing_tier: Tier for closing line (uses last snapshot in tier)
-        market: Market type (h2h, spreads, totals)
-        outcome: Outcome name (team name or Over/Under)
-
-    Returns:
-        Tuple of (opening_odds, closing_odds) where each is a list of Odds
-        for the target outcome/market, or None if not found.
-
-    Example:
-        opening, closing = await get_opening_closing_odds_by_tier(
-            session=session,
-            event_id="abc123",
-            opening_tier=FetchTier.EARLY,
-            closing_tier=FetchTier.CLOSING,
-            market="h2h",
-            outcome="Los Angeles Lakers",
-        )
-    """
-    from odds_lambda.storage.readers import OddsReader
-
-    reader = OddsReader(session)
-
-    # Query for first snapshot in opening tier
-    opening_snapshot = await reader.get_first_snapshot_in_tier(event_id, opening_tier)
-    if opening_snapshot is None:
-        logger.debug(
-            "no_opening_snapshot",
-            event_id=event_id,
-            tier=opening_tier.value,
-        )
-        return None, None
-
-    # Query for last snapshot in closing tier
-    closing_snapshot = await reader.get_last_snapshot_in_tier(event_id, closing_tier)
-    if closing_snapshot is None:
-        logger.debug(
-            "no_closing_snapshot",
-            event_id=event_id,
-            tier=closing_tier.value,
-        )
-        return None, None
-
-    # Ensure we have different snapshots
-    if opening_snapshot.id == closing_snapshot.id:
-        logger.debug(
-            "same_opening_closing_snapshot",
-            event_id=event_id,
-            snapshot_id=opening_snapshot.id,
-        )
-        return None, None
-
-    # Extract odds from snapshots
-    opening_odds = _extract_odds_from_snapshot(opening_snapshot, event_id, market, outcome)
-    closing_odds = _extract_odds_from_snapshot(closing_snapshot, event_id, market, outcome)
-
-    if not opening_odds:
-        logger.debug(
-            "no_opening_odds_for_outcome",
-            event_id=event_id,
-            market=market,
-            outcome=outcome,
-            tier=opening_tier.value,
-        )
-        return None, None
-
-    if not closing_odds:
-        logger.debug(
-            "no_closing_odds_for_outcome",
-            event_id=event_id,
-            market=market,
-            outcome=outcome,
-            tier=closing_tier.value,
-        )
-        return None, None
-
-    return opening_odds, closing_odds
 
 
 async def load_sequences_for_event(
@@ -634,164 +354,6 @@ async def load_sequences_for_event(
             sorted_timestamps[0].isoformat() if sorted_timestamps else None,
             sorted_timestamps[-1].isoformat() if sorted_timestamps else None,
         ),
-    )
-
-    return sequences
-
-
-async def load_sequences_up_to_tier(
-    event_id: str,
-    session: AsyncSession,
-    decision_tier: FetchTier,
-) -> list[list[Odds]]:
-    """
-    Load odds snapshots for an event, filtered to include only snapshots up to decision tier.
-
-    This prevents look-ahead bias by ensuring trajectory features are computed only
-    from data that would have been available at the time of the betting decision.
-
-    Args:
-        event_id: Event identifier
-        session: Async database session
-        decision_tier: Maximum tier to include (snapshots at or before this tier)
-
-    Returns:
-        List of snapshots filtered to include only those at or before decision_tier.
-        Each snapshot is a list of Odds objects.
-        Snapshots are ordered chronologically (earliest to latest).
-
-    Example:
-        >>> # Load only snapshots up to PREGAME tier (excludes CLOSING tier data)
-        >>> sequences = await load_sequences_up_to_tier(
-        ...     event_id="abc123",
-        ...     session=session,
-        ...     decision_tier=FetchTier.PREGAME
-        ... )
-    """
-    from odds_lambda.storage.readers import OddsReader
-
-    reader = OddsReader(session)
-
-    # Get all snapshots for the event, ordered by time
-    snapshots = await reader.get_snapshots_for_event(event_id)
-
-    if not snapshots:
-        logger.warning("no_snapshots_found", event_id=event_id)
-        return []
-
-    # Define tier ordering: CLOSING is closest to game, OPENING is furthest
-    tier_order = FetchTier.get_priority_order()  # [CLOSING, PREGAME, SHARP, EARLY, OPENING]
-    decision_tier_idx = tier_order.index(decision_tier)
-
-    # Filter snapshots to only include those at or before decision tier
-    # "Before" means further from game time, which is higher index in tier_order
-    filtered_snapshots = []
-    for snapshot in snapshots:
-        snapshot_tier = None
-        if snapshot.fetch_tier:
-            try:
-                snapshot_tier = FetchTier(snapshot.fetch_tier)
-            except ValueError:
-                # Unknown tier, include by default
-                pass
-
-        if snapshot_tier is None:
-            # If tier is unknown, use hours_until_commence to determine
-            if snapshot.hours_until_commence is not None:
-                # Map hours to approximate tier
-                hours = snapshot.hours_until_commence
-                if hours > 72:  # OPENING
-                    snapshot_tier = FetchTier.OPENING
-                elif hours > 24:  # EARLY
-                    snapshot_tier = FetchTier.EARLY
-                elif hours > 12:  # SHARP
-                    snapshot_tier = FetchTier.SHARP
-                elif hours > 3:  # PREGAME
-                    snapshot_tier = FetchTier.PREGAME
-                else:  # CLOSING
-                    snapshot_tier = FetchTier.CLOSING
-            else:
-                # No tier info - include by default (conservative)
-                filtered_snapshots.append(snapshot)
-                continue
-
-        # Check if snapshot is at or before decision tier
-        if snapshot_tier is not None:
-            snapshot_tier_idx = tier_order.index(snapshot_tier)
-            # Higher index = further from game = earlier tier
-            if snapshot_tier_idx >= decision_tier_idx:
-                filtered_snapshots.append(snapshot)
-
-    if not filtered_snapshots:
-        logger.warning(
-            "no_snapshots_after_tier_filter",
-            event_id=event_id,
-            decision_tier=decision_tier.value,
-        )
-        return []
-
-    # Group odds by timestamp (same logic as load_sequences_for_event)
-    odds_by_timestamp: dict[datetime, list[Odds]] = defaultdict(list)
-
-    for snapshot in filtered_snapshots:
-        raw_data = snapshot.raw_data
-
-        if not raw_data or "bookmakers" not in raw_data:
-            continue
-
-        bookmakers = raw_data.get("bookmakers", [])
-
-        for bookmaker_data in bookmakers:
-            bookmaker_key = bookmaker_data.get("key")
-            bookmaker_title = bookmaker_data.get("title")
-            last_update_str = bookmaker_data.get("last_update")
-
-            if last_update_str:
-                try:
-                    last_update = datetime.fromisoformat(last_update_str.replace("Z", "+00:00"))
-                except (ValueError, AttributeError):
-                    last_update = snapshot.snapshot_time
-            else:
-                last_update = snapshot.snapshot_time
-
-            markets = bookmaker_data.get("markets", [])
-            for market_data in markets:
-                market_key = market_data.get("key")
-                outcomes = market_data.get("outcomes", [])
-
-                for outcome_data in outcomes:
-                    outcome_name = outcome_data.get("name")
-                    price = outcome_data.get("price")
-                    point = outcome_data.get("point")
-
-                    if price is None:
-                        continue
-
-                    odds = Odds(
-                        event_id=event_id,
-                        bookmaker_key=bookmaker_key,
-                        bookmaker_title=bookmaker_title,
-                        market_key=market_key,
-                        outcome_name=outcome_name,
-                        price=price,
-                        point=point,
-                        odds_timestamp=snapshot.snapshot_time,
-                        last_update=last_update,
-                        is_valid=True,
-                    )
-
-                    odds_by_timestamp[snapshot.snapshot_time].append(odds)
-
-    # Convert to list of lists, sorted by timestamp
-    sorted_timestamps = sorted(odds_by_timestamp.keys())
-    sequences = [odds_by_timestamp[ts] for ts in sorted_timestamps]
-
-    logger.info(
-        "loaded_sequences_up_to_tier",
-        event_id=event_id,
-        decision_tier=decision_tier.value,
-        num_snapshots=len(sequences),
-        total_before_filter=len(snapshots),
     )
 
     return sequences

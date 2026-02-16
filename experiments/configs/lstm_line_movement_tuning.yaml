@@ -61,12 +61,16 @@ training:
   base_confidence: 0.52
 
   features:
+    adapter: "lstm"
     sharp_bookmakers: ["pinnacle"]
     retail_bookmakers: ["fanduel", "draftkings", "betmgm"]
     markets: ["h2h", "spreads", "totals"]
     outcome: "home"
     normalize: false
-    feature_groups: ["sequence_full"]  # LSTM uses 3D sequences
+    feature_groups: ["tabular"]
+    sampling:
+      strategy: "tier"
+      decision_tier: "pregame"
 
   # Feature selection disabled for LSTM (learns feature importance via gating)
   feature_selection:

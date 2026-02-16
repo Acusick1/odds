@@ -5,7 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
-from odds_analytics.training.config import FeatureConfig, MLTrainingConfig
+from odds_analytics.feature_groups import (
+    EventDataBundle,
+    TierSampler,
+    TimeRangeSampler,
+    prepare_training_data,
+)
+from odds_analytics.training.config import FeatureConfig, MLTrainingConfig, SamplingConfig
 from odds_analytics.training.cross_validation import CVResult, run_cv
 from odds_core.models import Event, EventStatus, OddsSnapshot
 
@@ -86,7 +92,6 @@ class TestGroupTimeseriesCV:
                         "feature_groups": ["tabular"],
                         "markets": ["h2h"],
                         "outcome": "home",
-                        "opening_tier": "opening",
                         "closing_tier": "closing",
                     },
                     "data": {
@@ -124,7 +129,6 @@ class TestGroupTimeseriesCV:
 
     def test_events_dont_span_folds(self):
         """No event should appear in both train and val within a fold."""
-        # 5 events, 3 rows each = 15 rows
         n_events = 5
         rows_per_event = 3
         n_rows = n_events * rows_per_event
@@ -134,7 +138,6 @@ class TestGroupTimeseriesCV:
         y = np.random.randn(n_rows).astype(np.float32)
         feature_names = [f"f_{i}" for i in range(n_features)]
 
-        # event_ids: ["evt_0","evt_0","evt_0","evt_1","evt_1","evt_1",...]
         event_ids = np.array([f"evt_{i}" for i in range(n_events) for _ in range(rows_per_event)])
 
         config = self._make_config(n_folds=3)
@@ -157,12 +160,10 @@ class TestGroupTimeseriesCV:
         y = np.random.randn(n_rows).astype(np.float32)
         feature_names = [f"f_{i}" for i in range(n_features)]
 
-        # Events in chronological order
         event_ids = np.array([f"evt_{i}" for i in range(n_events) for _ in range(rows_per_event)])
 
         config = self._make_config(n_folds=3)
 
-        # Track fold splits for verification
         fold_splits = []
 
         def capture_train(config, X_train, y_train, feature_names, X_val, y_val):
@@ -181,7 +182,6 @@ class TestGroupTimeseriesCV:
 
         run_cv(strategy, config, X, y, feature_names, event_ids=event_ids)
 
-        # Training set should grow with each fold (walk-forward)
         for i in range(len(fold_splits) - 1):
             assert (
                 fold_splits[i][0] <= fold_splits[i + 1][0]
@@ -229,77 +229,357 @@ class TestGroupTimeseriesCV:
 
 
 class TestFeatureConfigValidation:
-    """Tests for multi-horizon config validation."""
+    """Tests for new FeatureConfig and SamplingConfig validation."""
 
-    def test_valid_decision_hours_range(self):
+    def test_default_sampling_config(self):
         config = FeatureConfig(
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
-            opening_tier="opening",
             closing_tier="closing",
-            target_type="devigged_pinnacle",
-            decision_hours_range=(3.0, 12.0),
-            max_samples_per_event=5,
         )
-        assert config.decision_hours_range == (3.0, 12.0)
+        assert config.sampling.strategy == "time_range"
+        assert config.sampling.min_hours == 3.0
+        assert config.sampling.max_hours == 12.0
+        assert config.sampling.max_samples_per_event == 5
 
-    def test_invalid_range_reversed(self):
+    def test_sampling_config_time_range(self):
+        config = FeatureConfig(
+            feature_groups=["tabular"],
+            markets=["h2h"],
+            outcome="home",
+            closing_tier="closing",
+            sampling=SamplingConfig(
+                strategy="time_range",
+                min_hours=3.0,
+                max_hours=12.0,
+                max_samples_per_event=5,
+            ),
+        )
+        assert config.sampling.strategy == "time_range"
+        assert config.sampling.min_hours == 3.0
+        assert config.sampling.max_hours == 12.0
+
+    def test_sampling_config_tier(self):
+        from odds_lambda.fetch_tier import FetchTier
+
+        config = FeatureConfig(
+            feature_groups=["tabular"],
+            markets=["h2h"],
+            outcome="home",
+            closing_tier="closing",
+            sampling=SamplingConfig(
+                strategy="tier",
+                decision_tier=FetchTier.PREGAME,
+            ),
+        )
+        assert config.sampling.strategy == "tier"
+        assert config.sampling.decision_tier == FetchTier.PREGAME
+
+    def test_invalid_hours_range_reversed(self):
         """min >= max should raise validation error."""
-        with pytest.raises(ValueError, match="must be less than max"):
-            FeatureConfig(
-                feature_groups=["tabular"],
-                markets=["h2h"],
-                outcome="home",
-                opening_tier="opening",
-                closing_tier="closing",
-                target_type="devigged_pinnacle",
-                decision_hours_range=(12.0, 3.0),
-            )
-
-    def test_invalid_range_negative(self):
-        """Negative min should raise validation error."""
-        with pytest.raises(ValueError, match="must be >= 0"):
-            FeatureConfig(
-                feature_groups=["tabular"],
-                markets=["h2h"],
-                outcome="home",
-                opening_tier="opening",
-                closing_tier="closing",
-                target_type="devigged_pinnacle",
-                decision_hours_range=(-1.0, 12.0),
-            )
+        with pytest.raises(ValueError, match="must be less than"):
+            SamplingConfig(strategy="time_range", min_hours=12.0, max_hours=3.0)
 
     def test_default_target_type_is_raw(self):
         config = FeatureConfig(
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
-            opening_tier="opening",
             closing_tier="closing",
         )
         assert config.target_type == "raw"
 
+    def test_devigged_pinnacle_target_type(self):
+        config = FeatureConfig(
+            feature_groups=["tabular"],
+            markets=["h2h"],
+            outcome="home",
+            closing_tier="closing",
+            target_type="devigged_pinnacle",
+        )
+        assert config.target_type == "devigged_pinnacle"
 
-class TestPrepareMultiHorizonData:
-    """Tests for prepare_multi_horizon_data."""
+    def test_adapter_default_is_xgboost(self):
+        config = FeatureConfig()
+        assert config.adapter == "xgboost"
 
-    def _mock_reader(
+    def test_adapter_lstm(self):
+        config = FeatureConfig(adapter="lstm")
+        assert config.adapter == "lstm"
+
+
+class TestTierSampler:
+    """Tests for TierSampler snapshot selection."""
+
+    @pytest.fixture
+    def event(self):
+        return Event(
+            id="tier_test",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
+            home_team="Los Angeles Lakers",
+            away_team="Boston Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+
+    def _make_bundle(self, event: Event, snapshots: list[OddsSnapshot]) -> EventDataBundle:
+        return EventDataBundle(
+            event=event,
+            snapshots=snapshots,
+            closing_snapshot=None,
+            pm_context=None,
+        )
+
+    def test_returns_latest_snapshot_in_decision_tier(self, event):
+        """Should pick the most recent pregame snapshot."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=10),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="pregame",
+            ),
+            OddsSnapshot(
+                id=2,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=5),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="pregame",
+            ),
+            OddsSnapshot(
+                id=3,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=1),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="closing",
+            ),
+        ]
+        sampler = TierSampler("pregame")
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 1
+        assert result[0].id == 2  # Latest pregame, not the closing one
+
+    def test_includes_earlier_tiers(self, event):
+        """When no snapshot in decision tier, falls back to earlier tiers."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=50),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="early",
+            ),
+            OddsSnapshot(
+                id=2,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=1),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="closing",
+            ),
+        ]
+        sampler = TierSampler("pregame")
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 1
+        assert result[0].fetch_tier == "early"
+
+    def test_excludes_closer_tiers(self, event):
+        """Closing-tier snapshot should not be selected when decision_tier=pregame."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=1),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="closing",
+            ),
+        ]
+        sampler = TierSampler("pregame")
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert result == []
+
+    def test_empty_snapshots(self, event):
+        sampler = TierSampler("pregame")
+        assert sampler.sample(self._make_bundle(event, [])) == []
+
+
+class TestTimeRangeSampler:
+    """Tests for TimeRangeSampler stratified snapshot selection."""
+
+    @pytest.fixture
+    def event(self):
+        return Event(
+            id="range_test",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
+            home_team="Los Angeles Lakers",
+            away_team="Boston Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+
+    def _make_bundle(self, event: Event, snapshots: list[OddsSnapshot]) -> EventDataBundle:
+        return EventDataBundle(
+            event=event,
+            snapshots=snapshots,
+            closing_snapshot=None,
+            pm_context=None,
+        )
+
+    def test_returns_snapshots_in_range(self, event):
+        """Only snapshots within [min_hours, max_hours] before game are included."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=24),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+            OddsSnapshot(
+                id=2,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=8),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+            OddsSnapshot(
+                id=3,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=6),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+            OddsSnapshot(
+                id=4,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=4),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+            OddsSnapshot(
+                id=5,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=1),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+        ]
+        sampler = TimeRangeSampler(min_hours=3.0, max_hours=12.0, max_samples=10)
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 3
+        result_ids = {s.id for s in result}
+        assert result_ids == {2, 3, 4}
+
+    def test_stratified_sampling_caps_at_max(self, event):
+        """When more snapshots than max_samples, picks one per bin."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=i,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=3 + i * 0.9),
+                raw_data={},
+                bookmaker_count=1,
+            )
+            for i in range(10)
+        ]
+        sampler = TimeRangeSampler(min_hours=3.0, max_hours=12.0, max_samples=3)
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) <= 3
+        # Results should be chronologically sorted
+        for i in range(len(result) - 1):
+            assert result[i].snapshot_time < result[i + 1].snapshot_time
+
+    def test_no_duplicates_in_stratified_sample(self, event):
+        """Same snapshot shouldn't appear twice even if it's nearest to multiple bins."""
+        commence = event.commence_time
+        # Only 2 snapshots, ask for 5 bins — should get at most 2, no dupes
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=6),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+            OddsSnapshot(
+                id=2,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=4),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+        ]
+        sampler = TimeRangeSampler(min_hours=3.0, max_hours=12.0, max_samples=5)
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 2
+        assert result[0].id != result[1].id
+
+    def test_empty_range(self, event):
+        """No snapshots in range returns empty list."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=24),
+                raw_data={},
+                bookmaker_count=1,
+            ),
+        ]
+        sampler = TimeRangeSampler(min_hours=3.0, max_hours=12.0, max_samples=5)
+        assert sampler.sample(self._make_bundle(event, snaps)) == []
+
+    def test_empty_snapshots(self, event):
+        sampler = TimeRangeSampler(min_hours=3.0, max_hours=12.0, max_samples=5)
+        assert sampler.sample(self._make_bundle(event, [])) == []
+
+
+class TestPrepareTrainingData:
+    """Tests for the new unified prepare_training_data function."""
+
+    def _make_bundle(
         self,
+        event: Event,
         closing_snap: OddsSnapshot,
         all_snaps: list[OddsSnapshot],
-    ) -> MagicMock:
-        """Create a mock OddsReader with both methods configured."""
-        mock_reader = MagicMock()
-        mock_reader.get_last_snapshot_in_tier = AsyncMock(return_value=closing_snap)
-        mock_reader.get_snapshots_for_event = AsyncMock(return_value=all_snaps)
-        return mock_reader
+    ) -> EventDataBundle:
+        return EventDataBundle(
+            event=event,
+            snapshots=all_snaps,
+            closing_snapshot=closing_snap,
+            pm_context=None,
+            pm_prices=[],
+            pm_orderbooks=[],
+            sequences=[],
+        )
 
     @pytest.mark.asyncio
     async def test_basic_multi_horizon(self, sample_events):
-        """Multi-horizon produces multiple rows per event with correct structure."""
-        from odds_analytics.feature_groups import prepare_multi_horizon_data
-
+        """Time-range sampling produces multiple rows per event."""
         event = sample_events[0]
         commence = event.commence_time
 
@@ -326,18 +606,24 @@ class TestPrepareMultiHorizonData:
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
-            opening_tier="opening",
             closing_tier="closing",
             target_type="devigged_pinnacle",
-            decision_hours_range=(3.0, 12.0),
-            max_samples_per_event=5,
+            sampling=SamplingConfig(
+                strategy="time_range",
+                min_hours=3.0,
+                max_hours=12.0,
+                max_samples_per_event=5,
+            ),
         )
 
-        mock_reader = self._mock_reader(closing_snap, all_snaps)
+        bundle = self._make_bundle(event, closing_snap, all_snaps)
         mock_session = AsyncMock()
 
-        with patch("odds_lambda.storage.readers.OddsReader", return_value=mock_reader):
-            result = await prepare_multi_horizon_data(
+        with patch(
+            "odds_analytics.feature_groups.collect_event_data",
+            new=AsyncMock(return_value=bundle),
+        ):
+            result = await prepare_training_data(
                 events=[event],
                 session=mock_session,
                 config=config,
@@ -347,14 +633,12 @@ class TestPrepareMultiHorizonData:
         assert result.num_samples <= 4
         assert result.event_ids is not None
         assert all(eid == event.id for eid in result.event_ids)
-        assert result.feature_names[-1] == "hours_until_event"
+        assert "hours_until_event" in result.feature_names
         assert not all(y == 0 for y in result.y)
 
     @pytest.mark.asyncio
     async def test_drops_event_without_pinnacle_closing(self, sample_events):
-        """Events without Pinnacle closing data are skipped."""
-        from odds_analytics.feature_groups import prepare_multi_horizon_data
-
+        """Events without Pinnacle closing data are skipped with devigged_pinnacle target."""
         event = sample_events[0]
         commence = event.commence_time
 
@@ -393,19 +677,25 @@ class TestPrepareMultiHorizonData:
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
-            opening_tier="opening",
             closing_tier="closing",
             target_type="devigged_pinnacle",
-            decision_hours_range=(3.0, 12.0),
-            max_samples_per_event=5,
+            sampling=SamplingConfig(
+                strategy="time_range",
+                min_hours=3.0,
+                max_hours=12.0,
+                max_samples_per_event=5,
+            ),
         )
 
-        mock_reader = self._mock_reader(closing_snap, [])
+        bundle = self._make_bundle(event, closing_snap, [])
         mock_session = AsyncMock()
 
-        with patch("odds_lambda.storage.readers.OddsReader", return_value=mock_reader):
+        with patch(
+            "odds_analytics.feature_groups.collect_event_data",
+            new=AsyncMock(return_value=bundle),
+        ):
             with pytest.raises(ValueError, match="No valid training data"):
-                await prepare_multi_horizon_data(
+                await prepare_training_data(
                     events=[event],
                     session=mock_session,
                     config=config,
@@ -414,8 +704,6 @@ class TestPrepareMultiHorizonData:
     @pytest.mark.asyncio
     async def test_hours_until_event_correct(self, sample_events):
         """hours_until_event feature matches actual time difference."""
-        from odds_analytics.feature_groups import prepare_multi_horizon_data
-
         event = sample_events[0]
         commence = event.commence_time
 
@@ -439,18 +727,24 @@ class TestPrepareMultiHorizonData:
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
-            opening_tier="opening",
             closing_tier="closing",
             target_type="devigged_pinnacle",
-            decision_hours_range=(3.0, 12.0),
-            max_samples_per_event=5,
+            sampling=SamplingConfig(
+                strategy="time_range",
+                min_hours=3.0,
+                max_hours=12.0,
+                max_samples_per_event=5,
+            ),
         )
 
-        mock_reader = self._mock_reader(closing_snap, all_snaps)
+        bundle = self._make_bundle(event, closing_snap, all_snaps)
         mock_session = AsyncMock()
 
-        with patch("odds_lambda.storage.readers.OddsReader", return_value=mock_reader):
-            result = await prepare_multi_horizon_data(
+        with patch(
+            "odds_analytics.feature_groups.collect_event_data",
+            new=AsyncMock(return_value=bundle),
+        ):
+            result = await prepare_training_data(
                 events=[event],
                 session=mock_session,
                 config=config,
@@ -463,8 +757,6 @@ class TestPrepareMultiHorizonData:
     @pytest.mark.asyncio
     async def test_max_samples_per_event_respected(self, sample_events):
         """Should not produce more rows than max_samples_per_event."""
-        from odds_analytics.feature_groups import prepare_multi_horizon_data
-
         event = sample_events[0]
         commence = event.commence_time
 
@@ -491,18 +783,24 @@ class TestPrepareMultiHorizonData:
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
-            opening_tier="opening",
             closing_tier="closing",
             target_type="devigged_pinnacle",
-            decision_hours_range=(3.0, 12.0),
-            max_samples_per_event=3,
+            sampling=SamplingConfig(
+                strategy="time_range",
+                min_hours=3.0,
+                max_hours=12.0,
+                max_samples_per_event=3,
+            ),
         )
 
-        mock_reader = self._mock_reader(closing_snap, all_snaps)
+        bundle = self._make_bundle(event, closing_snap, all_snaps)
         mock_session = AsyncMock()
 
-        with patch("odds_lambda.storage.readers.OddsReader", return_value=mock_reader):
-            result = await prepare_multi_horizon_data(
+        with patch(
+            "odds_analytics.feature_groups.collect_event_data",
+            new=AsyncMock(return_value=bundle),
+        ):
+            result = await prepare_training_data(
                 events=[event],
                 session=mock_session,
                 config=config,

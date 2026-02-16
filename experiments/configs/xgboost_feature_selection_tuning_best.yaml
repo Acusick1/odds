@@ -43,6 +43,7 @@ training:
     n_jobs: -1
     early_stopping_rounds: 10
   features:
+    adapter: xgboost
     sharp_bookmakers:
     - pinnacle
     retail_bookmakers:
@@ -54,9 +55,7 @@ training:
     - spreads
     - totals
     outcome: home
-    opening_tier: sharp
     closing_tier: closing
-    decision_tier: pregame
     lookback_hours: 72
     timesteps: 24
     normalize: false
@@ -64,6 +63,9 @@ training:
     - tabular
     - trajectory
     movement_threshold: 0.005
+    sampling:
+      strategy: tier
+      decision_tier: pregame
   feature_selection:
     enabled: true
     method: ensemble
