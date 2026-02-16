@@ -96,9 +96,6 @@ jobs:
       - name: Test Lambda functions
         run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
 
-      - name: Activate self-scheduling rules
-        run: bash scripts/activate-schedules.sh --lambda-name odds-scheduler --rule-prefix odds --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
-
       - name: Verify schedule activation
         run: bash scripts/verify-schedules.sh --rule-prefix odds --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
 

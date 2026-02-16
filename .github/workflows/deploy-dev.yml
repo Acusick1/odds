@@ -95,9 +95,6 @@ jobs:
       - name: Verify database writes
         run: uv run python scripts/ci/verify_database.py
 
-      - name: Activate self-scheduling rules
-        run: bash scripts/activate-schedules.sh --lambda-name odds-scheduler-dev --rule-prefix odds-dev --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
-
       - name: Verify schedule activation
         run: bash scripts/verify-schedules.sh --rule-prefix odds-dev --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
 
