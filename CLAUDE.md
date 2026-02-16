@@ -2,9 +2,13 @@
 
 IMPORTANT (LLM agents): This document is read-only. Do not create additional documentation files without user consent. Do NOT manually run `ruff` or `pre-commit` - automated via git hooks.
 
+## Strategic Goal
+
+Predict line movement (closing line value) using cross-source market data. The model targets the delta between current and closing fair prices, identifying when current prices are mispriced relative to where they'll close. Execute on whichever venue (sportsbook or Polymarket) offers the best price relative to the predicted close. Line movement prediction, not outcome prediction.
+
 ## Project Overview
 
-Single-user betting odds data collection and analysis system for NBA games. Integrates sportsbook odds and Polymarket prediction market data for cross-source analysis and closing line value (CLV) prediction. Prioritizes robust data pipeline architecture with comprehensive historical data collection, storage, and validation. Supports backtesting betting strategies against historical data.
+Single-user betting odds data collection and analysis system for NBA games. Integrates sportsbook odds and Polymarket prediction market data for cross-source CLV delta prediction. Prioritizes robust data pipeline architecture with comprehensive historical data collection, storage, and validation. Supports backtesting betting strategies against historical data.
 
 ## Package Structure
 
@@ -54,6 +58,7 @@ packages/
 
 - ALWAYS use async context manager: `async with async_session_maker() as session`
 - NEVER share sessions across async tasks
+- No wrapper functions — use `async_session_maker()` directly everywhere
 - Lambda uses NullPool automatically. Local/Railway use pool of 5
 
 ### Look-Ahead Bias (Backtesting)
@@ -70,7 +75,7 @@ packages/
 
 ## Polymarket Integration
 
-**Strategic goal:** Predict closing line values using all available market data, execute on whichever venue (sportsbook or Polymarket) offers best price relative to predicted close. Line movement prediction, not outcome prediction.
+Polymarket is one of two primary data sources feeding the strategic goal above.
 
 ### Data Sources
 
@@ -87,9 +92,11 @@ CLOB `/prices-history` data expires on a ~30-day rolling basis. The backfill job
 - Token IDs are strings, not integers
 - Order books need client-side sorting (CLOB returns unsorted)
 - Prices are implied probabilities (0.0–1.0), not American odds
-- Event matching parses ticker format (`nba-{away}-{home}-{yyyy}-{mm}-{dd}`) against sportsbook Events with ±24h date window
+- Event matching parses ticker format (`nba-{away}-{home}-{yyyy}-{mm}-{dd}`) against sportsbook Events with ±24h date window centered on noon UTC (not midnight) to handle US evening games whose UTC timestamps roll to next day
+- Event matching is manual via CLI (`odds polymarket link`), not auto-triggered during fetch jobs
 - `PolymarketEvent.event_id` FK starts `NULL`, linked lazily via `match_polymarket_event()`
 - Market type classified from question text via regex in `classify_market()`
+- Gamma API returns `clobTokenIds`/`outcomes` as JSON strings — writer parses with `json.loads()`
 - Polling uses fixed `price_poll_interval` (default 300s); `FetchTier` filters which events to collect, not frequency
 
 ## Code Style
@@ -105,6 +112,13 @@ CLOB `/prices-history` data expires on a ~30-day rolling basis. The backfill job
 - All DB operations must be async
 - Use `AsyncSession`, never sync `Session`
 - CLI uses `asyncio.run()` for async functions
+
+### Conventions
+
+- Job entry points are `async def main()` functions
+- `PolymarketIngestionService` orchestrates the Polymarket fetch job (not inline in job file)
+- `EventSyncService` syncs games from free `/events` endpoint as first step in `fetch_odds` job
+- Training pipeline: PM features NaN-fill when Polymarket data unavailable — rows kept, not dropped
 
 ### Model Types
 
