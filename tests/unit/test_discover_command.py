@@ -36,39 +36,6 @@ class TestDiscoverCommand:
         assert result.exit_code == 1
         assert "start date must be before" in result.stdout.lower()
 
-    def test_dry_run_mode(self, runner, mock_historical_events_response, mock_api_client_factory):
-        """Test dry-run mode doesn't write to database."""
-        mock_client = mock_api_client_factory(mock_historical_events_response)
-
-        with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
-            with patch("odds_lambda.storage.writers.OddsWriter") as mock_writer_class:
-                result = runner.invoke(
-                    app,
-                    [
-                        "discover",
-                        "games",
-                        "--start",
-                        "2024-10-15",
-                        "--end",
-                        "2024-10-15",
-                        "--dry-run",
-                    ],
-                )
-
-                # Command should succeed
-                assert result.exit_code == 0
-
-                # Should show dry run mode
-                assert "DRY RUN MODE" in result.stdout
-
-                # Should display sample events
-                assert "Sample Events" in result.stdout
-                assert "Lakers" in result.stdout
-                assert "Celtics" in result.stdout
-
-                # Should NOT create writer (no database writes)
-                mock_writer_class.assert_not_called()
-
     def test_successful_discovery(
         self,
         runner,
@@ -207,29 +174,33 @@ class TestDiscoverCommand:
             assert "Events found: 0" in result.stdout
             assert "No events found in date range" in result.stdout
 
-    def test_quota_tracking(self, runner, mock_historical_events_response, mock_api_client_factory):
+    def test_quota_tracking(
+        self, runner, mock_historical_events_response, mock_api_client_factory, mock_db_session
+    ):
         """Test that quota is tracked and displayed."""
         mock_client = mock_api_client_factory(mock_historical_events_response)
 
         with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
-            result = runner.invoke(
-                app,
-                [
-                    "discover",
-                    "games",
-                    "--start",
-                    "2024-10-15",
-                    "--end",
-                    "2024-10-15",
-                    "--dry-run",
-                ],
-            )
+            with patch(
+                "odds_cli.commands.discover.async_session_maker", return_value=mock_db_session
+            ):
+                result = runner.invoke(
+                    app,
+                    [
+                        "discover",
+                        "games",
+                        "--start",
+                        "2024-10-15",
+                        "--end",
+                        "2024-10-15",
+                    ],
+                )
 
-            # Command should succeed
-            assert result.exit_code == 0
+                # Command should succeed
+                assert result.exit_code == 0
 
-            # Should display quota information
-            assert "API quota remaining: 19,990" in result.stdout
+                # Should display quota information
+                assert "API quota remaining: 19,990" in result.stdout
 
     def test_batch_upsert(self, runner, mock_api_client_factory, mock_db_session):
         """Test that events are upserted in batches."""
@@ -287,7 +258,7 @@ class TestDiscoverCommand:
                         or "Events updated:" in result.stdout
                     )
 
-    def test_invalid_event_data_handling(self, runner, mock_api_client_factory):
+    def test_invalid_event_data_handling(self, runner, mock_api_client_factory, mock_db_session):
         """Test handling of malformed event data."""
         malformed_response = {
             "data": [
@@ -312,24 +283,26 @@ class TestDiscoverCommand:
         mock_client = mock_api_client_factory(malformed_response)
 
         with patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client):
-            result = runner.invoke(
-                app,
-                [
-                    "discover",
-                    "games",
-                    "--start",
-                    "2024-10-15",
-                    "--end",
-                    "2024-10-15",
-                    "--dry-run",
-                ],
-            )
+            with patch(
+                "odds_cli.commands.discover.async_session_maker", return_value=mock_db_session
+            ):
+                result = runner.invoke(
+                    app,
+                    [
+                        "discover",
+                        "games",
+                        "--start",
+                        "2024-10-15",
+                        "--end",
+                        "2024-10-15",
+                    ],
+                )
 
-            # Command should complete
-            assert result.exit_code == 0
+                # Command should complete
+                assert result.exit_code == 0
 
-            # Should show warning for failed parsing
-            assert "Warning" in result.stdout
+                # Should show warning for failed parsing
+                assert "Warning" in result.stdout
 
-            # Should still process valid events
-            assert "Events parsed: 1" in result.stdout
+                # Should still process valid events
+                assert "Events parsed: 1" in result.stdout
