@@ -24,6 +24,15 @@ Fetches game scores and updates event status.
 
 ## Backfill Commands
 
+### Discover Upcoming Games (free)
+
+```bash
+odds discover upcoming
+odds discover upcoming --sport basketball_nba
+```
+
+Syncs upcoming games from the free `/events` endpoint (0 quota units). Runs automatically at the start of every `fetch-odds` job, but can also be called directly.
+
 ### Discover Historical Games
 
 ```bash
