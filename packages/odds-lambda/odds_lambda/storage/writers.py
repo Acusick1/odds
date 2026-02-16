@@ -385,6 +385,12 @@ class OddsWriter:
             logger.info("bulk_events_upserted", inserted=0, updated=0)
             return {"inserted": 0, "updated": 0}
 
+        # Deduplicate by event ID (API returns same event across multiple dates)
+        seen: dict[str, Event] = {}
+        for event in events:
+            seen[event.id] = event
+        events = list(seen.values())
+
         # Determine which events already exist
         event_ids = [event.id for event in events]
         result = await self.session.execute(select(Event.id).where(Event.id.in_(event_ids)))

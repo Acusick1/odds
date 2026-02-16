@@ -11,7 +11,6 @@ from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.storage.writers import OddsWriter
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeElapsedColumn
-from rich.table import Table
 
 app = typer.Typer()
 console = Console()
@@ -26,9 +25,6 @@ def games(
     end: str = typer.Option(today.isoformat(), "--end", help="End date (YYYY-MM-DD)"),
     sport: str = typer.Option(
         "basketball_nba", "--sport", "-s", help="Sport to discover games for"
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Preview operations without database writes"
     ),
 ):
     """
@@ -45,12 +41,11 @@ def games(
     Examples:
         odds discover games  # Discover games from the past day
         odds discover games --start 2024-10-01 --end 2024-10-31
-        odds discover games --start 2024-10-01 --end 2024-10-31 --dry-run
     """
-    asyncio.run(_discover_games(start, end, sport, dry_run))
+    asyncio.run(_discover_games(start, end, sport))
 
 
-async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dry_run: bool):
+async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
     """Async implementation of discover games."""
     # Validate and parse dates
     try:
@@ -71,8 +66,6 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
     # Display header
     console.print(f"\n[bold blue]Discovering {sport} games[/bold blue]")
     console.print(f"  Date range: {start_date_str} to {end_date_str} ({days_in_range} days)")
-    if dry_run:
-        console.print("  [yellow]DRY RUN MODE - No database writes[/yellow]")
     console.print()
 
     # Track statistics
@@ -153,8 +146,14 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
     if quota_remaining is not None:
         console.print(f"  API quota remaining: {quota_remaining:,}")
 
-    # Store in database if not dry run
-    if not dry_run and all_events:
+    # Deduplicate events (API returns same event across multiple dates)
+    seen: dict[str, Event] = {}
+    for event in all_events:
+        seen[event.id] = event
+    unique_events = list(seen.values())
+
+    if unique_events:
+        console.print(f"  Unique events: {len(unique_events)}")
         console.print("\n[bold blue]Storing events in database...[/bold blue]")
 
         with Progress(
@@ -165,7 +164,7 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
         ) as progress:
             store_task = progress.add_task(
                 "Upserting events...",
-                total=len(all_events),
+                total=len(unique_events),
             )
 
             async with async_session_maker() as session:
@@ -176,8 +175,8 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
                 total_inserted = 0
                 total_updated = 0
 
-                for i in range(0, len(all_events), batch_size):
-                    batch = all_events[i : i + batch_size]
+                for i in range(0, len(unique_events), batch_size):
+                    batch = unique_events[i : i + batch_size]
 
                     try:
                         result = await writer.bulk_upsert_events(batch)
@@ -199,32 +198,7 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str, dr
             "[dim]Use 'odds backfill' to fetch historical odds for discovered games.[/dim]"
         )
 
-    elif dry_run and all_events:
-        # Show sample of events in dry run mode
-        console.print("\n[bold]Sample Events (first 10):[/bold]")
-
-        table = Table(show_header=True, header_style="bold magenta")
-        table.add_column("Date", style="cyan")
-        table.add_column("Home Team", style="green")
-        table.add_column("Away Team", style="yellow")
-        table.add_column("Status", style="white")
-
-        for event in all_events[:10]:
-            table.add_row(
-                event.commence_time.strftime("%Y-%m-%d %H:%M"),
-                event.home_team,
-                event.away_team,
-                event.status.value,
-            )
-
-        console.print(table)
-
-        if len(all_events) > 10:
-            console.print(f"\n  ... and {len(all_events) - 10} more events")
-
-        console.print("\n[dim]Events will be stored with SCHEDULED status (no scores).[/dim]")
-
-    elif not all_events:
+    elif not unique_events:
         console.print("\n[yellow]No events found in date range[/yellow]")
 
     console.print()
