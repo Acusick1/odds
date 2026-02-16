@@ -32,11 +32,7 @@ packages/
 - Scores Endpoint: `/sports/basketball_nba/scores`
 - Historical Endpoint: `/sports/basketball_nba/odds/history`
 
-**Pricing:**
-- Cost per "object" (1 object = 1 game/event)
-- Bookmakers/markets requested does not affect cost
-- Historical endpoint costs 10x (10 units per game)
-- 20,000 requests/month tier: $25/month
+See CLAUDE.md for endpoint pricing breakdown and DEPLOYMENT.md for tier details.
 
 ### Bookmaker Coverage (8 books)
 

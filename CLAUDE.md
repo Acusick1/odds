@@ -43,8 +43,11 @@ packages/
 
 ### API Cost
 
-- 1 game = 1 quota unit
-- Historical endpoint = 10x cost (10 units per game)
+- `/odds` endpoint: 1 unit per region × per market per call (returns all games in one call — cost does not scale with number of games). Current config: 1 region × 3 markets = 3 units per fetch.
+- `/events` endpoint: free (no quota cost) — returns game metadata (IDs, teams, times) without odds
+- `/scores` endpoint: 1 unit without `daysFrom`, 2 units with `daysFrom`
+- `/historical/odds` endpoint: 10 units per region × per market
+- Bookmakers do not affect cost (server-side filter only)
 - Check quota: `odds status quota`
 
 ### Database Connections

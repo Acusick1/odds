@@ -112,14 +112,15 @@ uv run odds status show
 
 ### The Odds API
 
-| Tier | Cost | Requests |
-|------|------|----------|
-| Basic | $25/month | 20,000/month |
+| Tier | Cost | Requests | Notes |
+|------|------|----------|-------|
+| **Free (current)** | $0/month | 500/month | No historical endpoints |
+| Basic | $25/month | 20,000/month | Historical endpoints available |
 
 **Typical Usage:**
-- ~10-15k requests/month during NBA season
-- Intelligent scheduling optimizes usage
-- Historical endpoint costs 10x (10 units per game)
+- ~400-500 requests/month during NBA season with adaptive scheduling
+- Historical endpoint costs 10x and is only available on paid tiers
+- See CLAUDE.md for endpoint pricing breakdown
 
 ### Compute
 
