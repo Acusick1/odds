@@ -1,13 +1,15 @@
-"""CLI commands for discovering historical games."""
+"""CLI commands for discovering games (historical and upcoming)."""
 
 import asyncio
 from datetime import UTC, datetime, timedelta
 
 import typer
 from odds_core.api_models import create_scheduled_event
+from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import Event
 from odds_lambda.data_fetcher import TheOddsAPIClient
+from odds_lambda.event_sync import EventSyncService
 from odds_lambda.storage.writers import OddsWriter
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeElapsedColumn
@@ -200,5 +202,46 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
 
     elif not unique_events:
         console.print("\n[yellow]No events found in date range[/yellow]")
+
+    console.print()
+
+
+@app.command()
+def upcoming(
+    sport: str = typer.Option(
+        "basketball_nba", "--sport", "-s", help="Sport to discover games for"
+    ),
+):
+    """
+    Discover and store upcoming games using the free /events endpoint (0 quota units).
+
+    This command syncs upcoming game schedules from The Odds API's free events endpoint
+    and stores them in the database. Use this to keep the game schedule up-to-date
+    without spending quota.
+
+    Examples:
+        odds discover upcoming
+        odds discover upcoming --sport basketball_nba
+    """
+    asyncio.run(_discover_upcoming(sport))
+
+
+async def _discover_upcoming(sport: str) -> None:
+    """Async implementation of discover upcoming."""
+    app_settings = get_settings()
+    sports = [sport] if sport else app_settings.data_collection.sports
+
+    console.print(f"\n[bold blue]Discovering upcoming {sport} games (free endpoint)[/bold blue]")
+    console.print()
+
+    async with TheOddsAPIClient() as client:
+        service = EventSyncService(client=client)
+        results = await service.sync_sports(sports)
+
+    for result in results:
+        console.print(f"[bold]{result.sport_key}[/bold]")
+        console.print(f"  Inserted: {result.inserted}")
+        console.print(f"  Updated:  {result.updated}")
+        console.print(f"  Total:    {result.total}")
 
     console.print()

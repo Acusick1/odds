@@ -11,7 +11,6 @@ from odds_core.database import async_session_maker
 from odds_core.models import FetchLog
 
 from odds_lambda.data_fetcher import OddsResponse, TheOddsAPIClient
-from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger(__name__)
@@ -108,7 +107,6 @@ class OddsIngestionService:
         self,
         sport_key: str,
         *,
-        fetch_tier: FetchTier | None = None,
         validate: bool | None = None,
         callbacks: OddsIngestionCallbacks | None = None,
     ) -> SportIngestionResult:
@@ -196,7 +194,6 @@ class OddsIngestionService:
         self,
         sports: Iterable[str],
         *,
-        fetch_tier: FetchTier | None = None,
         validate: bool | None = None,
         callbacks_factory: Callable[[str], OddsIngestionCallbacks] | None = None,
     ) -> IngestionResult:
@@ -207,7 +204,6 @@ class OddsIngestionService:
             callbacks = callbacks_factory(sport) if callbacks_factory else None
             result = await self.ingest_sport(
                 sport,
-                fetch_tier=fetch_tier,
                 validate=validate,
                 callbacks=callbacks,
             )

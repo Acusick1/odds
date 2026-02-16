@@ -31,6 +31,16 @@ class ScoresResponse:
 
 
 @dataclass(slots=True)
+class EventsResponse:
+    """Response from get_events() API call (free endpoint, no bookmaker data)."""
+
+    events: list[Event]
+    response_time_ms: int
+    quota_remaining: int | None
+    timestamp: datetime
+
+
+@dataclass(slots=True)
 class HistoricalOddsResponse:
     """Response from get_historical_odds() API call."""
 

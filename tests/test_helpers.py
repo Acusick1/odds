@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from odds_core.api_models import HistoricalOddsResponse, OddsResponse
+from datetime import UTC, datetime
+
+from odds_core.api_models import EventsResponse, HistoricalOddsResponse, OddsResponse
 
 
 class StubOddsClient:
@@ -20,14 +22,25 @@ class StubOddsClient:
         ...     assert result == response
     """
 
-    def __init__(self, odds_response: OddsResponse):
+    def __init__(
+        self,
+        odds_response: OddsResponse,
+        events_response: EventsResponse | None = None,
+    ):
         """
-        Initialize stub with a response to return.
+        Initialize stub with responses to return.
 
         Args:
             odds_response: The OddsResponse to return from get_odds()
+            events_response: The EventsResponse to return from get_events(). Defaults to empty.
         """
         self._odds_response = odds_response
+        self._events_response = events_response or EventsResponse(
+            events=[],
+            response_time_ms=0,
+            quota_remaining=None,
+            timestamp=datetime.now(UTC),
+        )
 
     async def __aenter__(self):
         """Enter async context manager."""
@@ -38,12 +51,12 @@ class StubOddsClient:
         return False
 
     async def get_odds(self, *args, **kwargs) -> OddsResponse:
-        """
-        Return the configured odds response.
-
-        Args and kwargs are accepted but ignored for stub simplicity.
-        """
+        """Return the configured odds response."""
         return self._odds_response
+
+    async def get_events(self, *args, **kwargs) -> EventsResponse:
+        """Return the configured events response."""
+        return self._events_response
 
 
 class StubHistoricalOddsClient:
