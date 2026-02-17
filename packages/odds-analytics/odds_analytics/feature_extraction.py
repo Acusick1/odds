@@ -158,47 +158,26 @@ class TabularFeatures:
     """
     Type-safe feature container for tabular ML models.
 
-    Replaces string-keyed dictionaries with typed attributes to eliminate
-    runtime errors from typos and provide compile-time type checking.
+    All features are outcome-relative (computed for the specific outcome being
+    analyzed), eliminating structural duplicates between home/away sides.
 
-    Fields marked as Optional (with None default) indicate features that may
-    be unavailable depending on data completeness. None values are converted
-    to np.nan in array representation to distinguish from calculated zeros.
-
-    Required fields (always present):
-    - is_home_team, is_away_team: Team indicators
-
-    Optional fields (depend on data availability):
-    - Consensus features: Require h2h market with multiple bookmakers
-    - Sharp features: Require sharp bookmaker data (e.g., Pinnacle)
-    - Retail features: Require retail bookmaker data
-    - Best odds features: Require multiple bookmaker quotes
+    None values are converted to np.nan in array representation to distinguish
+    "feature unavailable" from "calculated value equals zero".
     """
 
-    # Required fields - always present
-    is_home_team: float  # 1.0 or 0.0
-    is_away_team: float  # 1.0 or 0.0
-
     # Consensus features (optional - require h2h market data)
-    avg_home_odds: float | None = None
-    avg_away_odds: float | None = None
-    std_home_odds: float | None = None
-    std_away_odds: float | None = None
-    home_consensus_prob: float | None = None
-    away_consensus_prob: float | None = None
     consensus_prob: float | None = None
     opponent_consensus_prob: float | None = None
+    avg_odds: float | None = None
+    std_odds: float | None = None
 
     # Sharp bookmaker features (optional - require sharp books)
-    sharp_home_prob: float | None = None
-    sharp_away_prob: float | None = None
-    sharp_market_hold: float | None = None
     sharp_prob: float | None = None
     opponent_sharp_prob: float | None = None
+    sharp_market_hold: float | None = None
 
     # Retail vs sharp features (optional - require both sharp and retail)
-    retail_sharp_diff_home: float | None = None
-    retail_sharp_diff_away: float | None = None
+    retail_sharp_diff: float | None = None
 
     # Market efficiency features (optional - require bookmaker data)
     num_bookmakers: float | None = None
@@ -206,12 +185,6 @@ class TabularFeatures:
     std_market_hold: float | None = None
 
     # Best odds features (optional - require line shopping data)
-    best_home_odds: float | None = None
-    worst_home_odds: float | None = None
-    home_odds_range: float | None = None
-    best_away_odds: float | None = None
-    worst_away_odds: float | None = None
-    away_odds_range: float | None = None
     best_available_odds: float | None = None
     odds_range: float | None = None
     best_available_decimal: float | None = None
@@ -572,14 +545,10 @@ class TabularFeatureExtractor(FeatureExtractor):
             TabularFeatures instance with type-safe feature access
         """
         # Initialize feature values dictionary for building
-        feature_values = {}
+        feature_values: dict[str, float] = {}
 
         # Filter for target market
         market_odds = filter_odds_by_market_outcome(odds_data, market)
-
-        # Always set required fields
-        feature_values["is_home_team"] = 1.0 if outcome == event.home_team else 0.0
-        feature_values["is_away_team"] = 1.0 if outcome == event.away_team else 0.0
 
         if not market_odds:
             return TabularFeatures(**feature_values)
@@ -588,88 +557,63 @@ class TabularFeatureExtractor(FeatureExtractor):
         sharp_odds = filter_odds_by_bookmakers(market_odds, self.sharp_bookmakers)
         retail_odds = filter_odds_by_bookmakers(market_odds, self.retail_bookmakers)
 
+        # Resolve outcome and opponent odds lists
+        if outcome == event.home_team:
+            outcome_team, opponent_team = event.home_team, event.away_team
+        elif outcome == event.away_team:
+            outcome_team, opponent_team = event.away_team, event.home_team
+        else:
+            outcome_team, opponent_team = None, None
+
         # 1. Market consensus features
-        if market == "h2h":
-            home_odds_list = filter_odds_by_market_outcome(market_odds, market, event.home_team)
-            away_odds_list = filter_odds_by_market_outcome(market_odds, market, event.away_team)
+        if market == "h2h" and outcome_team:
+            outcome_odds_list = filter_odds_by_market_outcome(market_odds, market, outcome_team)
+            opponent_odds_list = filter_odds_by_market_outcome(market_odds, market, opponent_team)
 
-            if home_odds_list and away_odds_list:
-                feature_values["avg_home_odds"] = calculate_avg_price(home_odds_list)
-                feature_values["avg_away_odds"] = calculate_avg_price(away_odds_list)
-                feature_values["std_home_odds"] = float(np.std([o.price for o in home_odds_list]))
-                feature_values["std_away_odds"] = float(np.std([o.price for o in away_odds_list]))
+            if outcome_odds_list and opponent_odds_list:
+                feature_values["avg_odds"] = calculate_avg_price(outcome_odds_list)
+                feature_values["std_odds"] = float(np.std([o.price for o in outcome_odds_list]))
 
-                # Market consensus (average implied probability)
-                avg_home_prob = float(
-                    np.mean([calculate_implied_probability(o.price) for o in home_odds_list])
+                avg_outcome_prob = float(
+                    np.mean([calculate_implied_probability(o.price) for o in outcome_odds_list])
                 )
-                avg_away_prob = float(
-                    np.mean([calculate_implied_probability(o.price) for o in away_odds_list])
+                avg_opponent_prob = float(
+                    np.mean([calculate_implied_probability(o.price) for o in opponent_odds_list])
                 )
-                feature_values["home_consensus_prob"] = avg_home_prob
-                feature_values["away_consensus_prob"] = avg_away_prob
-
-                # Determine if analyzing home or away
-                if outcome == event.home_team:
-                    feature_values["consensus_prob"] = avg_home_prob
-                    feature_values["opponent_consensus_prob"] = avg_away_prob
-                elif outcome == event.away_team:
-                    feature_values["consensus_prob"] = avg_away_prob
-                    feature_values["opponent_consensus_prob"] = avg_home_prob
+                feature_values["consensus_prob"] = avg_outcome_prob
+                feature_values["opponent_consensus_prob"] = avg_opponent_prob
 
         # 2. Sharp vs Retail features (key for detecting value)
-        if sharp_odds and retail_odds:
-            sharp_home = next((o for o in sharp_odds if o.outcome_name == event.home_team), None)
-            sharp_away = next((o for o in sharp_odds if o.outcome_name == event.away_team), None)
+        if sharp_odds and retail_odds and outcome_team:
+            sharp_outcome = next((o for o in sharp_odds if o.outcome_name == outcome_team), None)
+            sharp_opponent = next((o for o in sharp_odds if o.outcome_name == opponent_team), None)
 
-            if sharp_home and sharp_away:
-                sharp_home_prob = calculate_implied_probability(sharp_home.price)
-                sharp_away_prob = calculate_implied_probability(sharp_away.price)
+            if sharp_outcome and sharp_opponent:
+                outcome_sharp_prob = calculate_implied_probability(sharp_outcome.price)
+                opponent_sharp_prob = calculate_implied_probability(sharp_opponent.price)
 
-                feature_values["sharp_home_prob"] = sharp_home_prob
-                feature_values["sharp_away_prob"] = sharp_away_prob
+                feature_values["sharp_prob"] = outcome_sharp_prob
+                feature_values["opponent_sharp_prob"] = opponent_sharp_prob
 
-                # Calculate sharp market hold (should be lower than retail)
-                sharp_hold = calculate_market_hold([sharp_home.price, sharp_away.price])
+                sharp_hold = calculate_market_hold([sharp_outcome.price, sharp_opponent.price])
                 feature_values["sharp_market_hold"] = sharp_hold
 
-                # Compare retail to sharp (deviation indicates potential value)
-                retail_home_odds = filter_odds_by_market_outcome(
-                    retail_odds, market, event.home_team
+                # Retail-sharp diff for outcome side only
+                retail_outcome_odds = filter_odds_by_market_outcome(
+                    retail_odds, market, outcome_team
                 )
-                retail_away_odds = filter_odds_by_market_outcome(
-                    retail_odds, market, event.away_team
-                )
-
-                if retail_home_odds:
-                    avg_retail_home_prob = float(
-                        np.mean([calculate_implied_probability(o.price) for o in retail_home_odds])
+                if retail_outcome_odds:
+                    avg_retail_prob = float(
+                        np.mean(
+                            [calculate_implied_probability(o.price) for o in retail_outcome_odds]
+                        )
                     )
-                    feature_values["retail_sharp_diff_home"] = (
-                        avg_retail_home_prob - sharp_home_prob
-                    )
-
-                if retail_away_odds:
-                    avg_retail_away_prob = float(
-                        np.mean([calculate_implied_probability(o.price) for o in retail_away_odds])
-                    )
-                    feature_values["retail_sharp_diff_away"] = (
-                        avg_retail_away_prob - sharp_away_prob
-                    )
-
-                # Set outcome-specific features
-                if outcome == event.home_team:
-                    feature_values["sharp_prob"] = sharp_home_prob
-                    feature_values["opponent_sharp_prob"] = sharp_away_prob
-                elif outcome == event.away_team:
-                    feature_values["sharp_prob"] = sharp_away_prob
-                    feature_values["opponent_sharp_prob"] = sharp_home_prob
+                    feature_values["retail_sharp_diff"] = avg_retail_prob - outcome_sharp_prob
 
         # 3. Market efficiency features
         all_books = {o.bookmaker_key for o in market_odds}
         feature_values["num_bookmakers"] = float(len(all_books))
 
-        # Calculate average market hold across all books
         if market == "h2h":
             holds = []
             for book in all_books:
@@ -685,30 +629,14 @@ class TabularFeatureExtractor(FeatureExtractor):
                 feature_values["avg_market_hold"] = float(np.mean(holds))
                 feature_values["std_market_hold"] = float(np.std(holds))
 
-        # 4. Best available odds features (line shopping)
-        if market == "h2h":
-            home_market_odds = filter_odds_by_market_outcome(market_odds, market, event.home_team)
-            away_market_odds = filter_odds_by_market_outcome(market_odds, market, event.away_team)
-            home_prices = [o.price for o in home_market_odds]
-            away_prices = [o.price for o in away_market_odds]
+        # 4. Best available odds features (line shopping) — outcome side only
+        if market == "h2h" and outcome_team:
+            outcome_market_odds = filter_odds_by_market_outcome(market_odds, market, outcome_team)
+            outcome_prices = [o.price for o in outcome_market_odds]
 
-            if home_prices:
-                feature_values["best_home_odds"] = float(max(home_prices))
-                feature_values["worst_home_odds"] = float(min(home_prices))
-                feature_values["home_odds_range"] = float(max(home_prices) - min(home_prices))
-
-            if away_prices:
-                feature_values["best_away_odds"] = float(max(away_prices))
-                feature_values["worst_away_odds"] = float(min(away_prices))
-                feature_values["away_odds_range"] = float(max(away_prices) - min(away_prices))
-
-            # Set outcome-specific best odds
-            if outcome == event.home_team and home_prices:
-                feature_values["best_available_odds"] = float(max(home_prices))
-                feature_values["odds_range"] = float(max(home_prices) - min(home_prices))
-            elif outcome == event.away_team and away_prices:
-                feature_values["best_available_odds"] = float(max(away_prices))
-                feature_values["odds_range"] = float(max(away_prices) - min(away_prices))
+            if outcome_prices:
+                feature_values["best_available_odds"] = float(max(outcome_prices))
+                feature_values["odds_range"] = float(max(outcome_prices) - min(outcome_prices))
 
         # 5. Decimal odds features (for model friendliness)
         if "best_available_odds" in feature_values:
@@ -1562,10 +1490,7 @@ class HybridFeatureExtractor(FeatureExtractor):
             )
         else:
             # Empty tabular features if no data
-            tabular_features = TabularFeatures(
-                is_home_team=1.0 if outcome == event.home_team else 0.0,
-                is_away_team=1.0 if outcome == event.away_team else 0.0,
-            )
+            tabular_features = TabularFeatures()
 
         # Extract trajectory features from full sequence
         trajectory_features = self.trajectory_extractor.extract_features(

@@ -222,11 +222,7 @@ class TestTabularFeatureExtractor:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        # Should have retail-sharp difference features
-        assert (
-            features.retail_sharp_diff_home is not None
-            or features.retail_sharp_diff_away is not None
-        )
+        assert features.retail_sharp_diff is not None
 
     def test_extract_features_includes_best_odds(self, sample_event, sample_odds_snapshot):
         """Test that best available odds are found."""
@@ -239,24 +235,6 @@ class TestTabularFeatureExtractor:
         assert features.best_available_decimal is not None
         assert features.best_available_decimal > 1.0
 
-    def test_extract_features_team_indicators(self, sample_event, sample_odds_snapshot):
-        """Test that team indicator features are set correctly."""
-        extractor = TabularFeatureExtractor()
-
-        home_features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
-        )
-
-        assert home_features.is_home_team == 1.0
-        assert home_features.is_away_team == 0.0
-
-        away_features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.away_team
-        )
-
-        assert away_features.is_home_team == 0.0
-        assert away_features.is_away_team == 1.0
-
     def test_extract_features_empty_odds(self, sample_event):
         """Test that extract_features handles empty odds gracefully."""
         from odds_analytics.feature_extraction import TabularFeatures
@@ -267,9 +245,9 @@ class TestTabularFeatureExtractor:
         )
 
         assert isinstance(features, TabularFeatures)
-        # Should have is_home_team and is_away_team set
-        assert features.is_home_team == 1.0
-        assert features.is_away_team == 0.0
+        # All fields should be None with empty odds
+        assert features.consensus_prob is None
+        assert features.sharp_prob is None
 
     def test_get_feature_names_returns_list(self):
         """Test that get_feature_names returns a list of strings."""
@@ -300,20 +278,18 @@ class TestTabularFeatureExtractor:
 
         # Create features with some None values
         features = TabularFeatures(
-            is_home_team=1.0,
-            is_away_team=0.0,
             consensus_prob=0.55,
             # Other fields default to None
         )
 
         vector = features.to_array()
+        names = TabularFeatures.get_feature_names()
 
-        # Required fields should have values
-        assert vector[0] == 1.0  # is_home_team
-        assert vector[1] == 0.0  # is_away_team
+        # Set field should have value
+        assert vector[names.index("consensus_prob")] == 0.55
 
         # Optional fields that are None should be NaN
-        assert np.isnan(vector[2])  # avg_home_odds (None)
+        assert np.isnan(vector[names.index("opponent_consensus_prob")])
 
     def test_create_feature_vector_uses_get_feature_names_by_default(
         self, sample_event, sample_odds_snapshot
@@ -959,7 +935,6 @@ class TestFeatureExtractorFromConfig:
         )
 
         # Should produce valid features
-        assert features.is_home_team == 1.0
         assert features.consensus_prob is not None
         assert features.sharp_prob is not None
 
