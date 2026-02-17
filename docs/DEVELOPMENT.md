@@ -218,10 +218,7 @@ pre-commit install
 
 ## Issue Creation Workflow
 
-1. Generate markdown following schema in `issues/ISSUE_SCHEMA.md`
-2. Show preview for user review
-3. After approval, post with `gh issue create`
-4. Return issue URL
+Use the `/create-issue` Claude Code skill.
 
 ## Logging
 
