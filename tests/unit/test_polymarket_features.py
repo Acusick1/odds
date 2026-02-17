@@ -96,8 +96,6 @@ def recent_prices() -> list[PolymarketPriceSnapshot]:
 @pytest.fixture
 def sample_sb_tabular_features() -> TabularFeatures:
     return TabularFeatures(
-        is_home_team=1.0,
-        is_away_team=0.0,
         consensus_prob=0.57,
         opponent_consensus_prob=0.43,
         sharp_prob=0.55,

@@ -120,9 +120,7 @@ class TestTabularFeatureExtractor:
         )
 
         assert isinstance(features, TabularFeatures)
-        # Should have required fields
-        assert features.is_home_team is not None
-        assert features.is_away_team is not None
+        assert features.consensus_prob is not None
 
     def test_extract_features_includes_consensus_prob(self, sample_event, sample_odds_snapshot):
         """Test that consensus probability features are calculated."""
@@ -153,11 +151,7 @@ class TestTabularFeatureExtractor:
             sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
         )
 
-        # Should have retail-sharp difference features (at least one side)
-        assert (
-            features.retail_sharp_diff_home is not None
-            or features.retail_sharp_diff_away is not None
-        )
+        assert features.retail_sharp_diff is not None
 
     def test_extract_features_includes_best_odds(self, sample_event, sample_odds_snapshot):
         """Test that best available odds are found."""
@@ -170,23 +164,6 @@ class TestTabularFeatureExtractor:
         assert features.best_available_decimal is not None
         assert features.best_available_decimal > 1.0
 
-    def test_extract_features_team_indicators(self, sample_event, sample_odds_snapshot):
-        """Test that team indicator features are set correctly."""
-        extractor = TabularFeatureExtractor()
-        home_features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
-        )
-
-        assert home_features.is_home_team == 1.0
-        assert home_features.is_away_team == 0.0
-
-        away_features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.away_team
-        )
-
-        assert away_features.is_home_team == 0.0
-        assert away_features.is_away_team == 1.0
-
     def test_extract_features_empty_odds(self, sample_event):
         """Test that extract_features handles empty odds gracefully."""
         extractor = TabularFeatureExtractor()
@@ -195,11 +172,9 @@ class TestTabularFeatureExtractor:
         )
 
         assert isinstance(features, TabularFeatures)
-        # Should have only required fields (team indicators)
-        assert features.is_home_team is not None
-        assert features.is_away_team is not None
-        # Optional fields should be None
+        # All fields should be None with empty odds
         assert features.consensus_prob is None
+        assert features.sharp_prob is None
 
     def test_create_feature_vector_correct_order(self):
         """Test that feature vector maintains correct order."""
