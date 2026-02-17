@@ -732,7 +732,7 @@ async def prepare_training_data(
     event_ids = np.array(event_id_list)
     masks = np.array(masks_list, dtype=bool) if masks_list else None
 
-    X, feature_names = apply_variance_filter(X, feature_names, config.variance_threshold)
+    X, feature_names, _ = apply_variance_filter(X, feature_names, config.variance_threshold)
 
     n_events = len(set(event_id_list))
     logger.info(

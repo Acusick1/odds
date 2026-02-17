@@ -531,10 +531,11 @@ class TestApplyVarianceFilter:
         X = np.array([[1.0, 5.0, 3.0], [2.0, 5.0, 1.0], [3.0, 5.0, 4.0]], dtype=np.float32)
         names = ["varying_a", "constant_b", "varying_c"]
 
-        X_out, names_out = apply_variance_filter(X, names, threshold=0.0)
+        X_out, names_out, keep = apply_variance_filter(X, names, threshold=0.0)
 
         assert names_out == ["varying_a", "varying_c"]
         assert X_out.shape == (3, 2)
+        np.testing.assert_array_equal(keep, [True, False, True])
         np.testing.assert_array_equal(X_out[:, 0], X[:, 0])
         np.testing.assert_array_equal(X_out[:, 1], X[:, 2])
 
@@ -546,37 +547,41 @@ class TestApplyVarianceFilter:
         X[:, :, 2] = np.arange(6)[None, :]  # varying across timesteps
         names = ["var_sample", "constant", "var_time"]
 
-        X_out, names_out = apply_variance_filter(X, names, threshold=0.0)
+        X_out, names_out, keep = apply_variance_filter(X, names, threshold=0.0)
 
         assert names_out == ["var_sample", "var_time"]
         assert X_out.shape == (4, 6, 2)
+        np.testing.assert_array_equal(keep, [True, False, True])
 
     def test_no_features_dropped_when_all_vary(self):
         """Nothing is dropped when all features have non-zero variance."""
         X = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32)
         names = ["a", "b"]
 
-        X_out, names_out = apply_variance_filter(X, names, threshold=0.0)
+        X_out, names_out, keep = apply_variance_filter(X, names, threshold=0.0)
 
         assert names_out == names
         assert X_out.shape == X.shape
+        np.testing.assert_array_equal(keep, [True, True])
 
     def test_single_sample_unchanged(self):
         """Filter is skipped when fewer than 2 samples are present."""
         X = np.array([[7.0, 7.0]], dtype=np.float32)
         names = ["a", "b"]
 
-        X_out, names_out = apply_variance_filter(X, names, threshold=0.0)
+        X_out, names_out, keep = apply_variance_filter(X, names, threshold=0.0)
 
         assert names_out == names
         assert X_out.shape == X.shape
+        np.testing.assert_array_equal(keep, [True, True])
 
     def test_custom_threshold(self):
         """Features with variance below a positive threshold are dropped."""
         X = np.array([[0.0, 10.0], [0.001, 20.0], [0.0, 15.0]], dtype=np.float32)
         names = ["near_constant", "high_var"]
 
-        X_out, names_out = apply_variance_filter(X, names, threshold=0.01)
+        X_out, names_out, keep = apply_variance_filter(X, names, threshold=0.01)
 
         assert names_out == ["high_var"]
         assert X_out.shape == (3, 1)
+        np.testing.assert_array_equal(keep, [False, True])
