@@ -41,6 +41,7 @@ from typing import Any
 import numpy as np
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sklearn.feature_selection import VarianceThreshold
 
 from odds_analytics.training.config import FeatureSelectionConfig
 
@@ -83,8 +84,6 @@ def apply_variance_filter(
     Returns:
         Filtered (X, feature_names) with low-variance columns removed.
     """
-    from sklearn.feature_selection import VarianceThreshold
-
     if len(X) < 2:
         return X, feature_names
 
