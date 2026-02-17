@@ -106,4 +106,3 @@ No feature individually explains enough to build a useful model. The question fo
 - `scatter_top6.png` — scatter plots for top 6 features vs target
 - `target_distribution.png` — target histogram and QQ plot
 - `intercorrelation_heatmap.png` — top 20 features inter-correlation matrix
-- `summary.txt` — console output from script run

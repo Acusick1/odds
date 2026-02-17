@@ -384,14 +384,11 @@ async def main() -> None:
     plot_intercorrelation(df, feature_names, corr_df)
 
     print()
-    summary = print_summary(df, y, feature_names, event_ids, corr_df, collinear_pairs)
+    print_summary(df, y, feature_names, event_ids, corr_df, collinear_pairs)
 
     # Save artifacts
     corr_df.to_csv(OUTPUT_DIR / "correlations.csv")
     print("\nSaved correlations.csv")
-    with open(OUTPUT_DIR / "summary.txt", "w") as f:
-        f.write(summary)
-    print("Saved summary.txt")
     print(f"\nAll outputs in {OUTPUT_DIR}")
 
 

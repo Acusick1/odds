@@ -144,25 +144,29 @@ Experiments live in `experiments/scripts/` as standalone Python scripts. Each sc
 ### Required outputs
 
 Every experiment must produce:
-- **`FINDINGS.md`** — self-contained write-up: setup (date, dataset size, method), key results with numbers, interpretation, implications for next experiments. This is the primary artifact future agents read.
-- **`summary.txt`** — console output from the script run (raw numbers for reference).
+- **`FINDINGS.md`** — the primary artifact future agents read. Must follow this structure:
+  - **Setup**: date, git SHA, dataset size, sampling method, target definition, exact command to reproduce
+  - **Key Results**: numbers, tables, significance — no vague summaries
+  - **Interpretation**: what the results mean, caveats, alternative explanations
+  - **Implications**: what to do next, go/no-go recommendation for downstream experiments
 - **Plots** saved as PNGs in the same directory.
 - **Data artifacts** (CSVs, etc.) for downstream analysis.
 
 ### After running
 
-1. Update the **Experiment Log** table below with the headline result.
-2. Update the **What We Know** section if the experiment changes our understanding, linking to the FINDINGS.md.
+1. Update the **Experiment Log** table below with the headline result and decision.
+2. Update the **What We Know** section if the experiment changes our understanding, linking to the FINDINGS.md. If results contradict a prior entry, amend the prior entry inline with the correction and a link to the new experiment (do not delete — preserve the history of what we believed and why it changed).
 
 ### Conventions
 
 - Scripts use the existing training pipeline (`prepare_training_data`, `MLTrainingConfig`, etc.) to load data.
 - Config reuse: reference existing YAML configs in `experiments/configs/` where possible.
 - Scripts must be runnable via `uv run python experiments/scripts/<script>.py`.
+- FINDINGS.md must record the git SHA of the commit containing the experiment code (commit the script first, then run, then commit results).
 
 ## Experiment Log
 
-| Date | Experiment | Features | Target | Samples | Result | Notes |
-|------|-----------|----------|--------|---------|--------|-------|
-| 2026-02-14 | XGBoost v1 | tabular + trajectory + PM + cross-source | devigged pinnacle | 656 (193 events) | R² ≈ 0 | Multi-horizon, group CV; 21 tab features zeroed (bug) |
-| 2026-02-17 | Exp 1: correlations | 60 testable / 75 total | devigged pinnacle | 719 (229 events) | max \|r\|=0.12 | Sharp-retail diff strongest; 12/60 uncorrected, 0/60 BH |
+| Date | Experiment | Features | Target | Samples | Result | Decision | Notes |
+|------|-----------|----------|--------|---------|--------|----------|-------|
+| 2026-02-14 | XGBoost v1 | tabular + trajectory + PM + cross-source | devigged pinnacle | 656 (193 events) | R² ≈ 0 | — | Multi-horizon, group CV; 21 tab features zeroed (bug) |
+| 2026-02-17 | Exp 1: correlations | 60 testable / 75 total | devigged pinnacle | 719 (229 events) | max \|r\|=0.12 | Proceed to Exp 2 | Sharp-retail diff strongest; 12/60 uncorrected, 0/60 BH |
