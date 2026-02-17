@@ -60,6 +60,11 @@ experiments/*
 !experiments/configs/
 experiments/configs/*
 !experiments/configs/*.yaml
+!experiments/scripts/
+!experiments/results/
+experiments/results/**/*.png
+experiments/results/**/*.txt
+!experiments/results/**/*.csv
 models/
 mlruns/
 *.html

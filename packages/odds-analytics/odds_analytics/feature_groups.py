@@ -407,9 +407,7 @@ class XGBoostAdapter:
 
         # --- Tabular features ---
         if "tabular" in config.feature_groups:
-            snap_odds = extract_odds_from_snapshot(
-                snapshot, event.id, market=market, outcome=outcome
-            )
+            snap_odds = extract_odds_from_snapshot(snapshot, event.id, market=market)
             if not snap_odds:
                 return None
             try:
@@ -488,7 +486,7 @@ class XGBoostAdapter:
                         # Try to align SB odds for cross-source features
                         sb_feats = None
                         sb_odds_at_time = extract_odds_from_snapshot(
-                            snapshot, event.id, market=market, outcome=outcome
+                            snapshot, event.id, market=market
                         )
                         if sb_odds_at_time:
                             try:

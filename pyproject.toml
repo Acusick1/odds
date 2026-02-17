@@ -50,6 +50,7 @@ dev = [
     "py-pglite[asyncpg,sqlalchemy]>=0.5.3",
     "psycopg[binary]>=3.2.12",
     "pytest-env>=1.2.0",
+    "statsmodels>=0.14.6",
 ]
 
 # Virtual workspace root - no build system needed
