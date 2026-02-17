@@ -41,12 +41,14 @@ from typing import Any
 import numpy as np
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sklearn.feature_selection import VarianceThreshold
 
 from odds_analytics.training.config import FeatureSelectionConfig
 
 logger = structlog.get_logger()
 
 __all__ = [
+    "apply_variance_filter",
     "FeatureRanking",
     "FeatureSelector",
     "ManualSelector",
@@ -56,6 +58,46 @@ __all__ = [
     "FEATURE_SELECTOR_REGISTRY",
     "get_feature_selector",
 ]
+
+
+# =============================================================================
+# Variance Filter
+# =============================================================================
+
+
+def apply_variance_filter(
+    X: np.ndarray,
+    feature_names: list[str],
+    threshold: float = 0.0,
+) -> tuple[np.ndarray, list[str], np.ndarray]:
+    """Drop features whose variance is below threshold using sklearn VarianceThreshold.
+
+    Handles both 2D (samples, features) and 3D (samples, timesteps, features) arrays.
+    For 3D arrays, variance is computed over the flattened (samples × timesteps) axis.
+    Skips filtering when fewer than 2 samples are present.
+
+    Args:
+        X: Feature array, shape (samples, features) or (samples, timesteps, features).
+        feature_names: Names corresponding to the last axis of X.
+        threshold: Variance threshold; features strictly below this are dropped.
+
+    Returns:
+        Tuple of (filtered X, filtered feature_names, boolean mask of kept features).
+    """
+    n_features = X.shape[-1]
+    if len(X) < 2:
+        return X, feature_names, np.ones(n_features, dtype=bool)
+
+    X_2d = X.reshape(-1, X.shape[-1]) if X.ndim == 3 else X
+    selector = VarianceThreshold(threshold=threshold)
+    selector.fit(X_2d)
+    keep = selector.get_support()
+
+    dropped = [name for name, k in zip(feature_names, keep, strict=False) if not k]
+    if dropped:
+        logger.info("dropped_low_variance_features", features=dropped, count=len(dropped))
+
+    return X[..., keep], [name for name, k in zip(feature_names, keep, strict=False) if k], keep
 
 
 # =============================================================================

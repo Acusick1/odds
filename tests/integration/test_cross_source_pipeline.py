@@ -415,38 +415,35 @@ class TestPrepareTrainingDataWithPolymarket:
         config = self._make_config()
         result = await prepare_training_data(events, pglite_async_session, config)
 
-        expected_features = (
+        max_features = (
             len(TabularFeatures.get_feature_names())
             + len(PolymarketTabularFeatures.get_feature_names())
             + len(CrossSourceFeatures.get_feature_names())
             + 1  # hours_until_event
         )
-        assert result.X.shape[1] == expected_features
+        assert result.X.shape[1] == len(result.feature_names)
+        assert result.X.shape[1] <= max_features
         assert result.y.shape == (result.num_samples,)
 
     async def test_sb_only_event_has_zero_pm_features(
         self, pglite_async_session, cross_source_test_data
     ):
         """The SB-only event row should have zeros (NaN→0) for PM feature columns."""
-        from odds_analytics.feature_extraction import TabularFeatures
-        from odds_analytics.polymarket_features import (
-            CrossSourceFeatures,
-            PolymarketTabularFeatures,
-        )
-
         events = cross_source_test_data["events"]
         config = self._make_config()
         result = await prepare_training_data(events, pglite_async_session, config)
-
-        n_tab = len(TabularFeatures.get_feature_names())
-        n_pm = len(PolymarketTabularFeatures.get_feature_names())
-        n_xsrc = len(CrossSourceFeatures.get_feature_names())
 
         # Find the row for the SB-only event (event_2)
         sb_only_id = cross_source_test_data["events"][2].id
         sb_only_rows = result.X[result.event_ids == sb_only_id]
         assert len(sb_only_rows) > 0
 
-        # PM features should be 0 (NaN-filled and then nan_to_num)
-        pm_block = sb_only_rows[0, n_tab : n_tab + n_pm + n_xsrc]
-        assert np.all(pm_block == 0.0)
+        # PM/cross-source features should be 0 (NaN-filled and then nan_to_num)
+        pm_indices = [
+            i
+            for i, name in enumerate(result.feature_names)
+            if name.startswith("pm_") or name.startswith("xsrc_")
+        ]
+        if pm_indices:
+            pm_block = sb_only_rows[0, pm_indices]
+            assert np.all(pm_block == 0.0)

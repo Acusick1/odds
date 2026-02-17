@@ -274,3 +274,20 @@ class TestTrainingDataIntegration:
         assert result_dict["num_test_samples"] == result.num_test_samples
         assert result_dict["num_features"] == result.num_features
         assert result_dict["strategy_type"] == result.strategy_type
+
+    @pytest.mark.asyncio
+    async def test_variance_filter_removes_constant_features(
+        self, xgboost_config, pglite_async_session, test_events_with_odds
+    ):
+        """Constant features are absent from the pipeline output."""
+        import numpy as np
+
+        result = await prepare_training_data_from_config(xgboost_config, pglite_async_session)
+
+        X_all = np.concatenate([result.X_train, result.X_test], axis=0)
+        variances = np.var(X_all, axis=0)
+
+        constant = [
+            name for name, var in zip(result.feature_names, variances, strict=False) if var == 0.0
+        ]
+        assert constant == [], f"Constant features still present: {constant}"
