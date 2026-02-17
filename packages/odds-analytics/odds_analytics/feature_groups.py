@@ -54,6 +54,7 @@ from odds_analytics.sequence_loader import (
     extract_pinnacle_h2h_probs,
     load_sequences_for_event,
 )
+from odds_analytics.training.feature_selection import apply_variance_filter
 
 if TYPE_CHECKING:
     from odds_analytics.training.config import FeatureConfig
@@ -730,6 +731,8 @@ async def prepare_training_data(
     X = np.nan_to_num(X, nan=0.0)
     event_ids = np.array(event_id_list)
     masks = np.array(masks_list, dtype=bool) if masks_list else None
+
+    X, feature_names = apply_variance_filter(X, feature_names, config.variance_threshold)
 
     n_events = len(set(event_id_list))
     logger.info(

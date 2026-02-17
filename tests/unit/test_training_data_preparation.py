@@ -550,3 +550,112 @@ class TestDateRangeFiltering:
 
             assert len(events) == 5
             assert events == expected_events
+
+
+# =============================================================================
+# Variance Filter Tests
+# =============================================================================
+
+
+class TestVarianceFilter:
+    """Tests for zero-variance feature removal in prepare_training_data."""
+
+    @pytest.mark.asyncio
+    async def test_constant_features_are_dropped(self):
+        """Constant columns are removed from X and feature_names."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from odds_analytics.feature_groups import prepare_training_data
+        from odds_analytics.training import FeatureConfig
+        from odds_core.models import EventStatus
+
+        config = FeatureConfig()
+
+        event = MagicMock()
+        event.id = "event_1"
+        event.status = EventStatus.FINAL
+        event.home_score = 100
+        event.away_score = 95
+
+        feature_names = ["varying_a", "constant_b", "varying_c"]
+        rows = [
+            np.array([1.0, 0.5, 3.0], dtype=np.float32),
+            np.array([2.0, 0.5, 1.0], dtype=np.float32),
+            np.array([3.0, 0.5, 4.0], dtype=np.float32),
+        ]
+
+        mock_adapter = MagicMock()
+        mock_adapter.feature_names.return_value = feature_names
+        mock_adapter.transform.side_effect = [MagicMock(features=row, mask=None) for row in rows]
+
+        mock_sampler = MagicMock()
+        mock_sampler.sample.return_value = [MagicMock() for _ in range(3)]
+
+        mock_bundle = MagicMock()
+        mock_bundle.closing_snapshot = MagicMock()
+
+        with (
+            patch("odds_analytics.feature_groups._make_adapter", return_value=mock_adapter),
+            patch("odds_analytics.feature_groups._make_sampler", return_value=mock_sampler),
+            patch(
+                "odds_analytics.feature_groups.collect_event_data",
+                new=AsyncMock(return_value=mock_bundle),
+            ),
+            patch("odds_analytics.feature_groups._compute_target", return_value=0.1),
+        ):
+            session = AsyncMock()
+            result = await prepare_training_data([event], session, config)
+
+        assert "constant_b" not in result.feature_names
+        assert "varying_a" in result.feature_names
+        assert "varying_c" in result.feature_names
+        assert result.X.shape[1] == 2
+        assert len(result.feature_names) == 2
+
+    @pytest.mark.asyncio
+    async def test_no_constant_features_unchanged(self):
+        """When all features have variance, nothing is dropped."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from odds_analytics.feature_groups import prepare_training_data
+        from odds_analytics.training import FeatureConfig
+        from odds_core.models import EventStatus
+
+        config = FeatureConfig()
+
+        event = MagicMock()
+        event.id = "event_1"
+        event.status = EventStatus.FINAL
+        event.home_score = 100
+        event.away_score = 95
+
+        feature_names = ["feat_a", "feat_b"]
+        rows = [
+            np.array([1.0, 2.0], dtype=np.float32),
+            np.array([3.0, 4.0], dtype=np.float32),
+        ]
+
+        mock_adapter = MagicMock()
+        mock_adapter.feature_names.return_value = feature_names
+        mock_adapter.transform.side_effect = [MagicMock(features=row, mask=None) for row in rows]
+
+        mock_sampler = MagicMock()
+        mock_sampler.sample.return_value = [MagicMock() for _ in range(2)]
+
+        mock_bundle = MagicMock()
+        mock_bundle.closing_snapshot = MagicMock()
+
+        with (
+            patch("odds_analytics.feature_groups._make_adapter", return_value=mock_adapter),
+            patch("odds_analytics.feature_groups._make_sampler", return_value=mock_sampler),
+            patch(
+                "odds_analytics.feature_groups.collect_event_data",
+                new=AsyncMock(return_value=mock_bundle),
+            ),
+            patch("odds_analytics.feature_groups._compute_target", return_value=0.1),
+        ):
+            session = AsyncMock()
+            result = await prepare_training_data([event], session, config)
+
+        assert result.feature_names == feature_names
+        assert result.X.shape[1] == 2

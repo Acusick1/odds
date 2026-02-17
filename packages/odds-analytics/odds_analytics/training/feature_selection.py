@@ -47,6 +47,7 @@ from odds_analytics.training.config import FeatureSelectionConfig
 logger = structlog.get_logger()
 
 __all__ = [
+    "apply_variance_filter",
     "FeatureRanking",
     "FeatureSelector",
     "ManualSelector",
@@ -56,6 +57,47 @@ __all__ = [
     "FEATURE_SELECTOR_REGISTRY",
     "get_feature_selector",
 ]
+
+
+# =============================================================================
+# Variance Filter
+# =============================================================================
+
+
+def apply_variance_filter(
+    X: np.ndarray,
+    feature_names: list[str],
+    threshold: float = 0.0,
+) -> tuple[np.ndarray, list[str]]:
+    """Drop features whose variance is below threshold using sklearn VarianceThreshold.
+
+    Handles both 2D (samples, features) and 3D (samples, timesteps, features) arrays.
+    For 3D arrays, variance is computed over the flattened (samples × timesteps) axis.
+    Skips filtering when fewer than 2 samples are present.
+
+    Args:
+        X: Feature array, shape (samples, features) or (samples, timesteps, features).
+        feature_names: Names corresponding to the last axis of X.
+        threshold: Variance threshold; features strictly below this are dropped.
+
+    Returns:
+        Filtered (X, feature_names) with low-variance columns removed.
+    """
+    from sklearn.feature_selection import VarianceThreshold
+
+    if len(X) < 2:
+        return X, feature_names
+
+    X_2d = X.reshape(-1, X.shape[-1]) if X.ndim == 3 else X
+    selector = VarianceThreshold(threshold=threshold)
+    selector.fit(X_2d)
+    mask = selector.get_support()
+
+    dropped = [name for name, keep in zip(feature_names, mask, strict=False) if not keep]
+    if dropped:
+        logger.info("dropped_low_variance_features", features=dropped, count=len(dropped))
+
+    return X[..., mask], [name for name, keep in zip(feature_names, mask, strict=False) if keep]
 
 
 # =============================================================================

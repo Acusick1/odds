@@ -596,6 +596,14 @@ class FeatureConfig(BaseModel):
         description="Tolerance in minutes for matching PM snapshots to a target timestamp",
     )
 
+    # Variance filter
+    variance_threshold: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Drop features whose variance is below this threshold. "
+        "0.0 (default) drops only strictly constant features.",
+    )
+
     # Target formulation
     target_type: Literal["raw", "devigged_pinnacle"] = Field(
         default="raw",
