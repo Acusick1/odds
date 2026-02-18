@@ -106,7 +106,7 @@ class CVResult:
     fold_results: list[CVFoldResult]
     n_folds: int
     random_seed: int
-    cv_method: Literal["kfold", "timeseries"] = "kfold"
+    cv_method: Literal["kfold", "timeseries", "group_timeseries"] = "kfold"
     _val_mse_stats: tuple[float, float] = field(init=False, repr=False)
     _val_mae_stats: tuple[float, float] = field(init=False, repr=False)
     _val_r2_stats: tuple[float, float] = field(init=False, repr=False)
@@ -265,7 +265,7 @@ def run_cv(
         strategy: Strategy instance implementing train_from_config() that returns
             a history dict with keys: train_mse, train_mae, train_r2, val_mse,
             val_mae, val_r2. Supports XGBoostLineMovementStrategy and
-            LSTMLineMovementStrategy (after #90 is complete).
+            LSTMLineMovementStrategy.
         config: MLTrainingConfig with data.cv_method, data.n_folds, etc.
         X: Feature matrix (n_samples, n_features). Must be sorted chronologically
            when using cv_method='timeseries'.

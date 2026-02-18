@@ -994,6 +994,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
         feature_names: list[str],
         X_test: np.ndarray | None = None,
         y_test: np.ndarray | None = None,
+        event_ids: np.ndarray | None = None,
     ) -> tuple[dict[str, Any], Any]:
         """
         Train with K-Fold cross-validation, then train final model on all data.
@@ -1010,6 +1011,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
             feature_names: List of feature names
             X_test: Optional held-out test features for final evaluation
             y_test: Optional held-out test targets for final evaluation
+            event_ids: Optional event IDs for group_timeseries CV splitting
 
         Returns:
             Tuple of (training_history, cv_result) where:
@@ -1041,6 +1043,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
             X=X,
             y=y,
             feature_names=feature_names,
+            event_ids=event_ids,
         )
 
         logger.info(
