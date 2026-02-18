@@ -10,13 +10,12 @@
 - **CV**: 3-fold walk-forward group timeseries (TimeSeriesSplit on event boundaries — always trains on earlier events, validates on later)
 - **Models**: Ridge (alpha=1.0), XGBoost (50 trees, depth 3, heavily regularized)
 
-### LSTM (sequence model)
-- **Dataset**: 180 samples, 180 events (1 per event; 50 skipped — no pregame snapshot or Pinnacle closing)
-- **Sampling**: single snapshot per event at pregame tier
-- **Target**: devigged Pinnacle CLV delta (mean=+0.037, std=0.170)
+### LSTM (sequence model, pregame tier)
+- **Dataset**: 228 samples, 228 events (1 per event; pregame tier)
+- **Sampling**: single snapshot per event at pregame tier (3+ hours before game)
+- **Target**: devigged Pinnacle CLV delta (mean≈0, std=0.028)
 - **CV**: 3-fold walk-forward group timeseries
 - **Model**: tuned LSTM (hidden=48, layers=3, dropout=0.4, patience=20) from `lstm_line_movement_tuning_best.yaml`
-- **Note**: LSTM target std=0.17 vs tabular std=0.038. The pregame tier selects the latest snapshot at or before pregame, which can be anywhere from 0.5h to 24h+ before game — much wider range than the tabular 3-12h window. MSE is **not directly comparable** between LSTM and tabular rows.
 
 **Reproduce**: `uv run python experiments/scripts/exp2_feature_group_isolation.py`
 
@@ -41,15 +40,7 @@
 
 **Predict-mean baseline**: R²=-0.0162, MSE=0.001768, MAE=0.0270
 
-### LSTM: Sequence Model (different target scale — R² only comparable within LSTM)
-
-| Group | N Features | Model | R² (mean±std) | MSE* | MAE* |
-|-------|-----------|-------|---------------|------|------|
-| sequence | 15 | lstm | +0.0204±0.0412 | 0.036708 | 0.1490 |
-
-*MSE/MAE not comparable to tabular rows (target std=0.17 vs 0.038).
-
-### Per-Fold R² (XGBoost, tabular models)
+### Per-Fold R² (XGBoost, tabular models — time_range)
 
 | Group | Fold 0 | Fold 1 | Fold 2 |
 |-------|--------|--------|--------|
@@ -60,15 +51,48 @@
 | all_no_pm | -0.0006 | -0.0129 | -0.0309 |
 | all | +0.0011 | -0.0067 | -0.0260 |
 
-### Per-Fold R² (LSTM)
+## Phase 2: Controlled Architecture Comparison
 
-| Fold 0 | Fold 1 | Fold 2 |
-|--------|--------|--------|
-| -0.0245 | +0.0106 | +0.0750 |
+### Motivation
+
+Earlier runs (before TierSampler bugfix) showed LSTM @ pregame tier as the only model with positive R². This raised the question: is the signal from the LSTM architecture, or from the different decision time? Phase 2 adds a 2×2 comparison (architecture × decision time) to isolate both effects.
+
+### TierSampler bug (fixed in this run)
+
+The initial Phase 2 run showed XGBoost @ tier with R²=+0.45 — suspiciously high. Investigation revealed a bug in `TierSampler`: `IN_PLAY` snapshots (taken *during* the game) were included as candidates for pregame tier requests. `IN_PLAY` is listed last in `FetchTier.get_priority_order()` (lowest priority, index 5), so the `tier_idx >= decision_idx` filter incorrectly included them. Since `TierSampler` picks the *latest* candidate, in-play snapshots — which occur after game start — were always preferred over genuine pregame snapshots.
+
+**Impact**: 135/180 events used in-play snapshots as "pregame" decisions. Since the closing snapshot is the last pre-game snapshot (~0.5h before game) and the "decision" snapshot was taken *during* the game (1-2h after start), the features were computed from a time point **after** the target's reference point. This is textbook look-ahead bias: the model used future (in-game) odds — which reflect score, injuries, and momentum — to "predict" the pre-game closing price, which was already in the past. The R²=+0.45 reflected this temporal inversion, not genuine predictive signal.
+
+**Fix**: `TierSampler.sample()` now excludes `IN_PLAY` snapshots unless the decision tier is explicitly `IN_PLAY`.
+
+### 2×2 Results: Architecture × Decision Time (post-fix)
+
+| | XGBoost | LSTM |
+|--|---------|------|
+| **time_range (3-12h)** | R²=-0.011±0.011 (n=538) | R²=-0.009±0.026 (n=717) |
+| **tier (pregame)** | R²=-0.024±0.013 (n=229) | R²=-0.015±0.026 (n=228) |
+
+All four cells are R² ≈ 0. No model beats predict-mean at either decision time.
+
+### Phase 2 Detail
+
+| Group | Model | N Features | Samples | R² (mean±std) | MSE | MAE |
+|-------|-------|-----------|---------|---------------|-----|-----|
+| sequence_pregame | lstm | 15 | 228 | -0.0149±0.0259 | 0.000828 | 0.0201 |
+| sequence_time_range | lstm | 15 | 717 | -0.0088±0.0260 | 0.001666 | 0.0267 |
+| all_tier | xgboost | 47 | 229 | -0.0236±0.0131 | 0.000851 | 0.0196 |
+
+### Per-Fold R² (Phase 2)
+
+| Condition | Fold 0 | Fold 1 | Fold 2 |
+|-----------|--------|--------|--------|
+| LSTM pregame | -0.0485 | +0.0146 | -0.0107 |
+| LSTM time_range | -0.0222 | -0.0317 | +0.0276 |
+| XGBoost tier | -0.0191 | -0.0103 | -0.0414 |
 
 ## Interpretation
 
-### Tabular models
+### Tabular models (Phase 1)
 
 No tabular feature group produces R² > 0 or MSE meaningfully below the predict-mean baseline. All groups are within noise of the predict-mean baseline.
 
@@ -78,23 +102,30 @@ Key observations:
 3. **PM features are not differentiating.** `pm_cross_source` performs similarly to other small groups — no evidence of incremental signal from Polymarket data at this sample size.
 4. **Walk-forward fold structure**: Fold 0 has the smallest training set (~57 events). With walk-forward CV, later folds train on progressively more data. No consistent improvement across folds, suggesting the bottleneck is absolute data volume rather than incremental learning.
 
-### LSTM (sequence model)
+### Phase 2: Neither architecture nor decision time matters
 
-The LSTM achieves **R²=+0.0204±0.0412** — the only model to achieve positive mean R² across folds. This is weak (explaining ~2% of target variance) but directionally consistent: fold 2 (largest training set) shows the strongest result (+0.075), fold 0 (smallest) is negative (-0.025).
+The 2×2 comparison is unambiguous: **all four cells produce R² ≈ 0**.
 
-**Caution**: The LSTM uses a different decision time (pregame tier sampling vs 3-12h window for tabular), so its positive R² could partially reflect that prediction is easier closer to game time (less remaining movement to predict). A controlled comparison at the same decision time would be needed to isolate the architecture effect.
+- LSTM adds no value over XGBoost at either decision time.
+- Pregame tier (3+ hours) produces the same R² as time_range (3-12h) — the decision time window doesn't matter within this range.
+- The tier-sampled data has lower MSE (~0.0008 vs ~0.0017) simply because pregame tier selects one snapshot per event near the boundary (3-5h before game), where less line movement remains. The target has lower variance, but models can't exploit it.
 
-**What the LSTM result does tell us**: temporal sequence information adds incremental value over point-in-time snapshots, even at the same signal-to-noise ratio. The LSTM can identify directional patterns in how odds have moved, which XGBoost using only a single snapshot cannot.
+### TierSampler bug implications
+
+The bug had no effect on Phase 1 results (tabular models use `TimeRangeSampler`, not `TierSampler`). It affected LSTM pregame tier results in the initial run and the XGBoost @ tier comparison. The corrected LSTM pregame result (R²=-0.015) replaces the previously reported R²≈+0.02.
+
+Any prior analysis that used `TierSampler` with non-closing tiers on events with in-play snapshots was subject to look-ahead bias. The LSTM v1 results (which used pregame tier) should be re-evaluated.
 
 ## Implications
 
-1. **Sharp-retail subset is the most defensible tabular baseline.** 3 features, most stable CV, theoretically grounded. More features strictly hurt on current data.
-2. **LSTM shows marginal but consistent positive R².** Worth pursuing as the primary model type if data volume increases. The architecture is already tuned (from the HPO run).
-3. **The bottleneck is data volume, not feature engineering or architecture.** With 230 events, all models are dominated by CV noise. Both the tabular results (R²≈0) and the LSTM result (R²≈0.02) are consistent with the weak individual correlations from exp1 (max |r|=0.12 → need ~1000+ events for reliable detection).
-4. **Next steps**: Continue collecting data. Re-run exp2 at 500 events to see if LSTM's positive signal persists and tabular groups become more differentiated.
+1. **No detectable signal at 230 events.** Neither architecture (tabular vs sequence), decision time (3-12h vs pregame), nor feature group selection produces R² > 0. All models are indistinguishable from predict-mean.
+2. **Sharp-retail subset is the most stable tabular configuration.** 3 features, smallest negative R², theoretically grounded. More features strictly hurt.
+3. **LSTM does not add value.** At both decision times, LSTM ≈ XGBoost ≈ predict-mean. The sequence architecture is not worth pursuing at current data volume.
+4. **The bottleneck is data volume, not feature engineering or architecture.** With 230 events and weak individual correlations (max |r|=0.12 from exp1), all models are dominated by noise.
+5. **Next steps**: Continue collecting data. Re-run at 500+ events. If still R²≈0, consider whether the feature set captures the right information for CLV prediction, or whether the target itself (devigged Pinnacle delta) is too noisy at available sample frequencies.
 
 ## Artifacts
 
-- `results.csv` — full results table
+- `results.csv` — full results table (Phase 1 + Phase 2)
 - `group_comparison.png` — R² and MSE bar chart comparison
 - `fold_detail.png` — per-fold R² boxplot for XGBoost

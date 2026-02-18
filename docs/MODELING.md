@@ -84,12 +84,19 @@ Time-series per snapshot:
 ### Feature group isolation (Feb 2026, 230 events)
 - Trained Ridge and shallow XGBoost independently on each feature group (tabular, trajectory, PM+cross-source, sharp-retail subset, all)
 - Walk-forward group timeseries CV (TimeSeriesSplit on event boundaries)
-- **All tabular groups: R² < 0** — no group outperforms predicting the training mean
+- **All groups R² < 0** — no group, architecture, or decision time outperforms predicting the training mean
 - Smaller groups (sharp_retail: 3 features, pm_cross_source: 9) are more stable than larger (tabular, all) — adding features makes CV worse due to collinearity
 - Adding PM features to sportsbook-only features makes no difference (`all` ≈ `all_no_pm` in MSE)
-- LSTM (sequence model, pregame tier) achieves R²=+0.020±0.041 — only model with positive R²; fold 2 (largest training set) strongest at +0.075
-- LSTM caution: uses pregame sampling (wider decision window than tabular 3-12h), so positive R² may partially reflect easier prediction task closer to game; target std=0.17 vs 0.038 for tabular (MSE not directly comparable)
-- Conclusion: data volume is the bottleneck, not feature engineering — ~230 events is insufficient to surface weak signal reliably; LSTM architecture worth prioritising when data grows
+- Phase 2 controlled comparison (2×2: architecture × decision time):
+
+| | XGBoost | LSTM |
+|--|---------|------|
+| **time_range (3-12h)** | R²≈-0.011 (n=538) | R²≈-0.009 (n=717) |
+| **tier (pregame)** | R²≈-0.024 (n=229) | R²≈-0.015 (n=228) |
+
+- Neither architecture nor decision time matters — all four cells R²≈0
+- LSTM adds no value over XGBoost at either decision time
+- **TierSampler bug found and fixed**: `IN_PLAY` snapshots were incorrectly included as candidates for pregame tier — since in-play snapshots occur *after* the closing snapshot, this was look-ahead bias (features from the future "predicting" past closing prices); earlier LSTM pregame R²≈+0.02 was contaminated; corrected result is R²≈-0.015
 - Full results: [experiments/results/exp2_feature_group_isolation/FINDINGS.md](../experiments/results/exp2_feature_group_isolation/FINDINGS.md)
 
 ### LSTM v1 (Feb 2026)
@@ -181,3 +188,4 @@ Every experiment must produce:
 |------|-----------|----------|--------|---------|--------|----------|-------|
 | 2026-02-14 | XGBoost v1 | tabular + trajectory + PM + cross-source | devigged pinnacle | 656 (193 events) | R² ≈ 0 | — | Multi-horizon, group CV; 21 tab features zeroed (bug) |
 | 2026-02-17 | Exp 1: correlations | 60 testable / 75 total | devigged pinnacle | 719 (229 events) | max \|r\|=0.12 | Proceed to Exp 2 | Sharp-retail diff strongest; 12/60 uncorrected, 0/60 BH |
+| 2026-02-18 | Exp 2: feature groups | 47 features, 6 groups | devigged pinnacle | 538–719 (230 events) | All R²<0 | No signal at 230 events | 2×2 (arch × time): all cells R²≈0; TierSampler IN_PLAY bug fixed |

@@ -417,6 +417,60 @@ class TestTierSampler:
 
         assert result == []
 
+    def test_excludes_in_play_snapshots(self, event):
+        """IN_PLAY snapshots must not be selected for pre-game decision tiers."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=5),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="pregame",
+            ),
+            OddsSnapshot(
+                id=2,
+                event_id=event.id,
+                snapshot_time=commence + timedelta(hours=1),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="in_play",
+            ),
+        ]
+        sampler = TierSampler("pregame")
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 1
+        assert result[0].id == 1  # Pregame, not in_play
+
+    def test_in_play_tier_can_select_in_play(self, event):
+        """IN_PLAY decision tier should select in-play snapshots."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=5),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="pregame",
+            ),
+            OddsSnapshot(
+                id=2,
+                event_id=event.id,
+                snapshot_time=commence + timedelta(hours=1),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier="in_play",
+            ),
+        ]
+        sampler = TierSampler("in_play")
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 1
+        assert result[0].id == 2  # in_play is the latest
+
     def test_empty_snapshots(self, event):
         sampler = TierSampler("pregame")
         assert sampler.sample(self._make_bundle(event, [])) == []

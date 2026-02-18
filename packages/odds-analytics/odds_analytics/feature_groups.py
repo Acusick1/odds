@@ -214,6 +214,11 @@ class TierSampler:
             if s.fetch_tier:
                 try:
                     tier = FetchTier(s.fetch_tier)
+                    # IN_PLAY is placed last in priority order but is actually
+                    # *closer* to (past) game time than any pre-game tier.
+                    # Exclude it unless explicitly requested.
+                    if tier == FetchTier.IN_PLAY and self._decision_tier != FetchTier.IN_PLAY:
+                        continue
                     tier_idx = tier_order.index(tier)
                     if tier_idx >= decision_idx:
                         candidates.append(s)

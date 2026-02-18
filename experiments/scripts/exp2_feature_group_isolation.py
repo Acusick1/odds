@@ -153,11 +153,23 @@ def make_xgboost() -> XGBRegressor:
     )
 
 
-async def load_data() -> tuple[np.ndarray, np.ndarray, list[str], np.ndarray]:
-    """Load training data using existing pipeline."""
+async def load_data(
+    sampling_override: str | None = None,
+) -> tuple[np.ndarray, np.ndarray, list[str], np.ndarray]:
+    """Load training data using existing pipeline.
+
+    Args:
+        sampling_override: If set, override the config's sampling strategy
+            ("tier" or "time_range").
+    """
     config = MLTrainingConfig.from_yaml(str(CONFIG_PATH))
     features_config = config.training.features
     data_config = config.training.data
+
+    if sampling_override == "tier":
+        features_config.sampling.strategy = "tier"
+    elif sampling_override == "time_range":
+        features_config.sampling.strategy = "time_range"
 
     start_dt = datetime.combine(data_config.start_date, datetime.min.time(), tzinfo=UTC)
     end_dt = datetime.combine(data_config.end_date, datetime.max.time(), tzinfo=UTC)
@@ -364,11 +376,26 @@ def make_lstm_config() -> MLTrainingConfig:
     return lstm_config
 
 
-async def load_lstm_data() -> tuple[np.ndarray, np.ndarray, list[str], np.ndarray]:
-    """Load sequence training data using the LSTM adapter (3D array)."""
+async def load_lstm_data(
+    sampling_override: str | None = None,
+) -> tuple[np.ndarray, np.ndarray, list[str], np.ndarray, MLTrainingConfig]:
+    """Load sequence training data using the LSTM adapter (3D array).
+
+    Args:
+        sampling_override: If set, override the config's sampling strategy
+            ("tier" or "time_range").
+
+    Returns:
+        Tuple of (X, y, feature_names, event_ids, config).
+    """
     lstm_config = make_lstm_config()
     features_config = lstm_config.training.features
     data_config = lstm_config.training.data
+
+    if sampling_override == "tier":
+        features_config.sampling.strategy = "tier"
+    elif sampling_override == "time_range":
+        features_config.sampling.strategy = "time_range"
 
     start_dt = datetime.combine(data_config.start_date, datetime.min.time(), tzinfo=UTC)
     end_dt = datetime.combine(data_config.end_date, datetime.max.time(), tzinfo=UTC)
@@ -388,7 +415,7 @@ async def load_lstm_data() -> tuple[np.ndarray, np.ndarray, list[str], np.ndarra
             config=features_config,
         )
 
-    return result.X, result.y, result.feature_names, result.event_ids
+    return result.X, result.y, result.feature_names, result.event_ids, lstm_config
 
 
 def run_lstm_experiment(
@@ -445,19 +472,64 @@ async def main() -> None:
     print("\nRunning feature group experiments...")
     results_df = run_group_experiments(X, y, feature_names, event_ids)
 
-    print("\nLoading LSTM sequence data...")
-    X_lstm, y_lstm, feature_names_lstm, event_ids_lstm = await load_lstm_data()
-    n_lstm_events = len(set(event_ids_lstm))
+    print("\nLoading LSTM sequence data (pregame tier)...")
+    X_lstm, y_lstm, fn_lstm, eid_lstm, lstm_config = await load_lstm_data()
+    n_lstm_events = len(set(eid_lstm))
     print(f"  Loaded {len(X_lstm)} samples, {n_lstm_events} events, shape {X_lstm.shape}")
 
-    print("\nRunning LSTM experiment...")
-    lstm_config = make_lstm_config()
-    lstm_row = run_lstm_experiment(lstm_config, X_lstm, y_lstm, feature_names_lstm, event_ids_lstm)
+    print("\nRunning LSTM experiment (pregame tier)...")
+    lstm_row = run_lstm_experiment(lstm_config, X_lstm, y_lstm, fn_lstm, eid_lstm)
+    lstm_row["group"] = "sequence_pregame"
     print(
         f"  lstm: R²={lstm_row['r2_mean']:+.4f}±{lstm_row['r2_std']:.4f}  "
         f"MSE={lstm_row['mse_mean']:.6f}  MAE={lstm_row['mae_mean']:.4f}"
     )
     results_df = pd.concat([results_df, pd.DataFrame([lstm_row])], ignore_index=True)
+
+    # --- Phase 2: Controlled architecture comparison (2×2 design) ---
+    # Isolates architecture effect from decision-time effect.
+    # Existing results: XGBoost @ time_range, LSTM @ pregame tier.
+    # New cells: LSTM @ time_range, XGBoost @ tier.
+    print("\n" + "=" * 60)
+    print("Phase 2: Controlled architecture comparison")
+    print("=" * 60)
+
+    # LSTM @ time_range (same decision window as tabular)
+    print("\nLoading LSTM sequence data (time_range override)...")
+    X_lstm_tr, y_lstm_tr, fn_lstm_tr, eid_lstm_tr, lstm_tr_config = await load_lstm_data(
+        sampling_override="time_range"
+    )
+    n_lstm_tr_events = len(set(eid_lstm_tr))
+    print(f"  Loaded {len(X_lstm_tr)} samples, {n_lstm_tr_events} events, shape {X_lstm_tr.shape}")
+
+    print("\nRunning LSTM experiment (time_range)...")
+    lstm_tr_row = run_lstm_experiment(lstm_tr_config, X_lstm_tr, y_lstm_tr, fn_lstm_tr, eid_lstm_tr)
+    lstm_tr_row["group"] = "sequence_time_range"
+    print(
+        f"  lstm: R²={lstm_tr_row['r2_mean']:+.4f}±{lstm_tr_row['r2_std']:.4f}  "
+        f"MSE={lstm_tr_row['mse_mean']:.6f}  MAE={lstm_tr_row['mae_mean']:.4f}"
+    )
+    results_df = pd.concat([results_df, pd.DataFrame([lstm_tr_row])], ignore_index=True)
+
+    # XGBoost @ tier (same decision window as LSTM pregame)
+    print("\nLoading tabular data (tier override)...")
+    X_tier, y_tier, fn_tier, eid_tier = await load_data(sampling_override="tier")
+    n_tier_events = len(set(eid_tier))
+    print(f"  Loaded {len(X_tier)} samples, {n_tier_events} events, {len(fn_tier)} features")
+
+    print("\nRunning XGBoost experiment (tier)...")
+    xgb_tier_metrics = cross_validate(X_tier, y_tier, eid_tier, make_xgboost, n_folds=3)
+    xgb_tier_row = {
+        "group": "all_tier",
+        "model": "xgboost",
+        "n_features": X_tier.shape[1],
+        **xgb_tier_metrics,
+    }
+    print(
+        f"  xgboost: R²={xgb_tier_row['r2_mean']:+.4f}±{xgb_tier_row['r2_std']:.4f}  "
+        f"MSE={xgb_tier_row['mse_mean']:.6f}  MAE={xgb_tier_row['mae_mean']:.4f}"
+    )
+    results_df = pd.concat([results_df, pd.DataFrame([xgb_tier_row])], ignore_index=True)
 
     print("\nGenerating plots...")
     plot_group_comparison(results_df, baselines)
