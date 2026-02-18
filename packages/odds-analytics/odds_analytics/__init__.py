@@ -6,8 +6,7 @@ Provides strategies, backtesting, feature extraction, and game selection.
 
 from odds_analytics.backfill_executor import BackfillExecutor
 from odds_analytics.game_selector import GameSelector
-from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
-from odds_analytics.lstm_strategy import LSTMModel, LSTMStrategy
+from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy, LSTMModel
 from odds_analytics.sequence_loader import load_sequences_for_event
 from odds_analytics.strategies import (
     ArbitrageStrategy,
@@ -39,7 +38,6 @@ __all__ = [
     "FlatBettingStrategy",
     "BasicEVStrategy",
     "ArbitrageStrategy",
-    "LSTMStrategy",
     "LSTMLineMovementStrategy",
     "XGBoostLineMovementStrategy",
     # Models

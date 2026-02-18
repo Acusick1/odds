@@ -770,7 +770,7 @@ def create_objective(
     tuning_top_k_features = "top_k_features" in search_spaces
 
     # Check if this is an LSTM strategy (feature selection not supported for 3D sequences)
-    is_lstm_strategy = strategy_type in ("lstm", "lstm_line_movement")
+    is_lstm_strategy = strategy_type == "lstm_line_movement"
 
     # Warn if LSTM + feature selection combination detected
     if is_lstm_strategy and tuning_top_k_features:
