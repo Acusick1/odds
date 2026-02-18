@@ -35,13 +35,13 @@ import seaborn as sns
 from odds_analytics.feature_groups import prepare_training_data
 from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
 from odds_analytics.training.config import MLTrainingConfig
+from odds_analytics.training.cross_validation import make_group_timeseries_splits
 from odds_analytics.training.data_preparation import filter_events_by_date_range
 from odds_core.database import async_session_maker
 from odds_core.models import EventStatus
 from sklearn.base import RegressorMixin
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBRegressor
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "results" / "exp2_feature_group_isolation"
@@ -95,24 +95,10 @@ def cross_validate(
     model_factory: Callable[[], RegressorMixin],
     n_folds: int = 3,
 ) -> dict[str, float]:
-    """Run group timeseries CV (walk-forward on event boundaries).
-
-    Uses TimeSeriesSplit on unique event IDs — same logic as run_cv()
-    with cv_method='group_timeseries'. Always trains on chronologically
-    earlier events and validates on later events.
-    """
-    unique_events = list(dict.fromkeys(event_ids))
-    event_splitter = TimeSeriesSplit(n_splits=n_folds)
-    event_indices = np.arange(len(unique_events))
-
+    """Run group timeseries CV (walk-forward on event boundaries)."""
     fold_metrics: list[dict[str, float]] = []
 
-    for ev_train_idx, ev_val_idx in event_splitter.split(event_indices):
-        train_events = {unique_events[i] for i in ev_train_idx}
-        val_events = {unique_events[i] for i in ev_val_idx}
-        train_idx = np.where([eid in train_events for eid in event_ids])[0]
-        val_idx = np.where([eid in val_events for eid in event_ids])[0]
-
+    for train_idx, val_idx in make_group_timeseries_splits(event_ids, n_folds):
         X_train, X_val = X[train_idx], X[val_idx]
         y_train, y_val = y[train_idx], y[val_idx]
 
@@ -257,18 +243,9 @@ def run_group_experiments(
 
 
 def compute_baselines(y: np.ndarray, event_ids: np.ndarray) -> dict[str, float]:
-    """Compute naive baselines using walk-forward event splits."""
-    unique_events = list(dict.fromkeys(event_ids))
-    event_splitter = TimeSeriesSplit(n_splits=3)
-    event_indices = np.arange(len(unique_events))
-
+    """Compute predict-mean baseline using walk-forward event splits."""
     r2s, mses, maes = [], [], []
-    for ev_train_idx, ev_val_idx in event_splitter.split(event_indices):
-        train_events = {unique_events[i] for i in ev_train_idx}
-        val_events = {unique_events[i] for i in ev_val_idx}
-        train_idx = np.where([eid in train_events for eid in event_ids])[0]
-        val_idx = np.where([eid in val_events for eid in event_ids])[0]
-
+    for train_idx, val_idx in make_group_timeseries_splits(event_ids, n_folds=3):
         y_train, y_val = y[train_idx], y[val_idx]
         pred = np.full_like(y_val, y_train.mean())
         r2s.append(r2_score(y_val, pred))

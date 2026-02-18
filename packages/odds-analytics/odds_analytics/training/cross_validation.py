@@ -235,6 +235,38 @@ class CVResult:
         }
 
 
+def make_group_timeseries_splits(
+    event_ids: np.ndarray,
+    n_folds: int,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Return walk-forward row-level splits grouped by event boundary.
+
+    Splits on unique event IDs using TimeSeriesSplit, then expands each
+    event-level split back to row indices. Assumes event_ids are ordered
+    chronologically (as returned by prepare_training_data).
+
+    Args:
+        event_ids: Per-row event identifiers in chronological order.
+        n_folds: Number of CV folds.
+
+    Returns:
+        List of (train_row_indices, val_row_indices) tuples, one per fold.
+    """
+    unique_events = list(dict.fromkeys(event_ids))  # preserve chronological order
+    event_indices = np.arange(len(unique_events))
+    splits = []
+    for ev_train_idx, ev_val_idx in TimeSeriesSplit(n_splits=n_folds).split(event_indices):
+        train_events = {unique_events[i] for i in ev_train_idx}
+        val_events = {unique_events[i] for i in ev_val_idx}
+        splits.append(
+            (
+                np.where([eid in train_events for eid in event_ids])[0],
+                np.where([eid in val_events for eid in event_ids])[0],
+            )
+        )
+    return splits
+
+
 def run_cv(
     strategy: TrainableStrategy,
     config: MLTrainingConfig,
@@ -296,25 +328,13 @@ def run_cv(
         cv_method = "timeseries"
 
     if cv_method == "group_timeseries" and event_ids is not None:
-        # Group-aware timeseries: split on event boundaries, not row boundaries
-        unique_events = list(dict.fromkeys(event_ids))  # preserve chronological order
-        event_splitter = TimeSeriesSplit(n_splits=n_folds)
-        event_indices = np.arange(len(unique_events))
-
-        # Build row-level splits from event-level splits
-        group_splits: list[tuple[np.ndarray, np.ndarray]] = []
-        for ev_train_idx, ev_val_idx in event_splitter.split(event_indices):
-            train_events = {unique_events[i] for i in ev_train_idx}
-            val_events = {unique_events[i] for i in ev_val_idx}
-            row_train = np.where([eid in train_events for eid in event_ids])[0]
-            row_val = np.where([eid in val_events for eid in event_ids])[0]
-            group_splits.append((row_train, row_val))
+        group_splits = make_group_timeseries_splits(event_ids, n_folds)
 
         logger.info(
             "starting_group_timeseries_cv",
             n_folds=n_folds,
             n_samples=len(X),
-            n_events=len(unique_events),
+            n_events=len(dict.fromkeys(event_ids)),
             n_features=len(feature_names),
             cv_method=cv_method,
         )
