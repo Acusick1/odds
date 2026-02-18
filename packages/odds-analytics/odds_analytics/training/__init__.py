@@ -33,7 +33,9 @@ from odds_analytics.training.config import (
 from odds_analytics.training.cross_validation import (
     CVFoldResult,
     CVResult,
+    TrainableStrategy,
     run_cv,
+    train_with_cv,
 )
 from odds_analytics.training.data_preparation import (
     TrainingDataResult,
@@ -50,7 +52,7 @@ from odds_analytics.training.tuner import (
     OptunaTuner,
     create_objective,
 )
-from odds_analytics.training.utils import flatten_config_for_tracking
+from odds_analytics.training.utils import compute_regression_metrics, flatten_config_for_tracking
 
 __all__ = [
     "ExperimentConfig",
@@ -69,10 +71,13 @@ __all__ = [
     "TrainingDataResult",
     "CVFoldResult",
     "CVResult",
+    "TrainableStrategy",
     "run_cv",
+    "train_with_cv",
     "ExperimentTracker",
     "MLflowTracker",
     "create_tracker",
+    "compute_regression_metrics",
     "flatten_config_for_tracking",
     "HyperparameterTuner",
     "OptunaTuner",

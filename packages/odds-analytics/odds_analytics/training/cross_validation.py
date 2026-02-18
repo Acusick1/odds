@@ -30,27 +30,40 @@ Example usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 import numpy as np
 import structlog
 from sklearn.model_selection import KFold, TimeSeriesSplit
 
 if TYPE_CHECKING:
-    from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
     from odds_analytics.training.config import MLTrainingConfig
-    from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
+    from odds_analytics.training.tracking import ExperimentTracker
 
-# Type alias for strategies that support train_from_config()
-# Both must return history dict with keys: train_mse, train_mae, train_r2, val_mse, val_mae, val_r2
-TrainableStrategy: TypeAlias = "XGBoostLineMovementStrategy | LSTMLineMovementStrategy"
+
+@runtime_checkable
+class TrainableStrategy(Protocol):
+    def train_from_config(
+        self,
+        config: MLTrainingConfig,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        feature_names: list[str],
+        X_val: np.ndarray | None = ...,
+        y_val: np.ndarray | None = ...,
+        tracker: ExperimentTracker | None = ...,
+        trial: Any | None = ...,
+    ) -> dict[str, Any]: ...
+
 
 logger = structlog.get_logger()
 
 __all__ = [
     "CVFoldResult",
     "CVResult",
+    "TrainableStrategy",
     "run_cv",
+    "train_with_cv",
 ]
 
 
@@ -439,3 +452,59 @@ def run_cv(
     )
 
     return cv_result
+
+
+def train_with_cv(
+    strategy: TrainableStrategy,
+    config: MLTrainingConfig,
+    X: np.ndarray,
+    y: np.ndarray,
+    feature_names: list[str],
+    X_test: np.ndarray | None = None,
+    y_test: np.ndarray | None = None,
+    event_ids: np.ndarray | None = None,
+) -> tuple[dict[str, Any], CVResult]:
+    """Run CV, train final model on all data, merge CV metrics into history."""
+    logger.info(
+        "starting_train_with_cv",
+        experiment_name=config.experiment.name,
+        n_folds=config.training.data.n_folds,
+        n_samples=len(X),
+        n_features=len(feature_names),
+    )
+
+    cv_result = run_cv(
+        strategy=strategy,
+        config=config,
+        X=X,
+        y=y,
+        feature_names=feature_names,
+        event_ids=event_ids,
+    )
+
+    logger.info(
+        "cv_complete_training_final",
+        cv_val_mse=f"{cv_result.mean_val_mse:.6f} ± {cv_result.std_val_mse:.6f}",
+        cv_val_r2=f"{cv_result.mean_val_r2:.4f} ± {cv_result.std_val_r2:.4f}",
+    )
+
+    history = strategy.train_from_config(
+        config=config,
+        X_train=X,
+        y_train=y,
+        feature_names=feature_names,
+        X_val=X_test,
+        y_val=y_test,
+    )
+
+    history.update(cv_result.to_dict())
+
+    logger.info(
+        "train_with_cv_complete",
+        experiment_name=config.experiment.name,
+        cv_val_mse_mean=cv_result.mean_val_mse,
+        final_train_mse=history.get("train_mse"),
+        final_test_mse=history.get("val_mse"),
+    )
+
+    return history, cv_result

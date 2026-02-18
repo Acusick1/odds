@@ -50,6 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     from odds_analytics.training.config import MLTrainingConfig
+    from odds_analytics.training.cross_validation import CVResult
     from odds_analytics.training.tracking import ExperimentTracker
 
 from odds_analytics.backtesting import (
@@ -330,42 +331,35 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         )
 
         # Calculate training metrics
-        train_predictions = self.model.predict(X_train)
-        train_mse = float(np.mean((train_predictions - y_train) ** 2))
-        train_mae = float(np.mean(np.abs(train_predictions - y_train)))
-        train_r2 = float(
-            1
-            - np.sum((y_train - train_predictions) ** 2) / np.sum((y_train - np.mean(y_train)) ** 2)
-        )
+        from odds_analytics.training.utils import compute_regression_metrics
 
-        history = {
-            "train_mse": train_mse,
-            "train_mae": train_mae,
-            "train_r2": train_r2,
+        train_predictions = self.model.predict(X_train)
+        train_metrics = compute_regression_metrics(y_train, train_predictions)
+
+        history: dict[str, Any] = {
+            "train_mse": train_metrics["mse"],
+            "train_mae": train_metrics["mae"],
+            "train_r2": train_metrics["r2"],
             "n_samples": len(X_train),
             "n_features": len(feature_names),
         }
 
         if X_val is not None and y_val is not None:
             val_predictions = self.model.predict(X_val)
-            val_mse = float(np.mean((val_predictions - y_val) ** 2))
-            val_mae = float(np.mean(np.abs(val_predictions - y_val)))
-            val_r2 = float(
-                1 - np.sum((y_val - val_predictions) ** 2) / np.sum((y_val - np.mean(y_val)) ** 2)
-            )
+            val_metrics = compute_regression_metrics(y_val, val_predictions)
             history.update(
                 {
-                    "val_mse": val_mse,
-                    "val_mae": val_mae,
-                    "val_r2": val_r2,
+                    "val_mse": val_metrics["mse"],
+                    "val_mae": val_metrics["mae"],
+                    "val_r2": val_metrics["r2"],
                 }
             )
 
         logger.info(
             "model_trained",
-            train_mse=train_mse,
-            train_mae=train_mae,
-            train_r2=train_r2,
+            train_mse=train_metrics["mse"],
+            train_mae=train_metrics["mae"],
+            train_r2=train_metrics["r2"],
             n_samples=len(X_train),
         )
 
@@ -545,84 +539,12 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         X_test: np.ndarray | None = None,
         y_test: np.ndarray | None = None,
         event_ids: np.ndarray | None = None,
-    ) -> tuple[dict[str, Any], Any]:
-        """
-        Train with K-Fold cross-validation, then train final model on all data.
-
-        This method:
-        1. Runs K-Fold CV to get robust performance estimates
-        2. Trains a final model on all training data
-        3. Returns both CV results and final model metrics
-
-        Args:
-            config: ML training configuration with kfold settings
-            X: Full training feature matrix (n_samples, n_features)
-            y: Full training target vector (n_samples,)
-            feature_names: List of feature names
-            X_test: Optional held-out test features for final evaluation
-            y_test: Optional held-out test targets for final evaluation
-
-        Returns:
-            Tuple of (training_history, cv_result) where:
-            - training_history: Dict with final model metrics + cv metrics
-            - cv_result: CVResult object with per-fold details
-
-        Example:
-            >>> strategy = XGBoostLineMovementStrategy()
-            >>> history, cv_result = strategy.train_with_cv(
-            ...     config, X_train, y_train, feature_names, X_test, y_test
-            ... )
-            >>> print(f"CV R²: {cv_result.mean_val_r2:.4f} ± {cv_result.std_val_r2:.4f}")
-            >>> print(f"Final test R²: {history['val_r2']:.4f}")
-        """
-        from odds_analytics.training.cross_validation import run_cv
-
-        logger.info(
-            "starting_train_with_cv",
-            experiment_name=config.experiment.name,
-            n_folds=config.training.data.n_folds,
-            n_samples=len(X),
-            n_features=len(feature_names),
+    ) -> tuple[dict[str, Any], CVResult]:
+        from odds_analytics.training.cross_validation import (
+            train_with_cv as _train_with_cv,
         )
 
-        # Step 1: Run cross-validation (time series or k-fold based on config)
-        cv_result = run_cv(
-            strategy=self,
-            config=config,
-            X=X,
-            y=y,
-            feature_names=feature_names,
-            event_ids=event_ids,
-        )
-
-        logger.info(
-            "cv_complete_training_final",
-            cv_val_mse=f"{cv_result.mean_val_mse:.6f} ± {cv_result.std_val_mse:.6f}",
-            cv_val_r2=f"{cv_result.mean_val_r2:.4f} ± {cv_result.std_val_r2:.4f}",
-        )
-
-        # Step 2: Train final model on all training data
-        history = self.train_from_config(
-            config=config,
-            X_train=X,
-            y_train=y,
-            feature_names=feature_names,
-            X_val=X_test,
-            y_val=y_test,
-        )
-
-        # Step 3: Merge CV metrics into history
-        history.update(cv_result.to_dict())
-
-        logger.info(
-            "train_with_cv_complete",
-            experiment_name=config.experiment.name,
-            cv_val_mse_mean=cv_result.mean_val_mse,
-            final_train_mse=history.get("train_mse"),
-            final_test_mse=history.get("val_mse"),
-        )
-
-        return history, cv_result
+        return _train_with_cv(self, config, X, y, feature_names, X_test, y_test, event_ids)
 
     def save_model(self, filepath: str | Path) -> None:
         """

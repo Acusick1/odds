@@ -9,10 +9,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import numpy as np
+import numpy as np
 
+if TYPE_CHECKING:
     from odds_analytics.training.config import MLTrainingConfig
+
+
+def compute_regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
+    """Return dict with keys: mse, mae, r2."""
+    mse = float(np.mean((y_pred - y_true) ** 2))
+    mae = float(np.mean(np.abs(y_pred - y_true)))
+    ss_res = np.sum((y_true - y_pred) ** 2)
+    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+    return {"mse": mse, "mae": mae, "r2": r2}
 
 
 def flatten_config_for_tracking(
