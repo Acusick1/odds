@@ -6,7 +6,6 @@ from typing import Any
 
 import typer
 from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
-from odds_analytics.lstm_strategy import LSTMStrategy
 from odds_analytics.training import (
     CVResult,
     MLTrainingConfig,
@@ -26,7 +25,6 @@ console = Console()
 # Strategy registry mapping strategy_type to class
 STRATEGY_CLASSES = {
     "xgboost_line_movement": XGBoostLineMovementStrategy,
-    "lstm": LSTMStrategy,
     "lstm_line_movement": LSTMLineMovementStrategy,
 }
 

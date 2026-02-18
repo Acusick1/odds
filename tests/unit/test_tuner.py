@@ -609,7 +609,7 @@ def test_feature_groups_warning_without_precomputed(sample_config, sample_traini
     from odds_analytics.training.config import SearchSpace
 
     sample_config.tuning.search_spaces["feature_groups"] = SearchSpace(
-        type="categorical", choices=[["tabular"], ["tabular", "trajectory"]]
+        type="categorical", choices=[["tabular"], ["tabular", "polymarket"]]
     )
 
     # Create objective without precomputed_features
@@ -843,7 +843,7 @@ def test_cv_with_precomputed_features(
     from odds_analytics.training.config import SearchSpace
 
     sample_config.tuning.search_spaces["feature_groups"] = SearchSpace(
-        type="categorical", choices=[("tabular",), ("tabular", "trajectory")]
+        type="categorical", choices=[("tabular",), ("tabular", "polymarket")]
     )
 
     # Mock precomputed features

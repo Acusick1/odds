@@ -740,7 +740,7 @@ def create_objective(
     Example:
         >>> config = MLTrainingConfig.from_yaml("experiments/tune.yaml")
         >>> # Pre-compute features for all feature_groups choices
-        >>> precomputed = {("tabular",): data_result1, ("tabular", "trajectory"): data_result2}
+        >>> precomputed = {("tabular",): data_result1, ("tabular", "polymarket"): data_result2}
         >>> objective = create_objective(config, X_train, y_train, feature_names, X_val, y_val, precomputed)
         >>> study = tuner.optimize(objective, n_trials=50)
     """
@@ -770,7 +770,7 @@ def create_objective(
     tuning_top_k_features = "top_k_features" in search_spaces
 
     # Check if this is an LSTM strategy (feature selection not supported for 3D sequences)
-    is_lstm_strategy = strategy_type in ("lstm", "lstm_line_movement")
+    is_lstm_strategy = strategy_type == "lstm_line_movement"
 
     # Warn if LSTM + feature selection combination detected
     if is_lstm_strategy and tuning_top_k_features:

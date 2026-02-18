@@ -94,13 +94,86 @@ from odds_analytics.backtesting import (
 )
 from odds_analytics.feature_extraction import SequenceFeatureExtractor
 from odds_analytics.feature_groups import prepare_training_data
-from odds_analytics.lstm_strategy import LSTMModel
 from odds_analytics.sequence_loader import load_sequences_for_event
 from odds_analytics.training.config import FeatureConfig
 
 logger = structlog.get_logger()
 
-__all__ = ["LSTMLineMovementStrategy"]
+__all__ = ["LSTMModel", "LSTMLineMovementStrategy"]
+
+
+class LSTMModel(nn.Module):
+    """
+    Unified LSTM model supporting both classification and regression.
+
+    Args:
+        input_size: Number of input features per timestep
+        hidden_size: Number of hidden units in LSTM layers (default: 64)
+        num_layers: Number of stacked LSTM layers (default: 2)
+        dropout: Dropout rate between LSTM layers (default: 0.2)
+        output_type: Type of output - "classification" or "regression" (default: "classification")
+
+    Input:
+        x: Tensor of shape (batch_size, seq_len, input_size)
+
+    Output:
+        Classification: Tuple of (logits, probs) where both are (batch_size,)
+        Regression: Single tensor of predictions (batch_size,)
+    """
+
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int = 64,
+        num_layers: int = 2,
+        dropout: float = 0.2,
+        output_type: str = "classification",
+    ):
+        super().__init__()
+
+        if output_type not in ("classification", "regression"):
+            raise ValueError(
+                f"output_type must be 'classification' or 'regression', got '{output_type}'"
+            )
+
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.output_type = output_type
+
+        # LSTM layers
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0.0,
+            batch_first=True,
+        )
+
+        # Output layer
+        self.fc = nn.Linear(hidden_size, 1)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+        """Forward pass through LSTM."""
+        # output shape: (batch_size, seq_len, hidden_size)
+        # h_n shape: (num_layers, batch_size, hidden_size)
+        lstm_out, (h_n, c_n) = self.lstm(x)
+
+        # Use final hidden state from last layer
+        final_hidden = h_n[-1]
+
+        # Fully connected layer
+        output = self.fc(final_hidden)
+
+        # Squeeze to (batch_size,)
+        output = output.squeeze(-1)
+
+        if self.output_type == "classification":
+            probs = torch.sigmoid(output)
+            return output, probs
+        else:
+            return output
 
 
 class LSTMLineMovementStrategy(BettingStrategy):

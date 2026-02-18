@@ -9,8 +9,7 @@ import numpy as np
 import pytest
 import torch
 from odds_analytics.backtesting import BacktestConfig, BacktestEvent, BetOpportunity
-from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
-from odds_analytics.lstm_strategy import LSTMModel
+from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy, LSTMModel
 from odds_core.models import Event, EventStatus, Odds
 
 

@@ -36,10 +36,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backtesting import BacktestEvent
-from odds_analytics.feature_extraction import (
-    TabularFeatureExtractor,
-    TrajectoryFeatureExtractor,
-)
+from odds_analytics.feature_extraction import TabularFeatureExtractor
 from odds_analytics.polymarket_features import (
     CrossSourceFeatureExtractor,
     CrossSourceFeatures,
@@ -162,9 +159,9 @@ async def collect_event_data(
                         home_team=event.home_team,
                     )
 
-    # Sequences for trajectory features or LSTM adapter
+    # Sequences for LSTM adapter
     sequences: list[list[Odds]] = []
-    if "trajectory" in config.feature_groups or config.adapter == "lstm":
+    if config.adapter == "lstm":
         sequences = await load_sequences_for_event(event.id, session)
 
     return EventDataBundle(
@@ -387,10 +384,6 @@ class XGBoostAdapter:
             from odds_analytics.feature_extraction import TabularFeatures
 
             names.extend(f"tab_{n}" for n in TabularFeatures.get_feature_names())
-        if "trajectory" in config.feature_groups:
-            from odds_analytics.feature_extraction import TrajectoryFeatures
-
-            names.extend(f"traj_{n}" for n in TrajectoryFeatures.get_feature_names())
         if "polymarket" in config.feature_groups:
             names.extend(f"pm_{n}" for n in PolymarketTabularFeatures.get_feature_names())
             names.extend(f"xsrc_{n}" for n in CrossSourceFeatures.get_feature_names())
@@ -427,29 +420,6 @@ class XGBoostAdapter:
             except Exception:
                 logger.debug("tabular_extraction_failed", event_id=event.id)
                 return None
-
-        # --- Trajectory features ---
-        if "trajectory" in config.feature_groups:
-            from odds_analytics.feature_extraction import TrajectoryFeatures
-
-            traj_extractor = TrajectoryFeatureExtractor.from_config(config)
-            seqs_up_to = [
-                s for s in bundle.sequences if s and s[0].odds_timestamp <= snapshot.snapshot_time
-            ]
-            if len(seqs_up_to) >= 2:
-                try:
-                    traj_feats = traj_extractor.extract_features(
-                        event=backtest_event,
-                        odds_data=seqs_up_to,
-                        outcome=outcome,
-                        market=market,
-                    )
-                    parts.append(traj_feats.to_array())
-                except Exception:
-                    logger.debug("trajectory_extraction_failed", event_id=event.id)
-                    parts.append(np.zeros(len(TrajectoryFeatures.get_feature_names())))
-            else:
-                parts.append(np.zeros(len(TrajectoryFeatures.get_feature_names())))
 
         # --- Polymarket features (NaN-fill when unavailable to keep row) ---
         if "polymarket" in config.feature_groups:
