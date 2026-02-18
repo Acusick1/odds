@@ -9,7 +9,7 @@ Adds alert_history table for alert deduplication tracking in health monitoring s
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy import JSON, Column, DateTime, Index, Integer, String
+from sqlalchemy import JSON
 
 # revision identifiers, used by Alembic.
 revision = "a1b2c3d4e5f6"

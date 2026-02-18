@@ -1,12 +1,13 @@
 """Unit tests for API models and conversion functions."""
 
+from datetime import UTC
+
 import pytest
-from datetime import datetime, timezone
 from odds_core.api_models import (
-    parse_scores_from_api_dict,
-    create_scheduled_event,
-    create_completed_event,
     api_dict_to_event,
+    create_completed_event,
+    create_scheduled_event,
+    parse_scores_from_api_dict,
 )
 from odds_core.models import EventStatus
 
@@ -199,7 +200,7 @@ class TestCreateScheduledEvent:
 
         event = create_scheduled_event(event_data)
 
-        assert event.commence_time.tzinfo == timezone.utc
+        assert event.commence_time.tzinfo == UTC
         assert event.commence_time.year == 2024
         assert event.commence_time.month == 10
         assert event.commence_time.day == 20

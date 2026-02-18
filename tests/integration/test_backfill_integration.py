@@ -1,5 +1,7 @@
 """Integration tests for backfill functionality with real database."""
 
+from datetime import UTC
+
 import pytest
 from odds_analytics.backfill_executor import BackfillExecutor
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
@@ -237,7 +239,7 @@ class TestBackfillPlanFromDatabase:
     @pytest.mark.asyncio
     async def test_plan_from_database_with_real_events(self, test_session):
         """Test generating backfill plan from database with real Event records."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from odds_analytics.game_selector import GameSelector
         from odds_lambda.storage.readers import OddsReader
@@ -250,7 +252,7 @@ class TestBackfillPlanFromDatabase:
                 id="db_plan_test_1",
                 sport_key="basketball_nba",
                 sport_title="NBA",
-                commence_time=datetime(2024, 1, 15, 19, 0, 0, tzinfo=timezone.utc),
+                commence_time=datetime(2024, 1, 15, 19, 0, 0, tzinfo=UTC),
                 home_team="Los Angeles Lakers",
                 away_team="Boston Celtics",
                 status=EventStatus.FINAL,
@@ -261,7 +263,7 @@ class TestBackfillPlanFromDatabase:
                 id="db_plan_test_2",
                 sport_key="basketball_nba",
                 sport_title="NBA",
-                commence_time=datetime(2024, 1, 16, 20, 0, 0, tzinfo=timezone.utc),
+                commence_time=datetime(2024, 1, 16, 20, 0, 0, tzinfo=UTC),
                 home_team="Golden State Warriors",
                 away_team="Miami Heat",
                 status=EventStatus.FINAL,
@@ -277,8 +279,8 @@ class TestBackfillPlanFromDatabase:
         # Query events from database
         reader = OddsReader(test_session)
         events = await reader.get_events_by_date_range(
-            start_date=datetime(2024, 1, 15, tzinfo=timezone.utc),
-            end_date=datetime(2024, 1, 17, tzinfo=timezone.utc),
+            start_date=datetime(2024, 1, 15, tzinfo=UTC),
+            end_date=datetime(2024, 1, 17, tzinfo=UTC),
             sport_key="basketball_nba",
             status=EventStatus.FINAL,
         )
@@ -306,8 +308,8 @@ class TestBackfillPlanFromDatabase:
 
         # Generate plan using GameSelector
         selector = GameSelector(
-            start_date=datetime(2024, 1, 15, tzinfo=timezone.utc),
-            end_date=datetime(2024, 1, 17, tzinfo=timezone.utc),
+            start_date=datetime(2024, 1, 15, tzinfo=UTC),
+            end_date=datetime(2024, 1, 17, tzinfo=UTC),
             target_games=2,
             games_per_team=1,
         )
@@ -324,7 +326,7 @@ class TestBackfillPlanFromDatabase:
     @pytest.mark.asyncio
     async def test_db_plan_output_matches_api_plan_structure(self, test_session):
         """Test that database-sourced plan has same structure as API-sourced plan."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from odds_analytics.game_selector import GameSelector
         from odds_core.time import utc_isoformat
@@ -337,7 +339,7 @@ class TestBackfillPlanFromDatabase:
             id="structure_test_1",
             sport_key="basketball_nba",
             sport_title="NBA",
-            commence_time=datetime(2024, 1, 15, 19, 0, 0, tzinfo=timezone.utc),
+            commence_time=datetime(2024, 1, 15, 19, 0, 0, tzinfo=UTC),
             home_team="Test Team A",
             away_team="Test Team B",
             status=EventStatus.FINAL,
@@ -350,8 +352,8 @@ class TestBackfillPlanFromDatabase:
         # Query from database and convert to dict (DB path)
         reader = OddsReader(test_session)
         db_events = await reader.get_events_by_date_range(
-            start_date=datetime(2024, 1, 15, tzinfo=timezone.utc),
-            end_date=datetime(2024, 1, 16, tzinfo=timezone.utc),
+            start_date=datetime(2024, 1, 15, tzinfo=UTC),
+            end_date=datetime(2024, 1, 16, tzinfo=UTC),
             sport_key="basketball_nba",
             status=EventStatus.FINAL,
         )
@@ -374,7 +376,7 @@ class TestBackfillPlanFromDatabase:
 
         # Simulate API response structure (API path)
         api_events_by_date = {
-            utc_isoformat(datetime(2024, 1, 15, 19, 0, 0, tzinfo=timezone.utc)): [
+            utc_isoformat(datetime(2024, 1, 15, 19, 0, 0, tzinfo=UTC)): [
                 {
                     "id": "structure_test_1",
                     "sport_key": "basketball_nba",
@@ -392,8 +394,8 @@ class TestBackfillPlanFromDatabase:
 
         # Generate plans from both sources
         selector = GameSelector(
-            start_date=datetime(2024, 1, 15, tzinfo=timezone.utc),
-            end_date=datetime(2024, 1, 16, tzinfo=timezone.utc),
+            start_date=datetime(2024, 1, 15, tzinfo=UTC),
+            end_date=datetime(2024, 1, 16, tzinfo=UTC),
             target_games=1,
             games_per_team=1,
         )
@@ -416,7 +418,7 @@ class TestBackfillPlanFromDatabase:
     @pytest.mark.asyncio
     async def test_db_plan_empty_date_range(self, test_session):
         """Test that empty date range returns no games in plan."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from odds_analytics.game_selector import GameSelector
         from odds_lambda.storage.readers import OddsReader
@@ -424,8 +426,8 @@ class TestBackfillPlanFromDatabase:
         # Query empty date range
         reader = OddsReader(test_session)
         events = await reader.get_events_by_date_range(
-            start_date=datetime(2025, 1, 1, tzinfo=timezone.utc),
-            end_date=datetime(2025, 1, 2, tzinfo=timezone.utc),
+            start_date=datetime(2025, 1, 1, tzinfo=UTC),
+            end_date=datetime(2025, 1, 2, tzinfo=UTC),
             sport_key="basketball_nba",
             status=EventStatus.FINAL,
         )
@@ -434,8 +436,8 @@ class TestBackfillPlanFromDatabase:
 
         # Generate plan with no events
         selector = GameSelector(
-            start_date=datetime(2025, 1, 1, tzinfo=timezone.utc),
-            end_date=datetime(2025, 1, 2, tzinfo=timezone.utc),
+            start_date=datetime(2025, 1, 1, tzinfo=UTC),
+            end_date=datetime(2025, 1, 2, tzinfo=UTC),
             target_games=10,
             games_per_team=1,
         )

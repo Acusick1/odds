@@ -1,6 +1,6 @@
 # Betting Odds Data Pipeline
 
-IMPORTANT (LLM agents): This document is read-only. Do not create additional documentation files without user consent. Do NOT manually run `ruff` or `pre-commit` - automated via git hooks.
+IMPORTANT (LLM agents): This document is read-only. Do not create additional documentation files without user consent. Run `uv run ruff check --fix` and `uv run ruff format` immediately before committing — not during development while changes are still in progress.
 
 ## Strategic Goal
 

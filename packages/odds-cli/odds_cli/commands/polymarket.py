@@ -296,7 +296,7 @@ async def _link_async(dry_run: bool):
 
         console.print(results_table)
         console.print(
-            f"\n[green]Matched: {matched}[/green]  " f"[yellow]Unmatched: {unmatched}[/yellow]"
+            f"\n[green]Matched: {matched}[/green]  [yellow]Unmatched: {unmatched}[/yellow]"
         )
         if dry_run:
             console.print("\n[dim]Dry run — no changes written.[/dim]")

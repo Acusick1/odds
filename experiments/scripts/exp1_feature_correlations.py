@@ -242,7 +242,7 @@ def print_summary(
     lines.append("=" * 65)
     lines.append(f"\nDataset: {len(df)} samples, {n_events} events, {len(feature_names)} features")
     lines.append(f"  {n_testable} testable, {n_constant} constant (excluded from correction)")
-    lines.append(f"Avg rows/event: {len(df)/n_events:.1f}")
+    lines.append(f"Avg rows/event: {len(df) / n_events:.1f}")
     lines.append("Target: devigged Pinnacle CLV delta")
     lines.append(f"  mean={y.mean():.5f}, std={y.std():.5f}, range=[{y.min():.4f}, {y.max():.4f}]")
     lines.append(f"  skewness={stats.skew(y):.3f}, kurtosis={stats.kurtosis(y):.3f}")

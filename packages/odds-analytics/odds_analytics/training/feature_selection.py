@@ -198,8 +198,7 @@ class FeatureSelector(ABC):
 
         if X.shape[1] != len(feature_names):
             raise ValueError(
-                f"X columns ({X.shape[1]}) must match feature_names length "
-                f"({len(feature_names)})"
+                f"X columns ({X.shape[1]}) must match feature_names length ({len(feature_names)})"
             )
 
         if X.shape[0] == 0:
