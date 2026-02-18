@@ -8,6 +8,7 @@ from odds_analytics.ml_strategy_example import XGBoostStrategy
 from odds_analytics.training.config import (
     DataConfig,
     ExperimentConfig,
+    FeatureConfig,
     LSTMConfig,
     MLTrainingConfig,
     SearchSpace,
@@ -98,6 +99,7 @@ def sample_lstm_config():
                 lookback_hours=48,
                 timesteps=12,
             ),
+            features=FeatureConfig(adapter="lstm"),
         ),
     )
 
@@ -205,6 +207,7 @@ class TestXGBoostStrategyTrainFromConfig:
                     end_date=date(2024, 12, 31),
                 ),
                 model=LSTMConfig(),  # Wrong config type
+                features=FeatureConfig(adapter="lstm"),
             ),
         )
 

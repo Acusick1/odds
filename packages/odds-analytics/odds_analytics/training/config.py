@@ -547,18 +547,19 @@ class FeatureConfig(BaseModel):
         description="Snapshot sampling strategy",
     )
 
-    # Sequence model configuration (LSTM)
-    lookback_hours: int = Field(
-        default=72,
+    # Sequence model configuration (LSTM only — auto-populated from LSTMConfig
+    # by TrainingConfig.sync_lstm_sequence_params when using config-driven training)
+    lookback_hours: int | None = Field(
+        default=None,
         ge=1,
         le=168,
-        description="Hours of historical data to use for sequence models",
+        description="Hours of historical data for LSTM sequence extraction",
     )
-    timesteps: int = Field(
-        default=24,
+    timesteps: int | None = Field(
+        default=None,
         ge=1,
         le=168,
-        description="Number of sequence timesteps for LSTM models",
+        description="Number of LSTM sequence timesteps",
     )
 
     # Feature processing
@@ -978,6 +979,36 @@ class TrainingConfig(BaseModel):
                     f"Strategy '{self.strategy_type}' requires LSTMConfig, "
                     f"got {type(self.model).__name__}"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def sync_lstm_sequence_params(self) -> TrainingConfig:
+        """Auto-populate LSTM sequence params from LSTMConfig into FeatureConfig.
+
+        LSTMConfig is the canonical source for lookback_hours and timesteps.
+        When FeatureConfig leaves them as None, this validator copies them from
+        the model config. If both are set explicitly, they must agree.
+        """
+        if not isinstance(self.model, LSTMConfig):
+            return self
+
+        for field_name in ("lookback_hours", "timesteps"):
+            model_val = getattr(self.model, field_name)
+            feat_val = getattr(self.features, field_name)
+
+            if feat_val is None:
+                object.__setattr__(self.features, field_name, model_val)
+            elif feat_val != model_val:
+                raise ValueError(
+                    f"{field_name} mismatch: features={feat_val}, model={model_val}. "
+                    f"Remove from features section (auto-populated from model config)."
+                )
+
+        if self.features.adapter != "lstm":
+            raise ValueError(
+                f"LSTM strategy requires features.adapter='lstm', got '{self.features.adapter}'"
+            )
+
         return self
 
 

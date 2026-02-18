@@ -422,6 +422,8 @@ class TestFeatureConfig:
         assert config.adapter == "xgboost"
         assert config.closing_tier == FetchTier.CLOSING
         assert config.sampling.strategy == "time_range"
+        assert config.lookback_hours is None
+        assert config.timesteps is None
 
     def test_custom_bookmakers(self):
         """Test custom bookmaker lists."""
@@ -622,11 +624,64 @@ class TestTrainingConfig:
                 end_date=date(2024, 12, 31),
             ),
             model=LSTMConfig(hidden_size=128, epochs=30),
+            features=FeatureConfig(adapter="lstm"),
         )
         assert config.strategy_type == "lstm_line_movement"
         assert isinstance(config.model, LSTMConfig)
         assert config.model.hidden_size == 128
         assert config.model.epochs == 30
+
+    def test_lstm_auto_populates_sequence_params(self):
+        """Test that TrainingConfig propagates lookback_hours/timesteps from LSTMConfig."""
+        config = TrainingConfig(
+            strategy_type="lstm_line_movement",
+            data=DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+            ),
+            model=LSTMConfig(lookback_hours=48, timesteps=12),
+            features=FeatureConfig(adapter="lstm"),
+        )
+        assert config.features.lookback_hours == 48
+        assert config.features.timesteps == 12
+
+    def test_lstm_sequence_param_mismatch_raises(self):
+        """Test that mismatched lookback_hours/timesteps between LSTMConfig and FeatureConfig raises."""
+        with pytest.raises(ValueError, match="lookback_hours mismatch"):
+            TrainingConfig(
+                strategy_type="lstm_line_movement",
+                data=DataConfig(
+                    start_date=date(2024, 1, 1),
+                    end_date=date(2024, 12, 31),
+                ),
+                model=LSTMConfig(lookback_hours=72),
+                features=FeatureConfig(adapter="lstm", lookback_hours=48),
+            )
+
+    def test_lstm_requires_lstm_adapter(self):
+        """Test that LSTM strategy requires features.adapter='lstm'."""
+        with pytest.raises(ValueError, match="requires features.adapter='lstm'"):
+            TrainingConfig(
+                strategy_type="lstm_line_movement",
+                data=DataConfig(
+                    start_date=date(2024, 1, 1),
+                    end_date=date(2024, 12, 31),
+                ),
+                model=LSTMConfig(),
+            )
+
+    def test_xgboost_leaves_sequence_params_none(self):
+        """Test that XGBoost TrainingConfig does not touch sequence params."""
+        config = TrainingConfig(
+            strategy_type="xgboost_line_movement",
+            data=DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+            ),
+            model=XGBoostConfig(),
+        )
+        assert config.features.lookback_hours is None
+        assert config.features.timesteps is None
 
     def test_model_type_mismatch(self):
         """Test that model type must match strategy type."""
@@ -711,7 +766,10 @@ class TestMLTrainingConfig:
                     end_date=date(2024, 12, 31),
                 ),
                 model=LSTMConfig(),
-                features=FeatureConfig(sharp_bookmakers=["pinnacle", "circasports"]),
+                features=FeatureConfig(
+                    adapter="lstm",
+                    sharp_bookmakers=["pinnacle", "circasports"],
+                ),
             ),
             tuning=TuningConfig(
                 n_trials=50,
@@ -816,6 +874,9 @@ class TestYAMLLoading:
                     "num_layers": 3,
                     "epochs": 50,
                     "loss_function": "huber",
+                },
+                "features": {
+                    "adapter": "lstm",
                 },
             },
         }
@@ -1112,6 +1173,7 @@ class TestEdgeCases:
                     end_date=date(2024, 12, 31),
                 ),
                 model=LSTMConfig(),
+                features=FeatureConfig(adapter="lstm"),
             )
             assert config.strategy_type == strategy
 
