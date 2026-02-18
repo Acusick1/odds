@@ -467,6 +467,7 @@ def train_with_cv(
     """Run CV, train final model on all data, merge CV metrics into history."""
     logger.info(
         "starting_train_with_cv",
+        experiment_name=config.experiment.name,
         n_folds=config.training.data.n_folds,
         n_samples=len(X),
         n_features=len(feature_names),
@@ -500,6 +501,7 @@ def train_with_cv(
 
     logger.info(
         "train_with_cv_complete",
+        experiment_name=config.experiment.name,
         cv_val_mse_mean=cv_result.mean_val_mse,
         final_train_mse=history.get("train_mse"),
         final_test_mse=history.get("val_mse"),

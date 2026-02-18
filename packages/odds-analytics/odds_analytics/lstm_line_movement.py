@@ -82,6 +82,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     from odds_analytics.training.config import MLTrainingConfig
+    from odds_analytics.training.cross_validation import CVResult
     from odds_analytics.training.tracking import ExperimentTracker
 
 from odds_lambda.fetch_tier import FetchTier
@@ -938,7 +939,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
         X_test: np.ndarray | None = None,
         y_test: np.ndarray | None = None,
         event_ids: np.ndarray | None = None,
-    ) -> tuple[dict[str, Any], Any]:
+    ) -> tuple[dict[str, Any], CVResult]:
         from odds_analytics.training.cross_validation import (
             train_with_cv as _train_with_cv,
         )
