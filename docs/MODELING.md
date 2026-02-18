@@ -81,6 +81,17 @@ Time-series per snapshot:
 - Target variance halves closer to game (std: 0.049 far → 0.025 close); sharp-retail signal peaks 5-8h out
 - Full results: [experiments/results/exp1_feature_correlations/FINDINGS.md](../experiments/results/exp1_feature_correlations/FINDINGS.md)
 
+### Feature group isolation (Feb 2026, 230 events)
+- Trained Ridge and shallow XGBoost independently on each feature group (tabular, trajectory, PM+cross-source, sharp-retail subset, all)
+- Walk-forward group timeseries CV (TimeSeriesSplit on event boundaries)
+- **All tabular groups: R² < 0** — no group outperforms predicting the training mean
+- Smaller groups (sharp_retail: 3 features, pm_cross_source: 9) are more stable than larger (tabular, all) — adding features makes CV worse due to collinearity
+- Adding PM features to sportsbook-only features makes no difference (`all` ≈ `all_no_pm` in MSE)
+- LSTM (sequence model, pregame tier) achieves R²=+0.020±0.041 — only model with positive R²; fold 2 (largest training set) strongest at +0.075
+- LSTM caution: uses pregame sampling (wider decision window than tabular 3-12h), so positive R² may partially reflect easier prediction task closer to game; target std=0.17 vs 0.038 for tabular (MSE not directly comparable)
+- Conclusion: data volume is the bottleneck, not feature engineering — ~230 events is insufficient to surface weak signal reliably; LSTM architecture worth prioritising when data grows
+- Full results: [experiments/results/exp2_feature_group_isolation/FINDINGS.md](../experiments/results/exp2_feature_group_isolation/FINDINGS.md)
+
 ### LSTM v1 (Feb 2026)
 - Implemented but not yet trained/evaluated at scale
 - Hypothesis: temporal patterns in line movement (momentum, sharp money timing) may be captured better by sequence models than aggregate trajectory features
