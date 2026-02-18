@@ -593,6 +593,12 @@ class SequenceFeatureExtractor(FeatureExtractor):
             extractor = SequenceFeatureExtractor.from_config(config)
             ```
         """
+        if config.lookback_hours is None or config.timesteps is None:
+            raise ValueError(
+                "SequenceFeatureExtractor requires lookback_hours and timesteps "
+                "to be set in FeatureConfig (auto-populated from LSTMConfig "
+                "when using config-driven training)."
+            )
         return cls(
             lookback_hours=config.lookback_hours,
             timesteps=config.timesteps,

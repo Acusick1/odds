@@ -239,6 +239,7 @@ class TestPrepareTrainingDataFromConfig:
                     lookback_hours=72,
                     timesteps=24,
                 ),
+                features=FeatureConfig(adapter="lstm"),
             ),
         )
 

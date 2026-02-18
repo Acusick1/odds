@@ -492,7 +492,13 @@ class XGBoostAdapter:
 
 
 class LSTMAdapter:
-    """Sequence feature adapter for LSTM (and other recurrent) models."""
+    """Sequence feature adapter for LSTM (and other recurrent) models.
+
+    Produces a fixed 14-feature ``SequenceFeatures`` vector per timestep.
+    Unlike ``XGBoostAdapter``, this adapter does **not** compose features
+    from ``config.feature_groups`` — the sequence feature set is fixed and
+    determined entirely by ``SequenceFeatureExtractor``.
+    """
 
     def feature_names(self, config: FeatureConfig) -> list[str]:
         from odds_analytics.feature_extraction import SequenceFeatures
