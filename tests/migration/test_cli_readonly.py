@@ -79,6 +79,6 @@ class TestReadOnlyCLI:
 
         # Verify output contains expected quality coverage keywords
         output_lower = result.stdout.lower()
-        assert any(
-            keyword in output_lower for keyword in ["coverage", "tier", "bookmaker"]
-        ), f"Output missing expected quality coverage keywords:\n{result.stdout}"
+        assert any(keyword in output_lower for keyword in ["coverage", "tier", "bookmaker"]), (
+            f"Output missing expected quality coverage keywords:\n{result.stdout}"
+        )

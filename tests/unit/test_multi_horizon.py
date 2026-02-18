@@ -186,9 +186,9 @@ class TestGroupTimeseriesCV:
         run_cv(strategy, config, X, y, feature_names, event_ids=event_ids)
 
         for i in range(len(fold_splits) - 1):
-            assert (
-                fold_splits[i][0] <= fold_splits[i + 1][0]
-            ), f"Fold {i} train size ({fold_splits[i][0]}) > fold {i + 1} ({fold_splits[i + 1][0]})"
+            assert fold_splits[i][0] <= fold_splits[i + 1][0], (
+                f"Fold {i} train size ({fold_splits[i][0]}) > fold {i + 1} ({fold_splits[i + 1][0]})"
+            )
 
     def test_group_timeseries_with_no_event_ids_falls_back_to_timeseries(self):
         """group_timeseries without event_ids warns and falls back to timeseries CV."""

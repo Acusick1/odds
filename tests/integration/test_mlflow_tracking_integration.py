@@ -263,9 +263,9 @@ class TestMLflowTrackingIntegration:
         metric_names = list(run.data.metrics.keys())
 
         # Check for final metrics that we explicitly log
-        assert any(
-            "final_train_mse" in name for name in metric_names
-        ), "Final train metrics not logged"
+        assert any("final_train_mse" in name for name in metric_names), (
+            "Final train metrics not logged"
+        )
 
         # Note: Autolog metrics appear in the run but may have different naming
         # The important thing is that the run completed and has metrics

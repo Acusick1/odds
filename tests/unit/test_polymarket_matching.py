@@ -31,9 +31,9 @@ class TestTeamAliases:
         for canonical, aliases in TEAM_ALIASES.items():
             for alias in aliases:
                 key = alias.lower()
-                assert (
-                    key not in seen
-                ), f"Alias '{alias}' appears in both '{seen[key]}' and '{canonical}'"
+                assert key not in seen, (
+                    f"Alias '{alias}' appears in both '{seen[key]}' and '{canonical}'"
+                )
                 seen[key] = canonical
 
     def test_abbrev_map_covers_all_teams(self):

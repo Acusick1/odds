@@ -903,11 +903,11 @@ class TrainingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    strategy_type: Literal[
-        "xgboost", "xgboost_line_movement", "lstm", "lstm_line_movement"
-    ] = Field(
-        ...,
-        description="Type of ML strategy to train",
+    strategy_type: Literal["xgboost", "xgboost_line_movement", "lstm", "lstm_line_movement"] = (
+        Field(
+            ...,
+            description="Type of ML strategy to train",
+        )
     )
 
     # Data configuration

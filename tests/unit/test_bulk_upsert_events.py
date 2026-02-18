@@ -244,9 +244,9 @@ class TestBulkUpsertEvents:
         elapsed_time = time.time() - start_time
 
         assert result == {"inserted": 100, "updated": 0}
-        assert (
-            elapsed_time < 2.0
-        ), f"Performance test failed: took {elapsed_time:.2f}s (expected < 2.0s)"
+        assert elapsed_time < 2.0, (
+            f"Performance test failed: took {elapsed_time:.2f}s (expected < 2.0s)"
+        )
 
         # Verify all events were inserted
         test_session.expire_all()
@@ -298,9 +298,9 @@ class TestBulkUpsertEvents:
         elapsed_time = time.time() - start_time
 
         assert result == {"inserted": 50, "updated": 50}
-        assert (
-            elapsed_time < 2.0
-        ), f"Performance test failed: took {elapsed_time:.2f}s (expected < 2.0s)"
+        assert elapsed_time < 2.0, (
+            f"Performance test failed: took {elapsed_time:.2f}s (expected < 2.0s)"
+        )
 
         # Expire session and verify all events exist
         test_session.expire_all()

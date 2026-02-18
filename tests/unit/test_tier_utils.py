@@ -270,9 +270,9 @@ class TestTierUtilsConsistency:
             direct_tier = calculate_tier(hours)
             timestamp_tier = calculate_tier_from_timestamps(now, game_time)
 
-            assert (
-                direct_tier == timestamp_tier
-            ), f"Mismatch at {hours} hours: {direct_tier} vs {timestamp_tier}"
+            assert direct_tier == timestamp_tier, (
+                f"Mismatch at {hours} hours: {direct_tier} vs {timestamp_tier}"
+            )
 
     def test_calculate_hours_matches_tier_logic(self):
         """Test that hours calculation integrates correctly with tier logic."""
