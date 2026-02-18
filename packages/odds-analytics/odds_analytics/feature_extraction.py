@@ -38,7 +38,6 @@ from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.utils import (
     american_to_decimal,
     calculate_implied_probability,
-    calculate_market_hold,
 )
 
 if TYPE_CHECKING:
@@ -165,29 +164,17 @@ class TabularFeatures:
     "feature unavailable" from "calculated value equals zero".
     """
 
-    # Consensus features (optional - require h2h market data)
+    # Consensus probability (optional - requires h2h market data)
     consensus_prob: float | None = None
-    opponent_consensus_prob: float | None = None
-    avg_odds: float | None = None
-    std_odds: float | None = None
 
     # Sharp bookmaker features (optional - require sharp books)
     sharp_prob: float | None = None
-    opponent_sharp_prob: float | None = None
-    sharp_market_hold: float | None = None
 
     # Retail vs sharp features (optional - require both sharp and retail)
     retail_sharp_diff: float | None = None
 
-    # Market efficiency features (optional - require bookmaker data)
+    # Market maturity (optional - require bookmaker data)
     num_bookmakers: float | None = None
-    avg_market_hold: float | None = None
-    std_market_hold: float | None = None
-
-    # Best odds features (optional - require line shopping data)
-    best_available_odds: float | None = None
-    odds_range: float | None = None
-    best_available_decimal: float | None = None
 
     def to_array(self) -> np.ndarray:
         """
@@ -457,26 +444,11 @@ class TabularFeatureExtractor(FeatureExtractor):
     """
     Feature extractor for tabular ML models (XGBoost, Random Forest, etc.).
 
-    Extracts features from a single odds snapshot that capture:
-    - Market consensus (average implied probabilities)
-    - Sharp vs retail bookmaker discrepancies
-    - Market efficiency (vig, hold percentages)
-    - Best available odds (line shopping)
-    - Team indicators (home/away)
-
-    This extractor produces flat feature dictionaries suitable for
-    gradient boosting and random forest models.
-
-    Example:
-        ```python
-        extractor = TabularFeatureExtractor()
-        features = extractor.extract_features(
-            event=event,
-            odds_data=odds_snapshot,  # Single snapshot at decision time
-            outcome="Los Angeles Lakers"
-        )
-        # Returns: {"consensus_prob": 0.55, "sharp_prob": 0.52, ...}
-        ```
+    Extracts features from a single odds snapshot focused on line movement
+    prediction signals:
+    - Market consensus probability
+    - Sharp vs retail bookmaker divergence (strongest publicly observable signal)
+    - Market maturity (bookmaker count)
     """
 
     def __init__(
@@ -557,46 +529,29 @@ class TabularFeatureExtractor(FeatureExtractor):
         sharp_odds = filter_odds_by_bookmakers(market_odds, self.sharp_bookmakers)
         retail_odds = filter_odds_by_bookmakers(market_odds, self.retail_bookmakers)
 
-        # Resolve outcome and opponent odds lists
+        # Resolve outcome team
         if outcome == event.home_team:
-            outcome_team, opponent_team = event.home_team, event.away_team
+            outcome_team = event.home_team
         elif outcome == event.away_team:
-            outcome_team, opponent_team = event.away_team, event.home_team
+            outcome_team = event.away_team
         else:
-            outcome_team, opponent_team = None, None
+            outcome_team = None
 
-        # 1. Market consensus features
+        # 1. Consensus probability
         if market == "h2h" and outcome_team:
             outcome_odds_list = filter_odds_by_market_outcome(market_odds, market, outcome_team)
-            opponent_odds_list = filter_odds_by_market_outcome(market_odds, market, opponent_team)
-
-            if outcome_odds_list and opponent_odds_list:
-                feature_values["avg_odds"] = calculate_avg_price(outcome_odds_list)
-                feature_values["std_odds"] = float(np.std([o.price for o in outcome_odds_list]))
-
+            if outcome_odds_list:
                 avg_outcome_prob = float(
                     np.mean([calculate_implied_probability(o.price) for o in outcome_odds_list])
                 )
-                avg_opponent_prob = float(
-                    np.mean([calculate_implied_probability(o.price) for o in opponent_odds_list])
-                )
                 feature_values["consensus_prob"] = avg_outcome_prob
-                feature_values["opponent_consensus_prob"] = avg_opponent_prob
 
-        # 2. Sharp vs Retail features (key for detecting value)
+        # 2. Sharp vs Retail features
         if sharp_odds and retail_odds and outcome_team:
             sharp_outcome = next((o for o in sharp_odds if o.outcome_name == outcome_team), None)
-            sharp_opponent = next((o for o in sharp_odds if o.outcome_name == opponent_team), None)
-
-            if sharp_outcome and sharp_opponent:
+            if sharp_outcome:
                 outcome_sharp_prob = calculate_implied_probability(sharp_outcome.price)
-                opponent_sharp_prob = calculate_implied_probability(sharp_opponent.price)
-
                 feature_values["sharp_prob"] = outcome_sharp_prob
-                feature_values["opponent_sharp_prob"] = opponent_sharp_prob
-
-                sharp_hold = calculate_market_hold([sharp_outcome.price, sharp_opponent.price])
-                feature_values["sharp_market_hold"] = sharp_hold
 
                 # Retail-sharp diff for outcome side only
                 retail_outcome_odds = filter_odds_by_market_outcome(
@@ -610,39 +565,9 @@ class TabularFeatureExtractor(FeatureExtractor):
                     )
                     feature_values["retail_sharp_diff"] = avg_retail_prob - outcome_sharp_prob
 
-        # 3. Market efficiency features
+        # 3. Market maturity
         all_books = {o.bookmaker_key for o in market_odds}
         feature_values["num_bookmakers"] = float(len(all_books))
-
-        if market == "h2h":
-            holds = []
-            for book in all_books:
-                book_odds = filter_odds_by_bookmakers(market_odds, [book])
-                book_home = next((o for o in book_odds if o.outcome_name == event.home_team), None)
-                book_away = next((o for o in book_odds if o.outcome_name == event.away_team), None)
-
-                if book_home and book_away:
-                    hold = calculate_market_hold([book_home.price, book_away.price])
-                    holds.append(hold)
-
-            if holds:
-                feature_values["avg_market_hold"] = float(np.mean(holds))
-                feature_values["std_market_hold"] = float(np.std(holds))
-
-        # 4. Best available odds features (line shopping) — outcome side only
-        if market == "h2h" and outcome_team:
-            outcome_market_odds = filter_odds_by_market_outcome(market_odds, market, outcome_team)
-            outcome_prices = [o.price for o in outcome_market_odds]
-
-            if outcome_prices:
-                feature_values["best_available_odds"] = float(max(outcome_prices))
-                feature_values["odds_range"] = float(max(outcome_prices) - min(outcome_prices))
-
-        # 5. Decimal odds features (for model friendliness)
-        if "best_available_odds" in feature_values:
-            feature_values["best_available_decimal"] = american_to_decimal(
-                int(feature_values["best_available_odds"])
-            )
 
         return TabularFeatures(**feature_values)
 

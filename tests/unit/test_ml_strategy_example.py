@@ -131,7 +131,6 @@ class TestTabularFeatureExtractor:
 
         assert features.consensus_prob is not None
         assert 0 < features.consensus_prob < 1
-        assert features.opponent_consensus_prob is not None
 
     def test_extract_features_includes_sharp_features(self, sample_event, sample_odds_snapshot):
         """Test that sharp bookmaker features are extracted."""
@@ -141,8 +140,6 @@ class TestTabularFeatureExtractor:
         )
 
         assert features.sharp_prob is not None
-        assert features.sharp_market_hold is not None
-        assert features.sharp_market_hold > 0  # Should have some vig
 
     def test_extract_features_includes_retail_sharp_diff(self, sample_event, sample_odds_snapshot):
         """Test that retail vs sharp differences are calculated."""
@@ -152,17 +149,6 @@ class TestTabularFeatureExtractor:
         )
 
         assert features.retail_sharp_diff is not None
-
-    def test_extract_features_includes_best_odds(self, sample_event, sample_odds_snapshot):
-        """Test that best available odds are found."""
-        extractor = TabularFeatureExtractor()
-        features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
-        )
-
-        assert features.best_available_odds is not None
-        assert features.best_available_decimal is not None
-        assert features.best_available_decimal > 1.0
 
     def test_extract_features_empty_odds(self, sample_event):
         """Test that extract_features handles empty odds gracefully."""

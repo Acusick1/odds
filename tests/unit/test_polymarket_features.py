@@ -97,10 +97,7 @@ def recent_prices() -> list[PolymarketPriceSnapshot]:
 def sample_sb_tabular_features() -> TabularFeatures:
     return TabularFeatures(
         consensus_prob=0.57,
-        opponent_consensus_prob=0.43,
         sharp_prob=0.55,
-        opponent_sharp_prob=0.45,
-        avg_market_hold=0.04,
         num_bookmakers=3.0,
     )
 
@@ -160,11 +157,11 @@ class TestCrossSourceFeatures:
         assert np.all(np.isnan(arr))
 
     def test_set_fields_populate_array(self):
-        f = CrossSourceFeatures(pm_sb_prob_divergence=0.05, pm_sb_divergence_abs=0.05)
+        f = CrossSourceFeatures(pm_sb_prob_divergence=0.05, pm_sharp_divergence=0.07)
         arr = f.to_array()
         names = CrossSourceFeatures.get_feature_names()
         assert arr[names.index("pm_sb_prob_divergence")] == pytest.approx(0.05)
-        assert arr[names.index("pm_sb_divergence_abs")] == pytest.approx(0.05)
+        assert arr[names.index("pm_sharp_divergence")] == pytest.approx(0.07)
 
 
 # =============================================================================
@@ -366,14 +363,6 @@ class TestCrossSourceFeatureExtractor:
         result = extractor.extract(pm_features=pm, sb_features=sample_sb_tabular_features)
         # pm=0.62, sb_consensus=0.57 → divergence=0.05
         assert result.pm_sb_prob_divergence == pytest.approx(0.05, abs=1e-6)
-        assert result.pm_sb_divergence_abs == pytest.approx(0.05, abs=1e-6)
-        assert result.pm_sb_divergence_direction == pytest.approx(1.0)
-
-    def test_negative_divergence_direction(self, sample_sb_tabular_features):
-        extractor = CrossSourceFeatureExtractor()
-        pm = PolymarketTabularFeatures(pm_home_prob=0.50)
-        result = extractor.extract(pm_features=pm, sb_features=sample_sb_tabular_features)
-        assert result.pm_sb_divergence_direction == pytest.approx(-1.0)
 
     def test_sharp_divergence_computed(self, sample_sb_tabular_features):
         extractor = CrossSourceFeatureExtractor()
@@ -381,23 +370,3 @@ class TestCrossSourceFeatureExtractor:
         result = extractor.extract(pm_features=pm, sb_features=sample_sb_tabular_features)
         # pm=0.62, sharp_prob=0.55 → pm_sharp_divergence=0.07
         assert result.pm_sharp_divergence == pytest.approx(0.07, abs=1e-6)
-        assert result.pm_sharp_divergence_abs == pytest.approx(0.07, abs=1e-6)
-
-    def test_pm_midpoint_vs_sb_consensus(self, sample_sb_tabular_features):
-        extractor = CrossSourceFeatureExtractor()
-        pm = PolymarketTabularFeatures(pm_home_prob=0.62, pm_midpoint=0.61)
-        result = extractor.extract(pm_features=pm, sb_features=sample_sb_tabular_features)
-        assert result.pm_mid_vs_sb_consensus == pytest.approx(0.61 - 0.57, abs=1e-6)
-
-    def test_pm_spread_vs_sb_hold(self, sample_sb_tabular_features):
-        extractor = CrossSourceFeatureExtractor()
-        pm = PolymarketTabularFeatures(pm_home_prob=0.62, pm_spread=0.02)
-        result = extractor.extract(pm_features=pm, sb_features=sample_sb_tabular_features)
-        # pm_spread=0.02, sb_hold=0.04 → pm_spread_vs_sb_hold=-0.02
-        assert result.pm_spread_vs_sb_hold == pytest.approx(-0.02, abs=1e-6)
-
-    def test_convergence_rate_always_none_in_v1(self, sample_sb_tabular_features):
-        extractor = CrossSourceFeatureExtractor()
-        pm = PolymarketTabularFeatures(pm_home_prob=0.62)
-        result = extractor.extract(pm_features=pm, sb_features=sample_sb_tabular_features)
-        assert result.pm_sb_convergence_rate is None

@@ -89,28 +89,15 @@ class CrossSourceFeatures:
     """
     Features comparing Polymarket prices against sportsbook odds.
 
-    Captures divergence, direction, and relative pricing signals between
-    the two market types. All fields optional.
+    Focused on divergence signals relevant to line movement prediction.
+    All fields optional.
     """
 
     # PM vs SB consensus probability divergence
     pm_sb_prob_divergence: float | None = None  # pm_home_prob - sb_consensus_prob
-    pm_sb_divergence_abs: float | None = None  # abs(divergence)
-    pm_sb_divergence_direction: float | None = None  # +1 if PM higher, -1 if lower, 0 if equal
-
-    # PM spread vs SB market hold (relative liquidity cost)
-    pm_spread_vs_sb_hold: float | None = None  # pm_spread - sb_avg_market_hold
 
     # PM vs sharp bookmaker divergence
     pm_sharp_divergence: float | None = None  # pm_home_prob - sharp_prob
-    pm_sharp_divergence_abs: float | None = None
-
-    # PM midpoint vs SB consensus (using order book midpoint if available)
-    pm_mid_vs_sb_consensus: float | None = None  # pm_midpoint - sb_consensus_prob
-
-    # PM-SB convergence rate (change in divergence per hour)
-    # None when insufficient historical cross-source data
-    pm_sb_convergence_rate: float | None = None
 
     def to_array(self) -> np.ndarray:
         """Convert to numpy array. None → np.nan."""
@@ -294,27 +281,10 @@ class CrossSourceFeatureExtractor:
 
         # PM vs SB consensus divergence
         if sb_features.consensus_prob is not None:
-            divergence = pm_features.pm_home_prob - sb_features.consensus_prob
-            result.pm_sb_prob_divergence = divergence
-            result.pm_sb_divergence_abs = abs(divergence)
-            result.pm_sb_divergence_direction = (
-                1.0 if divergence > 0 else -1.0 if divergence < 0 else 0.0
-            )
-
-        # PM spread vs SB market hold
-        if pm_features.pm_spread is not None and sb_features.avg_market_hold is not None:
-            result.pm_spread_vs_sb_hold = pm_features.pm_spread - sb_features.avg_market_hold
+            result.pm_sb_prob_divergence = pm_features.pm_home_prob - sb_features.consensus_prob
 
         # PM vs sharp divergence
         if sb_features.sharp_prob is not None:
-            sharp_div = pm_features.pm_home_prob - sb_features.sharp_prob
-            result.pm_sharp_divergence = sharp_div
-            result.pm_sharp_divergence_abs = abs(sharp_div)
-
-        # PM midpoint vs SB consensus
-        if pm_features.pm_midpoint is not None and sb_features.consensus_prob is not None:
-            result.pm_mid_vs_sb_consensus = pm_features.pm_midpoint - sb_features.consensus_prob
-
-        # pm_sb_convergence_rate: not computed in v1 (requires historical cross-source data)
+            result.pm_sharp_divergence = pm_features.pm_home_prob - sb_features.sharp_prob
 
         return result
