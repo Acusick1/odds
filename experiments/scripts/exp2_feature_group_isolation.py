@@ -24,7 +24,7 @@ Outputs saved to experiments/results/exp2_feature_group_isolation/
 from __future__ import annotations
 
 import asyncio
-import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -38,9 +38,10 @@ from odds_analytics.training.config import MLTrainingConfig
 from odds_analytics.training.data_preparation import filter_events_by_date_range
 from odds_core.database import async_session_maker
 from odds_core.models import EventStatus
+from sklearn.base import RegressorMixin
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import GroupKFold
+from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBRegressor
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "results" / "exp2_feature_group_isolation"
@@ -70,13 +71,6 @@ FEATURE_GROUPS: dict[str, list[str]] = {
 }
 
 
-def get_git_sha() -> str:
-    try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()[:8]
-    except Exception:
-        return "unknown"
-
-
 def select_features_by_group(feature_names: list[str], group_name: str) -> list[int]:
     """Return column indices for features belonging to a group."""
     if group_name == "sharp_retail":
@@ -97,15 +91,28 @@ def select_features_by_group(feature_names: list[str], group_name: str) -> list[
 def cross_validate(
     X: np.ndarray,
     y: np.ndarray,
-    groups: np.ndarray,
-    model_factory: callable,
+    event_ids: np.ndarray,
+    model_factory: Callable[[], RegressorMixin],
     n_folds: int = 3,
 ) -> dict[str, float]:
-    """Run group timeseries CV and return aggregated metrics."""
-    gkf = GroupKFold(n_splits=n_folds)
+    """Run group timeseries CV (walk-forward on event boundaries).
+
+    Uses TimeSeriesSplit on unique event IDs — same logic as run_cv()
+    with cv_method='group_timeseries'. Always trains on chronologically
+    earlier events and validates on later events.
+    """
+    unique_events = list(dict.fromkeys(event_ids))
+    event_splitter = TimeSeriesSplit(n_splits=n_folds)
+    event_indices = np.arange(len(unique_events))
+
     fold_metrics: list[dict[str, float]] = []
 
-    for _, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups)):
+    for ev_train_idx, ev_val_idx in event_splitter.split(event_indices):
+        train_events = {unique_events[i] for i in ev_train_idx}
+        val_events = {unique_events[i] for i in ev_val_idx}
+        train_idx = np.where([eid in train_events for eid in event_ids])[0]
+        val_idx = np.where([eid in val_events for eid in event_ids])[0]
+
         X_train, X_val = X[train_idx], X[val_idx]
         y_train, y_val = y[train_idx], y[val_idx]
 
@@ -122,7 +129,6 @@ def cross_validate(
             }
         )
 
-    # Aggregate across folds (weighted by fold size)
     total_n = sum(f["n_val"] for f in fold_metrics)
     r2_vals = [f["r2"] for f in fold_metrics]
     mse_vals = [f["mse"] for f in fold_metrics]
@@ -251,11 +257,18 @@ def run_group_experiments(
 
 
 def compute_baselines(y: np.ndarray, event_ids: np.ndarray) -> dict[str, float]:
-    """Compute naive baselines for comparison."""
-    # Predict-mean baseline
-    gkf = GroupKFold(n_splits=3)
+    """Compute naive baselines using walk-forward event splits."""
+    unique_events = list(dict.fromkeys(event_ids))
+    event_splitter = TimeSeriesSplit(n_splits=3)
+    event_indices = np.arange(len(unique_events))
+
     r2s, mses, maes = [], [], []
-    for train_idx, val_idx in gkf.split(y, y, event_ids):
+    for ev_train_idx, ev_val_idx in event_splitter.split(event_indices):
+        train_events = {unique_events[i] for i in ev_train_idx}
+        val_events = {unique_events[i] for i in ev_val_idx}
+        train_idx = np.where([eid in train_events for eid in event_ids])[0]
+        val_idx = np.where([eid in val_events for eid in event_ids])[0]
+
         y_train, y_val = y[train_idx], y[val_idx]
         pred = np.full_like(y_val, y_train.mean())
         r2s.append(r2_score(y_val, pred))
@@ -358,170 +371,6 @@ def plot_fold_detail(results_df: pd.DataFrame) -> None:
     print("  Saved fold_detail.png")
 
 
-def generate_findings(
-    results_df: pd.DataFrame,
-    baselines: dict,
-    n_samples: int,
-    n_events: int,
-    n_features: int,
-    feature_names: list[str],
-    y: np.ndarray,
-    git_sha: str,
-) -> str:
-    """Generate FINDINGS.md content."""
-    lines = [
-        "# Experiment 2: Feature Group Isolation",
-        "",
-        "## Setup",
-        "",
-        f"- **Date**: {datetime.now(UTC).strftime('%Y-%m-%d')}",
-        f"- **Git SHA**: `{git_sha}`",
-        f"- **Dataset**: {n_samples} samples, {n_events} events, {n_features} total features",
-        "- **Sampling**: multi-horizon time_range (3-12h, max 5/event)",
-        f"- **Target**: devigged Pinnacle CLV delta (mean={y.mean():.4f}, std={y.std():.4f})",
-        "- **CV**: 3-fold GroupKFold (event-level splits)",
-        "- **Models**: Ridge (alpha=1.0), XGBoost (50 trees, depth 3, heavily regularized)",
-        "- **Reproduce**: `uv run python experiments/scripts/exp2_feature_group_isolation.py`",
-        "",
-        "## Key Results",
-        "",
-        "### Performance by Feature Group",
-        "",
-        "| Group | N Features | Model | R² (mean±std) | MSE | MAE |",
-        "|-------|-----------|-------|---------------|-----|-----|",
-    ]
-
-    for _, row in results_df.sort_values(["group", "model"]).iterrows():
-        lines.append(
-            f"| {row['group']} | {row['n_features']} | {row['model']} | "
-            f"{row['r2_mean']:+.4f}±{row['r2_std']:.4f} | "
-            f"{row['mse_mean']:.6f} | {row['mae_mean']:.4f} |"
-        )
-
-    lines.extend(
-        [
-            "",
-            f"**Baseline (predict mean)**: R²={baselines['baseline_r2']:.4f}, "
-            f"MSE={baselines['baseline_mse']:.6f}, MAE={baselines['baseline_mae']:.4f}",
-            "",
-        ]
-    )
-
-    # Best group analysis
-    xgb_results = results_df[results_df["model"] == "xgboost"].copy()
-    best_group = xgb_results.loc[xgb_results["r2_mean"].idxmax()]
-    worst_group = xgb_results.loc[xgb_results["r2_mean"].idxmin()]
-
-    lines.extend(
-        [
-            "### Summary",
-            "",
-            f"- **Best group (XGBoost)**: {best_group['group']} "
-            f"(R²={best_group['r2_mean']:+.4f}±{best_group['r2_std']:.4f})",
-            f"- **Worst group (XGBoost)**: {worst_group['group']} "
-            f"(R²={worst_group['r2_mean']:+.4f}±{worst_group['r2_std']:.4f})",
-            "",
-        ]
-    )
-
-    # Ridge vs XGBoost comparison
-    lines.extend(
-        [
-            "### Ridge vs XGBoost",
-            "",
-        ]
-    )
-
-    any_positive = (results_df["r2_mean"] > 0).any()
-    if any_positive:
-        positive_groups = results_df[results_df["r2_mean"] > 0][["group", "model", "r2_mean"]]
-        lines.append("Groups with R² > 0:")
-        for _, row in positive_groups.iterrows():
-            lines.append(f"- {row['group']} ({row['model']}): R²={row['r2_mean']:+.4f}")
-        lines.append("")
-    else:
-        lines.extend(
-            [
-                "No group achieves R² > 0 with either model, meaning no feature group ",
-                "outperforms simply predicting the training set mean.",
-                "",
-            ]
-        )
-
-    # Per-fold detail
-    lines.extend(
-        [
-            "### Per-Fold R² (XGBoost)",
-            "",
-            "| Group | Fold 0 | Fold 1 | Fold 2 |",
-            "|-------|--------|--------|--------|",
-        ]
-    )
-    for _, row in xgb_results.iterrows():
-        fold_strs = [f"{r2:+.4f}" for r2 in row["fold_r2s"]]
-        lines.append(f"| {row['group']} | {' | '.join(fold_strs)} |")
-
-    lines.extend(
-        [
-            "",
-            "## Interpretation",
-            "",
-        ]
-    )
-
-    # Auto-interpret based on results
-    baseline_mse = baselines["baseline_mse"]
-    groups_beating_baseline = results_df[results_df["mse_mean"] < baseline_mse * 0.99]
-
-    if len(groups_beating_baseline) == 0:
-        lines.extend(
-            [
-                "No feature group produces MSE meaningfully below the predict-mean baseline. "
-                "This is consistent with exp1's finding that individual feature correlations are weak "
-                "(max |r|=0.12). Even combining features within a group does not surface usable signal.",
-                "",
-                "The result is not unexpected at this sample size (~200 events). The features may carry "
-                "real but tiny signal that requires more data to detect reliably above CV noise.",
-                "",
-            ]
-        )
-    else:
-        lines.extend(
-            [
-                "Some feature groups show MSE improvement over predict-mean baseline:",
-                "",
-            ]
-        )
-        for _, row in groups_beating_baseline.iterrows():
-            pct = (1 - row["mse_mean"] / baseline_mse) * 100
-            lines.append(f"- {row['group']} ({row['model']}): {pct:.1f}% MSE reduction")
-        lines.append("")
-
-    lines.extend(
-        [
-            "## Implications",
-            "",
-            "1. **Feature group ranking**: Establishes which groups carry the most signal for the "
-            "CLV delta target, informing feature selection for downstream models.",
-            "2. **Sharp-retail subset**: Tests whether the theoretically-motivated 4-feature set "
-            "from exp1 performs comparably to the full tabular group (28 features).",
-            "3. **PM feature value**: Determines whether PM + cross-source features add signal "
-            "beyond sportsbook-only features, given the sparse alignment issues.",
-            "4. **Next steps**: If any group shows positive R², proceed to exp3 (minimal feature "
-            "models with top correlated features). If all groups are R²≈0, the bottleneck is "
-            "likely data volume — prioritize collection over feature engineering.",
-            "",
-            "## Artifacts",
-            "",
-            "- `results.csv` — full results table",
-            "- `group_comparison.png` — R² and MSE bar chart comparison",
-            "- `fold_detail.png` — per-fold R² boxplot for XGBoost",
-        ]
-    )
-
-    return "\n".join(lines)
-
-
 def make_lstm_config() -> MLTrainingConfig:
     """Build LSTM config aligned with the tabular experiment (same dates, target, CV)."""
     xgb_config = MLTrainingConfig.from_yaml(str(CONFIG_PATH))
@@ -603,7 +452,6 @@ def run_lstm_experiment(
 
 async def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    git_sha = get_git_sha()
 
     print("Loading data...")
     X, y, feature_names, event_ids = await load_data()
@@ -641,20 +489,6 @@ async def main() -> None:
     # Save results
     results_df.to_csv(OUTPUT_DIR / "results.csv", index=False)
     print("  Saved results.csv")
-
-    # Generate and save FINDINGS.md
-    findings = generate_findings(
-        results_df,
-        baselines,
-        len(X),
-        n_events,
-        len(feature_names),
-        feature_names,
-        y,
-        git_sha,
-    )
-    (OUTPUT_DIR / "FINDINGS.md").write_text(findings)
-    print("  Saved FINDINGS.md")
 
     print(f"\nAll outputs in {OUTPUT_DIR}")
 

@@ -8,7 +8,7 @@
 - **Dataset**: 719 samples, 229 events, 47 total features (down from 75 in exp1 — 28 structural duplicates removed in PR #135)
 - **Sampling**: multi-horizon time_range (3-12h before game, max 5/event)
 - **Target**: devigged Pinnacle CLV delta (mean=-0.0012, std=0.0380)
-- **CV**: 3-fold group timeseries (event-level splits)
+- **CV**: 3-fold walk-forward group timeseries (TimeSeriesSplit on event boundaries — always trains on earlier events, validates on later)
 - **Models**: Ridge (alpha=1.0), XGBoost (50 trees, depth 3, heavily regularized)
 
 ### LSTM (sequence model)
@@ -20,6 +20,8 @@
 - **Note**: LSTM target std=0.17 vs tabular std=0.038. The pregame tier selects the latest snapshot at or before pregame, which can be anywhere from 0.5h to 24h+ before game — much wider range than the tabular 3-12h window. MSE is **not directly comparable** between LSTM and tabular rows.
 
 **Reproduce**: `uv run python experiments/scripts/exp2_feature_group_isolation.py`
+
+> **Note**: Tabular results below were generated with GroupKFold (round-robin, not walk-forward). The script now uses walk-forward TimeSeriesSplit on event boundaries — re-run to update these tables.
 
 ## Key Results
 
@@ -77,7 +79,7 @@ Key observations:
 1. **Smaller groups are more stable.** `sharp_retail` (3 features) and `pm_cross_source` (9 features) have the least negative R² and smallest std. Adding more features (`all`) consistently makes things worse — Ridge degrades sharply (ill-conditioned; collinearity warnings), XGBoost degrades moderately.
 2. **Trajectory group adds noise.** Despite having the highest individual correlations in exp1 (traj_max_prob_decrease ρ=0.13), the full `trajectory` group (23 features) is the worst-performing group for XGBoost.
 3. **PM features are not differentiating.** `pm_cross_source` appears marginally best but this is consistent with sparse features being harder to overfit on rather than carrying real signal.
-4. **Fold 0 is consistently the worst.** The earliest time period (first ~77 events chronologically) has the most negative R² across all groups, suggesting either regime shift across the season or that small early training sets can't learn a weak signal.
+4. **Fold 0 is consistently the worst.** Walk-forward fold 0 has the smallest training set (~57 events), so negative R² is expected — too little data to learn any signal.
 
 ### LSTM (sequence model)
 
