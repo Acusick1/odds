@@ -179,13 +179,13 @@ class TestFeatureConfigExtraction:
             sharp_bookmakers=["pinnacle", "circasports"],
             retail_bookmakers=["fanduel"],
             closing_tier=FetchTier.CLOSING,
-            feature_groups=["tabular", "trajectory"],
+            feature_groups=["tabular", "polymarket"],
         )
 
         assert config.outcome == "away"
         assert config.markets == ["spreads"]
         assert config.sharp_bookmakers == ["pinnacle", "circasports"]
-        assert config.feature_groups == ("tabular", "trajectory")
+        assert config.feature_groups == ("tabular", "polymarket")
 
 
 # =============================================================================

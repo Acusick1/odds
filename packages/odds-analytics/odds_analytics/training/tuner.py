@@ -740,7 +740,7 @@ def create_objective(
     Example:
         >>> config = MLTrainingConfig.from_yaml("experiments/tune.yaml")
         >>> # Pre-compute features for all feature_groups choices
-        >>> precomputed = {("tabular",): data_result1, ("tabular", "trajectory"): data_result2}
+        >>> precomputed = {("tabular",): data_result1, ("tabular", "polymarket"): data_result2}
         >>> objective = create_objective(config, X_train, y_train, feature_names, X_val, y_val, precomputed)
         >>> study = tuner.optimize(objective, n_trials=50)
     """

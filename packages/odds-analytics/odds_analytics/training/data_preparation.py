@@ -15,7 +15,7 @@ Example usage:
     from odds_analytics.training import MLTrainingConfig
     from odds_analytics.training.data_preparation import prepare_training_data_from_config
 
-    # Load config with feature_groups: ["tabular", "trajectory"]
+    # Load config with feature_groups: ["tabular"]
     config = MLTrainingConfig.from_yaml("experiments/xgboost_v1.yaml")
 
     # Prepare data
