@@ -36,7 +36,7 @@ def fetch(
 ) -> None:
     """Fetch NBA team game logs from stats.nba.com and store to database.
 
-    Uses Playwright (headless Chrome) to bypass Akamai bot detection.
+    Uses Playwright (headless Firefox) to bypass Akamai bot detection.
 
     Examples:
         odds nba-stats fetch --season 2024-25

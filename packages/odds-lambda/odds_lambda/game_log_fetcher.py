@@ -95,7 +95,7 @@ def _parse_game_date(date_str: str) -> date:
     raise ValueError(msg)
 
 
-def _row_to_record(row: list, season: str) -> GameLogRecord:
+def _row_to_record(row: list[object], season: str) -> GameLogRecord:
     """Convert a raw API row (positional array) to a GameLogRecord."""
     col = {name: row[i] for i, name in enumerate(_COLUMNS)}
     return GameLogRecord(
@@ -145,7 +145,7 @@ def _parse_response(raw_json: dict, season: str) -> list[GameLogRecord]:
 def fetch_game_logs(season: str) -> list[GameLogRecord]:
     """Fetch all team game logs for a season via Playwright.
 
-    Launches headless Chrome, navigates to nba.com to establish cookies,
+    Launches headless Firefox, navigates to nba.com to establish cookies,
     then calls the LeagueGameFinder API from the browser context.
 
     Args:
@@ -181,21 +181,22 @@ def fetch_game_logs(season: str) -> list[GameLogRecord]:
     with sync_playwright() as p:
         # Firefox avoids HTTP/2 protocol errors that Chromium hits on nba.com in WSL2
         browser = p.firefox.launch(headless=True)
-        page = browser.new_page()
+        try:
+            page = browser.new_page()
 
-        # Navigate to nba.com to establish Akamai session cookies
-        logger.info("game_log_establishing_session")
-        page.goto(
-            "https://www.nba.com/",
-            wait_until="domcontentloaded",
-            timeout=30000,
-        )
+            # Navigate to nba.com to establish Akamai session cookies
+            logger.info("game_log_establishing_session")
+            page.goto(
+                "https://www.nba.com/",
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
 
-        # Make the API call from the browser context
-        logger.info("game_log_fetching", season=season, url=api_url)
-        result = page.evaluate(js_fetch, api_url)
-
-        browser.close()
+            # Make the API call from the browser context
+            logger.info("game_log_fetching", season=season, url=api_url)
+            result = page.evaluate(js_fetch, api_url)
+        finally:
+            browser.close()
 
     if isinstance(result, dict) and result.get("error"):
         msg = f"stats.nba.com returned {result.get('status')}: {result.get('statusText')}"

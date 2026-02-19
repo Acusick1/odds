@@ -200,7 +200,7 @@ Scheduler -> API Client -> Validator -> Writer -> Logger
 
 `packages/odds-lambda/odds_lambda/game_log_fetcher.py` - `fetch_game_logs()`
 
-- Fetches NBA team game logs from stats.nba.com via Playwright (headless Chrome)
+- Fetches NBA team game logs from stats.nba.com via Playwright (headless Firefox)
 - Uses Playwright to bypass Akamai bot detection (raw HTTP requests are blocked)
 - Calls LeagueGameFinder API from browser context after establishing session cookies
 - Returns ~2,460 rows per season (30 teams × 82 games)

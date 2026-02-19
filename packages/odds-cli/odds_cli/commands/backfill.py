@@ -426,16 +426,16 @@ async def _backfill_scores_async(start_date_str: str, end_date_str: str, dry_run
     if dry_run:
         console.print("[yellow]DRY RUN - No database changes will be made[/yellow]\n")
 
-    from odds_core.game_log_models import NbaTeamGameLog
     from odds_core.models import EventStatus
+    from odds_lambda.storage.game_log_reader import GameLogReader
     from odds_lambda.storage.readers import OddsReader
     from odds_lambda.storage.writers import OddsWriter
-    from sqlalchemy import and_, select
 
     console.print("[cyan]Querying events without scores...[/cyan]")
 
     async with async_session_maker() as session:
         reader = OddsReader(session)
+        gl_reader = GameLogReader(session)
         writer = OddsWriter(session)
 
         all_events = await reader.get_events_by_date_range(
@@ -469,19 +469,11 @@ async def _backfill_scores_async(start_date_str: str, end_date_str: str, dry_run
             task = progress.add_task("Processing events...", total=len(events_without_scores))
 
             for event in events_without_scores:
-                # Look up game log rows linked to this event
-                gl_query = (
-                    select(NbaTeamGameLog)
-                    .where(
-                        and_(
-                            NbaTeamGameLog.event_id == event.id,
-                            NbaTeamGameLog.pts.is_not(None),
-                        )
-                    )
-                    .order_by(NbaTeamGameLog.matchup)
-                )
-                gl_result = await session.execute(gl_query)
-                game_logs = list(gl_result.scalars().all())
+                game_logs = [
+                    gl
+                    for gl in await gl_reader.get_game_logs_for_event(event.id)
+                    if gl.pts is not None
+                ]
 
                 if len(game_logs) >= 2:
                     # Determine home/away by matchup string ("vs." = home)

@@ -23,10 +23,7 @@ class NbaTeamGameLog(SQLModel, table=True):
     nba_game_id: str = Field(description="NBA game ID e.g. '0022400123'")
     team_id: int = Field(description="NBA team ID (numeric)")
     team_abbreviation: str = Field(description="Team abbreviation e.g. 'BOS'")
-    game_date: date = Field(
-        sa_column=Column(Date),
-        description="Game date",
-    )
+    game_date: date = Field(sa_column=Column(Date))
     matchup: str = Field(description="Matchup string e.g. 'BOS vs. NYK'")
     wl: str | None = Field(default=None, description="Win/Loss indicator")
     season: str = Field(description="Season string e.g. '2024-25'")
@@ -59,9 +56,7 @@ class NbaTeamGameLog(SQLModel, table=True):
 
     # Metadata
     created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True)),
-        default_factory=utc_now,
-        description="Record creation time",
+        sa_column=Column(DateTime(timezone=True), default=utc_now),
     )
 
     __table_args__ = (
