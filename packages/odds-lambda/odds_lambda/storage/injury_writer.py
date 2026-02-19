@@ -87,17 +87,20 @@ class InjuryWriter:
     async def _match_event(self, team_name: str, game_date: date) -> str | None:
         """Match a team + game_date to a sportsbook Event record.
 
-        Uses the same ±24h window centered on noon UTC as Polymarket matching
-        to handle US evening games whose UTC timestamps roll to the next day.
-        Checks either home_team or away_team since injury reports identify
-        only one team per row.
+        Converts the ET calendar date to a UTC window covering that single
+        day. NBA games start between ~noon ET and ~11 PM ET; the window
+        spans game_date 10:00 ET to game_date+1 06:00 ET to handle early
+        tipoffs and late-night UTC rollovers.
 
         Returns:
             event_id if exactly one match found, None otherwise.
         """
-        game_noon_utc = datetime(game_date.year, game_date.month, game_date.day, 12, tzinfo=UTC)
-        window_start = game_noon_utc - timedelta(hours=24)
-        window_end = game_noon_utc + timedelta(hours=24)
+        from odds_core.time import EASTERN
+
+        day_start_et = datetime(game_date.year, game_date.month, game_date.day, 10, tzinfo=EASTERN)
+        day_end_et = day_start_et + timedelta(hours=20)  # game_date+1 06:00 ET
+        window_start = day_start_et.astimezone(UTC)
+        window_end = day_end_et.astimezone(UTC)
 
         query = select(Event.id).where(
             and_(
