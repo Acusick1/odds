@@ -116,6 +116,34 @@ def backtest_engine(mock_strategy, backtest_config, mock_reader, mock_logger):
     )
 
 
+class TestBacktestEventValidation:
+    """Test BacktestEvent field validation."""
+
+    def test_rejects_naive_commence_time(self):
+        with pytest.raises(ValueError, match="commence_time must be timezone-aware"):
+            BacktestEvent(
+                id="naive",
+                commence_time=datetime(2024, 10, 15, 19, 0),
+                home_team="Lakers",
+                away_team="Warriors",
+                home_score=110,
+                away_score=105,
+                status=EventStatus.FINAL,
+            )
+
+    def test_accepts_aware_commence_time(self):
+        event = BacktestEvent(
+            id="aware",
+            commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
+            home_team="Lakers",
+            away_team="Warriors",
+            home_score=110,
+            away_score=105,
+            status=EventStatus.FINAL,
+        )
+        assert event.commence_time.tzinfo is not None
+
+
 class TestEvaluateMoneylineOutcome:
     """Test _evaluate_moneyline_outcome method."""
 
