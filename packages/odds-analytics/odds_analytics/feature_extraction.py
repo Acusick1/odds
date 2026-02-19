@@ -172,6 +172,10 @@ class TabularFeatures:
     # Market maturity (optional - require bookmaker data)
     num_bookmakers: float | None = None
 
+    # Calendar features (derived from commence_time)
+    is_weekend: float | None = None
+    day_of_week: float | None = None
+
     def to_array(self) -> np.ndarray:
         """
         Convert features to numpy array for model input.
@@ -424,6 +428,11 @@ class TabularFeatureExtractor(FeatureExtractor):
         """
         # Initialize feature values dictionary for building
         feature_values: dict[str, float] = {}
+
+        # Calendar features (always available from commence_time)
+        weekday = event.commence_time.weekday()
+        feature_values["day_of_week"] = float(weekday)
+        feature_values["is_weekend"] = 1.0 if weekday >= 5 else 0.0
 
         # Filter for target market
         market_odds = filter_odds_by_market_outcome(odds_data, market)
