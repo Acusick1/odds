@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 
 import structlog
 from odds_core.injury_models import InjuryStatus
@@ -119,7 +119,6 @@ def fetch_injury_report(target_time_utc: datetime) -> list[InjuryRecord]:
     from nbainjuries import injury  # Lazy import — triggers JVM start
 
     naive_et = _to_naive_et(target_time_utc)
-    report_time_utc = ensure_utc(datetime.now(UTC))
 
     if not injury.check_reportvalid(naive_et):
         logger.info("injury_report_not_available", target_et=str(naive_et))
@@ -130,48 +129,11 @@ def fetch_injury_report(target_time_utc: datetime) -> list[InjuryRecord]:
         logger.info("injury_report_empty", target_et=str(naive_et))
         return []
 
-    # Use the ET target time converted to UTC as report_time (not wall clock)
     report_time_utc = ensure_utc(naive_et.replace(tzinfo=EASTERN))
 
     records = _parse_records(raw_json, report_time_utc)
     logger.info(
         "injury_report_fetched",
-        count=len(records),
-        target_time=str(target_time_utc),
-    )
-    return records
-
-
-async def fetch_injury_report_async(
-    target_time_utc: datetime,
-    http_session: object | None = None,
-) -> list[InjuryRecord]:
-    """Fetch injury report for a specific UTC time (async, for backfill).
-
-    Args:
-        target_time_utc: UTC timestamp for the desired report snapshot.
-        http_session: Optional aiohttp.ClientSession for connection reuse.
-
-    Returns:
-        Parsed InjuryRecord instances. Empty list if report unavailable.
-    """
-    from nbainjuries import injury_asy  # Lazy import — triggers JVM start
-
-    naive_et = _to_naive_et(target_time_utc)
-
-    if not await injury_asy.check_reportvalid(naive_et, session=http_session):
-        logger.info("injury_report_not_available_async", target_et=str(naive_et))
-        return []
-
-    raw_json = await injury_asy.get_reportdata(naive_et, session=http_session)
-    if not raw_json:
-        logger.info("injury_report_empty_async", target_et=str(naive_et))
-        return []
-
-    report_time_utc = ensure_utc(naive_et.replace(tzinfo=EASTERN))
-    records = _parse_records(raw_json, report_time_utc)
-    logger.info(
-        "injury_report_fetched_async",
         count=len(records),
         target_time=str(target_time_utc),
     )

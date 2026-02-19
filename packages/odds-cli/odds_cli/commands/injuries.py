@@ -8,6 +8,9 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+# nbainjuries switched from hourly to 15-minute report intervals on this date
+_NEW_ERA_CUTOFF_ET = datetime(2025, 12, 22, 9, 0)
+
 app = typer.Typer(help="NBA injury report operations")
 console = Console()
 
@@ -185,7 +188,7 @@ async def _backfill_async(
             # Round to nearest valid report slot in ET
             target_et = target_utc.astimezone(EASTERN)
             # Round down to hour for legacy era, 15-min for new era
-            if target_et.replace(tzinfo=None) < datetime(2025, 12, 22, 9, 0):
+            if target_et.replace(tzinfo=None) < _NEW_ERA_CUTOFF_ET:
                 # Legacy: hourly
                 rounded_et = target_et.replace(minute=0, second=0, microsecond=0)
             else:
