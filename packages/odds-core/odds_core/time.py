@@ -1,6 +1,9 @@
 """Time utility helpers for consistent timezone handling."""
 
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
+
+EASTERN = ZoneInfo("America/New_York")
 
 
 def ensure_utc(dt: datetime) -> datetime:
@@ -18,6 +21,11 @@ def parse_api_datetime(value: str) -> datetime:
         value = value[:-1] + "+00:00"
     dt = datetime.fromisoformat(value)
     return ensure_utc(dt)
+
+
+def to_eastern(dt: datetime) -> datetime:
+    """Convert datetime to US Eastern (handles EST/EDT automatically)."""
+    return ensure_utc(dt).astimezone(EASTERN)
 
 
 def utc_isoformat(dt: datetime) -> str:
