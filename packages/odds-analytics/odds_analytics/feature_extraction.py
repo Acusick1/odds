@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from odds_core.models import Odds
+from odds_core.time import to_eastern
 
 from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.utils import (
@@ -171,6 +172,10 @@ class TabularFeatures:
 
     # Market maturity (optional - require bookmaker data)
     num_bookmakers: float | None = None
+
+    # Calendar features (derived from commence_time)
+    is_weekend: float | None = None
+    day_of_week: float | None = None
 
     def to_array(self) -> np.ndarray:
         """
@@ -424,6 +429,12 @@ class TabularFeatureExtractor(FeatureExtractor):
         """
         # Initialize feature values dictionary for building
         feature_values: dict[str, float] = {}
+
+        # Calendar features — convert to US Eastern so midnight UTC rollover
+        # doesn't shift US evening games to the next calendar day.
+        weekday = to_eastern(event.commence_time).weekday()
+        feature_values["day_of_week"] = float(weekday)
+        feature_values["is_weekend"] = 1.0 if weekday >= 5 else 0.0
 
         # Filter for target market
         market_odds = filter_odds_by_market_outcome(odds_data, market)

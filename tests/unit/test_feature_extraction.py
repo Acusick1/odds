@@ -221,6 +221,97 @@ class TestTabularFeatureExtractor:
 
         assert features.retail_sharp_diff is not None
 
+    def test_extract_features_includes_calendar_features(self, sample_event, sample_odds_snapshot):
+        """Test that calendar features are derived from commence_time."""
+        extractor = TabularFeatureExtractor()
+        features = extractor.extract_features(
+            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+        )
+
+        # 2024-11-01 is a Friday (weekday=4)
+        assert features.day_of_week == 4.0
+        assert features.is_weekend == 0.0
+
+    def test_extract_features_weekend_detection(self):
+        """Test that is_weekend correctly identifies Saturday and Sunday."""
+        extractor = TabularFeatureExtractor()
+
+        # Saturday game
+        saturday_event = BacktestEvent(
+            id="sat_event",
+            commence_time=datetime(2024, 11, 2, 19, 0, 0, tzinfo=UTC),  # Saturday
+            home_team="Los Angeles Lakers",
+            away_team="Boston Celtics",
+            home_score=110,
+            away_score=105,
+            status=EventStatus.FINAL,
+        )
+        features = extractor.extract_features(saturday_event, [], market="h2h")
+        assert features.day_of_week == 5.0
+        assert features.is_weekend == 1.0
+
+        # Sunday game
+        sunday_event = BacktestEvent(
+            id="sun_event",
+            commence_time=datetime(2024, 11, 3, 19, 0, 0, tzinfo=UTC),  # Sunday
+            home_team="Los Angeles Lakers",
+            away_team="Boston Celtics",
+            home_score=110,
+            away_score=105,
+            status=EventStatus.FINAL,
+        )
+        features = extractor.extract_features(sunday_event, [], market="h2h")
+        assert features.day_of_week == 6.0
+        assert features.is_weekend == 1.0
+
+    def test_calendar_friday_evening_stored_as_saturday_utc(self):
+        """Friday 8pm ET (Sat 1am UTC) should yield day_of_week=4, is_weekend=0."""
+        extractor = TabularFeatureExtractor()
+        event = BacktestEvent(
+            id="fri_utc_sat",
+            commence_time=datetime(2025, 1, 4, 1, 0, 0, tzinfo=UTC),  # Sat 1am UTC = Fri 8pm ET
+            home_team="Los Angeles Lakers",
+            away_team="Boston Celtics",
+            home_score=110,
+            away_score=105,
+            status=EventStatus.FINAL,
+        )
+        features = extractor.extract_features(event, [], market="h2h")
+        assert features.day_of_week == 4.0
+        assert features.is_weekend == 0.0
+
+    def test_calendar_saturday_late_stored_as_sunday_utc(self):
+        """Saturday 10pm ET (Sun 3am UTC) should yield day_of_week=5, is_weekend=1."""
+        extractor = TabularFeatureExtractor()
+        event = BacktestEvent(
+            id="sat_utc_sun",
+            commence_time=datetime(2025, 1, 5, 3, 0, 0, tzinfo=UTC),  # Sun 3am UTC = Sat 10pm ET
+            home_team="Los Angeles Lakers",
+            away_team="Boston Celtics",
+            home_score=110,
+            away_score=105,
+            status=EventStatus.FINAL,
+        )
+        features = extractor.extract_features(event, [], market="h2h")
+        assert features.day_of_week == 5.0
+        assert features.is_weekend == 1.0
+
+    def test_calendar_sunday_afternoon_no_rollover(self):
+        """Sunday 3pm ET (Sun 8pm UTC) — no rollover, sanity check."""
+        extractor = TabularFeatureExtractor()
+        event = BacktestEvent(
+            id="sun_no_roll",
+            commence_time=datetime(2025, 1, 5, 20, 0, 0, tzinfo=UTC),  # Sun 8pm UTC = Sun 3pm ET
+            home_team="Los Angeles Lakers",
+            away_team="Boston Celtics",
+            home_score=110,
+            away_score=105,
+            status=EventStatus.FINAL,
+        )
+        features = extractor.extract_features(event, [], market="h2h")
+        assert features.day_of_week == 6.0
+        assert features.is_weekend == 1.0
+
     def test_extract_features_empty_odds(self, sample_event):
         """Test that extract_features handles empty odds gracefully."""
         from odds_analytics.feature_extraction import TabularFeatures
@@ -231,9 +322,12 @@ class TestTabularFeatureExtractor:
         )
 
         assert isinstance(features, TabularFeatures)
-        # All fields should be None with empty odds
+        # Odds-derived fields should be None with empty odds
         assert features.consensus_prob is None
         assert features.sharp_prob is None
+        # Calendar features are always populated from commence_time
+        assert features.is_weekend is not None
+        assert features.day_of_week is not None
 
     def test_get_feature_names_returns_list(self):
         """Test that get_feature_names returns a list of strings."""

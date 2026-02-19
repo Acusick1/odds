@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from odds_core.models import Event, EventStatus
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 __all__ = [
     "BacktestEvent",
@@ -34,6 +34,13 @@ class BacktestEvent(BaseModel):
     home_score: int
     away_score: int
     status: EventStatus
+
+    @field_validator("commence_time")
+    @classmethod
+    def _must_be_aware(cls, v: datetime) -> datetime:
+        if v.tzinfo is None:
+            raise ValueError("commence_time must be timezone-aware")
+        return v
 
     @classmethod
     def from_db_event(cls, event: Event) -> BacktestEvent | None:
