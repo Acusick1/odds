@@ -26,6 +26,13 @@ A single-user NBA betting odds data collection and analysis system. Built for ro
 - PostgreSQL 15+
 - [uv](https://github.com/astral-sh/uv) (recommended) or pip
 - [The Odds API](https://the-odds-api.com/) key
+- JDK 11+ with AWT libraries (for injury report PDF parsing via `nbainjuries`/tabula-java)
+  ```bash
+  # Ubuntu/Debian
+  sudo apt install default-jdk
+  # Or headless + AWT libs separately
+  sudo apt install default-jdk-headless libxrender1 libxtst6 libxi6
+  ```
 
 ### Installation
 

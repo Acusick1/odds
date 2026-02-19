@@ -13,7 +13,7 @@ These tests use fixtures to create known test data for predictable results.
 from __future__ import annotations
 
 import tempfile
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -29,6 +29,7 @@ from odds_analytics.training import (
     XGBoostConfig,
     prepare_training_data_from_config,
 )
+from odds_core.injury_models import InjuryReport, InjuryStatus
 from odds_lambda.fetch_tier import FetchTier
 
 # Mark all tests in this module as integration tests
@@ -291,3 +292,129 @@ class TestTrainingDataIntegration:
             name for name, var in zip(result.feature_names, variances, strict=False) if var == 0.0
         ]
         assert constant == [], f"Constant features still present: {constant}"
+
+
+class TestInjuryFeaturesIntegration:
+    """Integration tests for injury features in the training pipeline."""
+
+    @pytest.fixture
+    def xgboost_with_injuries_config(self):
+        """XGBoost config with tabular + injuries feature groups."""
+        return MLTrainingConfig(
+            experiment=ExperimentConfig(
+                name="integration_test_injuries",
+                tags=["integration", "injuries"],
+                description="Integration test for injury features",
+            ),
+            training=TrainingConfig(
+                strategy_type="xgboost_line_movement",
+                data=DataConfig(
+                    start_date=date(2024, 10, 1),
+                    end_date=date(2024, 10, 31),
+                    test_split=0.2,
+                    validation_split=0.1,
+                    random_seed=42,
+                    shuffle=True,
+                ),
+                model=XGBoostConfig(
+                    n_estimators=100,
+                    max_depth=6,
+                    learning_rate=0.1,
+                ),
+                features=FeatureConfig(
+                    outcome="home",
+                    markets=["h2h"],
+                    sharp_bookmakers=["pinnacle"],
+                    retail_bookmakers=["fanduel", "draftkings"],
+                    closing_tier=FetchTier.CLOSING,
+                    feature_groups=("tabular", "injuries"),
+                ),
+            ),
+        )
+
+    @pytest.fixture
+    async def test_events_with_injury_reports(self, pglite_async_session, test_events_with_odds):
+        """Add injury reports to a subset of test events."""
+        events = test_events_with_odds
+        base_time = datetime(2024, 10, 15, 19, 0, tzinfo=UTC)
+
+        # Add injury reports for the first 3 events only
+        for i in range(3):
+            commence_time = base_time + timedelta(days=i)
+            report_time = commence_time - timedelta(hours=10)
+
+            # Two reports per event (one per team)
+            report_home = InjuryReport(
+                report_time=report_time,
+                game_date=commence_time.date(),
+                game_time_et="07:00 PM ET",
+                matchup=f"Away Team {i}@Home Team {i}",
+                team=f"Home Team {i}",
+                player_name=f"Player, Home{i}",
+                status=InjuryStatus.OUT,
+                reason="Left Knee; Sprain",
+                event_id=f"test_event_{i}",
+            )
+            report_away = InjuryReport(
+                report_time=report_time,
+                game_date=commence_time.date(),
+                game_time_et="07:00 PM ET",
+                matchup=f"Away Team {i}@Home Team {i}",
+                team=f"Away Team {i}",
+                player_name=f"Player, Away{i}",
+                status=InjuryStatus.QUESTIONABLE,
+                reason="Right Ankle; Soreness",
+                event_id=f"test_event_{i}",
+            )
+            pglite_async_session.add(report_home)
+            pglite_async_session.add(report_away)
+
+        await pglite_async_session.commit()
+        return events
+
+    @pytest.mark.asyncio
+    async def test_pipeline_with_injury_features(
+        self,
+        xgboost_with_injuries_config,
+        pglite_async_session,
+        test_events_with_injury_reports,
+    ):
+        """Full pipeline with injuries produces valid training data."""
+
+        result = await prepare_training_data_from_config(
+            xgboost_with_injuries_config, pglite_async_session
+        )
+
+        assert isinstance(result, TrainingDataResult)
+        assert result.num_train_samples > 0
+        assert result.num_test_samples > 0
+
+        # Verify at least some injury features survive variance filter.
+        # Count features (num_out_*, num_gtd_*) are constant with fake team names,
+        # so the variance filter drops them. Timing features vary per event.
+        inj_features = [n for n in result.feature_names if n.startswith("inj_")]
+        assert len(inj_features) > 0, "No injury features survived variance filter"
+        assert "inj_report_hours_before_game" in result.feature_names
+        assert "inj_injury_news_recency" in result.feature_names
+
+        assert result.X_train.shape[1] == len(result.feature_names)
+
+    @pytest.mark.asyncio
+    async def test_events_without_injuries_not_dropped(
+        self,
+        xgboost_with_injuries_config,
+        pglite_async_session,
+        test_events_with_injury_reports,
+    ):
+        """Events without injury data still produce training rows (NaN-filled)."""
+        # Run pipeline — events 3-7 have no injury reports
+        result = await prepare_training_data_from_config(
+            xgboost_with_injuries_config, pglite_async_session
+        )
+
+        # All 8 events should contribute rows (not just the 3 with injury data).
+        # Total includes train + val + test (val split removes some from train+test).
+        total_samples = result.num_train_samples + result.num_test_samples
+        if result.num_val_samples is not None:
+            total_samples += result.num_val_samples
+        assert total_samples >= 8  # At least 1 row per event

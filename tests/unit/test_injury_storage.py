@@ -108,12 +108,12 @@ class TestInjuryWriter:
     @pytest.mark.asyncio
     async def test_event_matching_finds_match(self, pglite_async_session):
         """Injury records auto-match to sportsbook events at write time."""
-        # Create an event for BOS at ORL on Jan 16
+        # Create an event for BOS at ORL on Jan 16 (7:10 PM ET = Jan 17 00:10 UTC)
         event = _make_event(
             "evt_bos_orl",
             home="Orlando Magic",
             away="Boston Celtics",
-            commence=datetime(2026, 1, 16, 0, 10, tzinfo=UTC),
+            commence=datetime(2026, 1, 17, 0, 10, tzinfo=UTC),
         )
         pglite_async_session.add(event)
         await pglite_async_session.commit()
@@ -152,7 +152,7 @@ class TestInjuryWriter:
                 f"evt_bos_{i}",
                 home="Orlando Magic",
                 away="Boston Celtics",
-                commence=datetime(2026, 1, 16, i, 0, tzinfo=UTC),
+                commence=datetime(2026, 1, 16, 20 + i, 0, tzinfo=UTC),
             )
             pglite_async_session.add(event)
         await pglite_async_session.commit()
@@ -167,6 +167,38 @@ class TestInjuryWriter:
         result = await pglite_async_session.execute(select(InjuryReport))
         row = result.scalar_one()
         assert row.event_id is None
+
+    @pytest.mark.asyncio
+    async def test_event_matching_back_to_back(self, pglite_async_session):
+        """Back-to-back games on adjacent ET dates match the correct event only."""
+        # Jan 15 game: 7 PM ET = Jan 16 00:00 UTC
+        evt_jan15 = _make_event(
+            "evt_jan15",
+            home="Orlando Magic",
+            away="Boston Celtics",
+            commence=datetime(2026, 1, 16, 0, 0, tzinfo=UTC),
+        )
+        # Jan 16 game: 7:30 PM ET = Jan 17 00:30 UTC
+        evt_jan16 = _make_event(
+            "evt_jan16",
+            home="Boston Celtics",
+            away="Miami Heat",
+            commence=datetime(2026, 1, 17, 0, 30, tzinfo=UTC),
+        )
+        pglite_async_session.add(evt_jan15)
+        pglite_async_session.add(evt_jan16)
+        await pglite_async_session.commit()
+
+        writer = InjuryWriter(pglite_async_session)
+        records = [_make_record(team="Boston Celtics", game_date=date(2026, 1, 16))]
+        await writer.upsert_injury_reports(records)
+        await pglite_async_session.commit()
+
+        from sqlalchemy import select
+
+        result = await pglite_async_session.execute(select(InjuryReport))
+        row = result.scalar_one()
+        assert row.event_id == "evt_jan16"
 
     @pytest.mark.asyncio
     async def test_empty_records(self, pglite_async_session):
@@ -186,7 +218,7 @@ class TestInjuryReader:
                 event_id,
                 home="Orlando Magic",
                 away="Boston Celtics",
-                commence=datetime(2026, 1, 16, 0, 10, tzinfo=UTC),
+                commence=datetime(2026, 1, 17, 0, 10, tzinfo=UTC),  # 7:10 PM ET on Jan 16
             )
             session.add(event)
             await session.commit()

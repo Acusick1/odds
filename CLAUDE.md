@@ -184,5 +184,6 @@ uv run odds scheduler start
 | [docs/CLI.md](docs/CLI.md) | Full command reference |
 | [BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md) | Comprehensive backtesting reference |
 | [docs/POLYMARKET.md](docs/POLYMARKET.md) | Polymarket data model, pipeline, API reference |
+| [docs/INJURIES.md](docs/INJURIES.md) | Injury report pipeline, backfill, feature extraction |
 | [docs/MODELING.md](docs/MODELING.md) | Modeling rationale, features, experiments, open questions |
 | [.env.example](.env.example) | Environment variable template |

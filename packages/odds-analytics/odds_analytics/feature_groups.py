@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 import structlog
+from odds_core.injury_models import InjuryReport
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.polymarket_models import (
     PolymarketEvent,
@@ -98,6 +99,7 @@ class EventDataBundle:
     pm_context: PMEventContext | None
     pm_prices: list[PolymarketPriceSnapshot] = field(default_factory=list)
     pm_orderbooks: list[PolymarketOrderBookSnapshot] = field(default_factory=list)
+    injury_reports: list[InjuryReport] = field(default_factory=list)
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
@@ -159,6 +161,14 @@ async def collect_event_data(
                         home_team=event.home_team,
                     )
 
+    # Injury reports (bulk-load all, filter by time in adapter)
+    injury_reports: list[InjuryReport] = []
+    if "injuries" in config.feature_groups:
+        from odds_lambda.storage.injury_reader import InjuryReader
+
+        injury_reader = InjuryReader(session)
+        injury_reports = await injury_reader.get_injuries_for_event(event.id)
+
     # Sequences for LSTM adapter
     sequences: list[list[Odds]] = []
     if config.adapter == "lstm":
@@ -171,6 +181,7 @@ async def collect_event_data(
         pm_context=pm_context,
         pm_prices=pm_prices,
         pm_orderbooks=pm_orderbooks,
+        injury_reports=injury_reports,
         sequences=sequences,
     )
 
@@ -387,6 +398,10 @@ class XGBoostAdapter:
         if "polymarket" in config.feature_groups:
             names.extend(f"pm_{n}" for n in PolymarketTabularFeatures.get_feature_names())
             names.extend(f"xsrc_{n}" for n in CrossSourceFeatures.get_feature_names())
+        if "injuries" in config.feature_groups:
+            from odds_analytics.injury_features import InjuryFeatures
+
+            names.extend(f"inj_{n}" for n in InjuryFeatures.get_feature_names())
         names.append("hours_until_event")
         return names
 
@@ -483,6 +498,25 @@ class XGBoostAdapter:
                     except Exception:
                         logger.debug("pm_feature_extraction_failed", event_id=event.id)
                         parts.append(nan_block)
+
+        # --- Injury features (NaN-fill when unavailable to keep row) ---
+        if "injuries" in config.feature_groups:
+            from odds_analytics.injury_features import InjuryFeatures, extract_injury_features
+
+            n_inj = len(InjuryFeatures.get_feature_names())
+            nan_block_inj = np.full(n_inj, np.nan)
+
+            if not bundle.injury_reports:
+                parts.append(nan_block_inj)
+            else:
+                try:
+                    inj_feats = extract_injury_features(
+                        bundle.injury_reports, event, snapshot.snapshot_time
+                    )
+                    parts.append(inj_feats.to_array())
+                except Exception:
+                    logger.debug("injury_feature_extraction_failed", event_id=event.id)
+                    parts.append(nan_block_inj)
 
         # --- hours_until_event ---
         hours_until = (event.commence_time - snapshot.snapshot_time).total_seconds() / 3600
