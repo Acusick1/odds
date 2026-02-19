@@ -5,6 +5,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from odds_core.config import get_settings
+from odds_core.injury_models import InjuryReport, InjuryStatus  # noqa: F401
 
 # Import all models to ensure they're registered with SQLModel.metadata
 from odds_core.models import (  # noqa: F401
