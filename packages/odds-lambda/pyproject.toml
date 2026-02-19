@@ -13,6 +13,7 @@ dependencies = [
     "alembic>=1.13.0",
     "nba_api>=1.1.0",
     "nbainjuries>=1.1.1",
+    "playwright>=1.58.0",
 ]
 
 [tool.uv.sources]

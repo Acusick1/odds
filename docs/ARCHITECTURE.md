@@ -196,12 +196,17 @@ Scheduler -> API Client -> Validator -> Writer -> Logger
 - Quota tracking
 - Methods: `get_odds()`, `get_scores()`, `get_historical_odds()`, `get_historical_events()`
 
-### NBA Score Fetcher
+### Game Log Pipeline
 
-`packages/odds-lambda/odds_lambda/nba_score_fetcher.py` - `NBAScoreFetcher`
+`packages/odds-lambda/odds_lambda/game_log_fetcher.py` - `fetch_game_logs()`
 
-- Fetches NBA scores using nba_api library
-- Used by `odds backfill scores` command
+- Fetches NBA team game logs from stats.nba.com via Playwright (headless Chrome)
+- Uses Playwright to bypass Akamai bot detection (raw HTTP requests are blocked)
+- Calls LeagueGameFinder API from browser context after establishing session cookies
+- Returns ~2,460 rows per season (30 teams × 82 games)
+- Storage: `GameLogWriter` (upsert with event matching), `GameLogReader` (pipeline stats)
+- CLI: `odds nba-stats fetch --season 2024-25`, `odds nba-stats status`
+- Score backfill (`odds backfill scores`) reads from game log table
 
 ### Validator
 

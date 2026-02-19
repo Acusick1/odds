@@ -400,21 +400,21 @@ def backfill_scores(
     ),
 ):
     """
-    Backfill historical scores using nba_api for events missing scores.
+    Backfill event scores from game log table.
 
-    This command uses the nba_api library to fetch historical game results
-    and update events in the database that don't have final scores populated.
+    Reads scores from nba_team_game_logs (populated via `odds nba-stats fetch`)
+    and updates events that are missing scores. Run `odds nba-stats fetch` first.
 
     Example:
         odds backfill scores --start 2023-10-01 --end 2024-04-30
         odds backfill scores --start 2023-10-01 --end 2024-04-30 --dry-run
     """
-    console.print("\n[bold cyan]Historical Score Backfill (NBA API)[/bold cyan]\n")
+    console.print("\n[bold cyan]Score Backfill from Game Logs[/bold cyan]\n")
     asyncio.run(_backfill_scores_async(start_date, end_date, dry_run))
 
 
 async def _backfill_scores_async(start_date_str: str, end_date_str: str, dry_run: bool):
-    """Async implementation of score backfill."""
+    """Async implementation of score backfill using game log table."""
     try:
         start_date = datetime.fromisoformat(start_date_str).replace(tzinfo=UTC)
         end_date = datetime.fromisoformat(end_date_str).replace(tzinfo=UTC)
@@ -422,61 +422,42 @@ async def _backfill_scores_async(start_date_str: str, end_date_str: str, dry_run
         console.print(f"[red]Error parsing dates: {e}[/red]")
         raise typer.Exit(1) from e
 
-    # Display settings
     console.print(f"[bold]Date range:[/bold] {start_date_str} to {end_date_str}")
     if dry_run:
         console.print("[yellow]DRY RUN - No database changes will be made[/yellow]\n")
 
-    # Import here to avoid circular dependencies
+    from odds_core.game_log_models import NbaTeamGameLog
     from odds_core.models import EventStatus
-    from odds_lambda.nba_score_fetcher import NBAScoreFetcher
     from odds_lambda.storage.readers import OddsReader
     from odds_lambda.storage.writers import OddsWriter
+    from sqlalchemy import and_, select
 
-    # Query events without scores in date range
-    console.print("[cyan]Querying database for events without scores...[/cyan]")
+    console.print("[cyan]Querying events without scores...[/cyan]")
 
     async with async_session_maker() as session:
         reader = OddsReader(session)
         writer = OddsWriter(session)
 
-        # Get all events in date range
         all_events = await reader.get_events_by_date_range(
             start_date=start_date,
             end_date=end_date,
             sport_key="basketball_nba",
         )
 
-        # Filter to events without scores (home_score is None or away_score is None)
         events_without_scores = [
             e for e in all_events if e.home_score is None or e.away_score is None
         ]
 
         if not events_without_scores:
             console.print(
-                "[green]No events found missing scores in the specified date range.[/green]"
+                "[green]No events found missing scores in the specified date range.[/green]\n"
             )
-            console.print()
             return
 
         console.print(f"Found {len(events_without_scores)} events without scores\n")
 
-        # Initialize NBA API fetcher
-        fetcher = NBAScoreFetcher()
-
-        # Fetch historical scores from NBA API
-        console.print("[cyan]Fetching historical scores from NBA API...[/cyan]")
-        try:
-            nba_scores = fetcher.get_historical_scores(start_date, end_date)
-            console.print(f"Fetched {len(nba_scores)} games from NBA API\n")
-        except Exception as e:
-            console.print(f"[red]Failed to fetch scores from NBA API: {e}[/red]")
-            raise typer.Exit(1) from e
-
-        # Match events with NBA scores and update
         updated_count = 0
         not_found_count = 0
-        failed_count = 0
 
         with Progress(
             SpinnerColumn(),
@@ -488,55 +469,66 @@ async def _backfill_scores_async(start_date_str: str, end_date_str: str, dry_run
             task = progress.add_task("Processing events...", total=len(events_without_scores))
 
             for event in events_without_scores:
-                try:
-                    # Try to match event with NBA API data
-                    matched_game = fetcher.match_game_by_teams_and_date(
-                        home_team=event.home_team,
-                        away_team=event.away_team,
-                        game_date=event.commence_time,
-                        tolerance_hours=24,
+                # Look up game log rows linked to this event
+                gl_query = (
+                    select(NbaTeamGameLog)
+                    .where(
+                        and_(
+                            NbaTeamGameLog.event_id == event.id,
+                            NbaTeamGameLog.pts.is_not(None),
+                        )
                     )
+                    .order_by(NbaTeamGameLog.matchup)
+                )
+                gl_result = await session.execute(gl_query)
+                game_logs = list(gl_result.scalars().all())
 
-                    if matched_game:
-                        home_score = matched_game["home_score"]
-                        away_score = matched_game["away_score"]
+                if len(game_logs) >= 2:
+                    # Determine home/away by matchup string ("vs." = home)
+                    home_pts = None
+                    away_pts = None
+                    for gl in game_logs:
+                        if "vs." in gl.matchup:
+                            home_pts = gl.pts
+                        elif "@" in gl.matchup:
+                            away_pts = gl.pts
 
+                    if home_pts is not None and away_pts is not None:
                         if not dry_run:
                             await writer.update_event_status(
                                 event_id=event.id,
                                 status=EventStatus.FINAL,
-                                home_score=home_score,
-                                away_score=away_score,
+                                home_score=home_pts,
+                                away_score=away_pts,
                             )
 
                         console.print(
-                            f"[green]✓[/green] {event.away_team} @ {event.home_team} "
+                            f"[green]\u2713[/green] {event.away_team} @ {event.home_team} "
                             f"({event.commence_time.strftime('%Y-%m-%d')}): "
-                            f"{away_score}-{home_score}"
+                            f"{away_pts}-{home_pts}"
                         )
                         updated_count += 1
                     else:
                         console.print(
-                            f"[yellow]⚠[/yellow] {event.away_team} @ {event.home_team} "
+                            f"[yellow]\u26a0[/yellow] {event.away_team} @ {event.home_team} "
                             f"({event.commence_time.strftime('%Y-%m-%d')}): "
-                            f"No matching game found"
+                            f"Cannot determine home/away from matchup"
                         )
                         not_found_count += 1
-
-                except Exception as e:
+                else:
                     console.print(
-                        f"[red]✗[/red] {event.away_team} @ {event.home_team}: Error: {str(e)[:60]}"
+                        f"[yellow]\u26a0[/yellow] {event.away_team} @ {event.home_team} "
+                        f"({event.commence_time.strftime('%Y-%m-%d')}): "
+                        f"No game log data"
                     )
-                    failed_count += 1
+                    not_found_count += 1
 
                 progress.advance(task)
 
-        # Commit changes if not dry run
         if not dry_run and updated_count > 0:
             await session.commit()
             console.print("\n[green]Changes committed to database[/green]")
 
-    # Final summary
     console.print("\n" + "=" * 60)
     console.print("[bold cyan]Score Backfill Complete[/bold cyan]")
     console.print("=" * 60)
@@ -547,11 +539,15 @@ async def _backfill_scores_async(start_date_str: str, end_date_str: str, dry_run
 
     summary_table.add_row("Events Processed", str(len(events_without_scores)))
     summary_table.add_row("Scores Updated", str(updated_count))
-    summary_table.add_row("Not Found in NBA API", str(not_found_count))
-    summary_table.add_row("Failed", str(failed_count))
+    summary_table.add_row("No Game Log Data", str(not_found_count))
 
     console.print("\n")
     console.print(summary_table)
+
+    if not_found_count > 0:
+        console.print(
+            "\n[dim]Tip: Run 'odds nba-stats fetch --all' to populate game log data[/dim]"
+        )
     console.print()
 
 
