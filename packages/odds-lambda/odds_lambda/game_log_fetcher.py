@@ -179,19 +179,17 @@ def fetch_game_logs(season: str) -> list[GameLogRecord]:
     """
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/130.0.0.0 Safari/537.36"
-            ),
-        )
-        page = context.new_page()
+        # Firefox avoids HTTP/2 protocol errors that Chromium hits on nba.com in WSL2
+        browser = p.firefox.launch(headless=True)
+        page = browser.new_page()
 
-        # Navigate to nba.com to establish Akamai cookies
+        # Navigate to nba.com to establish Akamai session cookies
         logger.info("game_log_establishing_session")
-        page.goto("https://www.nba.com/stats", wait_until="domcontentloaded", timeout=30000)
+        page.goto(
+            "https://www.nba.com/",
+            wait_until="domcontentloaded",
+            timeout=30000,
+        )
 
         # Make the API call from the browser context
         logger.info("game_log_fetching", season=season, url=api_url)

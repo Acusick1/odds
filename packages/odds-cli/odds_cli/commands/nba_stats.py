@@ -1,12 +1,18 @@
 """NBA game log operations commands."""
 
+from __future__ import annotations
+
 import asyncio
 import time
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+
+if TYPE_CHECKING:
+    from odds_lambda.game_log_fetcher import GameLogRecord
 
 app = typer.Typer(help="NBA game log operations")
 console = Console()
@@ -41,7 +47,49 @@ def fetch(
     seasons = ALL_SEASONS if all_seasons else [season or _current_season()]
     console.print(f"Seasons to fetch: {', '.join(seasons)}\n")
 
-    asyncio.run(_fetch_async(seasons))
+    # Playwright sync API cannot run inside an asyncio event loop.
+    # Fetch all seasons first (sync), then store to DB (async).
+    from odds_lambda.game_log_fetcher import fetch_game_logs
+
+    fetched: list[tuple[str, list[GameLogRecord]]] = []
+    errors = 0
+
+    for i, s in enumerate(seasons):
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task(f"Fetching {s} (browser session)...", total=None)
+            try:
+                records = fetch_game_logs(s)
+                progress.update(task, completed=True)
+            except Exception as e:
+                progress.stop()
+                console.print(f"\n[red]Failed to fetch {s}: {e}[/red]")
+                errors += 1
+                continue
+
+        if not records:
+            console.print(f"[yellow]No game log data for {s}[/yellow]")
+            continue
+
+        console.print(f"  Fetched {len(records)} rows for {s}")
+        fetched.append((s, records))
+
+        # Rate limit between seasons
+        if i < len(seasons) - 1:
+            console.print("  Waiting 10s before next season...")
+            time.sleep(10)
+
+    if fetched:
+        asyncio.run(_store_game_logs(fetched))
+
+    total = sum(len(recs) for _, recs in fetched)
+    console.print(f"\n[green]Total: {total} rows stored[/green]")
+    if errors:
+        console.print(f"[yellow]Errors: {errors} season(s) failed[/yellow]")
+    console.print()
 
 
 def _current_season() -> str:
@@ -58,54 +106,20 @@ def _current_season() -> str:
     return f"{start_year}-{end_year_short:02d}"
 
 
-async def _fetch_async(seasons: list[str]) -> None:
-    """Async implementation of fetch command."""
+async def _store_game_logs(
+    fetched: list[tuple[str, list[GameLogRecord]]],
+) -> None:
+    """Store fetched game logs to database."""
+
     from odds_core.database import async_session_maker
-    from odds_lambda.game_log_fetcher import fetch_game_logs
     from odds_lambda.storage.game_log_writer import GameLogWriter
 
-    total_stored = 0
-    errors = 0
-
-    for i, season in enumerate(seasons):
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task(f"Fetching {season} (browser session)...", total=None)
-            try:
-                records = fetch_game_logs(season)
-                progress.update(task, completed=True)
-            except Exception as e:
-                progress.stop()
-                console.print(f"\n[red]Failed to fetch {season}: {e}[/red]")
-                errors += 1
-                continue
-
-        if not records:
-            console.print(f"[yellow]No game log data for {season}[/yellow]")
-            continue
-
-        console.print(f"  Fetched {len(records)} rows for {season}")
-
+    for season, records in fetched:
         async with async_session_maker() as session:
             writer = GameLogWriter(session)
             count = await writer.upsert_game_logs(records)
             await session.commit()
-            total_stored += count
-
-        console.print(f"  [green]Stored {count} game log entries[/green]")
-
-        # Rate limit between seasons
-        if i < len(seasons) - 1:
-            console.print("  Waiting 10s before next season...")
-            time.sleep(10)
-
-    console.print(f"\n[green]Total: {total_stored} rows stored[/green]")
-    if errors:
-        console.print(f"[yellow]Errors: {errors} season(s) failed[/yellow]")
-    console.print()
+        console.print(f"  [green]Stored {count} game log entries for {season}[/green]")
 
 
 @app.command("status")

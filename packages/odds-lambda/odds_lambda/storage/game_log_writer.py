@@ -112,17 +112,22 @@ class GameLogWriter:
                 }
             )
 
-        stmt = insert(NbaTeamGameLog).values(log_dicts)
-        set_ = {
-            col.name: stmt.excluded[col.name]
-            for col in NbaTeamGameLog.__table__.columns
-            if col.name not in ("id", "created_at")
-        }
-        stmt = stmt.on_conflict_do_update(
-            constraint="uq_game_log_game_team",
-            set_=set_,
-        )
-        await self.session.execute(stmt)
+        # asyncpg limits query parameters to 32,767.  Each row has ~24 columns,
+        # so batch to stay well under the limit.
+        batch_size = 1000
+        for i in range(0, len(log_dicts), batch_size):
+            batch = log_dicts[i : i + batch_size]
+            stmt = insert(NbaTeamGameLog).values(batch)
+            set_ = {
+                col.name: stmt.excluded[col.name]
+                for col in NbaTeamGameLog.__table__.columns
+                if col.name not in ("id", "created_at")
+            }
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_game_log_game_team",
+                set_=set_,
+            )
+            await self.session.execute(stmt)
         await self.session.flush()
 
         matched = sum(1 for v in event_cache.values() if v is not None)
