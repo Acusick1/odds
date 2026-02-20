@@ -14,6 +14,7 @@ dependencies = [
     "nba_api>=1.1.0",
     "nbainjuries>=1.1.1",
     "playwright>=1.58.0",
+    "requests>=2.31.0",
 ]
 
 [tool.uv.sources]

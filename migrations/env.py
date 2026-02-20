@@ -17,6 +17,7 @@ from odds_core.models import (  # noqa: F401
     Odds,
     OddsSnapshot,
 )
+from odds_core.player_stats_models import NbaPlayerSeasonStats  # noqa: F401
 from odds_core.polymarket_models import (  # noqa: F401
     PolymarketEvent,
     PolymarketFetchLog,
