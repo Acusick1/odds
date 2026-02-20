@@ -572,7 +572,7 @@ class FeatureConfig(BaseModel):
     feature_groups: tuple[str, ...] = Field(
         default=("tabular",),
         min_length=1,
-        description="Feature groups to compose. Available: tabular, trajectory, polymarket, injuries",
+        description="Feature groups to compose. Available: tabular, trajectory, polymarket, injuries, rest",
     )
 
     # Trajectory feature configuration

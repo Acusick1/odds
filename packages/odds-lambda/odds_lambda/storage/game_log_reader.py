@@ -44,6 +44,25 @@ class GameLogReader:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def get_team_previous_game(
+        self, team_abbreviation: str, before_date: date
+    ) -> NbaTeamGameLog | None:
+        """Get the most recent game for a team before a given date.
+
+        Uses the (team_abbreviation, game_date) index for efficient lookup.
+        """
+        query = (
+            select(NbaTeamGameLog)
+            .where(
+                NbaTeamGameLog.team_abbreviation == team_abbreviation,
+                NbaTeamGameLog.game_date < before_date,
+            )
+            .order_by(NbaTeamGameLog.game_date.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
     async def get_pipeline_stats(self) -> GameLogPipelineStats:
         """Aggregate pipeline health statistics."""
         # Total rows
