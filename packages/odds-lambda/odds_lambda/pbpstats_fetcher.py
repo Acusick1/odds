@@ -50,6 +50,7 @@ def convert_name(name: str) -> str:
     if len(parts) <= 1:
         return name
 
+    # Require 3+ words for suffix detection: "Michael Porter Jr." not "A Jr."
     if len(parts) >= 3 and parts[-1] in _SUFFIXES:
         last = f"{parts[-2]} {parts[-1]}"
         first = " ".join(parts[:-2])
@@ -66,16 +67,6 @@ def _safe_float(value: object) -> float | None:
         return None
     try:
         return float(value)
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_int(value: object) -> int | None:
-    """Convert to int, returning None for missing values."""
-    if value is None:
-        return None
-    try:
-        return int(float(value))
     except (ValueError, TypeError):
         return None
 

@@ -7,7 +7,6 @@ from odds_lambda.pbpstats_fetcher import (
     PlayerSeasonRecord,
     _parse_player,
     _safe_float,
-    _safe_int,
     convert_name,
     fetch_player_season_stats,
 )
@@ -64,23 +63,6 @@ class TestSafeFloat:
 
     def test_invalid_string_returns_none(self):
         assert _safe_float("abc") is None
-
-
-class TestSafeInt:
-    def test_normal_int(self):
-        assert _safe_int(42) == 42
-
-    def test_float_truncates(self):
-        assert _safe_int(3.7) == 3
-
-    def test_none_returns_none(self):
-        assert _safe_int(None) is None
-
-    def test_string_number(self):
-        assert _safe_int("10") == 10
-
-    def test_invalid_string_returns_none(self):
-        assert _safe_int("abc") is None
 
 
 class TestParsePlayer:
