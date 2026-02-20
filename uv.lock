@@ -2902,6 +2902,7 @@ dependencies = [
     { name = "nbainjuries" },
     { name = "odds-core" },
     { name = "playwright" },
+    { name = "requests" },
     { name = "tenacity" },
 ]
 
@@ -2915,6 +2916,7 @@ requires-dist = [
     { name = "nbainjuries", specifier = ">=1.1.1" },
     { name = "odds-core", editable = "packages/odds-core" },
     { name = "playwright", specifier = ">=1.58.0" },
+    { name = "requests", specifier = ">=2.31.0" },
     { name = "tenacity", specifier = ">=8.2.3" },
 ]
 
