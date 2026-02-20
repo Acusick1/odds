@@ -12,6 +12,7 @@ from odds_cli.commands import (
     discover,
     fetch,
     injuries,
+    nba_stats,
     polymarket,
     quality,
     scheduler,
@@ -39,6 +40,7 @@ app.add_typer(copy_from_prod.app, name="copy", help="Copy data from production d
 app.add_typer(discover.app, name="discover", help="Discover upcoming and historical games")
 app.add_typer(polymarket.app, name="polymarket", help="Polymarket data operations")
 app.add_typer(injuries.app, name="injuries", help="NBA injury report operations")
+app.add_typer(nba_stats.app, name="nba-stats", help="NBA game log operations")
 
 console = Console()
 
