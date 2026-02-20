@@ -79,7 +79,7 @@ def date_to_nba_season(dt: datetime) -> str:
 def _compute_player_impact(stats: NbaPlayerSeasonStats | None) -> float:
     """Compute impact score for a player, or 1.0 if stats unavailable.
 
-    Formula: on_off_net_rtg * (minutes_per_game / 48).
+    Formula: (on_off_rtg - on_def_rtg) * (minutes_per_game / 48).
     Falls back to 1.0 (preserving headcount behavior) when stats are
     missing, ratings are None, or games_played is zero.
     """
