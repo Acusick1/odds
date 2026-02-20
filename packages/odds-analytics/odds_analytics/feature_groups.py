@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 import structlog
+from odds_core.game_log_models import NbaTeamGameLog
 from odds_core.injury_models import InjuryReport
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.polymarket_models import (
@@ -100,6 +101,7 @@ class EventDataBundle:
     pm_prices: list[PolymarketPriceSnapshot] = field(default_factory=list)
     pm_orderbooks: list[PolymarketOrderBookSnapshot] = field(default_factory=list)
     injury_reports: list[InjuryReport] = field(default_factory=list)
+    game_logs: list[NbaTeamGameLog] = field(default_factory=list)
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
@@ -169,6 +171,20 @@ async def collect_event_data(
         injury_reader = InjuryReader(session)
         injury_reports = await injury_reader.get_injuries_for_event(event.id)
 
+    # Game logs for rest/schedule features
+    game_logs: list[NbaTeamGameLog] = []
+    if "rest" in config.feature_groups:
+        from odds_lambda.storage.game_log_reader import GameLogReader
+
+        gl_reader = GameLogReader(session)
+        event_logs = await gl_reader.get_game_logs_for_event(event.id)
+        all_logs = list(event_logs)
+        for log in event_logs:
+            prev = await gl_reader.get_team_previous_game(log.team_abbreviation, log.game_date)
+            if prev:
+                all_logs.append(prev)
+        game_logs = all_logs
+
     # Sequences for LSTM adapter
     sequences: list[list[Odds]] = []
     if config.adapter == "lstm":
@@ -182,6 +198,7 @@ async def collect_event_data(
         pm_prices=pm_prices,
         pm_orderbooks=pm_orderbooks,
         injury_reports=injury_reports,
+        game_logs=game_logs,
         sequences=sequences,
     )
 
@@ -402,6 +419,10 @@ class XGBoostAdapter:
             from odds_analytics.injury_features import InjuryFeatures
 
             names.extend(f"inj_{n}" for n in InjuryFeatures.get_feature_names())
+        if "rest" in config.feature_groups:
+            from odds_analytics.schedule_features import RestScheduleFeatures
+
+            names.extend(f"rest_{n}" for n in RestScheduleFeatures.get_feature_names())
         names.append("hours_until_event")
         return names
 
@@ -517,6 +538,23 @@ class XGBoostAdapter:
                 except Exception:
                     logger.debug("injury_feature_extraction_failed", event_id=event.id)
                     parts.append(nan_block_inj)
+
+        # --- Rest/schedule features (NaN-fill when unavailable to keep row) ---
+        if "rest" in config.feature_groups:
+            from odds_analytics.schedule_features import RestScheduleFeatures, extract_rest_features
+
+            n_rest = len(RestScheduleFeatures.get_feature_names())
+            nan_block_rest = np.full(n_rest, np.nan)
+
+            if not bundle.game_logs:
+                parts.append(nan_block_rest)
+            else:
+                try:
+                    rest_feats = extract_rest_features(bundle.game_logs, event)
+                    parts.append(rest_feats.to_array())
+                except Exception:
+                    logger.debug("rest_feature_extraction_failed", event_id=event.id)
+                    parts.append(nan_block_rest)
 
         # --- hours_until_event ---
         hours_until = (event.commence_time - snapshot.snapshot_time).total_seconds() / 3600

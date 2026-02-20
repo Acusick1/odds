@@ -29,6 +29,7 @@ from odds_analytics.training import (
     XGBoostConfig,
     prepare_training_data_from_config,
 )
+from odds_core.game_log_models import NbaTeamGameLog
 from odds_core.injury_models import InjuryReport, InjuryStatus
 from odds_lambda.fetch_tier import FetchTier
 
@@ -414,6 +415,148 @@ class TestInjuryFeaturesIntegration:
 
         # All 8 events should contribute rows (not just the 3 with injury data).
         # Total includes train + val + test (val split removes some from train+test).
+        total_samples = result.num_train_samples + result.num_test_samples
+        if result.num_val_samples is not None:
+            total_samples += result.num_val_samples
+        assert total_samples >= 8  # At least 1 row per event
+
+
+class TestRestFeaturesIntegration:
+    """Integration tests for rest/schedule features in the training pipeline."""
+
+    @pytest.fixture
+    def xgboost_with_rest_config(self):
+        """XGBoost config with tabular + rest feature groups."""
+        return MLTrainingConfig(
+            experiment=ExperimentConfig(
+                name="integration_test_rest",
+                tags=["integration", "rest"],
+                description="Integration test for rest/schedule features",
+            ),
+            training=TrainingConfig(
+                strategy_type="xgboost_line_movement",
+                data=DataConfig(
+                    start_date=date(2024, 10, 1),
+                    end_date=date(2024, 10, 31),
+                    test_split=0.2,
+                    validation_split=0.1,
+                    random_seed=42,
+                    shuffle=True,
+                ),
+                model=XGBoostConfig(
+                    n_estimators=100,
+                    max_depth=6,
+                    learning_rate=0.1,
+                ),
+                features=FeatureConfig(
+                    outcome="home",
+                    markets=["h2h"],
+                    sharp_bookmakers=["pinnacle"],
+                    retail_bookmakers=["fanduel", "draftkings"],
+                    closing_tier=FetchTier.CLOSING,
+                    feature_groups=("tabular", "rest"),
+                ),
+            ),
+        )
+
+    @pytest.fixture
+    async def test_events_with_game_logs(self, pglite_async_session, test_events_with_odds):
+        """Add game log records for a subset of test events."""
+        events = test_events_with_odds
+        base_time = datetime(2024, 10, 15, 19, 0, tzinfo=UTC)
+
+        # Add game logs for the first 5 events with prior games
+        for i in range(5):
+            commence_time = base_time + timedelta(days=i)
+            game_date = commence_time.date()
+
+            # Game logs for the event itself (2 rows: home + away)
+            home_log = NbaTeamGameLog(
+                nba_game_id=f"002240010{i}",
+                team_id=1610612740 + i,
+                team_abbreviation=f"HM{i}",
+                game_date=game_date,
+                matchup=f"HM{i} vs. AW{i}",
+                season="2024-25",
+                event_id=f"test_event_{i}",
+            )
+            away_log = NbaTeamGameLog(
+                nba_game_id=f"002240010{i}",
+                team_id=1610612750 + i,
+                team_abbreviation=f"AW{i}",
+                game_date=game_date,
+                matchup=f"AW{i} @ HM{i}",
+                season="2024-25",
+                event_id=f"test_event_{i}",
+            )
+            pglite_async_session.add(home_log)
+            pglite_async_session.add(away_log)
+
+            # Prior game for home team (2 days before → 2 days rest)
+            prev_home = NbaTeamGameLog(
+                nba_game_id=f"002240009{i}",
+                team_id=1610612740 + i,
+                team_abbreviation=f"HM{i}",
+                game_date=game_date - timedelta(days=2),
+                matchup=f"HM{i} vs. OPP",
+                season="2024-25",
+                event_id=None,
+            )
+            pglite_async_session.add(prev_home)
+
+            # Prior game for away team (varies: 1 day for even i, 3 days for odd i)
+            away_rest_days = 1 if i % 2 == 0 else 3
+            prev_away = NbaTeamGameLog(
+                nba_game_id=f"002240008{i}",
+                team_id=1610612750 + i,
+                team_abbreviation=f"AW{i}",
+                game_date=game_date - timedelta(days=away_rest_days),
+                matchup=f"AW{i} @ OPP",
+                season="2024-25",
+                event_id=None,
+            )
+            pglite_async_session.add(prev_away)
+
+        await pglite_async_session.commit()
+        return events
+
+    @pytest.mark.asyncio
+    async def test_pipeline_with_rest_features(
+        self,
+        xgboost_with_rest_config,
+        pglite_async_session,
+        test_events_with_game_logs,
+    ):
+        """Full pipeline with rest features produces valid training data."""
+        result = await prepare_training_data_from_config(
+            xgboost_with_rest_config, pglite_async_session
+        )
+
+        assert isinstance(result, TrainingDataResult)
+        assert result.num_train_samples > 0
+        assert result.num_test_samples > 0
+
+        # Verify rest features survive variance filter.
+        # home_days_rest is constant (2 for all events with logs), but
+        # away_days_rest varies (1 or 3), so rest_advantage and away features vary.
+        rest_features = [n for n in result.feature_names if n.startswith("rest_")]
+        assert len(rest_features) > 0, "No rest features survived variance filter"
+
+        assert result.X_train.shape[1] == len(result.feature_names)
+
+    @pytest.mark.asyncio
+    async def test_events_without_game_logs_not_dropped(
+        self,
+        xgboost_with_rest_config,
+        pglite_async_session,
+        test_events_with_game_logs,
+    ):
+        """Events without game log data still produce training rows (NaN-filled)."""
+        result = await prepare_training_data_from_config(
+            xgboost_with_rest_config, pglite_async_session
+        )
+
+        # All 8 events should contribute rows (not just the 5 with game logs).
         total_samples = result.num_train_samples + result.num_test_samples
         if result.num_val_samples is not None:
             total_samples += result.num_val_samples
