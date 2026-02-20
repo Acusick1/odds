@@ -391,7 +391,7 @@ class TestInjuryFeaturesIntegration:
         assert result.num_test_samples > 0
 
         # Verify at least some injury features survive variance filter.
-        # Count features (num_out_*, num_gtd_*) are constant with fake team names,
+        # Impact features (impact_out_*, impact_gtd_*) are constant with fake team names,
         # so the variance filter drops them. Timing features vary per event.
         inj_features = [n for n in result.feature_names if n.startswith("inj_")]
         assert len(inj_features) > 0, "No injury features survived variance filter"

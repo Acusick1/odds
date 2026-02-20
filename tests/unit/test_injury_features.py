@@ -4,9 +4,15 @@ from datetime import UTC, datetime
 
 import numpy as np
 import pytest
-from odds_analytics.injury_features import InjuryFeatures, extract_injury_features
+from odds_analytics.injury_features import (
+    InjuryFeatures,
+    _compute_player_impact,
+    date_to_nba_season,
+    extract_injury_features,
+)
 from odds_core.injury_models import InjuryReport, InjuryStatus
 from odds_core.models import Event
+from odds_core.player_stats_models import NbaPlayerSeasonStats
 
 
 def _make_event(
@@ -50,14 +56,47 @@ def _make_report(
     )
 
 
+def _make_player_stats(
+    player_name: str = "James, LeBron",
+    team_abbreviation: str = "LAL",
+    season: str = "2024-25",
+    minutes: float = 2520.0,
+    games_played: int = 70,
+    on_off_rtg: float | None = 118.5,
+    on_def_rtg: float | None = 112.0,
+) -> NbaPlayerSeasonStats:
+    return NbaPlayerSeasonStats(
+        id=1,
+        player_id=2544,
+        player_name=player_name,
+        team_id=1610612747,
+        team_abbreviation=team_abbreviation,
+        season=season,
+        minutes=minutes,
+        games_played=games_played,
+        on_off_rtg=on_off_rtg,
+        on_def_rtg=on_def_rtg,
+        usage=0.30,
+        ts_pct=0.60,
+        efg_pct=0.55,
+        assists=500,
+        turnovers=250,
+        rebounds=550,
+        steals=80,
+        blocks=40,
+        points=1800,
+        plus_minus=200.0,
+    )
+
+
 class TestInjuryFeaturesDataclass:
     def test_get_feature_names(self) -> None:
         names = InjuryFeatures.get_feature_names()
         assert names == [
-            "num_out_home",
-            "num_out_away",
-            "num_gtd_home",
-            "num_gtd_away",
+            "impact_out_home",
+            "impact_out_away",
+            "impact_gtd_home",
+            "impact_gtd_away",
             "report_hours_before_game",
             "injury_news_recency",
         ]
@@ -70,25 +109,85 @@ class TestInjuryFeaturesDataclass:
 
     def test_to_array_with_values(self) -> None:
         features = InjuryFeatures(
-            num_out_home=2.0,
-            num_out_away=1.0,
-            num_gtd_home=1.0,
-            num_gtd_away=0.0,
+            impact_out_home=2.5,
+            impact_out_away=1.2,
+            impact_gtd_home=0.8,
+            impact_gtd_away=0.0,
             report_hours_before_game=4.5,
             injury_news_recency=1.0,
         )
         arr = features.to_array()
         assert arr.shape == (6,)
-        np.testing.assert_array_equal(arr, [2.0, 1.0, 1.0, 0.0, 4.5, 1.0])
+        np.testing.assert_array_equal(arr, [2.5, 1.2, 0.8, 0.0, 4.5, 1.0])
 
     def test_to_array_partial_none(self) -> None:
-        features = InjuryFeatures(num_out_home=3.0)
+        features = InjuryFeatures(impact_out_home=3.0)
         arr = features.to_array()
         assert arr[0] == 3.0
         assert np.isnan(arr[1])
 
     def test_feature_count_matches_names(self) -> None:
         assert len(InjuryFeatures.get_feature_names()) == len(InjuryFeatures().to_array())
+
+
+class TestComputePlayerImpact:
+    def test_none_stats_returns_1(self) -> None:
+        assert _compute_player_impact(None) == 1.0
+
+    def test_none_on_off_rtg_returns_1(self) -> None:
+        stats = _make_player_stats(on_off_rtg=None)
+        assert _compute_player_impact(stats) == 1.0
+
+    def test_none_on_def_rtg_returns_1(self) -> None:
+        stats = _make_player_stats(on_def_rtg=None)
+        assert _compute_player_impact(stats) == 1.0
+
+    def test_zero_games_returns_1(self) -> None:
+        stats = _make_player_stats(games_played=0)
+        assert _compute_player_impact(stats) == 1.0
+
+    def test_normal_computation(self) -> None:
+        # on_off_rtg=118.5, on_def_rtg=112.0 -> net=6.5
+        # minutes=2520, games=70 -> mpg=36.0
+        # impact = 6.5 * (36.0 / 48.0) = 6.5 * 0.75 = 4.875
+        stats = _make_player_stats(
+            on_off_rtg=118.5, on_def_rtg=112.0, minutes=2520.0, games_played=70
+        )
+        result = _compute_player_impact(stats)
+        assert result == pytest.approx(4.875)
+
+    def test_negative_net_rating(self) -> None:
+        # Player with negative impact (worse on court)
+        # on_off_rtg=108.0, on_def_rtg=115.0 -> net=-7.0
+        # minutes=1200, games=60 -> mpg=20.0
+        # impact = -7.0 * (20.0/48.0) = -7.0 * 0.4167 = -2.9167
+        stats = _make_player_stats(
+            on_off_rtg=108.0, on_def_rtg=115.0, minutes=1200.0, games_played=60
+        )
+        result = _compute_player_impact(stats)
+        assert result == pytest.approx(-7.0 * (20.0 / 48.0))
+
+
+class TestDateToNbaSeason:
+    def test_january_game(self) -> None:
+        dt = datetime(2025, 1, 15, 0, 30, tzinfo=UTC)
+        assert date_to_nba_season(dt) == "2024-25"
+
+    def test_october_game(self) -> None:
+        dt = datetime(2024, 10, 22, 19, 0, tzinfo=UTC)
+        assert date_to_nba_season(dt) == "2024-25"
+
+    def test_june_game(self) -> None:
+        dt = datetime(2025, 6, 15, 20, 0, tzinfo=UTC)
+        assert date_to_nba_season(dt) == "2024-25"
+
+    def test_september_preseason(self) -> None:
+        dt = datetime(2024, 9, 30, 19, 0, tzinfo=UTC)
+        assert date_to_nba_season(dt) == "2023-24"
+
+    def test_december_game(self) -> None:
+        dt = datetime(2024, 12, 25, 0, 0, tzinfo=UTC)
+        assert date_to_nba_season(dt) == "2024-25"
 
 
 class TestExtractInjuryFeatures:
@@ -106,7 +205,8 @@ class TestExtractInjuryFeatures:
         )
         assert np.all(np.isnan(features.to_array()))
 
-    def test_counts_out_players_by_team(self) -> None:
+    def test_counts_out_players_without_stats(self) -> None:
+        """Without player_stats, each OUT player contributes 1.0 (headcount)."""
         event = _make_event()
         snapshot_time = datetime(2025, 1, 14, 22, 0, tzinfo=UTC)
         report_time = datetime(2025, 1, 14, 20, 0, tzinfo=UTC)
@@ -132,10 +232,123 @@ class TestExtractInjuryFeatures:
             ),
         ]
         features = extract_injury_features(reports, event, snapshot_time)
-        assert features.num_out_home == 2.0
-        assert features.num_out_away == 1.0
+        assert features.impact_out_home == 2.0
+        assert features.impact_out_away == 1.0
 
-    def test_counts_gtd_questionable_and_doubtful(self) -> None:
+    def test_weighted_extraction_with_stats(self) -> None:
+        """Known players with stats produce weighted sums, not headcounts."""
+        event = _make_event()
+        snapshot_time = datetime(2025, 1, 14, 22, 0, tzinfo=UTC)
+        report_time = datetime(2025, 1, 14, 20, 0, tzinfo=UTC)
+
+        reports = [
+            _make_report(
+                team="Los Angeles Lakers",
+                player_name="James, LeBron",
+                status=InjuryStatus.OUT,
+                report_time=report_time,
+            ),
+        ]
+
+        # LeBron stats: net=6.5, mpg=36.0 -> impact=4.875
+        player_stats = {
+            "James, LeBron": _make_player_stats(
+                player_name="James, LeBron",
+                on_off_rtg=118.5,
+                on_def_rtg=112.0,
+                minutes=2520.0,
+                games_played=70,
+            ),
+        }
+        features = extract_injury_features(reports, event, snapshot_time, player_stats=player_stats)
+        assert features.impact_out_home == pytest.approx(4.875)
+
+    def test_fallback_for_unknown_player(self) -> None:
+        """Player not in player_stats dict contributes 1.0."""
+        event = _make_event()
+        snapshot_time = datetime(2025, 1, 14, 22, 0, tzinfo=UTC)
+        report_time = datetime(2025, 1, 14, 20, 0, tzinfo=UTC)
+
+        reports = [
+            _make_report(
+                team="Los Angeles Lakers",
+                player_name="Unknown, Player",
+                status=InjuryStatus.OUT,
+                report_time=report_time,
+            ),
+        ]
+
+        player_stats = {
+            "James, LeBron": _make_player_stats(player_name="James, LeBron"),
+        }
+        features = extract_injury_features(reports, event, snapshot_time, player_stats=player_stats)
+        assert features.impact_out_home == 1.0
+
+    def test_mixed_known_and_unknown(self) -> None:
+        """Mix of known (weighted) and unknown (1.0) players."""
+        event = _make_event()
+        snapshot_time = datetime(2025, 1, 14, 22, 0, tzinfo=UTC)
+        report_time = datetime(2025, 1, 14, 20, 0, tzinfo=UTC)
+
+        reports = [
+            _make_report(
+                team="Los Angeles Lakers",
+                player_name="James, LeBron",
+                status=InjuryStatus.OUT,
+                report_time=report_time,
+            ),
+            _make_report(
+                team="Los Angeles Lakers",
+                player_name="Unknown, Bench",
+                status=InjuryStatus.OUT,
+                report_time=report_time,
+            ),
+        ]
+
+        # LeBron: impact=4.875, Unknown: impact=1.0 -> total=5.875
+        player_stats = {
+            "James, LeBron": _make_player_stats(
+                player_name="James, LeBron",
+                on_off_rtg=118.5,
+                on_def_rtg=112.0,
+                minutes=2520.0,
+                games_played=70,
+            ),
+        }
+        features = extract_injury_features(reports, event, snapshot_time, player_stats=player_stats)
+        assert features.impact_out_home == pytest.approx(5.875)
+
+    def test_gtd_discount(self) -> None:
+        """GTD players get impact * 0.5."""
+        event = _make_event()
+        snapshot_time = datetime(2025, 1, 14, 22, 0, tzinfo=UTC)
+        report_time = datetime(2025, 1, 14, 20, 0, tzinfo=UTC)
+
+        reports = [
+            _make_report(
+                team="Los Angeles Lakers",
+                player_name="James, LeBron",
+                status=InjuryStatus.QUESTIONABLE,
+                report_time=report_time,
+            ),
+        ]
+
+        # LeBron impact=4.875, GTD discount=0.5 -> 2.4375
+        player_stats = {
+            "James, LeBron": _make_player_stats(
+                player_name="James, LeBron",
+                on_off_rtg=118.5,
+                on_def_rtg=112.0,
+                minutes=2520.0,
+                games_played=70,
+            ),
+        }
+        features = extract_injury_features(reports, event, snapshot_time, player_stats=player_stats)
+        assert features.impact_gtd_home == pytest.approx(2.4375)
+        assert features.impact_out_home == 0.0
+
+    def test_gtd_without_stats_gets_discount(self) -> None:
+        """GTD without stats contributes 1.0 * 0.5 = 0.5."""
         event = _make_event()
         snapshot_time = datetime(2025, 1, 14, 22, 0, tzinfo=UTC)
         report_time = datetime(2025, 1, 14, 20, 0, tzinfo=UTC)
@@ -153,18 +366,9 @@ class TestExtractInjuryFeatures:
                 status=InjuryStatus.DOUBTFUL,
                 report_time=report_time,
             ),
-            _make_report(
-                team="Boston Celtics",
-                player_name="Tatum, Jayson",
-                status=InjuryStatus.QUESTIONABLE,
-                report_time=report_time,
-            ),
         ]
         features = extract_injury_features(reports, event, snapshot_time)
-        assert features.num_gtd_home == 2.0
-        assert features.num_gtd_away == 1.0
-        assert features.num_out_home == 0.0
-        assert features.num_out_away == 0.0
+        assert features.impact_gtd_home == pytest.approx(1.0)  # 0.5 + 0.5
 
     def test_probable_and_available_not_counted(self) -> None:
         event = _make_event()
@@ -186,10 +390,10 @@ class TestExtractInjuryFeatures:
             ),
         ]
         features = extract_injury_features(reports, event, snapshot_time)
-        assert features.num_out_home == 0.0
-        assert features.num_out_away == 0.0
-        assert features.num_gtd_home == 0.0
-        assert features.num_gtd_away == 0.0
+        assert features.impact_out_home == 0.0
+        assert features.impact_out_away == 0.0
+        assert features.impact_gtd_home == 0.0
+        assert features.impact_gtd_away == 0.0
 
     def test_uses_latest_report_only(self) -> None:
         event = _make_event()
@@ -215,8 +419,8 @@ class TestExtractInjuryFeatures:
         ]
         features = extract_injury_features(reports, event, snapshot_time)
         # Should use only the latest report (late_time)
-        assert features.num_out_home == 0.0
-        assert features.num_gtd_home == 1.0
+        assert features.impact_out_home == 0.0
+        assert features.impact_gtd_home == pytest.approx(0.5)  # 1.0 * 0.5 (no stats)
 
     def test_look_ahead_bias_prevention(self) -> None:
         event = _make_event()
@@ -241,8 +445,8 @@ class TestExtractInjuryFeatures:
         ]
         features = extract_injury_features(reports, event, snapshot_time)
         # Only the early report (QUESTIONABLE) should be visible
-        assert features.num_out_home == 0.0
-        assert features.num_gtd_home == 1.0
+        assert features.impact_out_home == 0.0
+        assert features.impact_gtd_home == pytest.approx(0.5)  # 1.0 * 0.5
 
     def test_timing_features(self) -> None:
         # Game at Jan 15 00:30 UTC, report at Jan 14 20:00 UTC, snapshot at Jan 14 22:00 UTC
@@ -280,7 +484,7 @@ class TestExtractInjuryFeatures:
             ),
         ]
         features = extract_injury_features(reports, event, snapshot_time)
-        assert features.num_out_home == 1.0
+        assert features.impact_out_home == 1.0
 
     def test_unrecognized_team_ignored(self) -> None:
         event = _make_event()
@@ -296,9 +500,9 @@ class TestExtractInjuryFeatures:
             ),
         ]
         features = extract_injury_features(reports, event, snapshot_time)
-        # Unrecognized team → 0 counts (not an error)
-        assert features.num_out_home == 0.0
-        assert features.num_out_away == 0.0
+        # Unrecognized team → 0 impact (not an error)
+        assert features.impact_out_home == 0.0
+        assert features.impact_out_away == 0.0
 
     def test_report_at_exact_snapshot_time_included(self) -> None:
         event = _make_event()
@@ -313,4 +517,52 @@ class TestExtractInjuryFeatures:
             ),
         ]
         features = extract_injury_features(reports, event, snapshot_time)
-        assert features.num_out_home == 1.0
+        assert features.impact_out_home == 1.0
+
+    def test_no_player_stats_degrades_to_count(self) -> None:
+        """When player_stats=None, each player contributes 1.0 (backward compat)."""
+        event = _make_event()
+        snapshot_time = datetime(2025, 1, 14, 22, 0, tzinfo=UTC)
+        report_time = datetime(2025, 1, 14, 20, 0, tzinfo=UTC)
+
+        reports = [
+            _make_report(
+                team="Los Angeles Lakers",
+                player_name="James, LeBron",
+                status=InjuryStatus.OUT,
+                report_time=report_time,
+            ),
+            _make_report(
+                team="Boston Celtics",
+                player_name="Tatum, Jayson",
+                status=InjuryStatus.QUESTIONABLE,
+                report_time=report_time,
+            ),
+        ]
+        features = extract_injury_features(reports, event, snapshot_time, player_stats=None)
+        assert features.impact_out_home == 1.0
+        assert features.impact_gtd_away == pytest.approx(0.5)  # 1.0 * 0.5
+
+    def test_none_on_off_rtg_player_falls_back(self) -> None:
+        """Player with stats but None on_off_rtg contributes 1.0."""
+        event = _make_event()
+        snapshot_time = datetime(2025, 1, 14, 22, 0, tzinfo=UTC)
+        report_time = datetime(2025, 1, 14, 20, 0, tzinfo=UTC)
+
+        reports = [
+            _make_report(
+                team="Los Angeles Lakers",
+                player_name="Rookie, Young",
+                status=InjuryStatus.OUT,
+                report_time=report_time,
+            ),
+        ]
+        player_stats = {
+            "Rookie, Young": _make_player_stats(
+                player_name="Rookie, Young",
+                on_off_rtg=None,
+                on_def_rtg=None,
+            ),
+        }
+        features = extract_injury_features(reports, event, snapshot_time, player_stats=player_stats)
+        assert features.impact_out_home == 1.0
