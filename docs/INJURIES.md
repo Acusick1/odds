@@ -67,18 +67,14 @@ Rate-limited at `--delay-ms` (default 500ms) between fetches. JVM startup adds a
 
 | Feature | Description |
 |---------|-------------|
-| num_out_home | Players ruled OUT on home team |
-| num_out_away | Players ruled OUT on away team |
-| num_gtd_home | Game-time decisions (QUESTIONABLE + DOUBTFUL) on home team |
-| num_gtd_away | Game-time decisions (QUESTIONABLE + DOUBTFUL) on away team |
+| impact_out_home | Impact-weighted sum of OUT players on home team |
+| impact_out_away | Impact-weighted sum of OUT players on away team |
+| impact_gtd_home | Impact-weighted sum of GTD players on home team (0.5x discount) |
+| impact_gtd_away | Impact-weighted sum of GTD players on away team (0.5x discount) |
 | report_hours_before_game | Hours between latest report and tipoff |
 | injury_news_recency | Hours between latest report and snapshot (staleness) |
 
-PROBABLE and AVAILABLE statuses are excluded from counts (not actionable for line movement).
-
-### Limitation: No Player Impact Weighting
-
-All OUT players count equally — a star and an end-of-bench player both contribute +1. Adding impact weighting (e.g., minutes, usage rate, on/off net rating from PBPStats) would extend `extract_injury_features` without architectural changes: the per-player loop already exists, just needs a lookup table.
+Impact score per player: `(on_off_rtg - on_def_rtg) * (minutes_per_game / 48)` from `NbaPlayerSeasonStats`. Players without stats fall back to 1.0 (headcount). GTD (QUESTIONABLE + DOUBTFUL) players are discounted by 0.5x. PROBABLE and AVAILABLE statuses are excluded.
 
 ## Key Files
 

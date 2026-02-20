@@ -28,6 +28,7 @@ import structlog
 from odds_core.game_log_models import NbaTeamGameLog
 from odds_core.injury_models import InjuryReport
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.player_stats_models import NbaPlayerSeasonStats
 from odds_core.polymarket_models import (
     PolymarketEvent,
     PolymarketMarket,
@@ -101,6 +102,7 @@ class EventDataBundle:
     pm_prices: list[PolymarketPriceSnapshot] = field(default_factory=list)
     pm_orderbooks: list[PolymarketOrderBookSnapshot] = field(default_factory=list)
     injury_reports: list[InjuryReport] = field(default_factory=list)
+    player_stats: dict[str, NbaPlayerSeasonStats] = field(default_factory=dict)
     game_logs: list[NbaTeamGameLog] = field(default_factory=list)
     sequences: list[list[Odds]] = field(default_factory=list)
 
@@ -165,11 +167,32 @@ async def collect_event_data(
 
     # Injury reports (bulk-load all, filter by time in adapter)
     injury_reports: list[InjuryReport] = []
+    player_stats: dict[str, NbaPlayerSeasonStats] = {}
     if "injuries" in config.feature_groups:
         from odds_lambda.storage.injury_reader import InjuryReader
 
         injury_reader = InjuryReader(session)
         injury_reports = await injury_reader.get_injuries_for_event(event.id)
+
+        # Load player stats for impact weighting
+        if injury_reports:
+            from odds_lambda.polymarket_matching import CANONICAL_TO_ABBREV
+            from odds_lambda.storage.pbpstats_reader import PbpStatsReader
+
+            from odds_analytics.injury_features import date_to_nba_season
+
+            season = date_to_nba_season(event.commence_time)
+            team_abbrevs = [
+                a
+                for a in [
+                    CANONICAL_TO_ABBREV.get(event.home_team),
+                    CANONICAL_TO_ABBREV.get(event.away_team),
+                ]
+                if a is not None
+            ]
+            if team_abbrevs:
+                pbp_reader = PbpStatsReader(session)
+                player_stats = await pbp_reader.get_players_for_teams(team_abbrevs, season)
 
     # Game logs for rest/schedule features
     game_logs: list[NbaTeamGameLog] = []
@@ -198,6 +221,7 @@ async def collect_event_data(
         pm_prices=pm_prices,
         pm_orderbooks=pm_orderbooks,
         injury_reports=injury_reports,
+        player_stats=player_stats,
         game_logs=game_logs,
         sequences=sequences,
     )
@@ -532,7 +556,10 @@ class XGBoostAdapter:
             else:
                 try:
                     inj_feats = extract_injury_features(
-                        bundle.injury_reports, event, snapshot.snapshot_time
+                        bundle.injury_reports,
+                        event,
+                        snapshot.snapshot_time,
+                        player_stats=bundle.player_stats,
                     )
                     parts.append(inj_feats.to_array())
                 except Exception:

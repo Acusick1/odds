@@ -50,6 +50,17 @@ class PbpStatsReader:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def get_players_for_teams(
+        self, team_abbreviations: list[str], season: str
+    ) -> dict[str, NbaPlayerSeasonStats]:
+        """Bulk-load player stats for multiple teams, keyed by player_name."""
+        query = select(NbaPlayerSeasonStats).where(
+            NbaPlayerSeasonStats.team_abbreviation.in_(team_abbreviations),
+            NbaPlayerSeasonStats.season == season,
+        )
+        result = await self.session.execute(query)
+        return {p.player_name: p for p in result.scalars().all()}
+
     async def get_pipeline_stats(self) -> PlayerStatsPipelineStats:
         """Aggregate pipeline health statistics."""
         total_result = await self.session.execute(select(func.count(NbaPlayerSeasonStats.id)))

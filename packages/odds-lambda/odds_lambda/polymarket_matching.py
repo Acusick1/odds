@@ -85,6 +85,9 @@ _ALIAS_TO_CANONICAL: dict[str, str] = {
     alias.lower(): canonical for canonical, aliases in TEAM_ALIASES.items() for alias in aliases
 }
 
+# Canonical team name → standard NBA abbreviation (used by PBPStats, nba_api)
+CANONICAL_TO_ABBREV: dict[str, str] = {v: k.upper() for k, v in NBA_ABBREV_MAP.items()}
+
 _TICKER_RE = re.compile(r"^nba-([a-z]+)-([a-z]+)-(\d{4})-(\d{2})-(\d{2})$")
 
 
