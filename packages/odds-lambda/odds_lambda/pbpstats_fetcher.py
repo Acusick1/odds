@@ -86,13 +86,13 @@ def _parse_player(raw: dict, season: str) -> PlayerSeasonRecord:
         usage=_safe_float(raw.get("Usage")),
         ts_pct=_safe_float(raw.get("TsPct")),
         efg_pct=_safe_float(raw.get("EfgPct")),
-        assists=int(raw["Assists"]),
-        turnovers=int(raw["Turnovers"]),
-        rebounds=int(raw["Rebounds"]),
-        steals=int(raw["Steals"]),
-        blocks=int(raw["Blocks"]),
-        points=int(raw["Points"]),
-        plus_minus=float(raw["PlusMinus"]),
+        assists=int(raw.get("Assists", 0)),
+        turnovers=int(raw.get("Turnovers", 0)),
+        rebounds=int(raw.get("Rebounds", 0)),
+        steals=int(raw.get("Steals", 0)),
+        blocks=int(raw.get("Blocks", 0)),
+        points=int(raw.get("Points", 0)),
+        plus_minus=float(raw.get("PlusMinus", 0)),
     )
 
 
@@ -111,7 +111,7 @@ def fetch_player_season_stats(season: str) -> list[PlayerSeasonRecord]:
         "SeasonType": "Regular Season",
     }
 
-    response = requests.get(PBPSTATS_BASE_URL, params=params, timeout=30)
+    response = requests.get(PBPSTATS_BASE_URL, params=params, timeout=90)
     response.raise_for_status()
 
     data = response.json()
