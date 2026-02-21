@@ -117,7 +117,7 @@ class TestGroupTimeseriesCV:
         """Create a mock strategy that returns plausible metrics."""
         strategy = MagicMock()
 
-        def fake_train(config, X_train, y_train, feature_names, X_val, y_val):
+        def fake_train(config, X_train, y_train, feature_names, X_val, y_val, **kwargs):
             return {
                 "train_mse": 0.01,
                 "train_mae": 0.08,
@@ -169,7 +169,7 @@ class TestGroupTimeseriesCV:
 
         fold_splits = []
 
-        def capture_train(config, X_train, y_train, feature_names, X_val, y_val):
+        def capture_train(config, X_train, y_train, feature_names, X_val, y_val, **kwargs):
             fold_splits.append((len(X_train), len(X_val)))
             return {
                 "train_mse": 0.01,
@@ -934,11 +934,29 @@ class TestLSTMAdapter:
 
     def test_feature_names_returns_sequence_feature_names(self, config):
         from odds_analytics.feature_extraction import SequenceFeatures
+        from odds_analytics.feature_groups import _static_feature_group_names
 
         adapter = LSTMAdapter()
         names = adapter.feature_names(config)
-        assert names == SequenceFeatures.get_feature_names()
+        # Config has feature_groups=["tabular"], so static names are appended
+        expected = SequenceFeatures.get_feature_names() + _static_feature_group_names(config)
+        assert names == expected
         assert len(names) > 0
+
+    def test_feature_names_sequence_only_when_no_static_groups(self):
+        from odds_analytics.feature_extraction import SequenceFeatures
+
+        seq_only_config = FeatureConfig(
+            adapter="lstm",
+            feature_groups=["sequence"],
+            markets=["h2h"],
+            outcome="home",
+            lookback_hours=72,
+            timesteps=8,
+        )
+        adapter = LSTMAdapter()
+        names = adapter.feature_names(seq_only_config)
+        assert names == SequenceFeatures.get_feature_names()
 
     def test_transform_returns_adapter_output_with_mask(self, event, config):
         adapter = LSTMAdapter()
@@ -949,9 +967,15 @@ class TestLSTMAdapter:
         mock_sequence = np.zeros((8, 10))
         mock_mask = np.ones(8, dtype=bool)
 
-        with patch(
-            "odds_analytics.feature_extraction.SequenceFeatureExtractor.extract_features",
-            return_value={"sequence": mock_sequence, "mask": mock_mask},
+        with (
+            patch(
+                "odds_analytics.feature_extraction.SequenceFeatureExtractor.extract_features",
+                return_value={"sequence": mock_sequence, "mask": mock_mask},
+            ),
+            patch(
+                "odds_analytics.feature_groups._extract_static_feature_parts",
+                return_value=[np.array([0.5, 0.3, 0.1, 0.2])],
+            ),
         ):
             output = adapter.transform(bundle, snapshot, config)
 
@@ -960,6 +984,7 @@ class TestLSTMAdapter:
         assert output.features.shape == (8, 10)
         assert output.mask is not None
         assert output.mask.shape == (8,)
+        assert output.static_features is not None
 
     def test_transform_filters_sequences_by_snapshot_time(self, event, config):
         """Only sequences with first-entry timestamp <= snapshot_time are passed."""
