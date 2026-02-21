@@ -91,6 +91,10 @@ class TrainingDataResult:
         masks_val: np.ndarray | None = None,
         event_ids_train: np.ndarray | None = None,
         event_ids_test: np.ndarray | None = None,
+        static_train: np.ndarray | None = None,
+        static_val: np.ndarray | None = None,
+        static_test: np.ndarray | None = None,
+        static_feature_names: list[str] | None = None,
     ):
         """Initialize training data result."""
         self.X_train = X_train
@@ -106,6 +110,10 @@ class TrainingDataResult:
         self.masks_test = masks_test
         self.event_ids_train = event_ids_train
         self.event_ids_test = event_ids_test
+        self.static_train = static_train
+        self.static_val = static_val
+        self.static_test = static_test
+        self.static_feature_names = static_feature_names
 
     @property
     def num_train_samples(self) -> int:
@@ -284,6 +292,7 @@ async def prepare_training_data_from_config(
     feature_names = prep_result.feature_names
     masks = prep_result.masks
     event_ids = prep_result.event_ids
+    static = prep_result.static_features
 
     if len(X) == 0:
         raise ValueError(f"No valid training data after processing {len(events)} events")
@@ -309,23 +318,49 @@ async def prepare_training_data_from_config(
         event_ids_test = event_ids[test_mask]
         masks_trainval = masks[train_mask] if masks is not None else None
         masks_test = masks[test_mask] if masks is not None else None
+        static_trainval = static[train_mask] if static is not None else None
+        static_test = static[test_mask] if static is not None else None
     elif masks is not None:
-        X_trainval, X_test, y_trainval, y_test, masks_trainval, masks_test = train_test_split(
-            X,
-            y,
-            masks,
+        split_arrays = [X, y, masks]
+        if static is not None:
+            split_arrays.append(static)
+        split_result = train_test_split(
+            *split_arrays,
             test_size=data_config.test_split,
             random_state=data_config.random_seed,
             shuffle=data_config.shuffle,
         )
+        if static is not None:
+            (
+                X_trainval,
+                X_test,
+                y_trainval,
+                y_test,
+                masks_trainval,
+                masks_test,
+                static_trainval,
+                static_test,
+            ) = split_result
+        else:
+            X_trainval, X_test, y_trainval, y_test, masks_trainval, masks_test = split_result
+            static_trainval = None
+            static_test = None
     else:
-        X_trainval, X_test, y_trainval, y_test = train_test_split(
-            X,
-            y,
+        split_arrays = [X, y]
+        if static is not None:
+            split_arrays.append(static)
+        split_result = train_test_split(
+            *split_arrays,
             test_size=data_config.test_split,
             random_state=data_config.random_seed,
             shuffle=data_config.shuffle,
         )
+        if static is not None:
+            X_trainval, X_test, y_trainval, y_test, static_trainval, static_test = split_result
+        else:
+            X_trainval, X_test, y_trainval, y_test = split_result
+            static_trainval = None
+            static_test = None
         masks_trainval = None
         masks_test = None
 
@@ -334,32 +369,48 @@ async def prepare_training_data_from_config(
     y_val = None
     masks_val = None
     masks_train = None
+    static_val = None
+    static_train = None
 
     if data_config.validation_split > 0:
         remaining = 1.0 - data_config.test_split
         val_size_relative = data_config.validation_split / remaining
 
         if masks_trainval is not None:
-            X_train, X_val, y_train, y_val, masks_train, masks_val = train_test_split(
-                X_trainval,
-                y_trainval,
-                masks_trainval,
+            split_arrays = [X_trainval, y_trainval, masks_trainval]
+            if static_trainval is not None:
+                split_arrays.append(static_trainval)
+            split_result = train_test_split(
+                *split_arrays,
                 test_size=val_size_relative,
                 random_state=data_config.random_seed,
                 shuffle=data_config.shuffle,
             )
+            if static_trainval is not None:
+                X_train, X_val, y_train, y_val, masks_train, masks_val, static_train, static_val = (
+                    split_result
+                )
+            else:
+                X_train, X_val, y_train, y_val, masks_train, masks_val = split_result
         else:
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_trainval,
-                y_trainval,
+            split_arrays = [X_trainval, y_trainval]
+            if static_trainval is not None:
+                split_arrays.append(static_trainval)
+            split_result = train_test_split(
+                *split_arrays,
                 test_size=val_size_relative,
                 random_state=data_config.random_seed,
                 shuffle=data_config.shuffle,
             )
+            if static_trainval is not None:
+                X_train, X_val, y_train, y_val, static_train, static_val = split_result
+            else:
+                X_train, X_val, y_train, y_val = split_result
     else:
         X_train = X_trainval
         y_train = y_trainval
         masks_train = masks_trainval
+        static_train = static_trainval
 
     logger.info(
         "training_data_prepared_from_config",
@@ -372,6 +423,7 @@ async def prepare_training_data_from_config(
         val_samples=len(X_val) if X_val is not None else 0,
         test_samples=len(X_test),
         num_features=len(feature_names),
+        num_static_features=static.shape[1] if static is not None else 0,
         test_split=data_config.test_split,
         validation_split=data_config.validation_split,
     )
@@ -390,4 +442,8 @@ async def prepare_training_data_from_config(
         masks_val=masks_val,
         event_ids_train=event_ids_train,
         event_ids_test=event_ids_test,
+        static_train=static_train,
+        static_val=static_val,
+        static_test=static_test,
+        static_feature_names=prep_result.static_feature_names,
     )

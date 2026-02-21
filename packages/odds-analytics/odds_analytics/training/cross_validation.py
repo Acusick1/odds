@@ -53,6 +53,8 @@ class TrainableStrategy(Protocol):
         y_val: np.ndarray | None = ...,
         tracker: ExperimentTracker | None = ...,
         trial: Any | None = ...,
+        static_train: np.ndarray | None = ...,
+        static_val: np.ndarray | None = ...,
     ) -> dict[str, Any]: ...
 
 
@@ -287,6 +289,7 @@ def run_cv(
     y: np.ndarray,
     feature_names: list[str],
     event_ids: np.ndarray | None = None,
+    static_features: np.ndarray | None = None,
 ) -> CVResult:
     """
     Run cross-validation on the provided data.
@@ -392,6 +395,8 @@ def run_cv(
         y_train_fold = y[train_idx]
         X_val_fold = X[val_idx]
         y_val_fold = y[val_idx]
+        static_train_fold = static_features[train_idx] if static_features is not None else None
+        static_val_fold = static_features[val_idx] if static_features is not None else None
 
         logger.debug(
             "training_fold",
@@ -410,6 +415,8 @@ def run_cv(
             feature_names=feature_names,
             X_val=X_val_fold,
             y_val=y_val_fold,
+            static_train=static_train_fold,
+            static_val=static_val_fold,
         )
 
         fold_result = CVFoldResult(
@@ -463,6 +470,8 @@ def train_with_cv(
     X_test: np.ndarray | None = None,
     y_test: np.ndarray | None = None,
     event_ids: np.ndarray | None = None,
+    static_features: np.ndarray | None = None,
+    static_test: np.ndarray | None = None,
 ) -> tuple[dict[str, Any], CVResult]:
     """Run CV, train final model on all data, merge CV metrics into history."""
     logger.info(
@@ -480,6 +489,7 @@ def train_with_cv(
         y=y,
         feature_names=feature_names,
         event_ids=event_ids,
+        static_features=static_features,
     )
 
     logger.info(
@@ -495,6 +505,8 @@ def train_with_cv(
         feature_names=feature_names,
         X_val=X_test,
         y_val=y_test,
+        static_train=static_features,
+        static_val=static_test,
     )
 
     history.update(cv_result.to_dict())

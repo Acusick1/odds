@@ -129,6 +129,7 @@ class LSTMModel(nn.Module):
         num_layers: int = 2,
         dropout: float = 0.2,
         output_type: str = "classification",
+        static_size: int = 0,
     ):
         super().__init__()
 
@@ -142,6 +143,7 @@ class LSTMModel(nn.Module):
         self.num_layers = num_layers
         self.dropout = dropout
         self.output_type = output_type
+        self.static_size = static_size
 
         # LSTM layers
         self.lstm = nn.LSTM(
@@ -152,17 +154,36 @@ class LSTMModel(nn.Module):
             batch_first=True,
         )
 
-        # Output layer
-        self.fc = nn.Linear(hidden_size, 1)
+        # Output layer: hidden_size + static_size when static branch is active
+        fc_input_size = hidden_size + static_size
+        self.fc = nn.Linear(fc_input_size, 1)
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
-        """Forward pass through LSTM."""
+    def forward(
+        self,
+        x: torch.Tensor,
+        static_features: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+        """Forward pass through LSTM with optional static feature branch.
+
+        Args:
+            x: Sequence input of shape ``(batch, seq_len, input_size)``.
+            static_features: Optional static input of shape ``(batch, static_size)``.
+                When ``static_size > 0`` and this is ``None``, zeros are used.
+        """
         # output shape: (batch_size, seq_len, hidden_size)
         # h_n shape: (num_layers, batch_size, hidden_size)
         lstm_out, (h_n, c_n) = self.lstm(x)
 
         # Use final hidden state from last layer
         final_hidden = h_n[-1]
+
+        # Concat static features when the static branch is active
+        if self.static_size > 0:
+            if static_features is None:
+                static_features = torch.zeros(
+                    final_hidden.size(0), self.static_size, device=final_hidden.device
+                )
+            final_hidden = torch.cat([final_hidden, static_features], dim=-1)
 
         # Fully connected layer
         output = self.fc(final_hidden)
@@ -274,6 +295,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
             num_layers=self.params["num_layers"],
             dropout=self.params["dropout"],
             output_type="regression",
+            static_size=self.params.get("static_size", 0),
         )
 
     def _get_loss_function(self) -> nn.Module:
@@ -304,6 +326,8 @@ class LSTMLineMovementStrategy(BettingStrategy):
         patience: int | None = None,
         min_delta: float = 0.0001,
         masks: np.ndarray | None = None,
+        static_train: np.ndarray | None = None,
+        static_val: np.ndarray | None = None,
         tracker: ExperimentTracker | None = None,
         trial: Any | None = None,
     ) -> dict[str, Any]:
@@ -317,23 +341,33 @@ class LSTMLineMovementStrategy(BettingStrategy):
         X_tensor = torch.FloatTensor(X_train).to(self.device)
         y_tensor = torch.FloatTensor(y_train).to(self.device)
 
-        # Build dataset with or without masks
+        # Build dataset tensors list
+        dataset_tensors: list[torch.Tensor] = [X_tensor, y_tensor]
         if masks is not None:
-            masks_tensor = torch.BoolTensor(masks).to(self.device)
-            dataset = torch.utils.data.TensorDataset(X_tensor, y_tensor, masks_tensor)
-        else:
-            dataset = torch.utils.data.TensorDataset(X_tensor, y_tensor)
+            dataset_tensors.append(torch.BoolTensor(masks).to(self.device))
+        if static_train is not None:
+            dataset_tensors.append(torch.FloatTensor(static_train).to(self.device))
+
+        dataset = torch.utils.data.TensorDataset(*dataset_tensors)
 
         dataloader = torch.utils.data.DataLoader(
             dataset, batch_size=batch_size, shuffle=True, drop_last=False
         )
 
+        # Precompute tensor indices for batch unpacking
+        _has_masks = masks is not None
+        _has_static = static_train is not None
+        _static_idx = 2 + int(_has_masks)  # index of static tensor in batch tuple
+
         # Validation tensors
         X_val_tensor = None
         y_val_tensor = None
+        static_val_tensor = None
         if X_val is not None and y_val is not None:
             X_val_tensor = torch.FloatTensor(X_val).to(self.device)
             y_val_tensor = torch.FloatTensor(y_val).to(self.device)
+            if static_val is not None:
+                static_val_tensor = torch.FloatTensor(static_val).to(self.device)
 
         # Loss function and optimizer
         criterion = self._get_loss_function()
@@ -354,9 +388,10 @@ class LSTMLineMovementStrategy(BettingStrategy):
 
             for batch in dataloader:
                 batch_X, batch_y = batch[0], batch[1]
+                batch_static = batch[_static_idx] if _has_static else None
                 optimizer.zero_grad()
 
-                predictions = self.model(batch_X)
+                predictions = self.model(batch_X, static_features=batch_static)
                 loss = criterion(predictions, batch_y)
 
                 loss.backward()
@@ -378,7 +413,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
             if X_val_tensor is not None and y_val_tensor is not None:
                 self.model.eval()
                 with torch.no_grad():
-                    val_predictions = self.model(X_val_tensor)
+                    val_predictions = self.model(X_val_tensor, static_features=static_val_tensor)
                     val_loss = criterion(val_predictions, y_val_tensor).item()
                     val_mae = torch.mean(torch.abs(val_predictions - y_val_tensor)).item()
                     intermediate_value = val_loss
@@ -434,9 +469,12 @@ class LSTMLineMovementStrategy(BettingStrategy):
             logger.info("restored_best_model", val_loss=best_val_loss)
 
         # Calculate final metrics
+        static_train_tensor = (
+            torch.FloatTensor(static_train).to(self.device) if static_train is not None else None
+        )
         self.model.eval()
         with torch.no_grad():
-            train_preds = self.model(X_tensor).cpu().numpy()
+            train_preds = self.model(X_tensor, static_features=static_train_tensor).cpu().numpy()
             train_metrics = compute_regression_metrics(y_train, train_preds)
 
         history: dict[str, Any] = {
@@ -449,7 +487,9 @@ class LSTMLineMovementStrategy(BettingStrategy):
 
         if X_val_tensor is not None and y_val is not None:
             with torch.no_grad():
-                val_preds = self.model(X_val_tensor).cpu().numpy()
+                val_preds = (
+                    self.model(X_val_tensor, static_features=static_val_tensor).cpu().numpy()
+                )
                 val_metrics = compute_regression_metrics(y_val, val_preds)
             history.update(
                 {
@@ -733,6 +773,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
             "model_state_dict": self.model.state_dict(),
             "params": self.params,
             "input_size": self.input_size,
+            "static_size": self.params.get("static_size", 0),
             "is_trained": self.is_trained,
             "training_history": self.training_history,
         }
@@ -762,6 +803,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
         # Restore parameters (in case they differ from constructor args)
         self.params.update(checkpoint["params"])
         self.input_size = checkpoint["input_size"]
+        self.params["static_size"] = checkpoint.get("static_size", 0)
 
         # Recreate feature extractor with loaded params
         self.feature_extractor = SequenceFeatureExtractor(
@@ -793,6 +835,8 @@ class LSTMLineMovementStrategy(BettingStrategy):
         y_val: np.ndarray | None = None,
         tracker: ExperimentTracker | None = None,
         trial: Any | None = None,
+        static_train: np.ndarray | None = None,
+        static_val: np.ndarray | None = None,
     ) -> dict[str, Any]:
         """
         Train LSTM model using configuration object.
@@ -885,6 +929,10 @@ class LSTMLineMovementStrategy(BettingStrategy):
         else:
             self.input_size = len(feature_names)
 
+        # Determine static feature size from data
+        static_size = static_train.shape[1] if static_train is not None else 0
+        self.params["static_size"] = static_size
+
         history = self._train_loop(
             X_train,
             y_train,
@@ -896,6 +944,8 @@ class LSTMLineMovementStrategy(BettingStrategy):
             weight_decay=lstm_params["weight_decay"],
             patience=lstm_params.get("patience"),
             min_delta=lstm_params.get("min_delta", 0.0001),
+            static_train=static_train,
+            static_val=static_val,
             tracker=tracker,
             trial=trial,
         )
@@ -939,9 +989,22 @@ class LSTMLineMovementStrategy(BettingStrategy):
         X_test: np.ndarray | None = None,
         y_test: np.ndarray | None = None,
         event_ids: np.ndarray | None = None,
+        static_features: np.ndarray | None = None,
+        static_test: np.ndarray | None = None,
     ) -> tuple[dict[str, Any], CVResult]:
         from odds_analytics.training.cross_validation import (
             train_with_cv as _train_with_cv,
         )
 
-        return _train_with_cv(self, config, X, y, feature_names, X_test, y_test, event_ids)
+        return _train_with_cv(
+            self,
+            config,
+            X,
+            y,
+            feature_names,
+            X_test,
+            y_test,
+            event_ids,
+            static_features=static_features,
+            static_test=static_test,
+        )

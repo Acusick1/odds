@@ -1,7 +1,7 @@
 """Unit tests for LSTM line movement predictor strategy."""
 
 import tempfile
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -699,6 +699,141 @@ class TestLSTMLineMovementStrategy:
 
             assert loaded_strategy.model is not None
             assert loaded_strategy.is_trained
+
+
+class TestLSTMModelStaticFeatures:
+    """Tests for LSTMModel static feature branch architecture."""
+
+    def test_static_size_zero_backward_compatible(self):
+        """Test that static_size=0 produces identical behavior to original model."""
+        model = LSTMModel(input_size=14, hidden_size=64, static_size=0, output_type="regression")
+        x = torch.randn(4, 24, 14)
+        predictions = model(x)
+        assert predictions.shape == (4,)
+        # FC layer should be hidden_size -> 1
+        assert model.fc.in_features == 64
+
+    def test_static_size_creates_wider_fc(self):
+        """Test that static_size > 0 widens the FC layer."""
+        model = LSTMModel(input_size=14, hidden_size=64, static_size=11, output_type="regression")
+        assert model.fc.in_features == 64 + 11
+        assert model.fc.out_features == 1
+
+    def test_forward_with_static_features(self):
+        """Test forward pass concatenates static features correctly."""
+        batch_size = 4
+        static_size = 11
+        model = LSTMModel(
+            input_size=14, hidden_size=64, static_size=static_size, output_type="regression"
+        )
+        x = torch.randn(batch_size, 24, 14)
+        static = torch.randn(batch_size, static_size)
+        predictions = model(x, static_features=static)
+        assert predictions.shape == (batch_size,)
+
+    def test_forward_static_none_zero_fills(self):
+        """Test that static_features=None zero-fills when static_size > 0."""
+        model = LSTMModel(input_size=14, hidden_size=64, static_size=11, output_type="regression")
+        x = torch.randn(2, 24, 14)
+        # Should not crash — zero-fills the static portion
+        predictions = model(x, static_features=None)
+        assert predictions.shape == (2,)
+
+    def test_save_load_preserves_static_size(self):
+        """Test that save/load round-trip preserves static_size."""
+        strategy = LSTMLineMovementStrategy(hidden_size=32)
+        strategy.params["static_size"] = 11
+        strategy.model = strategy._create_model().to(strategy.device)
+        strategy.is_trained = True
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = Path(tmpdir) / "lstm_static.pt"
+            strategy.save_model(model_path)
+
+            loaded = LSTMLineMovementStrategy()
+            loaded.load_model(model_path)
+
+            assert loaded.params["static_size"] == 11
+            assert loaded.model.fc.in_features == 32 + 11
+
+    def test_train_loop_with_static_data(self):
+        """Test _train_loop accepts and uses static features."""
+        strategy = LSTMLineMovementStrategy(hidden_size=32, num_layers=1, dropout=0.0)
+        strategy.params["static_size"] = 5
+        strategy.model = strategy._create_model().to(strategy.device)
+
+        n_train, n_val = 20, 5
+        timesteps, input_size = 8, strategy.input_size
+        X_train = np.random.randn(n_train, timesteps, input_size).astype(np.float32)
+        y_train = np.random.randn(n_train).astype(np.float32) * 0.05
+        X_val = np.random.randn(n_val, timesteps, input_size).astype(np.float32)
+        y_val = np.random.randn(n_val).astype(np.float32) * 0.05
+        static_train = np.random.randn(n_train, 5).astype(np.float32)
+        static_val = np.random.randn(n_val, 5).astype(np.float32)
+
+        history = strategy._train_loop(
+            X_train,
+            y_train,
+            X_val,
+            y_val,
+            epochs=2,
+            batch_size=8,
+            learning_rate=0.001,
+            static_train=static_train,
+            static_val=static_val,
+        )
+
+        assert "train_mse" in history
+        assert "val_mse" in history
+        assert np.isfinite(history["train_mse"])
+        assert np.isfinite(history["val_mse"])
+
+    def test_train_from_config_computes_static_size(self):
+        """Test train_from_config derives static_size from data shape."""
+        from odds_analytics.training import (
+            DataConfig,
+            ExperimentConfig,
+            FeatureConfig,
+            MLTrainingConfig,
+            TrainingConfig,
+        )
+        from odds_analytics.training.config import LSTMConfig
+
+        config = MLTrainingConfig(
+            experiment=ExperimentConfig(name="test_static"),
+            training=TrainingConfig(
+                strategy_type="lstm_line_movement",
+                data=DataConfig(
+                    start_date=date(2024, 10, 1),
+                    end_date=date(2025, 1, 1),
+                ),
+                features=FeatureConfig(adapter="lstm"),
+                model=LSTMConfig(lookback_hours=24, timesteps=8),
+            ),
+        )
+
+        strategy = LSTMLineMovementStrategy()
+
+        n_samples = 30
+        timesteps, input_size = 8, strategy.input_size
+        static_size = 7
+
+        X_train = np.random.randn(n_samples, timesteps, input_size).astype(np.float32)
+        y_train = np.random.randn(n_samples).astype(np.float32) * 0.05
+        static_train = np.random.randn(n_samples, static_size).astype(np.float32)
+
+        history = strategy.train_from_config(
+            config=config,
+            X_train=X_train,
+            y_train=y_train,
+            feature_names=[f"f{i}" for i in range(input_size)],
+            static_train=static_train,
+        )
+
+        hidden_size = config.training.model.hidden_size
+        assert strategy.params["static_size"] == static_size
+        assert strategy.model.fc.in_features == hidden_size + static_size
+        assert np.isfinite(history["train_mse"])
 
 
 class TestLSTMLineMovementWorkflow:

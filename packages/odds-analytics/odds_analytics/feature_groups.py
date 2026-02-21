@@ -73,6 +73,8 @@ __all__ = [
     "PreparedFeatureData",
     "prepare_training_data",
     "filter_completed_events",
+    "_static_feature_group_names",
+    "_extract_static_feature_parts",
 ]
 
 
@@ -408,6 +410,7 @@ class AdapterOutput:
 
     features: np.ndarray  # 1D for XGBoost, 2D (timesteps, features) for LSTM
     mask: np.ndarray | None = None  # (timesteps,) boolean, LSTM only
+    static_features: np.ndarray | None = None  # 1D static feature vector, LSTM only
 
 
 class FeatureAdapter(Protocol):
@@ -427,28 +430,177 @@ class FeatureAdapter(Protocol):
         ...
 
 
+_STATIC_FEATURE_GROUPS = frozenset({"tabular", "polymarket", "injuries", "rest"})
+
+
+def _static_feature_group_names(config: FeatureConfig) -> list[str]:
+    """Return ordered feature names for all configured static feature groups.
+
+    Does NOT include ``hours_until_event`` (adapter-specific).
+    """
+    names: list[str] = []
+    if "tabular" in config.feature_groups:
+        from odds_analytics.feature_extraction import TabularFeatures
+
+        names.extend(f"tab_{n}" for n in TabularFeatures.get_feature_names())
+    if "polymarket" in config.feature_groups:
+        names.extend(f"pm_{n}" for n in PolymarketTabularFeatures.get_feature_names())
+        names.extend(f"xsrc_{n}" for n in CrossSourceFeatures.get_feature_names())
+    if "injuries" in config.feature_groups:
+        from odds_analytics.injury_features import InjuryFeatures
+
+        names.extend(f"inj_{n}" for n in InjuryFeatures.get_feature_names())
+    if "rest" in config.feature_groups:
+        from odds_analytics.schedule_features import RestScheduleFeatures
+
+        names.extend(f"rest_{n}" for n in RestScheduleFeatures.get_feature_names())
+    return names
+
+
+def _extract_static_feature_parts(
+    bundle: EventDataBundle,
+    snapshot: OddsSnapshot,
+    config: FeatureConfig,
+) -> list[np.ndarray] | None:
+    """Extract static feature arrays for all configured groups.
+
+    Returns ``None`` when tabular is configured but odds extraction fails
+    (the row cannot be used). Other groups NaN-fill on failure.
+    Does NOT include ``hours_until_event``.
+    """
+    event = bundle.event
+    market = config.markets[0] if config.markets else "h2h"
+    outcome = event.home_team if config.outcome == "home" else event.away_team
+    backtest_event = make_backtest_event(event)
+    tab_extractor = TabularFeatureExtractor.from_config(config)
+
+    parts: list[np.ndarray] = []
+
+    # --- Tabular features ---
+    if "tabular" in config.feature_groups:
+        snap_odds = extract_odds_from_snapshot(snapshot, event.id, market=market)
+        if not snap_odds:
+            return None
+        try:
+            tab_feats = tab_extractor.extract_features(
+                event=backtest_event,
+                odds_data=snap_odds,
+                outcome=outcome,
+                market=market,
+            )
+            parts.append(tab_feats.to_array())
+        except Exception:
+            logger.debug("tabular_extraction_failed", event_id=event.id)
+            return None
+
+    # --- Polymarket features (NaN-fill when unavailable to keep row) ---
+    if "polymarket" in config.feature_groups:
+        n_pm = len(PolymarketTabularFeatures.get_feature_names())
+        n_xsrc = len(CrossSourceFeatures.get_feature_names())
+        nan_block = np.full(n_pm + n_xsrc, np.nan)
+
+        if bundle.pm_context is None:
+            parts.append(nan_block)
+        else:
+            ctx = bundle.pm_context
+            target_time = snapshot.snapshot_time
+            price_snap = _find_nearest_pm_price(
+                bundle.pm_prices, target_time, config.pm_price_tolerance_minutes
+            )
+
+            if price_snap is None:
+                parts.append(nan_block)
+            else:
+                ob_snap = _find_nearest_pm_orderbook(
+                    bundle.pm_orderbooks, target_time, config.pm_price_tolerance_minutes
+                )
+                recent = _find_velocity_prices(
+                    bundle.pm_prices, target_time, config.pm_velocity_window_hours
+                )
+
+                try:
+                    pm_extractor = PolymarketFeatureExtractor(
+                        velocity_window_hours=config.pm_velocity_window_hours
+                    )
+                    xsrc_extractor = CrossSourceFeatureExtractor()
+
+                    pm_feats = pm_extractor.extract(
+                        price_snapshot=price_snap,
+                        orderbook_snapshot=ob_snap,
+                        recent_prices=recent,
+                        home_outcome_index=ctx.home_idx,
+                    )
+
+                    # Try to align SB odds for cross-source features
+                    sb_feats = None
+                    sb_odds_at_time = extract_odds_from_snapshot(snapshot, event.id, market=market)
+                    if sb_odds_at_time:
+                        try:
+                            sb_feats = tab_extractor.extract_features(
+                                event=backtest_event,
+                                odds_data=sb_odds_at_time,
+                                outcome=outcome,
+                                market=market,
+                            )
+                        except Exception:
+                            pass
+
+                    xsrc_feats = xsrc_extractor.extract(
+                        pm_features=pm_feats,
+                        sb_features=sb_feats,
+                    )
+                    parts.append(np.concatenate([pm_feats.to_array(), xsrc_feats.to_array()]))
+                except Exception:
+                    logger.debug("pm_feature_extraction_failed", event_id=event.id)
+                    parts.append(nan_block)
+
+    # --- Injury features (NaN-fill when unavailable to keep row) ---
+    if "injuries" in config.feature_groups:
+        from odds_analytics.injury_features import InjuryFeatures, extract_injury_features
+
+        n_inj = len(InjuryFeatures.get_feature_names())
+        nan_block_inj = np.full(n_inj, np.nan)
+
+        if not bundle.injury_reports:
+            parts.append(nan_block_inj)
+        else:
+            try:
+                inj_feats = extract_injury_features(
+                    bundle.injury_reports,
+                    event,
+                    snapshot.snapshot_time,
+                    player_stats=bundle.player_stats,
+                )
+                parts.append(inj_feats.to_array())
+            except Exception:
+                logger.debug("injury_feature_extraction_failed", event_id=event.id)
+                parts.append(nan_block_inj)
+
+    # --- Rest/schedule features (NaN-fill when unavailable to keep row) ---
+    if "rest" in config.feature_groups:
+        from odds_analytics.schedule_features import RestScheduleFeatures, extract_rest_features
+
+        n_rest = len(RestScheduleFeatures.get_feature_names())
+        nan_block_rest = np.full(n_rest, np.nan)
+
+        if not bundle.game_logs:
+            parts.append(nan_block_rest)
+        else:
+            try:
+                rest_feats = extract_rest_features(bundle.game_logs, event)
+                parts.append(rest_feats.to_array())
+            except Exception:
+                logger.debug("rest_feature_extraction_failed", event_id=event.id)
+                parts.append(nan_block_rest)
+
+    return parts
+
+
 class XGBoostAdapter:
     """Tabular feature adapter for XGBoost (and other tree-based models)."""
 
     def feature_names(self, config: FeatureConfig) -> list[str]:
-        names: list[str] = []
-        if "tabular" in config.feature_groups:
-            from odds_analytics.feature_extraction import TabularFeatures
-
-            names.extend(f"tab_{n}" for n in TabularFeatures.get_feature_names())
-        if "polymarket" in config.feature_groups:
-            names.extend(f"pm_{n}" for n in PolymarketTabularFeatures.get_feature_names())
-            names.extend(f"xsrc_{n}" for n in CrossSourceFeatures.get_feature_names())
-        if "injuries" in config.feature_groups:
-            from odds_analytics.injury_features import InjuryFeatures
-
-            names.extend(f"inj_{n}" for n in InjuryFeatures.get_feature_names())
-        if "rest" in config.feature_groups:
-            from odds_analytics.schedule_features import RestScheduleFeatures
-
-            names.extend(f"rest_{n}" for n in RestScheduleFeatures.get_feature_names())
-        names.append("hours_until_event")
-        return names
+        return _static_feature_group_names(config) + ["hours_until_event"]
 
     def transform(
         self,
@@ -456,153 +608,35 @@ class XGBoostAdapter:
         snapshot: OddsSnapshot,
         config: FeatureConfig,
     ) -> AdapterOutput | None:
-        event = bundle.event
-        market = config.markets[0] if config.markets else "h2h"
-        outcome = event.home_team if config.outcome == "home" else event.away_team
-        backtest_event = make_backtest_event(event)
-        tab_extractor = TabularFeatureExtractor.from_config(config)
+        parts = _extract_static_feature_parts(bundle, snapshot, config)
+        if parts is None:
+            return None
 
-        parts: list[np.ndarray] = []
-
-        # --- Tabular features ---
-        if "tabular" in config.feature_groups:
-            snap_odds = extract_odds_from_snapshot(snapshot, event.id, market=market)
-            if not snap_odds:
-                return None
-            try:
-                tab_feats = tab_extractor.extract_features(
-                    event=backtest_event,
-                    odds_data=snap_odds,
-                    outcome=outcome,
-                    market=market,
-                )
-                parts.append(tab_feats.to_array())
-            except Exception:
-                logger.debug("tabular_extraction_failed", event_id=event.id)
-                return None
-
-        # --- Polymarket features (NaN-fill when unavailable to keep row) ---
-        if "polymarket" in config.feature_groups:
-            n_pm = len(PolymarketTabularFeatures.get_feature_names())
-            n_xsrc = len(CrossSourceFeatures.get_feature_names())
-            nan_block = np.full(n_pm + n_xsrc, np.nan)
-
-            if bundle.pm_context is None:
-                parts.append(nan_block)
-            else:
-                ctx = bundle.pm_context
-                target_time = snapshot.snapshot_time
-                price_snap = _find_nearest_pm_price(
-                    bundle.pm_prices, target_time, config.pm_price_tolerance_minutes
-                )
-
-                if price_snap is None:
-                    parts.append(nan_block)
-                else:
-                    ob_snap = _find_nearest_pm_orderbook(
-                        bundle.pm_orderbooks, target_time, config.pm_price_tolerance_minutes
-                    )
-                    recent = _find_velocity_prices(
-                        bundle.pm_prices, target_time, config.pm_velocity_window_hours
-                    )
-
-                    try:
-                        pm_extractor = PolymarketFeatureExtractor(
-                            velocity_window_hours=config.pm_velocity_window_hours
-                        )
-                        xsrc_extractor = CrossSourceFeatureExtractor()
-
-                        pm_feats = pm_extractor.extract(
-                            price_snapshot=price_snap,
-                            orderbook_snapshot=ob_snap,
-                            recent_prices=recent,
-                            home_outcome_index=ctx.home_idx,
-                        )
-
-                        # Try to align SB odds for cross-source features
-                        sb_feats = None
-                        sb_odds_at_time = extract_odds_from_snapshot(
-                            snapshot, event.id, market=market
-                        )
-                        if sb_odds_at_time:
-                            try:
-                                sb_feats = tab_extractor.extract_features(
-                                    event=backtest_event,
-                                    odds_data=sb_odds_at_time,
-                                    outcome=outcome,
-                                    market=market,
-                                )
-                            except Exception:
-                                pass
-
-                        xsrc_feats = xsrc_extractor.extract(
-                            pm_features=pm_feats,
-                            sb_features=sb_feats,
-                        )
-                        parts.append(np.concatenate([pm_feats.to_array(), xsrc_feats.to_array()]))
-                    except Exception:
-                        logger.debug("pm_feature_extraction_failed", event_id=event.id)
-                        parts.append(nan_block)
-
-        # --- Injury features (NaN-fill when unavailable to keep row) ---
-        if "injuries" in config.feature_groups:
-            from odds_analytics.injury_features import InjuryFeatures, extract_injury_features
-
-            n_inj = len(InjuryFeatures.get_feature_names())
-            nan_block_inj = np.full(n_inj, np.nan)
-
-            if not bundle.injury_reports:
-                parts.append(nan_block_inj)
-            else:
-                try:
-                    inj_feats = extract_injury_features(
-                        bundle.injury_reports,
-                        event,
-                        snapshot.snapshot_time,
-                        player_stats=bundle.player_stats,
-                    )
-                    parts.append(inj_feats.to_array())
-                except Exception:
-                    logger.debug("injury_feature_extraction_failed", event_id=event.id)
-                    parts.append(nan_block_inj)
-
-        # --- Rest/schedule features (NaN-fill when unavailable to keep row) ---
-        if "rest" in config.feature_groups:
-            from odds_analytics.schedule_features import RestScheduleFeatures, extract_rest_features
-
-            n_rest = len(RestScheduleFeatures.get_feature_names())
-            nan_block_rest = np.full(n_rest, np.nan)
-
-            if not bundle.game_logs:
-                parts.append(nan_block_rest)
-            else:
-                try:
-                    rest_feats = extract_rest_features(bundle.game_logs, event)
-                    parts.append(rest_feats.to_array())
-                except Exception:
-                    logger.debug("rest_feature_extraction_failed", event_id=event.id)
-                    parts.append(nan_block_rest)
-
-        # --- hours_until_event ---
-        hours_until = (event.commence_time - snapshot.snapshot_time).total_seconds() / 3600
+        hours_until = (bundle.event.commence_time - snapshot.snapshot_time).total_seconds() / 3600
         parts.append(np.array([hours_until]))
 
         return AdapterOutput(features=np.concatenate(parts))
 
 
 class LSTMAdapter:
-    """Sequence feature adapter for LSTM (and other recurrent) models.
+    """Sequence + optional static feature adapter for LSTM models.
 
-    Produces a fixed 14-feature ``SequenceFeatures`` vector per timestep.
-    Unlike ``XGBoostAdapter``, this adapter does **not** compose features
-    from ``config.feature_groups`` — the sequence feature set is fixed and
-    determined entirely by ``SequenceFeatureExtractor``.
+    Produces a fixed 14-feature ``SequenceFeatures`` vector per timestep
+    via ``SequenceFeatureExtractor``. When static feature groups (tabular,
+    injuries, rest, etc.) are configured, also extracts a 1-D static feature
+    vector returned via ``AdapterOutput.static_features``.
     """
+
+    def _has_static_groups(self, config: FeatureConfig) -> bool:
+        return bool(_STATIC_FEATURE_GROUPS & set(config.feature_groups))
 
     def feature_names(self, config: FeatureConfig) -> list[str]:
         from odds_analytics.feature_extraction import SequenceFeatures
 
-        return SequenceFeatures.get_feature_names()
+        names = SequenceFeatures.get_feature_names()
+        if self._has_static_groups(config):
+            names = names + _static_feature_group_names(config)
+        return names
 
     def transform(
         self,
@@ -635,7 +669,20 @@ class LSTMAdapter:
             logger.debug("sequence_extraction_failed", event_id=event.id, error=str(e))
             return None
 
-        return AdapterOutput(features=result["sequence"], mask=result["mask"])
+        # Extract optional static features (injuries, rest, tabular, etc.)
+        static_vec: np.ndarray | None = None
+        if self._has_static_groups(config):
+            parts = _extract_static_feature_parts(bundle, snapshot, config)
+            if parts is None:
+                return None
+            if parts:
+                static_vec = np.concatenate(parts)
+
+        return AdapterOutput(
+            features=result["sequence"],
+            mask=result["mask"],
+            static_features=static_vec,
+        )
 
 
 def _make_adapter(config: FeatureConfig) -> FeatureAdapter:
@@ -701,12 +748,16 @@ class PreparedFeatureData:
         feature_names: list[str],
         masks: np.ndarray | None = None,
         event_ids: np.ndarray | None = None,
+        static_features: np.ndarray | None = None,
+        static_feature_names: list[str] | None = None,
     ) -> None:
         self.X = X
         self.y = y
         self.feature_names = feature_names
         self.masks = masks
         self.event_ids = event_ids
+        self.static_features = static_features
+        self.static_feature_names = static_feature_names
 
     @property
     def num_samples(self) -> int:
@@ -753,9 +804,14 @@ async def prepare_training_data(
     X_list: list[np.ndarray] = []
     y_list: list[float] = []
     masks_list: list[np.ndarray] = []
+    static_list: list[np.ndarray] = []
     event_id_list: list[str] = []
     skipped_events = 0
     total_rows = 0
+
+    # Determine static feature names upfront (empty list if no static groups)
+    lstm_adapter = isinstance(adapter, LSTMAdapter)
+    static_names = _static_feature_group_names(config) if lstm_adapter else None
 
     for event in valid_events:
         # Load all data for this event in bulk
@@ -792,6 +848,8 @@ async def prepare_training_data(
             X_list.append(output.features)
             if output.mask is not None:
                 masks_list.append(output.mask)
+            if output.static_features is not None:
+                static_list.append(output.static_features)
             y_list.append(target)
             event_id_list.append(event.id)
             event_had_rows = True
@@ -812,6 +870,12 @@ async def prepare_training_data(
     event_ids = np.array(event_id_list)
     masks = np.array(masks_list, dtype=bool) if masks_list else None
 
+    # Stack static features if collected
+    static_features: np.ndarray | None = None
+    if static_list:
+        static_features = np.array(static_list, dtype=np.float32)
+        static_features = np.nan_to_num(static_features, nan=0.0)
+
     X, feature_names, _ = apply_variance_filter(X, feature_names, config.variance_threshold)
 
     n_events = len(set(event_id_list))
@@ -820,6 +884,7 @@ async def prepare_training_data(
         num_samples=len(X),
         num_events=n_events,
         num_features=len(feature_names),
+        num_static_features=static_features.shape[1] if static_features is not None else 0,
         avg_rows_per_event=total_rows / max(n_events, 1),
         skipped_events=skipped_events,
         sampling_strategy=config.sampling.strategy,
@@ -834,4 +899,6 @@ async def prepare_training_data(
         feature_names=feature_names,
         masks=masks,
         event_ids=event_ids,
+        static_features=static_features,
+        static_feature_names=static_names if static_features is not None else None,
     )
