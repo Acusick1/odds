@@ -73,8 +73,6 @@ __all__ = [
     "PreparedFeatureData",
     "prepare_training_data",
     "filter_completed_events",
-    "_static_feature_group_names",
-    "_extract_static_feature_parts",
 ]
 
 

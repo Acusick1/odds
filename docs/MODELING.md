@@ -51,6 +51,19 @@ PM vs sportsbook divergence:
 - **Spread vs hold**: PM spread compared to SB market hold
 - **Sharp divergence**: PM vs Pinnacle specifically
 
+### Injury (6 features)
+Impact-weighted injury burden per team at decision time:
+- **Impact OUT**: home/away sum of `(on_off_rtg - on_def_rtg) * (mpg/48)` for OUT players
+- **Impact GTD**: same formula for QUESTIONABLE/DOUBTFUL players, discounted 0.5x
+- **Timing**: hours between latest report and game, hours between latest report and snapshot (staleness)
+- Players without PBPStats data fall back to 1.0 (headcount behavior)
+
+### Rest/Schedule (5 features)
+Game context from NBA game logs:
+- **Days rest**: home/away days since previous game
+- **Rest advantage**: home days rest minus away days rest
+- **Back-to-back**: home/away boolean flags
+
 ### Sequence (13 features per timestep, for LSTM)
 Time-series per snapshot:
 - american/decimal odds, implied prob, num bookmakers
@@ -99,33 +112,39 @@ Time-series per snapshot:
 - **TierSampler bug found and fixed**: `IN_PLAY` snapshots were incorrectly included as candidates for pregame tier — since in-play snapshots occur *after* the closing snapshot, this was look-ahead bias (features from the future "predicting" past closing prices); earlier LSTM pregame R²≈+0.02 was contaminated; corrected result is R²≈-0.015
 - Full results: [experiments/results/exp2_feature_group_isolation/FINDINGS.md](../experiments/results/exp2_feature_group_isolation/FINDINGS.md)
 
+### XGBoost with injury + rest features (Feb 2026, 803 events)
+- 18 features (tabular 4 + injury 6 + rest 5 + timing 3), tier sampling (pregame), devigged Pinnacle target
+- 100-trial Optuna tuning with 5-fold timeseries CV
+- **First positive out-of-sample signal**: validation R²=0.050, CV mean R²=0.020 ± 0.025
+- Best params: `max_depth=2, min_child_weight=20, lr=0.295` — heavy regularization prevents overfitting
+- Feature importance: **injuries 55%** (`impact_out_away` 17%, `injury_news_recency` 12%), tabular 28%, rest 9%
+- Dead features (zero importance): `away_is_b2b`, `away_days_rest`, `rest_advantage`, `home_is_b2b`, `is_weekend`, `num_bookmakers`
+- Config: `experiments/xgboost_injuries_rest_tuning_best.yaml` (gitignored)
+
 ### LSTM v1 (Feb 2026)
 - Implemented but not yet trained/evaluated at scale
 - Hypothesis: temporal patterns in line movement (momentum, sharp money timing) may be captured better by sequence models than aggregate trajectory features
+- Note: injury features (not temporal patterns) drove signal in the XGBoost experiment — LSTM may not add value, but this is untested
 
 ## Open Questions
 
-### Feature Relevance
-The current feature set was largely designed for a backtesting/execution system before the goal shifted to CLV delta prediction. Not all features may be relevant to predicting line movement:
-- **Line shopping features** (best/worst odds, range across books) — useful for execution, but do they predict movement?
-- **Market hold features** (avg/std hold) — describe market efficiency, but unclear if they predict directional change
-- **Consensus probability** — may be redundant with sharp probability for a delta target
-- A systematic audit of feature relevance to the delta prediction task is needed before adding more features
-
 ### Signal
-- Is 193 events fundamentally too few, or is the feature set not capturing the right information?
-- Do PM features add signal, or is the sparse time-alignment too limiting?
+- R²=0.05 is positive but small — is this the ceiling for public features, or can more data / PM order flow push it higher?
+- Injury features dominate importance — is the model primarily learning "star player OUT → line moves"? If so, how robust is this across seasons?
+- Does the signal generalize to other sports, or is it NBA-specific (injury report timing)?
+- Do PM features add signal, or is the sparse time-alignment too limiting? (untested with 803-event dataset)
 - Does sharp-retail divergence (Pinnacle vs DraftKings/FanDuel) contain more signal than cross-source (PM vs SB)?
 
-### Features
-- Should we add game context features (team records, rest days, home/away)?
+### Data
+- **Historical odds backfill**: 297 events from 2024-25 have injuries + player stats but no odds snapshots. Worth the API cost (10 units/region/market)?
+- PM order flow features from existing CLOB snapshots — untapped data source
 - Is order book microstructure (depth, imbalance) informative at our snapshot frequency (5min)?
 - Would higher-frequency PM data (sub-minute) improve velocity/acceleration features?
 
 ### Methodology
+- Should we prune the 6 dead features, or keep them for future tuning runs with more data?
+- Is devigged Pinnacle the right target, or should we explore market-wide targets?
 - Multi-horizon sampling: does it genuinely increase effective sample size, or just add correlated noise?
-- Is devigged Pinnacle the right target, or should we explore market-wide targets (e.g., devigged consensus)?
-- At what sample size should we expect to see signal if it exists?
 
 ## Experiment Plan
 
@@ -189,3 +208,4 @@ Every experiment must produce:
 | 2026-02-14 | XGBoost v1 | tabular + trajectory + PM + cross-source | devigged pinnacle | 656 (193 events) | R² ≈ 0 | — | Multi-horizon, group CV; 21 tab features zeroed (bug) |
 | 2026-02-17 | Exp 1: correlations | 60 testable / 75 total | devigged pinnacle | 719 (229 events) | max \|r\|=0.12 | Proceed to Exp 2 | Sharp-retail diff strongest; 12/60 uncorrected, 0/60 BH |
 | 2026-02-18 | Exp 2: feature groups | 47 features, 6 groups | devigged pinnacle | 538–719 (230 events) | All R²<0 | No signal at 230 events | 2×2 (arch × time): all cells R²≈0; TierSampler IN_PLAY bug fixed |
+| 2026-02-20 | XGBoost + injuries/rest | tabular 4 + injury 6 + rest 5 + timing 3 | devigged pinnacle | 803 events | val R²=0.050, CV R²=0.020±0.025 | First positive signal | 100-trial Optuna; injuries 55% importance; 6 dead features |

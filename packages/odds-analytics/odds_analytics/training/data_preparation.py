@@ -46,6 +46,32 @@ from odds_analytics.training.config import MLTrainingConfig
 
 logger = structlog.get_logger()
 
+
+def _split_aligned_arrays(
+    arrays: list[np.ndarray | None],
+    **split_kwargs: float | int | bool | None,
+) -> list[np.ndarray | None]:
+    """Split multiple aligned arrays via train_test_split, skipping Nones.
+
+    Returns a flat list of split results in the same order as input,
+    with two entries per input array (train, test). None inputs produce
+    (None, None) pairs in the output.
+    """
+    present = [(i, arr) for i, arr in enumerate(arrays) if arr is not None]
+    if not present:
+        return [None, None] * len(arrays)
+
+    _, to_split = zip(*present, strict=True)
+    split_result = train_test_split(*to_split, **split_kwargs)
+
+    # split_result is [arr0_train, arr0_test, arr1_train, arr1_test, ...]
+    result: list[np.ndarray | None] = [None] * (len(arrays) * 2)
+    for pair_idx, (orig_idx, _) in enumerate(present):
+        result[orig_idx * 2] = split_result[pair_idx * 2]
+        result[orig_idx * 2 + 1] = split_result[pair_idx * 2 + 1]
+    return result
+
+
 __all__ = [
     "prepare_training_data_from_config",
     "filter_events_by_date_range",
@@ -320,49 +346,17 @@ async def prepare_training_data_from_config(
         masks_test = masks[test_mask] if masks is not None else None
         static_trainval = static[train_mask] if static is not None else None
         static_test = static[test_mask] if static is not None else None
-    elif masks is not None:
-        split_arrays = [X, y, masks]
-        if static is not None:
-            split_arrays.append(static)
-        split_result = train_test_split(
-            *split_arrays,
-            test_size=data_config.test_split,
-            random_state=data_config.random_seed,
-            shuffle=data_config.shuffle,
-        )
-        if static is not None:
-            (
-                X_trainval,
-                X_test,
-                y_trainval,
-                y_test,
-                masks_trainval,
-                masks_test,
-                static_trainval,
-                static_test,
-            ) = split_result
-        else:
-            X_trainval, X_test, y_trainval, y_test, masks_trainval, masks_test = split_result
-            static_trainval = None
-            static_test = None
     else:
-        split_arrays = [X, y]
-        if static is not None:
-            split_arrays.append(static)
-        split_result = train_test_split(
-            *split_arrays,
+        split_result = _split_aligned_arrays(
+            [X, y, masks, static],
             test_size=data_config.test_split,
             random_state=data_config.random_seed,
             shuffle=data_config.shuffle,
         )
-        if static is not None:
-            X_trainval, X_test, y_trainval, y_test, static_trainval, static_test = split_result
-        else:
-            X_trainval, X_test, y_trainval, y_test = split_result
-            static_trainval = None
-            static_test = None
-        masks_trainval = None
-        masks_test = None
+        X_trainval, X_test = split_result[0], split_result[1]
+        y_trainval, y_test = split_result[2], split_result[3]
+        masks_trainval, masks_test = split_result[4], split_result[5]
+        static_trainval, static_test = split_result[6], split_result[7]
 
     # Second split: separate validation set from training set (if validation_split > 0)
     X_val = None
@@ -376,36 +370,16 @@ async def prepare_training_data_from_config(
         remaining = 1.0 - data_config.test_split
         val_size_relative = data_config.validation_split / remaining
 
-        if masks_trainval is not None:
-            split_arrays = [X_trainval, y_trainval, masks_trainval]
-            if static_trainval is not None:
-                split_arrays.append(static_trainval)
-            split_result = train_test_split(
-                *split_arrays,
-                test_size=val_size_relative,
-                random_state=data_config.random_seed,
-                shuffle=data_config.shuffle,
-            )
-            if static_trainval is not None:
-                X_train, X_val, y_train, y_val, masks_train, masks_val, static_train, static_val = (
-                    split_result
-                )
-            else:
-                X_train, X_val, y_train, y_val, masks_train, masks_val = split_result
-        else:
-            split_arrays = [X_trainval, y_trainval]
-            if static_trainval is not None:
-                split_arrays.append(static_trainval)
-            split_result = train_test_split(
-                *split_arrays,
-                test_size=val_size_relative,
-                random_state=data_config.random_seed,
-                shuffle=data_config.shuffle,
-            )
-            if static_trainval is not None:
-                X_train, X_val, y_train, y_val, static_train, static_val = split_result
-            else:
-                X_train, X_val, y_train, y_val = split_result
+        val_result = _split_aligned_arrays(
+            [X_trainval, y_trainval, masks_trainval, static_trainval],
+            test_size=val_size_relative,
+            random_state=data_config.random_seed,
+            shuffle=data_config.shuffle,
+        )
+        X_train, X_val = val_result[0], val_result[1]
+        y_train, y_val = val_result[2], val_result[3]
+        masks_train, masks_val = val_result[4], val_result[5]
+        static_train, static_val = val_result[6], val_result[7]
     else:
         X_train = X_trainval
         y_train = y_trainval
