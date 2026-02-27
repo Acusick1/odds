@@ -711,6 +711,8 @@ def create_objective(
     static_val: ndarray | None = None,
     event_ids_train: ndarray | None = None,
     event_ids_val: ndarray | None = None,
+    masks_train: ndarray | None = None,
+    masks_val: ndarray | None = None,
 ) -> Callable[[Any], float]:
     """
     Create objective function for hyperparameter optimization.
@@ -849,6 +851,7 @@ def create_objective(
         trial_static_train, trial_static_val = static_train, static_val
         trial_event_ids = event_ids_train
         trial_event_ids_val = event_ids_val
+        trial_masks_train, trial_masks_val = masks_train, masks_val
 
         if "feature_groups" in feature_params and precomputed_features is not None:
             fg_key = feature_params["feature_groups"]
@@ -863,6 +866,8 @@ def create_objective(
                 trial_static_val = data.static_val if data.num_val_samples > 0 else data.static_test
                 trial_event_ids = data.event_ids_train
                 trial_event_ids_val = data.event_ids_val
+                trial_masks_train = data.masks_train
+                trial_masks_val = data.masks_val if data.num_val_samples > 0 else data.masks_test
                 logger.debug(
                     "using_precomputed_features",
                     trial_number=trial.number,
@@ -959,10 +964,16 @@ def create_objective(
                         if trial_static_train is not None and trial_static_val is not None
                         else trial_static_train
                     )
+                    masks_full = (
+                        np.vstack([trial_masks_train, trial_masks_val])
+                        if trial_masks_train is not None and trial_masks_val is not None
+                        else trial_masks_train
+                    )
                 else:
                     X_full = trial_X_train
                     y_full = trial_y_train
                     static_full = trial_static_train
+                    masks_full = trial_masks_train
 
                 # Recombine event_ids (train + val, chronological order preserved)
                 event_ids_full = None
@@ -988,6 +999,7 @@ def create_objective(
                     feature_names=trial_feature_names,
                     static_features=static_full,
                     event_ids=event_ids_full,
+                    masks=masks_full,
                 )
 
                 # Log mean and std CV metrics if trial has set_user_attr (for MLflow logging)
@@ -1038,6 +1050,11 @@ def create_objective(
                 )
             else:
                 # Use simple train/validation split (backward compatibility)
+                mask_kw: dict[str, Any] = {}
+                if trial_masks_train is not None:
+                    mask_kw["masks_train"] = trial_masks_train
+                    mask_kw["masks_val"] = trial_masks_val
+
                 history = strategy.train_from_config(
                     config=modified_config,
                     X_train=trial_X_train,
@@ -1048,6 +1065,7 @@ def create_objective(
                     trial=trial,  # Pass trial for pruning support
                     static_train=trial_static_train,
                     static_val=trial_static_val,
+                    **mask_kw,
                 )
 
                 # Extract metric value
