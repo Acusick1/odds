@@ -276,6 +276,90 @@ class TestDataConfig:
         assert config.cv_method == "timeseries"
         assert config.kfold_shuffle is True  # Stored but ignored for timeseries
 
+    def test_walk_forward_requires_min_train_events(self):
+        """walk_forward without min_train_events raises."""
+        with pytest.raises(ValueError, match="min_train_events"):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                cv_method="walk_forward",
+                val_step_events=200,
+            )
+
+    def test_walk_forward_requires_val_step_events(self):
+        """walk_forward without val_step_events raises."""
+        with pytest.raises(ValueError, match="val_step_events"):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                cv_method="walk_forward",
+                min_train_events=500,
+            )
+
+    def test_sliding_requires_max_train_events(self):
+        """sliding window without max_train_events raises."""
+        with pytest.raises(ValueError, match="max_train_events"):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                cv_method="walk_forward",
+                window_type="sliding",
+                min_train_events=500,
+                val_step_events=200,
+            )
+
+    def test_max_train_less_than_min_train_raises(self):
+        """max_train_events < min_train_events raises."""
+        with pytest.raises(ValueError, match="max_train_events.*must be >="):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                cv_method="walk_forward",
+                window_type="sliding",
+                min_train_events=500,
+                val_step_events=200,
+                max_train_events=300,
+            )
+
+    def test_non_walk_forward_accepts_none_fields(self):
+        """Non-walk_forward methods accept None walk_forward fields."""
+        for method in ("kfold", "timeseries"):
+            config = DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                cv_method=method,
+            )
+            assert config.min_train_events is None
+            assert config.val_step_events is None
+            assert config.max_train_events is None
+
+    def test_walk_forward_valid_expanding(self):
+        """Valid expanding walk_forward config creates successfully."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            cv_method="walk_forward",
+            min_train_events=500,
+            val_step_events=200,
+        )
+        assert config.window_type == "expanding"
+        assert config.min_train_events == 500
+        assert config.val_step_events == 200
+
+    def test_walk_forward_valid_sliding(self):
+        """Valid sliding walk_forward config creates successfully."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            cv_method="walk_forward",
+            window_type="sliding",
+            min_train_events=500,
+            val_step_events=200,
+            max_train_events=1000,
+        )
+        assert config.window_type == "sliding"
+        assert config.max_train_events == 1000
+
 
 # =============================================================================
 # XGBoostConfig Tests

@@ -80,12 +80,21 @@ def _make_snapshot(
 
 
 class TestGroupTimeseriesCV:
-    """Tests for group_timeseries cross-validation method."""
+    """Tests for event-grouped walk-forward cross-validation."""
 
     def _make_config(
-        self, n_folds: int = 3, cv_method: str = "group_timeseries"
+        self, cv_method: str = "walk_forward", **data_overrides: object
     ) -> MLTrainingConfig:
         """Create a minimal MLTrainingConfig for CV testing."""
+        data = {
+            "start_date": "2024-10-01",
+            "end_date": "2024-12-31",
+            "cv_method": cv_method,
+            "random_seed": 42,
+            "min_train_events": 2,
+            "val_step_events": 1,
+        }
+        data.update(data_overrides)
         return MLTrainingConfig.model_validate(
             {
                 "experiment": {"name": "test_cv", "description": "test"},
@@ -97,13 +106,7 @@ class TestGroupTimeseriesCV:
                         "outcome": "home",
                         "closing_tier": "closing",
                     },
-                    "data": {
-                        "start_date": "2024-10-01",
-                        "end_date": "2024-12-31",
-                        "cv_method": cv_method,
-                        "n_folds": n_folds,
-                        "random_seed": 42,
-                    },
+                    "data": data,
                     "model": {
                         "n_estimators": 10,
                         "max_depth": 3,
@@ -143,14 +146,15 @@ class TestGroupTimeseriesCV:
 
         event_ids = np.array([f"evt_{i}" for i in range(n_events) for _ in range(rows_per_event)])
 
-        config = self._make_config(n_folds=3)
+        # min_train=2, val_step=1 → 3 folds for 5 events
+        config = self._make_config()
         strategy = self._make_mock_strategy()
 
         result = run_cv(strategy, config, X, y, feature_names, event_ids=event_ids)
 
         assert isinstance(result, CVResult)
         assert result.n_folds == 3
-        assert result.cv_method == "group_timeseries"
+        assert result.cv_method == "walk_forward"
 
     def test_temporal_ordering_preserved(self):
         """Train events should always be earlier than val events."""
@@ -165,7 +169,7 @@ class TestGroupTimeseriesCV:
 
         event_ids = np.array([f"evt_{i}" for i in range(n_events) for _ in range(rows_per_event)])
 
-        config = self._make_config(n_folds=3)
+        config = self._make_config()
 
         fold_splits = []
 
@@ -190,20 +194,19 @@ class TestGroupTimeseriesCV:
                 f"Fold {i} train size ({fold_splits[i][0]}) > fold {i + 1} ({fold_splits[i + 1][0]})"
             )
 
-    def test_group_timeseries_with_no_event_ids_falls_back_to_timeseries(self):
-        """group_timeseries without event_ids warns and falls back to timeseries CV."""
+    def test_walk_forward_with_no_event_ids_falls_back_to_timeseries(self):
+        """walk_forward without event_ids warns and falls back to timeseries CV."""
         n_rows = 20
         n_features = 3
         X = np.random.randn(n_rows, n_features).astype(np.float32)
         y = np.random.randn(n_rows).astype(np.float32)
         feature_names = [f"f_{i}" for i in range(n_features)]
 
-        config = self._make_config(n_folds=3)
+        config = self._make_config()
         strategy = self._make_mock_strategy()
 
         result = run_cv(strategy, config, X, y, feature_names, event_ids=None)
         assert isinstance(result, CVResult)
-        assert result.n_folds == 3
         assert result.cv_method == "timeseries"
 
     def test_fold_results_populated(self):
@@ -218,12 +221,13 @@ class TestGroupTimeseriesCV:
         feature_names = [f"f_{i}" for i in range(n_features)]
         event_ids = np.array([f"evt_{i}" for i in range(n_events) for _ in range(rows_per_event)])
 
-        config = self._make_config(n_folds=3)
+        # min_train=2, val_step=1 → 2 folds for 4 events
+        config = self._make_config()
         strategy = self._make_mock_strategy()
 
         result = run_cv(strategy, config, X, y, feature_names, event_ids=event_ids)
 
-        assert len(result.fold_results) == 3
+        assert len(result.fold_results) == 2
         for fold in result.fold_results:
             assert fold.n_train > 0
             assert fold.n_val > 0
