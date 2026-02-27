@@ -81,7 +81,7 @@ class TestDataConfig:
         assert config.start_date == date(2024, 1, 1)
         assert config.end_date == date(2024, 12, 31)
         assert config.test_split == 0.2
-        assert config.validation_split == 0.1
+        assert config.validation_split == 0.0
         assert config.random_seed == 42
         assert config.shuffle is True
 
@@ -92,6 +92,7 @@ class TestDataConfig:
             end_date=date(2024, 12, 31),
             test_split=0.3,
             validation_split=0.15,
+            use_kfold=False,
         )
         assert config.test_split == 0.3
         assert config.validation_split == 0.15
@@ -166,19 +167,16 @@ class TestDataConfig:
         assert config.n_folds == 10
         assert config.kfold_shuffle is False
 
-    def test_kfold_ignores_validation_split(self):
-        """Test that validation_split check is skipped when use_kfold is True."""
-        # This should NOT raise even though test_split + validation_split >= 1.0
-        # because validation_split is ignored when use_kfold=True
-        config = DataConfig(
-            start_date=date(2024, 1, 1),
-            end_date=date(2024, 12, 31),
-            test_split=0.2,
-            validation_split=0.9,  # Would exceed 1.0 normally
-            use_kfold=True,
-        )
-        assert config.use_kfold is True
-        assert config.validation_split == 0.9  # Still stored, just ignored
+    def test_kfold_rejects_nonzero_validation_split(self):
+        """Test that validation_split > 0 raises when use_kfold is True."""
+        with pytest.raises(ValueError, match="validation_split must be 0"):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                test_split=0.2,
+                validation_split=0.1,
+                use_kfold=True,
+            )
 
     def test_kfold_n_folds_bounds(self):
         """Test n_folds boundary validation."""

@@ -342,6 +342,7 @@ class TestPrepareTrainingDataFromConfig:
                     end_date=date(2024, 10, 31),
                     test_split=0.2,
                     validation_split=0.1,
+                    use_kfold=False,
                     random_seed=42,
                 ),
                 model=XGBoostConfig(n_estimators=100),

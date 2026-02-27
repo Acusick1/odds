@@ -817,6 +817,7 @@ class TestWalkForwardCV:
                 features=FeatureConfig(),
             ),
         )
+
     @pytest.fixture
     def sliding_config(self) -> MLTrainingConfig:
         """Config with cv_method='walk_forward', sliding."""

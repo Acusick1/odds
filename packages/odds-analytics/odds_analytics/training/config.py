@@ -169,11 +169,11 @@ class DataConfig(BaseModel):
         description="Fraction of data to use for testing (0.0 to 1.0)",
     )
     validation_split: float = Field(
-        default=0.1,
+        default=0.0,
         ge=0.0,
         le=1.0,
         description="Fraction of training data to use for validation (0.0 to 1.0). "
-        "Ignored when use_kfold=True.",
+        "Must be 0 when use_kfold=True.",
     )
     random_seed: int = Field(
         default=42,
@@ -243,8 +243,12 @@ class DataConfig(BaseModel):
     @model_validator(mode="after")
     def validate_splits(self) -> DataConfig:
         """Ensure splits don't exceed 1.0 in total."""
-        # When using kfold, validation_split is ignored
         if self.use_kfold:
+            if self.validation_split > 0:
+                raise ValueError(
+                    "validation_split must be 0 when use_kfold=True. "
+                    "Cross-validation provides its own validation folds."
+                )
             return self
 
         total = self.test_split + self.validation_split
