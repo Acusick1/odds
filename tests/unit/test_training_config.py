@@ -81,7 +81,7 @@ class TestDataConfig:
         assert config.start_date == date(2024, 1, 1)
         assert config.end_date == date(2024, 12, 31)
         assert config.test_split == 0.2
-        assert config.validation_split == 0.1
+        assert config.validation_split == 0.0
         assert config.random_seed == 42
         assert config.shuffle is True
 
@@ -92,6 +92,7 @@ class TestDataConfig:
             end_date=date(2024, 12, 31),
             test_split=0.3,
             validation_split=0.15,
+            use_kfold=False,
         )
         assert config.test_split == 0.3
         assert config.validation_split == 0.15
@@ -166,19 +167,16 @@ class TestDataConfig:
         assert config.n_folds == 10
         assert config.kfold_shuffle is False
 
-    def test_kfold_ignores_validation_split(self):
-        """Test that validation_split check is skipped when use_kfold is True."""
-        # This should NOT raise even though test_split + validation_split >= 1.0
-        # because validation_split is ignored when use_kfold=True
-        config = DataConfig(
-            start_date=date(2024, 1, 1),
-            end_date=date(2024, 12, 31),
-            test_split=0.2,
-            validation_split=0.9,  # Would exceed 1.0 normally
-            use_kfold=True,
-        )
-        assert config.use_kfold is True
-        assert config.validation_split == 0.9  # Still stored, just ignored
+    def test_kfold_rejects_nonzero_validation_split(self):
+        """Test that validation_split > 0 raises when use_kfold is True."""
+        with pytest.raises(ValueError, match="validation_split must be 0"):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                test_split=0.2,
+                validation_split=0.1,
+                use_kfold=True,
+            )
 
     def test_kfold_n_folds_bounds(self):
         """Test n_folds boundary validation."""
@@ -275,6 +273,90 @@ class TestDataConfig:
         )
         assert config.cv_method == "timeseries"
         assert config.kfold_shuffle is True  # Stored but ignored for timeseries
+
+    def test_walk_forward_requires_min_train_events(self):
+        """walk_forward without min_train_events raises."""
+        with pytest.raises(ValueError, match="min_train_events"):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                cv_method="walk_forward",
+                val_step_events=200,
+            )
+
+    def test_walk_forward_requires_val_step_events(self):
+        """walk_forward without val_step_events raises."""
+        with pytest.raises(ValueError, match="val_step_events"):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                cv_method="walk_forward",
+                min_train_events=500,
+            )
+
+    def test_sliding_requires_max_train_events(self):
+        """sliding window without max_train_events raises."""
+        with pytest.raises(ValueError, match="max_train_events"):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                cv_method="walk_forward",
+                window_type="sliding",
+                min_train_events=500,
+                val_step_events=200,
+            )
+
+    def test_max_train_less_than_min_train_raises(self):
+        """max_train_events < min_train_events raises."""
+        with pytest.raises(ValueError, match="max_train_events.*must be >="):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                cv_method="walk_forward",
+                window_type="sliding",
+                min_train_events=500,
+                val_step_events=200,
+                max_train_events=300,
+            )
+
+    def test_non_walk_forward_accepts_none_fields(self):
+        """Non-walk_forward methods accept None walk_forward fields."""
+        for method in ("kfold", "timeseries"):
+            config = DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                cv_method=method,
+            )
+            assert config.min_train_events is None
+            assert config.val_step_events is None
+            assert config.max_train_events is None
+
+    def test_walk_forward_valid_expanding(self):
+        """Valid expanding walk_forward config creates successfully."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            cv_method="walk_forward",
+            min_train_events=500,
+            val_step_events=200,
+        )
+        assert config.window_type == "expanding"
+        assert config.min_train_events == 500
+        assert config.val_step_events == 200
+
+    def test_walk_forward_valid_sliding(self):
+        """Valid sliding walk_forward config creates successfully."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            cv_method="walk_forward",
+            window_type="sliding",
+            min_train_events=500,
+            val_step_events=200,
+            max_train_events=1000,
+        )
+        assert config.window_type == "sliding"
+        assert config.max_train_events == 1000
 
 
 # =============================================================================

@@ -64,6 +64,7 @@ __all__ = [
     "CVFoldResult",
     "CVResult",
     "TrainableStrategy",
+    "make_walk_forward_splits",
     "run_cv",
     "train_with_cv",
 ]
@@ -121,7 +122,7 @@ class CVResult:
     fold_results: list[CVFoldResult]
     n_folds: int
     random_seed: int
-    cv_method: Literal["kfold", "timeseries", "group_timeseries"] = "kfold"
+    cv_method: Literal["kfold", "timeseries", "walk_forward"] = "kfold"
     _val_mse_stats: tuple[float, float] = field(init=False, repr=False)
     _val_mae_stats: tuple[float, float] = field(init=False, repr=False)
     _val_r2_stats: tuple[float, float] = field(init=False, repr=False)
@@ -250,35 +251,69 @@ class CVResult:
         }
 
 
-def make_group_timeseries_splits(
+def make_walk_forward_splits(
     event_ids: np.ndarray,
-    n_folds: int,
+    min_train_events: int,
+    val_step_events: int,
+    window_type: str = "expanding",
+    max_train_events: int | None = None,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Return walk-forward row-level splits grouped by event boundary.
+    """Return walk-forward row-level splits with configurable step size.
 
-    Splits on unique event IDs using TimeSeriesSplit, then expands each
-    event-level split back to row indices. Assumes event_ids are ordered
-    chronologically (as returned by prepare_training_data).
+    Walks forward through chronologically-ordered events, building train/val
+    splits where each validation window contains exactly val_step_events events.
+    Training window either expands (expanding) or slides (sliding, capped at
+    max_train_events).
 
     Args:
         event_ids: Per-row event identifiers in chronological order.
-        n_folds: Number of CV folds.
+        min_train_events: Minimum number of events in the first training fold.
+        val_step_events: Number of events per validation fold.
+        window_type: "expanding" or "sliding".
+        max_train_events: Cap for sliding window (required when window_type="sliding").
 
     Returns:
         List of (train_row_indices, val_row_indices) tuples, one per fold.
+
+    Raises:
+        ValueError: If not enough events for at least one fold.
     """
-    unique_events = list(dict.fromkeys(event_ids))  # preserve chronological order
-    event_indices = np.arange(len(unique_events))
-    splits = []
-    for ev_train_idx, ev_val_idx in TimeSeriesSplit(n_splits=n_folds).split(event_indices):
-        train_events = {unique_events[i] for i in ev_train_idx}
-        val_events = {unique_events[i] for i in ev_val_idx}
-        splits.append(
-            (
-                np.where([eid in train_events for eid in event_ids])[0],
-                np.where([eid in val_events for eid in event_ids])[0],
-            )
+    unique_events = list(dict.fromkeys(event_ids))
+    n_events = len(unique_events)
+
+    if n_events < min_train_events + val_step_events:
+        raise ValueError(
+            f"Not enough events ({n_events}) for walk_forward CV: need at least "
+            f"min_train_events ({min_train_events}) + val_step_events ({val_step_events}) "
+            f"= {min_train_events + val_step_events}"
         )
+
+    # Build event -> row indices mapping
+    event_to_rows: dict[object, list[int]] = {}
+    for row_idx, eid in enumerate(event_ids):
+        event_to_rows.setdefault(eid, []).append(row_idx)
+
+    splits: list[tuple[np.ndarray, np.ndarray]] = []
+    val_start = min_train_events
+
+    while val_start + val_step_events <= n_events:
+        val_end = val_start + val_step_events
+
+        # Determine training window
+        if window_type == "sliding" and max_train_events is not None:
+            train_start = max(0, val_start - max_train_events)
+        else:
+            train_start = 0
+
+        train_events = unique_events[train_start:val_start]
+        val_events = unique_events[val_start:val_end]
+
+        train_rows = np.array([r for eid in train_events for r in event_to_rows[eid]])
+        val_rows = np.array([r for eid in val_events for r in event_to_rows[eid]])
+
+        splits.append((train_rows, val_rows))
+        val_start = val_end
+
     return splits
 
 
@@ -334,28 +369,42 @@ def run_cv(
     shuffle = data_config.kfold_shuffle
     random_seed = data_config.random_seed
 
-    # Select cross-validation splitter based on method
-    if cv_method == "group_timeseries" and event_ids is None:
+    # Fallback: event-grouped methods require event_ids
+    if cv_method == "walk_forward" and event_ids is None:
         logger.warning(
-            "group_timeseries_missing_event_ids",
-            message="cv_method='group_timeseries' but event_ids not provided. "
+            "walk_forward_missing_event_ids",
+            message="cv_method='walk_forward' but event_ids not provided. "
             "Falling back to standard timeseries CV.",
         )
         cv_method = "timeseries"
 
-    if cv_method == "group_timeseries" and event_ids is not None:
-        group_splits = make_group_timeseries_splits(event_ids, n_folds)
+    # Select cross-validation splitter based on method
+    if cv_method == "walk_forward":
+        assert event_ids is not None  # guarded by fallback above
+        assert data_config.min_train_events is not None  # guaranteed by validate_walk_forward
+        assert data_config.val_step_events is not None
+        wf_splits = make_walk_forward_splits(
+            event_ids=event_ids,
+            min_train_events=data_config.min_train_events,
+            val_step_events=data_config.val_step_events,
+            window_type=data_config.window_type,
+            max_train_events=data_config.max_train_events,
+        )
+        n_folds = len(wf_splits)
 
         logger.info(
-            "starting_group_timeseries_cv",
+            "starting_walk_forward_cv",
             n_folds=n_folds,
             n_samples=len(X),
-            n_events=len(dict.fromkeys(event_ids)),
+            n_events=len(dict.fromkeys(event_ids)),  # type: ignore[arg-type]
             n_features=len(feature_names),
             cv_method=cv_method,
+            window_type=data_config.window_type,
+            min_train_events=data_config.min_train_events,
+            val_step_events=data_config.val_step_events,
         )
 
-        fold_iter: list[tuple[np.ndarray, np.ndarray]] = group_splits
+        fold_iter: list[tuple[np.ndarray, np.ndarray]] = wf_splits
 
     elif cv_method == "timeseries":
         if shuffle:

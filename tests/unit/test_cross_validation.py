@@ -27,6 +27,7 @@ from odds_analytics.training import (
     XGBoostConfig,
     run_cv,
 )
+from odds_analytics.training.cross_validation import make_walk_forward_splits
 
 # =============================================================================
 # CVFoldResult Tests
@@ -577,6 +578,130 @@ class TestTimeSeriesCV:
         assert fold_indices[1]["n_train"] < fold_indices[2]["n_train"]
 
 
+# =============================================================================
+# make_walk_forward_splits Tests
+# =============================================================================
+
+
+MOCK_HISTORY = {
+    "train_mse": 0.01,
+    "train_mae": 0.05,
+    "train_r2": 0.9,
+    "val_mse": 0.02,
+    "val_mae": 0.08,
+    "val_r2": 0.8,
+}
+
+
+class TestMakeWalkForwardSplits:
+    """Tests for make_walk_forward_splits function."""
+
+    def test_expanding_basic(self):
+        """Expanding window produces correct fold count and indices."""
+        # 10 events, 1 row each, min_train=6, val_step=2 → 2 folds
+        event_ids = np.array([f"e{i}" for i in range(10)])
+        splits = make_walk_forward_splits(event_ids, min_train_events=6, val_step_events=2)
+        assert len(splits) == 2
+        # Fold 0: train [0..5], val [6,7]
+        np.testing.assert_array_equal(splits[0][0], np.arange(6))
+        np.testing.assert_array_equal(splits[0][1], np.array([6, 7]))
+        # Fold 1: train [0..7], val [8,9]
+        np.testing.assert_array_equal(splits[1][0], np.arange(8))
+        np.testing.assert_array_equal(splits[1][1], np.array([8, 9]))
+
+    def test_sliding_basic(self):
+        """Sliding window caps training set at max_train_events."""
+        event_ids = np.array([f"e{i}" for i in range(10)])
+        splits = make_walk_forward_splits(
+            event_ids,
+            min_train_events=4,
+            val_step_events=2,
+            window_type="sliding",
+            max_train_events=5,
+        )
+        # Fold 0: val_start=4, train [0..3] (4 events), val [4,5]
+        # Fold 1: val_start=6, train [1..5] (5 capped), val [6,7]
+        # Fold 2: val_start=8, train [3..7] (5 capped), val [8,9]
+        assert len(splits) == 3
+        assert len(splits[0][0]) == 4  # min_train < max, so just 4
+        assert len(splits[1][0]) == 5  # capped at 5
+        assert len(splits[2][0]) == 5  # capped at 5
+
+    def test_multi_row_events(self):
+        """Events with multiple rows are kept together."""
+        # 4 events, 2 rows each = 8 rows total
+        event_ids = np.array(["e0", "e0", "e1", "e1", "e2", "e2", "e3", "e3"])
+        splits = make_walk_forward_splits(event_ids, min_train_events=2, val_step_events=1)
+        # Fold 0: train events [e0,e1] → rows [0,1,2,3], val event [e2] → rows [4,5]
+        # Fold 1: train events [e0,e1,e2] → rows [0..5], val event [e3] → rows [6,7]
+        assert len(splits) == 2
+        np.testing.assert_array_equal(splits[0][0], np.array([0, 1, 2, 3]))
+        np.testing.assert_array_equal(splits[0][1], np.array([4, 5]))
+        np.testing.assert_array_equal(splits[1][0], np.array([0, 1, 2, 3, 4, 5]))
+        np.testing.assert_array_equal(splits[1][1], np.array([6, 7]))
+
+    def test_expanding_train_grows_monotonically(self):
+        """Each expanding fold has strictly more training rows than the previous."""
+        event_ids = np.array([f"e{i}" for i in range(20)])
+        splits = make_walk_forward_splits(event_ids, min_train_events=8, val_step_events=3)
+        train_sizes = [len(s[0]) for s in splits]
+        for i in range(1, len(train_sizes)):
+            assert train_sizes[i] > train_sizes[i - 1]
+
+    def test_sliding_train_capped(self):
+        """Sliding window never exceeds max_train_events rows."""
+        event_ids = np.array([f"e{i}" for i in range(20)])
+        splits = make_walk_forward_splits(
+            event_ids,
+            min_train_events=5,
+            val_step_events=3,
+            window_type="sliding",
+            max_train_events=8,
+        )
+        for train_idx, _ in splits:
+            assert len(train_idx) <= 8
+
+    def test_not_enough_events_raises(self):
+        """Raises ValueError when fewer events than min_train + val_step."""
+        event_ids = np.array(["e0", "e1", "e2"])
+        with pytest.raises(ValueError, match="Not enough events"):
+            make_walk_forward_splits(event_ids, min_train_events=3, val_step_events=1)
+
+    def test_exact_fit_no_remainder(self):
+        """When events divide evenly, no events are dropped."""
+        # 10 events, min_train=4, val_step=3 → folds at [4..6], [7..9] = 2 folds
+        event_ids = np.array([f"e{i}" for i in range(10)])
+        splits = make_walk_forward_splits(event_ids, min_train_events=4, val_step_events=3)
+        assert len(splits) == 2
+        all_val = np.concatenate([s[1] for s in splits])
+        all_train_last = splits[-1][0]
+        all_covered = np.union1d(all_train_last, all_val)
+        np.testing.assert_array_equal(all_covered, np.arange(10))
+
+    def test_val_events_no_overlap(self):
+        """Validation events don't overlap across folds."""
+        event_ids = np.array([f"e{i}" for i in range(15)])
+        splits = make_walk_forward_splits(event_ids, min_train_events=5, val_step_events=3)
+        val_sets = [set(event_ids[s[1]]) for s in splits]
+        for i in range(len(val_sets)):
+            for j in range(i + 1, len(val_sets)):
+                assert val_sets[i].isdisjoint(val_sets[j])
+
+    def test_train_val_no_event_overlap_within_fold(self):
+        """No event appears in both train and val within the same fold."""
+        event_ids = np.array(["e0", "e0", "e1", "e1", "e2", "e2", "e3", "e3", "e4", "e4"])
+        splits = make_walk_forward_splits(event_ids, min_train_events=2, val_step_events=1)
+        for train_idx, val_idx in splits:
+            train_events = set(event_ids[train_idx])
+            val_events = set(event_ids[val_idx])
+            assert train_events.isdisjoint(val_events)
+
+
+# =============================================================================
+# Static Features CV Tests
+# =============================================================================
+
+
 class TestRunCVStaticFeatures:
     """Tests for static feature threading through run_cv."""
 
@@ -613,20 +738,9 @@ class TestRunCVStaticFeatures:
 
         def capture(**kwargs):
             calls.append(kwargs)
-            return {
-                "train_mse": 0.01,
-                "train_mae": 0.05,
-                "train_r2": 0.9,
-                "val_mse": 0.02,
-                "val_mae": 0.08,
-                "val_r2": 0.8,
-            }
+            return MOCK_HISTORY
 
         mock_strategy = MagicMock()
-        mock_strategy.train_from_config.side_effect = (
-            lambda **kw: capture(**kw) if kw else capture()
-        )
-        # Use side_effect that captures kwargs
         mock_strategy.train_from_config = MagicMock(side_effect=lambda **kw: capture(**kw))
 
         run_cv(
@@ -644,7 +758,6 @@ class TestRunCVStaticFeatures:
             assert "static_val" in call
             assert call["static_train"] is not None
             assert call["static_val"] is not None
-            # Dimensions should match X splits
             assert call["static_train"].shape[0] == call["X_train"].shape[0]
             assert call["static_val"].shape[0] == call["X_val"].shape[0]
             assert call["static_train"].shape[1] == 3
@@ -659,17 +772,7 @@ class TestRunCVStaticFeatures:
         calls = []
         mock_strategy = MagicMock()
         mock_strategy.train_from_config = MagicMock(
-            side_effect=lambda **kw: (
-                calls.append(kw)
-                or {
-                    "train_mse": 0.01,
-                    "train_mae": 0.05,
-                    "train_r2": 0.9,
-                    "val_mse": 0.02,
-                    "val_mae": 0.08,
-                    "val_r2": 0.8,
-                }
-            )
+            side_effect=lambda **kw: (calls.append(kw) or MOCK_HISTORY)
         )
 
         run_cv(
@@ -685,3 +788,142 @@ class TestRunCVStaticFeatures:
         for call in calls:
             assert call["static_train"] is None
             assert call["static_val"] is None
+
+
+# =============================================================================
+# Walk-Forward CV Integration Tests (through run_cv)
+# =============================================================================
+
+
+class TestWalkForwardCV:
+    """Integration tests for walk_forward CV through run_cv."""
+
+    @pytest.fixture
+    def walk_forward_config(self) -> MLTrainingConfig:
+        """Config with cv_method='walk_forward', expanding."""
+        return MLTrainingConfig(
+            experiment=ExperimentConfig(name="test_walk_forward"),
+            training=TrainingConfig(
+                strategy_type="xgboost_line_movement",
+                data=DataConfig(
+                    start_date=date(2024, 1, 1),
+                    end_date=date(2024, 12, 31),
+                    use_kfold=True,
+                    cv_method="walk_forward",
+                    min_train_events=6,
+                    val_step_events=2,
+                ),
+                model=XGBoostConfig(n_estimators=10, max_depth=3),
+                features=FeatureConfig(),
+            ),
+        )
+
+    @pytest.fixture
+    def sliding_config(self) -> MLTrainingConfig:
+        """Config with cv_method='walk_forward', sliding."""
+        return MLTrainingConfig(
+            experiment=ExperimentConfig(name="test_walk_forward_sliding"),
+            training=TrainingConfig(
+                strategy_type="xgboost_line_movement",
+                data=DataConfig(
+                    start_date=date(2024, 1, 1),
+                    end_date=date(2024, 12, 31),
+                    use_kfold=True,
+                    cv_method="walk_forward",
+                    window_type="sliding",
+                    min_train_events=4,
+                    val_step_events=2,
+                    max_train_events=6,
+                ),
+                model=XGBoostConfig(n_estimators=10, max_depth=3),
+                features=FeatureConfig(),
+            ),
+        )
+
+    def test_expanding_returns_cv_result(self, walk_forward_config):
+        """Expanding walk_forward through run_cv returns correct CVResult."""
+        # 10 events, 1 row each
+        X = np.random.randn(10, 3)
+        y = np.random.randn(10)
+        event_ids = np.array([f"e{i}" for i in range(10)])
+
+        mock_strategy = MagicMock()
+        mock_strategy.train_from_config.return_value = MOCK_HISTORY
+
+        result = run_cv(
+            strategy=mock_strategy,
+            config=walk_forward_config,
+            X=X,
+            y=y,
+            feature_names=["f1", "f2", "f3"],
+            event_ids=event_ids,
+        )
+
+        assert isinstance(result, CVResult)
+        assert result.cv_method == "walk_forward"
+        # 10 events, min_train=6, val_step=2 → 2 folds
+        assert result.n_folds == 2
+        assert len(result.fold_results) == 2
+
+    def test_sliding_returns_cv_result(self, sliding_config):
+        """Sliding walk_forward through run_cv returns correct CVResult."""
+        X = np.random.randn(10, 3)
+        y = np.random.randn(10)
+        event_ids = np.array([f"e{i}" for i in range(10)])
+
+        mock_strategy = MagicMock()
+        mock_strategy.train_from_config.return_value = MOCK_HISTORY
+
+        result = run_cv(
+            strategy=mock_strategy,
+            config=sliding_config,
+            X=X,
+            y=y,
+            feature_names=["f1", "f2", "f3"],
+            event_ids=event_ids,
+        )
+
+        assert isinstance(result, CVResult)
+        assert result.cv_method == "walk_forward"
+        # 10 events, min_train=4, val_step=2 → 3 folds
+        assert result.n_folds == 3
+
+    def test_no_event_ids_falls_back_to_timeseries(self, walk_forward_config):
+        """walk_forward without event_ids falls back to timeseries."""
+        X = np.random.randn(50, 3)
+        y = np.random.randn(50)
+
+        mock_strategy = MagicMock()
+        mock_strategy.train_from_config.return_value = MOCK_HISTORY
+
+        result = run_cv(
+            strategy=mock_strategy,
+            config=walk_forward_config,
+            X=X,
+            y=y,
+            feature_names=["f1", "f2", "f3"],
+            event_ids=None,
+        )
+
+        assert result.cv_method == "timeseries"
+
+    def test_derived_n_folds_matches_fold_count(self, walk_forward_config):
+        """n_folds in CVResult matches actual number of folds generated."""
+        X = np.random.randn(10, 3)
+        y = np.random.randn(10)
+        event_ids = np.array([f"e{i}" for i in range(10)])
+
+        mock_strategy = MagicMock()
+        mock_strategy.train_from_config.return_value = MOCK_HISTORY
+
+        result = run_cv(
+            strategy=mock_strategy,
+            config=walk_forward_config,
+            X=X,
+            y=y,
+            feature_names=["f1", "f2", "f3"],
+            event_ids=event_ids,
+        )
+
+        assert result.n_folds == len(result.fold_results)
+        assert mock_strategy.train_from_config.call_count == result.n_folds

@@ -22,8 +22,9 @@ training:
     random_seed: 42
     shuffle: false
     use_kfold: true
-    cv_method: group_timeseries
-    n_folds: 3
+    cv_method: walk_forward
+    min_train_events: 80
+    val_step_events: 15
     kfold_shuffle: false
   model:
     n_estimators: 50

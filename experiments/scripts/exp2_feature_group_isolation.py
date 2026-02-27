@@ -35,7 +35,7 @@ import seaborn as sns
 from odds_analytics.feature_groups import prepare_training_data
 from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
 from odds_analytics.training.config import MLTrainingConfig
-from odds_analytics.training.cross_validation import make_group_timeseries_splits
+from odds_analytics.training.cross_validation import make_walk_forward_splits
 from odds_analytics.training.data_preparation import filter_events_by_date_range
 from odds_core.database import async_session_maker
 from odds_core.models import EventStatus
@@ -93,12 +93,15 @@ def cross_validate(
     y: np.ndarray,
     event_ids: np.ndarray,
     model_factory: Callable[[], RegressorMixin],
-    n_folds: int = 3,
+    min_train_events: int = 100,
+    val_step_events: int = 50,
 ) -> dict[str, float]:
-    """Run group timeseries CV (walk-forward on event boundaries)."""
+    """Run walk-forward CV on event boundaries."""
     fold_metrics: list[dict[str, float]] = []
 
-    for train_idx, val_idx in make_group_timeseries_splits(event_ids, n_folds):
+    for train_idx, val_idx in make_walk_forward_splits(
+        event_ids, min_train_events=min_train_events, val_step_events=val_step_events
+    ):
         X_train, X_val = X[train_idx], X[val_idx]
         y_train, y_val = y[train_idx], y[val_idx]
 
@@ -257,7 +260,9 @@ def run_group_experiments(
 def compute_baselines(y: np.ndarray, event_ids: np.ndarray) -> dict[str, float]:
     """Compute predict-mean baseline using walk-forward event splits."""
     r2s, mses, maes = [], [], []
-    for train_idx, val_idx in make_group_timeseries_splits(event_ids, n_folds=3):
+    for train_idx, val_idx in make_walk_forward_splits(
+        event_ids, min_train_events=100, val_step_events=50
+    ):
         y_train, y_val = y[train_idx], y[val_idx]
         pred = np.full_like(y_val, y_train.mean())
         r2s.append(r2_score(y_val, pred))
@@ -367,11 +372,12 @@ def make_lstm_config() -> MLTrainingConfig:
 
     lstm_config.training.data.start_date = xgb_config.training.data.start_date
     lstm_config.training.data.end_date = xgb_config.training.data.end_date
-    lstm_config.training.data.cv_method = "group_timeseries"
-    lstm_config.training.data.n_folds = 3
+    lstm_config.training.data.cv_method = "walk_forward"
+    lstm_config.training.data.min_train_events = 100
+    lstm_config.training.data.val_step_events = 50
     lstm_config.training.data.shuffle = False
     # Match target type so MSE is on the same scale as tabular experiments
-    lstm_config.training.features.target_type = "devigged_pinnacle"
+    lstm_config.training.features.target_type = "devigged_bookmaker"
 
     return lstm_config
 

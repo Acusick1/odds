@@ -327,6 +327,74 @@ class TestPrepareTrainingDataFromConfig:
             assert result.masks_test is not None
 
     @pytest.mark.asyncio
+    async def test_validation_split_with_event_ids(self, mock_events):
+        """Test that validation split correctly slices event_ids_train."""
+        from odds_analytics.feature_groups import PreparedFeatureData
+
+        session = AsyncMock()
+
+        config = MLTrainingConfig(
+            experiment=ExperimentConfig(name="test_val_split", tags=["test"]),
+            training=TrainingConfig(
+                strategy_type="xgboost_line_movement",
+                data=DataConfig(
+                    start_date=date(2024, 10, 1),
+                    end_date=date(2024, 10, 31),
+                    test_split=0.2,
+                    validation_split=0.1,
+                    use_kfold=False,
+                    random_seed=42,
+                ),
+                model=XGBoostConfig(n_estimators=100),
+            ),
+        )
+
+        with (
+            patch(
+                "odds_analytics.training.data_preparation.filter_events_by_date_range"
+            ) as mock_filter,
+            patch("odds_analytics.feature_groups.prepare_training_data") as mock_prepare,
+        ):
+            mock_filter.return_value = mock_events
+            num_samples = 100
+            num_features = 7
+            X = np.random.randn(num_samples, num_features).astype(np.float32)
+            y = np.random.randn(num_samples).astype(np.float32)
+            feature_names = [f"feature_{i}" for i in range(num_features)]
+            event_ids = np.array([f"event_{i}" for i in range(num_samples)])
+            mock_prepare.return_value = PreparedFeatureData(
+                X=X,
+                y=y,
+                feature_names=feature_names,
+                masks=None,
+                event_ids=event_ids,
+            )
+
+            result = await prepare_training_data_from_config(config, session)
+
+            # event_ids_train must match X_train row count
+            assert result.event_ids_train is not None
+            assert len(result.event_ids_train) == result.num_train_samples
+
+            # All three splits should account for total samples
+            assert (
+                result.num_train_samples + result.num_val_samples + result.num_test_samples
+                == num_samples
+            )
+
+            # Validation set should be non-empty
+            assert result.num_val_samples > 0
+
+            # event_ids_val must match X_val row count
+            assert result.event_ids_val is not None
+            assert len(result.event_ids_val) == result.num_val_samples
+
+            # No event should appear in both train and val
+            train_events = set(result.event_ids_train)
+            val_events = set(result.event_ids_val)
+            assert train_events.isdisjoint(val_events)
+
+    @pytest.mark.asyncio
     async def test_no_events_raises_error(self, basic_xgboost_config):
         """Test that empty event list raises ValueError."""
         session = AsyncMock()

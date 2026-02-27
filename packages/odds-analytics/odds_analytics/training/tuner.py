@@ -709,6 +709,8 @@ def create_objective(
     precomputed_features: dict[tuple[str, ...], TrainingDataResult] | None = None,
     static_train: ndarray | None = None,
     static_val: ndarray | None = None,
+    event_ids_train: ndarray | None = None,
+    event_ids_val: ndarray | None = None,
 ) -> Callable[[Any], float]:
     """
     Create objective function for hyperparameter optimization.
@@ -845,6 +847,8 @@ def create_objective(
         trial_X_val, trial_y_val = X_val, y_val
         trial_feature_names = feature_names
         trial_static_train, trial_static_val = static_train, static_val
+        trial_event_ids = event_ids_train
+        trial_event_ids_val = event_ids_val
 
         if "feature_groups" in feature_params and precomputed_features is not None:
             fg_key = feature_params["feature_groups"]
@@ -857,6 +861,8 @@ def create_objective(
                 trial_feature_names = data.feature_names
                 trial_static_train = data.static_train
                 trial_static_val = data.static_val if data.num_val_samples > 0 else data.static_test
+                trial_event_ids = data.event_ids_train
+                trial_event_ids_val = data.event_ids_val
                 logger.debug(
                     "using_precomputed_features",
                     trial_number=trial.number,
@@ -958,6 +964,14 @@ def create_objective(
                     y_full = trial_y_train
                     static_full = trial_static_train
 
+                # Recombine event_ids (train + val, chronological order preserved)
+                event_ids_full = None
+                if trial_event_ids is not None:
+                    if trial_event_ids_val is not None:
+                        event_ids_full = np.concatenate([trial_event_ids, trial_event_ids_val])
+                    else:
+                        event_ids_full = trial_event_ids
+
                 logger.debug(
                     "using_cv_for_tuning",
                     trial_number=trial.number,
@@ -973,6 +987,7 @@ def create_objective(
                     y=y_full,
                     feature_names=trial_feature_names,
                     static_features=static_full,
+                    event_ids=event_ids_full,
                 )
 
                 # Log mean and std CV metrics if trial has set_user_attr (for MLflow logging)

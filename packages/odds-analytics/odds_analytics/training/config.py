@@ -169,11 +169,11 @@ class DataConfig(BaseModel):
         description="Fraction of data to use for testing (0.0 to 1.0)",
     )
     validation_split: float = Field(
-        default=0.1,
+        default=0.0,
         ge=0.0,
         le=1.0,
         description="Fraction of training data to use for validation (0.0 to 1.0). "
-        "Ignored when use_kfold=True.",
+        "Must be 0 when use_kfold=True.",
     )
     random_seed: int = Field(
         default=42,
@@ -190,12 +190,11 @@ class DataConfig(BaseModel):
         default=True,
         description="Enable cross-validation for model evaluation",
     )
-    cv_method: Literal["kfold", "timeseries", "group_timeseries"] = Field(
+    cv_method: Literal["kfold", "timeseries", "walk_forward"] = Field(
         default="timeseries",
-        description="Cross-validation method. 'timeseries' uses walk-forward validation "
-        "(recommended for temporal betting data), 'kfold' uses standard K-Fold, "
-        "'group_timeseries' uses walk-forward with event-level grouping "
-        "(required for multi-horizon data where events have multiple rows).",
+        description="Cross-validation method. 'timeseries' uses row-level walk-forward "
+        "(TimeSeriesSplit), 'kfold' uses standard K-Fold, "
+        "'walk_forward' uses event-grouped walk-forward with configurable step size.",
     )
     n_folds: int = Field(
         default=5,
@@ -207,6 +206,29 @@ class DataConfig(BaseModel):
         default=True,
         description="Whether to shuffle data before splitting into folds. "
         "Only applies when cv_method='kfold'; ignored for 'timeseries'.",
+    )
+
+    # Walk-forward CV settings
+    window_type: Literal["expanding", "sliding"] = Field(
+        default="expanding",
+        description="Training window type for walk_forward CV. "
+        "'expanding' grows the training set each fold, 'sliding' caps it at max_train_events.",
+    )
+    min_train_events: int | None = Field(
+        default=None,
+        ge=1,
+        description="Minimum number of events in the training set for walk_forward CV.",
+    )
+    max_train_events: int | None = Field(
+        default=None,
+        ge=1,
+        description="Maximum training events for sliding window. "
+        "Required when window_type='sliding'.",
+    )
+    val_step_events: int | None = Field(
+        default=None,
+        ge=1,
+        description="Number of events per validation fold for walk_forward CV.",
     )
 
     @model_validator(mode="after")
@@ -221,8 +243,12 @@ class DataConfig(BaseModel):
     @model_validator(mode="after")
     def validate_splits(self) -> DataConfig:
         """Ensure splits don't exceed 1.0 in total."""
-        # When using kfold, validation_split is ignored
         if self.use_kfold:
+            if self.validation_split > 0:
+                raise ValueError(
+                    "validation_split must be 0 when use_kfold=True. "
+                    "Cross-validation provides its own validation folds."
+                )
             return self
 
         total = self.test_split + self.validation_split
@@ -231,6 +257,26 @@ class DataConfig(BaseModel):
                 f"test_split ({self.test_split}) + validation_split ({self.validation_split}) "
                 f"= {total} must be less than 1.0"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_walk_forward(self) -> DataConfig:
+        """Validate walk_forward CV requires min_train_events and val_step_events."""
+        if self.cv_method != "walk_forward":
+            return self
+
+        if self.min_train_events is None:
+            raise ValueError("walk_forward CV requires min_train_events")
+        if self.val_step_events is None:
+            raise ValueError("walk_forward CV requires val_step_events")
+        if self.window_type == "sliding":
+            if self.max_train_events is None:
+                raise ValueError("sliding window requires max_train_events")
+            if self.max_train_events < self.min_train_events:
+                raise ValueError(
+                    f"max_train_events ({self.max_train_events}) must be >= "
+                    f"min_train_events ({self.min_train_events})"
+                )
         return self
 
 
@@ -606,10 +652,15 @@ class FeatureConfig(BaseModel):
     )
 
     # Target formulation
-    target_type: Literal["raw", "devigged_pinnacle"] = Field(
+    target_type: Literal["raw", "devigged_bookmaker"] = Field(
         default="raw",
         description="Target formulation. 'raw': avg implied prob delta at snapshot vs closing. "
-        "'devigged_pinnacle': Pinnacle close vs Pinnacle at snapshot, both devigged.",
+        "'devigged_bookmaker': bookmaker close vs bookmaker at snapshot, both devigged.",
+    )
+
+    target_bookmaker: str = Field(
+        default="pinnacle",
+        description="Bookmaker key for devigged target computation (used when target_type='devigged_bookmaker').",
     )
 
 
