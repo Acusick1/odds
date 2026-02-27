@@ -552,23 +552,35 @@ class LSTMLineMovementStrategy(BettingStrategy):
             self.model.load_state_dict(best_model_state)
             logger.info("restored_best_model", val_loss=best_val_loss)
 
-        # Calculate final metrics using packed sequences
+        # Calculate final metrics using packed sequences (apply same
+        # min_valid_timesteps filter used during training)
         static_train_tensor = (
             torch.FloatTensor(static_train).to(self.device) if static_train is not None else None
         )
         train_lengths: torch.Tensor | None = None
+        y_train_final = y_train
         if masks is not None:
             masks_tensor = torch.BoolTensor(masks).to(self.device)
             X_tensor, train_lengths = _compact_sequences(X_tensor, masks_tensor)
+            train_keep = train_lengths >= min_valid_timesteps
+            if not train_keep.all():
+                X_tensor = X_tensor[train_keep]
+                train_lengths = train_lengths[train_keep]
+                y_train_final = y_train[train_keep.cpu().numpy()]
+                if static_train_tensor is not None:
+                    static_train_tensor = static_train_tensor[train_keep]
 
         self.model.eval()
-        with torch.no_grad():
-            train_preds = (
-                self.model(X_tensor, static_features=static_train_tensor, lengths=train_lengths)
-                .cpu()
-                .numpy()
-            )
-            train_metrics = compute_regression_metrics(y_train, train_preds)
+        if X_tensor.size(0) > 0:
+            with torch.no_grad():
+                train_preds = (
+                    self.model(X_tensor, static_features=static_train_tensor, lengths=train_lengths)
+                    .cpu()
+                    .numpy()
+                )
+                train_metrics = compute_regression_metrics(y_train_final, train_preds)
+        else:
+            train_metrics = {"mse": float("nan"), "mae": float("nan"), "r2": float("nan")}
 
         history: dict[str, Any] = {
             "train_mse": train_metrics["mse"],
@@ -580,12 +592,29 @@ class LSTMLineMovementStrategy(BettingStrategy):
 
         if X_val_tensor is not None and y_val is not None:
             with torch.no_grad():
-                val_preds = (
-                    self.model(X_val_tensor, static_features=static_val_tensor, lengths=val_lengths)
-                    .cpu()
-                    .numpy()
-                )
-                val_metrics = compute_regression_metrics(y_val, val_preds)
+                f_X = X_val_tensor
+                f_y = y_val
+                f_static = static_val_tensor
+                f_lengths = val_lengths
+
+                if val_keep is not None and not val_keep.all():
+                    f_X = f_X[val_keep]
+                    f_lengths = f_lengths[val_keep] if f_lengths is not None else None
+                    f_y = f_y[val_keep.cpu().numpy()]
+                    if f_static is not None:
+                        f_static = f_static[val_keep]
+
+                if f_X.size(0) > 0:
+                    val_preds = (
+                        self.model(f_X, static_features=f_static, lengths=f_lengths).cpu().numpy()
+                    )
+                    val_metrics = compute_regression_metrics(f_y, val_preds)
+                else:
+                    val_metrics = {
+                        "mse": float("nan"),
+                        "mae": float("nan"),
+                        "r2": float("nan"),
+                    }
             history.update(
                 {
                     "val_mse": val_metrics["mse"],

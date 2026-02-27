@@ -933,9 +933,58 @@ class TestLSTMPackedSequences:
             masks=masks,
             min_valid_timesteps=2,
         )
-        # All samples filtered out — model trains on nothing, but doesn't crash
+        # All samples filtered out — model trains on nothing, but doesn't crash.
+        # Metrics are NaN because no valid samples remain for evaluation.
+        assert strategy.is_trained
+        assert np.isnan(history["train_mse"])
+
+    def test_final_metrics_exclude_filtered_samples(self):
+        """Final train/val metrics must apply the same min_valid_timesteps
+        filter used during the training loop — no crash on length=0 samples
+        and metrics are consistent with what was trained on."""
+        strategy = LSTMLineMovementStrategy(
+            lookback_hours=24,
+            timesteps=8,
+            hidden_size=16,
+            num_layers=1,
+            dropout=0.0,
+        )
+
+        n_train = 20
+        n_val = 10
+        timesteps = 8
+        input_size = strategy.input_size
+        np.random.seed(42)
+        X_train = np.random.randn(n_train, timesteps, input_size).astype(np.float32)
+        y_train = np.random.randn(n_train).astype(np.float32) * 0.05
+        X_val = np.random.randn(n_val, timesteps, input_size).astype(np.float32)
+        y_val = np.random.randn(n_val).astype(np.float32) * 0.05
+
+        # Half valid (3 timesteps), half insufficient (1 timestep)
+        masks_train = np.zeros((n_train, timesteps), dtype=bool)
+        masks_train[:10, :3] = True  # first 10 have 3 valid
+        masks_train[10:, 0] = True  # last 10 have only 1 valid
+
+        masks_val = np.zeros((n_val, timesteps), dtype=bool)
+        masks_val[:5, :3] = True
+        masks_val[5:, 0] = True  # insufficient
+
+        history = strategy._train_loop(
+            X_train,
+            y_train,
+            X_val,
+            y_val,
+            epochs=3,
+            batch_size=8,
+            learning_rate=0.001,
+            masks=masks_train,
+            masks_val=masks_val,
+            min_valid_timesteps=2,
+        )
+
         assert strategy.is_trained
         assert np.isfinite(history["train_mse"])
+        assert np.isfinite(history["val_mse"])
 
 
 class TestLSTMLineMovementWorkflow:
