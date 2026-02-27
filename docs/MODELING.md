@@ -6,11 +6,38 @@ Predict line movement: the delta between current fair price and closing fair pri
 
 We are in the **signal discovery** phase. No execution strategy until we have evidence of predictive signal.
 
+## Data Sources
+
+Two data sources with **non-overlapping bookmaker sets**:
+
+| | OddsPortal | Odds API |
+|--|-----------|----------|
+| **Events** | ~5,000 (5 NBA seasons, 2021-2026) | ~1,000 (Mar–Apr 2025 + Oct 2025 – Feb 2026) |
+| **Snapshots/event** | 2 (opening + closing) | 15+ avg (all tiers) |
+| **Bookmakers** | UK: bet365, betway, betfred, bwin | US: pinnacle, fanduel, draftkings, betmgm, bovada |
+| **Event ID pattern** | `op_YYYY-YYYY_AWAY_HOME_DATE` | hex UUID |
+| **Overlap** | 141 events matched to Odds API events (Oct 2025+) |
+
+### Config fields
+
+- `data_source`: `"oddsportal"`, `"oddsapi"`, `"all"`, or `null` (no filter). Filters by event ID prefix (`op_` = OddsPortal).
+- `min_snapshots`: Minimum snapshots per event (e.g., `min_snapshots: 5` for dense sequence data).
+- `start_date` / `end_date`: Date range filter (always required).
+
+### Which source for which experiment
+
+- **bet365 target** → `data_source: oddsportal` — bet365 only available from OddsPortal. ~5K events, 5 seasons. Best for tabular/injury features with 2-snapshot coverage.
+- **Pinnacle target** → `data_source: oddsapi` — Pinnacle only available from Odds API. ~1K events but dense snapshots. Best for LSTM/sequence features.
+- **LSTM experiments** → also set `min_snapshots: 5` (or higher) to ensure sufficient sequence data.
+- `target_bookmaker` must belong to the corresponding source's bookmaker set.
+
 ## Target Definition
 
-**Devigged Pinnacle CLV delta**: `pinnacle_fair_close - pinnacle_fair_at_snapshot`
+**Devigged bookmaker CLV delta**: `fair_close - fair_at_snapshot` for a configured `target_bookmaker`.
 
-Why Pinnacle:
+The target bookmaker must belong to the data source's bookmaker set (see Data Sources above). Pinnacle is the default for Odds API data; bet365 for OddsPortal data.
+
+Why Pinnacle (when available):
 - Sharpest bookmaker — closest to true market probability
 - Proportional devigging removes ~2% vig cleanly
 - 32% lower variance than raw consensus target (multi-book average)
@@ -222,3 +249,7 @@ Every experiment must produce:
 | 2026-02-20 | XGBoost + injuries/rest | tabular 4 + injury 6 + rest 5 + timing 3 | devigged pinnacle | 800 events | val R²=0.050, CV R²=0.020±0.025 | First positive signal | 100-trial Optuna; injuries 55% importance; 6 dead features |
 | 2026-02-21 | LSTM seq-only | 15 seq features × 24 timesteps | devigged pinnacle | 800 events | CV R²=-0.010±0.039 | No signal | 100-trial Optuna; best: hidden=48, layers=2 |
 | 2026-02-21 | LSTM + static branch | 15 seq + 17 static (tab+inj+rest) | devigged pinnacle | 800 events | CV R²=-0.122±0.115 | Worse than seq-only | Static features increase overfitting; XGBoost remains best |
+| 2026-02-27 | XGBoost bet365 tuned | tabular 4 + injury 6 | devigged bet365 | ~5K events (OddsPortal) | CV R²=0.036±0.033 | Plateau at ~3.6% | 11-fold walk-forward; injuries add zero over tabular-only |
+| 2026-02-27 | XGBoost bet365 baseline tuned | tabular 4 | devigged bet365 | ~5K events (OddsPortal) | CV R²=0.036±0.028 | Same as +injuries | Confirms injuries are noise; public features plateau |
+| 2026-02-27 | LSTM mask fix | 15 seq features × 8 timesteps | devigged pinnacle | ~1K events (Odds API) | — | Bug fix | Packed sequences for correct mask application (#162) |
+| 2026-02-27 | LSTM Pinnacle pilot | 15 seq × 8 timesteps | devigged pinnacle | ~1K events (Odds API) | In progress | Pilot | First LSTM run with correct masking + oddsapi source filter |

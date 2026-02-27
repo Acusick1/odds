@@ -358,6 +358,85 @@ class TestDataConfig:
         assert config.window_type == "sliding"
         assert config.max_train_events == 1000
 
+    def test_data_source_defaults_to_none(self):
+        """data_source defaults to None (no filter)."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+        )
+        assert config.data_source is None
+
+    def test_data_source_valid_values(self):
+        """data_source accepts all valid literal values."""
+        for value in ("all", "oddsportal", "oddsapi"):
+            config = DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                data_source=value,
+            )
+            assert config.data_source == value
+
+    def test_data_source_invalid_value(self):
+        """data_source rejects invalid values."""
+        with pytest.raises(ValueError):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                data_source="invalid",
+            )
+
+    def test_min_snapshots_defaults_to_none(self):
+        """min_snapshots defaults to None (no filter)."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+        )
+        assert config.min_snapshots is None
+
+    def test_min_snapshots_valid(self):
+        """min_snapshots accepts positive integers."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            min_snapshots=5,
+        )
+        assert config.min_snapshots == 5
+
+    def test_min_snapshots_rejects_zero(self):
+        """min_snapshots rejects 0 (ge=1)."""
+        with pytest.raises(ValueError):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                min_snapshots=0,
+            )
+
+    def test_data_source_in_yaml_roundtrip(self):
+        """data_source and min_snapshots survive YAML serialization."""
+        config = MLTrainingConfig(
+            experiment=ExperimentConfig(name="test"),
+            training=TrainingConfig(
+                strategy_type="xgboost_line_movement",
+                data=DataConfig(
+                    start_date=date(2024, 1, 1),
+                    end_date=date(2024, 12, 31),
+                    data_source="oddsportal",
+                    min_snapshots=3,
+                ),
+                model=XGBoostConfig(n_estimators=100),
+            ),
+        )
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            config.to_yaml(f.name)
+            loaded = MLTrainingConfig.from_yaml(f.name)
+            Path(f.name).unlink()
+
+        assert loaded.training.data.data_source == "oddsportal"
+        assert loaded.training.data.min_snapshots == 3
+
 
 # =============================================================================
 # XGBoostConfig Tests

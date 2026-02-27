@@ -35,6 +35,7 @@ Example usage:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 import numpy as np
 import structlog
@@ -195,6 +196,8 @@ async def filter_events_by_date_range(
     start_date: datetime,
     end_date: datetime,
     status: EventStatus = EventStatus.FINAL,
+    data_source: Literal["oddsportal", "oddsapi"] | None = None,
+    min_snapshots: int | None = None,
 ) -> list[Event]:
     """
     Filter events by date range from the database.
@@ -204,25 +207,30 @@ async def filter_events_by_date_range(
         start_date: Start date (inclusive)
         end_date: End date (inclusive)
         status: Event status to filter by (default: FINAL)
+        data_source: Filter by data source ('oddsportal', 'oddsapi', or None)
+        min_snapshots: Minimum number of snapshots required per event
 
     Returns:
         List of Event objects within the date range
-
-    Example:
-        >>> from datetime import date
-        >>> start = datetime(2024, 10, 1, tzinfo=timezone.utc)
-        >>> end = datetime(2024, 12, 31, tzinfo=timezone.utc)
-        >>> events = await filter_events_by_date_range(session, start, end)
     """
     from odds_lambda.storage.readers import OddsReader
 
     reader = OddsReader(session)
 
+    # oddsportal events use 'op_' ID prefix; push to SQL for efficiency
+    event_id_pattern = "op_%" if data_source == "oddsportal" else None
+
     events = await reader.get_events_by_date_range(
         start_date=start_date,
         end_date=end_date,
         status=status,
+        event_id_pattern=event_id_pattern,
+        min_snapshots=min_snapshots,
     )
+
+    # oddsapi = everything that isn't oddsportal; filter in-memory
+    if data_source == "oddsapi":
+        events = [e for e in events if not e.id.startswith("op_")]
 
     logger.info(
         "filtered_events_by_date_range",
@@ -230,6 +238,8 @@ async def filter_events_by_date_range(
         end_date=end_date.isoformat(),
         num_events=len(events),
         status=status.value,
+        data_source=data_source,
+        min_snapshots=min_snapshots,
     )
 
     return events
@@ -296,12 +306,19 @@ async def prepare_training_data_from_config(
         tzinfo=UTC,
     )
 
+    # Normalize data_source: treat "all" as None (no filter)
+    data_source = data_config.data_source
+    if data_source == "all":
+        data_source = None
+
     # Filter events by date range
     events = await filter_events_by_date_range(
         session=session,
         start_date=start_datetime,
         end_date=end_datetime,
         status=EventStatus.FINAL,
+        data_source=data_source,
+        min_snapshots=data_config.min_snapshots,
     )
 
     if not events:
