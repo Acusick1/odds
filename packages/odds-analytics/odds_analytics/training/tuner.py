@@ -707,6 +707,8 @@ def create_objective(
     X_val: ndarray | None = None,
     y_val: ndarray | None = None,
     precomputed_features: dict[tuple[str, ...], TrainingDataResult] | None = None,
+    static_train: ndarray | None = None,
+    static_val: ndarray | None = None,
 ) -> Callable[[Any], float]:
     """
     Create objective function for hyperparameter optimization.
@@ -842,6 +844,7 @@ def create_objective(
         trial_X_train, trial_y_train = X_train, y_train
         trial_X_val, trial_y_val = X_val, y_val
         trial_feature_names = feature_names
+        trial_static_train, trial_static_val = static_train, static_val
 
         if "feature_groups" in feature_params and precomputed_features is not None:
             fg_key = feature_params["feature_groups"]
@@ -852,6 +855,8 @@ def create_objective(
                 trial_X_val = data.X_val if data.num_val_samples > 0 else data.X_test
                 trial_y_val = data.y_val if data.num_val_samples > 0 else data.y_test
                 trial_feature_names = data.feature_names
+                trial_static_train = data.static_train
+                trial_static_val = data.static_val if data.num_val_samples > 0 else data.static_test
                 logger.debug(
                     "using_precomputed_features",
                     trial_number=trial.number,
@@ -943,9 +948,15 @@ def create_objective(
                 if trial_X_val is not None and trial_y_val is not None:
                     X_full = np.vstack([trial_X_train, trial_X_val])
                     y_full = np.concatenate([trial_y_train, trial_y_val])
+                    static_full = (
+                        np.vstack([trial_static_train, trial_static_val])
+                        if trial_static_train is not None and trial_static_val is not None
+                        else trial_static_train
+                    )
                 else:
                     X_full = trial_X_train
                     y_full = trial_y_train
+                    static_full = trial_static_train
 
                 logger.debug(
                     "using_cv_for_tuning",
@@ -961,6 +972,7 @@ def create_objective(
                     X=X_full,
                     y=y_full,
                     feature_names=trial_feature_names,
+                    static_features=static_full,
                 )
 
                 # Log mean and std CV metrics if trial has set_user_attr (for MLflow logging)
@@ -1019,6 +1031,8 @@ def create_objective(
                     X_val=trial_X_val,
                     y_val=trial_y_val,
                     trial=trial,  # Pass trial for pruning support
+                    static_train=trial_static_train,
+                    static_val=trial_static_val,
                 )
 
                 # Extract metric value

@@ -233,6 +233,8 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             X_test=X_test,
                             y_test=y_test,
                             event_ids=getattr(data_result, "event_ids_train", None),
+                            static_features=data_result.static_train,
+                            static_test=data_result.static_test,
                         )
                     except Exception:
                         progress.stop()
@@ -262,6 +264,8 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             X_val=X_test,
                             y_val=y_test,
                             tracker=tracker,
+                            static_train=data_result.static_train,
+                            static_val=data_result.static_test,
                         )
                     except Exception:
                         progress.stop()
@@ -850,6 +854,10 @@ async def _run_tuning_async(
             X_val=X_val,
             y_val=y_val,
             precomputed_features=precomputed_features,
+            static_train=data_result.static_train,
+            static_val=data_result.static_val
+            if data_result.num_val_samples > 0
+            else data_result.static_test,
         )
 
         # Step 4: Run optimization
@@ -958,6 +966,10 @@ async def _run_tuning_async(
                         feature_names=data_result.feature_names,
                         X_val=X_val,
                         y_val=y_val,
+                        static_train=data_result.static_train,
+                        static_val=data_result.static_val
+                        if data_result.num_val_samples > 0
+                        else data_result.static_test,
                     )
                 except Exception:
                     progress.stop()

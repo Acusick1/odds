@@ -537,7 +537,7 @@ class TestTimeSeriesCV:
         # Track the indices used in each fold
         fold_indices = []
 
-        def capture_indices(config, X_train, y_train, feature_names, X_val, y_val):
+        def capture_indices(config, X_train, y_train, feature_names, X_val, y_val, **kwargs):
             # Store the original indices by comparing with full X
             fold_indices.append(
                 {
@@ -575,3 +575,113 @@ class TestTimeSeriesCV:
         # Training sizes should increase
         assert fold_indices[0]["n_train"] < fold_indices[1]["n_train"]
         assert fold_indices[1]["n_train"] < fold_indices[2]["n_train"]
+
+
+class TestRunCVStaticFeatures:
+    """Tests for static feature threading through run_cv."""
+
+    @pytest.fixture
+    def kfold_config(self) -> MLTrainingConfig:
+        return MLTrainingConfig(
+            experiment=ExperimentConfig(name="test_static_cv"),
+            training=TrainingConfig(
+                strategy_type="xgboost_line_movement",
+                data=DataConfig(
+                    start_date=date(2024, 1, 1),
+                    end_date=date(2024, 12, 31),
+                    use_kfold=True,
+                    cv_method="kfold",
+                    n_folds=3,
+                    kfold_shuffle=True,
+                    random_seed=42,
+                ),
+                model=XGBoostConfig(),
+                features=FeatureConfig(),
+            ),
+        )
+
+    def test_static_features_split_by_fold(self, kfold_config):
+        """Test that static_features are split alongside X/y per fold."""
+        np.random.seed(42)
+        n_samples = 60
+        X = np.random.randn(n_samples, 5)
+        y = np.random.randn(n_samples)
+        static = np.random.randn(n_samples, 3)
+        feature_names = [f"f{i}" for i in range(5)]
+
+        calls = []
+
+        def capture(**kwargs):
+            calls.append(kwargs)
+            return {
+                "train_mse": 0.01,
+                "train_mae": 0.05,
+                "train_r2": 0.9,
+                "val_mse": 0.02,
+                "val_mae": 0.08,
+                "val_r2": 0.8,
+            }
+
+        mock_strategy = MagicMock()
+        mock_strategy.train_from_config.side_effect = (
+            lambda **kw: capture(**kw) if kw else capture()
+        )
+        # Use side_effect that captures kwargs
+        mock_strategy.train_from_config = MagicMock(side_effect=lambda **kw: capture(**kw))
+
+        run_cv(
+            strategy=mock_strategy,
+            config=kfold_config,
+            X=X,
+            y=y,
+            feature_names=feature_names,
+            static_features=static,
+        )
+
+        assert len(calls) == 3
+        for call in calls:
+            assert "static_train" in call
+            assert "static_val" in call
+            assert call["static_train"] is not None
+            assert call["static_val"] is not None
+            # Dimensions should match X splits
+            assert call["static_train"].shape[0] == call["X_train"].shape[0]
+            assert call["static_val"].shape[0] == call["X_val"].shape[0]
+            assert call["static_train"].shape[1] == 3
+            assert call["static_val"].shape[1] == 3
+
+    def test_static_none_passes_none_to_folds(self, kfold_config):
+        """Test that static_features=None passes None to each fold."""
+        np.random.seed(42)
+        X = np.random.randn(60, 5)
+        y = np.random.randn(60)
+
+        calls = []
+        mock_strategy = MagicMock()
+        mock_strategy.train_from_config = MagicMock(
+            side_effect=lambda **kw: (
+                calls.append(kw)
+                or {
+                    "train_mse": 0.01,
+                    "train_mae": 0.05,
+                    "train_r2": 0.9,
+                    "val_mse": 0.02,
+                    "val_mae": 0.08,
+                    "val_r2": 0.8,
+                }
+            )
+        )
+
+        run_cv(
+            strategy=mock_strategy,
+            config=kfold_config,
+            X=X,
+            y=y,
+            feature_names=[f"f{i}" for i in range(5)],
+            static_features=None,
+        )
+
+        assert len(calls) == 3
+        for call in calls:
+            assert call["static_train"] is None
+            assert call["static_val"] is None

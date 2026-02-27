@@ -375,6 +375,8 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         y_val: np.ndarray | None = None,
         tracker: ExperimentTracker | None = None,
         trial: Any | None = None,
+        static_train: np.ndarray | None = None,
+        static_val: np.ndarray | None = None,
     ) -> dict[str, Any]:
         """
         Train XGBoost regressor using configuration object.
@@ -539,12 +541,25 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         X_test: np.ndarray | None = None,
         y_test: np.ndarray | None = None,
         event_ids: np.ndarray | None = None,
+        static_features: np.ndarray | None = None,
+        static_test: np.ndarray | None = None,
     ) -> tuple[dict[str, Any], CVResult]:
         from odds_analytics.training.cross_validation import (
             train_with_cv as _train_with_cv,
         )
 
-        return _train_with_cv(self, config, X, y, feature_names, X_test, y_test, event_ids)
+        return _train_with_cv(
+            self,
+            config,
+            X,
+            y,
+            feature_names,
+            X_test,
+            y_test,
+            event_ids,
+            static_features=static_features,
+            static_test=static_test,
+        )
 
     def save_model(self, filepath: str | Path) -> None:
         """
