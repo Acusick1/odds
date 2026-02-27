@@ -380,10 +380,13 @@ def run_cv(
 
     # Select cross-validation splitter based on method
     if cv_method == "walk_forward":
+        assert event_ids is not None  # guarded by fallback above
+        assert data_config.min_train_events is not None  # guaranteed by validate_walk_forward
+        assert data_config.val_step_events is not None
         wf_splits = make_walk_forward_splits(
-            event_ids=event_ids,  # type: ignore[arg-type]
-            min_train_events=data_config.min_train_events,  # type: ignore[arg-type]
-            val_step_events=data_config.val_step_events,  # type: ignore[arg-type]
+            event_ids=event_ids,
+            min_train_events=data_config.min_train_events,
+            val_step_events=data_config.val_step_events,
             window_type=data_config.window_type,
             max_train_events=data_config.max_train_events,
         )

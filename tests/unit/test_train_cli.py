@@ -57,7 +57,6 @@ def sample_config_with_tuning(tmp_path):
                 start_date="2024-10-01",
                 end_date="2024-12-31",
                 test_split=0.2,
-                validation_split=0.1,
                 random_seed=42,
             ),
             model=XGBoostConfig(

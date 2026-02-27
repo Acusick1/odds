@@ -385,13 +385,14 @@ class TestPrepareTrainingDataFromConfig:
             # Validation set should be non-empty
             assert result.num_val_samples > 0
 
+            # event_ids_val must match X_val row count
+            assert result.event_ids_val is not None
+            assert len(result.event_ids_val) == result.num_val_samples
+
             # No event should appear in both train and val
             train_events = set(result.event_ids_train)
-            val_event_ids = event_ids[
-                ~np.isin(event_ids, list(train_events))
-                & ~np.isin(event_ids, list(set(result.event_ids_test)))
-            ]
-            assert len(train_events & set(val_event_ids)) == 0
+            val_events = set(result.event_ids_val)
+            assert train_events.isdisjoint(val_events)
 
     @pytest.mark.asyncio
     async def test_no_events_raises_error(self, basic_xgboost_config):

@@ -377,7 +377,7 @@ def make_lstm_config() -> MLTrainingConfig:
     lstm_config.training.data.val_step_events = 50
     lstm_config.training.data.shuffle = False
     # Match target type so MSE is on the same scale as tabular experiments
-    lstm_config.training.features.target_type = "devigged_pinnacle"
+    lstm_config.training.features.target_type = "devigged_bookmaker"
 
     return lstm_config
 
