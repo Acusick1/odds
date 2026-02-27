@@ -185,6 +185,18 @@ class DataConfig(BaseModel):
         description="Whether to shuffle data before splitting",
     )
 
+    data_source: Literal["all", "oddsportal", "oddsapi"] | None = Field(
+        default=None,
+        description="Filter events by data source. 'oddsportal' = historical scrape "
+        "(op_ prefix), 'oddsapi' = live API. None or 'all' = no filter.",
+    )
+    min_snapshots: int | None = Field(
+        default=None,
+        ge=1,
+        description="Minimum number of snapshots required per event. "
+        "Useful for filtering to events with dense sequence data.",
+    )
+
     # Cross-Validation settings
     use_kfold: bool = Field(
         default=True,
@@ -483,6 +495,13 @@ class LSTMConfig(BaseModel):
         default=0.0001,
         ge=0.0,
         description="Minimum change to qualify as improvement",
+    )
+
+    # Sequence filtering
+    min_valid_timesteps: int = Field(
+        default=2,
+        ge=1,
+        description="Minimum valid (non-padded) timesteps required per sample",
     )
 
 

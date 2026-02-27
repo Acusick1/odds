@@ -595,6 +595,8 @@ class TestDateRangeFiltering:
                 start_date=start_date,
                 end_date=end_date,
                 status=EventStatus.FINAL,
+                event_id_pattern=None,
+                min_snapshots=None,
             )
 
     @pytest.mark.asyncio
@@ -619,3 +621,112 @@ class TestDateRangeFiltering:
 
             assert len(events) == 5
             assert events == expected_events
+
+    @pytest.mark.asyncio
+    async def test_filter_oddsportal_passes_pattern(self):
+        """data_source='oddsportal' passes event_id_pattern='op_%' to reader."""
+        session = AsyncMock()
+        start_date = datetime(2024, 10, 1, tzinfo=UTC)
+        end_date = datetime(2024, 10, 31, tzinfo=UTC)
+
+        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_cls:
+            mock_reader = MagicMock()
+            mock_reader.get_events_by_date_range = AsyncMock(return_value=[])
+            mock_reader_cls.return_value = mock_reader
+
+            await filter_events_by_date_range(
+                session=session,
+                start_date=start_date,
+                end_date=end_date,
+                data_source="oddsportal",
+            )
+
+            mock_reader.get_events_by_date_range.assert_called_once_with(
+                start_date=start_date,
+                end_date=end_date,
+                status=EventStatus.FINAL,
+                event_id_pattern="op_%",
+                min_snapshots=None,
+            )
+
+    @pytest.mark.asyncio
+    async def test_filter_oddsapi_excludes_op_prefix(self):
+        """data_source='oddsapi' filters out events with op_ prefix."""
+        session = AsyncMock()
+        start_date = datetime(2024, 10, 1, tzinfo=UTC)
+        end_date = datetime(2024, 10, 31, tzinfo=UTC)
+
+        op_event = MagicMock(spec=Event)
+        op_event.id = "op_2024-2025_LAL_BOS_20241015"
+        api_event = MagicMock(spec=Event)
+        api_event.id = "abc123-def456"
+
+        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_cls:
+            mock_reader = MagicMock()
+            mock_reader.get_events_by_date_range = AsyncMock(return_value=[op_event, api_event])
+            mock_reader_cls.return_value = mock_reader
+
+            events = await filter_events_by_date_range(
+                session=session,
+                start_date=start_date,
+                end_date=end_date,
+                data_source="oddsapi",
+            )
+
+            assert len(events) == 1
+            assert events[0].id == "abc123-def456"
+
+    @pytest.mark.asyncio
+    async def test_filter_min_snapshots_passed_to_reader(self):
+        """min_snapshots is forwarded to the reader."""
+        session = AsyncMock()
+        start_date = datetime(2024, 10, 1, tzinfo=UTC)
+        end_date = datetime(2024, 10, 31, tzinfo=UTC)
+
+        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_cls:
+            mock_reader = MagicMock()
+            mock_reader.get_events_by_date_range = AsyncMock(return_value=[])
+            mock_reader_cls.return_value = mock_reader
+
+            await filter_events_by_date_range(
+                session=session,
+                start_date=start_date,
+                end_date=end_date,
+                min_snapshots=5,
+            )
+
+            mock_reader.get_events_by_date_range.assert_called_once_with(
+                start_date=start_date,
+                end_date=end_date,
+                status=EventStatus.FINAL,
+                event_id_pattern=None,
+                min_snapshots=5,
+            )
+
+    @pytest.mark.asyncio
+    async def test_filter_data_source_all_treated_as_none(self):
+        """data_source='all' should not filter (same as None)."""
+        session = AsyncMock()
+        start_date = datetime(2024, 10, 1, tzinfo=UTC)
+        end_date = datetime(2024, 10, 31, tzinfo=UTC)
+
+        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_cls:
+            mock_reader = MagicMock()
+            mock_reader.get_events_by_date_range = AsyncMock(return_value=[])
+            mock_reader_cls.return_value = mock_reader
+
+            await filter_events_by_date_range(
+                session=session,
+                start_date=start_date,
+                end_date=end_date,
+                data_source="all",
+            )
+
+            # Should not pass event_id_pattern
+            mock_reader.get_events_by_date_range.assert_called_once_with(
+                start_date=start_date,
+                end_date=end_date,
+                status=EventStatus.FINAL,
+                event_id_pattern=None,
+                min_snapshots=None,
+            )
