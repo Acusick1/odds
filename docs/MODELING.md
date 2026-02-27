@@ -112,7 +112,7 @@ Time-series per snapshot:
 - **TierSampler bug found and fixed**: `IN_PLAY` snapshots were incorrectly included as candidates for pregame tier — since in-play snapshots occur *after* the closing snapshot, this was look-ahead bias (features from the future "predicting" past closing prices); earlier LSTM pregame R²≈+0.02 was contaminated; corrected result is R²≈-0.015
 - Full results: [experiments/results/exp2_feature_group_isolation/FINDINGS.md](../experiments/results/exp2_feature_group_isolation/FINDINGS.md)
 
-### XGBoost with injury + rest features (Feb 2026, 803 events)
+### XGBoost with injury + rest features (Feb 2026, 800 events)
 - 18 features (tabular 4 + injury 6 + rest 5 + timing 3), tier sampling (pregame), devigged Pinnacle target
 - 100-trial Optuna tuning with 5-fold timeseries CV
 - **First positive out-of-sample signal**: validation R²=0.050, CV mean R²=0.020 ± 0.025
@@ -121,10 +121,21 @@ Time-series per snapshot:
 - Dead features (zero importance): `away_is_b2b`, `away_days_rest`, `rest_advantage`, `home_is_b2b`, `is_weekend`, `num_bookmakers`
 - Config: `experiments/xgboost_injuries_rest_tuning_best.yaml` (gitignored)
 
-### LSTM v1 (Feb 2026)
-- Implemented but not yet trained/evaluated at scale
-- Hypothesis: temporal patterns in line movement (momentum, sharp money timing) may be captured better by sequence models than aggregate trajectory features
-- Note: injury features (not temporal patterns) drove signal in the XGBoost experiment — LSTM may not add value, but this is untested
+### LSTM tuning (Feb 2026, 800 events)
+- Two-branch architecture: LSTM processes 15-feature sequences (24 timesteps), optional static feature branch (tabular + injury + rest) concatenated with final hidden state
+- 100-trial Optuna tuning with 5-fold timeseries CV, same date range as XGBoost experiment (204 events skipped due to missing snapshots/sequences)
+- Controlled comparison: sequence-only vs sequence + static features
+
+| Variant | Features | CV R² | CV MSE | Best params |
+|---------|----------|-------|--------|-------------|
+| **Sequence only** | 15 seq features × 24 timesteps | -0.010 ± 0.039 | 0.000471 ± 0.000139 | hidden=48, layers=2, dropout=0.2, lr=0.00289 |
+| **Sequence + static** | 15 seq + 17 static (tab 6 + inj 6 + rest 5) | -0.122 ± 0.115 | — | hidden=112, layers=3, dropout=0.0, lr=0.00229 |
+
+- **Both variants R² < 0** — LSTM does not outperform predicting the mean, regardless of static features
+- Adding static features made things *worse* (R² -0.122 vs -0.010) with much higher variance (±0.115 vs ±0.039), suggesting the larger model overfits
+- XGBoost R²=+0.020 remains the best architecture — injury signal is captured by tabular features, not temporal patterns
+- Hypothesis disproven: temporal patterns in line movement sequences do not improve prediction beyond aggregate features
+- Configs: `experiments/lstm_tuning_seq_only_best.yaml`, `experiments/lstm_tuning_best.yaml`
 
 ## Open Questions
 
@@ -208,4 +219,6 @@ Every experiment must produce:
 | 2026-02-14 | XGBoost v1 | tabular + trajectory + PM + cross-source | devigged pinnacle | 656 (193 events) | R² ≈ 0 | — | Multi-horizon, group CV; 21 tab features zeroed (bug) |
 | 2026-02-17 | Exp 1: correlations | 60 testable / 75 total | devigged pinnacle | 719 (229 events) | max \|r\|=0.12 | Proceed to Exp 2 | Sharp-retail diff strongest; 12/60 uncorrected, 0/60 BH |
 | 2026-02-18 | Exp 2: feature groups | 47 features, 6 groups | devigged pinnacle | 538–719 (230 events) | All R²<0 | No signal at 230 events | 2×2 (arch × time): all cells R²≈0; TierSampler IN_PLAY bug fixed |
-| 2026-02-20 | XGBoost + injuries/rest | tabular 4 + injury 6 + rest 5 + timing 3 | devigged pinnacle | 803 events | val R²=0.050, CV R²=0.020±0.025 | First positive signal | 100-trial Optuna; injuries 55% importance; 6 dead features |
+| 2026-02-20 | XGBoost + injuries/rest | tabular 4 + injury 6 + rest 5 + timing 3 | devigged pinnacle | 800 events | val R²=0.050, CV R²=0.020±0.025 | First positive signal | 100-trial Optuna; injuries 55% importance; 6 dead features |
+| 2026-02-21 | LSTM seq-only | 15 seq features × 24 timesteps | devigged pinnacle | 800 events | CV R²=-0.010±0.039 | No signal | 100-trial Optuna; best: hidden=48, layers=2 |
+| 2026-02-21 | LSTM + static branch | 15 seq + 17 static (tab+inj+rest) | devigged pinnacle | 800 events | CV R²=-0.122±0.115 | Worse than seq-only | Static features increase overfitting; XGBoost remains best |
