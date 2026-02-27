@@ -225,6 +225,11 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                     )
 
                     try:
+                        mask_kw: dict[str, Any] = {}
+                        if data_result.masks_train is not None:
+                            mask_kw["masks"] = data_result.masks_train
+                            mask_kw["masks_test"] = data_result.masks_test
+
                         history, cv_result = strategy.train_with_cv(
                             config,
                             data_result.X_train,
@@ -235,6 +240,7 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             event_ids=getattr(data_result, "event_ids_train", None),
                             static_features=data_result.static_train,
                             static_test=data_result.static_test,
+                            **mask_kw,
                         )
                     except Exception:
                         progress.stop()
@@ -256,6 +262,11 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                     task = progress.add_task("Training model...", total=None)
 
                     try:
+                        mask_kw_direct: dict[str, Any] = {}
+                        if data_result.masks_train is not None:
+                            mask_kw_direct["masks_train"] = data_result.masks_train
+                            mask_kw_direct["masks_val"] = data_result.masks_test
+
                         history = strategy.train_from_config(
                             config,
                             data_result.X_train,
@@ -266,6 +277,7 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             tracker=tracker,
                             static_train=data_result.static_train,
                             static_val=data_result.static_test,
+                            **mask_kw_direct,
                         )
                     except Exception:
                         progress.stop()
@@ -846,6 +858,13 @@ async def _run_tuning_async(
                 f"[green]Pre-computed {len(precomputed_features)} feature combinations[/green]\n"
             )
 
+        tune_mask_obj_kw: dict[str, Any] = {}
+        if data_result.masks_train is not None:
+            tune_mask_obj_kw["masks_train"] = data_result.masks_train
+            tune_mask_obj_kw["masks_val"] = (
+                data_result.masks_val if data_result.num_val_samples > 0 else data_result.masks_test
+            )
+
         objective = create_objective(
             config=ml_config,
             X_train=data_result.X_train,
@@ -860,6 +879,7 @@ async def _run_tuning_async(
             else data_result.static_test,
             event_ids_train=data_result.event_ids_train,
             event_ids_val=data_result.event_ids_val,
+            **tune_mask_obj_kw,
         )
 
         # Step 4: Run optimization
@@ -961,6 +981,15 @@ async def _run_tuning_async(
                 task = progress.add_task("Training model...", total=None)
 
                 try:
+                    tune_mask_kw: dict[str, Any] = {}
+                    if data_result.masks_train is not None:
+                        tune_mask_kw["masks_train"] = data_result.masks_train
+                        tune_mask_kw["masks_val"] = (
+                            data_result.masks_val
+                            if data_result.num_val_samples > 0
+                            else data_result.masks_test
+                        )
+
                     history = strategy.train_from_config(
                         config=best_config,
                         X_train=data_result.X_train,
@@ -972,6 +1001,7 @@ async def _run_tuning_async(
                         static_val=data_result.static_val
                         if data_result.num_val_samples > 0
                         else data_result.static_test,
+                        **tune_mask_kw,
                     )
                 except Exception:
                     progress.stop()

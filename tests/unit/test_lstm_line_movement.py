@@ -836,6 +836,108 @@ class TestLSTMModelStaticFeatures:
         assert np.isfinite(history["train_mse"])
 
 
+class TestLSTMPackedSequences:
+    """Tests for packed-sequence masking in LSTMModel."""
+
+    def test_zero_padding_invariance(self):
+        """An event with 2/24 valid timesteps must produce the same prediction
+        as a 2-timestep sequence with no padding, proving that zero-padded
+        timesteps do not corrupt the hidden state."""
+        from odds_analytics.lstm_line_movement import _compact_sequences
+
+        torch.manual_seed(42)
+        input_size = 14
+        model = LSTMModel(
+            input_size=input_size,
+            hidden_size=32,
+            num_layers=1,
+            dropout=0.0,
+            output_type="regression",
+        )
+        model.eval()
+
+        # Two valid timesteps placed at non-contiguous positions in a 24-step seq
+        sparse_seq = torch.zeros(1, 24, input_size)
+        data_row_a = torch.randn(input_size)
+        data_row_b = torch.randn(input_size)
+        sparse_seq[0, 5] = data_row_a
+        sparse_seq[0, 10] = data_row_b
+
+        mask = torch.zeros(1, 24, dtype=torch.bool)
+        mask[0, 5] = True
+        mask[0, 10] = True
+
+        compacted, lengths = _compact_sequences(sparse_seq, mask)
+
+        # The compacted version should have data at positions 0 and 1
+        assert lengths.item() == 2
+        assert torch.allclose(compacted[0, 0], data_row_a)
+        assert torch.allclose(compacted[0, 1], data_row_b)
+
+        # Build a dense 2-step sequence from the same data
+        dense_seq = torch.stack([data_row_a, data_row_b]).unsqueeze(0)  # (1, 2, input_size)
+        dense_lengths = torch.tensor([2])
+
+        with torch.no_grad():
+            pred_sparse = model(compacted, lengths=lengths)
+            pred_dense = model(dense_seq, lengths=dense_lengths)
+
+        assert torch.allclose(pred_sparse, pred_dense, atol=1e-6), (
+            f"Predictions differ: sparse={pred_sparse.item():.6f}, dense={pred_dense.item():.6f}"
+        )
+
+    def test_forward_without_lengths_unchanged(self):
+        """Forward without lengths should behave identically to before (no packing)."""
+        torch.manual_seed(0)
+        model = LSTMModel(
+            input_size=8, hidden_size=16, num_layers=1, dropout=0.0, output_type="regression"
+        )
+        model.eval()
+
+        x = torch.randn(2, 10, 8)
+        with torch.no_grad():
+            pred_no_len = model(x)
+            pred_with_len = model(x, lengths=torch.tensor([10, 10]))
+
+        assert torch.allclose(pred_no_len, pred_with_len, atol=1e-5)
+
+    def test_train_loop_filters_insufficient_timesteps(self):
+        """Samples with fewer valid timesteps than min_valid_timesteps should
+        be excluded from loss but training should still complete."""
+        strategy = LSTMLineMovementStrategy(
+            lookback_hours=24,
+            timesteps=8,
+            hidden_size=16,
+            num_layers=1,
+            dropout=0.0,
+        )
+
+        n = 10
+        timesteps = 8
+        input_size = strategy.input_size
+        X = np.random.randn(n, timesteps, input_size).astype(np.float32)
+        y = np.random.randn(n).astype(np.float32) * 0.05
+
+        # Give every sample only 1 valid timestep (below default threshold of 2)
+        masks = np.zeros((n, timesteps), dtype=bool)
+        masks[:, 0] = True
+
+        history = strategy._train_loop(
+            X,
+            y,
+            None,
+            None,
+            epochs=2,
+            batch_size=4,
+            learning_rate=0.001,
+            masks=masks,
+            min_valid_timesteps=2,
+        )
+        # All samples filtered out — model trains on nothing, but doesn't crash
+        assert strategy.is_trained
+        assert np.isfinite(history["train_mse"])
+
+
 class TestLSTMLineMovementWorkflow:
     """Integration tests for LSTM line movement strategy workflows."""
 

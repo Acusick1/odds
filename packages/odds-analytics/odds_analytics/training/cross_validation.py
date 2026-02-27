@@ -325,6 +325,7 @@ def run_cv(
     feature_names: list[str],
     event_ids: np.ndarray | None = None,
     static_features: np.ndarray | None = None,
+    masks: np.ndarray | None = None,
 ) -> CVResult:
     """
     Run cross-validation on the provided data.
@@ -447,6 +448,11 @@ def run_cv(
         static_train_fold = static_features[train_idx] if static_features is not None else None
         static_val_fold = static_features[val_idx] if static_features is not None else None
 
+        mask_kwargs: dict[str, Any] = {}
+        if masks is not None:
+            mask_kwargs["masks_train"] = masks[train_idx]
+            mask_kwargs["masks_val"] = masks[val_idx]
+
         logger.debug(
             "training_fold",
             fold=fold_idx + 1,
@@ -466,6 +472,7 @@ def run_cv(
             y_val=y_val_fold,
             static_train=static_train_fold,
             static_val=static_val_fold,
+            **mask_kwargs,
         )
 
         fold_result = CVFoldResult(
@@ -521,6 +528,8 @@ def train_with_cv(
     event_ids: np.ndarray | None = None,
     static_features: np.ndarray | None = None,
     static_test: np.ndarray | None = None,
+    masks: np.ndarray | None = None,
+    masks_test: np.ndarray | None = None,
 ) -> tuple[dict[str, Any], CVResult]:
     """Run CV, train final model on all data, merge CV metrics into history."""
     logger.info(
@@ -539,6 +548,7 @@ def train_with_cv(
         feature_names=feature_names,
         event_ids=event_ids,
         static_features=static_features,
+        masks=masks,
     )
 
     logger.info(
@@ -546,6 +556,11 @@ def train_with_cv(
         cv_val_mse=f"{cv_result.mean_val_mse:.6f} ± {cv_result.std_val_mse:.6f}",
         cv_val_r2=f"{cv_result.mean_val_r2:.4f} ± {cv_result.std_val_r2:.4f}",
     )
+
+    mask_kwargs: dict[str, Any] = {}
+    if masks is not None:
+        mask_kwargs["masks_train"] = masks
+        mask_kwargs["masks_val"] = masks_test
 
     history = strategy.train_from_config(
         config=config,
@@ -556,6 +571,7 @@ def train_with_cv(
         y_val=y_test,
         static_train=static_features,
         static_val=static_test,
+        **mask_kwargs,
     )
 
     history.update(cv_result.to_dict())
