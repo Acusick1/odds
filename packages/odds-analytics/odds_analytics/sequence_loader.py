@@ -5,8 +5,8 @@ Key Functions:
 - load_sequences_for_event(): Query odds snapshots and organize chronologically
 - extract_odds_from_snapshot(): Parse Odds from OddsSnapshot.raw_data
 - calculate_regression_target(): Calculate line movement for regression
-- extract_pinnacle_h2h_probs(): Extract devigged Pinnacle probabilities
-- calculate_devigged_pinnacle_target(): Devigged Pinnacle close vs snapshot delta
+- extract_devigged_h2h_probs(): Extract devigged bookmaker probabilities
+- calculate_devigged_bookmaker_target(): Devigged bookmaker close vs snapshot delta
 """
 
 from __future__ import annotations
@@ -36,8 +36,8 @@ __all__ = [
     "load_sequences_for_event",
     "TargetType",
     "calculate_regression_target",
-    "extract_pinnacle_h2h_probs",
-    "calculate_devigged_pinnacle_target",
+    "extract_devigged_h2h_probs",
+    "calculate_devigged_bookmaker_target",
     "extract_odds_from_snapshot",
 ]
 
@@ -99,27 +99,28 @@ def calculate_regression_target(
         return None
 
 
-def extract_pinnacle_h2h_probs(
+def extract_devigged_h2h_probs(
     odds: list[Odds],
     home_team: str,
     away_team: str,
+    bookmaker_key: str = "pinnacle",
 ) -> tuple[float, float] | None:
-    """Extract devigged Pinnacle h2h probabilities for home and away teams.
+    """Extract devigged h2h probabilities for home and away teams from a specific bookmaker.
 
-    Filters odds to Pinnacle h2h market, finds home and away outcomes,
+    Filters odds to the given bookmaker's h2h market, finds home and away outcomes,
     converts to implied probabilities, and applies proportional devigging.
 
     Returns:
-        (fair_home_prob, fair_away_prob) or None if Pinnacle h2h not found
+        (fair_home_prob, fair_away_prob) or None if bookmaker h2h not found
         for both sides.
     """
-    pinnacle_h2h = [o for o in odds if o.bookmaker_key == "pinnacle" and o.market_key == "h2h"]
-    if not pinnacle_h2h:
+    bm_h2h = [o for o in odds if o.bookmaker_key == bookmaker_key and o.market_key == "h2h"]
+    if not bm_h2h:
         return None
 
     home_odds: Odds | None = None
     away_odds: Odds | None = None
-    for o in pinnacle_h2h:
+    for o in bm_h2h:
         if o.outcome_name == home_team:
             home_odds = o
         elif o.outcome_name == away_team:
@@ -133,20 +134,21 @@ def extract_pinnacle_h2h_probs(
     return devig_probabilities(home_raw, away_raw)
 
 
-def calculate_devigged_pinnacle_target(
+def calculate_devigged_bookmaker_target(
     snapshot_odds: list[Odds],
     closing_odds: list[Odds],
     home_team: str,
     away_team: str,
+    bookmaker_key: str = "pinnacle",
 ) -> float | None:
-    """Calculate target as devigged Pinnacle close minus devigged Pinnacle at snapshot.
+    """Calculate target as devigged bookmaker close minus devigged bookmaker at snapshot.
 
     Returns:
-        fair_close_home - fair_snapshot_home, or None if Pinnacle data missing
+        fair_close_home - fair_snapshot_home, or None if bookmaker data missing
         on either side.
     """
-    snapshot_probs = extract_pinnacle_h2h_probs(snapshot_odds, home_team, away_team)
-    closing_probs = extract_pinnacle_h2h_probs(closing_odds, home_team, away_team)
+    snapshot_probs = extract_devigged_h2h_probs(snapshot_odds, home_team, away_team, bookmaker_key)
+    closing_probs = extract_devigged_h2h_probs(closing_odds, home_team, away_team, bookmaker_key)
 
     if snapshot_probs is None or closing_probs is None:
         return None

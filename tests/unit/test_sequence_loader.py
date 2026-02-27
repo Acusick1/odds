@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_analytics.sequence_loader import (
-    calculate_devigged_pinnacle_target,
+    calculate_devigged_bookmaker_target,
     calculate_regression_target,
-    extract_pinnacle_h2h_probs,
+    extract_devigged_h2h_probs,
     load_sequences_for_event,
 )
 from odds_analytics.utils import devig_probabilities
@@ -512,8 +512,8 @@ class TestDevigProbabilities:
         assert home / away == pytest.approx(home_raw / away_raw, rel=1e-4)
 
 
-class TestExtractPinnacleH2hProbs:
-    """Tests for extract_pinnacle_h2h_probs."""
+class TestExtractDeviggedH2hProbs:
+    """Tests for extract_devigged_h2h_probs."""
 
     @pytest.fixture
     def timestamp(self):
@@ -547,7 +547,7 @@ class TestExtractPinnacleH2hProbs:
             self._make_odds("fanduel", "Lakers", -160, timestamp),
             self._make_odds("fanduel", "Celtics", 140, timestamp),
         ]
-        result = extract_pinnacle_h2h_probs(odds, "Lakers", "Celtics")
+        result = extract_devigged_h2h_probs(odds, "Lakers", "Celtics")
         assert result is not None
         home, away = result
         assert home + away == pytest.approx(1.0)
@@ -562,14 +562,14 @@ class TestExtractPinnacleH2hProbs:
             self._make_odds("fanduel", "Lakers", -160, timestamp),
             self._make_odds("fanduel", "Celtics", 140, timestamp),
         ]
-        assert extract_pinnacle_h2h_probs(odds, "Lakers", "Celtics") is None
+        assert extract_devigged_h2h_probs(odds, "Lakers", "Celtics") is None
 
     def test_pinnacle_missing_one_side(self, timestamp):
         """Pinnacle present but only one side → None."""
         odds = [
             self._make_odds("pinnacle", "Lakers", -150, timestamp),
         ]
-        assert extract_pinnacle_h2h_probs(odds, "Lakers", "Celtics") is None
+        assert extract_devigged_h2h_probs(odds, "Lakers", "Celtics") is None
 
     def test_pinnacle_spreads_ignored(self, timestamp):
         """Pinnacle spreads not treated as h2h."""
@@ -577,14 +577,14 @@ class TestExtractPinnacleH2hProbs:
             self._make_odds("pinnacle", "Lakers", -110, timestamp, market="spreads"),
             self._make_odds("pinnacle", "Celtics", -110, timestamp, market="spreads"),
         ]
-        assert extract_pinnacle_h2h_probs(odds, "Lakers", "Celtics") is None
+        assert extract_devigged_h2h_probs(odds, "Lakers", "Celtics") is None
 
     def test_empty_odds_list(self, timestamp):
-        assert extract_pinnacle_h2h_probs([], "Lakers", "Celtics") is None
+        assert extract_devigged_h2h_probs([], "Lakers", "Celtics") is None
 
 
-class TestCalculateDeviggedPinnacleTarget:
-    """Tests for calculate_devigged_pinnacle_target."""
+class TestCalculateDeviggedBookmakerTarget:
+    """Tests for calculate_devigged_bookmaker_target."""
 
     @pytest.fixture
     def timestamp(self):
@@ -613,14 +613,14 @@ class TestCalculateDeviggedPinnacleTarget:
             self._make_odds("Lakers", -200, timestamp),
             self._make_odds("Celtics", 170, timestamp),
         ]
-        result = calculate_devigged_pinnacle_target(
+        result = calculate_devigged_bookmaker_target(
             snapshot_odds, closing_odds, "Lakers", "Celtics"
         )
         assert result is not None
 
         # Verify manually
-        snap_probs = extract_pinnacle_h2h_probs(snapshot_odds, "Lakers", "Celtics")
-        close_probs = extract_pinnacle_h2h_probs(closing_odds, "Lakers", "Celtics")
+        snap_probs = extract_devigged_h2h_probs(snapshot_odds, "Lakers", "Celtics")
+        close_probs = extract_devigged_h2h_probs(closing_odds, "Lakers", "Celtics")
         expected = close_probs[0] - snap_probs[0]
         assert result == pytest.approx(expected)
         # Line moved toward Lakers (more negative = bigger favorite)
@@ -632,7 +632,7 @@ class TestCalculateDeviggedPinnacleTarget:
             self._make_odds("Lakers", -150, timestamp),
             self._make_odds("Celtics", 130, timestamp),
         ]
-        result = calculate_devigged_pinnacle_target(odds, odds, "Lakers", "Celtics")
+        result = calculate_devigged_bookmaker_target(odds, odds, "Lakers", "Celtics")
         assert result == pytest.approx(0.0)
 
     def test_missing_snapshot_pinnacle(self, timestamp):
@@ -655,7 +655,7 @@ class TestCalculateDeviggedPinnacleTarget:
             self._make_odds("Celtics", 170, timestamp),
         ]
         assert (
-            calculate_devigged_pinnacle_target(snapshot_odds, closing_odds, "Lakers", "Celtics")
+            calculate_devigged_bookmaker_target(snapshot_odds, closing_odds, "Lakers", "Celtics")
             is None
         )
 
@@ -667,6 +667,6 @@ class TestCalculateDeviggedPinnacleTarget:
         ]
         closing_odds = []
         assert (
-            calculate_devigged_pinnacle_target(snapshot_odds, closing_odds, "Lakers", "Celtics")
+            calculate_devigged_bookmaker_target(snapshot_odds, closing_odds, "Lakers", "Celtics")
             is None
         )

@@ -48,10 +48,10 @@ from odds_analytics.polymarket_features import (
     resolve_home_outcome_index,
 )
 from odds_analytics.sequence_loader import (
-    calculate_devigged_pinnacle_target,
+    calculate_devigged_bookmaker_target,
     calculate_regression_target,
+    extract_devigged_h2h_probs,
     extract_odds_from_snapshot,
-    extract_pinnacle_h2h_probs,
     load_sequences_for_event,
 )
 from odds_analytics.training.feature_selection import apply_variance_filter
@@ -707,10 +707,14 @@ def _compute_target(
 
     closing_odds_all = extract_odds_from_snapshot(closing_snapshot, event.id, market=market)
 
-    if config.target_type == "devigged_pinnacle":
+    if config.target_type == "devigged_bookmaker":
         snapshot_odds_all = extract_odds_from_snapshot(snapshot, event.id, market=market)
-        return calculate_devigged_pinnacle_target(
-            snapshot_odds_all, closing_odds_all, event.home_team, event.away_team
+        return calculate_devigged_bookmaker_target(
+            snapshot_odds_all,
+            closing_odds_all,
+            event.home_team,
+            event.away_team,
+            bookmaker_key=config.target_bookmaker,
         )
     else:
         # "raw": avg implied prob delta (snapshot → closing)
@@ -722,12 +726,17 @@ def _compute_target(
         return calculate_regression_target(snap_odds, closing_odds, market)
 
 
-def _has_pinnacle_closing(closing_snapshot: OddsSnapshot, event: Event) -> bool:
-    """Check if closing snapshot has Pinnacle h2h data (required for devigged_pinnacle target)."""
+def _has_bookmaker_closing(
+    closing_snapshot: OddsSnapshot, event: Event, bookmaker_key: str
+) -> bool:
+    """Check if closing snapshot has bookmaker h2h data (required for devigged_bookmaker target)."""
     market = "h2h"
     closing_odds_all = extract_odds_from_snapshot(closing_snapshot, event.id, market=market)
     return (
-        extract_pinnacle_h2h_probs(closing_odds_all, event.home_team, event.away_team) is not None
+        extract_devigged_h2h_probs(
+            closing_odds_all, event.home_team, event.away_team, bookmaker_key
+        )
+        is not None
     )
 
 
@@ -777,9 +786,9 @@ async def prepare_training_data(
       - config.sampling.strategy="tier"        → single row per event
       - config.sampling.strategy="time_range"  → multiple rows per event
       - config.target_type="raw"               → avg implied-prob delta
-      - config.target_type="devigged_pinnacle" → devigged Pinnacle delta
+      - config.target_type="devigged_bookmaker" → devigged bookmaker delta
 
-    For devigged_pinnacle, events without Pinnacle closing data are dropped.
+    For devigged_bookmaker, events without target bookmaker closing data are dropped.
     Polymarket features NaN-fill when PM data is unavailable, so events are
     kept rather than dropped when PM is missing.
 
@@ -820,9 +829,9 @@ async def prepare_training_data(
             skipped_events += 1
             continue
 
-        # For devigged_pinnacle, must have Pinnacle closing data
-        if config.target_type == "devigged_pinnacle" and not _has_pinnacle_closing(
-            bundle.closing_snapshot, event
+        # For devigged_bookmaker, must have bookmaker closing data
+        if config.target_type == "devigged_bookmaker" and not _has_bookmaker_closing(
+            bundle.closing_snapshot, event, config.target_bookmaker
         ):
             skipped_events += 1
             continue

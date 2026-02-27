@@ -293,15 +293,15 @@ class TestFeatureConfigValidation:
         )
         assert config.target_type == "raw"
 
-    def test_devigged_pinnacle_target_type(self):
+    def test_devigged_bookmaker_target_type(self):
         config = FeatureConfig(
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_pinnacle",
+            target_type="devigged_bookmaker",
         )
-        assert config.target_type == "devigged_pinnacle"
+        assert config.target_type == "devigged_bookmaker"
 
     def test_adapter_default_is_xgboost(self):
         config = FeatureConfig()
@@ -664,7 +664,7 @@ class TestPrepareTrainingData:
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_pinnacle",
+            target_type="devigged_bookmaker",
             sampling=SamplingConfig(
                 strategy="time_range",
                 min_hours=3.0,
@@ -694,8 +694,8 @@ class TestPrepareTrainingData:
         assert not all(y == 0 for y in result.y)
 
     @pytest.mark.asyncio
-    async def test_drops_event_without_pinnacle_closing(self, sample_events):
-        """Events without Pinnacle closing data are skipped with devigged_pinnacle target."""
+    async def test_drops_event_without_bookmaker_closing(self, sample_events):
+        """Events without bookmaker closing data are skipped with devigged_bookmaker target."""
         event = sample_events[0]
         commence = event.commence_time
 
@@ -735,7 +735,7 @@ class TestPrepareTrainingData:
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_pinnacle",
+            target_type="devigged_bookmaker",
             sampling=SamplingConfig(
                 strategy="time_range",
                 min_hours=3.0,
@@ -785,7 +785,7 @@ class TestPrepareTrainingData:
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_pinnacle",
+            target_type="devigged_bookmaker",
             sampling=SamplingConfig(
                 strategy="time_range",
                 min_hours=3.0,
@@ -841,7 +841,7 @@ class TestPrepareTrainingData:
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_pinnacle",
+            target_type="devigged_bookmaker",
             sampling=SamplingConfig(
                 strategy="time_range",
                 min_hours=3.0,
@@ -1108,7 +1108,7 @@ class TestPrepareTrainingDataMaskCollection:
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_pinnacle",
+            target_type="devigged_bookmaker",
             sampling=SamplingConfig(strategy="tier", decision_tier="pregame"),
         )
 
@@ -1166,7 +1166,7 @@ class TestPrepareTrainingDataMaskCollection:
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_pinnacle",
+            target_type="devigged_bookmaker",
             lookback_hours=72,
             timesteps=timesteps,
             sampling=SamplingConfig(strategy="tier", decision_tier="pregame"),
