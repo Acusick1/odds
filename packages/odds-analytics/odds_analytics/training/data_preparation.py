@@ -35,6 +35,7 @@ Example usage:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 import numpy as np
 import structlog
@@ -42,7 +43,7 @@ from odds_core.models import Event, EventStatus
 from sklearn.model_selection import train_test_split
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_analytics.training.config import LSTMConfig, MLTrainingConfig
+from odds_analytics.training.config import MLTrainingConfig
 
 logger = structlog.get_logger()
 
@@ -195,7 +196,7 @@ async def filter_events_by_date_range(
     start_date: datetime,
     end_date: datetime,
     status: EventStatus = EventStatus.FINAL,
-    data_source: str | None = None,
+    data_source: Literal["oddsportal", "oddsapi"] | None = None,
     min_snapshots: int | None = None,
 ) -> list[Event]:
     """
@@ -340,30 +341,6 @@ async def prepare_training_data_from_config(
 
     if len(X) == 0:
         raise ValueError(f"No valid training data after processing {len(events)} events")
-
-    # Filter events with insufficient valid timesteps (LSTM only)
-    if masks is not None and isinstance(training_config.model, LSTMConfig):
-        min_ts = training_config.model.min_valid_timesteps
-        valid_counts = masks.sum(axis=1)
-        keep = valid_counts >= min_ts
-        n_before = len(X)
-        X = X[keep]
-        y = y[keep]
-        masks = masks[keep]
-        if event_ids is not None:
-            event_ids = event_ids[keep]
-        if static is not None:
-            static = static[keep]
-        logger.info(
-            "filtered_by_min_valid_timesteps",
-            min_valid_timesteps=min_ts,
-            kept=int(keep.sum()),
-            removed=n_before - int(keep.sum()),
-        )
-        if len(X) == 0:
-            raise ValueError(
-                f"No events with >= {min_ts} valid timesteps (all {n_before} events filtered out)"
-            )
 
     # Split: event-level for multi-horizon, row-level for raw
     event_ids_train = None
