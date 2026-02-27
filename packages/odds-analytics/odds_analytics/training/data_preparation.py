@@ -116,6 +116,7 @@ class TrainingDataResult:
         y_val: np.ndarray | None = None,
         masks_val: np.ndarray | None = None,
         event_ids_train: np.ndarray | None = None,
+        event_ids_val: np.ndarray | None = None,
         event_ids_test: np.ndarray | None = None,
         static_train: np.ndarray | None = None,
         static_val: np.ndarray | None = None,
@@ -135,6 +136,7 @@ class TrainingDataResult:
         self.masks_val = masks_val
         self.masks_test = masks_test
         self.event_ids_train = event_ids_train
+        self.event_ids_val = event_ids_val
         self.event_ids_test = event_ids_test
         self.static_train = static_train
         self.static_val = static_val
@@ -365,6 +367,7 @@ async def prepare_training_data_from_config(
     masks_train = None
     static_val = None
     static_train = None
+    event_ids_val: np.ndarray | None = None
 
     if data_config.validation_split > 0:
         remaining = 1.0 - data_config.test_split
@@ -387,6 +390,7 @@ async def prepare_training_data_from_config(
             masks_val = masks_trainval[tv_val_mask] if masks_trainval is not None else None
             static_train = static_trainval[tv_train_mask] if static_trainval is not None else None
             static_val = static_trainval[tv_val_mask] if static_trainval is not None else None
+            event_ids_val = event_ids_train[tv_val_mask]
             event_ids_train = event_ids_train[tv_train_mask]
         else:
             val_result = _split_aligned_arrays(
@@ -434,6 +438,7 @@ async def prepare_training_data_from_config(
         y_val=y_val,
         masks_val=masks_val,
         event_ids_train=event_ids_train,
+        event_ids_val=event_ids_val,
         event_ids_test=event_ids_test,
         static_train=static_train,
         static_val=static_val,

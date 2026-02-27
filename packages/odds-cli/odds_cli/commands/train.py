@@ -858,6 +858,8 @@ async def _run_tuning_async(
             static_val=data_result.static_val
             if data_result.num_val_samples > 0
             else data_result.static_test,
+            event_ids_train=getattr(data_result, "event_ids_train", None),
+            event_ids_val=getattr(data_result, "event_ids_val", None),
         )
 
         # Step 4: Run optimization
