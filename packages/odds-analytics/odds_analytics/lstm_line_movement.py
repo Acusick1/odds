@@ -1083,6 +1083,7 @@ class LSTMLineMovementStrategy(BettingStrategy):
             min_delta=lstm_params.get("min_delta", 0.0001),
             masks=masks_train,
             masks_val=masks_val,
+            min_valid_timesteps=model_config.min_valid_timesteps,
             static_train=static_train,
             static_val=static_val,
             tracker=tracker,
