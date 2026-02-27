@@ -370,16 +370,35 @@ async def prepare_training_data_from_config(
         remaining = 1.0 - data_config.test_split
         val_size_relative = data_config.validation_split / remaining
 
-        val_result = _split_aligned_arrays(
-            [X_trainval, y_trainval, masks_trainval, static_trainval],
-            test_size=val_size_relative,
-            random_state=data_config.random_seed,
-            shuffle=data_config.shuffle,
-        )
-        X_train, X_val = val_result[0], val_result[1]
-        y_train, y_val = val_result[2], val_result[3]
-        masks_train, masks_val = val_result[4], val_result[5]
-        static_train, static_val = val_result[6], val_result[7]
+        if event_ids_train is not None:
+            # Event-level val split (matches event-level test split above)
+            unique_trainval_events = list(dict.fromkeys(event_ids_train))
+            n_val_events = max(1, int(len(unique_trainval_events) * val_size_relative))
+            train_events = set(unique_trainval_events[:-n_val_events])
+
+            tv_train_mask = np.array([eid in train_events for eid in event_ids_train])
+            tv_val_mask = ~tv_train_mask
+
+            X_train = X_trainval[tv_train_mask]
+            y_train = y_trainval[tv_train_mask]
+            X_val = X_trainval[tv_val_mask]
+            y_val = y_trainval[tv_val_mask]
+            masks_train = masks_trainval[tv_train_mask] if masks_trainval is not None else None
+            masks_val = masks_trainval[tv_val_mask] if masks_trainval is not None else None
+            static_train = static_trainval[tv_train_mask] if static_trainval is not None else None
+            static_val = static_trainval[tv_val_mask] if static_trainval is not None else None
+            event_ids_train = event_ids_train[tv_train_mask]
+        else:
+            val_result = _split_aligned_arrays(
+                [X_trainval, y_trainval, masks_trainval, static_trainval],
+                test_size=val_size_relative,
+                random_state=data_config.random_seed,
+                shuffle=data_config.shuffle,
+            )
+            X_train, X_val = val_result[0], val_result[1]
+            y_train, y_val = val_result[2], val_result[3]
+            masks_train, masks_val = val_result[4], val_result[5]
+            static_train, static_val = val_result[6], val_result[7]
     else:
         X_train = X_trainval
         y_train = y_trainval
