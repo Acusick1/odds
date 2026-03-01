@@ -164,6 +164,26 @@ Time-series per snapshot:
 - Hypothesis disproven: temporal patterns in line movement sequences do not improve prediction beyond aggregate features
 - Configs: `experiments/lstm_tuning_seq_only_best.yaml`, `experiments/lstm_tuning_best.yaml`
 
+### XGBoost bet365 at scale (Feb 2026, ~5K events OddsPortal)
+- Walk-forward CV (11 folds, expanding window), 100-trial Optuna
+- **Tabular + injuries**: CV R²=0.036 ± 0.033, test R²=0.079 (744 held-out)
+- **Tabular-only baseline**: CV R²=0.036 ± 0.028 — injuries add zero signal once both are tuned
+- Public features plateau at ~3.6% explained variance on bet365 CLV
+- Config: `experiments/configs/xgboost_bet365_tuning_best.yaml`
+
+### Pinnacle CLV: XGBoost + LSTM (Feb–Mar 2026, ~800 events Odds API)
+- Both architectures yield **negative R²** on devigged Pinnacle target:
+
+| Architecture | CV R² | CV MSE | Notes |
+|-------------|-------|--------|-------|
+| **XGBoost** (100 trials, 4-fold walk-forward) | -0.017 ± 0.015 | 0.000431 | Max regularization; no signal |
+| **LSTM** (50 trials, 5-fold) | -0.075 ± 0.113 | 0.000437 | Negative R²; ruled out |
+
+- Pinnacle MSE (0.000431) is 6.7× lower than bet365 MSE (0.002883) — Pinnacle lines move less, leaving less variance to predict
+- Pinnacle is the sharpest book; less pricing inefficiency to exploit vs retail books like bet365
+- **Conclusion**: bet365 is the viable target for CLV prediction with public features. Pinnacle would need substantially more history or non-public features (order flow, bettor identity) to revisit.
+- Configs: `experiments/configs/xgboost_pinnacle_tuning_best.yaml`, `experiments/configs/lstm_pinnacle_tuning_best.yaml`
+
 ## Open Questions
 
 ### Signal
@@ -252,4 +272,5 @@ Every experiment must produce:
 | 2026-02-27 | XGBoost bet365 tuned | tabular 4 + injury 6 | devigged bet365 | ~5K events (OddsPortal) | CV R²=0.036±0.033 | Plateau at ~3.6% | 11-fold walk-forward; injuries add zero over tabular-only |
 | 2026-02-27 | XGBoost bet365 baseline tuned | tabular 4 | devigged bet365 | ~5K events (OddsPortal) | CV R²=0.036±0.028 | Same as +injuries | Confirms injuries are noise; public features plateau |
 | 2026-02-27 | LSTM mask fix | 15 seq features × 8 timesteps | devigged pinnacle | ~1K events (Odds API) | — | Bug fix | Packed sequences for correct mask application (#162) |
-| 2026-02-27 | LSTM Pinnacle pilot | 15 seq × 8 timesteps | devigged pinnacle | ~1K events (Odds API) | In progress | Pilot | First LSTM run with correct masking + oddsapi source filter |
+| 2026-02-27 | LSTM Pinnacle tuned | 15 seq × 8 timesteps + tabular + injury | devigged pinnacle | ~1K events (Odds API) | CV R²=-0.075±0.113 | No signal | 50-trial Optuna; negative R²; LSTM ruled out for CLV |
+| 2026-03-01 | XGBoost Pinnacle tuned | tabular 4 + injury 6 | devigged pinnacle | ~800 events (Odds API) | CV R²=-0.017±0.015 | No signal | 100-trial walk-forward; max regularization; Pinnacle CLV unpredictable with public features |
