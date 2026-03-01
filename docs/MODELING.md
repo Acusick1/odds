@@ -206,20 +206,20 @@ Time-series per snapshot:
 - Extrapolated: R²≈0.047 at 10K events, R²≈0.068 at 20K events — diminishing returns
 - **Injury timing diagnostic (2×2)**: tabular-only vs tabular+injuries at sharp (12-24h) vs pregame (3-12h) tier — injuries add nothing at either tier
 - Pregame tier (3-12h) yields lower R² than sharp (0.001 vs 0.018) — consistent with OddsPortal snapshot timing centered at ~19h
-- **Caveat**: OddsPortal has zero snapshots in the 0-3h closing window where GTD injury signal is strongest (Exp 4: r=0.28). The "injuries add nothing" conclusion at 3-12h doesn't rule out injury value at < 3h — but testing requires Odds API bet365 data that doesn't exist yet.
+- **Caveat resolved by Exp 6b**: OddsPortal had zero snapshots in the 0-3h closing window. Exp 6b tested this on 479 Odds API events with bet365 closing-tier snapshots (avg 0.2h) — injuries add exactly zero. The closing-tier target is near-zero (std=0.0016) because the line has already priced in GTD designations.
 - Full results: [experiments/results/exp6_learning_curve/FINDINGS.md](../experiments/results/exp6_learning_curve/FINDINGS.md)
 
 ## Open Questions
 
 ### Signal
 - ~3.6% R² is the ceiling for public sportsbook features at 5K events, with the learning curve plateaued. Can Polymarket cross-source features push it higher?
-- ~~Injury features dominate importance~~ — **Partially answered**: injuries add zero signal at ≥3h decision times when properly tuned (earlier apparent importance was a tuning artifact). GTD injury at 0-3h (r=0.28, Exp 4) remains untested — OddsPortal lacks closing-window snapshots.
+- ~~Injury features dominate importance~~ — **Answered** (Exp 6 + 6b): injuries add zero signal at all decision tiers when properly tuned. GTD injury r=0.28 (Exp 4, Pinnacle) does not transfer to bet365 target (r=-0.01, Exp 6b). At closing tier, the line has already priced in GTD designations. Earlier apparent importance was a tuning artifact.
 - Does the signal generalize to other sports, or is it NBA-specific?
 - Do PM features add signal? Untested at scale — only tested with 230 events (insufficient data). PM order flow from CLOB snapshots remains untapped.
 - Does sharp-retail divergence (Pinnacle vs DraftKings/FanDuel) contain more signal than cross-source (PM vs SB)?
 
 ### Execution
-- ~~At what hours-before-game does the model's edge peak?~~ — **Partially answered** (Exp 4): correlations peak at 3-6h for sharp-retail, 0-3h for GTD injury, but per-bin model evaluation inconclusive at 478 events. Revisit after #165 recovers ~800 events.
+- ~~At what hours-before-game does the model's edge peak?~~ — **Answered** (Exp 4 + 6b): sharp-retail diff peaks at 3-6h (Exp 4). GTD injury r=0.28 at 0-3h (Exp 4, Pinnacle target) does NOT transfer to bet365 target (r=-0.01, Exp 6b) — the closing-tier catch-22 means the line has already priced in GTD designations by the time they're visible.
 - Can cross-venue execution (sportsbook vs Polymarket) extract more value than single-venue?
 - What is the optimal bet sizing given the weak but real signal?
 
@@ -243,6 +243,8 @@ Time-series per snapshot:
 - **~~5. LSTM evaluation~~** — LSTM R²<0 across all configurations (800-event Pinnacle, 1K-event Pinnacle with masking fix). Conclusively worse than XGBoost.
 
 - **~~6. Data volume learning curve~~** — R² plateaued at ~1.5K events, oscillating 0–0.035 thereafter (log-fit dR²/dN = 6.7e-06). More OddsPortal data will not meaningfully improve the model. Injury timing diagnostic (2×2): injuries add nothing at sharp tier; pregame comparison diluted (~93% of events fall back to sharp-tier snapshots, only ~335 sample at actual 3-12h). The 0-3h closing window where GTD signal is strongest remains untested. [Full results](../experiments/results/exp6_learning_curve/FINDINGS.md).
+
+- **~~6b. Injury closing tier~~** — Tested GTD hypothesis on Odds API data with bet365 closing-tier snapshots (avg 0.2h before game). Closing-tier R²=0.596 is a measurement artifact: target std=0.0016 (line has barely moved at 0.2h), so the model explains near-zero residuals. Injuries add exactly zero at closing tier (identical R² to tabular-only). `inj_impact_gtd_away` r=-0.011 at closing — the Exp 4 r=0.28 does not transfer to bet365 target. Injury signal is conclusively uninformative for CLV prediction at any tier. [Full results](../experiments/results/exp6b_injury_closing_tier/FINDINGS.md).
 
 ### Active
 
@@ -306,3 +308,4 @@ Every experiment must produce:
 | 2026-02-28 | Exp 4: hours-to-game | tabular 6 + injury 6 | devigged pinnacle | 1,593 (477 events, Odds API) | All bins R²<0; sharp-retail peaks 3-6h | Pregame window confirmed | CLV delta grows with hours; GTD injury r=0.28 at 0-3h; dataset too small for per-bin models |
 | 2026-03-01 | XGBoost Pinnacle tuned | tabular 4 + injury 6 | devigged pinnacle | ~800 events (Odds API) | CV R²=-0.017±0.015 | No signal | 100-trial walk-forward; max regularization; Pinnacle CLV unpredictable with public features |
 | 2026-03-01 | Exp 6: learning curve | tabular 4 | devigged bet365 | 500–4,524 events (OddsPortal) | Plateau at ~1.5K; R²≈0.02 | More data won't help | Log-fit dR²/dN=6.7e-06; injuries add nothing at sharp; pregame tier diluted (93% fallback to sharp) |
+| 2026-03-01 | Exp 6b: injury closing tier | tabular 4 ± injury 6 | devigged bet365 | 479 (closing) / 826 (sharp) events (Odds API) | Closing R²=0.596 (artifact); sharp R²=-0.02 | GTD hypothesis falsified | Closing-tier target near-zero (std=0.0016); injuries add zero at both tiers; inj_impact_gtd_away r=-0.01 (not r=0.28 from Exp 4) |
