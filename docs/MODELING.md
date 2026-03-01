@@ -199,11 +199,21 @@ Time-series per snapshot:
 - **Conclusion**: bet365 is the viable target for CLV prediction with public features. Pinnacle would need substantially more history or non-public features (order flow, bettor identity) to revisit.
 - Config: `experiments/configs/xgboost_pinnacle_tuning_best.yaml`
 
+### Data volume learning curve (Mar 2026, 500–4,524 events OddsPortal)
+- Walk-forward CV with tuned bet365 baseline params (tabular-only) on chronological subsets of 500 → 4,524 events
+- **R² plateaus at ~1,500 events**: oscillates between 0 and +0.035 from 1.5K onwards, with no upward trend
+- Log-fit: R² = 0.0301·ln(N) − 0.2302, marginal return dR²/dN = 6.7e-06 at N=4,524
+- Extrapolated: R²≈0.047 at 10K events, R²≈0.068 at 20K events — diminishing returns
+- **Injury timing diagnostic (2×2)**: tabular-only vs tabular+injuries at sharp (12-24h) vs pregame (3-12h) tier — injuries add nothing at either tier
+- Pregame tier (3-12h) yields lower R² than sharp (0.001 vs 0.018) — consistent with OddsPortal snapshot timing centered at ~19h
+- **Caveat**: OddsPortal has zero snapshots in the 0-3h closing window where GTD injury signal is strongest (Exp 4: r=0.28). The "injuries add nothing" conclusion at 3-12h doesn't rule out injury value at < 3h — but testing requires Odds API bet365 data that doesn't exist yet.
+- Full results: [experiments/results/exp6_learning_curve/FINDINGS.md](../experiments/results/exp6_learning_curve/FINDINGS.md)
+
 ## Open Questions
 
 ### Signal
-- ~3.6% R² is the ceiling for public sportsbook features (confirmed with 5K events). Can Polymarket cross-source features push it higher?
-- ~~Injury features dominate importance~~ — **Answered**: injuries add zero signal when properly tuned. Earlier apparent importance was a tuning artifact.
+- ~3.6% R² is the ceiling for public sportsbook features at 5K events, with the learning curve plateaued. Can Polymarket cross-source features push it higher?
+- ~~Injury features dominate importance~~ — **Partially answered**: injuries add zero signal at ≥3h decision times when properly tuned (earlier apparent importance was a tuning artifact). GTD injury at 0-3h (r=0.28, Exp 4) remains untested — OddsPortal lacks closing-window snapshots.
 - Does the signal generalize to other sports, or is it NBA-specific?
 - Do PM features add signal? Untested at scale — only tested with 230 events (insufficient data). PM order flow from CLOB snapshots remains untapped.
 - Does sharp-retail divergence (Pinnacle vs DraftKings/FanDuel) contain more signal than cross-source (PM vs SB)?
@@ -214,6 +224,7 @@ Time-series per snapshot:
 - What is the optimal bet sizing given the weak but real signal?
 
 ### Data
+- ~~Is more OddsPortal data worth collecting?~~ — **No** (Exp 6): learning curve plateaued at ~1.5K events. More events of the same type won't help.
 - PM order flow features from existing CLOB snapshots — untapped data source
 - Is order book microstructure (depth, imbalance) informative at our snapshot frequency (5min)?
 - Would higher-frequency PM data (sub-minute) improve velocity/acceleration features?
@@ -231,10 +242,9 @@ Time-series per snapshot:
 - **~~4. Hours-to-game effect~~** — target variance grows with decision distance; sharp-retail peaks at 3-6h; GTD injury r=0.28 at 0-3h. Per-bin models inconclusive (478 events). Pregame window confirmed. [Full results](../experiments/results/exp4_hours_to_game/FINDINGS.md).
 - **~~5. LSTM evaluation~~** — LSTM R²<0 across all configurations (800-event Pinnacle, 1K-event Pinnacle with masking fix). Conclusively worse than XGBoost.
 
-### Active
+- **~~6. Data volume learning curve~~** — R² plateaued at ~1.5K events, oscillating 0–0.035 thereafter (log-fit dR²/dN = 6.7e-06). More OddsPortal data will not meaningfully improve the model. Injury timing diagnostic (2×2): injuries add nothing at sharp tier; pregame comparison diluted (~93% of events fall back to sharp-tier snapshots, only ~335 sample at actual 3-12h). The 0-3h closing window where GTD signal is strongest remains untested. [Full results](../experiments/results/exp6_learning_curve/FINDINGS.md).
 
-### 6. Data volume learning curve
-Train on increasing subsets of the 5K OddsPortal events. Performance improved from 230→800→5K events (R²: <0→0.020→0.036). Is the curve still rising, or has it plateaued? If still rising, more data collection (more seasons, more sports) is the highest-leverage action.
+### Active
 
 ### 7. Cross-venue execution analysis
 Compare execution opportunity across sportsbook and Polymarket for the same events. Requires Polymarket pipeline running live. Key questions:
@@ -295,3 +305,4 @@ Every experiment must produce:
 | 2026-02-28 | LSTM Pinnacle tuned | 15 seq × 8 timesteps | devigged pinnacle | ~1K events (Odds API) | CV R²=-0.075±0.113 | LSTM ruled out | 50-trial Optuna, 5-fold walk-forward; packed sequences; worse than constant predictor |
 | 2026-02-28 | Exp 4: hours-to-game | tabular 6 + injury 6 | devigged pinnacle | 1,593 (477 events, Odds API) | All bins R²<0; sharp-retail peaks 3-6h | Pregame window confirmed | CLV delta grows with hours; GTD injury r=0.28 at 0-3h; dataset too small for per-bin models |
 | 2026-03-01 | XGBoost Pinnacle tuned | tabular 4 + injury 6 | devigged pinnacle | ~800 events (Odds API) | CV R²=-0.017±0.015 | No signal | 100-trial walk-forward; max regularization; Pinnacle CLV unpredictable with public features |
+| 2026-03-01 | Exp 6: learning curve | tabular 4 | devigged bet365 | 500–4,524 events (OddsPortal) | Plateau at ~1.5K; R²≈0.02 | More data won't help | Log-fit dR²/dN=6.7e-06; injuries add nothing at sharp; pregame tier diluted (93% fallback to sharp) |
