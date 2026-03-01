@@ -62,6 +62,14 @@ OddsPortal's ~19h average decision time.
 
 ### Interpretation
 
+**Pregame tier is diluted**: `TierSampler(decision_tier="pregame")` accepts
+pregame, sharp, early, and opening tiers, picking the most recent. Since most
+OddsPortal events only have opening (~19h) and closing (~0.1h) snapshots, ~93%
+of "pregame" events fall back to the same sharp-tier snapshot as the sharp
+experiment. Only ~335 events actually sample at 3-12h pregame timing. The R²
+difference (0.001 vs 0.018) may reflect those 335 events dragging down the
+average rather than a clean timing effect.
+
 **Important caveat**: OddsPortal has zero snapshots in the 0-3h closing window
 where GTD injury signal is theoretically strongest (r=0.28, p=0.0003 in Exp 4).
 The pregame tier (3-12h) partially probes closer-to-game timing, but the true

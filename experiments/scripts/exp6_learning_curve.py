@@ -183,12 +183,17 @@ def log_func(x: np.ndarray, a: float, b: float) -> np.ndarray:
 def run_learning_curve(
     X: np.ndarray,
     y: np.ndarray,
+    feature_names: list[str],
     event_ids: np.ndarray,
 ) -> pd.DataFrame:
     """Part 1: Learning curve across subset sizes."""
     unique_events = list(dict.fromkeys(event_ids))
     n_total = len(unique_events)
     sizes = [s for s in SUBSET_SIZES if s < n_total] + [n_total]
+
+    assert feature_names[-1] == "hours_until_event", (
+        f"Expected last feature to be hours_until_event, got {feature_names[-1]}"
+    )
 
     rows = []
     for n in sizes:
@@ -211,7 +216,6 @@ def run_learning_curve(
             val_step_events=val_step,
         )
 
-        # hours_until_event is the last feature column
         hours = X_sub[:, -1]
 
         rows.append(
@@ -307,7 +311,7 @@ def run_injury_timing(
     return pd.DataFrame(rows)
 
 
-def plot_learning_curve(lc_df: pd.DataFrame) -> None:
+def plot_learning_curve(lc_df: pd.DataFrame) -> tuple[float, float] | None:
     """Plot R² vs N with log-fit extrapolation."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7))
 
@@ -387,7 +391,7 @@ def plot_injury_timing(it_df: pd.DataFrame) -> None:
 
     labels = [f"{row['feature_group']}\n{row['decision_tier']}" for _, row in plot_df.iterrows()]
     x = np.arange(len(labels))
-    colors = ["#2196F3" if "tabular" in label else "#FF9800" for label in labels]
+    colors = ["#2196F3" if label.startswith("tabular\n") else "#FF9800" for label in labels]
 
     ax.bar(x, plot_df["r2_mean"], yerr=plot_df["r2_std"], capsize=5, color=colors, alpha=0.8)
 
@@ -507,6 +511,14 @@ def write_findings(
             "",
             "### Interpretation",
             "",
+            '**Pregame tier is diluted**: `TierSampler(decision_tier="pregame")` accepts',
+            "pregame, sharp, early, and opening tiers, picking the most recent. Since most",
+            "OddsPortal events only have opening (~19h) and closing (~0.1h) snapshots, ~93%",
+            'of "pregame" events fall back to the same sharp-tier snapshot as the sharp',
+            "experiment. Only ~335 events actually sample at 3-12h pregame timing. The R²",
+            "difference (0.001 vs 0.018) may reflect those 335 events dragging down the",
+            "average rather than a clean timing effect.",
+            "",
             "**Important caveat**: OddsPortal has zero snapshots in the 0-3h closing window",
             "where GTD injury signal is theoretically strongest (r=0.28, p=0.0003 in Exp 4).",
             "The pregame tier (3-12h) partially probes closer-to-game timing, but the true",
@@ -534,7 +546,7 @@ async def main() -> None:
     print(f"  Features: {feature_names}")
 
     print("\nRunning learning curve...")
-    lc_df = run_learning_curve(X, y, event_ids)
+    lc_df = run_learning_curve(X, y, feature_names, event_ids)
 
     # Save (drop fold_r2s list column for CSV)
     lc_csv = lc_df.drop(columns=["fold_r2s"])
