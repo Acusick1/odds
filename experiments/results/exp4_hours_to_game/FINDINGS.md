@@ -4,7 +4,7 @@
 
 - **Date**: 2026-02-28
 - **Git SHA**: `afab058`
-- **Dataset**: 1,597 samples from 478 Odds API events (Pinnacle target, US bookmaker set)
+- **Dataset**: 1,593 samples from 477 Odds API events (Pinnacle target, US bookmaker set, Oct 2025+)
 - **Sampling**: `time_range`, 1–48h before game, up to 10 samples per event
 - **Target**: Devigged Pinnacle CLV delta (`fair_close - fair_at_snapshot`)
 - **Features**: 13 (tabular 6 + injury 6 + hours_until_event)
@@ -16,10 +16,10 @@
 
 | Hour Bin | n samples | n events | Target Std | Mean \|CLV Delta\| |
 |----------|-----------|----------|------------|-------------------|
-| 0-3h     | 166       | 103      | 0.029      | 0.014             |
+| 0-3h     | 165       | 102      | 0.029      | 0.014             |
 | 3-6h     | 454       | 430      | 0.022      | 0.015             |
 | 6-9h     | 419       | 368      | 0.035      | 0.023             |
-| 9-12h    | 276       | 248      | 0.040      | 0.026             |
+| 9-12h    | 275       | 247      | 0.040      | 0.026             |
 | 12-18h   | 40        | 36       | 0.027      | 0.021             |
 | 18-24h   | 200       | 172      | 0.035      | 0.027             |
 | 24-36h   | 39        | 28       | 0.038      | 0.030             |
@@ -47,8 +47,8 @@ Mean absolute CLV delta grows from 1.4pp at 0-3h to 3.0pp at 24-36h — more roo
 **Per-bin XGBoost** (trained independently per bin): All bins R² < 0, heavily underpowered (27-317 train samples per bin).
 
 **Pooled XGBoost** (one model, evaluated per bin):
-- Overall test R² = -0.019 (478 Odds API events insufficient for positive signal)
-- 18-24h bin is closest to positive (R² = -0.004, MSE ratio = 0.96)
+- Overall test R² = -0.009 (477 Odds API events insufficient for positive signal)
+- 18-24h bin is closest to positive (R² = +0.002, MSE ratio = 0.95)
 - 12-18h and 18-24h are the only bins where MSE ratio < 1.0
 
 No bin shows positive R², but this is the ~500-event Odds API dataset — the 5K-event OddsPortal dataset (where we achieved 3.6% R²) cannot be stratified by hour because it has only 2 snapshots per event.
@@ -67,7 +67,7 @@ Snapshot density is bimodal: peaks at 3-4h and 8-10h before game, with a seconda
 
 4. **Prob level → CLV direction flips with time**: High current probability correlates with *negative* CLV delta close to game (reversion) but *positive* CLV delta far from game (momentum). This is consistent with market microstructure: close to game, extreme prices revert; far from game, current direction tends to continue.
 
-5. **Can't definitively answer "optimal decision hour"**: The Odds API dataset is too small (478 events) to produce positive model R² in any bin. The 5K OddsPortal dataset showed 3.6% R² in aggregate but only has opening+closing snapshots, preventing per-hour analysis.
+5. **Can't definitively answer "optimal decision hour"**: The Odds API dataset is too small (477 events) to produce positive model R² in any bin. The 5K OddsPortal dataset showed 3.6% R² in aggregate but only has opening+closing snapshots, preventing per-hour analysis.
 
 ## Implications
 

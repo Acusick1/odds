@@ -173,13 +173,13 @@ Time-series per snapshot:
 - ~3.6% R² appears to be the ceiling for public sportsbook features
 - Configs: `experiments/configs/xgboost_bet365_tuning_best.yaml`, `experiments/configs/xgboost_bet365_baseline_tuning_best.yaml`
 
-### Hours-to-game effect (Feb 2026, 478 events Odds API)
-- 1,597 samples across 1-48h before game, time_range sampling with up to 10 snapshots per event
+### Hours-to-game effect (Feb 2026, 477 events Odds API)
+- 1,593 samples across 1-48h before game, time_range sampling with up to 10 snapshots per event
 - **Target variance increases with decision distance**: mean |CLV delta| = 1.4pp at 0-3h → 3.0pp at 24-36h. Market efficiency peaks at 3-6h (std=0.022, lowest).
 - **Sharp-retail divergence peaks at 3-6h** (r=+0.097) — confirming the pregame window as the sweet spot for this feature
 - **GTD injury at 0-3h is the strongest individual signal found** (r=+0.28, p=0.0003) — late injury news not yet priced in. Sign flips negative at 18-24h (early reports already reflected).
 - **Prob level correlation flips**: high prob → negative CLV close to game (reversion), positive CLV far from game (momentum)
-- **Per-bin models all R²<0**: 478 Odds API events too small for per-hour model evaluation. OddsPortal's 5K events only have 2 snapshots, preventing hour stratification.
+- **Per-bin models all R²<0**: 477 Odds API events too small for per-hour model evaluation. OddsPortal's 5K events only have 2 snapshots, preventing hour stratification.
 - Current pregame tier (3-12h) is a reasonable default; no evidence to change
 - Full results: [experiments/results/exp4_hours_to_game/FINDINGS.md](../experiments/results/exp4_hours_to_game/FINDINGS.md)
 
@@ -201,7 +201,7 @@ Time-series per snapshot:
 - Does sharp-retail divergence (Pinnacle vs DraftKings/FanDuel) contain more signal than cross-source (PM vs SB)?
 
 ### Execution
-- At what hours-before-game does the model's edge peak? (Experiment 4)
+- ~~At what hours-before-game does the model's edge peak?~~ — **Partially answered** (Exp 4): correlations peak at 3-6h for sharp-retail, 0-3h for GTD injury, but per-bin model evaluation inconclusive at 478 events. Revisit after #165 recovers ~800 events.
 - Can cross-venue execution (sportsbook vs Polymarket) extract more value than single-venue?
 - What is the optimal bet sizing given the weak but real signal?
 
@@ -220,12 +220,10 @@ Time-series per snapshot:
 - **~~1. Feature-target correlation analysis~~** — max |r|=0.12, sharp-retail diff strongest, 0/75 significant after BH correction
 - **~~2. Feature group isolation~~** — all groups R²<0 at 230 events; TierSampler IN_PLAY bug found
 - **~~3. Minimal feature models~~** — subsumed by XGBoost bet365 at scale: 4 tabular features match 10-feature model
+- **~~4. Hours-to-game effect~~** — target variance grows with decision distance; sharp-retail peaks at 3-6h; GTD injury r=0.28 at 0-3h. Per-bin models inconclusive (478 events). Pregame window confirmed. [Full results](../experiments/results/exp4_hours_to_game/FINDINGS.md).
 - **~~5. LSTM evaluation~~** — LSTM R²<0 across all configurations (800-event Pinnacle, 1K-event Pinnacle with masking fix). Conclusively worse than XGBoost.
 
 ### Active
-
-### 4. Hours-to-game effect (completed)
-Target variance grows monotonically with decision distance; sharp-retail divergence peaks at 3-6h; GTD injury at 0-3h is strongest individual signal (r=0.28). Per-bin model evaluation inconclusive (Odds API dataset too small). Pregame window (3-12h) confirmed as reasonable default. [Full results](../experiments/results/exp4_hours_to_game/FINDINGS.md).
 
 ### 6. Data volume learning curve
 Train on increasing subsets of the 5K OddsPortal events. Performance improved from 230→800→5K events (R²: <0→0.020→0.036). Is the curve still rising, or has it plateaued? If still rising, more data collection (more seasons, more sports) is the highest-leverage action.
@@ -287,4 +285,4 @@ Every experiment must produce:
 | 2026-02-27 | XGBoost bet365 baseline tuned | tabular 4 | devigged bet365 | ~5K events (OddsPortal) | CV R²=0.036±0.028 | Same as +injuries | Confirms injuries are noise; public features plateau |
 | 2026-02-27 | LSTM mask fix | 15 seq features × 8 timesteps | devigged pinnacle | ~1K events (Odds API) | — | Bug fix | Packed sequences for correct mask application (#162) |
 | 2026-02-28 | LSTM Pinnacle tuned | 15 seq × 8 timesteps | devigged pinnacle | ~1K events (Odds API) | CV R²=-0.075±0.113 | LSTM ruled out | 50-trial Optuna, 5-fold walk-forward; packed sequences; worse than constant predictor |
-| 2026-02-28 | Exp 4: hours-to-game | tabular 6 + injury 6 | devigged pinnacle | 1,597 (478 events, Odds API) | All bins R²<0; sharp-retail peaks 3-6h | Pregame window confirmed | CLV delta grows with hours; GTD injury r=0.28 at 0-3h; dataset too small for per-bin models |
+| 2026-02-28 | Exp 4: hours-to-game | tabular 6 + injury 6 | devigged pinnacle | 1,593 (477 events, Odds API) | All bins R²<0; sharp-retail peaks 3-6h | Pregame window confirmed | CLV delta grows with hours; GTD injury r=0.28 at 0-3h; dataset too small for per-bin models |
