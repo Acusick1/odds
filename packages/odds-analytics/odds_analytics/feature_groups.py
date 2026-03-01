@@ -115,7 +115,7 @@ async def collect_event_data(
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
     - Loads all OddsSnapshot records once
-    - Finds closing snapshot (last in closing_tier)
+    - Finds closing snapshot (prefers target bookmaker when applicable)
     - Loads PM context (PM event, moneyline market, home_idx)
     - Bulk-loads all PM prices + orderbooks for the market (2 queries total)
     - Loads sequences via load_sequences_for_event when trajectory features requested
@@ -129,7 +129,7 @@ async def collect_event_data(
     # Derive closing snapshot from already-loaded snapshots (avoid extra DB query)
     closing_tier_value = config.closing_tier.value
     closing_candidates = [s for s in all_snapshots if s.fetch_tier == closing_tier_value]
-    closing_snapshot = closing_candidates[-1] if closing_candidates else None
+    closing_snapshot = _select_closing_snapshot(closing_candidates, event, config)
 
     # PM context (optional)
     pm_context: PMEventContext | None = None
@@ -738,6 +738,23 @@ def _has_bookmaker_closing(
         )
         is not None
     )
+
+
+def _select_closing_snapshot(
+    candidates: list[OddsSnapshot], event: Event, config: FeatureConfig
+) -> OddsSnapshot | None:
+    """Pick the best closing snapshot from candidates ordered by time.
+
+    When target_type is bookmaker-specific, prefer the candidate containing
+    the target bookmaker's h2h data. Falls back to last-by-time.
+    """
+    if not candidates:
+        return None
+    if config.target_type == "devigged_bookmaker":
+        for candidate in reversed(candidates):
+            if _has_bookmaker_closing(candidate, event, config.target_bookmaker):
+                return candidate
+    return candidates[-1]
 
 
 # =============================================================================

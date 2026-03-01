@@ -191,6 +191,14 @@ Time-series per snapshot:
 - LSTM conclusively ruled out for CLV prediction with current features — sequential modeling adds no value over cross-sectional features
 - Config: `experiments/configs/lstm_pinnacle_tuning_best.yaml`
 
+### XGBoost Pinnacle tuning (Mar 2026, ~800 events Odds API)
+- 4-fold walk-forward CV, 100-trial Optuna tuning, devigged Pinnacle target
+- **CV R²=-0.017 ± 0.015**, MSE=0.000431 — tuner converged to max regularization (no signal)
+- Best params: n_est=400, max_depth=2, lr=0.145, min_child_weight=47, subsample=0.5
+- Pinnacle MSE (0.000431) is 6.7× lower than bet365 MSE (0.002883) — Pinnacle lines move less, leaving less variance to predict
+- **Conclusion**: bet365 is the viable target for CLV prediction with public features. Pinnacle would need substantially more history or non-public features (order flow, bettor identity) to revisit.
+- Config: `experiments/configs/xgboost_pinnacle_tuning_best.yaml`
+
 ## Open Questions
 
 ### Signal
@@ -286,3 +294,4 @@ Every experiment must produce:
 | 2026-02-27 | LSTM mask fix | 15 seq features × 8 timesteps | devigged pinnacle | ~1K events (Odds API) | — | Bug fix | Packed sequences for correct mask application (#162) |
 | 2026-02-28 | LSTM Pinnacle tuned | 15 seq × 8 timesteps | devigged pinnacle | ~1K events (Odds API) | CV R²=-0.075±0.113 | LSTM ruled out | 50-trial Optuna, 5-fold walk-forward; packed sequences; worse than constant predictor |
 | 2026-02-28 | Exp 4: hours-to-game | tabular 6 + injury 6 | devigged pinnacle | 1,593 (477 events, Odds API) | All bins R²<0; sharp-retail peaks 3-6h | Pregame window confirmed | CLV delta grows with hours; GTD injury r=0.28 at 0-3h; dataset too small for per-bin models |
+| 2026-03-01 | XGBoost Pinnacle tuned | tabular 4 + injury 6 | devigged pinnacle | ~800 events (Odds API) | CV R²=-0.017±0.015 | No signal | 100-trial walk-forward; max regularization; Pinnacle CLV unpredictable with public features |
