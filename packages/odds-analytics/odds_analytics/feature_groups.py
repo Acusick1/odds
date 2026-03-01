@@ -115,7 +115,7 @@ async def collect_event_data(
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
     - Loads all OddsSnapshot records once
-    - Finds closing snapshot (last in closing_tier)
+    - Finds closing snapshot (prefers target bookmaker when applicable)
     - Loads PM context (PM event, moneyline market, home_idx)
     - Bulk-loads all PM prices + orderbooks for the market (2 queries total)
     - Loads sequences via load_sequences_for_event when trajectory features requested
