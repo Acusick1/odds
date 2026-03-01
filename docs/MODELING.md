@@ -209,6 +209,16 @@ Time-series per snapshot:
 - **Caveat resolved by Exp 6b**: OddsPortal had zero snapshots in the 0-3h closing window. Exp 6b tested this on 479 Odds API events with bet365 closing-tier snapshots (avg 0.2h) — injuries add exactly zero. The closing-tier target is near-zero (std=0.0016) because the line has already priced in GTD designations.
 - Full results: [experiments/results/exp6_learning_curve/FINDINGS.md](../experiments/results/exp6_learning_curve/FINDINGS.md)
 
+### Walk-forward betting simulation (Mar 2026, ~4,500 events OddsPortal)
+- Walk-forward CV (12 folds, expanding window), flat $100 bets on bet365 vigged American odds, threshold sweep [0.005–0.05]
+- **Not profitable**: all thresholds from 0.005 to 0.03 produce negative ROI (-2.4% to -11.8%)
+- Only threshold=0.05 shows +3.36% ROI (56 bets), but **NOT significant** (p=0.260, 1K permutations) — likely noise from small sample
+- Avg CLV captured is positive at all thresholds (+0.010 to +0.047), confirming the model identifies directional line movement, but the edge is consumed by the vig
+- **Always-home baseline**: 54.2% win rate, -7.55% ROI — confirms the ~4.5% house edge the model must overcome
+- Away bias: model predicts more away bets than home bets at all thresholds (e.g., 812 away vs 495 home at 0.005), suggesting systematic away-side line movement in bet365 pricing
+- **Conclusion**: ~3.6% R² CLV signal is directionally correct but too weak to overcome bet365's vig (~4.5%) for flat betting. Would need either stronger signal (non-public features) or lower-cost execution venues
+- Full results: [experiments/results/exp7_backtest_sim/FINDINGS.md](../experiments/results/exp7_backtest_sim/FINDINGS.md)
+
 ## Open Questions
 
 ### Signal
@@ -221,7 +231,7 @@ Time-series per snapshot:
 ### Execution
 - ~~At what hours-before-game does the model's edge peak?~~ — **Answered** (Exp 4 + 6b): sharp-retail diff peaks at 3-6h (Exp 4). GTD injury r=0.28 at 0-3h (Exp 4, Pinnacle target) does NOT transfer to bet365 target (r=-0.01, Exp 6b) — the closing-tier catch-22 means the line has already priced in GTD designations by the time they're visible.
 - Can cross-venue execution (sportsbook vs Polymarket) extract more value than single-venue?
-- What is the optimal bet sizing given the weak but real signal?
+- ~~What is the optimal bet sizing given the weak but real signal?~~ — **Moot** (Exp 7): flat betting is unprofitable; Kelly sizing cannot fix an insufficient edge. Would need stronger signal first.
 
 ### Data
 - ~~Is more OddsPortal data worth collecting?~~ — **No** (Exp 6): learning curve plateaued at ~1.5K events. More events of the same type won't help.
@@ -246,9 +256,11 @@ Time-series per snapshot:
 
 - **~~6b. Injury closing tier~~** — Tested GTD hypothesis on Odds API data with bet365 closing-tier snapshots (avg 0.2h before game). Closing-tier R²=0.596 is a measurement artifact: target std=0.0016 (line has barely moved at 0.2h), so the model explains near-zero residuals. Injuries add exactly zero at closing tier (identical R² to tabular-only). `inj_impact_gtd_away` r=-0.011 at closing — the Exp 4 r=0.28 does not transfer to bet365 target. Injury signal is conclusively uninformative for CLV prediction at any tier. [Full results](../experiments/results/exp6b_injury_closing_tier/FINDINGS.md).
 
+- **~~7. Walk-forward betting simulation~~** — Flat $100 bets on bet365 vigged odds across 6 thresholds (0.005–0.05). All thresholds 0.005–0.03 produce negative ROI (-2.4% to -11.8%). Only threshold=0.05 shows +3.36% ROI (56 bets) but p=0.260 (not significant). Model captures positive CLV directionally but the ~3.6% R² signal is too weak to overcome bet365's ~4.5% vig. [Full results](../experiments/results/exp7_backtest_sim/FINDINGS.md).
+
 ### Active
 
-### 7. Cross-venue execution analysis
+### 8. Cross-venue execution analysis
 Compare execution opportunity across sportsbook and Polymarket for the same events. Requires Polymarket pipeline running live. Key questions:
 - When the model predicts a line move, which venue is slower to adjust?
 - Is the PM-SB price gap (~2.4pp) exploitable net of transaction costs?
@@ -256,13 +268,8 @@ Compare execution opportunity across sportsbook and Polymarket for the same even
 
 Prerequisite: Polymarket fetch pipeline deployed on scheduler.
 
-### 8. Position sizing / Kelly criterion
-Replace flat bet sizing in backtesting with Kelly criterion based on predicted edge magnitude. Key questions:
-- Are larger model predictions more accurate (calibration)?
-- What is the optimal Kelly fraction given the noise in predictions?
-- Does Kelly sizing improve Sharpe ratio vs flat betting in backtest?
-
-Prerequisite: Experiment 4 results (need to know optimal decision time).
+### ~~9. Position sizing / Kelly criterion~~
+**Deprioritized** (Exp 7): flat betting is unprofitable — Kelly sizing cannot fix an insufficient edge. Revisit only if signal improves via non-public features or cross-venue execution.
 
 ## Running Experiments
 
@@ -309,3 +316,4 @@ Every experiment must produce:
 | 2026-03-01 | XGBoost Pinnacle tuned | tabular 4 + injury 6 | devigged pinnacle | ~800 events (Odds API) | CV R²=-0.017±0.015 | No signal | 100-trial walk-forward; max regularization; Pinnacle CLV unpredictable with public features |
 | 2026-03-01 | Exp 6: learning curve | tabular 4 | devigged bet365 | 500–4,524 events (OddsPortal) | Plateau at ~1.5K; R²≈0.02 | More data won't help | Log-fit dR²/dN=6.7e-06; injuries add nothing at sharp; pregame tier diluted (93% fallback to sharp) |
 | 2026-03-01 | Exp 6b: injury closing tier | tabular 4 ± injury 6 | devigged bet365 | 479 (closing) / 826 (sharp) events (Odds API) | Closing R²=0.596 (artifact); sharp R²=-0.02 | GTD hypothesis falsified | Closing-tier target near-zero (std=0.0016); injuries add zero at both tiers; inj_impact_gtd_away r=-0.01 (not r=0.28 from Exp 4) |
+| 2026-03-01 | Exp 7: backtest sim | tabular 4 | devigged bet365 | 2,088 bets (4,524 events OddsPortal) | Best ROI +3.36% (p=0.260) | Not profitable | Flat $100, 12-fold walk-forward; all thresholds ≤0.03 negative ROI; CLV signal too weak to overcome ~4.5% vig |
