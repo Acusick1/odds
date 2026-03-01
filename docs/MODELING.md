@@ -219,6 +219,15 @@ Time-series per snapshot:
 - **Conclusion**: ~3.6% R² CLV signal is directionally correct but too weak to overcome bet365's vig (~4.5%) for flat betting. Would need either stronger signal (non-public features) or lower-cost execution venues
 - Full results: [experiments/results/exp7_backtest_sim/FINDINGS.md](../experiments/results/exp7_backtest_sim/FINDINGS.md)
 
+### Line shopping across bookmakers (Mar 2026, ~4,500 events OddsPortal)
+- Same walk-forward simulation as Exp 7, but selects the best available price across 4 UK bookmakers (bet365, betway, betfred, bwin) instead of bet365-only
+- **Vig reduction**: effective overround drops from 4.13% (bet365) to 1.59% (best-available), a 2.55pp reduction
+- **ROI improvement at every threshold**: +0.3pp to +1.3pp improvement, with largest gains at lower thresholds (1.3pp at 0.005, 0.9pp at 0.01)
+- **Still not profitable**: all thresholds 0.005–0.03 remain negative ROI. Best threshold=0.05 improves from +3.36% to +3.68% ROI but remains insignificant (p=0.334)
+- **bet365 provides best price 67% of the time**; betfred 13.1%, betway 12.4%, bwin 7.5% — bet365 is already competitive, limiting the shopping upside
+- **Conclusion**: line shopping is directionally correct but insufficient — the ~2.5pp vig reduction is smaller than the ~4% gap between signal strength and breakeven. Would need either exchange-level execution costs or stronger signal
+- Full results: [experiments/results/exp7b_line_shopping/FINDINGS.md](../experiments/results/exp7b_line_shopping/FINDINGS.md)
+
 ## Open Questions
 
 ### Signal
@@ -257,6 +266,8 @@ Time-series per snapshot:
 - **~~6b. Injury closing tier~~** — Tested GTD hypothesis on Odds API data with bet365 closing-tier snapshots (avg 0.2h before game). Closing-tier R²=0.596 is a measurement artifact: target std=0.0016 (line has barely moved at 0.2h), so the model explains near-zero residuals. Injuries add exactly zero at closing tier (identical R² to tabular-only). `inj_impact_gtd_away` r=-0.011 at closing — the Exp 4 r=0.28 does not transfer to bet365 target. Injury signal is conclusively uninformative for CLV prediction at any tier. [Full results](../experiments/results/exp6b_injury_closing_tier/FINDINGS.md).
 
 - **~~7. Walk-forward betting simulation~~** — Flat $100 bets on bet365 vigged odds across 6 thresholds (0.005–0.05). All thresholds 0.005–0.03 produce negative ROI (-2.4% to -11.8%). Only threshold=0.05 shows +3.36% ROI (56 bets) but p=0.260 (not significant). Model captures positive CLV directionally but the ~3.6% R² signal is too weak to overcome bet365's ~4.5% vig. [Full results](../experiments/results/exp7_backtest_sim/FINDINGS.md).
+
+- **~~7b. Line shopping across bookmakers~~** — Re-ran Exp 7 simulation selecting best available price across 4 UK bookmakers (bet365, betway, betfred, bwin). Effective vig drops from 4.13% to 1.59% (2.55pp reduction), ROI improves +0.3–1.3pp at every threshold, but still not profitable at thresholds ≤0.03. bet365 provides the best price 67% of the time, limiting shopping upside. [Full results](../experiments/results/exp7b_line_shopping/FINDINGS.md).
 
 ### Active
 
@@ -317,3 +328,4 @@ Every experiment must produce:
 | 2026-03-01 | Exp 6: learning curve | tabular 4 | devigged bet365 | 500–4,524 events (OddsPortal) | Plateau at ~1.5K; R²≈0.02 | More data won't help | Log-fit dR²/dN=6.7e-06; injuries add nothing at sharp; pregame tier diluted (93% fallback to sharp) |
 | 2026-03-01 | Exp 6b: injury closing tier | tabular 4 ± injury 6 | devigged bet365 | 479 (closing) / 826 (sharp) events (Odds API) | Closing R²=0.596 (artifact); sharp R²=-0.02 | GTD hypothesis falsified | Closing-tier target near-zero (std=0.0016); injuries add zero at both tiers; inj_impact_gtd_away r=-0.01 (not r=0.28 from Exp 4) |
 | 2026-03-01 | Exp 7: backtest sim | tabular 4 | devigged bet365 | 2,088 bets (4,524 events OddsPortal) | Best ROI +3.36% (p=0.260) | Not profitable | Flat $100, 12-fold walk-forward; all thresholds ≤0.03 negative ROI; CLV signal too weak to overcome ~4.5% vig |
+| 2026-03-01 | Exp 7b: line shopping | tabular 4 | devigged bet365 | 2,088 bets (4 bookmakers) | Best ROI +3.68% (p=0.334) | Still not profitable | Vig drops 4.13%→1.59% (2.55pp); ROI +0.3–1.3pp at all thresholds; bet365 best price 67% of time |
