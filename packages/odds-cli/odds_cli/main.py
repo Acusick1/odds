@@ -17,6 +17,7 @@ from odds_cli.commands import (
     polymarket,
     quality,
     scheduler,
+    scrape,
     status,
     train,
     validate,
@@ -43,6 +44,7 @@ app.add_typer(polymarket.app, name="polymarket", help="Polymarket data operation
 app.add_typer(injuries.app, name="injuries", help="NBA injury report operations")
 app.add_typer(nba_stats.app, name="nba-stats", help="NBA game log operations")
 app.add_typer(pbpstats.app, name="pbpstats", help="PBPStats player season statistics")
+app.add_typer(scrape.app, name="scrape", help="Scrape odds from OddsPortal")
 
 console = Console()
 

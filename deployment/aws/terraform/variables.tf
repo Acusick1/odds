@@ -57,3 +57,15 @@ variable "image_tag" {
   type        = string
   default     = "dev-latest"
 }
+
+variable "enable_oddsportal_scraper" {
+  description = "Deploy OddsPortal scraper Lambda (separate container with Playwright/Chromium)"
+  type        = bool
+  default     = false
+}
+
+variable "scraper_image_tag" {
+  description = "Docker image tag for the scraper Lambda (e.g., dev-a1b2c3d or dev-latest)"
+  type        = string
+  default     = "dev-latest"
+}
