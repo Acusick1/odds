@@ -161,6 +161,11 @@ class BacktestEngine:
                     event, odds_snapshot, self.config, self.reader.session
                 )
 
+                is_three_way_h2h = any(
+                    o.market_key == "h2h" and o.outcome_name.lower() == "draw"
+                    for o in odds_snapshot
+                )
+
                 for opportunity in opportunities:
                     stake = self._calculate_stake(opportunity, bankroll)
 
@@ -172,7 +177,7 @@ class BacktestEngine:
 
                     # Evaluate bet result before creating the immutable record
                     result, profit = self._evaluate_bet_result_for_opportunity(
-                        opportunity, event, stake
+                        opportunity, event, stake, is_three_way=is_three_way_h2h
                     )
 
                     # Calculate final bankroll after this bet
@@ -265,11 +270,18 @@ class BacktestEngine:
         return round(stake, 2)
 
     def _evaluate_bet_result_for_opportunity(
-        self, opportunity: BetOpportunity, event: BacktestEvent, stake: float
+        self,
+        opportunity: BetOpportunity,
+        event: BacktestEvent,
+        stake: float,
+        *,
+        is_three_way: bool = False,
     ) -> tuple[str, float]:
         """Evaluate bet result using opportunity details and event outcome."""
         if opportunity.market == "h2h":
-            won = self._evaluate_moneyline_outcome(opportunity.outcome, event)
+            won = self._evaluate_moneyline_outcome(
+                opportunity.outcome, event, is_three_way=is_three_way
+            )
         elif opportunity.market == "spreads":
             won = self._evaluate_spread_outcome(opportunity.outcome, opportunity.line, event)
         elif opportunity.market == "totals":
@@ -286,33 +298,22 @@ class BacktestEngine:
         result_str = "win" if won else "loss"
         return (result_str, profit)
 
-    def _evaluate_bet_result(self, bet: BetRecord, event: BacktestEvent) -> tuple[str, float]:
-        """Kept for backward compatibility, delegates to outcome-based evaluation."""
-        if bet.market == "h2h":
-            won = self._evaluate_moneyline_outcome(bet.outcome, event)
-        elif bet.market == "spreads":
-            won = self._evaluate_spread_outcome(bet.outcome, bet.line, event)
-        elif bet.market == "totals":
-            won = self._evaluate_total_outcome(bet.outcome, bet.line, event)
-        else:
-            self._logger.warning("unknown_market", market=bet.market)
-            return ("unknown", 0.0)
+    def _evaluate_moneyline_outcome(
+        self, outcome: str, event: BacktestEvent, *, is_three_way: bool = False
+    ) -> bool | None:
+        """Evaluate moneyline bet based on outcome name.
 
-        if won is None:
-            return ("push", 0.0)
-
-        profit = calculate_profit_from_odds(bet.stake, bet.odds, won)
-
-        result_str = "win" if won else "loss"
-        return (result_str, profit)
-
-    def _evaluate_moneyline_outcome(self, outcome: str, event: BacktestEvent) -> bool | None:
-        """Evaluate moneyline bet based on outcome name."""
+        For 3-way markets (football), a draw is a valid result: backing Draw
+        wins, backing a team loses. For 2-way markets (basketball), a tie is
+        a push (returns None).
+        """
         if event.home_score > event.away_score:
             winner = event.home_team
         elif event.away_score > event.home_score:
             winner = event.away_team
         else:
+            if is_three_way:
+                return outcome.lower() == "draw"
             return None
 
         return outcome == winner
