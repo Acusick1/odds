@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime
 from enum import Enum
+from typing import NamedTuple
 
 import numpy as np
 import structlog
@@ -21,6 +22,21 @@ from odds_core.models import Odds, OddsSnapshot
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.utils import calculate_implied_probability, devig_probabilities
+
+# Outcome name used by the Odds API for draw results in 3-way markets
+DRAW_OUTCOME = "Draw"
+
+
+class DeviggedProbs(NamedTuple):
+    """Devigged probabilities for an h2h market.
+
+    Always contains home and away. For 3-way markets (soccer),
+    draw is populated; for 2-way markets (NBA), draw is None.
+    """
+
+    home: float
+    draw: float | None
+    away: float
 
 
 class TargetType(str, Enum):
@@ -33,6 +49,8 @@ class TargetType(str, Enum):
 logger = structlog.get_logger()
 
 __all__ = [
+    "DeviggedProbs",
+    "DRAW_OUTCOME",
     "load_sequences_for_event",
     "TargetType",
     "calculate_regression_target",
@@ -104,7 +122,7 @@ def extract_devigged_h2h_probs(
     home_team: str,
     away_team: str,
     bookmaker_key: str = "pinnacle",
-) -> tuple[float, ...] | None:
+) -> DeviggedProbs | None:
     """Extract devigged h2h probabilities from a specific bookmaker.
 
     Supports both 2-way (NBA: home/away) and 3-way (soccer: home/draw/away) markets.
@@ -112,9 +130,8 @@ def extract_devigged_h2h_probs(
     converts to implied probabilities, and applies proportional devigging.
 
     Returns:
-        2-way: (fair_home_prob, fair_away_prob)
-        3-way: (fair_home_prob, fair_draw_prob, fair_away_prob)
-        None if home or away outcome missing for the bookmaker.
+        DeviggedProbs with home, draw (None for 2-way), and away fields.
+        None if home or away outcome is missing for the bookmaker.
     """
     bm_h2h = [o for o in odds if o.bookmaker_key == bookmaker_key and o.market_key == "h2h"]
     if not bm_h2h:
@@ -128,7 +145,7 @@ def extract_devigged_h2h_probs(
             home_odds = o
         elif o.outcome_name == away_team:
             away_odds = o
-        elif o.outcome_name == "Draw":
+        elif o.outcome_name == DRAW_OUTCOME:
             draw_odds = o
 
     if home_odds is None or away_odds is None:
@@ -139,9 +156,11 @@ def extract_devigged_h2h_probs(
 
     if draw_odds is not None:
         draw_raw = calculate_implied_probability(draw_odds.price)
-        return devig_probabilities(home_raw, draw_raw, away_raw)
+        home, draw, away = devig_probabilities(home_raw, draw_raw, away_raw)
+        return DeviggedProbs(home=home, draw=draw, away=away)
 
-    return devig_probabilities(home_raw, away_raw)
+    home, away = devig_probabilities(home_raw, away_raw)
+    return DeviggedProbs(home=home, draw=None, away=away)
 
 
 def calculate_devigged_bookmaker_target(
@@ -163,9 +182,7 @@ def calculate_devigged_bookmaker_target(
     if snapshot_probs is None or closing_probs is None:
         return None
 
-    fair_snapshot_home = snapshot_probs[0]
-    fair_close_home = closing_probs[0]
-    return fair_close_home - fair_snapshot_home
+    return closing_probs.home - snapshot_probs.home
 
 
 def extract_odds_from_snapshot(
