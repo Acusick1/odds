@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Scrape historical NBA odds from OddsPortal using OddsHarvester.
+"""Scrape historical odds from OddsPortal using OddsHarvester.
 
 Resumes at game level — only scrapes matches that are missing or incomplete.
 
 Usage:
-    # Scrape recent 3 seasons (closing odds only, fastest)
+    # Scrape recent 3 NBA seasons (closing odds only, fastest)
     uv run python scripts/scrape_oddsportal.py
 
     # Scrape specific seasons
@@ -18,6 +18,9 @@ Usage:
 
     # Scrape all available seasons
     uv run python scripts/scrape_oddsportal.py --all
+
+    # Scrape EPL soccer data
+    uv run python scripts/scrape_oddsportal.py --sport soccer --league england-premier-league --all
 
     # Scrape through a proxy to a separate directory (for geo-restricted bookmakers)
     uv run python scripts/scrape_oddsportal.py --all --odds-history \\
@@ -35,6 +38,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "external" / "oddsportal"
 
@@ -52,12 +56,30 @@ ALL_SEASONS = [
 
 DEFAULT_SEASONS = ["2023-2024", "2024-2025", "2025-2026"]
 
-MARKET = "home_away"
-SPORT = "basketball"
-LEAGUE = "nba"
 ODDS_FORMAT = "Decimal Odds"
 BATCH_SIZE = 20
 SCRAPE_TIMEOUT = 14400  # 4 hours
+
+# ---------------------------------------------------------------------------
+# Sport configuration
+# ---------------------------------------------------------------------------
+
+SPORT_CONFIGS: dict[str, dict[str, Any]] = {
+    "basketball": {
+        "harvester_sport": "basketball",
+        "default_league": "nba",
+        "market": "home_away",
+        "market_key": "home_away_market",
+        "file_prefix": "nba",
+    },
+    "soccer": {
+        "harvester_sport": "football",
+        "default_league": "england-premier-league",
+        "market": "1x2",
+        "market_key": "1x2_market",
+        "file_prefix": "epl",
+    },
+}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -72,7 +94,7 @@ log = logging.getLogger("scrape_oddsportal")
 # ---------------------------------------------------------------------------
 
 
-def load_existing(path: Path) -> dict[str, dict]:
+def load_existing(path: Path, market_key: str) -> dict[str, dict]:
     """Load a season JSON file and return records indexed by match_link.
 
     When duplicates exist, the entry with more data wins (non-empty odds
@@ -93,15 +115,15 @@ def load_existing(path: Path) -> dict[str, dict]:
         if not link:
             continue
         prev = indexed.get(link)
-        if prev is None or _richness(record) > _richness(prev):
+        if prev is None or _richness(record, market_key) > _richness(prev, market_key):
             indexed[link] = record
     return indexed
 
 
-def _richness(record: dict) -> int:
+def _richness(record: dict, market_key: str) -> int:
     """Score how complete a record is (higher = more data)."""
     score = 0
-    market = record.get("home_away_market", [])
+    market = record.get(market_key, [])
     if market:
         score += 1
         if any(bk.get("odds_history_data") for bk in market):
@@ -109,9 +131,9 @@ def _richness(record: dict) -> int:
     return score
 
 
-def is_complete(record: dict, odds_history: bool) -> bool:
+def is_complete(record: dict, odds_history: bool, market_key: str) -> bool:
     """Check whether a match record has all the data we need."""
-    market = record.get("home_away_market", [])
+    market = record.get(market_key, [])
     if not market:
         return False
     if odds_history:
@@ -119,7 +141,9 @@ def is_complete(record: dict, odds_history: bool) -> bool:
     return True
 
 
-def merge_records(existing: dict[str, dict], new_records: list[dict]) -> dict[str, dict]:
+def merge_records(
+    existing: dict[str, dict], new_records: list[dict], market_key: str
+) -> dict[str, dict]:
     """Merge a list of new records into the existing index.
 
     For each match_link, keep whichever entry is richer.
@@ -130,7 +154,7 @@ def merge_records(existing: dict[str, dict], new_records: list[dict]) -> dict[st
         if not link:
             continue
         prev = merged.get(link)
-        if prev is None or _richness(record) > _richness(prev):
+        if prev is None or _richness(record, market_key) > _richness(prev, market_key):
             merged[link] = record
     return merged
 
@@ -149,6 +173,9 @@ def save_season(path: Path, indexed: dict[str, dict]) -> int:
 
 def _base_cmd(
     *,
+    sport: str,
+    league: str,
+    market: str,
     proxy_url: str | None = None,
     proxy_user: str | None = None,
     proxy_pass: str | None = None,
@@ -160,11 +187,11 @@ def _base_cmd(
         "oddsharvester",
         "historic",
         "-s",
-        SPORT,
+        sport,
         "-l",
-        LEAGUE,
+        league,
         "-m",
-        MARKET,
+        market,
         "--headless",
         "--odds-format",
         ODDS_FORMAT,
@@ -185,6 +212,9 @@ def run_harvester(
     out_path: Path,
     log_path: Path,
     *,
+    sport: str,
+    league: str,
+    market: str,
     timeout: int = SCRAPE_TIMEOUT,
     proxy_url: str | None = None,
     proxy_user: str | None = None,
@@ -192,7 +222,14 @@ def run_harvester(
 ) -> bool:
     """Run oddsharvester with given extra args. Returns True on success."""
     cmd = (
-        _base_cmd(proxy_url=proxy_url, proxy_user=proxy_user, proxy_pass=proxy_pass)
+        _base_cmd(
+            sport=sport,
+            league=league,
+            market=market,
+            proxy_url=proxy_url,
+            proxy_user=proxy_user,
+            proxy_pass=proxy_pass,
+        )
         + ["-o", str(out_path)]
         + args
     )
@@ -216,6 +253,10 @@ def discover_season_links(
     season: str,
     log_path: Path,
     *,
+    sport: str,
+    league: str,
+    market: str,
+    file_prefix: str,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     timeout: int = 900,
     force: bool = False,
@@ -225,10 +266,10 @@ def discover_season_links(
 ) -> list[str]:
     """Discover all match URLs for a season via --links-only.
 
-    Results are cached to ``output_dir/nba_{season}_links.json`` so restarts
-    skip re-discovery.  Pass ``force=True`` to re-discover.
+    Results are cached to ``output_dir/{prefix}_{season}_links.json`` so
+    restarts skip re-discovery.  Pass ``force=True`` to re-discover.
     """
-    cache_path = output_dir / f"nba_{season}_links.json"
+    cache_path = output_dir / f"{file_prefix}_{season}_links.json"
 
     if not force and cache_path.exists():
         cached = load_json_links(cache_path)
@@ -244,6 +285,9 @@ def discover_season_links(
             ["--season", season, "--links-only"],
             tmp_path,
             log_path,
+            sport=sport,
+            league=league,
+            market=market,
             timeout=timeout,
             proxy_url=proxy_url,
             proxy_user=proxy_user,
@@ -290,6 +334,11 @@ def load_json_links(path: Path) -> list[str]:
 def scrape_season(
     season: str,
     *,
+    sport: str,
+    league: str,
+    market: str,
+    market_key: str,
+    file_prefix: str,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     odds_history: bool = False,
     force: bool = False,
@@ -307,12 +356,12 @@ def scrape_season(
     2. Identify which matches are missing or incomplete
     3. Batch scrape via --match-link in groups of BATCH_SIZE, saving after each
     """
-    out = output_dir / f"nba_{season}.json"
-    log_file = output_dir / f"nba_{season}.log"
+    out = output_dir / f"{file_prefix}_{season}.json"
+    log_file = output_dir / f"{file_prefix}_{season}.log"
     start = time.time()
 
-    existing = load_existing(out)
-    complete = sum(1 for r in existing.values() if is_complete(r, odds_history))
+    existing = load_existing(out, market_key)
+    complete = sum(1 for r in existing.values() if is_complete(r, odds_history, market_key))
 
     if existing:
         log.info(
@@ -327,6 +376,10 @@ def scrape_season(
     all_links = discover_season_links(
         season,
         log_file,
+        sport=sport,
+        league=league,
+        market=market,
+        file_prefix=file_prefix,
         output_dir=output_dir,
         proxy_url=proxy_url,
         proxy_user=proxy_user,
@@ -345,7 +398,7 @@ def scrape_season(
         links_to_scrape = [
             link
             for link in all_links
-            if link not in existing or not is_complete(existing[link], odds_history)
+            if link not in existing or not is_complete(existing[link], odds_history, market_key)
         ]
 
     if not links_to_scrape:
@@ -380,6 +433,9 @@ def scrape_season(
                 extra,
                 tmp_path,
                 log_file,
+                sport=sport,
+                league=league,
+                market=market,
                 proxy_url=proxy_url,
                 proxy_user=proxy_user,
                 proxy_pass=proxy_pass,
@@ -387,14 +443,16 @@ def scrape_season(
             if ok:
                 batch_records = load_json(tmp_path)
                 log.info(f"  {season}: batch {batch_num} returned {len(batch_records)} records")
-                existing = merge_records(existing, batch_records)
+                existing = merge_records(existing, batch_records, market_key)
                 save_season(out, existing)
         finally:
             tmp_path.unlink(missing_ok=True)
 
     count = len(existing)
     elapsed = time.time() - start
-    still_incomplete = sum(1 for r in existing.values() if not is_complete(r, odds_history))
+    still_incomplete = sum(
+        1 for r in existing.values() if not is_complete(r, odds_history, market_key)
+    )
     log.info(
         f"  {season}: {count} matches saved, {still_incomplete} still incomplete "
         f"({elapsed / 60:.1f} min)"
@@ -408,7 +466,18 @@ def scrape_season(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Scrape OddsPortal NBA historical odds")
+    parser = argparse.ArgumentParser(description="Scrape OddsPortal historical odds")
+    parser.add_argument(
+        "--sport",
+        choices=list(SPORT_CONFIGS),
+        default="basketball",
+        help="Sport to scrape (default: basketball)",
+    )
+    parser.add_argument(
+        "--league",
+        default=None,
+        help="OddsHarvester league name (default: per sport — nba, england-premier-league)",
+    )
     parser.add_argument(
         "--seasons",
         nargs="+",
@@ -418,7 +487,7 @@ def main() -> None:
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Scrape all available seasons (2009-2025)",
+        help="Scrape all available seasons (2021-2026)",
     )
     parser.add_argument(
         "--odds-history",
@@ -458,6 +527,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Resolve sport config
+    config = SPORT_CONFIGS[args.sport]
+    harvester_sport: str = config["harvester_sport"]
+    league: str = args.league or config["default_league"]
+    market: str = config["market"]
+    market_key: str = config["market_key"]
+    file_prefix: str = config["file_prefix"]
+
     if args.all:
         seasons = ALL_SEASONS
     elif args.seasons:
@@ -468,6 +545,9 @@ def main() -> None:
     output_dir = args.output_dir or DEFAULT_OUTPUT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    log.info(f"Sport: {args.sport} (harvester: {harvester_sport})")
+    log.info(f"League: {league}")
+    log.info(f"Market: {market}")
     log.info(f"Output directory: {output_dir}")
     log.info(f"Seasons: {seasons}")
     log.info(f"Odds history: {'yes' if args.odds_history else 'no'}")
@@ -478,10 +558,12 @@ def main() -> None:
 
     # Preview existing state
     for season in seasons:
-        out = output_dir / f"nba_{season}.json"
-        existing = load_existing(out)
+        out = output_dir / f"{file_prefix}_{season}.json"
+        existing = load_existing(out, market_key)
         if existing:
-            complete = sum(1 for r in existing.values() if is_complete(r, args.odds_history))
+            complete = sum(
+                1 for r in existing.values() if is_complete(r, args.odds_history, market_key)
+            )
             log.info(f"  {season}: {len(existing)} matches ({complete} complete)")
         else:
             log.info(f"  {season}: no data yet")
@@ -498,6 +580,11 @@ def main() -> None:
         log.info(f"[{i + 1}/{len(seasons)}] {season}")
         count = scrape_season(
             season,
+            sport=harvester_sport,
+            league=league,
+            market=market,
+            market_key=market_key,
+            file_prefix=file_prefix,
             output_dir=output_dir,
             odds_history=args.odds_history,
             force=args.force,

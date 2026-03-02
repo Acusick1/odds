@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
-"""Ingest OddsPortal historical NBA odds into the existing database.
+"""Ingest OddsPortal historical odds into the existing database.
 
 Converts OddsPortal JSON → Event + OddsSnapshot records. Once ingested,
 the existing training pipeline works unchanged — just extend the date range
 in the config YAML.
 
 Usage:
-    # Ingest all seasons (dry-run first)
+    # Ingest all NBA seasons (dry-run first)
     uv run python scripts/ingest_oddsportal.py --all --dry-run
 
     # Ingest specific seasons
     uv run python scripts/ingest_oddsportal.py --seasons 2024-2025
 
+    # Ingest EPL soccer data
+    uv run python scripts/ingest_oddsportal.py --sport soccer --all
+
     # Merge UK + proxy scrapes (union bookmakers from both directories)
     uv run python scripts/ingest_oddsportal.py --all \\
         --data-dirs data/external/oddsportal data/external/oddsportal_proxy
 
-    # Ingest and re-link game logs + injuries
+    # Ingest and re-link game logs + injuries (basketball only)
     uv run python scripts/ingest_oddsportal.py --all --relink
 """
 
@@ -27,19 +30,19 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_core.time import EASTERN
-from odds_lambda.polymarket_matching import CANONICAL_TO_ABBREV, normalize_team
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Reverse map: NBA abbreviation → canonical team name
-ABBREV_TO_CANONICAL: dict[str, str] = {v: k for k, v in CANONICAL_TO_ABBREV.items()}
+# Outcome name for draws — matches sequence_loader.DRAW_OUTCOME
+DRAW_OUTCOME = "Draw"
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "external" / "oddsportal"
 
@@ -78,6 +81,27 @@ BOOKMAKER_KEY_MAP: dict[str, str] = {
     "Betfair Exchange": "betfair_exchange",
 }
 
+# ---------------------------------------------------------------------------
+# Sport configuration
+# ---------------------------------------------------------------------------
+
+SPORT_CONFIGS: dict[str, dict[str, Any]] = {
+    "basketball": {
+        "sport_key": "basketball_nba",
+        "sport_title": "NBA",
+        "market_key": "home_away_market",
+        "num_outcomes": 2,
+        "file_prefix": "nba",
+    },
+    "soccer": {
+        "sport_key": "soccer_epl",
+        "sport_title": "EPL",
+        "market_key": "1x2_market",
+        "num_outcomes": 3,
+        "file_prefix": "epl",
+    },
+}
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
@@ -101,6 +125,24 @@ class IngestionStats:
     game_logs_linked: int = 0
     injuries_linked: int = 0
     errors: list[str] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Team normalization
+# ---------------------------------------------------------------------------
+
+
+def _get_nba_normalizer() -> tuple[dict[str, str], Callable[[str], str | None]]:
+    """Lazy-import NBA normalization to avoid hard dependency for non-basketball sports."""
+    from odds_lambda.polymarket_matching import CANONICAL_TO_ABBREV, normalize_team
+
+    abbrev_to_canonical: dict[str, str] = {v: k for k, v in CANONICAL_TO_ABBREV.items()}
+    return abbrev_to_canonical, normalize_team
+
+
+def _normalize_team_passthrough(name: str) -> str | None:
+    """Pass-through normalization — use OddsPortal names as-is."""
+    return name.strip() if name and name.strip() else None
 
 
 # ---------------------------------------------------------------------------
@@ -180,10 +222,20 @@ def parse_odds_timestamp(ts_str: str) -> datetime:
     return datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S")
 
 
-def build_event_id(season: str, home_team: str, away_team: str, game_date: date) -> str:
+def build_event_id(
+    season: str,
+    home_team: str,
+    away_team: str,
+    game_date: date,
+    canonical_to_abbrev: dict[str, str] | None = None,
+) -> str:
     """Generate deterministic event ID for OddsPortal-sourced events."""
-    home_abbrev = CANONICAL_TO_ABBREV.get(home_team, home_team[:3].upper())
-    away_abbrev = CANONICAL_TO_ABBREV.get(away_team, away_team[:3].upper())
+    if canonical_to_abbrev:
+        home_abbrev = canonical_to_abbrev.get(home_team, home_team[:3].upper())
+        away_abbrev = canonical_to_abbrev.get(away_team, away_team[:3].upper())
+    else:
+        home_abbrev = home_team[:3].upper()
+        away_abbrev = away_team[:3].upper()
     return f"op_{season}_{home_abbrev}_{away_abbrev}_{game_date.isoformat()}"
 
 
@@ -194,15 +246,17 @@ def build_raw_data(
     *,
     use_opening: bool,
     match_dt: datetime,
+    num_outcomes: int = 2,
 ) -> dict | None:
     """Convert OddsPortal bookmaker data into The Odds API raw_data format.
 
     Args:
-        bookmaker_odds: List of bookmaker dicts from home_away_market
+        bookmaker_odds: List of bookmaker dicts from the market data
         home_team: Canonical home team name
         away_team: Canonical away team name
         use_opening: If True, use opening odds; if False, use closing (last in history)
         match_dt: Correct game datetime (for fixing timestamps)
+        num_outcomes: Number of outcomes (2 for NBA h2h, 3 for soccer 1x2)
 
     Returns:
         Dict in The Odds API format, or None if no valid bookmakers found
@@ -212,18 +266,20 @@ def build_raw_data(
 
     for bk in bookmaker_odds:
         hist = bk.get("odds_history_data")
-        if not hist or len(hist) < 2:
+        if not hist or len(hist) < num_outcomes:
             continue
 
         bk_name = bk["bookmaker_name"]
         bk_key = BOOKMAKER_KEY_MAP.get(bk_name, _slugify(bk_name))
 
-        home_hist = hist[0]  # Entry 0 = home
-        away_hist = hist[1]  # Entry 1 = away
+        home_hist = hist[0]  # Outcome 1 (home)
+        away_hist = hist[num_outcomes - 1]  # Last outcome (away)
+        draw_hist = hist[1] if num_outcomes >= 3 else None  # Outcome X (draw)
 
         if use_opening:
             home_entry = home_hist.get("opening_odds")
             away_entry = away_hist.get("opening_odds")
+            draw_entry = draw_hist.get("opening_odds") if draw_hist else None
         else:
             # Closing = last entry in odds_history list
             home_entries = home_hist.get("odds_history", [])
@@ -233,13 +289,32 @@ def build_raw_data(
             home_entry = home_entries[-1]
             away_entry = away_entries[-1]
 
+            if draw_hist:
+                draw_entries = draw_hist.get("odds_history", [])
+                draw_entry = draw_entries[-1] if draw_entries else None
+            else:
+                draw_entry = None
+
         if not home_entry or not away_entry:
+            continue
+        if num_outcomes >= 3 and not draw_entry:
             continue
 
         home_decimal = home_entry.get("odds")
         away_decimal = away_entry.get("odds")
         if not home_decimal or not away_decimal:
             continue
+
+        # Build outcomes list
+        outcomes: list[dict[str, Any]] = [
+            {"name": home_team, "price": decimal_to_american(home_decimal)},
+        ]
+        if draw_entry and num_outcomes >= 3:
+            draw_decimal = draw_entry.get("odds")
+            if not draw_decimal:
+                continue
+            outcomes.append({"name": DRAW_OUTCOME, "price": decimal_to_american(draw_decimal)})
+        outcomes.append({"name": away_team, "price": decimal_to_american(away_decimal)})
 
         # Use the home entry's timestamp as the bookmaker last_update
         raw_ts = parse_odds_timestamp(home_entry["timestamp"])
@@ -254,21 +329,7 @@ def build_raw_data(
                 "key": bk_key,
                 "title": bk_name,
                 "last_update": fixed_ts.replace(tzinfo=UTC).isoformat().replace("+00:00", "Z"),
-                "markets": [
-                    {
-                        "key": "h2h",
-                        "outcomes": [
-                            {
-                                "name": home_team,
-                                "price": decimal_to_american(home_decimal),
-                            },
-                            {
-                                "name": away_team,
-                                "price": decimal_to_american(away_decimal),
-                            },
-                        ],
-                    }
-                ],
+                "markets": [{"key": "h2h", "outcomes": outcomes}],
             }
         )
 
@@ -292,7 +353,9 @@ def _slugify(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def load_season_records(season: str, data_dirs: list[Path]) -> list[dict]:
+def load_season_records(
+    season: str, data_dirs: list[Path], *, file_prefix: str, market_key: str
+) -> list[dict]:
     """Load and merge records for a season from multiple data directories.
 
     When the same game appears in multiple directories (matched by match_link),
@@ -302,7 +365,7 @@ def load_season_records(season: str, data_dirs: list[Path]) -> list[dict]:
     by_link: dict[str, dict] = {}
 
     for data_dir in data_dirs:
-        path = data_dir / f"nba_{season}.json"
+        path = data_dir / f"{file_prefix}_{season}.json"
         if not path.exists():
             continue
 
@@ -324,20 +387,20 @@ def load_season_records(season: str, data_dirs: list[Path]) -> list[dict]:
                 by_link[link] = record
             else:
                 # Merge bookmaker lists
-                by_link[link] = _merge_bookmakers(by_link[link], record)
+                by_link[link] = _merge_bookmakers(by_link[link], record, market_key)
 
     return list(by_link.values())
 
 
-def _merge_bookmakers(base: dict, other: dict) -> dict:
-    """Merge home_away_market bookmaker lists from two records of the same game.
+def _merge_bookmakers(base: dict, other: dict, market_key: str) -> dict:
+    """Merge market bookmaker lists from two records of the same game.
 
     Bookmakers are keyed by name. When both records have the same bookmaker,
     the entry with odds_history_data wins.
     """
     merged = dict(base)
-    base_market = {bk["bookmaker_name"]: bk for bk in base.get("home_away_market", [])}
-    other_market = other.get("home_away_market", [])
+    base_market = {bk["bookmaker_name"]: bk for bk in base.get(market_key, [])}
+    other_market = other.get(market_key, [])
 
     for bk in other_market:
         name = bk["bookmaker_name"]
@@ -346,7 +409,7 @@ def _merge_bookmakers(base: dict, other: dict) -> dict:
         elif bk.get("odds_history_data") and not base_market[name].get("odds_history_data"):
             base_market[name] = bk
 
-    merged["home_away_market"] = list(base_market.values())
+    merged[market_key] = list(base_market.values())
     return merged
 
 
@@ -390,12 +453,17 @@ async def ingest_season(
     season: str,
     data_dirs: list[Path],
     *,
+    sport_config: dict[str, Any],
+    normalize_fn: Callable[[str], str | None],
+    canonical_to_abbrev: dict[str, str] | None,
     dry_run: bool = False,
 ) -> IngestionStats:
     """Ingest one season of OddsPortal data into the database."""
     stats = IngestionStats()
+    file_prefix: str = sport_config["file_prefix"]
+    market_key: str = sport_config["market_key"]
 
-    records = load_season_records(season, data_dirs)
+    records = load_season_records(season, data_dirs, file_prefix=file_prefix, market_key=market_key)
     if not records:
         log.error(f"  {season}: no data found in {[str(d) for d in data_dirs]}")
         return stats
@@ -406,9 +474,7 @@ async def ingest_season(
     if dry_run:
         # Count how many have odds_history
         with_hist = sum(
-            1
-            for r in records
-            if any(bk.get("odds_history_data") for bk in r.get("home_away_market", []))
+            1 for r in records if any(bk.get("odds_history_data") for bk in r.get(market_key, []))
         )
         log.info(f"  {season}: {with_hist} games have odds history data")
         return stats
@@ -416,7 +482,15 @@ async def ingest_season(
     async with async_session_maker() as session:
         for record in records:
             try:
-                await _ingest_one_game(session, record, season, stats)
+                await _ingest_one_game(
+                    session,
+                    record,
+                    season,
+                    stats,
+                    sport_config=sport_config,
+                    normalize_fn=normalize_fn,
+                    canonical_to_abbrev=canonical_to_abbrev,
+                )
             except Exception as e:
                 msg = f"{record.get('home_team', '?')} vs {record.get('away_team', '?')}: {e}"
                 stats.errors.append(msg)
@@ -432,20 +506,29 @@ async def _ingest_one_game(
     record: dict,
     season: str,
     stats: IngestionStats,
+    *,
+    sport_config: dict[str, Any],
+    normalize_fn: Callable[[str], str | None],
+    canonical_to_abbrev: dict[str, str] | None,
 ) -> None:
     """Ingest a single OddsPortal game record."""
+    market_key: str = sport_config["market_key"]
+    num_outcomes: int = sport_config["num_outcomes"]
+    sport_key: str = sport_config["sport_key"]
+    sport_title: str = sport_config["sport_title"]
+
     home_raw = record.get("home_team", "")
     away_raw = record.get("away_team", "")
     match_date_str = record.get("match_date", "")
-    market_data = record.get("home_away_market", [])
+    market_data = record.get(market_key, [])
 
     if not home_raw or not away_raw or not match_date_str or not market_data:
         stats.games_skipped += 1
         return
 
     # Normalize team names
-    home_team = normalize_team(home_raw)
-    away_team = normalize_team(away_raw)
+    home_team = normalize_fn(home_raw)
+    away_team = normalize_fn(away_raw)
     if not home_team or not away_team:
         stats.games_skipped += 1
         log.debug(f"  Unknown team: {home_raw} or {away_raw}")
@@ -464,7 +547,9 @@ async def _ingest_one_game(
     if event_id:
         stats.events_matched += 1
     else:
-        event_id = build_event_id(season, home_team, away_team, match_dt.date())
+        event_id = build_event_id(
+            season, home_team, away_team, match_dt.date(), canonical_to_abbrev
+        )
 
         # Check if this OddsPortal event already exists (idempotency)
         existing = await session.get(Event, event_id)
@@ -479,8 +564,8 @@ async def _ingest_one_game(
 
             event = Event(
                 id=event_id,
-                sport_key="basketball_nba",
-                sport_title="NBA",
+                sport_key=sport_key,
+                sport_title=sport_title,
                 commence_time=match_dt,
                 home_team=home_team,
                 away_team=away_team,
@@ -512,6 +597,7 @@ async def _ingest_one_game(
             away_team,
             use_opening=use_opening,
             match_dt=match_dt,
+            num_outcomes=num_outcomes,
         )
         if not raw_data:
             continue
@@ -538,13 +624,16 @@ async def _ingest_one_game(
 
 
 # ---------------------------------------------------------------------------
-# Re-linking game logs and injuries
+# Re-linking game logs and injuries (basketball only)
 # ---------------------------------------------------------------------------
 
 
 async def relink_game_logs(stats: IngestionStats) -> None:
     """Re-link NbaTeamGameLog records that have NULL event_id."""
     from odds_core.game_log_models import NbaTeamGameLog
+    from odds_core.time import EASTERN
+
+    abbrev_to_canonical, _ = _get_nba_normalizer()
 
     async with async_session_maker() as session:
         # Find unlinked game logs
@@ -561,13 +650,15 @@ async def relink_game_logs(stats: IngestionStats) -> None:
         cache: dict[tuple[str, date], str | None] = {}
 
         for row in unlinked:
-            canonical = ABBREV_TO_CANONICAL.get(row.team_abbreviation)
+            canonical = abbrev_to_canonical.get(row.team_abbreviation)
             if not canonical:
                 continue
 
             cache_key = (canonical, row.game_date)
             if cache_key not in cache:
-                cache[cache_key] = await _match_event_for_relink(session, canonical, row.game_date)
+                cache[cache_key] = await _match_event_for_relink(
+                    session, canonical, row.game_date, EASTERN
+                )
 
             event_id = cache[cache_key]
             if event_id:
@@ -583,6 +674,9 @@ async def relink_game_logs(stats: IngestionStats) -> None:
 async def relink_injuries(stats: IngestionStats) -> None:
     """Re-link InjuryReport records that have NULL event_id."""
     from odds_core.injury_models import InjuryReport
+    from odds_core.time import EASTERN
+
+    _, normalize_team = _get_nba_normalizer()
 
     async with async_session_maker() as session:
         query = select(InjuryReport).where(InjuryReport.event_id.is_(None))
@@ -604,7 +698,9 @@ async def relink_injuries(stats: IngestionStats) -> None:
 
             cache_key = (canonical, row.game_date)
             if cache_key not in cache:
-                cache[cache_key] = await _match_event_for_relink(session, canonical, row.game_date)
+                cache[cache_key] = await _match_event_for_relink(
+                    session, canonical, row.game_date, EASTERN
+                )
 
             event_id = cache[cache_key]
             if event_id:
@@ -621,9 +717,10 @@ async def _match_event_for_relink(
     session: AsyncSession,
     team_name: str,
     game_date: date,
+    eastern: Any,
 ) -> str | None:
     """Match a team + game_date to an Event using the standard ET window."""
-    day_start_et = datetime(game_date.year, game_date.month, game_date.day, 10, tzinfo=EASTERN)
+    day_start_et = datetime(game_date.year, game_date.month, game_date.day, 10, tzinfo=eastern)
     day_end_et = day_start_et + timedelta(hours=20)
     window_start = day_start_et.astimezone(UTC)
     window_end = day_end_et.astimezone(UTC)
@@ -650,7 +747,13 @@ async def _match_event_for_relink(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Ingest OddsPortal historical NBA odds into the database"
+        description="Ingest OddsPortal historical odds into the database"
+    )
+    parser.add_argument(
+        "--sport",
+        choices=list(SPORT_CONFIGS),
+        default="basketball",
+        help="Sport to ingest (default: basketball)",
     )
     parser.add_argument(
         "--seasons",
@@ -681,7 +784,7 @@ def main() -> None:
     parser.add_argument(
         "--relink",
         action="store_true",
-        help="Re-link game logs and injuries to newly created events",
+        help="Re-link game logs and injuries to newly created events (basketball only)",
     )
     args = parser.parse_args()
 
@@ -692,16 +795,57 @@ def main() -> None:
     else:
         parser.error("Specify --seasons or --all")
 
+    sport_config = SPORT_CONFIGS[args.sport]
+
+    # Resolve team normalization and abbreviation map per sport
+    if args.sport == "basketball":
+        abbrev_to_canonical, normalize_fn = _get_nba_normalizer()
+        canonical_to_abbrev: dict[str, str] | None = {v: k for k, v in abbrev_to_canonical.items()}
+    else:
+        normalize_fn = _normalize_team_passthrough
+        canonical_to_abbrev = None
+
+    if args.relink and args.sport != "basketball":
+        log.warning("--relink is only supported for basketball — ignoring")
+
     data_dirs = args.data_dirs or [DEFAULT_DATA_DIR]
-    asyncio.run(_run(seasons, data_dirs=data_dirs, dry_run=args.dry_run, relink=args.relink))
+    asyncio.run(
+        _run(
+            seasons,
+            data_dirs=data_dirs,
+            sport_config=sport_config,
+            sport=args.sport,
+            normalize_fn=normalize_fn,
+            canonical_to_abbrev=canonical_to_abbrev,
+            dry_run=args.dry_run,
+            relink=args.relink,
+        )
+    )
 
 
-async def _run(seasons: list[str], *, data_dirs: list[Path], dry_run: bool, relink: bool) -> None:
+async def _run(
+    seasons: list[str],
+    *,
+    data_dirs: list[Path],
+    sport_config: dict[str, Any],
+    sport: str,
+    normalize_fn: Callable[[str], str | None],
+    canonical_to_abbrev: dict[str, str] | None,
+    dry_run: bool,
+    relink: bool,
+) -> None:
     totals = IngestionStats()
 
     for i, season in enumerate(seasons):
         log.info(f"[{i + 1}/{len(seasons)}] {season}")
-        stats = await ingest_season(season, data_dirs, dry_run=dry_run)
+        stats = await ingest_season(
+            season,
+            data_dirs,
+            sport_config=sport_config,
+            normalize_fn=normalize_fn,
+            canonical_to_abbrev=canonical_to_abbrev,
+            dry_run=dry_run,
+        )
 
         totals.games_loaded += stats.games_loaded
         totals.games_skipped += stats.games_skipped
@@ -728,7 +872,7 @@ async def _run(seasons: list[str], *, data_dirs: list[Path], dry_run: bool, reli
         for err in totals.errors[:10]:
             log.error(f"  {err}")
 
-    if relink and not dry_run:
+    if relink and sport == "basketball" and not dry_run:
         log.info("")
         log.info("=== Re-linking ===")
         await relink_game_logs(totals)
