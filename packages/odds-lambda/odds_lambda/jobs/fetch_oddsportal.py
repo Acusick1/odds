@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -85,42 +86,39 @@ def _build_event_id(home_team: str, away_team: str, match_date: datetime) -> str
     return f"op_live_{home_abbrev}_{away_abbrev}_{date_str}"
 
 
+def _harvester_cmd_prefix() -> list[str]:
+    """Return the command prefix for invoking OddsHarvester.
+
+    Uses ``python -m oddsharvester`` when the package is installed (Lambda
+    container), otherwise falls back to ``uvx`` for local development.
+    """
+    try:
+        import oddsharvester  # noqa: F401
+
+        return [sys.executable, "-m", "oddsharvester"]
+    except ImportError:
+        return ["uvx", "--from", FORK_SPEC, "oddsharvester"]
+
+
 def run_harvester_upcoming(spec: LeagueSpec) -> list[dict[str, Any]]:
     """Run OddsHarvester upcoming command and return parsed match list.
 
-    Tries direct import first, falls back to subprocess via uvx.
-
     Raises:
-        RuntimeError: If both import and subprocess paths fail.
+        RuntimeError: If the harvester subprocess fails.
     """
-    try:
-        from OddsHarvester.scraper import OddsScraper
-
-        scraper = OddsScraper(headless=True, odds_format="Fractional Odds")
-        raw = scraper.upcoming(sport=spec.sport, league=spec.league)
-        return raw if isinstance(raw, list) else []
-    except ImportError:
-        pass
-
-    return _run_harvester_subprocess(spec)
-
-
-def _run_harvester_subprocess(spec: LeagueSpec) -> list[dict[str, Any]]:
-    """Run oddsharvester via uvx subprocess."""
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as tf:
         tmp_path = Path(tf.name)
 
     try:
         cmd = [
-            "uvx",
-            "--from",
-            FORK_SPEC,
-            "oddsharvester",
+            *_harvester_cmd_prefix(),
             "upcoming",
             "-s",
             spec.sport,
             "-l",
             spec.league,
+            "-m",
+            ",".join(spec.markets),
             "--headless",
             "--odds-format",
             "Fractional Odds",
@@ -136,7 +134,7 @@ def _run_harvester_subprocess(spec: LeagueSpec) -> list[dict[str, Any]]:
             cmd,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
 
         if result.returncode != 0:
