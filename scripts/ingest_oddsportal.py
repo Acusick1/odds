@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
@@ -222,6 +223,19 @@ def parse_odds_timestamp(ts_str: str) -> datetime:
     return datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S")
 
 
+def _team_abbrev(name: str) -> str:
+    """Derive a short abbreviation from a team name.
+
+    Single-word names get 3 chars (e.g. "Arsenal" → "ARS").
+    Multi-word names use first 3 chars of first + last word
+    (e.g. "Manchester United" → "MANUNI", "Manchester City" → "MANCIT").
+    """
+    words = name.split()
+    if len(words) == 1:
+        return words[0][:3].upper()
+    return (words[0][:3] + words[-1][:3]).upper()
+
+
 def build_event_id(
     season: str,
     home_team: str,
@@ -230,12 +244,12 @@ def build_event_id(
     canonical_to_abbrev: dict[str, str] | None = None,
 ) -> str:
     """Generate deterministic event ID for OddsPortal-sourced events."""
-    if canonical_to_abbrev:
-        home_abbrev = canonical_to_abbrev.get(home_team, home_team[:3].upper())
-        away_abbrev = canonical_to_abbrev.get(away_team, away_team[:3].upper())
-    else:
-        home_abbrev = home_team[:3].upper()
-        away_abbrev = away_team[:3].upper()
+    home_abbrev = (
+        canonical_to_abbrev.get(home_team) if canonical_to_abbrev else None
+    ) or _team_abbrev(home_team)
+    away_abbrev = (
+        canonical_to_abbrev.get(away_team) if canonical_to_abbrev else None
+    ) or _team_abbrev(away_team)
     return f"op_{season}_{home_abbrev}_{away_abbrev}_{game_date.isoformat()}"
 
 
@@ -717,7 +731,7 @@ async def _match_event_for_relink(
     session: AsyncSession,
     team_name: str,
     game_date: date,
-    eastern: Any,
+    eastern: ZoneInfo,
 ) -> str | None:
     """Match a team + game_date to an Event using the standard ET window."""
     day_start_et = datetime(game_date.year, game_date.month, game_date.day, 10, tzinfo=eastern)
