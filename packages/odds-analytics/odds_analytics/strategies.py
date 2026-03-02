@@ -27,7 +27,7 @@ class FlatBettingStrategy(BettingStrategy):
     def __init__(
         self,
         market: str = "h2h",
-        outcome_pattern: str = "home",  # "home", "away", or "favorite"
+        outcome_pattern: str = "home",  # "home", "away", "draw", or "favorite"
         bookmaker: str = "fanduel",
     ):
         """
@@ -35,7 +35,7 @@ class FlatBettingStrategy(BettingStrategy):
 
         Args:
             market: Which market to bet (h2h, spreads, totals)
-            outcome_pattern: How to select outcome ("home", "away", "favorite")
+            outcome_pattern: How to select outcome ("home", "away", "draw", "favorite")
             bookmaker: Which bookmaker to use
         """
         super().__init__(
@@ -73,12 +73,19 @@ class FlatBettingStrategy(BettingStrategy):
         elif pattern == "away":
             target_outcome = event.away_team
         elif pattern == "draw":
-            target_outcome = "Draw"
+            draw_odd = next(
+                (o for o in relevant_odds if o.outcome_name.lower() == "draw"),
+                None,
+            )
+            target_outcome = draw_odd.outcome_name if draw_odd else None
         elif pattern == "favorite":
             # Find favorite (lowest odds / most negative)
             min_odds = min(relevant_odds, key=lambda o: o.price)
             target_outcome = min_odds.outcome_name
         else:
+            return []
+
+        if target_outcome is None:
             return []
 
         # Find odds for target outcome
@@ -315,7 +322,7 @@ class ArbitrageStrategy(BettingStrategy):
                                     odds=best_odd.price,
                                     line=None,
                                     confidence=1.0,
-                                    rationale=f"3-way arb: {profit_pct:.2%} profit",
+                                    rationale=f"3-way arb: {profit_pct:.2f}% profit",
                                 )
                             )
 
@@ -345,7 +352,7 @@ class ArbitrageStrategy(BettingStrategy):
                                 odds=best_home.price,
                                 line=None,
                                 confidence=1.0,
-                                rationale=f"Arbitrage: {profit_pct:.2%} profit "
+                                rationale=f"Arbitrage: {profit_pct:.2f}% profit "
                                 f"({best_home.bookmaker_key} vs {best_away.bookmaker_key})",
                             )
                         )
@@ -358,7 +365,7 @@ class ArbitrageStrategy(BettingStrategy):
                                 odds=best_away.price,
                                 line=None,
                                 confidence=1.0,
-                                rationale=f"Arbitrage: {profit_pct:.2%} profit "
+                                rationale=f"Arbitrage: {profit_pct:.2f}% profit "
                                 f"({best_home.bookmaker_key} vs {best_away.bookmaker_key})",
                             )
                         )
@@ -410,7 +417,7 @@ class ArbitrageStrategy(BettingStrategy):
                                             odds=best_home.price,
                                             line=best_home.point,
                                             confidence=1.0,
-                                            rationale=f"Spread arb: {profit_pct:.2%} profit at {line_value}",
+                                            rationale=f"Spread arb: {profit_pct:.2f}% profit at {line_value}",
                                         ),
                                         BetOpportunity(
                                             event_id=event.id,
@@ -420,7 +427,7 @@ class ArbitrageStrategy(BettingStrategy):
                                             odds=best_away.price,
                                             line=best_away.point,
                                             confidence=1.0,
-                                            rationale=f"Spread arb: {profit_pct:.2%} profit at {line_value}",
+                                            rationale=f"Spread arb: {profit_pct:.2f}% profit at {line_value}",
                                         ),
                                     ]
                                 )
@@ -456,7 +463,7 @@ class ArbitrageStrategy(BettingStrategy):
                                             odds=best_over.price,
                                             line=best_over.point,
                                             confidence=1.0,
-                                            rationale=f"Total arb: {profit_pct:.2%} profit at {line_value}",
+                                            rationale=f"Total arb: {profit_pct:.2f}% profit at {line_value}",
                                         ),
                                         BetOpportunity(
                                             event_id=event.id,
@@ -466,7 +473,7 @@ class ArbitrageStrategy(BettingStrategy):
                                             odds=best_under.price,
                                             line=best_under.point,
                                             confidence=1.0,
-                                            rationale=f"Total arb: {profit_pct:.2%} profit at {line_value}",
+                                            rationale=f"Total arb: {profit_pct:.2f}% profit at {line_value}",
                                         ),
                                     ]
                                 )

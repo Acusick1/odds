@@ -298,28 +298,6 @@ class BacktestEngine:
         result_str = "win" if won else "loss"
         return (result_str, profit)
 
-    def _evaluate_bet_result(
-        self, bet: BetRecord, event: BacktestEvent, *, is_three_way: bool = False
-    ) -> tuple[str, float]:
-        """Kept for backward compatibility, delegates to outcome-based evaluation."""
-        if bet.market == "h2h":
-            won = self._evaluate_moneyline_outcome(bet.outcome, event, is_three_way=is_three_way)
-        elif bet.market == "spreads":
-            won = self._evaluate_spread_outcome(bet.outcome, bet.line, event)
-        elif bet.market == "totals":
-            won = self._evaluate_total_outcome(bet.outcome, bet.line, event)
-        else:
-            self._logger.warning("unknown_market", market=bet.market)
-            return ("unknown", 0.0)
-
-        if won is None:
-            return ("push", 0.0)
-
-        profit = calculate_profit_from_odds(bet.stake, bet.odds, won)
-
-        result_str = "win" if won else "loss"
-        return (result_str, profit)
-
     def _evaluate_moneyline_outcome(
         self, outcome: str, event: BacktestEvent, *, is_three_way: bool = False
     ) -> bool | None:
