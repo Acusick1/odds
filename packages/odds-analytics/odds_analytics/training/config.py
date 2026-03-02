@@ -185,6 +185,11 @@ class DataConfig(BaseModel):
         description="Whether to shuffle data before splitting",
     )
 
+    sport_key: str | None = Field(
+        default=None,
+        description="Filter events by sport key (e.g. 'basketball_nba', 'soccer_epl'). "
+        "None = no filter (all sports).",
+    )
     data_source: Literal["all", "oddsportal", "oddsapi"] | None = Field(
         default=None,
         description="Filter events by data source. 'oddsportal' = historical scrape "

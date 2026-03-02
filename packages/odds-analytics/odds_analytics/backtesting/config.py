@@ -78,6 +78,7 @@ class BacktestConfig:
     start_date: datetime
     end_date: datetime
     decision_hours_before_game: float = 1.0
+    sport_key: str | None = None
     sizing: BetSizingConfig = field(default_factory=BetSizingConfig)
     constraints: BetConstraintsConfig = field(default_factory=BetConstraintsConfig)
 
@@ -140,6 +141,7 @@ class BacktestConfig:
             "start_date": self.start_date.isoformat(),
             "end_date": self.end_date.isoformat(),
             "decision_hours_before_game": self.decision_hours_before_game,
+            "sport_key": self.sport_key,
             "sizing": self.sizing.to_dict(),
             "constraints": self.constraints.to_dict(),
         }

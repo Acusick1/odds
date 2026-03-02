@@ -223,6 +223,7 @@ class BacktestEngine:
         events = await self.reader.get_events_by_date_range(
             start_date=self.config.start_date,
             end_date=self.config.end_date,
+            sport_key=self.config.sport_key,
             status=EventStatus.FINAL,
         )
 
