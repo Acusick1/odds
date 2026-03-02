@@ -1,0 +1,81 @@
+# Multi-stage build for OddsPortal scraper Lambda container.
+# Bundles Playwright + Chromium for headless browser scraping.
+#
+# Stage 1: Builder - compile dependencies and install browser
+FROM public.ecr.aws/lambda/python:3.12 AS builder
+
+# Install build tools for compiling Python packages
+RUN dnf install -y \
+    gcc \
+    gcc-c++ \
+    make \
+    && dnf clean all
+
+# Install UV for fast package management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+# Copy workspace files
+WORKDIR /build
+COPY pyproject.toml uv.lock ./
+COPY packages/odds-core ./packages/odds-core
+COPY packages/odds-lambda ./packages/odds-lambda
+
+# Build wheels for core and lambda packages
+RUN uv build --wheel --out-dir /wheels ./packages/odds-core && \
+    uv build --wheel --out-dir /wheels ./packages/odds-lambda
+
+# Install from wheels + OddsHarvester fork
+RUN uv pip install \
+    --python /var/lang/bin/python3.12 \
+    --target /asset \
+    --no-cache \
+    /wheels/*.whl \
+    "git+https://github.com/Acusick1/OddsHarvester.git@fix/fractional-odds-and-unknown-bookmaker"
+
+# Install Playwright and Chromium browser
+RUN uv pip install \
+    --python /var/lang/bin/python3.12 \
+    --target /asset \
+    --no-cache \
+    playwright && \
+    PYTHONPATH=/asset /var/lang/bin/python3.12 -m playwright install chromium
+
+# Remove unnecessary files to reduce image size
+RUN cd /asset && \
+    find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
+    find . -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find . -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true && \
+    find . -type f -name "*.pyc" -delete 2>/dev/null || true && \
+    find . -type f -name "*.pyo" -delete 2>/dev/null || true && \
+    find . -type f -name "*.pth" -delete 2>/dev/null || true
+
+# Stage 2: Runtime - clean Lambda base image with browser deps
+FROM public.ecr.aws/lambda/python:3.12
+
+# Install Chromium system dependencies
+RUN dnf install -y \
+    nss \
+    atk \
+    cups-libs \
+    libXcomposite \
+    libXdamage \
+    libXrandr \
+    libgbm \
+    pango \
+    alsa-lib \
+    libXtst \
+    gtk3 \
+    && dnf clean all
+
+# Copy compiled dependencies from builder
+COPY --from=builder /asset ${LAMBDA_TASK_ROOT}
+
+# Copy Playwright browser binaries
+COPY --from=builder /root/.cache/ms-playwright ${LAMBDA_TASK_ROOT}/.playwright-browsers
+ENV PLAYWRIGHT_BROWSERS_PATH=${LAMBDA_TASK_ROOT}/.playwright-browsers
+
+# Copy Lambda handler (entry point)
+COPY packages/odds-lambda/odds_lambda/lambda_handler.py ${LAMBDA_TASK_ROOT}/
+
+# Set the CMD to your handler
+CMD ["lambda_handler.lambda_handler"]

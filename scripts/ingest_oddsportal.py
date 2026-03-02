@@ -39,11 +39,15 @@ from zoneinfo import ZoneInfo
 
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_lambda.oddsportal_common import (
+    DRAW_OUTCOME,
+    decimal_to_american,
+    normalize_bookmaker_key,
+    parse_match_date,
+    team_abbrev,
+)
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-# Outcome name for draws — matches sequence_loader.DRAW_OUTCOME
-DRAW_OUTCOME = "Draw"
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "external" / "oddsportal"
 
@@ -54,33 +58,6 @@ ALL_SEASONS = [
     "2024-2025",
     "2025-2026",
 ]
-
-# OddsPortal bookmaker name → The Odds API-style key
-BOOKMAKER_KEY_MAP: dict[str, str] = {
-    "10bet": "10bet",
-    "bet365": "bet365",
-    "BetMGM": "betmgm",
-    "bwin": "bwin",
-    "Betway": "betway",
-    "BetVictor": "betvictor",
-    "Betfred": "betfred",
-    "BetUK": "betuk",
-    "Midnite": "midnite",
-    "Unibetuk": "unibet_uk",
-    "Betano.uk": "betano",
-    "AllBritishCasino": "allbritishcasino",
-    "Pinnacle": "pinnacle",
-    "DraftKings": "draftkings",
-    "FanDuel": "fanduel",
-    "Caesars": "williamhill_us",
-    "PointsBet": "pointsbetus",
-    "BetRivers": "betrivers",
-    "Unibet": "unibet",
-    "Bovada": "bovada",
-    "Marathon Bet": "marathonbet",
-    "1xBet": "onexbet",
-    "Betfair Exchange": "betfair_exchange",
-}
 
 # ---------------------------------------------------------------------------
 # Sport configuration
@@ -195,20 +172,6 @@ def _normalize_team_passthrough(name: str) -> str | None:
     return name.strip() if name and name.strip() else None
 
 
-# ---------------------------------------------------------------------------
-# Odds conversion
-# ---------------------------------------------------------------------------
-
-
-def decimal_to_american(d: float) -> int:
-    """Convert decimal odds to American odds."""
-    if d >= 2.0:
-        return round((d - 1) * 100)
-    elif d > 1.0:
-        return round(-100 / (d - 1))
-    return -10000  # edge case: decimal = 1.0
-
-
 def fix_odds_timestamp(odds_ts: datetime, match_dt: datetime) -> datetime:
     """Fix the year in OddsPortal odds timestamps.
 
@@ -259,30 +222,9 @@ def hours_to_tier(hours_before: float) -> str:
 # ---------------------------------------------------------------------------
 
 
-def parse_match_date(date_str: str) -> datetime:
-    """Parse OddsPortal match_date string to UTC datetime.
-
-    Format: '2024-10-04 16:00:00 UTC'
-    """
-    return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %Z").replace(tzinfo=UTC)
-
-
 def parse_odds_timestamp(ts_str: str) -> datetime:
     """Parse OddsPortal odds_history timestamp (naive, wrong year)."""
     return datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S")
-
-
-def _team_abbrev(name: str) -> str:
-    """Derive a short abbreviation from a team name.
-
-    Single-word names get 3 chars (e.g. "Arsenal" → "ARS").
-    Multi-word names use first 3 chars of first + last word
-    (e.g. "Manchester United" → "MANUNI", "Manchester City" → "MANCIT").
-    """
-    words = name.split()
-    if len(words) == 1:
-        return words[0][:3].upper()
-    return (words[0][:3] + words[-1][:3]).upper()
 
 
 def build_event_id(
@@ -295,10 +237,10 @@ def build_event_id(
     """Generate deterministic event ID for OddsPortal-sourced events."""
     home_abbrev = (
         canonical_to_abbrev.get(home_team) if canonical_to_abbrev else None
-    ) or _team_abbrev(home_team)
+    ) or team_abbrev(home_team)
     away_abbrev = (
         canonical_to_abbrev.get(away_team) if canonical_to_abbrev else None
-    ) or _team_abbrev(away_team)
+    ) or team_abbrev(away_team)
     return f"op_{season}_{home_abbrev}_{away_abbrev}_{game_date.isoformat()}"
 
 
@@ -338,7 +280,7 @@ def build_raw_data(
             continue
 
         bk_name = bk["bookmaker_name"]
-        bk_key = BOOKMAKER_KEY_MAP.get(bk_name, _slugify(bk_name))
+        bk_key = normalize_bookmaker_key(bk_name)
 
         # Extract odds entries for each outcome
         entries: list[dict | None] = []
@@ -404,11 +346,6 @@ def build_raw_data(
         "source": "oddsportal",
         "_snapshot_time": snapshot_time.replace(tzinfo=UTC).isoformat() if snapshot_time else None,
     }
-
-
-def _slugify(name: str) -> str:
-    """Convert bookmaker name to a lowercase slug key."""
-    return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
 # ---------------------------------------------------------------------------

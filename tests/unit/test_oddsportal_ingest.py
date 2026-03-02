@@ -7,8 +7,9 @@ from datetime import UTC, datetime
 import pytest
 
 # Import directly from script (it's on sys.path via the repo root)
+from odds_lambda.oddsportal_common import team_abbrev
+
 from scripts.ingest_oddsportal import (
-    _team_abbrev,
     build_event_id,
     build_raw_data,
     get_market_config,
@@ -207,10 +208,10 @@ class TestTeamAbbrev:
         ],
     )
     def test_team_abbrev(self, name: str, expected: str) -> None:
-        assert _team_abbrev(name) == expected
+        assert team_abbrev(name) == expected
 
     def test_manchester_derby_unique(self) -> None:
-        assert _team_abbrev("Manchester United") != _team_abbrev("Manchester City")
+        assert team_abbrev("Manchester United") != team_abbrev("Manchester City")
 
 
 class TestBuildEventId:

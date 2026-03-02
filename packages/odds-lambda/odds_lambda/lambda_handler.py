@@ -6,7 +6,7 @@ The event payload specifies which job to execute.
 
 Event payload format:
 {
-    "job": "fetch-odds" | "fetch-scores" | "update-status" | "check-health" | "fetch-polymarket" | "backfill-polymarket"
+    "job": "fetch-odds" | "fetch-scores" | "update-status" | "check-health" | "fetch-polymarket" | "backfill-polymarket" | "fetch-oddsportal"
 }
 
 Environment variables required:
