@@ -68,18 +68,25 @@ SPORT_CONFIGS: dict[str, dict[str, Any]] = {
     "basketball": {
         "harvester_sport": "basketball",
         "default_league": "nba",
-        "market": "home_away",
-        "market_key": "home_away_market",
+        "default_market": "home_away",
         "file_prefix": "nba",
     },
     "soccer": {
         "harvester_sport": "football",
         "default_league": "england-premier-league",
-        "market": "1x2",
-        "market_key": "1x2_market",
+        "default_market": "1x2",
         "file_prefix": "epl",
     },
 }
+
+
+def market_to_key(market: str) -> str:
+    """Derive the JSON key OddsHarvester uses for a given market name.
+
+    e.g. "1x2" → "1x2_market", "over-under" → "over_under_market"
+    """
+    return market.replace("-", "_") + "_market"
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -479,6 +486,12 @@ def main() -> None:
         help="OddsHarvester league name (default: per sport — nba, england-premier-league)",
     )
     parser.add_argument(
+        "--market",
+        default=None,
+        help="OddsHarvester market name (default: per sport — home_away, 1x2). "
+        "Examples: 1x2, over-under, asian-handicap, btts",
+    )
+    parser.add_argument(
         "--seasons",
         nargs="+",
         default=None,
@@ -531,9 +544,13 @@ def main() -> None:
     config = SPORT_CONFIGS[args.sport]
     harvester_sport: str = config["harvester_sport"]
     league: str = args.league or config["default_league"]
-    market: str = config["market"]
-    market_key: str = config["market_key"]
-    file_prefix: str = config["file_prefix"]
+    market: str = args.market or config["default_market"]
+    market_key: str = market_to_key(market)
+    # Include market in file prefix when overriding the default
+    base_prefix: str = config["file_prefix"]
+    file_prefix: str = (
+        f"{base_prefix}_{market}" if market != config["default_market"] else base_prefix
+    )
 
     if args.all:
         seasons = ALL_SEASONS

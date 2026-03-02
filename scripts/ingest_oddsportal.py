@@ -90,18 +90,67 @@ SPORT_CONFIGS: dict[str, dict[str, Any]] = {
     "basketball": {
         "sport_key": "basketball_nba",
         "sport_title": "NBA",
-        "market_key": "home_away_market",
-        "num_outcomes": 2,
+        "default_market": "home_away",
         "file_prefix": "nba",
     },
     "soccer": {
         "sport_key": "soccer_epl",
         "sport_title": "EPL",
-        "market_key": "1x2_market",
-        "num_outcomes": 3,
+        "default_market": "1x2",
         "file_prefix": "epl",
     },
 }
+
+# Market name → ingestion config. Determines how OddsHarvester output maps
+# to The Odds API format in the database.
+MARKET_CONFIGS: dict[str, dict[str, Any]] = {
+    "home_away": {
+        "num_outcomes": 2,
+        "db_market": "h2h",
+        "outcome_names": None,  # Use team names
+        "line": None,
+    },
+    "1x2": {
+        "num_outcomes": 3,
+        "db_market": "h2h",
+        "outcome_names": None,  # Home, Draw, Away
+        "line": None,
+    },
+}
+
+
+def _parse_over_under_market(market: str) -> dict[str, Any] | None:
+    """Parse over_under_X_Y market names into config."""
+    match = re.match(r"over_under_(\d+)(?:_(\d+))?$", market)
+    if not match:
+        return None
+    whole = int(match.group(1))
+    frac = int(match.group(2)) if match.group(2) else 0
+    # Convert: over_under_2_5 → 2.5, over_under_3 → 3.0, over_under_1_25 → 1.25
+    line = whole + frac / (10 ** len(match.group(2))) if match.group(2) else float(whole)
+    return {
+        "num_outcomes": 2,
+        "db_market": "totals",
+        "outcome_names": ("Over", "Under"),
+        "line": line,
+    }
+
+
+def get_market_config(market: str) -> dict[str, Any]:
+    """Get ingestion config for a market, supporting static and parsed configs."""
+    if market in MARKET_CONFIGS:
+        return MARKET_CONFIGS[market]
+    parsed = _parse_over_under_market(market)
+    if parsed:
+        return parsed
+    msg = f"Unknown market: {market}. Add it to MARKET_CONFIGS or use an over_under_* pattern."
+    raise ValueError(msg)
+
+
+def market_to_key(market: str) -> str:
+    """Derive the JSON key OddsHarvester uses for a given market name."""
+    return market.replace("-", "_") + "_market"
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -260,7 +309,7 @@ def build_raw_data(
     *,
     use_opening: bool,
     match_dt: datetime,
-    num_outcomes: int = 2,
+    market_config: dict[str, Any],
 ) -> dict | None:
     """Convert OddsPortal bookmaker data into The Odds API raw_data format.
 
@@ -270,11 +319,16 @@ def build_raw_data(
         away_team: Canonical away team name
         use_opening: If True, use opening odds; if False, use closing (last in history)
         match_dt: Correct game datetime (for fixing timestamps)
-        num_outcomes: Number of outcomes (2 for NBA h2h, 3 for soccer 1x2)
+        market_config: Market configuration from get_market_config()
 
     Returns:
         Dict in The Odds API format, or None if no valid bookmakers found
     """
+    num_outcomes: int = market_config["num_outcomes"]
+    db_market: str = market_config["db_market"]
+    outcome_names: tuple[str, ...] | None = market_config["outcome_names"]
+    line: float | None = market_config["line"]
+
     bookmakers = []
     snapshot_time: datetime | None = None
 
@@ -286,52 +340,47 @@ def build_raw_data(
         bk_name = bk["bookmaker_name"]
         bk_key = BOOKMAKER_KEY_MAP.get(bk_name, _slugify(bk_name))
 
-        home_hist = hist[0]  # Outcome 1 (home)
-        away_hist = hist[num_outcomes - 1]  # Last outcome (away)
-        draw_hist = hist[1] if num_outcomes >= 3 else None  # Outcome X (draw)
-
-        if use_opening:
-            home_entry = home_hist.get("opening_odds")
-            away_entry = away_hist.get("opening_odds")
-            draw_entry = draw_hist.get("opening_odds") if draw_hist else None
-        else:
-            # Closing = last entry in odds_history list
-            home_entries = home_hist.get("odds_history", [])
-            away_entries = away_hist.get("odds_history", [])
-            if not home_entries or not away_entries:
-                continue
-            home_entry = home_entries[-1]
-            away_entry = away_entries[-1]
-
-            if draw_hist:
-                draw_entries = draw_hist.get("odds_history", [])
-                draw_entry = draw_entries[-1] if draw_entries else None
+        # Extract odds entries for each outcome
+        entries: list[dict | None] = []
+        for i in range(num_outcomes):
+            outcome_hist = hist[i]
+            if use_opening:
+                entries.append(outcome_hist.get("opening_odds"))
             else:
-                draw_entry = None
+                odds_history = outcome_hist.get("odds_history", [])
+                entries.append(odds_history[-1] if odds_history else None)
 
-        if not home_entry or not away_entry:
-            continue
-        if num_outcomes >= 3 and not draw_entry:
-            continue
-
-        home_decimal = home_entry.get("odds")
-        away_decimal = away_entry.get("odds")
-        if not home_decimal or not away_decimal:
+        if any(e is None for e in entries):
             continue
 
-        # Build outcomes list
-        outcomes: list[dict[str, Any]] = [
-            {"name": home_team, "price": decimal_to_american(home_decimal)},
-        ]
-        if draw_entry and num_outcomes >= 3:
-            draw_decimal = draw_entry.get("odds")
-            if not draw_decimal:
-                continue
-            outcomes.append({"name": DRAW_OUTCOME, "price": decimal_to_american(draw_decimal)})
-        outcomes.append({"name": away_team, "price": decimal_to_american(away_decimal)})
+        # Validate all entries have odds values
+        decimals = [e.get("odds") for e in entries]  # type: ignore[union-attr]
+        if any(d is None for d in decimals):
+            continue
 
-        # Use the home entry's timestamp as the bookmaker last_update
-        raw_ts = parse_odds_timestamp(home_entry["timestamp"])
+        # Build outcomes list based on market type
+        if outcome_names:
+            # Named outcomes (e.g., Over/Under)
+            outcomes: list[dict[str, Any]] = []
+            for name, decimal in zip(outcome_names, decimals, strict=True):
+                outcome: dict[str, Any] = {
+                    "name": name,
+                    "price": decimal_to_american(decimal),
+                }
+                if line is not None:
+                    outcome["point"] = line
+                outcomes.append(outcome)
+        else:
+            # Team-based outcomes (h2h)
+            outcomes = [
+                {"name": home_team, "price": decimal_to_american(decimals[0])},
+            ]
+            if num_outcomes >= 3:
+                outcomes.append({"name": DRAW_OUTCOME, "price": decimal_to_american(decimals[1])})
+            outcomes.append({"name": away_team, "price": decimal_to_american(decimals[-1])})
+
+        # Use the first entry's timestamp as the bookmaker last_update
+        raw_ts = parse_odds_timestamp(entries[0]["timestamp"])  # type: ignore[index]
         fixed_ts = fix_odds_timestamp(raw_ts, match_dt)
 
         # Track the latest timestamp across bookmakers for snapshot_time
@@ -343,7 +392,7 @@ def build_raw_data(
                 "key": bk_key,
                 "title": bk_name,
                 "last_update": fixed_ts.replace(tzinfo=UTC).isoformat().replace("+00:00", "Z"),
-                "markets": [{"key": "h2h", "outcomes": outcomes}],
+                "markets": [{"key": db_market, "outcomes": outcomes}],
             }
         )
 
@@ -468,14 +517,16 @@ async def ingest_season(
     data_dirs: list[Path],
     *,
     sport_config: dict[str, Any],
+    market_config: dict[str, Any],
+    json_market_key: str,
+    file_prefix: str,
     normalize_fn: Callable[[str], str | None],
     canonical_to_abbrev: dict[str, str] | None,
     dry_run: bool = False,
 ) -> IngestionStats:
     """Ingest one season of OddsPortal data into the database."""
     stats = IngestionStats()
-    file_prefix: str = sport_config["file_prefix"]
-    market_key: str = sport_config["market_key"]
+    market_key: str = json_market_key
 
     records = load_season_records(season, data_dirs, file_prefix=file_prefix, market_key=market_key)
     if not records:
@@ -502,6 +553,8 @@ async def ingest_season(
                     season,
                     stats,
                     sport_config=sport_config,
+                    market_config=market_config,
+                    json_market_key=json_market_key,
                     normalize_fn=normalize_fn,
                     canonical_to_abbrev=canonical_to_abbrev,
                 )
@@ -522,12 +575,13 @@ async def _ingest_one_game(
     stats: IngestionStats,
     *,
     sport_config: dict[str, Any],
+    market_config: dict[str, Any],
+    json_market_key: str,
     normalize_fn: Callable[[str], str | None],
     canonical_to_abbrev: dict[str, str] | None,
 ) -> None:
     """Ingest a single OddsPortal game record."""
-    market_key: str = sport_config["market_key"]
-    num_outcomes: int = sport_config["num_outcomes"]
+    market_key: str = json_market_key
     sport_key: str = sport_config["sport_key"]
     sport_title: str = sport_config["sport_title"]
 
@@ -592,12 +646,16 @@ async def _ingest_one_game(
             stats.events_created += 1
 
     # --- Build and insert OddsSnapshots ---
-    # Check for existing snapshots from OddsPortal to avoid duplicates
+    # Tag with market-specific source for deduplication
+    db_market: str = market_config["db_market"]
+    source_tag = "oddsportal" if db_market == "h2h" else f"oddsportal_{db_market}"
+
+    # Check for existing snapshots to avoid duplicates
     existing_check = await session.execute(
         select(OddsSnapshot.id).where(
             and_(
                 OddsSnapshot.event_id == event_id,
-                OddsSnapshot.api_request_id == "oddsportal",
+                OddsSnapshot.api_request_id == source_tag,
             )
         )
     )
@@ -611,7 +669,7 @@ async def _ingest_one_game(
             away_team,
             use_opening=use_opening,
             match_dt=match_dt,
-            num_outcomes=num_outcomes,
+            market_config=market_config,
         )
         if not raw_data:
             continue
@@ -629,7 +687,7 @@ async def _ingest_one_game(
             snapshot_time=snapshot_time,
             raw_data=raw_data,
             bookmaker_count=len(raw_data["bookmakers"]),
-            api_request_id="oddsportal",
+            api_request_id=source_tag,
             fetch_tier=tier,
             hours_until_commence=max(0.0, hours_before),
         )
@@ -770,6 +828,12 @@ def main() -> None:
         help="Sport to ingest (default: basketball)",
     )
     parser.add_argument(
+        "--market",
+        default=None,
+        help="OddsHarvester market name (default: per sport). "
+        "Examples: 1x2, over_under_2_5, asian_handicap_-0_5",
+    )
+    parser.add_argument(
         "--seasons",
         nargs="+",
         default=None,
@@ -811,6 +875,15 @@ def main() -> None:
 
     sport_config = SPORT_CONFIGS[args.sport]
 
+    # Resolve market
+    market = args.market or sport_config["default_market"]
+    mkt_config = get_market_config(market)
+    json_mkt_key = market_to_key(market)
+    base_prefix: str = sport_config["file_prefix"]
+    file_prefix = (
+        f"{base_prefix}_{market}" if market != sport_config["default_market"] else base_prefix
+    )
+
     # Resolve team normalization and abbreviation map per sport
     if args.sport == "basketball":
         abbrev_to_canonical, normalize_fn = _get_nba_normalizer()
@@ -828,6 +901,9 @@ def main() -> None:
             seasons,
             data_dirs=data_dirs,
             sport_config=sport_config,
+            market_config=mkt_config,
+            json_market_key=json_mkt_key,
+            file_prefix=file_prefix,
             sport=args.sport,
             normalize_fn=normalize_fn,
             canonical_to_abbrev=canonical_to_abbrev,
@@ -842,6 +918,9 @@ async def _run(
     *,
     data_dirs: list[Path],
     sport_config: dict[str, Any],
+    market_config: dict[str, Any],
+    json_market_key: str,
+    file_prefix: str,
     sport: str,
     normalize_fn: Callable[[str], str | None],
     canonical_to_abbrev: dict[str, str] | None,
@@ -856,6 +935,9 @@ async def _run(
             season,
             data_dirs,
             sport_config=sport_config,
+            market_config=market_config,
+            json_market_key=json_market_key,
+            file_prefix=file_prefix,
             normalize_fn=normalize_fn,
             canonical_to_abbrev=canonical_to_abbrev,
             dry_run=dry_run,
