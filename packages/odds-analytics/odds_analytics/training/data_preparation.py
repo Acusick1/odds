@@ -198,6 +198,7 @@ async def filter_events_by_date_range(
     status: EventStatus = EventStatus.FINAL,
     data_source: Literal["oddsportal", "oddsapi"] | None = None,
     min_snapshots: int | None = None,
+    sport_key: str | None = None,
 ) -> list[Event]:
     """
     Filter events by date range from the database.
@@ -209,6 +210,7 @@ async def filter_events_by_date_range(
         status: Event status to filter by (default: FINAL)
         data_source: Filter by data source ('oddsportal', 'oddsapi', or None)
         min_snapshots: Minimum number of snapshots required per event
+        sport_key: Filter by sport key (e.g. 'basketball_nba', 'soccer_epl')
 
     Returns:
         List of Event objects within the date range
@@ -223,6 +225,7 @@ async def filter_events_by_date_range(
     events = await reader.get_events_by_date_range(
         start_date=start_date,
         end_date=end_date,
+        sport_key=sport_key,
         status=status,
         event_id_pattern=event_id_pattern,
         min_snapshots=min_snapshots,
@@ -240,6 +243,7 @@ async def filter_events_by_date_range(
         status=status.value,
         data_source=data_source,
         min_snapshots=min_snapshots,
+        sport_key=sport_key,
     )
 
     return events
@@ -319,6 +323,7 @@ async def prepare_training_data_from_config(
         status=EventStatus.FINAL,
         data_source=data_source,
         min_snapshots=data_config.min_snapshots,
+        sport_key=data_config.sport_key,
     )
 
     if not events:

@@ -411,6 +411,47 @@ class TestDataConfig:
                 min_snapshots=0,
             )
 
+    def test_sport_key_defaults_to_none(self):
+        """sport_key defaults to None (no filter)."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+        )
+        assert config.sport_key is None
+
+    def test_sport_key_accepts_string(self):
+        """sport_key accepts a sport key string."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            sport_key="soccer_epl",
+        )
+        assert config.sport_key == "soccer_epl"
+
+    def test_sport_key_in_yaml_roundtrip(self):
+        """sport_key survives YAML serialization."""
+        config = MLTrainingConfig(
+            experiment=ExperimentConfig(name="test"),
+            training=TrainingConfig(
+                strategy_type="xgboost_line_movement",
+                data=DataConfig(
+                    start_date=date(2024, 1, 1),
+                    end_date=date(2024, 12, 31),
+                    sport_key="soccer_epl",
+                ),
+                model=XGBoostConfig(n_estimators=100),
+            ),
+        )
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            config.to_yaml(f.name)
+            loaded = MLTrainingConfig.from_yaml(f.name)
+            Path(f.name).unlink()
+
+        assert loaded.training.data.sport_key == "soccer_epl"
+
     def test_data_source_in_yaml_roundtrip(self):
         """data_source and min_snapshots survive YAML serialization."""
         config = MLTrainingConfig(

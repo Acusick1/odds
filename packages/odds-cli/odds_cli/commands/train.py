@@ -82,6 +82,11 @@ def run_training(
     tracking_uri: str | None = typer.Option(
         None, "--tracking-uri", help="Override MLflow tracking URI (default: mlruns)"
     ),
+    sport: str | None = typer.Option(
+        None,
+        "--sport",
+        help="Override sport key filter (e.g. basketball_nba, soccer_epl)",
+    ),
 ):
     """
     Train an ML model using a configuration file.
@@ -95,6 +100,10 @@ def run_training(
     """
     # Load and validate configuration
     ml_config = load_config(config)
+
+    # Override sport key if specified
+    if sport:
+        ml_config.training.data.sport_key = sport
 
     # Override output path if specified
     if output:
@@ -661,6 +670,11 @@ def run_tuning(
     tracking_uri: str | None = typer.Option(
         None, "--tracking-uri", help="Override MLflow tracking URI (default: mlruns)"
     ),
+    sport: str | None = typer.Option(
+        None,
+        "--sport",
+        help="Override sport key filter (e.g. basketball_nba, soccer_epl)",
+    ),
 ):
     """
     Run hyperparameter optimization using Optuna.
@@ -681,6 +695,10 @@ def run_tuning(
     """
     # Load and validate configuration
     ml_config = load_config(config)
+
+    # Override sport key if specified
+    if sport:
+        ml_config.training.data.sport_key = sport
 
     # Validate tuning section exists
     if ml_config.tuning is None:

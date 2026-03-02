@@ -66,6 +66,11 @@ def run_backtest(
         "-m",
         help="Path to pre-trained model (for lstm, lstm_line_movement, xgb_line_movement)",
     ),
+    sport: str | None = typer.Option(
+        None,
+        "--sport",
+        help="Filter by sport key (e.g. basketball_nba, soccer_epl). Default: all sports.",
+    ),
 ):
     """
     Run a backtest for a strategy over a date range.
@@ -95,6 +100,7 @@ def run_backtest(
             bet_sizing=bet_sizing,
             kelly_fraction=kelly_fraction,
             model_path=model_path,
+            sport_key=sport,
         )
     )
 
@@ -109,6 +115,7 @@ async def _run_backtest_async(
     bet_sizing: str,
     kelly_fraction: float,
     model_path: str | None = None,
+    sport_key: str | None = None,
 ):
     """Run backtest asynchronously."""
     # Create strategy instance
@@ -133,6 +140,7 @@ async def _run_backtest_async(
         initial_bankroll=bankroll,
         start_date=start_date,
         end_date=end_date,
+        sport_key=sport_key,
         sizing=sizing_config,
     )
 

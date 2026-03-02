@@ -395,6 +395,45 @@ class TestPrepareTrainingDataFromConfig:
             assert train_events.isdisjoint(val_events)
 
     @pytest.mark.asyncio
+    async def test_sport_key_passed_to_filter(self, mock_events):
+        """Test that sport_key from DataConfig is forwarded to filter_events_by_date_range."""
+        from odds_analytics.feature_groups import PreparedFeatureData
+
+        session = AsyncMock()
+
+        config = MLTrainingConfig(
+            experiment=ExperimentConfig(name="test_sport_filter", tags=["test"]),
+            training=TrainingConfig(
+                strategy_type="xgboost_line_movement",
+                data=DataConfig(
+                    start_date=date(2024, 10, 1),
+                    end_date=date(2024, 10, 31),
+                    test_split=0.2,
+                    sport_key="soccer_epl",
+                ),
+                model=XGBoostConfig(n_estimators=100),
+            ),
+        )
+
+        with (
+            patch(
+                "odds_analytics.training.data_preparation.filter_events_by_date_range"
+            ) as mock_filter,
+            patch("odds_analytics.feature_groups.prepare_training_data") as mock_prepare,
+        ):
+            mock_filter.return_value = mock_events
+            X = np.random.randn(10, 5).astype(np.float32)
+            y = np.random.randn(10).astype(np.float32)
+            mock_prepare.return_value = PreparedFeatureData(
+                X=X, y=y, feature_names=[f"f_{i}" for i in range(5)], masks=None
+            )
+
+            await prepare_training_data_from_config(config, session)
+
+            call_kwargs = mock_filter.call_args.kwargs
+            assert call_kwargs["sport_key"] == "soccer_epl"
+
+    @pytest.mark.asyncio
     async def test_no_events_raises_error(self, basic_xgboost_config):
         """Test that empty event list raises ValueError."""
         session = AsyncMock()
@@ -594,6 +633,7 @@ class TestDateRangeFiltering:
             mock_reader.get_events_by_date_range.assert_called_once_with(
                 start_date=start_date,
                 end_date=end_date,
+                sport_key=None,
                 status=EventStatus.FINAL,
                 event_id_pattern=None,
                 min_snapshots=None,
@@ -644,6 +684,7 @@ class TestDateRangeFiltering:
             mock_reader.get_events_by_date_range.assert_called_once_with(
                 start_date=start_date,
                 end_date=end_date,
+                sport_key=None,
                 status=EventStatus.FINAL,
                 event_id_pattern="op_%",
                 min_snapshots=None,
@@ -698,6 +739,7 @@ class TestDateRangeFiltering:
             mock_reader.get_events_by_date_range.assert_called_once_with(
                 start_date=start_date,
                 end_date=end_date,
+                sport_key=None,
                 status=EventStatus.FINAL,
                 event_id_pattern=None,
                 min_snapshots=5,
@@ -726,7 +768,86 @@ class TestDateRangeFiltering:
             mock_reader.get_events_by_date_range.assert_called_once_with(
                 start_date=start_date,
                 end_date=end_date,
+                sport_key=None,
                 status=EventStatus.FINAL,
                 event_id_pattern=None,
+                min_snapshots=None,
+            )
+
+    @pytest.mark.asyncio
+    async def test_filter_sport_key_passed_to_reader(self):
+        """sport_key is forwarded to the reader."""
+        session = AsyncMock()
+        start_date = datetime(2024, 10, 1, tzinfo=UTC)
+        end_date = datetime(2024, 10, 31, tzinfo=UTC)
+
+        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_cls:
+            mock_reader = MagicMock()
+            mock_reader.get_events_by_date_range = AsyncMock(return_value=[])
+            mock_reader_cls.return_value = mock_reader
+
+            await filter_events_by_date_range(
+                session=session,
+                start_date=start_date,
+                end_date=end_date,
+                sport_key="soccer_epl",
+            )
+
+            mock_reader.get_events_by_date_range.assert_called_once_with(
+                start_date=start_date,
+                end_date=end_date,
+                sport_key="soccer_epl",
+                status=EventStatus.FINAL,
+                event_id_pattern=None,
+                min_snapshots=None,
+            )
+
+    @pytest.mark.asyncio
+    async def test_filter_sport_key_default_none(self):
+        """sport_key defaults to None (no filter)."""
+        session = AsyncMock()
+        start_date = datetime(2024, 10, 1, tzinfo=UTC)
+        end_date = datetime(2024, 10, 31, tzinfo=UTC)
+
+        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_cls:
+            mock_reader = MagicMock()
+            mock_reader.get_events_by_date_range = AsyncMock(return_value=[])
+            mock_reader_cls.return_value = mock_reader
+
+            await filter_events_by_date_range(
+                session=session,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+            call_kwargs = mock_reader.get_events_by_date_range.call_args
+            assert call_kwargs.kwargs.get("sport_key") is None
+
+    @pytest.mark.asyncio
+    async def test_filter_sport_key_combined_with_data_source(self):
+        """sport_key and data_source can be used together."""
+        session = AsyncMock()
+        start_date = datetime(2024, 10, 1, tzinfo=UTC)
+        end_date = datetime(2024, 10, 31, tzinfo=UTC)
+
+        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_cls:
+            mock_reader = MagicMock()
+            mock_reader.get_events_by_date_range = AsyncMock(return_value=[])
+            mock_reader_cls.return_value = mock_reader
+
+            await filter_events_by_date_range(
+                session=session,
+                start_date=start_date,
+                end_date=end_date,
+                sport_key="basketball_nba",
+                data_source="oddsportal",
+            )
+
+            mock_reader.get_events_by_date_range.assert_called_once_with(
+                start_date=start_date,
+                end_date=end_date,
+                sport_key="basketball_nba",
+                status=EventStatus.FINAL,
+                event_id_pattern="op_%",
                 min_snapshots=None,
             )
