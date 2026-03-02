@@ -72,6 +72,8 @@ class FlatBettingStrategy(BettingStrategy):
             target_outcome = event.home_team
         elif pattern == "away":
             target_outcome = event.away_team
+        elif pattern == "draw":
+            target_outcome = "Draw"
         elif pattern == "favorite":
             # Find favorite (lowest odds / most negative)
             min_odds = min(relevant_odds, key=lambda o: o.price)
@@ -277,22 +279,55 @@ class ArbitrageStrategy(BettingStrategy):
             if not market_odds:
                 continue
 
-            # For two-way markets (h2h in NBA rarely ties)
             if market == "h2h":
-                # Find best odds for each team
                 home_odds = [o for o in market_odds if o.outcome_name == event.home_team]
                 away_odds = [o for o in market_odds if o.outcome_name == event.away_team]
+                draw_odds = [o for o in market_odds if o.outcome_name.lower() == "draw"]
 
-                if home_odds and away_odds:
+                if draw_odds and home_odds and away_odds:
+                    # 3-way market (football): need all three legs
+                    best_home = max(home_odds, key=lambda o: o.price)
+                    best_away = max(away_odds, key=lambda o: o.price)
+                    best_draw = max(draw_odds, key=lambda o: o.price)
+
+                    hold = calculate_market_hold(
+                        [best_home.price, best_away.price, best_draw.price]
+                    )
+                    if hold > max_hold:
+                        continue
+
+                    has_arb, profit_pct, stakes = detect_arbitrage(
+                        [
+                            (best_home.bookmaker_key, best_home.price),
+                            (best_away.bookmaker_key, best_away.price),
+                            (best_draw.bookmaker_key, best_draw.price),
+                        ]
+                    )
+
+                    if has_arb and profit_pct >= (min_profit * 100):
+                        for best_odd in [best_home, best_away, best_draw]:
+                            opportunities.append(
+                                BetOpportunity(
+                                    event_id=event.id,
+                                    market=market,
+                                    outcome=best_odd.outcome_name,
+                                    bookmaker=best_odd.bookmaker_key,
+                                    odds=best_odd.price,
+                                    line=None,
+                                    confidence=1.0,
+                                    rationale=f"3-way arb: {profit_pct:.2%} profit",
+                                )
+                            )
+
+                elif home_odds and away_odds:
+                    # 2-way market (basketball)
                     best_home = max(home_odds, key=lambda o: o.price)
                     best_away = max(away_odds, key=lambda o: o.price)
 
-                    # Skip if market hold is too high (unlikely to have arb)
                     hold = calculate_market_hold([best_home.price, best_away.price])
                     if hold > max_hold:
                         continue
 
-                    # Check for arbitrage
                     has_arb, profit_pct, stakes = detect_arbitrage(
                         [
                             (best_home.bookmaker_key, best_home.price),
@@ -301,7 +336,6 @@ class ArbitrageStrategy(BettingStrategy):
                     )
 
                     if has_arb and profit_pct >= (min_profit * 100):
-                        # Add both sides of the arb
                         opportunities.append(
                             BetOpportunity(
                                 event_id=event.id,
@@ -310,7 +344,7 @@ class ArbitrageStrategy(BettingStrategy):
                                 bookmaker=best_home.bookmaker_key,
                                 odds=best_home.price,
                                 line=None,
-                                confidence=1.0,  # Arb is risk-free
+                                confidence=1.0,
                                 rationale=f"Arbitrage: {profit_pct:.2%} profit "
                                 f"({best_home.bookmaker_key} vs {best_away.bookmaker_key})",
                             )
