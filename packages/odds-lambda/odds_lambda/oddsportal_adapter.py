@@ -7,39 +7,22 @@ Produces dicts matching the OddsWriter.store_odds_snapshot() contract.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-DRAW_OUTCOME = "Draw"
+from odds_lambda.oddsportal_common import (
+    BOOKMAKER_KEY_MAP,
+    DRAW_OUTCOME,
+    decimal_to_american,
+    parse_match_date,
+    slugify,
+)
 
-# OddsPortal bookmaker name → pipeline key.
-# Copied from ingest_oddsportal.py and extended for upcoming-only bookmakers.
-BOOKMAKER_KEY_MAP: dict[str, str] = {
-    "10bet": "10bet",
-    "bet365": "bet365",
-    "BetMGM": "betmgm",
-    "bwin": "bwin",
-    "Betway": "betway",
-    "BetVictor": "betvictor",
-    "Betfred": "betfred",
-    "BetUK": "betuk",
-    "Midnite": "midnite",
-    "Unibetuk": "unibet_uk",
-    "Betano.uk": "betano",
-    "AllBritishCasino": "allbritishcasino",
-    "Pinnacle": "pinnacle",
-    "DraftKings": "draftkings",
-    "FanDuel": "fanduel",
-    "Caesars": "williamhill_us",
-    "PointsBet": "pointsbetus",
-    "BetRivers": "betrivers",
-    "Unibet": "unibet",
-    "Bovada": "bovada",
-    "Marathon Bet": "marathonbet",
-    "1xBet": "onexbet",
-    "Betfair Exchange": "betfair_exchange",
-    # Upcoming-only bookmakers (not in historical scrapes)
+# Upcoming-only bookmakers not seen in historical scrapes.
+UPCOMING_BOOKMAKER_MAP: dict[str, str] = {
+    **BOOKMAKER_KEY_MAP,
     "7Bet": "7bet",
     "Paddy Power": "paddypower",
     "Skybet": "skybet",
@@ -53,6 +36,9 @@ BOOKMAKER_KEY_MAP: dict[str, str] = {
 # Regex: Betfair format is "FRAC_REPEAT(LIQUIDITY)" e.g. "99/10099/100(300)"
 # The fraction is repeated (concatenated), followed by optional (liquidity).
 _BETFAIR_RE = re.compile(r"^(\d+/\d+)\1\((\d+)\)$")
+
+# Converter function signature: (bookmaker_odds, home_team, away_team) -> raw_data | None
+MarketConverter = Callable[[list[dict[str, Any]], str, str], dict[str, Any] | None]
 
 
 @dataclass
@@ -101,31 +87,9 @@ def parse_betfair_odds(raw: str) -> tuple[str, int | None]:
     return raw, None
 
 
-def normalize_bookmaker_key(name: str) -> str:
-    """Map OddsPortal bookmaker name to pipeline key."""
-    return BOOKMAKER_KEY_MAP.get(name, _slugify(name))
-
-
-def _slugify(name: str) -> str:
-    """Convert bookmaker name to a lowercase slug key."""
-    return re.sub(r"[^a-z0-9]", "", name.lower())
-
-
-def decimal_to_american(d: float) -> int:
-    """Convert decimal odds to American odds."""
-    if d >= 2.0:
-        return round((d - 1) * 100)
-    elif d > 1.0:
-        return round(-100 / (d - 1))
-    return -10000
-
-
-def parse_match_date(date_str: str) -> datetime:
-    """Parse OddsPortal date string to UTC datetime.
-
-    Format: '2026-03-03 19:30:00 UTC'
-    """
-    return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %Z").replace(tzinfo=UTC)
+def _normalize_upcoming_key(name: str) -> str:
+    """Map bookmaker name to pipeline key, including upcoming-only bookmakers."""
+    return UPCOMING_BOOKMAKER_MAP.get(name, slugify(name))
 
 
 def convert_upcoming_matches(matches: list[dict[str, Any]], market: str) -> list[MatchOdds]:
@@ -179,6 +143,40 @@ def convert_upcoming_matches(matches: list[dict[str, Any]], market: str) -> list
     return results
 
 
+def _build_betfair_entry(
+    bk_key: str,
+    bk_name: str,
+    market_key: str,
+    outcomes: list[dict[str, Any]],
+    liquidity: dict[str, int],
+) -> dict[str, Any]:
+    """Build a bookmaker entry with Betfair liquidity metadata."""
+    entry: dict[str, Any] = {
+        "key": bk_key,
+        "title": bk_name,
+        "last_update": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "markets": [{"key": market_key, "outcomes": outcomes}],
+    }
+    if liquidity:
+        entry["betfair_matched"] = liquidity
+    return entry
+
+
+def _build_bookmaker_entry(
+    bk_key: str,
+    bk_name: str,
+    market_key: str,
+    outcomes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a standard bookmaker entry."""
+    return {
+        "key": bk_key,
+        "title": bk_name,
+        "last_update": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "markets": [{"key": market_key, "outcomes": outcomes}],
+    }
+
+
 def _convert_1x2_match(
     bookmaker_odds: list[dict[str, Any]],
     home_team: str,
@@ -199,13 +197,13 @@ def _convert_1x2_match(
         if not home_raw or not draw_raw or not away_raw:
             continue
 
-        bk_key = normalize_bookmaker_key(bk_name)
+        bk_key = _normalize_upcoming_key(bk_name)
         is_betfair = bk_name == "Betfair Exchange"
 
         if is_betfair:
-            home_frac, _ = parse_betfair_odds(home_raw)
-            draw_frac, _ = parse_betfair_odds(draw_raw)
-            away_frac, _ = parse_betfair_odds(away_raw)
+            home_frac, home_liq = parse_betfair_odds(home_raw)
+            draw_frac, draw_liq = parse_betfair_odds(draw_raw)
+            away_frac, away_liq = parse_betfair_odds(away_raw)
         else:
             home_frac, draw_frac, away_frac = home_raw, draw_raw, away_raw
 
@@ -222,14 +220,17 @@ def _convert_1x2_match(
             {"name": away_team, "price": decimal_to_american(away_dec)},
         ]
 
-        bookmakers.append(
-            {
-                "key": bk_key,
-                "title": bk_name,
-                "last_update": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                "markets": [{"key": "h2h", "outcomes": outcomes}],
-            }
-        )
+        if is_betfair:
+            liquidity: dict[str, int] = {}
+            if home_liq is not None:
+                liquidity["home"] = home_liq
+            if draw_liq is not None:
+                liquidity["draw"] = draw_liq
+            if away_liq is not None:
+                liquidity["away"] = away_liq
+            bookmakers.append(_build_betfair_entry(bk_key, bk_name, "h2h", outcomes, liquidity))
+        else:
+            bookmakers.append(_build_bookmaker_entry(bk_key, bk_name, "h2h", outcomes))
 
     if not bookmakers:
         return None
@@ -256,12 +257,12 @@ def _convert_over_under_match(
         if not over_raw or not under_raw:
             continue
 
-        bk_key = normalize_bookmaker_key(bk_name)
+        bk_key = _normalize_upcoming_key(bk_name)
         is_betfair = bk_name == "Betfair Exchange"
 
         if is_betfair:
-            over_frac, _ = parse_betfair_odds(over_raw)
-            under_frac, _ = parse_betfair_odds(under_raw)
+            over_frac, over_liq = parse_betfair_odds(over_raw)
+            under_frac, under_liq = parse_betfair_odds(under_raw)
         else:
             over_frac, under_frac = over_raw, under_raw
 
@@ -276,14 +277,15 @@ def _convert_over_under_match(
             {"name": "Under", "price": decimal_to_american(under_dec), "point": 2.5},
         ]
 
-        bookmakers.append(
-            {
-                "key": bk_key,
-                "title": bk_name,
-                "last_update": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                "markets": [{"key": "totals", "outcomes": outcomes}],
-            }
-        )
+        if is_betfair:
+            liquidity: dict[str, int] = {}
+            if over_liq is not None:
+                liquidity["over"] = over_liq
+            if under_liq is not None:
+                liquidity["under"] = under_liq
+            bookmakers.append(_build_betfair_entry(bk_key, bk_name, "totals", outcomes, liquidity))
+        else:
+            bookmakers.append(_build_bookmaker_entry(bk_key, bk_name, "totals", outcomes))
 
     if not bookmakers:
         return None
@@ -291,7 +293,7 @@ def _convert_over_under_match(
     return {"bookmakers": bookmakers, "source": "oddsportal_live"}
 
 
-_MARKET_CONVERTERS: dict[str, Any] = {
+_MARKET_CONVERTERS: dict[str, MarketConverter] = {
     "1x2": _convert_1x2_match,
     "over_under_2_5": _convert_over_under_match,
 }

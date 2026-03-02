@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import pytest
 from odds_lambda.oddsportal_adapter import (
-    DRAW_OUTCOME,
     MatchOdds,
     _convert_1x2_match,
     _convert_over_under_match,
+    _normalize_upcoming_key,
     convert_upcoming_matches,
-    decimal_to_american,
     fractional_to_decimal,
-    normalize_bookmaker_key,
     parse_betfair_odds,
+)
+from odds_lambda.oddsportal_common import (
+    DRAW_OUTCOME,
+    decimal_to_american,
+    normalize_bookmaker_key,
 )
 
 
@@ -86,9 +89,17 @@ class TestNormalizeBookmakerKey:
         key = normalize_bookmaker_key("Some New Book")
         assert key == "somenewbook"
 
+
+class TestNormalizeUpcomingKey:
+    def test_known_from_base_map(self) -> None:
+        assert _normalize_upcoming_key("bet365") == "bet365"
+
     def test_upcoming_only_bookmaker(self) -> None:
-        assert normalize_bookmaker_key("Paddy Power") == "paddypower"
-        assert normalize_bookmaker_key("Skybet") == "skybet"
+        assert _normalize_upcoming_key("Paddy Power") == "paddypower"
+        assert _normalize_upcoming_key("Skybet") == "skybet"
+
+    def test_unknown_slugified(self) -> None:
+        assert _normalize_upcoming_key("Brand New Book") == "brandnewbook"
 
 
 class TestDecimalToAmerican:
@@ -164,10 +175,30 @@ class TestConvert1x2Match:
         home_price = betfair["markets"][0]["outcomes"][0]["price"]
         assert home_price == decimal_to_american(1.99)
 
+    def test_betfair_liquidity_stored(self, sample_1x2_bookmakers: list[dict]) -> None:
+        result = _convert_1x2_match(sample_1x2_bookmakers, "Leeds", "Sunderland")
+        assert result is not None
+        betfair = next(b for b in result["bookmakers"] if b["key"] == "betfair_exchange")
+        assert "betfair_matched" in betfair
+        assert betfair["betfair_matched"]["home"] == 300
+        assert betfair["betfair_matched"]["draw"] == 277
+        assert betfair["betfair_matched"]["away"] == 227
+
+    def test_non_betfair_no_liquidity(self, sample_1x2_bookmakers: list[dict]) -> None:
+        result = _convert_1x2_match(sample_1x2_bookmakers, "Leeds", "Sunderland")
+        assert result is not None
+        bet365 = next(b for b in result["bookmakers"] if b["key"] == "bet365")
+        assert "betfair_matched" not in bet365
+
     def test_market_key_is_h2h(self, sample_1x2_bookmakers: list[dict]) -> None:
         result = _convert_1x2_match(sample_1x2_bookmakers, "Leeds", "Sunderland")
         assert result is not None
         assert result["bookmakers"][0]["markets"][0]["key"] == "h2h"
+
+    def test_source_tag(self, sample_1x2_bookmakers: list[dict]) -> None:
+        result = _convert_1x2_match(sample_1x2_bookmakers, "Leeds", "Sunderland")
+        assert result is not None
+        assert result["source"] == "oddsportal_live"
 
     def test_empty_bookmakers_returns_none(self) -> None:
         assert _convert_1x2_match([], "A", "B") is None
@@ -221,6 +252,13 @@ class TestConvertOverUnderMatch:
         # 59/50 = 1.18 + 1 = 2.18 → 118
         over_price = betfair["markets"][0]["outcomes"][0]["price"]
         assert over_price == decimal_to_american(59 / 50 + 1)
+
+    def test_betfair_liquidity_stored(self, sample_ou_bookmakers: list[dict]) -> None:
+        result = _convert_over_under_match(sample_ou_bookmakers, "Leeds", "Sunderland")
+        assert result is not None
+        betfair = next(b for b in result["bookmakers"] if b["key"] == "betfair_exchange")
+        assert betfair["betfair_matched"]["over"] == 159
+        assert betfair["betfair_matched"]["under"] == 134
 
     def test_empty_returns_none(self) -> None:
         assert _convert_over_under_match([], "A", "B") is None

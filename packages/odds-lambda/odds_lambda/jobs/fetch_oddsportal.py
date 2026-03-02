@@ -32,6 +32,7 @@ from odds_lambda.oddsportal_adapter import (
     MatchOdds,
     convert_upcoming_matches,
 )
+from odds_lambda.oddsportal_common import team_abbrev
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -76,18 +77,10 @@ class IngestionStats:
     errors: list[str] = field(default_factory=list)
 
 
-def _team_abbrev(name: str) -> str:
-    """Derive a short abbreviation from a team name."""
-    words = name.split()
-    if len(words) == 1:
-        return words[0][:3].upper()
-    return (words[0][:3] + words[-1][:3]).upper()
-
-
 def _build_event_id(home_team: str, away_team: str, match_date: datetime) -> str:
     """Generate deterministic event ID for OddsPortal-sourced events."""
-    home_abbrev = _team_abbrev(home_team)
-    away_abbrev = _team_abbrev(away_team)
+    home_abbrev = team_abbrev(home_team)
+    away_abbrev = team_abbrev(away_team)
     date_str = match_date.strftime("%Y-%m-%d")
     return f"op_live_{home_abbrev}_{away_abbrev}_{date_str}"
 
@@ -96,6 +89,9 @@ def run_harvester_upcoming(spec: LeagueSpec) -> list[dict[str, Any]]:
     """Run OddsHarvester upcoming command and return parsed match list.
 
     Tries direct import first, falls back to subprocess via uvx.
+
+    Raises:
+        RuntimeError: If both import and subprocess paths fail.
     """
     try:
         from OddsHarvester.scraper import OddsScraper
@@ -144,19 +140,15 @@ def _run_harvester_subprocess(spec: LeagueSpec) -> list[dict[str, Any]]:
         )
 
         if result.returncode != 0:
-            logger.error(
-                "harvester_failed",
-                returncode=result.returncode,
-                stderr=result.stderr[:500],
+            raise RuntimeError(
+                f"OddsHarvester exited with code {result.returncode}: {result.stderr[:500]}"
             )
-            return []
 
         data = json.loads(tmp_path.read_text())
         return data if isinstance(data, list) else []
 
     except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as e:
-        logger.error("harvester_error", error=str(e))
-        return []
+        raise RuntimeError(f"OddsHarvester subprocess failed: {e}") from e
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -281,9 +273,6 @@ async def ingest_league(
                     stats.events_created += 1
                 else:
                     stats.events_matched += 1
-
-                # Set api_request_id on the raw_data for dedup tracking
-                match.raw_data["api_request_id"] = api_request_id
 
                 snapshot, _ = await writer.store_odds_snapshot(
                     event_id=event_id,
