@@ -104,15 +104,17 @@ def extract_devigged_h2h_probs(
     home_team: str,
     away_team: str,
     bookmaker_key: str = "pinnacle",
-) -> tuple[float, float] | None:
-    """Extract devigged h2h probabilities for home and away teams from a specific bookmaker.
+) -> tuple[float, ...] | None:
+    """Extract devigged h2h probabilities from a specific bookmaker.
 
-    Filters odds to the given bookmaker's h2h market, finds home and away outcomes,
+    Supports both 2-way (NBA: home/away) and 3-way (soccer: home/draw/away) markets.
+    Filters odds to the given bookmaker's h2h market, finds all outcomes,
     converts to implied probabilities, and applies proportional devigging.
 
     Returns:
-        (fair_home_prob, fair_away_prob) or None if bookmaker h2h not found
-        for both sides.
+        2-way: (fair_home_prob, fair_away_prob)
+        3-way: (fair_home_prob, fair_draw_prob, fair_away_prob)
+        None if home or away outcome missing for the bookmaker.
     """
     bm_h2h = [o for o in odds if o.bookmaker_key == bookmaker_key and o.market_key == "h2h"]
     if not bm_h2h:
@@ -120,17 +122,25 @@ def extract_devigged_h2h_probs(
 
     home_odds: Odds | None = None
     away_odds: Odds | None = None
+    draw_odds: Odds | None = None
     for o in bm_h2h:
         if o.outcome_name == home_team:
             home_odds = o
         elif o.outcome_name == away_team:
             away_odds = o
+        elif o.outcome_name == "Draw":
+            draw_odds = o
 
     if home_odds is None or away_odds is None:
         return None
 
     home_raw = calculate_implied_probability(home_odds.price)
     away_raw = calculate_implied_probability(away_odds.price)
+
+    if draw_odds is not None:
+        draw_raw = calculate_implied_probability(draw_odds.price)
+        return devig_probabilities(home_raw, draw_raw, away_raw)
+
     return devig_probabilities(home_raw, away_raw)
 
 
