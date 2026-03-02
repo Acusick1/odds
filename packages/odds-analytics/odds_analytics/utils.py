@@ -74,12 +74,19 @@ def calculate_implied_probability(american_odds: int) -> float:
     return 1 / decimal_odds
 
 
-def devig_probabilities(home_prob: float, away_prob: float) -> tuple[float, float]:
-    """Proportional devigging: remove overround by normalizing to sum=1."""
-    total = home_prob + away_prob
+def devig_probabilities(*probs: float) -> tuple[float, ...]:
+    """Proportional devigging: remove overround by normalizing to sum=1.
+
+    Accepts any number of implied probabilities (2 for NBA, 3 for soccer h2h, etc.)
+    and returns devigged probabilities preserving the original ratios.
+    """
+    if not probs:
+        return ()
+    total = sum(probs)
     if total <= 0:
-        return 0.5, 0.5
-    return home_prob / total, away_prob / total
+        n = len(probs)
+        return tuple(1.0 / n for _ in probs)
+    return tuple(p / total for p in probs)
 
 
 def calculate_ev(
