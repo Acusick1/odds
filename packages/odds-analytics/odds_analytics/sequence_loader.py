@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime
 from enum import Enum
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import numpy as np
 import structlog
@@ -235,7 +235,7 @@ def calculate_devigged_totals_target(
     snapshot_odds: list[Odds],
     closing_odds: list[Odds],
     bookmaker_key: str = "pinnacle",
-    outcome: str = "Over",
+    outcome: Literal["Over", "Under"] = "Over",
 ) -> float | None:
     """Calculate target as devigged totals close minus devigged totals at snapshot.
 
