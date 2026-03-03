@@ -60,6 +60,11 @@ echo -e "${YELLOW}Logging in to ECR...${NC}"
 aws ecr get-login-password --region "$AWS_REGION" | \
     docker login --username AWS --password-stdin "$ECR_URL"
 
+# Ensure ECR repository exists (not Terraform-managed, same as odds-scheduler ECR)
+echo -e "${YELLOW}Ensuring ECR repository exists...${NC}"
+aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" --region "$AWS_REGION" 2>/dev/null || \
+    aws ecr create-repository --repository-name "$ECR_REPOSITORY" --region "$AWS_REGION" --image-tag-mutability MUTABLE
+
 # Build image
 echo -e "${YELLOW}Building Docker image (this may take a few minutes due to Playwright/Chromium)...${NC}"
 docker build \
