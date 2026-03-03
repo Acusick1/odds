@@ -12,6 +12,9 @@ resource "aws_ecr_repository" "scraper" {
     scan_on_push = false
   }
 
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Lambda function — scraper
