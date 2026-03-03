@@ -49,8 +49,10 @@ from odds_analytics.polymarket_features import (
 )
 from odds_analytics.sequence_loader import (
     calculate_devigged_bookmaker_target,
+    calculate_devigged_totals_target,
     calculate_regression_target,
     extract_devigged_h2h_probs,
+    extract_devigged_totals_probs,
     extract_odds_from_snapshot,
     load_sequences_for_event,
 )
@@ -455,6 +457,13 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
     return names
 
 
+def _resolve_outcome_name(config: FeatureConfig, event: Event) -> str:
+    """Map config outcome to the outcome name stored in the database."""
+    if config.outcome in ("over", "under"):
+        return config.outcome.capitalize()
+    return event.home_team if config.outcome == "home" else event.away_team
+
+
 def _extract_static_feature_parts(
     bundle: EventDataBundle,
     snapshot: OddsSnapshot,
@@ -468,7 +477,7 @@ def _extract_static_feature_parts(
     """
     event = bundle.event
     market = config.markets[0] if config.markets else "h2h"
-    outcome = event.home_team if config.outcome == "home" else event.away_team
+    outcome = _resolve_outcome_name(config, event)
     backtest_event = make_backtest_event(event)
     tab_extractor = TabularFeatureExtractor.from_config(config)
 
@@ -709,6 +718,14 @@ def _compute_target(
 
     if config.target_type == "devigged_bookmaker":
         snapshot_odds_all = extract_odds_from_snapshot(snapshot, event.id, market=market)
+        if market == "totals":
+            outcome_name = _resolve_outcome_name(config, event)
+            return calculate_devigged_totals_target(
+                snapshot_odds_all,
+                closing_odds_all,
+                bookmaker_key=config.target_bookmaker,
+                outcome=outcome_name,
+            )
         return calculate_devigged_bookmaker_target(
             snapshot_odds_all,
             closing_odds_all,
@@ -718,7 +735,7 @@ def _compute_target(
         )
     else:
         # "raw": avg implied prob delta (snapshot → closing)
-        outcome = event.home_team if config.outcome == "home" else event.away_team
+        outcome = _resolve_outcome_name(config, event)
         snap_odds = extract_odds_from_snapshot(snapshot, event.id, market=market, outcome=outcome)
         closing_odds = extract_odds_from_snapshot(
             closing_snapshot, event.id, market=market, outcome=outcome
@@ -727,11 +744,12 @@ def _compute_target(
 
 
 def _has_bookmaker_closing(
-    closing_snapshot: OddsSnapshot, event: Event, bookmaker_key: str
+    closing_snapshot: OddsSnapshot, event: Event, bookmaker_key: str, market: str = "h2h"
 ) -> bool:
-    """Check if closing snapshot has bookmaker h2h data (required for devigged_bookmaker target)."""
-    market = "h2h"
+    """Check if closing snapshot has bookmaker data for the target market."""
     closing_odds_all = extract_odds_from_snapshot(closing_snapshot, event.id, market=market)
+    if market == "totals":
+        return extract_devigged_totals_probs(closing_odds_all, bookmaker_key) is not None
     return (
         extract_devigged_h2h_probs(
             closing_odds_all, event.home_team, event.away_team, bookmaker_key
@@ -746,13 +764,14 @@ def _select_closing_snapshot(
     """Pick the best closing snapshot from candidates ordered by time.
 
     When target_type is bookmaker-specific, prefer the candidate containing
-    the target bookmaker's h2h data. Falls back to last-by-time.
+    the target bookmaker's data for the configured market. Falls back to last-by-time.
     """
     if not candidates:
         return None
     if config.target_type == "devigged_bookmaker":
+        market = config.markets[0] if config.markets else "h2h"
         for candidate in reversed(candidates):
-            if _has_bookmaker_closing(candidate, event, config.target_bookmaker):
+            if _has_bookmaker_closing(candidate, event, config.target_bookmaker, market):
                 return candidate
     return candidates[-1]
 

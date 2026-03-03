@@ -5,8 +5,10 @@ Key Functions:
 - load_sequences_for_event(): Query odds snapshots and organize chronologically
 - extract_odds_from_snapshot(): Parse Odds from OddsSnapshot.raw_data
 - calculate_regression_target(): Calculate line movement for regression
-- extract_devigged_h2h_probs(): Extract devigged bookmaker probabilities
-- calculate_devigged_bookmaker_target(): Devigged bookmaker close vs snapshot delta
+- extract_devigged_h2h_probs(): Extract devigged bookmaker probabilities (h2h)
+- extract_devigged_totals_probs(): Extract devigged bookmaker probabilities (totals)
+- calculate_devigged_bookmaker_target(): Devigged h2h close vs snapshot delta
+- calculate_devigged_totals_target(): Devigged totals close vs snapshot delta
 """
 
 from __future__ import annotations
@@ -39,6 +41,13 @@ class DeviggedProbs(NamedTuple):
     away: float
 
 
+class DeviggedTotalsProbs(NamedTuple):
+    """Devigged probabilities for a totals (Over/Under) market."""
+
+    over: float
+    under: float
+
+
 class TargetType(str, Enum):
     """Target type for LSTM training."""
 
@@ -50,12 +59,15 @@ logger = structlog.get_logger()
 
 __all__ = [
     "DeviggedProbs",
+    "DeviggedTotalsProbs",
     "DRAW_OUTCOME",
     "load_sequences_for_event",
     "TargetType",
     "calculate_regression_target",
     "extract_devigged_h2h_probs",
+    "extract_devigged_totals_probs",
     "calculate_devigged_bookmaker_target",
+    "calculate_devigged_totals_target",
     "extract_odds_from_snapshot",
 ]
 
@@ -183,6 +195,63 @@ def calculate_devigged_bookmaker_target(
         return None
 
     return closing_probs.home - snapshot_probs.home
+
+
+def extract_devigged_totals_probs(
+    odds: list[Odds],
+    bookmaker_key: str = "pinnacle",
+) -> DeviggedTotalsProbs | None:
+    """Extract devigged Over/Under probabilities from a specific bookmaker.
+
+    Filters odds to the given bookmaker's totals market, finds Over and Under
+    outcomes, converts to implied probabilities, and applies proportional devigging.
+
+    Returns:
+        DeviggedTotalsProbs with over and under fields.
+        None if Over or Under outcome is missing for the bookmaker.
+    """
+    bm_totals = [o for o in odds if o.bookmaker_key == bookmaker_key and o.market_key == "totals"]
+    if not bm_totals:
+        return None
+
+    over_odds: Odds | None = None
+    under_odds: Odds | None = None
+    for o in bm_totals:
+        if o.outcome_name == "Over":
+            over_odds = o
+        elif o.outcome_name == "Under":
+            under_odds = o
+
+    if over_odds is None or under_odds is None:
+        return None
+
+    over_raw = calculate_implied_probability(over_odds.price)
+    under_raw = calculate_implied_probability(under_odds.price)
+    over, under = devig_probabilities(over_raw, under_raw)
+    return DeviggedTotalsProbs(over=over, under=under)
+
+
+def calculate_devigged_totals_target(
+    snapshot_odds: list[Odds],
+    closing_odds: list[Odds],
+    bookmaker_key: str = "pinnacle",
+    outcome: str = "Over",
+) -> float | None:
+    """Calculate target as devigged totals close minus devigged totals at snapshot.
+
+    Returns:
+        fair_close - fair_snapshot for the requested outcome (Over or Under),
+        or None if bookmaker data missing on either side.
+    """
+    snapshot_probs = extract_devigged_totals_probs(snapshot_odds, bookmaker_key)
+    closing_probs = extract_devigged_totals_probs(closing_odds, bookmaker_key)
+
+    if snapshot_probs is None or closing_probs is None:
+        return None
+
+    if outcome == "Over":
+        return closing_probs.over - snapshot_probs.over
+    return closing_probs.under - snapshot_probs.under
 
 
 def extract_odds_from_snapshot(

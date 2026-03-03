@@ -600,9 +600,9 @@ class FeatureConfig(BaseModel):
     )
 
     # Target configuration
-    outcome: Literal["home", "away"] = Field(
+    outcome: Literal["home", "away", "over", "under"] = Field(
         default="home",
-        description="Outcome to predict (home or away team)",
+        description="Outcome to predict (home/away for h2h, over/under for totals)",
     )
 
     # Tier-based closing line configuration
