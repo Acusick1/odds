@@ -109,6 +109,18 @@ class EventDataBundle:
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
+def _snapshot_has_market(snapshot: OddsSnapshot, market: str) -> bool:
+    """Check if a snapshot's raw_data contains data for the given market key."""
+    raw = snapshot.raw_data
+    if not raw or "bookmakers" not in raw:
+        return False
+    for bm in raw["bookmakers"]:
+        for mkt in bm.get("markets", []):
+            if mkt.get("key") == market:
+                return True
+    return False
+
+
 async def collect_event_data(
     event: Event,
     session: AsyncSession,
@@ -117,6 +129,7 @@ async def collect_event_data(
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
     - Loads all OddsSnapshot records once
+    - Filters snapshots to those containing the configured market
     - Finds closing snapshot (prefers target bookmaker when applicable)
     - Loads PM context (PM event, moneyline market, home_idx)
     - Bulk-loads all PM prices + orderbooks for the market (2 queries total)
@@ -126,7 +139,13 @@ async def collect_event_data(
     from odds_lambda.storage.readers import OddsReader
 
     reader = OddsReader(session)
-    all_snapshots = await reader.get_snapshots_for_event(event.id)
+    all_snapshots_raw = await reader.get_snapshots_for_event(event.id)
+
+    # Filter to snapshots containing the configured market so the sampler
+    # doesn't pick snapshots with data for a different market (e.g. h2h
+    # snapshot when we need totals).
+    market = config.markets[0] if config.markets else "h2h"
+    all_snapshots = [s for s in all_snapshots_raw if _snapshot_has_market(s, market)]
 
     # Derive closing snapshot from already-loaded snapshots (avoid extra DB query)
     closing_tier_value = config.closing_tier.value
@@ -866,8 +885,9 @@ async def prepare_training_data(
             continue
 
         # For devigged_bookmaker, must have bookmaker closing data
+        market = config.markets[0] if config.markets else "h2h"
         if config.target_type == "devigged_bookmaker" and not _has_bookmaker_closing(
-            bundle.closing_snapshot, event, config.target_bookmaker
+            bundle.closing_snapshot, event, config.target_bookmaker, market
         ):
             skipped_events += 1
             continue
