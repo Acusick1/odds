@@ -32,6 +32,9 @@ rule_prefix = "odds-dev"
 # Deploy Polymarket EventBridge rules (fetch + backfill)
 enable_polymarket = false
 
+# Deploy OddsPortal scraper Lambda (Playwright + Chromium container)
+enable_oddsportal_scraper = false
+
 # ============================================================================
 # Lambda Configuration
 # ============================================================================
