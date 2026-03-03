@@ -9,6 +9,7 @@ RUN dnf install -y \
     gcc \
     gcc-c++ \
     make \
+    git \
     && dnf clean all
 
 # Install UV for fast package management
