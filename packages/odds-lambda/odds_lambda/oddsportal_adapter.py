@@ -143,38 +143,24 @@ def convert_upcoming_matches(matches: list[dict[str, Any]], market: str) -> list
     return results
 
 
-def _build_betfair_entry(
+def _build_bookmaker_entry(
     bk_key: str,
     bk_name: str,
     market_key: str,
     outcomes: list[dict[str, Any]],
-    liquidity: dict[str, int],
+    *,
+    betfair_matched: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """Build a bookmaker entry with Betfair liquidity metadata."""
+    """Build a bookmaker entry, optionally with Betfair liquidity metadata."""
     entry: dict[str, Any] = {
         "key": bk_key,
         "title": bk_name,
         "last_update": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "markets": [{"key": market_key, "outcomes": outcomes}],
     }
-    if liquidity:
-        entry["betfair_matched"] = liquidity
+    if betfair_matched:
+        entry["betfair_matched"] = betfair_matched
     return entry
-
-
-def _build_bookmaker_entry(
-    bk_key: str,
-    bk_name: str,
-    market_key: str,
-    outcomes: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Build a standard bookmaker entry."""
-    return {
-        "key": bk_key,
-        "title": bk_name,
-        "last_update": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "markets": [{"key": market_key, "outcomes": outcomes}],
-    }
 
 
 def _convert_1x2_match(
@@ -220,17 +206,19 @@ def _convert_1x2_match(
             {"name": away_team, "price": decimal_to_american(away_dec)},
         ]
 
+        liquidity: dict[str, int] | None = None
         if is_betfair:
-            liquidity: dict[str, int] = {}
+            liquidity = {}
             if home_liq is not None:
                 liquidity["home"] = home_liq
             if draw_liq is not None:
                 liquidity["draw"] = draw_liq
             if away_liq is not None:
                 liquidity["away"] = away_liq
-            bookmakers.append(_build_betfair_entry(bk_key, bk_name, "h2h", outcomes, liquidity))
-        else:
-            bookmakers.append(_build_bookmaker_entry(bk_key, bk_name, "h2h", outcomes))
+
+        bookmakers.append(
+            _build_bookmaker_entry(bk_key, bk_name, "h2h", outcomes, betfair_matched=liquidity)
+        )
 
     if not bookmakers:
         return None
@@ -277,15 +265,17 @@ def _convert_over_under_match(
             {"name": "Under", "price": decimal_to_american(under_dec), "point": 2.5},
         ]
 
+        liquidity: dict[str, int] | None = None
         if is_betfair:
-            liquidity: dict[str, int] = {}
+            liquidity = {}
             if over_liq is not None:
                 liquidity["over"] = over_liq
             if under_liq is not None:
                 liquidity["under"] = under_liq
-            bookmakers.append(_build_betfair_entry(bk_key, bk_name, "totals", outcomes, liquidity))
-        else:
-            bookmakers.append(_build_bookmaker_entry(bk_key, bk_name, "totals", outcomes))
+
+        bookmakers.append(
+            _build_bookmaker_entry(bk_key, bk_name, "totals", outcomes, betfair_matched=liquidity)
+        )
 
     if not bookmakers:
         return None

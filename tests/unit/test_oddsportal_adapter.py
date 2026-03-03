@@ -44,6 +44,10 @@ class TestFractionalToDecimal:
         # 233/100 = 2.33 + 1 = 3.33
         assert fractional_to_decimal("233/100") == pytest.approx(3.33)
 
+    def test_whole_number(self) -> None:
+        # "3" is shorthand for 3/1 → 3 + 1 = 4.0
+        assert fractional_to_decimal("3") == pytest.approx(4.0)
+
     def test_whitespace_stripped(self) -> None:
         assert fractional_to_decimal("  9/10  ") == pytest.approx(1.9)
 

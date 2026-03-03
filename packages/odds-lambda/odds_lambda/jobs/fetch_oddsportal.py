@@ -33,7 +33,7 @@ from odds_lambda.oddsportal_adapter import (
     MatchOdds,
     convert_upcoming_matches,
 )
-from odds_lambda.oddsportal_common import team_abbrev
+from odds_lambda.oddsportal_common import hours_to_tier, team_abbrev
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -243,8 +243,7 @@ async def ingest_league(
     all_converted: list[tuple[str, MatchOdds]] = []
     for market in spec.markets:
         converted = convert_upcoming_matches(raw_matches, market)
-        for m in converted:
-            all_converted.append((market, m))
+        all_converted.extend((market, m) for m in converted)
         stats.matches_converted += len(converted)
 
     if dry_run:
@@ -278,8 +277,10 @@ async def ingest_league(
                     snapshot_time=match.scraped_date,
                 )
 
-                # Tag with api_request_id for querying
                 snapshot.api_request_id = api_request_id
+                hours_before = (match.match_date - match.scraped_date).total_seconds() / 3600
+                snapshot.hours_until_commence = max(0.0, hours_before)
+                snapshot.fetch_tier = hours_to_tier(hours_before)
                 stats.snapshots_stored += 1
 
             except Exception as e:
