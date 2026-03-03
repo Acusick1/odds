@@ -674,7 +674,7 @@ class LSTMAdapter:
 
         event = bundle.event
         market = config.primary_market
-        outcome = event.home_team if config.outcome == "home" else event.away_team
+        outcome = _resolve_outcome_name(config, event)
         backtest_event = make_backtest_event(event)
 
         # Filter sequences to those whose first entry is at or before the snapshot time,
