@@ -6,9 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from odds_analytics.sequence_loader import (
     DeviggedProbs,
+    DeviggedTotalsProbs,
     calculate_devigged_bookmaker_target,
+    calculate_devigged_totals_target,
     calculate_regression_target,
     extract_devigged_h2h_probs,
+    extract_devigged_totals_probs,
     load_sequences_for_event,
 )
 from odds_analytics.utils import devig_probabilities
@@ -785,3 +788,234 @@ class TestCalculateDeviggedBookmakerTarget:
         assert snap.draw is not None
         assert close.draw is not None
         assert result == pytest.approx(close.home - snap.home)
+
+
+class TestExtractDeviggedTotalsProbs:
+    """Tests for extract_devigged_totals_probs."""
+
+    @pytest.fixture
+    def timestamp(self):
+        return datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+    def _make_odds(
+        self,
+        bookmaker: str,
+        outcome: str,
+        price: int,
+        timestamp: datetime,
+    ) -> Odds:
+        return Odds(
+            event_id="test",
+            bookmaker_key=bookmaker,
+            bookmaker_title=bookmaker.title(),
+            market_key="totals",
+            outcome_name=outcome,
+            price=price,
+            point=2.5,
+            odds_timestamp=timestamp,
+            last_update=timestamp,
+        )
+
+    def test_extracts_and_devigs(self, timestamp):
+        """Extracts bookmaker totals and devigs Over/Under."""
+        odds = [
+            self._make_odds("bet365", "Over", -110, timestamp),
+            self._make_odds("bet365", "Under", -110, timestamp),
+        ]
+        result = extract_devigged_totals_probs(odds, "bet365")
+        assert result is not None
+        assert isinstance(result, DeviggedTotalsProbs)
+        assert result.over + result.under == pytest.approx(1.0)
+        # Symmetric line devigs to 0.5/0.5
+        assert result.over == pytest.approx(0.5, abs=0.01)
+
+    def test_asymmetric_line(self, timestamp):
+        """Asymmetric Over/Under preserves ratio."""
+        odds = [
+            self._make_odds("bet365", "Over", 120, timestamp),
+            self._make_odds("bet365", "Under", -150, timestamp),
+        ]
+        result = extract_devigged_totals_probs(odds, "bet365")
+        assert result is not None
+        assert result.over + result.under == pytest.approx(1.0)
+        assert result.under > result.over  # Under is favorite
+
+    def test_filters_by_bookmaker(self, timestamp):
+        """Only uses the requested bookmaker."""
+        odds = [
+            self._make_odds("bet365", "Over", -110, timestamp),
+            self._make_odds("bet365", "Under", -110, timestamp),
+            self._make_odds("betway", "Over", -120, timestamp),
+            self._make_odds("betway", "Under", 100, timestamp),
+        ]
+        result = extract_devigged_totals_probs(odds, "bet365")
+        assert result is not None
+        assert result.over == pytest.approx(0.5, abs=0.01)
+
+    def test_missing_bookmaker_returns_none(self, timestamp):
+        odds = [
+            self._make_odds("betway", "Over", -110, timestamp),
+            self._make_odds("betway", "Under", -110, timestamp),
+        ]
+        assert extract_devigged_totals_probs(odds, "bet365") is None
+
+    def test_missing_over_returns_none(self, timestamp):
+        odds = [
+            self._make_odds("bet365", "Under", -110, timestamp),
+        ]
+        assert extract_devigged_totals_probs(odds, "bet365") is None
+
+    def test_missing_under_returns_none(self, timestamp):
+        odds = [
+            self._make_odds("bet365", "Over", -110, timestamp),
+        ]
+        assert extract_devigged_totals_probs(odds, "bet365") is None
+
+    def test_empty_odds_list(self):
+        assert extract_devigged_totals_probs([], "bet365") is None
+
+    def test_h2h_market_ignored(self, timestamp):
+        """h2h odds are not treated as totals."""
+        odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="bet365",
+                bookmaker_title="Bet365",
+                market_key="h2h",
+                outcome_name="Over",
+                price=-110,
+                point=None,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+            Odds(
+                event_id="test",
+                bookmaker_key="bet365",
+                bookmaker_title="Bet365",
+                market_key="h2h",
+                outcome_name="Under",
+                price=-110,
+                point=None,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+        assert extract_devigged_totals_probs(odds, "bet365") is None
+
+
+class TestCalculateDeviggedTotalsTarget:
+    """Tests for calculate_devigged_totals_target."""
+
+    @pytest.fixture
+    def timestamp(self):
+        return datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+    def _make_odds(self, outcome: str, price: int, timestamp: datetime) -> Odds:
+        return Odds(
+            event_id="test",
+            bookmaker_key="bet365",
+            bookmaker_title="Bet365",
+            market_key="totals",
+            outcome_name=outcome,
+            price=price,
+            point=2.5,
+            odds_timestamp=timestamp,
+            last_update=timestamp,
+        )
+
+    def test_over_target_correct_delta(self, timestamp):
+        """Target is fair_close_over - fair_snapshot_over."""
+        snapshot_odds = [
+            self._make_odds("Over", -110, timestamp),
+            self._make_odds("Under", -110, timestamp),
+        ]
+        closing_odds = [
+            self._make_odds("Over", -130, timestamp),
+            self._make_odds("Under", 110, timestamp),
+        ]
+        result = calculate_devigged_totals_target(snapshot_odds, closing_odds, "bet365", "Over")
+        assert result is not None
+
+        snap = extract_devigged_totals_probs(snapshot_odds, "bet365")
+        close = extract_devigged_totals_probs(closing_odds, "bet365")
+        assert snap is not None and close is not None
+        assert result == pytest.approx(close.over - snap.over)
+        # Over became more likely (line moved toward Over)
+        assert result > 0
+
+    def test_under_target_correct_delta(self, timestamp):
+        """Under target is fair_close_under - fair_snapshot_under."""
+        snapshot_odds = [
+            self._make_odds("Over", -110, timestamp),
+            self._make_odds("Under", -110, timestamp),
+        ]
+        closing_odds = [
+            self._make_odds("Over", -130, timestamp),
+            self._make_odds("Under", 110, timestamp),
+        ]
+        result = calculate_devigged_totals_target(snapshot_odds, closing_odds, "bet365", "Under")
+        assert result is not None
+
+        snap = extract_devigged_totals_probs(snapshot_odds, "bet365")
+        close = extract_devigged_totals_probs(closing_odds, "bet365")
+        assert snap is not None and close is not None
+        assert result == pytest.approx(close.under - snap.under)
+        # Under became less likely (opposite of Over movement)
+        assert result < 0
+
+    def test_over_and_under_sum_to_zero(self, timestamp):
+        """Over delta + Under delta = 0 (zero-sum market)."""
+        snapshot_odds = [
+            self._make_odds("Over", -110, timestamp),
+            self._make_odds("Under", -110, timestamp),
+        ]
+        closing_odds = [
+            self._make_odds("Over", -130, timestamp),
+            self._make_odds("Under", 110, timestamp),
+        ]
+        over_delta = calculate_devigged_totals_target(snapshot_odds, closing_odds, "bet365", "Over")
+        under_delta = calculate_devigged_totals_target(
+            snapshot_odds, closing_odds, "bet365", "Under"
+        )
+        assert over_delta is not None and under_delta is not None
+        assert over_delta + under_delta == pytest.approx(0.0)
+
+    def test_no_movement(self, timestamp):
+        """Same odds → target is 0."""
+        odds = [
+            self._make_odds("Over", -110, timestamp),
+            self._make_odds("Under", -110, timestamp),
+        ]
+        result = calculate_devigged_totals_target(odds, odds, "bet365", "Over")
+        assert result == pytest.approx(0.0)
+
+    def test_missing_snapshot_bookmaker(self, timestamp):
+        """No target bookmaker in snapshot → None."""
+        snapshot_odds = [
+            Odds(
+                event_id="test",
+                bookmaker_key="betway",
+                bookmaker_title="Betway",
+                market_key="totals",
+                outcome_name="Over",
+                price=-110,
+                point=2.5,
+                odds_timestamp=timestamp,
+                last_update=timestamp,
+            ),
+        ]
+        closing_odds = [
+            self._make_odds("Over", -130, timestamp),
+            self._make_odds("Under", 110, timestamp),
+        ]
+        assert (
+            calculate_devigged_totals_target(snapshot_odds, closing_odds, "bet365", "Over") is None
+        )
+
+    def test_missing_closing_bookmaker(self, timestamp):
+        """No target bookmaker in closing → None."""
+        snapshot_odds = [
+            self._make_odds("Over", -110, timestamp),
+            self._make_odds("Under", -110, timestamp),
+        ]
+        assert calculate_devigged_totals_target(snapshot_odds, [], "bet365", "Over") is None

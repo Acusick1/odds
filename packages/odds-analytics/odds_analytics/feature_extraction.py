@@ -446,8 +446,10 @@ class TabularFeatureExtractor(FeatureExtractor):
         sharp_odds = filter_odds_by_bookmakers(market_odds, self.sharp_bookmakers)
         retail_odds = filter_odds_by_bookmakers(market_odds, self.retail_bookmakers)
 
-        # Resolve outcome team
-        if outcome == event.home_team:
+        # Resolve outcome (team name for h2h, "Over"/"Under" for totals)
+        if outcome in ("Over", "Under"):
+            outcome_team = outcome
+        elif outcome == event.home_team:
             outcome_team = event.home_team
         elif outcome == event.away_team:
             outcome_team = event.away_team
@@ -455,7 +457,7 @@ class TabularFeatureExtractor(FeatureExtractor):
             outcome_team = None
 
         # 1. Consensus probability
-        if market == "h2h" and outcome_team:
+        if outcome_team:
             outcome_odds_list = filter_odds_by_market_outcome(market_odds, market, outcome_team)
             if outcome_odds_list:
                 avg_outcome_prob = float(

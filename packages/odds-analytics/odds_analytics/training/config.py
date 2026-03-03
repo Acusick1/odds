@@ -599,10 +599,15 @@ class FeatureConfig(BaseModel):
         description="Markets to extract features from",
     )
 
+    @property
+    def primary_market(self) -> str:
+        """The first configured market, used for target and feature extraction."""
+        return self.markets[0] if self.markets else "h2h"
+
     # Target configuration
-    outcome: Literal["home", "away"] = Field(
+    outcome: Literal["home", "away", "over", "under"] = Field(
         default="home",
-        description="Outcome to predict (home or away team)",
+        description="Outcome to predict (home/away for h2h, over/under for totals)",
     )
 
     # Tier-based closing line configuration

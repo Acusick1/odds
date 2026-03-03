@@ -49,8 +49,10 @@ from odds_analytics.polymarket_features import (
 )
 from odds_analytics.sequence_loader import (
     calculate_devigged_bookmaker_target,
+    calculate_devigged_totals_target,
     calculate_regression_target,
     extract_devigged_h2h_probs,
+    extract_devigged_totals_probs,
     extract_odds_from_snapshot,
     load_sequences_for_event,
 )
@@ -107,6 +109,18 @@ class EventDataBundle:
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
+def _snapshot_has_market(snapshot: OddsSnapshot, market: str) -> bool:
+    """Check if a snapshot's raw_data contains data for the given market key."""
+    raw = snapshot.raw_data
+    if not raw or "bookmakers" not in raw:
+        return False
+    for bm in raw["bookmakers"]:
+        for mkt in bm.get("markets", []):
+            if mkt.get("key") == market:
+                return True
+    return False
+
+
 async def collect_event_data(
     event: Event,
     session: AsyncSession,
@@ -115,6 +129,7 @@ async def collect_event_data(
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
     - Loads all OddsSnapshot records once
+    - Filters snapshots to those containing the configured market
     - Finds closing snapshot (prefers target bookmaker when applicable)
     - Loads PM context (PM event, moneyline market, home_idx)
     - Bulk-loads all PM prices + orderbooks for the market (2 queries total)
@@ -124,7 +139,13 @@ async def collect_event_data(
     from odds_lambda.storage.readers import OddsReader
 
     reader = OddsReader(session)
-    all_snapshots = await reader.get_snapshots_for_event(event.id)
+    all_snapshots_raw = await reader.get_snapshots_for_event(event.id)
+
+    # Filter to snapshots containing the configured market so the sampler
+    # doesn't pick snapshots with data for a different market (e.g. h2h
+    # snapshot when we need totals).
+    market = config.primary_market
+    all_snapshots = [s for s in all_snapshots_raw if _snapshot_has_market(s, market)]
 
     # Derive closing snapshot from already-loaded snapshots (avoid extra DB query)
     closing_tier_value = config.closing_tier.value
@@ -455,6 +476,13 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
     return names
 
 
+def _resolve_outcome_name(config: FeatureConfig, event: Event) -> str:
+    """Map config outcome to the outcome name stored in the database."""
+    if config.outcome in ("over", "under"):
+        return config.outcome.capitalize()
+    return event.home_team if config.outcome == "home" else event.away_team
+
+
 def _extract_static_feature_parts(
     bundle: EventDataBundle,
     snapshot: OddsSnapshot,
@@ -467,8 +495,8 @@ def _extract_static_feature_parts(
     Does NOT include ``hours_until_event``.
     """
     event = bundle.event
-    market = config.markets[0] if config.markets else "h2h"
-    outcome = event.home_team if config.outcome == "home" else event.away_team
+    market = config.primary_market
+    outcome = _resolve_outcome_name(config, event)
     backtest_event = make_backtest_event(event)
     tab_extractor = TabularFeatureExtractor.from_config(config)
 
@@ -645,8 +673,8 @@ class LSTMAdapter:
         from odds_analytics.feature_extraction import SequenceFeatureExtractor
 
         event = bundle.event
-        market = config.markets[0] if config.markets else "h2h"
-        outcome = event.home_team if config.outcome == "home" else event.away_team
+        market = config.primary_market
+        outcome = _resolve_outcome_name(config, event)
         backtest_event = make_backtest_event(event)
 
         # Filter sequences to those whose first entry is at or before the snapshot time,
@@ -703,12 +731,20 @@ def _compute_target(
     config: FeatureConfig,
 ) -> float | None:
     """Compute regression target for one (snapshot, closing) pair."""
-    market = config.markets[0] if config.markets else "h2h"
+    market = config.primary_market
 
     closing_odds_all = extract_odds_from_snapshot(closing_snapshot, event.id, market=market)
 
     if config.target_type == "devigged_bookmaker":
         snapshot_odds_all = extract_odds_from_snapshot(snapshot, event.id, market=market)
+        if market == "totals":
+            outcome_name = _resolve_outcome_name(config, event)
+            return calculate_devigged_totals_target(
+                snapshot_odds_all,
+                closing_odds_all,
+                bookmaker_key=config.target_bookmaker,
+                outcome=outcome_name,
+            )
         return calculate_devigged_bookmaker_target(
             snapshot_odds_all,
             closing_odds_all,
@@ -718,7 +754,7 @@ def _compute_target(
         )
     else:
         # "raw": avg implied prob delta (snapshot → closing)
-        outcome = event.home_team if config.outcome == "home" else event.away_team
+        outcome = _resolve_outcome_name(config, event)
         snap_odds = extract_odds_from_snapshot(snapshot, event.id, market=market, outcome=outcome)
         closing_odds = extract_odds_from_snapshot(
             closing_snapshot, event.id, market=market, outcome=outcome
@@ -727,17 +763,24 @@ def _compute_target(
 
 
 def _has_bookmaker_closing(
-    closing_snapshot: OddsSnapshot, event: Event, bookmaker_key: str
+    closing_snapshot: OddsSnapshot, event: Event, bookmaker_key: str, market: str = "h2h"
 ) -> bool:
-    """Check if closing snapshot has bookmaker h2h data (required for devigged_bookmaker target)."""
-    market = "h2h"
+    """Check if closing snapshot has bookmaker data for the target market.
+
+    Only h2h and totals support devigged bookmaker targets. For other markets
+    (e.g. spreads), returns False since no devigging function exists.
+    """
     closing_odds_all = extract_odds_from_snapshot(closing_snapshot, event.id, market=market)
-    return (
-        extract_devigged_h2h_probs(
-            closing_odds_all, event.home_team, event.away_team, bookmaker_key
+    if market == "totals":
+        return extract_devigged_totals_probs(closing_odds_all, bookmaker_key) is not None
+    if market == "h2h":
+        return (
+            extract_devigged_h2h_probs(
+                closing_odds_all, event.home_team, event.away_team, bookmaker_key
+            )
+            is not None
         )
-        is not None
-    )
+    return False
 
 
 def _select_closing_snapshot(
@@ -746,13 +789,14 @@ def _select_closing_snapshot(
     """Pick the best closing snapshot from candidates ordered by time.
 
     When target_type is bookmaker-specific, prefer the candidate containing
-    the target bookmaker's h2h data. Falls back to last-by-time.
+    the target bookmaker's data for the configured market. Falls back to last-by-time.
     """
     if not candidates:
         return None
     if config.target_type == "devigged_bookmaker":
+        market = config.primary_market
         for candidate in reversed(candidates):
-            if _has_bookmaker_closing(candidate, event, config.target_bookmaker):
+            if _has_bookmaker_closing(candidate, event, config.target_bookmaker, market):
                 return candidate
     return candidates[-1]
 
@@ -847,8 +891,9 @@ async def prepare_training_data(
             continue
 
         # For devigged_bookmaker, must have bookmaker closing data
+        market = config.primary_market
         if config.target_type == "devigged_bookmaker" and not _has_bookmaker_closing(
-            bundle.closing_snapshot, event, config.target_bookmaker
+            bundle.closing_snapshot, event, config.target_bookmaker, market
         ):
             skipped_events += 1
             continue
