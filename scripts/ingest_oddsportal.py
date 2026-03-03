@@ -42,6 +42,7 @@ from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.oddsportal_common import (
     DRAW_OUTCOME,
     decimal_to_american,
+    hours_to_tier,
     normalize_bookmaker_key,
     parse_match_date,
     team_abbrev,
@@ -202,19 +203,6 @@ def fix_odds_timestamp(odds_ts: datetime, match_dt: datetime) -> datetime:
             fixed = fixed.replace(year=match_naive.year + 1, day=28)
 
     return fixed
-
-
-def hours_to_tier(hours_before: float) -> str:
-    """Map hours before game start to fetch tier name."""
-    if hours_before < 3:
-        return "closing"
-    elif hours_before < 12:
-        return "pregame"
-    elif hours_before < 24:
-        return "sharp"
-    elif hours_before < 72:
-        return "early"
-    return "opening"
 
 
 # ---------------------------------------------------------------------------

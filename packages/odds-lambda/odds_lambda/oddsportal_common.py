@@ -62,6 +62,19 @@ def parse_match_date(date_str: str) -> datetime:
     return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %Z").replace(tzinfo=UTC)
 
 
+def hours_to_tier(hours_before: float) -> str:
+    """Map hours before game start to fetch tier name."""
+    if hours_before < 3:
+        return "closing"
+    elif hours_before < 12:
+        return "pregame"
+    elif hours_before < 24:
+        return "sharp"
+    elif hours_before < 72:
+        return "early"
+    return "opening"
+
+
 def team_abbrev(name: str) -> str:
     """Derive a short abbreviation from a team name.
 
