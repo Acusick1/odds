@@ -69,3 +69,9 @@ variable "scraper_image_tag" {
   type        = string
   default     = "dev-latest"
 }
+
+variable "model_bucket_name" {
+  description = "S3 bucket name for trained model artifacts"
+  type        = string
+  default     = "odds-models"
+}
