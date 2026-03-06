@@ -67,7 +67,7 @@ def _upload_to_s3(
 def publish_model(
     name: str = typer.Option(..., "--name", "-n", help="Model name (S3 prefix)"),
     path: str = typer.Option(..., "--path", "-p", help="Path to model .pkl file"),
-    bucket: str = typer.Option("odds-models", "--bucket", "-b", help="S3 bucket name"),
+    bucket: str = typer.Option("odds-models-685946576110", "--bucket", "-b", help="S3 bucket name"),
     version: str | None = typer.Option(
         None,
         "--version",
