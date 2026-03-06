@@ -11,7 +11,7 @@ name = "betting-odds-pipeline"
 version = "0.1.0"
 description = "NBA betting odds data collection and analysis system"
 authors = [{name = "Andrew"}]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 
 # Install all workspace packages by default
 # (dependencies remain in their respective subpackages)
@@ -58,7 +58,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [

@@ -3,7 +3,7 @@ name = "odds-lambda"
 version = "0.1.0"
 description = "Lambda runtime code for betting odds pipeline"
 authors = [{name = "Andrew"}]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "odds-core",
     "aiohttp>=3.9.0",

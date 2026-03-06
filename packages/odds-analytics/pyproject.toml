@@ -3,7 +3,7 @@ name = "odds-analytics"
 version = "0.1.0"
 description = "Analytics and ML functionality for betting odds pipeline"
 authors = [{name = "Andrew"}]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "odds-core",
     "odds-lambda",  # Needs access to storage readers
