@@ -1,21 +1,8 @@
 # OddsPortal scraper Lambda — separate container image with Playwright + Chromium.
 # Gated by var.enable_oddsportal_scraper (default false).
 
-# ECR repository for scraper image
-resource "aws_ecr_repository" "scraper" {
-  count = var.enable_oddsportal_scraper ? 1 : 0
-
-  name                 = "odds-scraper"
-  image_tag_mutability = "MUTABLE"
-
-  image_scanning_configuration {
-    scan_on_push = false
-  }
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
+# ECR repository for scraper image is created by build_and_push_scraper.sh,
+# not managed by Terraform (same pattern as odds-scheduler ECR).
 
 # Lambda function — scraper
 resource "aws_lambda_function" "odds_scraper" {
@@ -85,5 +72,5 @@ output "scraper_function_arn" {
 
 output "scraper_ecr_url" {
   description = "ECR repository URL for scraper image"
-  value       = var.enable_oddsportal_scraper ? aws_ecr_repository.scraper[0].repository_url : null
+  value       = var.enable_oddsportal_scraper ? "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/odds-scraper" : null
 }
