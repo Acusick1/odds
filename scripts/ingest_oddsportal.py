@@ -40,10 +40,8 @@ from zoneinfo import ZoneInfo
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.oddsportal_common import (
-    DRAW_OUTCOME,
-    decimal_to_american,
+    build_raw_data,
     hours_to_tier,
-    normalize_bookmaker_key,
     parse_match_date,
     team_abbrev,
 )
@@ -173,48 +171,6 @@ def _normalize_team_passthrough(name: str) -> str | None:
     return name.strip() if name and name.strip() else None
 
 
-def fix_odds_timestamp(odds_ts: datetime, match_dt: datetime) -> datetime:
-    """Fix the year in OddsPortal odds timestamps.
-
-    OddsPortal records timestamps with the scrape year (e.g. 2026) instead
-    of the actual game year. Month/day/time are correct.
-
-    Returns a naive datetime (caller adds tzinfo as needed).
-    """
-    # Strip timezone for comparison — match_dt may be aware
-    match_naive = match_dt.replace(tzinfo=None)
-
-    try:
-        fixed = odds_ts.replace(year=match_naive.year)
-    except ValueError:
-        # Feb 29 in scrape year but not in game year
-        fixed = odds_ts.replace(year=match_naive.year, day=28)
-
-    # Handle Dec→Jan season boundary: opening odds from Dec for a Jan game
-    if (fixed - match_naive).days > 60:
-        try:
-            fixed = fixed.replace(year=match_naive.year - 1)
-        except ValueError:
-            fixed = fixed.replace(year=match_naive.year - 1, day=28)
-    elif (match_naive - fixed).days > 60:
-        try:
-            fixed = fixed.replace(year=match_naive.year + 1)
-        except ValueError:
-            fixed = fixed.replace(year=match_naive.year + 1, day=28)
-
-    return fixed
-
-
-# ---------------------------------------------------------------------------
-# Record parsing
-# ---------------------------------------------------------------------------
-
-
-def parse_odds_timestamp(ts_str: str) -> datetime:
-    """Parse OddsPortal odds_history timestamp (naive, wrong year)."""
-    return datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S")
-
-
 def build_event_id(
     season: str,
     home_team: str,
@@ -230,110 +186,6 @@ def build_event_id(
         canonical_to_abbrev.get(away_team) if canonical_to_abbrev else None
     ) or team_abbrev(away_team)
     return f"op_{season}_{home_abbrev}_{away_abbrev}_{game_date.isoformat()}"
-
-
-def build_raw_data(
-    bookmaker_odds: list[dict],
-    home_team: str,
-    away_team: str,
-    *,
-    use_opening: bool,
-    match_dt: datetime,
-    market_config: dict[str, Any],
-) -> dict | None:
-    """Convert OddsPortal bookmaker data into The Odds API raw_data format.
-
-    Args:
-        bookmaker_odds: List of bookmaker dicts from the market data
-        home_team: Canonical home team name
-        away_team: Canonical away team name
-        use_opening: If True, use opening odds; if False, use closing (last in history)
-        match_dt: Correct game datetime (for fixing timestamps)
-        market_config: Market configuration from get_market_config()
-
-    Returns:
-        Dict in The Odds API format, or None if no valid bookmakers found
-    """
-    num_outcomes: int = market_config["num_outcomes"]
-    db_market: str = market_config["db_market"]
-    outcome_names: tuple[str, ...] | None = market_config["outcome_names"]
-    line: float | None = market_config["line"]
-
-    bookmakers = []
-    snapshot_time: datetime | None = None
-
-    for bk in bookmaker_odds:
-        hist = bk.get("odds_history_data")
-        if not hist or len(hist) < num_outcomes:
-            continue
-
-        bk_name = bk["bookmaker_name"]
-        bk_key = normalize_bookmaker_key(bk_name)
-
-        # Extract odds entries for each outcome
-        entries: list[dict | None] = []
-        for i in range(num_outcomes):
-            outcome_hist = hist[i]
-            if use_opening:
-                entries.append(outcome_hist.get("opening_odds"))
-            else:
-                odds_history = outcome_hist.get("odds_history", [])
-                entries.append(odds_history[-1] if odds_history else None)
-
-        if any(e is None for e in entries):
-            continue
-
-        # Validate all entries have odds values
-        decimals = [e.get("odds") for e in entries]  # type: ignore[union-attr]
-        if any(d is None for d in decimals):
-            continue
-
-        # Build outcomes list based on market type
-        if outcome_names:
-            # Named outcomes (e.g., Over/Under)
-            outcomes: list[dict[str, Any]] = []
-            for name, decimal in zip(outcome_names, decimals, strict=True):
-                outcome: dict[str, Any] = {
-                    "name": name,
-                    "price": decimal_to_american(decimal),
-                }
-                if line is not None:
-                    outcome["point"] = line
-                outcomes.append(outcome)
-        else:
-            # Team-based outcomes (h2h)
-            outcomes = [
-                {"name": home_team, "price": decimal_to_american(decimals[0])},
-            ]
-            if num_outcomes >= 3:
-                outcomes.append({"name": DRAW_OUTCOME, "price": decimal_to_american(decimals[1])})
-            outcomes.append({"name": away_team, "price": decimal_to_american(decimals[-1])})
-
-        # Use the first entry's timestamp as the bookmaker last_update
-        raw_ts = parse_odds_timestamp(entries[0]["timestamp"])  # type: ignore[index]
-        fixed_ts = fix_odds_timestamp(raw_ts, match_dt)
-
-        # Track the latest timestamp across bookmakers for snapshot_time
-        if snapshot_time is None or fixed_ts > snapshot_time:
-            snapshot_time = fixed_ts
-
-        bookmakers.append(
-            {
-                "key": bk_key,
-                "title": bk_name,
-                "last_update": fixed_ts.replace(tzinfo=UTC).isoformat().replace("+00:00", "Z"),
-                "markets": [{"key": db_market, "outcomes": outcomes}],
-            }
-        )
-
-    if not bookmakers:
-        return None
-
-    return {
-        "bookmakers": bookmakers,
-        "source": "oddsportal",
-        "_snapshot_time": snapshot_time.replace(tzinfo=UTC).isoformat() if snapshot_time else None,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +446,10 @@ async def _ingest_one_game(
             away_team,
             use_opening=use_opening,
             match_dt=match_dt,
-            market_config=market_config,
+            num_outcomes=market_config["num_outcomes"],
+            db_market=market_config["db_market"],
+            outcome_names=market_config["outcome_names"],
+            line=market_config["line"],
         )
         if not raw_data:
             continue

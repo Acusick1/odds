@@ -65,6 +65,38 @@ resource "aws_lambda_permission" "allow_eventbridge_scraper" {
   source_arn    = aws_cloudwatch_event_rule.scraper_schedule[0].arn
 }
 
+# EventBridge rule — daily results and closing odds collection
+resource "aws_cloudwatch_event_rule" "scraper_results_schedule" {
+  count = var.enable_oddsportal_scraper ? 1 : 0
+
+  name                = "${var.rule_prefix}-fetch-oddsportal-results"
+  description         = "Daily EPL results and closing odds collection"
+  schedule_expression = "cron(0 8 * * ? *)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "scraper_results_target" {
+  count = var.enable_oddsportal_scraper ? 1 : 0
+
+  rule      = aws_cloudwatch_event_rule.scraper_results_schedule[0].name
+  target_id = "1"
+  arn       = aws_lambda_function.odds_scraper[0].arn
+
+  input = jsonencode({
+    job = "fetch-oddsportal-results"
+  })
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_scraper_results" {
+  count = var.enable_oddsportal_scraper ? 1 : 0
+
+  statement_id  = "AllowEventBridgeScraperResults-${var.rule_prefix}"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.odds_scraper[0].function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.scraper_results_schedule[0].arn
+}
+
 # Outputs
 output "scraper_function_arn" {
   description = "ARN of the scraper Lambda function"
