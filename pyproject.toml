@@ -11,7 +11,7 @@ name = "betting-odds-pipeline"
 version = "0.1.0"
 description = "NBA betting odds data collection and analysis system"
 authors = [{name = "Andrew"}]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 
 # Install all workspace packages by default
 # (dependencies remain in their respective subpackages)
@@ -27,6 +27,7 @@ odds-core = { workspace = true }
 odds-lambda = { workspace = true }
 odds-analytics = { workspace = true }
 odds-cli = { workspace = true }
+oddsharvester = { git = "https://github.com/Acusick1/OddsHarvester.git", branch = "master" }
 
 [dependency-groups]
 dev = [
@@ -51,6 +52,8 @@ dev = [
     "psycopg[binary]>=3.2.12",
     "pytest-env>=1.2.0",
     "statsmodels>=0.14.6",
+    # OddsPortal scraper
+    "oddsharvester",
 ]
 
 # Virtual workspace root - no build system needed
@@ -58,7 +61,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [

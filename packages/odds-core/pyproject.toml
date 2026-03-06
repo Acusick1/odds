@@ -3,7 +3,7 @@ name = "odds-core"
 version = "0.1.0"
 description = "Core foundation layer for betting odds pipeline"
 authors = [{name = "Andrew"}]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "sqlmodel>=0.0.14",
     "asyncpg>=0.29.0",
