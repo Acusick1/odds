@@ -30,9 +30,9 @@ def _get_git_sha() -> str | None:
 
 def _build_metadata(
     model_name: str,
-    config_data: dict,
+    config_data: dict[str, Any],
     version: str,
-) -> dict:
+) -> dict[str, Any]:
     git_sha = _get_git_sha()
     training_cfg = config_data.get("training", {})
 
@@ -51,7 +51,7 @@ def _upload_to_s3(
     prefix: str,
     model_path: Path,
     config_path: Path,
-    metadata: dict,
+    metadata: dict[str, Any],
 ) -> None:
     s3_client.upload_file(str(model_path), bucket, f"{prefix}/model.pkl")
     s3_client.upload_file(str(config_path), bucket, f"{prefix}/config.yaml")

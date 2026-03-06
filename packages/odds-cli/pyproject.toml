@@ -10,6 +10,8 @@ dependencies = [
     "odds-analytics",
     "typer>=0.9.0",
     "rich>=13.7.0",
+    "boto3>=1.42.62",
+    "pyyaml>=6.0.3",
 ]
 
 [tool.uv.sources]

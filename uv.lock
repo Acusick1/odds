@@ -2696,9 +2696,11 @@ name = "odds-cli"
 version = "0.1.0"
 source = { editable = "packages/odds-cli" }
 dependencies = [
+    { name = "boto3" },
     { name = "odds-analytics" },
     { name = "odds-core" },
     { name = "odds-lambda" },
+    { name = "pyyaml" },
     { name = "rich" },
     { name = "typer" },
 ]
@@ -2716,9 +2718,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "boto3", specifier = ">=1.42.62" },
     { name = "odds-analytics", editable = "packages/odds-analytics" },
     { name = "odds-core", editable = "packages/odds-core" },
     { name = "odds-lambda", editable = "packages/odds-lambda" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rich", specifier = ">=13.7.0" },
     { name = "typer", specifier = ">=0.9.0" },
 ]
