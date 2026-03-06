@@ -19,6 +19,7 @@ resource "aws_lambda_function" "odds_scraper" {
     variables = {
       SCHEDULER_BACKEND = "aws"
       DATABASE_URL      = var.database_url
+      ODDS_API_KEY      = var.odds_api_key
       LOG_LEVEL         = "INFO"
     }
   }
