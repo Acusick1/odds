@@ -27,6 +27,7 @@ odds-core = { workspace = true }
 odds-lambda = { workspace = true }
 odds-analytics = { workspace = true }
 odds-cli = { workspace = true }
+oddsharvester = { git = "https://github.com/Acusick1/OddsHarvester.git", branch = "master" }
 
 [dependency-groups]
 dev = [
@@ -51,6 +52,8 @@ dev = [
     "psycopg[binary]>=3.2.12",
     "pytest-env>=1.2.0",
     "statsmodels>=0.14.6",
+    # OddsPortal scraper
+    "oddsharvester",
 ]
 
 # Virtual workspace root - no build system needed

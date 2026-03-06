@@ -13,7 +13,7 @@ A single-user NBA betting odds data collection and analysis system. Built for ro
 
 ## Tech Stack
 
-- Python 3.11+, PostgreSQL 15+ with JSONB
+- Python 3.12+, PostgreSQL 15+ with JSONB
 - SQLModel (SQLAlchemy 2.0 + Pydantic)
 - asyncio + aiohttp
 - Multi-backend scheduler (AWS Lambda, Railway, APScheduler)
@@ -22,7 +22,7 @@ A single-user NBA betting odds data collection and analysis system. Built for ro
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - PostgreSQL 15+
 - [uv](https://github.com/astral-sh/uv) (recommended) or pip
 - [The Odds API](https://the-odds-api.com/) key
@@ -41,13 +41,11 @@ A single-user NBA betting odds data collection and analysis system. Built for ro
 git clone <repository-url>
 cd odds
 
-# Set up Python environment
-uv venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-uv pip install -e ".[dev]"
+# Install dependencies (includes OddsHarvester scraper from git)
+uv sync
 
 # Install pre-commit hooks
-pre-commit install
+uv run pre-commit install
 
 # Configure environment
 cp .env.example .env
@@ -57,8 +55,19 @@ cp .env.example .env
 docker-compose up -d postgres
 
 # Run migrations
-alembic upgrade head
+uv run alembic upgrade head
 ```
+
+#### OddsHarvester local development
+
+The OddsPortal scraper uses [OddsHarvester](https://github.com/jordantete/OddsHarvester), installed from git by default. To develop against a local clone with live changes:
+
+```bash
+git clone git@github.com:Acusick1/OddsHarvester.git ~/code/OddsHarvester
+uv pip install -e ~/code/OddsHarvester
+```
+
+The editable install takes precedence at runtime. `uv sync` will restore the git version — re-run the `uv pip install -e` command after syncing to switch back to local development.
 
 ### Basic Usage
 
