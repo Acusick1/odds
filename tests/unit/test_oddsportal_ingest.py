@@ -9,36 +9,7 @@ import pytest
 # Import directly from script (it's on sys.path via the repo root)
 from odds_lambda.oddsportal_common import build_raw_data, team_abbrev
 
-from scripts.ingest_oddsportal import (
-    build_event_id,
-    get_market_config,
-)
-
-H2H_2WAY = get_market_config("home_away")
-H2H_3WAY = get_market_config("1x2")
-
-
-def _build_raw_data_compat(
-    bookmaker_odds: list[dict],
-    home_team: str,
-    away_team: str,
-    *,
-    use_opening: bool,
-    match_dt: datetime,
-    market_config: dict,
-) -> dict | None:
-    """Wrapper that unpacks market_config dict into build_raw_data kwargs."""
-    return build_raw_data(
-        bookmaker_odds,
-        home_team,
-        away_team,
-        use_opening=use_opening,
-        match_dt=match_dt,
-        num_outcomes=market_config["num_outcomes"],
-        db_market=market_config["db_market"],
-        outcome_names=market_config["outcome_names"],
-        line=market_config["line"],
-    )
+from scripts.ingest_oddsportal import build_event_id
 
 
 def _make_bookmaker(
@@ -82,8 +53,8 @@ MATCH_DT = datetime(2026, 1, 15, 15, 0, 0, tzinfo=UTC)
 class TestBuildRawData2Way:
     def test_produces_two_outcomes(self) -> None:
         bk = _make_bookmaker("bet365", num_outcomes=2)
-        result = _build_raw_data_compat(
-            [bk], "Team A", "Team B", use_opening=False, match_dt=MATCH_DT, market_config=H2H_2WAY
+        result = build_raw_data(
+            [bk], "Team A", "Team B", use_opening=False, match_dt=MATCH_DT, num_outcomes=2
         )
 
         assert result is not None
@@ -94,8 +65,8 @@ class TestBuildRawData2Way:
 
     def test_opening_odds_used_when_requested(self) -> None:
         bk = _make_bookmaker("bet365", num_outcomes=2, home_opening=2.5, away_opening=1.5)
-        result = _build_raw_data_compat(
-            [bk], "Home", "Away", use_opening=True, match_dt=MATCH_DT, market_config=H2H_2WAY
+        result = build_raw_data(
+            [bk], "Home", "Away", use_opening=True, match_dt=MATCH_DT, num_outcomes=2
         )
 
         assert result is not None
@@ -107,8 +78,8 @@ class TestBuildRawData2Way:
 
     def test_skips_bookmaker_without_history(self) -> None:
         bk = {"bookmaker_name": "broken", "odds_history_data": None}
-        result = _build_raw_data_compat(
-            [bk], "A", "B", use_opening=False, match_dt=MATCH_DT, market_config=H2H_2WAY
+        result = build_raw_data(
+            [bk], "A", "B", use_opening=False, match_dt=MATCH_DT, num_outcomes=2
         )
         assert result is None
 
@@ -122,8 +93,8 @@ class TestBuildRawData2Way:
                 }
             ],
         }
-        result = _build_raw_data_compat(
-            [bk], "A", "B", use_opening=False, match_dt=MATCH_DT, market_config=H2H_2WAY
+        result = build_raw_data(
+            [bk], "A", "B", use_opening=False, match_dt=MATCH_DT, num_outcomes=2
         )
         assert result is None
 
@@ -131,8 +102,8 @@ class TestBuildRawData2Way:
 class TestBuildRawData3Way:
     def test_produces_three_outcomes_home_draw_away(self) -> None:
         bk = _make_bookmaker("Pinnacle", num_outcomes=3)
-        result = _build_raw_data_compat(
-            [bk], "Arsenal", "Chelsea", use_opening=False, match_dt=MATCH_DT, market_config=H2H_3WAY
+        result = build_raw_data(
+            [bk], "Arsenal", "Chelsea", use_opening=False, match_dt=MATCH_DT, num_outcomes=3
         )
 
         assert result is not None
@@ -150,8 +121,8 @@ class TestBuildRawData3Way:
             draw_opening=3.5,
             away_opening=4.0,
         )
-        result = _build_raw_data_compat(
-            [bk], "Arsenal", "Chelsea", use_opening=True, match_dt=MATCH_DT, market_config=H2H_3WAY
+        result = build_raw_data(
+            [bk], "Arsenal", "Chelsea", use_opening=True, match_dt=MATCH_DT, num_outcomes=3
         )
 
         assert result is not None
@@ -166,8 +137,8 @@ class TestBuildRawData3Way:
     def test_skips_bookmaker_with_only_2_entries_for_3way(self) -> None:
         """If odds_history_data has only 2 entries but num_outcomes=3, skip."""
         bk = _make_bookmaker("bet365", num_outcomes=2)  # Only 2 entries
-        result = _build_raw_data_compat(
-            [bk], "Arsenal", "Chelsea", use_opening=False, match_dt=MATCH_DT, market_config=H2H_3WAY
+        result = build_raw_data(
+            [bk], "Arsenal", "Chelsea", use_opening=False, match_dt=MATCH_DT, num_outcomes=3
         )
         assert result is None
 
@@ -176,8 +147,8 @@ class TestBuildRawData3Way:
         bk = _make_bookmaker("Pinnacle", num_outcomes=3)
         # Remove draw closing odds
         bk["odds_history_data"][1]["odds_history"] = []
-        result = _build_raw_data_compat(
-            [bk], "Arsenal", "Chelsea", use_opening=False, match_dt=MATCH_DT, market_config=H2H_3WAY
+        result = build_raw_data(
+            [bk], "Arsenal", "Chelsea", use_opening=False, match_dt=MATCH_DT, num_outcomes=3
         )
         assert result is None
 
@@ -185,15 +156,15 @@ class TestBuildRawData3Way:
         """If draw outcome has no opening_odds, bookmaker is skipped."""
         bk = _make_bookmaker("Pinnacle", num_outcomes=3)
         bk["odds_history_data"][1]["opening_odds"] = None
-        result = _build_raw_data_compat(
-            [bk], "Arsenal", "Chelsea", use_opening=True, match_dt=MATCH_DT, market_config=H2H_3WAY
+        result = build_raw_data(
+            [bk], "Arsenal", "Chelsea", use_opening=True, match_dt=MATCH_DT, num_outcomes=3
         )
         assert result is None
 
     def test_market_key_is_h2h(self) -> None:
         bk = _make_bookmaker("Pinnacle", num_outcomes=3)
-        result = _build_raw_data_compat(
-            [bk], "Arsenal", "Chelsea", use_opening=False, match_dt=MATCH_DT, market_config=H2H_3WAY
+        result = build_raw_data(
+            [bk], "Arsenal", "Chelsea", use_opening=False, match_dt=MATCH_DT, num_outcomes=3
         )
         assert result is not None
         assert result["bookmakers"][0]["markets"][0]["key"] == "h2h"
@@ -201,13 +172,13 @@ class TestBuildRawData3Way:
     def test_multiple_bookmakers(self) -> None:
         bk1 = _make_bookmaker("bet365", num_outcomes=3, home_closing=1.8)
         bk2 = _make_bookmaker("Pinnacle", num_outcomes=3, home_closing=1.9)
-        result = _build_raw_data_compat(
+        result = build_raw_data(
             [bk1, bk2],
             "Arsenal",
             "Chelsea",
             use_opening=False,
             match_dt=MATCH_DT,
-            market_config=H2H_3WAY,
+            num_outcomes=3,
         )
         assert result is not None
         assert len(result["bookmakers"]) == 2

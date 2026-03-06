@@ -21,14 +21,13 @@ from typing import Any
 
 import structlog
 from odds_core.database import async_session_maker
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventStatus
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.jobs.fetch_oddsportal import _harvester_cmd_prefix
 from odds_lambda.oddsportal_common import (
     build_raw_data,
-    hours_to_tier,
     parse_match_date,
 )
 from odds_lambda.storage.writers import OddsWriter
@@ -242,18 +241,13 @@ async def process_results(
                     continue
 
                 snapshot_time = datetime.fromisoformat(snapshot_time_str.replace("Z", "+00:00"))
-                hours_before = (match_dt - snapshot_time).total_seconds() / 3600
 
-                snapshot = OddsSnapshot(
+                snapshot, _ = await writer.store_odds_snapshot(
                     event_id=event.id,
-                    snapshot_time=snapshot_time,
                     raw_data=raw_data,
-                    bookmaker_count=len(raw_data["bookmakers"]),
-                    api_request_id=API_REQUEST_ID,
-                    fetch_tier=hours_to_tier(hours_before),
-                    hours_until_commence=max(0.0, hours_before),
+                    snapshot_time=snapshot_time,
                 )
-                session.add(snapshot)
+                snapshot.api_request_id = API_REQUEST_ID
                 stats.snapshots_stored += 1
 
             except Exception as e:
