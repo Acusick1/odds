@@ -31,6 +31,7 @@ from odds_core.polymarket_models import (
     PolymarketOrderBookSnapshot,
     PolymarketPriceSnapshot,
 )
+from odds_core.prediction_models import Prediction
 
 __all__ = [
     # Models
@@ -40,6 +41,8 @@ __all__ = [
     "OddsSnapshot",
     "DataQualityLog",
     "FetchLog",
+    # Prediction
+    "Prediction",
     # Polymarket Models
     "PolymarketMarketType",
     "PolymarketEvent",
