@@ -28,6 +28,7 @@ def get_job_registry() -> dict[str, Callable[[], Awaitable[None]]]:
             fetch_oddsportal_results,
             fetch_polymarket,
             fetch_scores,
+            score_predictions,
             update_status,
         )
 
@@ -40,6 +41,7 @@ def get_job_registry() -> dict[str, Callable[[], Awaitable[None]]]:
             "backfill-polymarket": backfill_polymarket.main,
             "fetch-oddsportal": fetch_oddsportal.main,
             "fetch-oddsportal-results": fetch_oddsportal_results.main,
+            "score-predictions": score_predictions.main,
         }
 
     return _JOB_REGISTRY

@@ -25,6 +25,7 @@ from odds_core.polymarket_models import (  # noqa: F401
     PolymarketOrderBookSnapshot,
     PolymarketPriceSnapshot,
 )
+from odds_core.prediction_models import Prediction  # noqa: F401
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config

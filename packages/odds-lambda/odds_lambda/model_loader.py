@@ -94,6 +94,11 @@ def load_model(
     return model_data
 
 
+def get_cached_version() -> str | None:
+    """Return the ETag of the currently cached model, or None if no model is cached."""
+    return _cached_etag
+
+
 def clear_cache() -> None:
     """Clear the in-memory model cache. Mainly useful for testing."""
     global _cached_model, _cached_etag, _cached_model_key
