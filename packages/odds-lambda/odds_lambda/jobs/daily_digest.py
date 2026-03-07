@@ -207,9 +207,19 @@ def _format_upcoming_section(events: list[dict[str, Any]]) -> str:
     return text
 
 
+def _format_window(hours: float) -> str:
+    """Format a window duration for section headers."""
+    if hours % 24 == 0 and hours >= 24:
+        days = int(hours // 24)
+        return f"{days}d" if days > 1 else "24h"
+    return f"{int(hours)}h"
+
+
 def build_digest_embed(
     results: list[dict[str, Any]],
     upcoming: list[dict[str, Any]],
+    lookback_hours: float = 24,
+    lookahead_hours: float = 48,
 ) -> dict[str, Any]:
     """Build a Discord embed dict for the daily digest."""
     now = datetime.now(UTC)
@@ -218,7 +228,7 @@ def build_digest_embed(
     if results:
         fields.append(
             {
-                "name": "Post-Match Results (last 24h)",
+                "name": f"Post-Match Results (last {_format_window(lookback_hours)})",
                 "value": _format_results_section(results),
                 "inline": False,
             }
@@ -227,7 +237,7 @@ def build_digest_embed(
     if upcoming:
         fields.append(
             {
-                "name": "Upcoming Predictions (next 48h)",
+                "name": f"Upcoming Predictions (next {_format_window(lookahead_hours)})",
                 "value": _format_upcoming_section(upcoming),
                 "inline": False,
             }
@@ -241,19 +251,25 @@ def build_digest_embed(
     }
 
 
-async def send_digest(model_name: str | None = None) -> dict[str, int]:
+async def send_digest(
+    model_name: str | None = None,
+    lookback_hours: float = 24,
+    lookahead_hours: float = 48,
+) -> dict[str, int]:
     """Query predictions and results, send Discord digest.
 
     Args:
         model_name: Model to filter predictions by. Defaults to MODEL_NAME env var.
+        lookback_hours: How far back to look for completed events.
+        lookahead_hours: How far ahead to look for upcoming events.
 
     Returns dict with counts: results_count, upcoming_count, sent (0 or 1).
     """
     model_name = model_name or os.environ.get("MODEL_NAME") or "epl-clv-home"
 
     now = datetime.now(UTC)
-    since = now - timedelta(hours=24)
-    until = now + timedelta(hours=48)
+    since = now - timedelta(hours=lookback_hours)
+    until = now + timedelta(hours=lookahead_hours)
 
     stats = {"results_count": 0, "upcoming_count": 0, "sent": 0}
 
@@ -268,7 +284,7 @@ async def send_digest(model_name: str | None = None) -> dict[str, int]:
         logger.info("daily_digest_empty", reason="no predictions or results")
         return stats
 
-    embed = build_digest_embed(results, upcoming)
+    embed = build_digest_embed(results, upcoming, lookback_hours, lookahead_hours)
 
     from odds_cli.alerts.base import AlertManager
 
@@ -280,12 +296,23 @@ async def send_digest(model_name: str | None = None) -> dict[str, int]:
     return stats
 
 
-async def main() -> None:
-    """Main job entry point."""
-    logger.info("daily_digest_started")
+async def main(
+    lookback_hours: float = 24,
+    lookahead_hours: float = 48,
+    **_kwargs: object,
+) -> None:
+    """Main job entry point.
+
+    Args:
+        lookback_hours: How far back to look for completed events.
+        lookahead_hours: How far ahead to look for upcoming events.
+    """
+    logger.info(
+        "daily_digest_started", lookback_hours=lookback_hours, lookahead_hours=lookahead_hours
+    )
 
     try:
-        stats = await send_digest()
+        stats = await send_digest(lookback_hours=lookback_hours, lookahead_hours=lookahead_hours)
         logger.info("daily_digest_complete", **stats)
     except Exception as e:
         logger.error("daily_digest_failed", error=str(e), exc_info=True)

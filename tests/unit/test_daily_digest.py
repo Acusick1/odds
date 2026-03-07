@@ -110,6 +110,14 @@ class TestBuildDigestEmbed:
 
         assert embed["fields"] == []
 
+    def test_custom_window_headers(self) -> None:
+        results = [_make_result()]
+        upcoming = [_make_upcoming()]
+        embed = build_digest_embed(results, upcoming, lookback_hours=168, lookahead_hours=240)
+
+        assert "last 7d" in embed["fields"][0]["name"]
+        assert "next 10d" in embed["fields"][1]["name"]
+
     def test_positive_clv_shows_home_side(self) -> None:
         results = [_make_result(predicted_clv=0.032)]
         embed = build_digest_embed(results, [])

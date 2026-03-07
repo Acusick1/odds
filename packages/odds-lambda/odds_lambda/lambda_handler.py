@@ -30,12 +30,24 @@ configure_logging(get_settings(), json_output=True)
 logger = structlog.get_logger()
 
 
-async def _run_job_async(job_name: str):
-    """Run the job module's main function asynchronously."""
+async def _run_job_async(job_name: str, **kwargs: object) -> None:
+    """Run the job module's main function asynchronously.
+
+    Extra kwargs from the event payload are passed to the job function.
+    Jobs that accept parameters should declare **kwargs to receive them;
+    jobs that don't will ignore extra fields (we inspect the signature).
+    """
+    import inspect
+
     from odds_lambda.scheduling.jobs import get_job_function
 
     job_fn = get_job_function(job_name)
-    await job_fn()
+    sig = inspect.signature(job_fn)
+    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+    if kwargs and has_var_keyword:
+        await job_fn(**kwargs)
+    else:
+        await job_fn()
 
 
 def lambda_handler(event, context):
@@ -69,7 +81,9 @@ def lambda_handler(event, context):
 
         # Run async job
         # Use asyncio.run() to ensure clean event loop per invocation
-        asyncio.run(_run_job_async(job_name))
+        # Extra event fields are passed as kwargs to jobs that accept them
+        job_params = {k: v for k, v in event.items() if k != "job"}
+        asyncio.run(_run_job_async(job_name, **job_params))
 
         logger.info(
             "lambda_completed",
