@@ -2653,6 +2653,7 @@ dependencies = [
     { name = "numpy" },
     { name = "odds-core" },
     { name = "odds-lambda" },
+    { name = "rich" },
 ]
 
 [package.optional-dependencies]
@@ -2683,6 +2684,7 @@ requires-dist = [
     { name = "optuna", marker = "extra == 'training'", specifier = ">=3.0.0" },
     { name = "optuna-integration", extras = ["xgboost"], marker = "extra == 'training'", specifier = ">=4.0.0" },
     { name = "pandas", marker = "extra == 'training'", specifier = ">=2.3.3" },
+    { name = "rich", specifier = ">=13.0.0" },
     { name = "scikit-learn", marker = "extra == 'training'", specifier = ">=1.3.0" },
     { name = "torch", marker = "extra == 'training'", specifier = ">=2.0.0" },
 ]
