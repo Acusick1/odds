@@ -333,15 +333,6 @@ async def main() -> None:
         total_errors=total_errors,
     )
 
-    # Score new snapshots against published model (best-effort)
-    if total_snapshots > 0:
-        try:
-            from odds_lambda.jobs.score_predictions import score_events
-
-            await score_events()
-        except Exception:
-            logger.error("score_predictions_failed_after_fetch", exc_info=True)
-
 
 if __name__ == "__main__":
     asyncio.run(main())

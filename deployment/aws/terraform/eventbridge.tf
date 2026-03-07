@@ -67,6 +67,33 @@ resource "aws_lambda_permission" "allow_eventbridge_daily_digest" {
   ]
 }
 
+# Score predictions: runs CLV model inference after scraper has landed new snapshots.
+# Offset 15 min past the hour so the hourly scraper job has time to finish.
+resource "aws_cloudwatch_event_rule" "score_predictions" {
+  name                = format("%s-score-predictions", var.rule_prefix)
+  description         = "Hourly CLV model inference on new snapshots"
+  schedule_expression = "cron(15 * * * ? *)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "score_predictions_target" {
+  rule      = aws_cloudwatch_event_rule.score_predictions.name
+  target_id = "1"
+  arn       = aws_lambda_function.odds_scheduler.arn
+
+  input = jsonencode({
+    job = "score-predictions"
+  })
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_score_predictions" {
+  statement_id  = format("AllowEventBridgeScorePredictions-%s", var.rule_prefix)
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.odds_scheduler.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.score_predictions.arn
+}
+
 # Self-scheduling rules: pre-created by Terraform, schedule updated by Lambda at runtime.
 # Lambda's put_rule() updates the schedule_expression and sets State=ENABLED; Terraform
 # ignores those changes but owns the lifecycle (create/destroy).
