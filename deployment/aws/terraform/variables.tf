@@ -75,3 +75,16 @@ variable "model_bucket_name" {
   type        = string
   default     = "odds-models-685946576110"
 }
+
+variable "model_name" {
+  description = "Model name for CLV predictions (S3 key prefix)"
+  type        = string
+  default     = "epl-clv-home"
+}
+
+variable "discord_webhook_url" {
+  description = "Discord webhook URL for alerts and digests"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

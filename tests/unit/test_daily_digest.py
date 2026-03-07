@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_lambda.jobs.daily_digest import (
+    _result_hit,
+    _value_side,
     build_digest_embed,
     send_digest,
 )
@@ -42,6 +44,43 @@ def _make_upcoming(
     }
 
 
+class TestValueSide:
+    def test_positive_clv_is_home(self) -> None:
+        side, clv = _value_side(0.03)
+        assert side == "Home"
+        assert clv == pytest.approx(0.03)
+
+    def test_negative_clv_is_away(self) -> None:
+        side, clv = _value_side(-0.02)
+        assert side == "Away"
+        assert clv == pytest.approx(0.02)
+
+    def test_zero_clv_is_home(self) -> None:
+        side, clv = _value_side(0.0)
+        assert side == "Home"
+        assert clv == pytest.approx(0.0)
+
+
+class TestResultHit:
+    def test_positive_clv_home_win(self) -> None:
+        assert _result_hit(0.03, home_score=2, away_score=1) is True
+
+    def test_positive_clv_away_win(self) -> None:
+        assert _result_hit(0.03, home_score=0, away_score=1) is False
+
+    def test_positive_clv_draw(self) -> None:
+        assert _result_hit(0.03, home_score=1, away_score=1) is False
+
+    def test_negative_clv_away_win(self) -> None:
+        assert _result_hit(-0.02, home_score=0, away_score=2) is True
+
+    def test_negative_clv_home_win(self) -> None:
+        assert _result_hit(-0.02, home_score=3, away_score=1) is False
+
+    def test_negative_clv_draw(self) -> None:
+        assert _result_hit(-0.02, home_score=0, away_score=0) is False
+
+
 class TestBuildDigestEmbed:
     def test_both_sections(self) -> None:
         results = [_make_result()]
@@ -71,30 +110,55 @@ class TestBuildDigestEmbed:
 
         assert embed["fields"] == []
 
-    def test_clv_formatting(self) -> None:
+    def test_positive_clv_shows_home_side(self) -> None:
         results = [_make_result(predicted_clv=0.032)]
         embed = build_digest_embed(results, [])
 
         value = embed["fields"][0]["value"]
-        assert "+3.2%" in value
+        assert "Home +3.2%" in value
 
-    def test_negative_clv(self) -> None:
+    def test_negative_clv_shows_away_side(self) -> None:
         results = [_make_result(predicted_clv=-0.018)]
         embed = build_digest_embed(results, [])
 
         value = embed["fields"][0]["value"]
-        assert "-1.8%" in value
+        assert "Away +1.8%" in value
 
-    def test_multiple_results_mean(self) -> None:
+    def test_result_hit_icon(self) -> None:
+        results = [_make_result(predicted_clv=0.02, home_score=2, away_score=1)]
+        embed = build_digest_embed(results, [])
+
+        value = embed["fields"][0]["value"]
+        assert "\u2705" in value
+
+    def test_result_miss_icon(self) -> None:
+        results = [_make_result(predicted_clv=0.02, home_score=0, away_score=1)]
+        embed = build_digest_embed(results, [])
+
+        value = embed["fields"][0]["value"]
+        assert "\u274c" in value
+
+    def test_multiple_results_correct_side_count(self) -> None:
         results = [
-            _make_result(home="Arsenal", away="Chelsea", predicted_clv=0.02),
-            _make_result(home="Liverpool", away="Spurs", predicted_clv=0.04),
+            _make_result(
+                home="Arsenal", away="Chelsea", predicted_clv=0.02, home_score=2, away_score=1
+            ),
+            _make_result(
+                home="Liverpool", away="Spurs", predicted_clv=0.04, home_score=0, away_score=1
+            ),
         ]
         embed = build_digest_embed(results, [])
 
         value = embed["fields"][0]["value"]
         assert "2 events" in value
-        assert "+3.0%" in value
+        assert "1/2 correct side" in value
+
+    def test_upcoming_shows_side(self) -> None:
+        upcoming = [_make_upcoming(predicted_clv=-0.03)]
+        embed = build_digest_embed([], upcoming)
+
+        value = embed["fields"][0]["value"]
+        assert "Away +3.0%" in value
 
     def test_upcoming_sorted_by_signal(self) -> None:
         upcoming = [

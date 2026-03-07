@@ -144,23 +144,43 @@ async def _get_upcoming_events_with_predictions(
     return events
 
 
+def _value_side(predicted_clv: float) -> tuple[str, float]:
+    """Return (side label, absolute CLV) from a home-outcome predicted CLV.
+
+    Positive CLV means the home price is expected to tighten (home undervalued).
+    Negative CLV means the away price is expected to tighten (away undervalued).
+    """
+    if predicted_clv >= 0:
+        return "Home", abs(predicted_clv)
+    return "Away", abs(predicted_clv)
+
+
+def _result_hit(predicted_clv: float, home_score: int, away_score: int) -> bool:
+    """Check whether the predicted value side won the match."""
+    if predicted_clv >= 0:
+        return home_score > away_score
+    return away_score > home_score
+
+
 def _format_results_section(events: list[dict[str, Any]]) -> str:
     """Format post-match results into a Discord field value."""
     if not events:
         return ""
 
     lines = []
-    total_clv = 0.0
+    hits = 0
     for e in events:
-        clv_pct = e["predicted_clv"] * 100
-        total_clv += e["predicted_clv"]
+        side, clv_abs = _value_side(e["predicted_clv"])
+        hit = _result_hit(e["predicted_clv"], e["home_score"], e["away_score"])
+        if hit:
+            hits += 1
+        icon = "\u2705" if hit else "\u274c"
         score = f"{e['home_score']}-{e['away_score']}"
         lines.append(
-            f"**{e['home_team']}** vs **{e['away_team']}** ({score}) | pred CLV: {clv_pct:+.1f}%"
+            f"{icon} {e['home_team']} vs {e['away_team']} ({score}) | {side} +{clv_abs * 100:.1f}%"
         )
 
-    mean_clv = (total_clv / len(events)) * 100
-    lines.append(f"\n_{len(events)} events | mean pred CLV: {mean_clv:+.1f}%_")
+    lines.append(f"\n_{len(events)} events | {hits}/{len(events)} correct side_")
 
     text = "\n".join(lines)
     if len(text) > MAX_FIELD_CHARS:
@@ -175,11 +195,10 @@ def _format_upcoming_section(events: list[dict[str, Any]]) -> str:
 
     lines = []
     for e in events:
-        clv_pct = e["predicted_clv"] * 100
+        side, clv_abs = _value_side(e["predicted_clv"])
         kickoff = e["commence_time"].strftime("%a %d %b %H:%M")
         lines.append(
-            f"**{e['home_team']}** vs **{e['away_team']}** "
-            f"({kickoff} UTC) | pred CLV: {clv_pct:+.1f}%"
+            f"{e['home_team']} vs {e['away_team']} ({kickoff} UTC) | {side} +{clv_abs * 100:.1f}%"
         )
 
     text = "\n".join(lines)
