@@ -41,15 +41,23 @@ class DiscordAlert(AlertBase):
         """
         self.webhook_url = webhook_url
 
-    async def send(self, message: str, severity: str = "info"):
-        """
-        Send alert to Discord via webhook.
+    async def _post(self, payload: dict, log_event: str = "discord_alert") -> None:
+        """Post a JSON payload to the Discord webhook."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.webhook_url, json=payload) as response:
+                    if response.status == 204:
+                        logger.info(f"{log_event}_sent")
+                    else:
+                        logger.error(
+                            f"{log_event}_failed",
+                            status=response.status,
+                            response=await response.text(),
+                        )
+        except Exception as e:
+            logger.error(f"{log_event}_error", error=str(e))
 
-        Args:
-            message: Alert message content
-            severity: Severity level
-        """
-        # Color codes for different severity levels
+    async def send(self, message: str, severity: str = "info") -> None:
         colors = {
             "info": 3447003,  # Blue
             "warning": 16776960,  # Yellow
@@ -68,37 +76,10 @@ class DiscordAlert(AlertBase):
             ]
         }
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.webhook_url, json=payload) as response:
-                    if response.status == 204:
-                        logger.info("discord_alert_sent", severity=severity)
-                    else:
-                        logger.error(
-                            "discord_alert_failed",
-                            status=response.status,
-                            response=await response.text(),
-                        )
-        except Exception as e:
-            logger.error("discord_alert_error", error=str(e))
+        await self._post(payload, "discord_alert")
 
     async def send_embed(self, embed: dict) -> None:
-        """Send a raw Discord embed dict via webhook."""
-        payload = {"embeds": [embed]}
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.webhook_url, json=payload) as response:
-                    if response.status == 204:
-                        logger.info("discord_embed_sent")
-                    else:
-                        logger.error(
-                            "discord_embed_failed",
-                            status=response.status,
-                            response=await response.text(),
-                        )
-        except Exception as e:
-            logger.error("discord_embed_error", error=str(e))
+        await self._post({"embeds": [embed]}, "discord_embed")
 
 
 class AlertManager:

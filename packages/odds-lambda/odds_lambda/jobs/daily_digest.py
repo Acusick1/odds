@@ -8,6 +8,7 @@ it via AlertManager. Skips sending when both sections are empty.
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -23,12 +24,12 @@ logger = structlog.get_logger()
 SPORT_KEY = "soccer_epl"
 EMBED_COLOR = 3066993  # Green
 MAX_FIELD_CHARS = 1024
-MAX_EMBED_FIELDS = 25
 
 
 async def _get_completed_events_with_predictions(
     session: AsyncSession,
     since: datetime,
+    model_name: str,
 ) -> list[dict[str, Any]]:
     """Get events completed since `since` that have predictions.
 
@@ -40,6 +41,7 @@ async def _get_completed_events_with_predictions(
             Prediction.event_id,
             func.max(Prediction.snapshot_id).label("max_snapshot_id"),
         )
+        .where(Prediction.model_name == model_name)
         .group_by(Prediction.event_id)
         .subquery()
     )
@@ -85,6 +87,7 @@ async def _get_completed_events_with_predictions(
 async def _get_upcoming_events_with_predictions(
     session: AsyncSession,
     until: datetime,
+    model_name: str,
 ) -> list[dict[str, Any]]:
     """Get SCHEDULED events before `until` that have at least one prediction.
 
@@ -97,6 +100,7 @@ async def _get_upcoming_events_with_predictions(
             Prediction.event_id,
             func.max(Prediction.snapshot_id).label("max_snapshot_id"),
         )
+        .where(Prediction.model_name == model_name)
         .group_by(Prediction.event_id)
         .subquery()
     )
@@ -187,7 +191,7 @@ def _format_upcoming_section(events: list[dict[str, Any]]) -> str:
 def build_digest_embed(
     results: list[dict[str, Any]],
     upcoming: list[dict[str, Any]],
-) -> dict:
+) -> dict[str, Any]:
     """Build a Discord embed dict for the daily digest."""
     now = datetime.now(UTC)
     fields: list[dict[str, str | bool]] = []
@@ -218,11 +222,16 @@ def build_digest_embed(
     }
 
 
-async def send_digest() -> dict[str, int]:
+async def send_digest(model_name: str | None = None) -> dict[str, int]:
     """Query predictions and results, send Discord digest.
+
+    Args:
+        model_name: Model to filter predictions by. Defaults to MODEL_NAME env var.
 
     Returns dict with counts: results_count, upcoming_count, sent (0 or 1).
     """
+    model_name = model_name or os.environ.get("MODEL_NAME") or "epl-clv-home"
+
     now = datetime.now(UTC)
     since = now - timedelta(hours=24)
     until = now + timedelta(hours=48)
@@ -230,8 +239,8 @@ async def send_digest() -> dict[str, int]:
     stats = {"results_count": 0, "upcoming_count": 0, "sent": 0}
 
     async with async_session_maker() as session:
-        results = await _get_completed_events_with_predictions(session, since)
-        upcoming = await _get_upcoming_events_with_predictions(session, until)
+        results = await _get_completed_events_with_predictions(session, since, model_name)
+        upcoming = await _get_upcoming_events_with_predictions(session, until, model_name)
 
     stats["results_count"] = len(results)
     stats["upcoming_count"] = len(upcoming)
