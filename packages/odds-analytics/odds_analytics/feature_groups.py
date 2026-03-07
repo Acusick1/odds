@@ -56,7 +56,6 @@ from odds_analytics.sequence_loader import (
     extract_odds_from_snapshot,
     load_sequences_for_event,
 )
-from odds_analytics.training.feature_selection import apply_variance_filter
 
 if TYPE_CHECKING:
     from odds_analytics.training.config import FeatureConfig
@@ -945,6 +944,8 @@ async def prepare_training_data(
     if static_list:
         static_features = np.array(static_list, dtype=np.float32)
         static_features = np.nan_to_num(static_features, nan=0.0)
+
+    from odds_analytics.training.feature_selection import apply_variance_filter
 
     X, feature_names, _ = apply_variance_filter(X, feature_names, config.variance_threshold)
 

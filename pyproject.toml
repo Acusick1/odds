@@ -18,7 +18,7 @@ requires-python = ">=3.12"
 dependencies = [
     "odds-core",
     "odds-lambda",
-    "odds-analytics",
+    "odds-analytics[training]",
     "odds-cli",
 ]
 
