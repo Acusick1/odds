@@ -13,7 +13,7 @@ class AlertBase(ABC):
     """Base class for all alert types."""
 
     @abstractmethod
-    async def send(self, message: str, severity: str = "info"):
+    async def send(self, message: str, severity: str = "info") -> None:
         """
         Send alert via specific channel.
 
@@ -21,6 +21,11 @@ class AlertBase(ABC):
             message: Alert message content
             severity: Severity level (info, warning, error, critical)
         """
+        pass
+
+    @abstractmethod
+    async def send_embed(self, embed: dict) -> None:
+        """Send a raw embed payload via specific channel."""
         pass
 
 
@@ -36,15 +41,23 @@ class DiscordAlert(AlertBase):
         """
         self.webhook_url = webhook_url
 
-    async def send(self, message: str, severity: str = "info"):
-        """
-        Send alert to Discord via webhook.
+    async def _post(self, payload: dict, log_event: str = "discord_alert") -> None:
+        """Post a JSON payload to the Discord webhook."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.webhook_url, json=payload) as response:
+                    if response.status == 204:
+                        logger.info(f"{log_event}_sent")
+                    else:
+                        logger.error(
+                            f"{log_event}_failed",
+                            status=response.status,
+                            response=await response.text(),
+                        )
+        except Exception as e:
+            logger.error(f"{log_event}_error", error=str(e))
 
-        Args:
-            message: Alert message content
-            severity: Severity level
-        """
-        # Color codes for different severity levels
+    async def send(self, message: str, severity: str = "info") -> None:
         colors = {
             "info": 3447003,  # Blue
             "warning": 16776960,  # Yellow
@@ -63,19 +76,10 @@ class DiscordAlert(AlertBase):
             ]
         }
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.webhook_url, json=payload) as response:
-                    if response.status == 204:
-                        logger.info("discord_alert_sent", severity=severity)
-                    else:
-                        logger.error(
-                            "discord_alert_failed",
-                            status=response.status,
-                            response=await response.text(),
-                        )
-        except Exception as e:
-            logger.error("discord_alert_error", error=str(e))
+        await self._post(payload, "discord_alert")
+
+    async def send_embed(self, embed: dict) -> None:
+        await self._post({"embeds": [embed]}, "discord_embed")
 
 
 class AlertManager:
@@ -125,6 +129,22 @@ class AlertManager:
                 await channel.send(message, severity)
             except Exception as e:
                 logger.error("alert_channel_failed", channel=type(channel).__name__, error=str(e))
+
+    async def send_embed(self, embed: dict) -> None:
+        """Send a raw embed to all configured channels."""
+        if not self.enabled:
+            logger.debug("embed_skipped_disabled")
+            return
+
+        if not self.channels:
+            logger.warning("embed_no_channels")
+            return
+
+        for channel in self.channels:
+            try:
+                await channel.send_embed(embed)
+            except Exception as e:
+                logger.error("embed_channel_failed", channel=type(channel).__name__, error=str(e))
 
 
 # Global alert manager instance

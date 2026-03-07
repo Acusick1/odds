@@ -36,6 +36,37 @@ resource "aws_lambda_permission" "allow_eventbridge_backfill_polymarket" {
   ]
 }
 
+# Daily digest: sends Discord embed with predictions + post-match results at 08:00 UTC
+resource "aws_cloudwatch_event_rule" "daily_digest" {
+  name                = format("%s-daily-digest", var.rule_prefix)
+  description         = "Daily Discord digest with predictions and post-match results"
+  schedule_expression = "cron(0 8 * * ? *)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "daily_digest_target" {
+  rule      = aws_cloudwatch_event_rule.daily_digest.name
+  target_id = "1"
+  arn       = aws_lambda_function.odds_scheduler.arn
+
+  input = jsonencode({
+    job = "daily-digest"
+  })
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_daily_digest" {
+  statement_id  = format("AllowExecutionFromEventBridgeDailyDigest-%s", var.rule_prefix)
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.odds_scheduler.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.daily_digest.arn
+
+  depends_on = [
+    aws_cloudwatch_event_rule.daily_digest,
+    aws_cloudwatch_event_target.daily_digest_target
+  ]
+}
+
 # Self-scheduling rules: pre-created by Terraform, schedule updated by Lambda at runtime.
 # Lambda's put_rule() updates the schedule_expression and sets State=ENABLED; Terraform
 # ignores those changes but owns the lifecycle (create/destroy).
@@ -90,9 +121,12 @@ resource "aws_lambda_permission" "allow_dynamic" {
 # Outputs
 output "bootstrap_rules" {
   description = "Bootstrap EventBridge rules (fixed-schedule, not self-scheduling)"
-  value = var.enable_polymarket ? {
-    backfill_polymarket = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket[0].name
-  } : {}
+  value = merge(
+    { daily_digest = aws_cloudwatch_event_rule.daily_digest.name },
+    var.enable_polymarket ? {
+      backfill_polymarket = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket[0].name
+    } : {}
+  )
 }
 
 output "dynamic_rules" {

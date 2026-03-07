@@ -83,11 +83,10 @@ resource "aws_lambda_function" "odds_scheduler" {
       # Optional: Configure other settings
       LOG_LEVEL         = "INFO"
       ENABLE_VALIDATION = "true"
-      MODEL_BUCKET      = var.model_bucket_name
-      # MODEL_NAME is set per-job in #189 when the scoring job is configured
-
-      # Note: AWS_REGION is automatically provided by Lambda runtime
-      # No need to set it manually - it will be available in the environment
+      MODEL_BUCKET        = var.model_bucket_name
+      MODEL_NAME          = var.model_name
+      DISCORD_WEBHOOK_URL = var.discord_webhook_url
+      ALERT_ENABLED       = var.discord_webhook_url != "" ? "true" : "false"
     }
   }
 

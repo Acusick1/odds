@@ -23,6 +23,7 @@ def get_job_registry() -> dict[str, Callable[[], Awaitable[None]]]:
         from odds_lambda.jobs import (
             backfill_polymarket,
             check_health,
+            daily_digest,
             fetch_odds,
             fetch_oddsportal,
             fetch_oddsportal_results,
@@ -42,6 +43,7 @@ def get_job_registry() -> dict[str, Callable[[], Awaitable[None]]]:
             "fetch-oddsportal": fetch_oddsportal.main,
             "fetch-oddsportal-results": fetch_oddsportal_results.main,
             "score-predictions": score_predictions.main,
+            "daily-digest": daily_digest.main,
         }
 
     return _JOB_REGISTRY

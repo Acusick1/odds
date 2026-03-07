@@ -61,6 +61,19 @@ database_url = "postgresql+asyncpg://USERNAME:PASSWORD@HOST/DATABASE?ssl=require
 odds_api_key = "your-api-key-here"
 
 # ============================================================================
+# Alerts & Notifications
+# ============================================================================
+# Discord webhook URL for daily digest and operational alerts.
+# Alerts are auto-enabled when a webhook URL is provided.
+discord_webhook_url = ""
+
+# ============================================================================
+# Model Configuration
+# ============================================================================
+# Model name for CLV predictions (S3 key prefix under MODEL_BUCKET)
+model_name = "epl-clv-home"
+
+# ============================================================================
 # Optional: VPC Configuration (if database requires VPC access)
 # ============================================================================
 # subnet_ids         = ["subnet-xxx", "subnet-yyy"]
