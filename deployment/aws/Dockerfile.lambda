@@ -28,11 +28,14 @@ RUN uv build --wheel --out-dir /wheels ./packages/odds-core && \
     uv build --wheel --out-dir /wheels ./packages/odds-cli
 
 # Install from wheels to ensure actual file installation (not .pth references)
+# xgboost is needed for CLV model inference (score-predictions job) but lives
+# in a dependency group, not core deps, so it must be installed explicitly.
 RUN uv pip install \
     --python /var/lang/bin/python3.12 \
     --target /asset \
     --no-cache \
-    /wheels/*.whl
+    /wheels/*.whl \
+    xgboost
 
 # Remove unnecessary files to reduce image size
 RUN cd /asset && \
