@@ -19,11 +19,13 @@ COPY pyproject.toml uv.lock ./
 COPY packages/odds-core ./packages/odds-core
 COPY packages/odds-lambda ./packages/odds-lambda
 COPY packages/odds-analytics ./packages/odds-analytics
+COPY packages/odds-cli ./packages/odds-cli
 
 # Build wheels first to ensure packages are properly copied, not referenced via .pth
 RUN uv build --wheel --out-dir /wheels ./packages/odds-core && \
     uv build --wheel --out-dir /wheels ./packages/odds-lambda && \
-    uv build --wheel --out-dir /wheels ./packages/odds-analytics
+    uv build --wheel --out-dir /wheels ./packages/odds-analytics && \
+    uv build --wheel --out-dir /wheels ./packages/odds-cli
 
 # Install from wheels to ensure actual file installation (not .pth references)
 RUN uv pip install \
