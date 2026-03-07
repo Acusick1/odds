@@ -34,7 +34,7 @@ resource "aws_iam_role_policy" "s3_model_read" {
           "s3:GetObject",
           "s3:HeadObject"
         ]
-        Resource = "${aws_s3_bucket.models.arn}/*"
+        Resource = "arn:aws:s3:::${var.model_bucket_name}/*"
       }
     ]
   })

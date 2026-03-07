@@ -1,10 +1,25 @@
-# S3 bucket for trained model artifacts
+# S3 bucket for trained model artifacts (shared across environments)
+#
+# This bucket is shared infrastructure — both dev and prod Lambdas read from it.
+# Managed here (not per-environment) so that dev's terraform destroy doesn't delete it.
+
+import {
+  to = aws_s3_bucket.models
+  id = var.model_bucket_name
+}
+
 resource "aws_s3_bucket" "models" {
   bucket = var.model_bucket_name
 
+  lifecycle {
+    prevent_destroy = true
+  }
+
   tags = {
-    Project     = var.project_name
-    Environment = var.environment
+    Name        = "Model Artifacts"
+    Project     = "betting-odds-pipeline"
+    Environment = "shared"
+    ManagedBy   = "terraform"
   }
 }
 
@@ -33,9 +48,4 @@ resource "aws_s3_bucket_public_access_block" "models" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
-}
-
-output "model_bucket_name" {
-  description = "Name of the S3 bucket for model artifacts"
-  value       = aws_s3_bucket.models.bucket
 }
