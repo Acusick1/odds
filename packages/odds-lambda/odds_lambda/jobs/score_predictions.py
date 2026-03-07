@@ -205,13 +205,15 @@ async def score_events(
                             model_name=model_name,
                             model_version=model_version,
                             predicted_clv=predicted_clv,
+                            created_at=datetime.now(UTC),
                         )
                         .on_conflict_do_nothing(
                             constraint="uq_prediction_event_snap_model",
                         )
                     )
-                    await session.execute(stmt)
-                    stats["snapshots_scored"] += 1
+                    result = await session.execute(stmt)
+                    if result.rowcount:
+                        stats["snapshots_scored"] += 1
 
                 except Exception:
                     stats["errors"] += 1

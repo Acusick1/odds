@@ -175,6 +175,7 @@ class TestScoreEvents:
         snapshots_result = MagicMock()
         snapshots_result.scalars.return_value.all.return_value = [snapshot]
         insert_result = MagicMock()
+        insert_result.rowcount = 1
         mock_session.execute = AsyncMock(
             side_effect=[events_result, snapshots_result, insert_result]
         )
