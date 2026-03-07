@@ -21,10 +21,6 @@ class Prediction(SQLModel, table=True):
     model_version: str = Field()
     predicted_clv: float = Field()
 
-    scored_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True)),
-        default_factory=utc_now,
-    )
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True)),
         default_factory=utc_now,
@@ -34,5 +30,5 @@ class Prediction(SQLModel, table=True):
         UniqueConstraint(
             "event_id", "snapshot_id", "model_name", name="uq_prediction_event_snap_model"
         ),
-        Index("ix_prediction_model_scored", "model_name", "scored_at"),
+        Index("ix_prediction_model_created", "model_name", "created_at"),
     )

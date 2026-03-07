@@ -26,7 +26,6 @@ def upgrade() -> None:
         sa.Column("model_name", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("model_version", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("predicted_clv", sa.Float(), nullable=False),
-        sa.Column("scored_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(
             ["event_id"],
@@ -42,7 +41,7 @@ def upgrade() -> None:
         ),
     )
     op.create_index(
-        "ix_prediction_model_scored", "predictions", ["model_name", "scored_at"], unique=False
+        "ix_prediction_model_created", "predictions", ["model_name", "created_at"], unique=False
     )
     op.create_index(op.f("ix_predictions_event_id"), "predictions", ["event_id"], unique=False)
     op.create_index(op.f("ix_predictions_model_name"), "predictions", ["model_name"], unique=False)
@@ -55,5 +54,5 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_predictions_snapshot_id"), table_name="predictions")
     op.drop_index(op.f("ix_predictions_model_name"), table_name="predictions")
     op.drop_index(op.f("ix_predictions_event_id"), table_name="predictions")
-    op.drop_index("ix_prediction_model_scored", table_name="predictions")
+    op.drop_index("ix_prediction_model_created", table_name="predictions")
     op.drop_table("predictions")

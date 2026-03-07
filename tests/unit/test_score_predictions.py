@@ -6,12 +6,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_core.prediction_models import Prediction
 from odds_lambda.jobs.score_predictions import (
     _DEFAULT_FEATURE_CONFIG,
     _extract_features,
     score_events,
 )
+
+_EXPECTED_FEATURE_NAMES = [
+    f"tab_{n}"
+    for n in [
+        "consensus_prob",
+        "sharp_prob",
+        "retail_sharp_diff",
+        "num_bookmakers",
+        "is_weekend",
+        "day_of_week",
+    ]
+] + ["hours_until_event"]
 
 
 def _make_event(
@@ -87,23 +98,11 @@ class TestExtractFeatures:
         snapshot = _make_snapshot(event)
         config = _DEFAULT_FEATURE_CONFIG
 
-        expected_names = [
-            f"tab_{n}"
-            for n in [
-                "consensus_prob",
-                "sharp_prob",
-                "retail_sharp_diff",
-                "num_bookmakers",
-                "is_weekend",
-                "day_of_week",
-            ]
-        ] + ["hours_until_event"]
-
-        result = _extract_features(event, snapshot, config, expected_names)
+        result = _extract_features(event, snapshot, config, _EXPECTED_FEATURE_NAMES)
 
         assert result is not None
         assert isinstance(result, np.ndarray)
-        assert result.shape == (len(expected_names),)
+        assert result.shape == (len(_EXPECTED_FEATURE_NAMES),)
         assert result.dtype == np.float32
         assert not np.any(np.isnan(result))
 
@@ -122,12 +121,22 @@ class TestExtractFeatures:
 
         assert result is None
 
+    def test_returns_none_on_feature_name_mismatch(self) -> None:
+        event = _make_event()
+        snapshot = _make_snapshot(event)
+        config = _DEFAULT_FEATURE_CONFIG
+
+        wrong_names = ["wrong_feature_1", "wrong_feature_2"]
+        result = _extract_features(event, snapshot, config, wrong_names)
+
+        assert result is None
+
     def test_hours_until_is_positive_for_future_event(self) -> None:
         event = _make_event(hours_from_now=48.0)
         snapshot = _make_snapshot(event, hours_before=24.0)
         config = _DEFAULT_FEATURE_CONFIG
 
-        result = _extract_features(event, snapshot, config, ["dummy"] * 7)
+        result = _extract_features(event, snapshot, config, _EXPECTED_FEATURE_NAMES)
 
         assert result is not None
         hours_until = result[-1]
@@ -147,20 +156,9 @@ class TestScoreEvents:
     ) -> None:
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([0.015])
-        feature_names = [
-            f"tab_{n}"
-            for n in [
-                "consensus_prob",
-                "sharp_prob",
-                "retail_sharp_diff",
-                "num_bookmakers",
-                "is_weekend",
-                "day_of_week",
-            ]
-        ] + ["hours_until_event"]
         mock_load.return_value = {
             "model": mock_model,
-            "feature_names": feature_names,
+            "feature_names": _EXPECTED_FEATURE_NAMES,
             "params": {},
         }
         mock_version.return_value = '"etag123"'
@@ -170,15 +168,16 @@ class TestScoreEvents:
 
         mock_session = AsyncMock()
 
-        # First execute returns events, second returns unscored snapshots
+        # First execute returns events, second returns unscored snapshots,
+        # third is the INSERT ON CONFLICT
         events_result = MagicMock()
         events_result.scalars.return_value.all.return_value = [event]
         snapshots_result = MagicMock()
         snapshots_result.scalars.return_value.all.return_value = [snapshot]
-        mock_session.execute = AsyncMock(side_effect=[events_result, snapshots_result])
-
-        added_predictions: list[Prediction] = []
-        mock_session.add = MagicMock(side_effect=lambda p: added_predictions.append(p))
+        insert_result = MagicMock()
+        mock_session.execute = AsyncMock(
+            side_effect=[events_result, snapshots_result, insert_result]
+        )
 
         mock_session_maker.return_value.__aenter__.return_value = mock_session
 
@@ -187,14 +186,10 @@ class TestScoreEvents:
         assert stats["events_checked"] == 1
         assert stats["snapshots_scored"] == 1
         assert stats["errors"] == 0
-        assert len(added_predictions) == 1
 
-        pred = added_predictions[0]
-        assert isinstance(pred, Prediction)
-        assert pred.event_id == event.id
-        assert pred.snapshot_id == snapshot.id
-        assert pred.model_name == "epl-clv-home"
-        assert pred.predicted_clv == pytest.approx(0.015)
+        # Verify the INSERT statement was executed (3rd call)
+        assert mock_session.execute.call_count == 3
+        mock_model.predict.assert_called_once()
 
     @pytest.mark.asyncio
     @patch("odds_lambda.jobs.score_predictions.load_model")

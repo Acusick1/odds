@@ -3,7 +3,7 @@
 Loads a model from S3, extracts features for each unscored snapshot of
 upcoming SCHEDULED events, and writes Prediction rows. Safe to re-run:
 the unique constraint on (event_id, snapshot_id, model_name) prevents
-duplicate predictions.
+duplicate predictions via ON CONFLICT DO NOTHING.
 
 Called inline at the end of fetch-oddsportal to score newly arrived data.
 """
@@ -18,13 +18,14 @@ import numpy as np
 import structlog
 from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import TabularFeatureExtractor
-from odds_analytics.feature_groups import _resolve_outcome_name
+from odds_analytics.feature_groups import resolve_outcome_name
 from odds_analytics.sequence_loader import extract_odds_from_snapshot
 from odds_analytics.training.config import FeatureConfig
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.prediction_models import Prediction
 from sqlalchemy import and_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.model_loader import get_cached_version, load_model
@@ -98,10 +99,11 @@ def _extract_features(
 ) -> np.ndarray | None:
     """Extract feature vector for a single snapshot.
 
-    Returns None if feature extraction fails (e.g. no odds data in snapshot).
+    Returns None if feature extraction fails (e.g. no odds data in snapshot)
+    or if the produced feature names don't match what the model expects.
     """
     market = config.primary_market
-    outcome_name = _resolve_outcome_name(config, event)
+    outcome_name = resolve_outcome_name(config, event)
 
     odds = extract_odds_from_snapshot(snapshot, event.id, market=market)
     if not odds:
@@ -130,14 +132,15 @@ def _extract_features(
     feature_vector = np.concatenate([tab_array, np.array([hours_until])])
     feature_vector = np.nan_to_num(feature_vector, nan=0.0).astype(np.float32)
 
-    # Prefix check: training produces tab_* + hours_until_event
+    # Verify feature alignment — mismatched features produce garbage predictions
     produced_names = [f"tab_{n}" for n in extractor.get_feature_names()] + ["hours_until_event"]
     if produced_names != expected_features:
-        logger.warning(
+        logger.error(
             "feature_name_mismatch",
             expected=expected_features,
             produced=produced_names,
         )
+        return None
 
     return feature_vector
 
@@ -149,6 +152,8 @@ async def score_events(
 ) -> dict[str, int]:
     """Score all unscored snapshots for upcoming events.
 
+    Uses INSERT ... ON CONFLICT DO NOTHING for safe concurrent execution.
+
     Args:
         model_name: S3 model name. Defaults to MODEL_NAME env var.
         bucket: S3 bucket. Defaults to MODEL_BUCKET env var.
@@ -157,7 +162,7 @@ async def score_events(
     Returns:
         Dict with counts: events_checked, snapshots_scored, snapshots_skipped, errors.
     """
-    model_name = model_name or os.environ.get("MODEL_NAME", "")
+    model_name = model_name or os.environ.get("MODEL_NAME") or None
     config = config or _DEFAULT_FEATURE_CONFIG
 
     stats = {"events_checked": 0, "snapshots_scored": 0, "snapshots_skipped": 0, "errors": 0}
@@ -192,14 +197,20 @@ async def score_events(
 
                     predicted_clv = float(model.predict(features.reshape(1, -1))[0])
 
-                    prediction = Prediction(
-                        event_id=event.id,
-                        snapshot_id=snapshot.id,
-                        model_name=model_name,
-                        model_version=model_version,
-                        predicted_clv=predicted_clv,
+                    stmt = (
+                        pg_insert(Prediction)
+                        .values(
+                            event_id=event.id,
+                            snapshot_id=snapshot.id,
+                            model_name=model_name,
+                            model_version=model_version,
+                            predicted_clv=predicted_clv,
+                        )
+                        .on_conflict_do_nothing(
+                            constraint="uq_prediction_event_snap_model",
+                        )
                     )
-                    session.add(prediction)
+                    await session.execute(stmt)
                     stats["snapshots_scored"] += 1
 
                 except Exception:

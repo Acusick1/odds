@@ -75,6 +75,7 @@ __all__ = [
     "PreparedFeatureData",
     "prepare_training_data",
     "filter_completed_events",
+    "resolve_outcome_name",
 ]
 
 
@@ -476,7 +477,7 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
     return names
 
 
-def _resolve_outcome_name(config: FeatureConfig, event: Event) -> str:
+def resolve_outcome_name(config: FeatureConfig, event: Event) -> str:
     """Map config outcome to the outcome name stored in the database."""
     if config.outcome in ("over", "under"):
         return config.outcome.capitalize()
@@ -496,7 +497,7 @@ def _extract_static_feature_parts(
     """
     event = bundle.event
     market = config.primary_market
-    outcome = _resolve_outcome_name(config, event)
+    outcome = resolve_outcome_name(config, event)
     backtest_event = make_backtest_event(event)
     tab_extractor = TabularFeatureExtractor.from_config(config)
 
@@ -674,7 +675,7 @@ class LSTMAdapter:
 
         event = bundle.event
         market = config.primary_market
-        outcome = _resolve_outcome_name(config, event)
+        outcome = resolve_outcome_name(config, event)
         backtest_event = make_backtest_event(event)
 
         # Filter sequences to those whose first entry is at or before the snapshot time,
@@ -738,7 +739,7 @@ def _compute_target(
     if config.target_type == "devigged_bookmaker":
         snapshot_odds_all = extract_odds_from_snapshot(snapshot, event.id, market=market)
         if market == "totals":
-            outcome_name = _resolve_outcome_name(config, event)
+            outcome_name = resolve_outcome_name(config, event)
             return calculate_devigged_totals_target(
                 snapshot_odds_all,
                 closing_odds_all,
@@ -754,7 +755,7 @@ def _compute_target(
         )
     else:
         # "raw": avg implied prob delta (snapshot → closing)
-        outcome = _resolve_outcome_name(config, event)
+        outcome = resolve_outcome_name(config, event)
         snap_odds = extract_odds_from_snapshot(snapshot, event.id, market=market, outcome=outcome)
         closing_odds = extract_odds_from_snapshot(
             closing_snapshot, event.id, market=market, outcome=outcome
