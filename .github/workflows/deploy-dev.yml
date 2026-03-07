@@ -16,6 +16,7 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
     steps:
       - name: Checkout code
@@ -78,6 +79,7 @@ jobs:
             -var-file="terraform.tfvars.example" \
             -var="database_url=$DATABASE_URL" \
             -var="odds_api_key=$ODDS_API_KEY" \
+            -var="discord_webhook_url=$DISCORD_WEBHOOK_URL" \
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
             -var="enable_oddsportal_scraper=true" \
             -var="scraper_image_tag=${{ steps.build-scraper.outputs.image_tag }}" \
@@ -125,6 +127,7 @@ jobs:
             -var-file="terraform.tfvars.example" \
             -var="database_url=$DATABASE_URL" \
             -var="odds_api_key=$ODDS_API_KEY" \
+            -var="discord_webhook_url=$DISCORD_WEBHOOK_URL" \
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
             -var="enable_oddsportal_scraper=true" \
             -var="scraper_image_tag=${{ steps.build-scraper.outputs.image_tag }}" \
