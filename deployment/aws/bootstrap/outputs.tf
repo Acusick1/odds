@@ -18,6 +18,16 @@ output "dynamodb_table_arn" {
   value       = aws_dynamodb_table.terraform_locks.arn
 }
 
+output "model_bucket_name" {
+  description = "Name of the S3 bucket for model artifacts"
+  value       = aws_s3_bucket.models.id
+}
+
+output "model_bucket_arn" {
+  description = "ARN of the S3 bucket for model artifacts"
+  value       = aws_s3_bucket.models.arn
+}
+
 output "backend_config_examples" {
   description = "Example backend config files for development and production"
   value       = <<-EOT

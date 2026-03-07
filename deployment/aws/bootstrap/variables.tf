@@ -15,3 +15,9 @@ variable "lock_table_name" {
   type        = string
   default     = "odds-scheduler-terraform-locks"
 }
+
+variable "model_bucket_name" {
+  description = "S3 bucket name for trained model artifacts (shared across environments)"
+  type        = string
+  default     = "odds-models-685946576110"
+}
