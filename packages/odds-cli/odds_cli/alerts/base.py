@@ -13,7 +13,7 @@ class AlertBase(ABC):
     """Base class for all alert types."""
 
     @abstractmethod
-    async def send(self, message: str, severity: str = "info"):
+    async def send(self, message: str, severity: str = "info") -> None:
         """
         Send alert via specific channel.
 
@@ -21,6 +21,11 @@ class AlertBase(ABC):
             message: Alert message content
             severity: Severity level (info, warning, error, critical)
         """
+        pass
+
+    @abstractmethod
+    async def send_embed(self, embed: dict) -> None:
+        """Send a raw embed payload via specific channel."""
         pass
 
 
@@ -77,6 +82,24 @@ class DiscordAlert(AlertBase):
         except Exception as e:
             logger.error("discord_alert_error", error=str(e))
 
+    async def send_embed(self, embed: dict) -> None:
+        """Send a raw Discord embed dict via webhook."""
+        payload = {"embeds": [embed]}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.webhook_url, json=payload) as response:
+                    if response.status == 204:
+                        logger.info("discord_embed_sent")
+                    else:
+                        logger.error(
+                            "discord_embed_failed",
+                            status=response.status,
+                            response=await response.text(),
+                        )
+        except Exception as e:
+            logger.error("discord_embed_error", error=str(e))
+
 
 class AlertManager:
     """Route alerts to appropriate channels."""
@@ -125,6 +148,22 @@ class AlertManager:
                 await channel.send(message, severity)
             except Exception as e:
                 logger.error("alert_channel_failed", channel=type(channel).__name__, error=str(e))
+
+    async def send_embed(self, embed: dict) -> None:
+        """Send a raw embed to all configured channels."""
+        if not self.enabled:
+            logger.debug("embed_skipped_disabled")
+            return
+
+        if not self.channels:
+            logger.warning("embed_no_channels")
+            return
+
+        for channel in self.channels:
+            try:
+                await channel.send_embed(embed)
+            except Exception as e:
+                logger.error("embed_channel_failed", channel=type(channel).__name__, error=str(e))
 
 
 # Global alert manager instance
