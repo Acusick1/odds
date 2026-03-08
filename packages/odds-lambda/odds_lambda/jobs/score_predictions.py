@@ -32,27 +32,12 @@ from odds_lambda.model_loader import get_cached_version, load_model
 
 logger = structlog.get_logger()
 
-SPORT_KEY = "soccer_epl"
 
-# Default scoring config — matches EPL CLV training config.
-# Stored here until we persist FeatureConfig in the model artifact.
-_DEFAULT_FEATURE_CONFIG = FeatureConfig(
-    adapter="xgboost",
-    sharp_bookmakers=["bet365"],
-    retail_bookmakers=["betway", "betfred", "bwin"],
-    markets=["h2h"],
-    outcome="home",
-    feature_groups=("tabular",),
-    target_type="devigged_bookmaker",
-    target_bookmaker="bet365",
-)
-
-
-async def _get_upcoming_events(session: AsyncSession) -> list[Event]:
-    """Get SCHEDULED EPL events with commence_time in the future."""
+async def _get_upcoming_events(session: AsyncSession, sport_key: str) -> list[Event]:
+    """Get SCHEDULED events for a sport with commence_time in the future."""
     query = select(Event).where(
         and_(
-            Event.sport_key == SPORT_KEY,
+            Event.sport_key == sport_key,
             Event.status == EventStatus.SCHEDULED,
             Event.commence_time > datetime.now(UTC),
         )
@@ -157,13 +142,13 @@ async def score_events(
     Args:
         model_name: S3 model name. Defaults to MODEL_NAME env var.
         bucket: S3 bucket. Defaults to MODEL_BUCKET env var.
-        config: Feature config. Defaults to EPL CLV config.
+        config: Override feature config (mainly for testing). If None, uses
+            the config bundled in the model artifact.
 
     Returns:
         Dict with counts: events_checked, snapshots_scored, snapshots_skipped, errors.
     """
     model_name = model_name or os.environ.get("MODEL_NAME") or None
-    config = config or _DEFAULT_FEATURE_CONFIG
 
     stats = {"events_checked": 0, "snapshots_scored": 0, "snapshots_skipped": 0, "errors": 0}
 
@@ -177,12 +162,28 @@ async def score_events(
     feature_names: list[str] = model_data["feature_names"]
     model_version = get_cached_version() or "unknown"
 
+    bundled_config: FeatureConfig | None = model_data.get("feature_config")
+    config = config or bundled_config
+    if config is None:
+        logger.error(
+            "no_feature_config", msg="No config provided and none bundled in model artifact"
+        )
+        return stats
+
+    sport_key = config.sport_key
+    if not sport_key:
+        logger.error(
+            "no_sport_key",
+            msg="FeatureConfig has no sport_key — cannot determine which events to score",
+        )
+        return stats
+
     async with async_session_maker() as session:
-        events = await _get_upcoming_events(session)
+        events = await _get_upcoming_events(session, sport_key)
         stats["events_checked"] = len(events)
 
         if not events:
-            logger.info("no_upcoming_events", sport_key=SPORT_KEY)
+            logger.info("no_upcoming_events", sport_key=sport_key)
             return stats
 
         for event in events:
