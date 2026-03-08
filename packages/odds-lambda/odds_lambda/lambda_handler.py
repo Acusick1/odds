@@ -43,9 +43,16 @@ async def _run_job_async(job_name: str, **kwargs: object) -> None:
 
     job_fn = get_job_function(job_name)
     sig = inspect.signature(job_fn)
-    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-    if kwargs and has_var_keyword:
-        await job_fn(**kwargs)
+    params = sig.parameters
+    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+    if kwargs:
+        if has_var_keyword:
+            await job_fn(**kwargs)
+        else:
+            # Only pass kwargs that match declared parameter names
+            accepted = {k: v for k, v in kwargs.items() if k in params}
+            await job_fn(**accepted) if accepted else await job_fn()
     else:
         await job_fn()
 

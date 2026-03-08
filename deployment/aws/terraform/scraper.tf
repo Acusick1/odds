@@ -83,7 +83,8 @@ resource "aws_cloudwatch_event_target" "scraper_results_target" {
   arn       = aws_lambda_function.odds_scraper[0].arn
 
   input = jsonencode({
-    job = "fetch-oddsportal-results"
+    job       = "fetch-oddsportal-results"
+    sport_key = "soccer_epl"
   })
 }
 
