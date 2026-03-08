@@ -251,6 +251,28 @@ class TestLoadModelWithConfig:
 
         assert result["feature_config"] is None
 
+    @patch("odds_lambda.model_loader._get_s3_client")
+    @patch("odds_lambda.model_loader.joblib")
+    def test_nosuchkey_error_also_returns_none(
+        self, mock_joblib: MagicMock, mock_get_client: MagicMock
+    ) -> None:
+        """download_file returns NoSuchKey (not 404) for missing objects."""
+        s3 = MagicMock()
+        mock_get_client.return_value = s3
+        s3.head_object.return_value = {"ETag": '"nsk1"'}
+        mock_joblib.load.return_value = {"model": "xgb", "feature_names": [], "params": {}}
+
+        nosuchkey_error = ClientError(
+            {"Error": {"Code": "NoSuchKey", "Message": "The specified key does not exist."}},
+            "GetObject",
+        )
+        s3.exceptions.ClientError = ClientError
+        s3.download_file.side_effect = [None, nosuchkey_error]
+
+        result = load_model(model_name="legacy-model", bucket="b")
+
+        assert result["feature_config"] is None
+
 
 class TestClearCache:
     @patch("odds_lambda.model_loader._get_s3_client")
