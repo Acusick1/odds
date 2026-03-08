@@ -7,11 +7,13 @@ from typing import Any
 import boto3
 import joblib
 import structlog
+import yaml
+from odds_analytics.training.config import FeatureConfig
 
 logger = structlog.get_logger(__name__)
 
 # Module-level cache — persists across warm Lambda invocations
-_cached_model: Any = None
+_cached_model: dict[str, Any] | None = None
 _cached_etag: str | None = None
 _cached_model_key: str | None = None
 
@@ -24,22 +26,51 @@ def _model_s3_key(model_name: str) -> str:
     return f"{model_name}/latest/model.pkl"
 
 
+def _config_s3_key(model_name: str) -> str:
+    return f"{model_name}/latest/config.yaml"
+
+
+def _load_feature_config(s3: Any, bucket: str, model_name: str) -> FeatureConfig | None:
+    """Download config.yaml from S3 and parse FeatureConfig from it.
+
+    Returns None if config.yaml is missing.
+    """
+    key = _config_s3_key(model_name)
+    tmp_path = os.path.join(tempfile.gettempdir(), f"{model_name}_config.yaml")
+
+    try:
+        s3.download_file(bucket, key, tmp_path)
+    except s3.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return None
+        raise
+
+    with open(tmp_path) as f:
+        config_data = yaml.safe_load(f)
+
+    training = config_data.get("training", {})
+    features_data = training.get("features", {})
+    sport_key = training.get("data", {}).get("sport_key")
+
+    if sport_key and "sport_key" not in features_data:
+        features_data["sport_key"] = sport_key
+
+    return FeatureConfig(**features_data)
+
+
 def load_model(
     model_name: str | None = None,
     bucket: str | None = None,
-) -> Any:
+) -> dict[str, Any]:
     """Load a model from S3 with ETag-based caching.
 
     On cold start, downloads the model from S3 to /tmp and loads it.
     On warm invocations, issues a HEAD request to check if the ETag has
     changed — if not, returns the cached in-memory model without downloading.
 
-    Args:
-        model_name: Model name (S3 prefix). Defaults to MODEL_NAME env var.
-        bucket: S3 bucket name. Defaults to MODEL_BUCKET env var.
-
     Returns:
-        The loaded model object (dict with 'model', 'feature_names', 'params').
+        Dict with 'model', 'feature_names', 'params', and 'feature_config'
+        (FeatureConfig or None if config.yaml missing).
 
     Raises:
         ValueError: If model_name or bucket is not provided and env vars are unset.
@@ -73,12 +104,30 @@ def load_model(
         logger.debug("model_cache_hit", model_name=model_name, etag=etag)
         return _cached_model
 
-    # Download and load
+    # Download and load model
     logger.info("model_downloading", model_name=model_name, bucket=bucket, key=key)
     tmp_path = os.path.join(tempfile.gettempdir(), f"{model_name}_model.pkl")
     s3.download_file(bucket, key, tmp_path)
 
     model_data = joblib.load(tmp_path)
+
+    # Load feature config from config.yaml
+    feature_config = _load_feature_config(s3, bucket, model_name)
+    if feature_config is None:
+        logger.warning(
+            "config_yaml_missing",
+            model_name=model_name,
+            msg="config.yaml not found in S3, feature_config will be None",
+        )
+    else:
+        logger.info(
+            "config_loaded",
+            model_name=model_name,
+            sport_key=feature_config.sport_key,
+        )
+
+    model_data["feature_config"] = feature_config
+
     logger.info(
         "model_loaded",
         model_name=model_name,

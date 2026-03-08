@@ -692,6 +692,12 @@ class FeatureConfig(BaseModel):
         description="Bookmaker key for devigged target computation (used when target_type='devigged_bookmaker').",
     )
 
+    sport_key: str | None = Field(
+        default=None,
+        description="Sport key for inference (e.g. 'soccer_epl'). "
+        "Populated from training data config when loading from a full training config.",
+    )
+
 
 # =============================================================================
 # Feature Selection Configuration

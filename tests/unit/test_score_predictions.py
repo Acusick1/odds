@@ -5,11 +5,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
+from odds_analytics.training.config import FeatureConfig
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.jobs.score_predictions import (
-    _DEFAULT_FEATURE_CONFIG,
     _extract_features,
     score_events,
+)
+
+_TEST_FEATURE_CONFIG = FeatureConfig(
+    adapter="xgboost",
+    sharp_bookmakers=["bet365"],
+    retail_bookmakers=["betway", "betfred", "bwin"],
+    markets=["h2h"],
+    outcome="home",
+    feature_groups=("tabular",),
+    target_type="devigged_bookmaker",
+    target_bookmaker="bet365",
+    sport_key="soccer_epl",
 )
 
 _EXPECTED_FEATURE_NAMES = [
@@ -96,9 +108,8 @@ class TestExtractFeatures:
     def test_extracts_features_successfully(self) -> None:
         event = _make_event()
         snapshot = _make_snapshot(event)
-        config = _DEFAULT_FEATURE_CONFIG
 
-        result = _extract_features(event, snapshot, config, _EXPECTED_FEATURE_NAMES)
+        result = _extract_features(event, snapshot, _TEST_FEATURE_CONFIG, _EXPECTED_FEATURE_NAMES)
 
         assert result is not None
         assert isinstance(result, np.ndarray)
@@ -115,28 +126,25 @@ class TestExtractFeatures:
             raw_data={"bookmakers": []},
             bookmaker_count=0,
         )
-        config = _DEFAULT_FEATURE_CONFIG
 
-        result = _extract_features(event, snapshot, config, [])
+        result = _extract_features(event, snapshot, _TEST_FEATURE_CONFIG, [])
 
         assert result is None
 
     def test_returns_none_on_feature_name_mismatch(self) -> None:
         event = _make_event()
         snapshot = _make_snapshot(event)
-        config = _DEFAULT_FEATURE_CONFIG
 
         wrong_names = ["wrong_feature_1", "wrong_feature_2"]
-        result = _extract_features(event, snapshot, config, wrong_names)
+        result = _extract_features(event, snapshot, _TEST_FEATURE_CONFIG, wrong_names)
 
         assert result is None
 
     def test_hours_until_is_positive_for_future_event(self) -> None:
         event = _make_event(hours_from_now=48.0)
         snapshot = _make_snapshot(event, hours_before=24.0)
-        config = _DEFAULT_FEATURE_CONFIG
 
-        result = _extract_features(event, snapshot, config, _EXPECTED_FEATURE_NAMES)
+        result = _extract_features(event, snapshot, _TEST_FEATURE_CONFIG, _EXPECTED_FEATURE_NAMES)
 
         assert result is not None
         hours_until = result[-1]
@@ -160,6 +168,7 @@ class TestScoreEvents:
             "model": mock_model,
             "feature_names": _EXPECTED_FEATURE_NAMES,
             "params": {},
+            "feature_config": _TEST_FEATURE_CONFIG,
         }
         mock_version.return_value = '"etag123"'
 
@@ -216,6 +225,7 @@ class TestScoreEvents:
             "model": MagicMock(),
             "feature_names": [],
             "params": {},
+            "feature_config": _TEST_FEATURE_CONFIG,
         }
         mock_version.return_value = '"v1"'
 
@@ -226,6 +236,42 @@ class TestScoreEvents:
         mock_session.execute = AsyncMock(return_value=events_result)
 
         mock_session_maker.return_value.__aenter__.return_value = mock_session
+
+        stats = await score_events(model_name="test", bucket="test-bucket")
+
+        assert stats["events_checked"] == 0
+        assert stats["snapshots_scored"] == 0
+
+    @pytest.mark.asyncio
+    @patch("odds_lambda.jobs.score_predictions.load_model")
+    async def test_returns_empty_stats_when_no_config(self, mock_load: MagicMock) -> None:
+        mock_load.return_value = {
+            "model": MagicMock(),
+            "feature_names": [],
+            "params": {},
+            "feature_config": None,
+        }
+
+        stats = await score_events(model_name="test", bucket="test-bucket")
+
+        assert stats["events_checked"] == 0
+        assert stats["snapshots_scored"] == 0
+
+    @pytest.mark.asyncio
+    @patch("odds_lambda.jobs.score_predictions.load_model")
+    async def test_returns_empty_stats_when_no_sport_key(self, mock_load: MagicMock) -> None:
+        config_no_sport = FeatureConfig(
+            adapter="xgboost",
+            sharp_bookmakers=["bet365"],
+            retail_bookmakers=["betway"],
+            markets=["h2h"],
+        )
+        mock_load.return_value = {
+            "model": MagicMock(),
+            "feature_names": [],
+            "params": {},
+            "feature_config": config_no_sport,
+        }
 
         stats = await score_events(model_name="test", bucket="test-bucket")
 
