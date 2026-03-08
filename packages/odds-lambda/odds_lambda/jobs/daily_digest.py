@@ -25,15 +25,6 @@ DEFAULT_SPORT_KEY = "soccer_epl"
 EMBED_COLOR = 3066993  # Green
 MAX_FIELD_CHARS = 1024
 
-# Maps sport_key to human-readable league name for embed titles
-LEAGUE_DISPLAY_NAMES: dict[str, str] = {
-    "soccer_epl": "EPL",
-    "soccer_spain_la_liga": "La Liga",
-    "soccer_germany_bundesliga": "Bundesliga",
-    "soccer_italy_serie_a": "Serie A",
-    "soccer_france_ligue_one": "Ligue 1",
-}
-
 
 async def _get_completed_events_with_predictions(
     session: AsyncSession,
@@ -227,8 +218,19 @@ def _format_window(hours: float) -> str:
 
 
 def _league_display_name(sport_key: str) -> str:
-    """Return a human-readable league name for embed titles."""
-    return LEAGUE_DISPLAY_NAMES.get(sport_key, sport_key)
+    """Return a human-readable league name for embed titles.
+
+    Derives from LeagueSpec.sport_title when available, otherwise
+    strips the ``soccer_`` prefix and title-cases the remainder.
+    """
+    from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPECS
+
+    for spec in LEAGUE_SPECS:
+        if spec.sport_key == sport_key:
+            return spec.sport_title
+    # Fallback: "soccer_epl" -> "Epl", "soccer_la_liga" -> "La Liga"
+    name = sport_key.removeprefix("soccer_").replace("_", " ").title()
+    return name
 
 
 def build_digest_embed(

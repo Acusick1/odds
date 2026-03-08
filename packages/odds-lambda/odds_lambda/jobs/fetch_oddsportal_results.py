@@ -61,17 +61,11 @@ class ResultsStats:
     errors: list[str] = field(default_factory=list)
 
 
-def run_harvester_historic(spec: LeagueSpec | None = None) -> list[dict[str, Any]]:
+def run_harvester_historic(spec: LeagueSpec) -> list[dict[str, Any]]:
     """Run OddsHarvester historic command for the given league's current season.
-
-    Args:
-        spec: League configuration. Defaults to EPL.
 
     Returns parsed match list from JSON output.
     """
-    if spec is None:
-        spec = _get_league_spec(DEFAULT_SPORT_KEY)
-
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as tf:
         tmp_path = Path(tf.name)
 
