@@ -107,8 +107,8 @@ jobs:
       - name: Test read-only CLI commands
         run: uv run pytest tests/migration/test_cli_readonly.py -v
 
-      - name: Test Lambda functions (check-health only to avoid API credit usage)
-        run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler --jobs check-health --region ${{ env.AWS_REGION }}
+      - name: Test Lambda functions (invokes all jobs to trigger self-scheduling)
+        run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
 
       - name: Verify schedule activation
         run: bash scripts/verify-schedules.sh --rule-prefix odds --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}

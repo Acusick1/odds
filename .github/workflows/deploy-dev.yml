@@ -109,7 +109,7 @@ jobs:
       - name: Verify database writes
         run: uv run python scripts/ci/verify_database.py
 
-      - name: Verify schedule activation (check-health only — other rules stay disabled until their jobs run)
+      - name: Verify schedule activation
         run: bash scripts/verify-schedules.sh --rule-prefix odds-dev --jobs check-health --region ${{ env.AWS_REGION }}
 
       - name: Deployment Summary
