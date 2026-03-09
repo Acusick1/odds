@@ -4,31 +4,35 @@ IMPORTANT (LLM agents): This document is read-only. Do not create additional doc
 
 ## Strategic Goal
 
-Predict line movement (closing line value) using cross-source market data. The model targets the delta between current and closing fair prices, identifying when current prices are mispriced relative to where they'll close. Execute on whichever venue (sportsbook or Polymarket) offers the best price relative to the predicted close. Line movement prediction, not outcome prediction.
+Predict line movement (closing line value) using cross-source market data. The model targets the delta between current and closing fair prices, identifying when current prices are mispriced relative to where they'll close. Execute on whichever venue (sportsbook or Betfair exchange) offers the best price relative to the predicted close. Line movement prediction, not outcome prediction.
 
 ## Project Overview
 
-Single-user betting odds data collection and analysis system for NBA games. Integrates sportsbook odds and Polymarket prediction market data for cross-source CLV delta prediction. Prioritizes robust data pipeline architecture with comprehensive historical data collection, storage, and validation. Supports backtesting betting strategies against historical data.
+Single-user betting odds data collection and analysis system supporting NBA and EPL football. Two primary data sources: The Odds API (US bookmakers, live polling) and OddsPortal (UK bookmakers, headless scraper). A scoring pipeline produces CLV predictions per snapshot, delivered via daily Discord digest. Supports backtesting strategies against historical data.
 
 ## Package Structure
 
 ```
 packages/
 ├── odds-core/      # Models, config, database (odds_core/)
-│   └── polymarket_models.py  # Polymarket DB schemas
+│   ├── models.py              # Event, OddsSnapshot, Odds, FetchLog, DataQualityLog
+│   ├── prediction_models.py   # Prediction table (CLV scoring output)
+│   └── config.py              # Pydantic Settings (API, DB, scheduler, alerts)
 ├── odds-lambda/    # Data fetching, storage, scheduling (odds_lambda/)
-│   ├── polymarket_fetcher.py    # Gamma + CLOB API client, market classifier
-│   ├── polymarket_ingestion.py  # Orchestrates event discovery + snapshot collection
-│   ├── polymarket_matching.py   # Matches Polymarket events to sportsbook Events
-│   ├── storage/polymarket_writer.py  # Upserts events/markets, stores snapshots
-│   ├── storage/polymarket_reader.py  # Queries active events, pipeline stats
-│   └── jobs/
-│       ├── fetch_polymarket.py     # Live polling job (scheduled)
-│       └── backfill_polymarket.py  # Historical price backfill from CLOB API
+│   ├── data_fetcher.py        # TheOddsAPIClient (with key rotation)
+│   ├── event_sync.py          # EventSyncService (free /events endpoint)
+│   ├── oddsportal_common.py   # Shared: bookmaker mapping, odds conversion, tier classification
+│   ├── model_loader.py        # S3 model loading with ETag caching
+│   ├── storage/               # readers + writers (odds, polymarket, injury, game_log, pbpstats)
+│   ├── scheduling/            # Multi-backend scheduler (AWS/Railway/local)
+│   └── jobs/                  # All scheduled job entry points (see ARCHITECTURE.md)
 ├── odds-analytics/ # Backtesting, strategies, ML (odds_analytics/)
 └── odds-cli/       # CLI commands (odds_cli/)
-    └── commands/polymarket.py  # discover, status, backfill, link, book
+    ├── commands/              # 16 command groups (see CLI.md)
+    └── alerts/base.py         # AlertManager + DiscordAlert (webhook delivery)
 ```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system architecture, all 10 scheduled jobs, and storage module index.
 
 ## Critical Constraints
 
@@ -41,9 +45,9 @@ packages/
 
 ### AWS Lambda
 
-- 15-minute max execution - design jobs for <5 min
+- Two Lambda functions: scheduler (512 MB, 5 min) and scraper (2 GB, 10 min)
 - Must use NullPool for DB connections (automatic when `SCHEDULER_BACKEND=aws`)
-- Stateless between invocations
+- Stateless between invocations; API key rotation state in SSM Parameter Store
 
 ### API Cost
 
@@ -52,6 +56,7 @@ packages/
 - `/scores` endpoint: 1 unit without `daysFrom`, 2 units with `daysFrom`
 - `/historical/odds` endpoint: 10 units per region × per market
 - Bookmakers do not affect cost (server-side filter only)
+- Multiple API keys rotated via `ODDS_API_KEYS` (comma-separated), active index tracked in SSM
 - Check quota: `odds status quota`
 
 ### Database Connections
@@ -73,31 +78,9 @@ packages/
 - Set `REJECT_INVALID_ODDS=true` for strict validation
 - Review `DataQualityLog` table for patterns
 
-## Polymarket Integration
+## Polymarket Integration (deprioritized)
 
-Polymarket is one of two primary data sources feeding the strategic goal above.
-
-### Data Sources
-
-- **Gamma API** — market/event discovery (metadata, status, volume). No auth required.
-- **CLOB API** — prices, order books, price history. No auth required.
-- NBA: `series_id=10345`, game `tag_id=100639`
-
-### 30-Day Data Retention (CRITICAL)
-
-CLOB `/prices-history` data expires on a ~30-day rolling basis. The backfill job (`odds polymarket backfill`) must run every 3–5 days to avoid data loss. This is the most time-sensitive aspect of the project.
-
-### Polymarket-Specific Patterns
-
-- Token IDs are strings, not integers
-- Order books need client-side sorting (CLOB returns unsorted)
-- Prices are implied probabilities (0.0–1.0), not American odds
-- Event matching parses ticker format (`nba-{away}-{home}-{yyyy}-{mm}-{dd}`) against sportsbook Events with ±24h date window centered on noon UTC (not midnight) to handle US evening games whose UTC timestamps roll to next day
-- Event matching is manual via CLI (`odds polymarket link`), not auto-triggered during fetch jobs
-- `PolymarketEvent.event_id` FK starts `NULL`, linked lazily via `match_polymarket_event()`
-- Market type classified from question text via regex in `classify_market()`
-- Gamma API returns `clobTokenIds`/`outcomes` as JSON strings — writer parses with `json.loads()`
-- Polling uses fixed `price_poll_interval` (default 300s); `FetchTier` filters which events to collect, not frequency
+Pipeline exists but is inactive. Not accessible from UK, data likely collinear with sportsbook odds, 30-day CLOB retention creates ongoing maintenance burden. See [docs/POLYMARKET.md](docs/POLYMARKET.md) for technical details if needed.
 
 ## Code Style
 
@@ -115,10 +98,12 @@ CLOB `/prices-history` data expires on a ~30-day rolling basis. The backfill job
 
 ### Conventions
 
-- Job entry points are `async def main()` functions
-- `PolymarketIngestionService` orchestrates the Polymarket fetch job (not inline in job file)
+- Job entry points are `async def main()` functions in `odds_lambda/jobs/`
 - `EventSyncService` syncs games from free `/events` endpoint as first step in `fetch_odds` job
-- Training pipeline: PM features NaN-fill when Polymarket data unavailable — rows kept, not dropped
+- OddsPortal jobs share utilities via `oddsportal_common.py` (bookmaker key mapping, decimal→American conversion, tier classification)
+- Scoring pipeline: `score_predictions` job loads model from S3 via `model_loader.load_model()` (ETag-cached), extracts features, stores to `Prediction` table with idempotent upsert (`ON CONFLICT DO NOTHING` on event_id + snapshot_id + model_name)
+- Discord alerts: `AlertManager.send_embed()` is generic delivery; each job owns its embed formatting
+- Training pipeline: features NaN-fill when optional data unavailable — rows kept, not dropped
 
 ### Model Types
 
@@ -130,25 +115,27 @@ CLOB `/prices-history` data expires on a ~30-day rolling basis. The backfill job
 
 ## Key Commands
 
-**Before running commands:** Check docs/CLI.md for full command reference and options.
+**Full reference:** [docs/CLI.md](docs/CLI.md)
 
 ```bash
 # Fetch data
-uv run odds fetch current
+uv run odds fetch current --sport soccer_epl
 uv run odds fetch scores
+
+# Scrape OddsPortal
+uv run odds scrape upcoming --league england-premier-league --market 1x2
 
 # Check status
 uv run odds status show
 uv run odds status quota
 
+# ML training and model publishing
+uv run odds train run --config experiments/configs/my_config.yaml
+uv run odds train tune --config experiments/configs/my_config.yaml --train-best
+uv run odds model publish --name epl-clv-home --path models/model.pkl
+
 # Run backtest
 uv run odds backtest run --strategy basic_ev --start 2024-10-01 --end 2024-12-31
-
-# Polymarket
-uv run odds polymarket discover
-uv run odds polymarket status
-uv run odds polymarket backfill
-uv run odds polymarket link
 
 # Run tests
 uv run pytest
@@ -177,13 +164,15 @@ uv run odds scheduler start
 
 | Document | Content |
 |----------|---------|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, scheduler, backends, pipeline |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, scheduler, backends, jobs, pipeline |
 | [docs/DATABASE.md](docs/DATABASE.md) | Schemas, environments, migrations, queries |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | File workflows, testing, code style, config |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | AWS/Railway/Local setup, costs |
-| [docs/CLI.md](docs/CLI.md) | Full command reference |
-| [BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md) | Comprehensive backtesting reference |
-| [docs/POLYMARKET.md](docs/POLYMARKET.md) | Polymarket data model, pipeline, API reference |
-| [docs/INJURIES.md](docs/INJURIES.md) | Injury report pipeline, backfill, feature extraction |
-| [docs/MODELING.md](docs/MODELING.md) | Modeling rationale, features, experiments, open questions |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | AWS Lambda (2 functions), Terraform, S3, costs |
+| [docs/CLI.md](docs/CLI.md) | Full command reference (16 command groups) |
+| [docs/DATA_MODELS.md](docs/DATA_MODELS.md) | Training pipeline, feature groups, target definition |
+| [docs/MODELING.md](docs/MODELING.md) | Modeling rationale, experiments, open questions |
+| [docs/DEBUGGING_SCHEDULER.md](docs/DEBUGGING_SCHEDULER.md) | Scheduler diagnostics, EventBridge, CloudWatch |
+| [docs/POLYMARKET.md](docs/POLYMARKET.md) | Polymarket data model, pipeline (deprioritized) |
+| [docs/INJURIES.md](docs/INJURIES.md) | Injury report pipeline (no predictive value for CLV) |
+| [docs/BOOKMAKER_LINE_RELEASE.md](docs/BOOKMAKER_LINE_RELEASE.md) | Bookmaker line timing analysis |
 | [.env.example](.env.example) | Environment variable template |
