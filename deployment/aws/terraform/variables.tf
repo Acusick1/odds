@@ -29,9 +29,16 @@ variable "database_url" {
 }
 
 variable "odds_api_key" {
-  description = "The Odds API key"
+  description = "The Odds API key (single key, used if odds_api_keys is empty)"
   type        = string
   sensitive   = true
+}
+
+variable "odds_api_keys" {
+  description = "Comma-separated Odds API keys for rotation (overrides odds_api_key)"
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 variable "project_name" {

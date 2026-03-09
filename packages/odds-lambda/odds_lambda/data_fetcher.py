@@ -20,6 +20,8 @@ from tenacity import (
     wait_exponential,
 )
 
+from odds_lambda.api_key_manager import AllKeysExhaustedError, APIKeyManager
+
 logger = structlog.get_logger()
 
 
@@ -35,7 +37,17 @@ class TheOddsAPIClient:
             base_url: Base URL (defaults to settings)
         """
         app_settings = get_settings()
-        self.api_key = api_key or app_settings.api.key
+        self._key_manager: APIKeyManager | None = None
+
+        if api_key:
+            self.api_key = api_key
+        elif app_settings.api.keys:
+            keys = [k.strip() for k in app_settings.api.keys.split(",") if k.strip()]
+            self._key_manager = APIKeyManager(keys)
+            self.api_key = self._key_manager.get_active_key()
+        else:
+            self.api_key = app_settings.api.key
+
         self.base_url = base_url or app_settings.api.base_url
         self.session: aiohttp.ClientSession | None = None
         self._quota_remaining: int | None = None
@@ -108,6 +120,19 @@ class TheOddsAPIClient:
                 return data, elapsed_ms
 
         except aiohttp.ClientResponseError as e:
+            if e.status in (401, 429) and self._key_manager:
+                try:
+                    self.api_key = self._key_manager.rotate_key()
+                    logger.info(
+                        "api_key_rotated_on_error",
+                        status=e.status,
+                        endpoint=endpoint,
+                    )
+                    params.pop("apiKey", None)
+                    return await self._make_request(endpoint, params)
+                except AllKeysExhaustedError:
+                    logger.error("all_api_keys_exhausted", endpoint=endpoint)
+                    raise
             logger.error(
                 "api_request_failed",
                 endpoint=endpoint,

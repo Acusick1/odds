@@ -16,10 +16,13 @@ class APIConfig(BaseSettings):
     )
 
     key: str = Field(..., description="The Odds API key")
+    keys: str | None = Field(
+        default=None, description="Comma-separated API keys for rotation (overrides key)"
+    )
     base_url: str = Field(
         default="https://api.the-odds-api.com/v4", description="Base URL for The Odds API"
     )
-    quota: int = Field(default=20_000, description="Monthly API request quota")
+    quota: int = Field(default=500, description="Monthly API request quota per key")
 
 
 class DatabaseConfig(BaseSettings):

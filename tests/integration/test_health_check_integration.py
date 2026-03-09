@@ -118,14 +118,14 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_health_check_detects_low_quota(self, test_session):
         """Test health check detects low API quota."""
-        # Create fetch log with low quota (1000 out of 20000 = 5%, below 10% critical)
+        # Create fetch log with low quota (25 out of 500 = 5%, below 10% critical)
         fetch_log = FetchLog(
             fetch_time=datetime.now(UTC) - timedelta(minutes=30),
             sport_key="basketball_nba",
             events_count=10,
             bookmakers_count=8,
             success=True,
-            api_quota_remaining=1000,
+            api_quota_remaining=25,
         )
         test_session.add(fetch_log)
         await test_session.commit()
@@ -135,7 +135,7 @@ class TestHealthCheckIntegration:
             with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
                 mock_settings = get_settings()
                 mock_settings.alerts.alert_enabled = False
-                mock_settings.api.quota = 20000  # Set explicit quota for test (1000/20000 = 5%)
+                mock_settings.api.quota = 500  # Set explicit quota for test (25/500 = 5%)
                 mock_get_settings.return_value = mock_settings
 
                 from odds_lambda.health_monitor import HealthMonitor
@@ -146,7 +146,7 @@ class TestHealthCheckIntegration:
         assert health_status.overall_healthy is False
         assert len(health_status.issues_detected) > 0
         assert any("quota" in issue.lower() for issue in health_status.issues_detected)
-        assert health_status.metrics.api_quota_remaining == 1000
+        assert health_status.metrics.api_quota_remaining == 25
 
     @pytest.mark.asyncio
     async def test_health_check_detects_data_quality_issues(self, test_session):
