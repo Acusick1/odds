@@ -109,8 +109,16 @@ jobs:
       - name: Verify database writes
         run: uv run python scripts/ci/verify_database.py
 
-      - name: Verify schedule activation (check-health only — other rules stay disabled until their jobs run)
-        run: bash scripts/verify-schedules.sh --rule-prefix odds-dev --jobs check-health --region ${{ env.AWS_REGION }}
+      - name: Enable self-scheduling rules
+        run: |
+          IFS=',' read -ra JOBS <<< "${{ steps.deploy.outputs.jobs }}"
+          for job in "${JOBS[@]}"; do
+            echo "Enabling odds-dev-${job}..."
+            aws events enable-rule --name "odds-dev-${job}" --region ${{ env.AWS_REGION }}
+          done
+
+      - name: Verify schedule activation
+        run: bash scripts/verify-schedules.sh --rule-prefix odds-dev --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
 
       - name: Deployment Summary
         if: success()
