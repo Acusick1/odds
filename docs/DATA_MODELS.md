@@ -4,8 +4,8 @@
 
 ### Sportsbook Odds
 
-Collected via The Odds API on a polling schedule. Each fetch stores an `OddsSnapshot` tagged
-with a `FetchTier` indicating how far before the game it was collected:
+Collected via The Odds API (live polling) and OddsPortal (headless scraping). Each fetch stores
+an `OddsSnapshot` tagged with a `FetchTier` indicating how far before the game it was collected:
 
 | Tier | Window before game |
 |------|--------------------|
@@ -15,95 +15,100 @@ with a `FetchTier` indicating how far before the game it was collected:
 | `pregame` | 3–12h |
 | `closing` | 0–3h |
 
-Each snapshot contains one `Odds` row per bookmaker per market per outcome. Bookmakers are
-classified as **sharp** (Pinnacle — efficient, signal-bearing) or **retail** (FanDuel,
-DraftKings, BetMGM — slower to move). American odds are converted to implied probabilities
-internally.
+Two bookmaker sets with non-overlapping coverage:
+
+| Source | Bookmakers | Events |
+|--------|-----------|--------|
+| Odds API | Pinnacle, FanDuel, DraftKings, BetMGM, Bovada, etc. (US) | ~1K (NBA, dense snapshots) |
+| OddsPortal | bet365, Betway, Betfred, bwin (UK) | ~5K NBA + ~1.8K EPL (opening + closing only) |
+
+Each snapshot contains one `Odds` row per bookmaker per market per outcome. American odds are
+converted to implied probabilities internally.
 
 **What this gives us:** A time series of market-consensus probabilities across bookmakers,
 from well before the game to just before tip-off.
 
 ---
 
-### Polymarket Prices
+### Polymarket Prices (deprioritized)
 
 Collected via two APIs — Gamma (metadata/discovery) and CLOB (prices/order books). Each NBA
 game has a Polymarket moneyline market with two binary outcome tokens. Prices are already
-implied probabilities (0.0–1.0).
-
-Two snapshot types are stored:
-- **`PolymarketPriceSnapshot`** — mid price, best bid/ask, spread, volume, liquidity; polled every 5 min
-- **`PolymarketOrderBookSnapshot`** — full depth (bid/ask depth totals, imbalance, weighted mid); stored when available
-
-**What this gives us:** A high-frequency time series of a prediction market's view of the same game.
-
-Linkage between the two sources is done by matching the PM event ticker
-(`nba-{away}-{home}-{date}`) to the sportsbook `Event` record, stored as
-`PolymarketEvent.event_id`.
-
----
-
-## How We Combine Them (Cross-Source Training)
-
-Training uses three **feature groups**, all evaluated at the same logical **decision point**
-(currently 7.5h before game = midpoint of the `pregame` tier). The target is the line movement
-from the opening snapshot to the closing snapshot.
-
-### Feature Group 1: `tabular` — Sportsbook snapshot at opening
-
-Point-in-time features from the earliest available sportsbook snapshot (configured as
-`opening_tier`, currently `early` = 24–72h before game). Captures the market's initial line.
-
-Key features (all relative to the configured outcome — home team by default):
-- `consensus_prob` — average implied probability across all bookmakers
-- `sharp_prob` — Pinnacle's implied probability
-- `retail_prob` — average retail bookmaker implied probability
-- `diff` — retail − sharp (sharp money signal at opening)
-- `avg_market_hold` — average overround across bookmakers (market efficiency proxy)
-- `best_available_odds` — best odds available for the outcome
-
-### Feature Group 2: `trajectory` — Sportsbook line movement to decision point
-
-Aggregate features across all snapshots from opening up to the `pregame` tier. Captures
-*how* the line moved, not just where it started.
-
-Key features:
-- **Momentum:** total prob change, avg rate of change, max single-step increase/decrease, net direction
-- **Volatility:** std dev of probabilities, total range, movement count
-- **Trend:** linear regression slope + R², reversal count, acceleration (2nd derivative)
-- **Sharp signal:** total sharp prob change, trend in sharp–retail divergence
-
-### Feature Group 3: `polymarket` — PM price + cross-source divergence at decision point
-
-Two sub-groups, both computed at the same 7.5h decision time:
-
-**PM tabular (14 features):**
-- `pm_home_prob`, `pm_away_prob` — PM implied probabilities
-- `pm_spread`, `pm_midpoint`, `pm_best_bid`, `pm_best_ask`
-- `pm_volume`, `pm_liquidity`
-- `pm_bid_depth`, `pm_ask_depth`, `pm_imbalance`, `pm_weighted_mid` (from order book, when available)
-- `pm_price_velocity` — prob change per hour over the prior 2h
-- `pm_price_acceleration` — change in velocity (first vs second half of window)
-
-**Cross-source (8 features):**
-- `pm_sb_prob_divergence` — `pm_home_prob − sportsbook_consensus_prob` (at same timestamp ±30min)
-- `pm_sb_divergence_abs`, `pm_sb_divergence_direction`
-- `pm_spread_vs_sb_hold` — PM spread minus SB market hold (relative liquidity cost)
-- `pm_sharp_divergence`, `pm_sharp_divergence_abs` — PM vs Pinnacle specifically
-- `pm_mid_vs_sb_consensus` — order book midpoint vs sportsbook consensus
+implied probabilities (0.0–1.0). Pipeline exists but is inactive — not accessible from UK,
+data likely collinear with sportsbook odds.
 
 ---
 
 ## Training Target
 
-For each event, the **regression target** is the closing line movement from opening:
+The **regression target** is the devigged bookmaker CLV delta at each snapshot:
 
 ```
-target = closing_prob − opening_prob
+target = devigged_fair_close - devigged_fair_at_snapshot
 ```
 
-This is the CLV direction: how far and which way the line moved from the opening snapshot to
-close. A model that predicts this can identify games where the current market price is likely
-to shift, which drives the bet-vs-pass decision at prediction time.
+This measures how far and which way the line moved from the current snapshot to close. A model
+that predicts this can identify games where the current market price is likely to shift, which
+drives the bet-vs-pass decision.
+
+The target bookmaker is configurable (`target_bookmaker` in training config). bet365 is the
+primary target for EPL; Pinnacle was tested for NBA but yielded no signal (see MODELING.md).
+
+Why delta (not absolute close):
+- We don't need to predict what the line will be — we need to predict how much it will move
+- Delta is stationary and mean-zero, easier to learn than absolute levels
+- Directly maps to CLV: positive delta = current price is too low, line will move up
 
 ---
+
+## Available Feature Groups
+
+### Sportsbook Tabular (28 features)
+Point-in-time snapshot at decision time:
+- **Consensus**: avg/std odds, implied probs (home/away)
+- **Sharp vs retail**: sharp prob vs retail avg, differential
+- **Market efficiency**: num bookmakers, avg/std market hold
+- **Line shopping**: best/worst odds, range across books
+
+### Trajectory (23 features)
+Aggregate statistics from the full odds sequence up to decision time:
+- **Momentum**: prob change to decision, avg change rate, max increase/decrease
+- **Volatility**: prob range, odds volatility, movement count
+- **Trend**: slope, strength, reversals, acceleration
+- **Sharp money**: sharp prob trajectory, sharp-retail divergence trend, sharp leads retail (binary)
+- **Timing**: early vs recent movement distribution
+
+### Polymarket (14 features) — deprioritized
+PM prices and order book microstructure. Not validated at scale (tested with only 230 events).
+
+### Cross-Source (7 features) — deprioritized
+PM vs sportsbook divergence.
+
+### Injury (6 features) — no predictive value
+Impact-weighted injury burden per team. Extensively tested (Exp 6, 6b) — adds zero signal
+for CLV prediction at any decision tier when properly tuned. See MODELING.md for details.
+
+### Rest/Schedule (5 features)
+Game context from NBA game logs:
+- **Days rest**: home/away days since previous game
+- **Rest advantage**: home days rest minus away days rest
+- **Back-to-back**: home/away boolean flags
+
+### Sequence (13 features per timestep, for LSTM) — no predictive value
+Time-series per snapshot. LSTM conclusively ruled out — sequential modeling adds no value
+over cross-sectional features (see MODELING.md).
+
+---
+
+## Configuration
+
+Training uses YAML config files in `experiments/configs/`. Key fields:
+
+- `data_source`: `"oddsportal"`, `"oddsapi"`, `"all"`, or `null` (no filter)
+- `target_type`: `"devigged_bookmaker"`
+- `target_bookmaker`: e.g. `"bet365"`, `"pinnacle"`
+- `feature_groups`: list of groups to include (e.g. `["tabular"]`)
+- `outcome`: `"home"` or `"away"` (which side to predict CLV for)
+- `start_date` / `end_date`: date range filter
+- `min_snapshots`: minimum snapshots per event (for sequence data)
+- `sport_key`: sport filter (e.g. `"soccer_epl"`, `"basketball_nba"`)

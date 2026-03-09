@@ -116,21 +116,27 @@ DATABASE_URL="<prod_url>" uv run python scripts/check_tier_distribution.py
 - **Region**: `eu-west-1`
 - **Production DB**: Neon PostgreSQL (connection string in `.env` as `PROD_DATABASE_URL`)
 
-## Three Scheduled Jobs
+## Scheduled Jobs
 
-The Lambda function handles three jobs based on event payload:
+Two Lambda functions handle jobs based on event payload:
 
+### Scheduler Lambda (`odds-scheduler-dev`)
+
+**Self-scheduling jobs** (dynamic cron, pre-created disabled):
 1. **`fetch-odds`**: Fetches current odds for upcoming games
-   - Rule: `odds-fetch-odds` (dynamic cron schedule)
-   - Bootstrap: `odds-scheduler-fetch-odds-bootstrap` (rate: 1 day)
-
 2. **`fetch-scores`**: Fetches final scores for completed games
-   - Rule: `odds-fetch-scores` (dynamic cron schedule)
-   - Bootstrap: `odds-scheduler-fetch-scores-bootstrap` (rate: 6 hours)
-
 3. **`update-status`**: Updates event status (scheduled → live → final)
-   - Rule: `odds-update-status` (dynamic cron schedule)
-   - Bootstrap: `odds-scheduler-update-status-bootstrap` (rate: 1 hour)
+4. **`check-health`**: System health checks
+
+**Fixed-schedule jobs:**
+5. **`score-predictions`**: CLV model inference — `cron(15 * * * ? *)` (hourly at :15)
+6. **`daily-digest`**: Discord predictions digest — `cron(0 8 * * ? *)` (08:00 UTC)
+7. **`backfill-polymarket`**: Polymarket backfill — `rate(3 days)` (if enabled)
+
+### Scraper Lambda (`odds-scheduler-dev-scraper`)
+
+8. **`fetch-oddsportal`**: Scrapes upcoming EPL match odds — `rate(1 hour)`
+9. **`fetch-oddsportal-results`**: Scrapes EPL results + closing odds — `cron(0 8 * * ? *)`
 
 ## Intelligent Scheduling Logic
 
