@@ -12,7 +12,8 @@ Configuration uses Pydantic Settings with environment variables. See `packages/o
 |----------|-------------|---------|
 | `ODDS_API_KEY` | The Odds API authentication key | Required |
 | `ODDS_API_BASE_URL` | API base URL | https://api.the-odds-api.com/v4 |
-| `ODDS_API_QUOTA` | Monthly request quota | 20,000 |
+| `ODDS_API_KEYS` | Comma-separated rotation keys | Optional (overrides single key) |
+| `ODDS_API_QUOTA` | Monthly request quota per key | 500 |
 
 ### Database Settings (`DatabaseConfig`)
 
@@ -25,8 +26,8 @@ Configuration uses Pydantic Settings with environment variables. See `packages/o
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SPORTS` | Sports to track | ["basketball_nba"] |
-| `BOOKMAKERS` | Bookmaker list | [pinnacle, circa, draftkings, fanduel, betmgm, williamhill_us, betrivers, bovada] |
+| `SPORTS` | Sports to track | ["basketball_nba"] (also supports "soccer_epl") |
+| `BOOKMAKERS` | Bookmaker list | [pinnacle, circa, draftkings, fanduel, betmgm, williamhill_us, betrivers, bovada] (US); OddsPortal uses [bet365, betway, betfred, bwin] (UK) |
 | `MARKETS` | Bet types | ["h2h", "spreads", "totals"] |
 | `REGIONS` | Odds regions | ["us"] |
 
@@ -51,6 +52,15 @@ Configuration uses Pydantic Settings with environment variables. See `packages/o
 |----------|-------------|---------|
 | `ENABLE_VALIDATION` | Run data quality checks | true |
 | `REJECT_INVALID_ODDS` | Reject vs log invalid data | false |
+
+### Alerts (`AlertConfig`)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DISCORD_WEBHOOK_URL` | Discord webhook for alerts/digests | Optional |
+| `ALERT_ENABLED` | Enable alert sending | false |
+| `QUOTA_WARNING_THRESHOLD` | Quota warning at this % remaining | 0.2 |
+| `CONSECUTIVE_FAILURES_THRESHOLD` | Alert after N consecutive failures | 3 |
 
 ### Logging (`LoggingConfig`)
 
@@ -214,7 +224,7 @@ Project uses **uv** workspace architecture. Dependencies managed via `pyproject.
 pre-commit install
 ```
 
-**LLM Agents:** Do NOT manually run `ruff` or `pre-commit`. Automated via git hooks and CI.
+Run `uv run ruff check --fix` and `uv run ruff format` immediately before committing.
 
 ## Issue Creation Workflow
 

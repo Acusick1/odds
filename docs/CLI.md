@@ -2,6 +2,27 @@
 
 > Complete reference for all CLI commands.
 
+## Command Groups
+
+| Group | Purpose |
+|-------|---------|
+| `fetch` | Fetch odds data from APIs |
+| `scrape` | Scrape odds from OddsPortal |
+| `discover` | Discover upcoming/historical games |
+| `backfill` | Historical data backfill |
+| `backtest` | Backtest betting strategies |
+| `train` | Train and tune ML models |
+| `model` | Model artifact management (S3) |
+| `status` | System status and monitoring |
+| `validate` | Validate data completeness |
+| `quality` | Data quality coverage analysis |
+| `copy` | Copy data from production |
+| `scheduler` | Scheduler management (local) |
+| `polymarket` | Polymarket data operations (deprioritized) |
+| `injuries` | NBA injury report operations |
+| `nba-stats` | NBA game log operations |
+| `pbpstats` | PBPStats player season stats |
+
 ## Data Collection
 
 ### Fetch Current Odds
@@ -9,6 +30,7 @@
 ```bash
 odds fetch current
 odds fetch current --sport basketball_nba
+odds fetch current --sport soccer_epl
 ```
 
 Manually fetches current odds for upcoming games.
@@ -21,6 +43,24 @@ odds fetch scores --sport basketball_nba --days 3
 ```
 
 Fetches game scores and updates event status.
+
+### Scrape OddsPortal
+
+```bash
+odds scrape upcoming
+odds scrape upcoming --league england-premier-league --market 1x2 --market over_under_2.5
+odds scrape upcoming --dry-run
+odds scrape upcoming --from-file matches.json
+```
+
+Scrapes upcoming match odds from OddsPortal via OddsHarvester (headless browser).
+
+**Options:**
+- `--sport, -s`: OddsHarvester sport name (default: football)
+- `--league, -l`: OddsHarvester league name (default: england-premier-league)
+- `--market, -m`: Markets to scrape, repeatable (default: 1x2)
+- `--dry-run`: Scrape and convert but don't store
+- `--from-file`: Load matches from JSON file instead of scraping
 
 ## Discovery Commands
 
@@ -85,6 +125,87 @@ odds backfill scores --start YYYY-MM-DD --end YYYY-MM-DD --dry-run
 ```
 
 Backfills missing scores using NBA API. Use `--dry-run` to preview changes.
+
+## ML Training Commands
+
+### Train a Model
+
+```bash
+odds train run --config experiments/configs/my_config.yaml
+odds train run --config my_config.yaml --output models/output.pkl --verbose
+odds train run --config my_config.yaml --track --sport soccer_epl
+```
+
+Trains an ML model using a configuration file.
+
+**Required:**
+- `--config, -c`: Path to training configuration file (YAML/JSON)
+
+**Optional:**
+- `--output, -o`: Override output path for model
+- `--dry-run`: Show what would be done without executing
+- `--verbose, -v`: Enable detailed output logging
+- `--track`: Enable MLflow experiment tracking
+- `--tracking-uri`: Override MLflow tracking URI
+- `--sport`: Override sport key filter
+
+### Tune Hyperparameters
+
+```bash
+odds train tune --config experiments/configs/my_config.yaml
+odds train tune --config my_config.yaml --n-trials 200 --train-best
+```
+
+Runs Optuna hyperparameter optimization. Requires config with a `tuning` section.
+
+**Required:**
+- `--config, -c`: Path to training configuration file with tuning section
+
+**Optional:**
+- `--output, -o`: Override output path for best config
+- `--train-best`: Train final model with best parameters after tuning
+- `--n-trials`: Override number of trials from config
+- `--timeout`: Override timeout in seconds
+- `--study-name`: Optuna study name for persistence/resumption
+- `--storage`: Optuna storage URL
+- `--track`: Enable MLflow experiment tracking
+- `--sport`: Override sport key filter
+
+### Validate Config
+
+```bash
+odds train validate --config experiments/configs/my_config.yaml
+```
+
+Validates a configuration file without executing training.
+
+### List Configs
+
+```bash
+odds train list-configs
+odds train list-configs --directory experiments/configs
+```
+
+Lists available configuration files in a directory.
+
+## Model Management
+
+### Publish Model to S3
+
+```bash
+odds model publish --name epl-clv-home --path models/model.pkl
+odds model publish --name epl-clv-home --path models/model.pkl --version v1.2
+```
+
+Publishes a trained model to S3. Uploads `model.pkl`, `config.yaml`, and `metadata.json` to both `{name}/{version}/` and `{name}/latest/`.
+
+**Required:**
+- `--name, -n`: Model name (S3 key prefix)
+- `--path, -p`: Path to model .pkl file
+
+**Optional:**
+- `--bucket, -b`: S3 bucket name (default: odds-models-{account_id})
+- `--version, -v`: Version label (default: git SHA or timestamp)
 
 ## Backtesting Commands
 
@@ -194,7 +315,43 @@ odds copy from-prod --start YYYY-MM-DD --end YYYY-MM-DD
 
 Copies data from production database to local database.
 
-## Polymarket Commands
+## NBA Data Commands
+
+### Game Logs
+
+```bash
+odds nba-stats fetch --season 2024-25
+odds nba-stats fetch --all
+odds nba-stats status
+```
+
+Fetches NBA team game logs from stats.nba.com via Playwright (headless Firefox). `--all` fetches seasons 2021-22 through current.
+
+### Player Stats (PBPStats)
+
+```bash
+odds pbpstats fetch --season 2024-25
+odds pbpstats fetch --all
+odds pbpstats backfill
+odds pbpstats status
+```
+
+Fetches player season stats (on/off ratings, minutes) from PBPStats API. Used for injury impact scoring.
+
+### Injury Reports
+
+```bash
+odds injuries fetch
+odds injuries backfill --season 2024-25
+odds injuries backfill --season 2025-26 --hours-before 12,8,2 --dry-run
+odds injuries status
+```
+
+Fetches NBA injury reports from official PDFs. Backfill computes target timestamps from game `commence_time` values.
+
+## Polymarket Commands (deprioritized)
+
+Pipeline exists but is inactive. Not accessible from UK, data likely collinear with sportsbook odds.
 
 ### Discover Events
 
@@ -220,9 +377,7 @@ odds polymarket backfill --include-spreads --include-totals
 odds polymarket backfill --dry-run
 ```
 
-Fetches historical price data for closed markets from the CLOB API. Moneyline only by default. Safe to run repeatedly — skips markets with ≥10 existing snapshots.
-
-**CRITICAL:** Must run every 3–5 days. CLOB `/prices-history` data expires on a ~30-day rolling basis.
+Fetches historical price data for closed markets from the CLOB API.
 
 ### Link Events
 
@@ -231,7 +386,7 @@ odds polymarket link
 odds polymarket link --dry-run
 ```
 
-Matches unlinked Polymarket events to internal sportsbook Event records via ticker parsing.
+Matches unlinked Polymarket events to sportsbook Event records via ticker parsing.
 
 ### View Order Book
 
@@ -239,7 +394,7 @@ Matches unlinked Polymarket events to internal sportsbook Event records via tick
 odds polymarket book <ticker>
 ```
 
-Shows the live order book for a game's moneyline market. Ticker format: `nba-{away}-{home}-{yyyy}-{mm}-{dd}`.
+Shows the live order book for a game's moneyline market.
 
 ## Scheduler Commands
 
@@ -287,10 +442,3 @@ odds backfill scores --start 2024-10-01 --end 2024-12-31
 # 5. Check status
 odds backfill status
 ```
-
-### Purpose
-
-- Validate schema with real data
-- Test query patterns and performance
-- Enable immediate backtesting
-- Verify data quality checks

@@ -1,6 +1,8 @@
 # Polymarket Integration
 
-> Data model, pipeline architecture, and API reference for Polymarket prediction market data.
+> **Status: Deprioritized indefinitely.** Not accessible from UK, data likely collinear with sportsbook odds, 30-day CLOB retention creates ongoing maintenance burden. Pipeline code exists but is inactive.
+
+Data model, pipeline architecture, and API reference for Polymarket prediction market data.
 
 For strategic context, key constraints, and quick-reference patterns see the Polymarket Integration section in [CLAUDE.md](../CLAUDE.md).
 
