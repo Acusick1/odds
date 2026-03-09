@@ -68,6 +68,11 @@ RUN dnf install -y \
     gtk3 \
     && dnf clean all
 
+# Signal to OddsHarvester that it's running in a container so it uses
+# Docker-appropriate Chromium args (--no-sandbox, --disable-dev-shm-usage).
+# Lambda containers don't have /.dockerenv which is what OddsHarvester checks.
+RUN touch /.dockerenv
+
 # Copy compiled dependencies from builder
 COPY --from=builder /asset ${LAMBDA_TASK_ROOT}
 

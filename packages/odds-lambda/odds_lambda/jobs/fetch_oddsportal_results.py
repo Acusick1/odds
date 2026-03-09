@@ -93,7 +93,7 @@ def run_harvester_historic() -> list[dict[str, Any]]:
 
         if result.returncode != 0:
             raise RuntimeError(
-                f"OddsHarvester exited with code {result.returncode}: {result.stderr[:500]}"
+                f"OddsHarvester exited with code {result.returncode}: {result.stderr[-2000:]}"
             )
 
         data = json.loads(tmp_path.read_text())
