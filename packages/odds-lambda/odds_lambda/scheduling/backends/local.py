@@ -81,10 +81,10 @@ class LocalSchedulerBackend(SchedulerBackend):
 
         # Check that job registry can be loaded
         try:
-            from odds_lambda.scheduling.jobs import get_job_registry
+            from odds_lambda.scheduling.jobs import list_available_jobs
 
-            registry = get_job_registry()
-            if not registry:
+            jobs = list_available_jobs()
+            if not jobs:
                 builder.add_warning("Job registry is empty")
         except ImportError as e:
             builder.add_warning(f"Job registry import warning: {e}")

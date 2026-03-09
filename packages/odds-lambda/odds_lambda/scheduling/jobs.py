@@ -1,57 +1,32 @@
 """Centralized job registry for scheduler backends."""
 
 from collections.abc import Awaitable, Callable
+from importlib import import_module
+from typing import Any
 
-# Lazy-loaded registry to avoid circular imports
-_JOB_REGISTRY: dict[str, Callable[[], Awaitable[None]]] | None = None
+# Maps job name to (module_path, function_name).
+# Modules are imported lazily when the job is first requested, so a Lambda
+# that only runs scraper jobs never imports score_predictions (which needs
+# odds_analytics / xgboost).
+_JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
+    "fetch-odds": ("odds_lambda.jobs.fetch_odds", "main"),
+    "fetch-scores": ("odds_lambda.jobs.fetch_scores", "main"),
+    "update-status": ("odds_lambda.jobs.update_status", "main"),
+    "check-health": ("odds_lambda.jobs.check_health", "main"),
+    "fetch-polymarket": ("odds_lambda.jobs.fetch_polymarket", "main"),
+    "backfill-polymarket": ("odds_lambda.jobs.backfill_polymarket", "main"),
+    "fetch-oddsportal": ("odds_lambda.jobs.fetch_oddsportal", "main"),
+    "fetch-oddsportal-results": ("odds_lambda.jobs.fetch_oddsportal_results", "main"),
+    "score-predictions": ("odds_lambda.jobs.score_predictions", "main"),
+    "daily-digest": ("odds_lambda.jobs.daily_digest", "main"),
+}
 
-
-def get_job_registry() -> dict[str, Callable[[], Awaitable[None]]]:
-    """
-    Get mapping of job names to job functions.
-
-    Registry is lazy-loaded on first access to avoid importing
-    job modules during backend initialization.
-
-    Returns:
-        Dictionary mapping job names (e.g., 'fetch-odds') to async job functions
-    """
-    global _JOB_REGISTRY
-
-    if _JOB_REGISTRY is None:
-        # Import job modules only when needed
-        from odds_lambda.jobs import (
-            backfill_polymarket,
-            check_health,
-            daily_digest,
-            fetch_odds,
-            fetch_oddsportal,
-            fetch_oddsportal_results,
-            fetch_polymarket,
-            fetch_scores,
-            score_predictions,
-            update_status,
-        )
-
-        _JOB_REGISTRY = {
-            "fetch-odds": fetch_odds.main,
-            "fetch-scores": fetch_scores.main,
-            "update-status": update_status.main,
-            "check-health": check_health.main,
-            "fetch-polymarket": fetch_polymarket.main,
-            "backfill-polymarket": backfill_polymarket.main,
-            "fetch-oddsportal": fetch_oddsportal.main,
-            "fetch-oddsportal-results": fetch_oddsportal_results.main,
-            "score-predictions": score_predictions.main,
-            "daily-digest": daily_digest.main,
-        }
-
-    return _JOB_REGISTRY
+# Cache of already-imported job functions.
+_loaded_jobs: dict[str, Callable[..., Awaitable[Any]]] = {}
 
 
-def get_job_function(job_name: str) -> Callable[[], Awaitable[None]]:
-    """
-    Get job function by name.
+def get_job_function(job_name: str) -> Callable[..., Awaitable[Any]]:
+    """Get job function by name, importing its module on first access.
 
     Args:
         job_name: Job identifier (e.g., 'fetch-odds')
@@ -62,18 +37,20 @@ def get_job_function(job_name: str) -> Callable[[], Awaitable[None]]:
     Raises:
         KeyError: If job name not found in registry
     """
-    registry = get_job_registry()
-    if job_name not in registry:
-        available = ", ".join(sorted(registry.keys()))
+    if job_name in _loaded_jobs:
+        return _loaded_jobs[job_name]
+
+    if job_name not in _JOB_MODULE_MAP:
+        available = ", ".join(sorted(_JOB_MODULE_MAP))
         raise KeyError(f"Unknown job '{job_name}'. Available jobs: {available}")
-    return registry[job_name]
+
+    module_path, func_name = _JOB_MODULE_MAP[job_name]
+    module = import_module(module_path)
+    fn = getattr(module, func_name)
+    _loaded_jobs[job_name] = fn
+    return fn
 
 
 def list_available_jobs() -> list[str]:
-    """
-    List all registered job names.
-
-    Returns:
-        Sorted list of job names
-    """
-    return sorted(get_job_registry().keys())
+    """List all registered job names."""
+    return sorted(_JOB_MODULE_MAP)
