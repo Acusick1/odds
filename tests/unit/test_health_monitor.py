@@ -23,7 +23,7 @@ def mock_settings():
     )
     settings.api = APIConfig(
         key="test-key",
-        quota=20000,
+        quota=500,
     )
     return settings
 
@@ -220,14 +220,14 @@ class TestHealthMonitor:
         with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
             mock_reader = AsyncMock()
             mock_reader.get_database_stats.return_value = {
-                "api_quota_remaining": 5000,  # 25% of 20000
+                "api_quota_remaining": 125,  # 25% of 500
             }
             mock_reader_class.return_value = mock_reader
 
             is_healthy, quota_remaining, quota_fraction = await monitor.check_api_quota()
 
             assert is_healthy is True
-            assert quota_remaining == 5000
+            assert quota_remaining == 125
             assert quota_fraction == 0.25
 
     @pytest.mark.asyncio
@@ -238,14 +238,14 @@ class TestHealthMonitor:
         with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
             mock_reader = AsyncMock()
             mock_reader.get_database_stats.return_value = {
-                "api_quota_remaining": 3000,  # 15% of 20000 (below 20% warning)
+                "api_quota_remaining": 75,  # 15% of 500 (below 20% warning)
             }
             mock_reader_class.return_value = mock_reader
 
             is_healthy, quota_remaining, quota_fraction = await monitor.check_api_quota()
 
             assert is_healthy is False
-            assert quota_remaining == 3000
+            assert quota_remaining == 75
             assert quota_fraction == 0.15
 
     @pytest.mark.asyncio
