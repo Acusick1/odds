@@ -1,5 +1,7 @@
 """API key rotation manager with SSM-backed state persistence."""
 
+from typing import Any
+
 import boto3
 import structlog
 from botocore.exceptions import ClientError
@@ -26,14 +28,15 @@ class APIKeyManager:
             raise ValueError("At least one API key is required")
         self._keys = keys
         self._active_index: int | None = None
+        self._start_index: int | None = None
         self._ssm_available: bool | None = None
-        self._ssm_client = None
+        self._ssm_client: Any = None
 
     @property
     def key_count(self) -> int:
         return len(self._keys)
 
-    def _get_ssm_client(self):
+    def _get_ssm_client(self) -> Any:
         if self._ssm_client is None:
             self._ssm_client = boto3.client("ssm")
         return self._ssm_client
@@ -81,6 +84,7 @@ class APIKeyManager:
         """Get the currently active API key."""
         if self._active_index is None:
             self._active_index = self._read_index_from_ssm()
+            self._start_index = self._active_index
 
         return self._keys[self._active_index]
 
@@ -88,10 +92,11 @@ class APIKeyManager:
         """Rotate to the next API key. Raises AllKeysExhaustedError if we've cycled through all keys."""
         if self._active_index is None:
             self._active_index = self._read_index_from_ssm()
+            self._start_index = self._active_index
 
         next_index = (self._active_index + 1) % len(self._keys)
 
-        if next_index == 0 and self._active_index != 0:
+        if next_index == self._start_index:
             raise AllKeysExhaustedError(f"All {len(self._keys)} API keys exhausted")
 
         self._active_index = next_index

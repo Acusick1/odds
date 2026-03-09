@@ -128,6 +128,7 @@ class TheOddsAPIClient:
                         status=e.status,
                         endpoint=endpoint,
                     )
+                    params.pop("apiKey", None)
                     return await self._make_request(endpoint, params)
                 except AllKeysExhaustedError:
                     logger.error("all_api_keys_exhausted", endpoint=endpoint)

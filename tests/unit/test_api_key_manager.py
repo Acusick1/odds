@@ -62,18 +62,30 @@ class TestAPIKeyManager:
         manager = APIKeyManager(["key0", "key1", "key2"])
         manager._ssm_available = False
         manager._active_index = 0
+        manager._start_index = 0
 
         new_key = manager.rotate_key()
         assert new_key == "key1"
         assert manager._active_index == 1
 
     def test_rotate_key_raises_when_all_exhausted(self):
-        """Should raise AllKeysExhaustedError when cycling back to 0."""
+        """Should raise AllKeysExhaustedError when cycling back to start."""
         manager = APIKeyManager(["key0", "key1"])
         manager._ssm_available = False
         manager._active_index = 1
+        manager._start_index = 0
 
         with pytest.raises(AllKeysExhaustedError, match="2 API keys exhausted"):
+            manager.rotate_key()
+
+    def test_rotate_single_key_raises_immediately(self):
+        """Should raise AllKeysExhaustedError with a single key (no infinite recursion)."""
+        manager = APIKeyManager(["only_key"])
+        manager._ssm_available = False
+        manager._active_index = 0
+        manager._start_index = 0
+
+        with pytest.raises(AllKeysExhaustedError, match="1 API keys exhausted"):
             manager.rotate_key()
 
     def test_rotate_key_writes_to_ssm(self):
@@ -85,6 +97,7 @@ class TestAPIKeyManager:
         manager._ssm_client = mock_ssm
         manager._ssm_available = True
         manager._active_index = 0
+        manager._start_index = 0
 
         manager.rotate_key()
 
