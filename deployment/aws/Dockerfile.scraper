@@ -73,6 +73,10 @@ RUN dnf install -y \
 # Lambda containers don't have /.dockerenv which is what OddsHarvester checks.
 RUN touch /.dockerenv
 
+# Chromium needs a writable home directory for its user profile/cache.
+# Lambda's filesystem is read-only except /tmp.
+ENV HOME=/tmp
+
 # Copy compiled dependencies from builder
 COPY --from=builder /asset ${LAMBDA_TASK_ROOT}
 
