@@ -191,9 +191,10 @@ def build_raw_data(
         if any(e is None for e in entries):
             continue
 
-        decimals = [e.get("odds") for e in entries]  # type: ignore[union-attr]
-        if any(d is None for d in decimals):
+        raw_decimals = [e.get("odds") for e in entries]  # type: ignore[union-attr]
+        if any(d is None for d in raw_decimals):
             continue
+        decimals: list[float] = raw_decimals  # type: ignore[assignment]  # None filtered above
 
         if outcome_names:
             outcomes: list[dict[str, Any]] = []
