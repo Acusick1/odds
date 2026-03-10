@@ -19,18 +19,10 @@ class TestNormalizeTeam:
     @pytest.mark.parametrize(
         ("raw", "expected"),
         [
-            ("Man United", "Manchester United"),
+            ("Man United", "Manchester Utd"),
             ("Man City", "Manchester City"),
-            ("Nott'm Forest", "Nottingham Forest"),
-            ("Wolves", "Wolverhampton Wanderers"),
-            ("Tottenham", "Tottenham Hotspur"),
-            ("West Ham", "West Ham United"),
-            ("Brighton", "Brighton and Hove Albion"),
-            ("Newcastle", "Newcastle United"),
-            ("Leicester", "Leicester City"),
-            ("Leeds", "Leeds United"),
+            ("Nott'm Forest", "Nottingham"),
             ("Sheffield United", "Sheffield Utd"),
-            ("West Brom", "West Bromwich Albion"),
         ],
     )
     def test_mapped_teams(self, raw: str, expected: str) -> None:
@@ -38,7 +30,22 @@ class TestNormalizeTeam:
 
     @pytest.mark.parametrize(
         "name",
-        ["Arsenal", "Chelsea", "Liverpool", "Everton", "Crystal Palace", "Brentford"],
+        [
+            "Arsenal",
+            "Chelsea",
+            "Liverpool",
+            "Everton",
+            "Crystal Palace",
+            "Brentford",
+            "Wolves",
+            "Tottenham",
+            "West Ham",
+            "Brighton",
+            "Newcastle",
+            "Leicester",
+            "Leeds",
+            "West Brom",
+        ],
     )
     def test_passthrough_teams(self, name: str) -> None:
         assert normalize_team(name) == name

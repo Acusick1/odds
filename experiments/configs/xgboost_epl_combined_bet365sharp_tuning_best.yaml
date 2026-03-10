@@ -60,6 +60,8 @@ training:
     - h2h
     outcome: home
     closing_tier: closing
+    closing_source_priority:
+    - football_data_uk
     sampling:
       strategy: tier
       decision_tier: sharp

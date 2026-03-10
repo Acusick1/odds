@@ -27,6 +27,7 @@ def _make_snapshot(
     hours_before: float,
     home_price: int = -120,
     away_price: int = 100,
+    api_request_id: str = "test",
 ) -> OddsSnapshot:
     snapshot_time = event.commence_time - timedelta(hours=hours_before)
     return OddsSnapshot(
@@ -54,6 +55,7 @@ def _make_snapshot(
         bookmaker_count=len(bookmakers),
         fetch_tier="closing",
         hours_until_commence=hours_before,
+        api_request_id=api_request_id,
     )
 
 
@@ -126,3 +128,100 @@ class TestSelectClosingSnapshot:
         config = FeatureConfig(target_type="devigged_bookmaker", target_bookmaker="bet365")
         result = _select_closing_snapshot(candidates, event, config)
         assert result is oddsportal_snap
+
+
+class TestClosingSourcePriority:
+    """Tests for closing_source_priority in _select_closing_snapshot."""
+
+    def test_priority_selects_matching_source(self) -> None:
+        """When priority matches a source, return that source's snapshot."""
+        event = _make_event()
+        op_snap = _make_snapshot(
+            event,
+            ["bet365", "betway"],
+            hours_before=0.5,
+            api_request_id="oddsportal",
+        )
+        fduk_snap = _make_snapshot(
+            event,
+            ["bet365", "pinnacle"],
+            hours_before=1.0,
+            api_request_id="football_data_uk",
+        )
+        candidates = [fduk_snap, op_snap]
+
+        config = FeatureConfig(
+            target_type="devigged_bookmaker",
+            target_bookmaker="bet365",
+            closing_source_priority=["football_data_uk"],
+        )
+        result = _select_closing_snapshot(candidates, event, config)
+        assert result is fduk_snap
+
+    def test_priority_falls_back_when_no_match(self) -> None:
+        """When priority source not available, fall back to latest with bookmaker."""
+        event = _make_event()
+        op_snap = _make_snapshot(
+            event,
+            ["bet365", "betway"],
+            hours_before=0.5,
+            api_request_id="oddsportal",
+        )
+        candidates = [op_snap]
+
+        config = FeatureConfig(
+            target_type="devigged_bookmaker",
+            target_bookmaker="bet365",
+            closing_source_priority=["football_data_uk"],
+        )
+        result = _select_closing_snapshot(candidates, event, config)
+        assert result is op_snap
+
+    def test_priority_order_respected(self) -> None:
+        """First matching priority source wins over later ones."""
+        event = _make_event()
+        op_snap = _make_snapshot(
+            event,
+            ["bet365"],
+            hours_before=0.5,
+            api_request_id="oddsportal",
+        )
+        fduk_snap = _make_snapshot(
+            event,
+            ["bet365"],
+            hours_before=1.0,
+            api_request_id="football_data_uk",
+        )
+        candidates = [fduk_snap, op_snap]
+
+        config = FeatureConfig(
+            target_type="devigged_bookmaker",
+            target_bookmaker="bet365",
+            closing_source_priority=["oddsportal", "football_data_uk"],
+        )
+        result = _select_closing_snapshot(candidates, event, config)
+        assert result is op_snap
+
+    def test_null_priority_behaves_as_before(self) -> None:
+        """When closing_source_priority is None, latest with bookmaker wins."""
+        event = _make_event()
+        fduk_snap = _make_snapshot(
+            event,
+            ["bet365"],
+            hours_before=1.0,
+            api_request_id="football_data_uk",
+        )
+        op_snap = _make_snapshot(
+            event,
+            ["bet365"],
+            hours_before=0.5,
+            api_request_id="oddsportal",
+        )
+        candidates = [fduk_snap, op_snap]
+
+        config = FeatureConfig(
+            target_type="devigged_bookmaker",
+            target_bookmaker="bet365",
+        )
+        result = _select_closing_snapshot(candidates, event, config)
+        assert result is op_snap
