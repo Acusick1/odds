@@ -27,7 +27,7 @@ odds-core = { workspace = true }
 odds-lambda = { workspace = true }
 odds-analytics = { workspace = true }
 odds-cli = { workspace = true }
-oddsharvester = { git = "https://github.com/Acusick1/OddsHarvester.git", branch = "master" }
+oddsharvester = { git = "https://github.com/Acusick1/OddsHarvester.git", branch = "fix/fractional-odds-and-unknown-bookmaker" }
 
 [dependency-groups]
 dev = [
