@@ -21,6 +21,7 @@ resource "aws_lambda_function" "odds_scraper" {
       DATABASE_URL      = var.database_url
       ODDS_API_KEY      = var.odds_api_key
       ODDS_API_KEYS     = var.odds_api_keys
+      SSM_API_KEY_INDEX = "/${var.project_name}/active-api-key-index"
       LOG_LEVEL         = "INFO"
     }
   }
