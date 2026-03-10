@@ -236,6 +236,53 @@ class TestFailedUrlRetry:
         assert len(out.success) == 1
 
     @pytest.mark.asyncio
+    async def test_mixed_retryable_and_non_retryable_preserves_non_retryable(self) -> None:
+        """Non-retryable failures are preserved after retry merges results."""
+        original_success = [{"match": i} for i in range(5)]
+        failed_urls = [
+            FakeFailedUrl(url="https://oddsportal.com/match/timeout_1", is_retryable=True),
+            FakeFailedUrl(
+                url="https://oddsportal.com/match/404",
+                is_retryable=False,
+                error_type="not_found",
+            ),
+            FakeFailedUrl(url="https://oddsportal.com/match/timeout_2", is_retryable=True),
+            FakeFailedUrl(
+                url="https://oddsportal.com/match/auth_error",
+                is_retryable=False,
+                error_type="auth",
+            ),
+        ]
+        result = _make_result(success=original_success, failed=failed_urls)
+
+        # Retry recovers 1 of 2 retryable, still fails 1
+        retry_success = [{"match": "recovered_0"}]
+        retry_failed = [FakeFailedUrl(url="https://oddsportal.com/match/timeout_2")]
+        retry_result = _make_result(success=retry_success, failed=retry_failed)
+
+        mock_run = AsyncMock(return_value=retry_result)
+
+        with patch(SCRAPER_PATCH, mock_run):
+            out = await _retry_failed_urls(
+                cast("ScrapeResult", result),
+                {"sport": "football"},
+            )
+
+        assert len(out.success) == 6  # 5 original + 1 recovered
+        assert len(out.failed) == 3  # 2 non-retryable + 1 still-failed
+        assert out.stats.successful == 6
+        assert out.stats.failed == 3
+
+        # Verify non-retryable failures are preserved
+        non_retryable_urls = [f.url for f in out.failed if not f.is_retryable]
+        assert "https://oddsportal.com/match/404" in non_retryable_urls
+        assert "https://oddsportal.com/match/auth_error" in non_retryable_urls
+
+        # Only retryable URLs were sent to retry
+        call_kwargs = mock_run.call_args.kwargs
+        assert len(call_kwargs["match_links"]) == 2
+
+    @pytest.mark.asyncio
     async def test_no_sport_skips_retry(self) -> None:
         """If sport is missing from kwargs, skip retry gracefully."""
         failed_urls = [FakeFailedUrl(url="https://oddsportal.com/match/1")]

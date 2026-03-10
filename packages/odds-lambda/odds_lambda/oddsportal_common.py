@@ -349,12 +349,13 @@ async def _retry_failed_urls(
         originally_failed=len(retryable_urls),
     )
 
-    # Replace original failures with retry outcome: merge recovered successes,
-    # swap failed list to only retain URLs that failed both times.
+    # Merge recovered successes and update failed list, preserving non-retryable
+    # failures that were never sent to retry.
     result.success.extend(retry_result.success)
-    result.stats.successful += retry_result.stats.successful
-    result.failed = retry_result.failed
-    result.stats.failed = retry_result.stats.failed
+    non_retryable = [f for f in result.failed if not f.is_retryable]
+    result.failed = non_retryable + retry_result.failed
+    result.stats.successful = len(result.success)
+    result.stats.failed = len(result.failed)
 
     return result
 
