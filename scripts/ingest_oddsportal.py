@@ -31,7 +31,6 @@ import json
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -40,7 +39,9 @@ from zoneinfo import ZoneInfo
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.oddsportal_common import (
+    IngestionStats,
     build_raw_data,
+    find_existing_event,
     hours_to_tier,
     parse_match_date,
     team_abbrev,
@@ -134,23 +135,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("ingest_oddsportal")
-
-
-# ---------------------------------------------------------------------------
-# Data types
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class IngestionStats:
-    games_loaded: int = 0
-    games_skipped: int = 0
-    events_matched: int = 0
-    events_created: int = 0
-    snapshots_inserted: int = 0
-    game_logs_linked: int = 0
-    injuries_linked: int = 0
-    errors: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -256,37 +240,6 @@ def _merge_bookmakers(base: dict, other: dict, market_key: str) -> dict:
 # ---------------------------------------------------------------------------
 # Database operations
 # ---------------------------------------------------------------------------
-
-
-async def find_existing_event(
-    session: AsyncSession,
-    home_team: str,
-    away_team: str,
-    commence_time: datetime,
-) -> str | None:
-    """Find an existing Event matching the given game within a ±24h window."""
-    window_start = commence_time - timedelta(hours=24)
-    window_end = commence_time + timedelta(hours=24)
-
-    query = select(Event.id).where(
-        and_(
-            Event.commence_time >= window_start,
-            Event.commence_time <= window_end,
-            Event.home_team == home_team,
-            Event.away_team == away_team,
-        )
-    )
-    result = await session.execute(query)
-    candidates = list(result.scalars().all())
-
-    if len(candidates) == 1:
-        return candidates[0]
-    if len(candidates) > 1:
-        log.warning(
-            f"Ambiguous match for {away_team} @ {home_team} on "
-            f"{commence_time.date()}: {len(candidates)} candidates"
-        )
-    return None
 
 
 async def ingest_season(

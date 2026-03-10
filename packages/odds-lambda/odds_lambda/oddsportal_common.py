@@ -1,10 +1,18 @@
-"""Shared utilities for OddsPortal data ingestion (historical and live)."""
+"""Shared utilities for odds data ingestion (historical and live)."""
 
 from __future__ import annotations
 
+import logging
 import re
-from datetime import UTC, datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any
+
+from odds_core.models import Event
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+log = logging.getLogger(__name__)
 
 DRAW_OUTCOME = "Draw"
 
@@ -219,3 +227,57 @@ def build_raw_data(
         "source": "oddsportal",
         "_snapshot_time": snapshot_time.replace(tzinfo=UTC).isoformat() if snapshot_time else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Shared ingestion helpers
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class IngestionStats:
+    """Tracks ingestion progress across games/matches."""
+
+    games_loaded: int = 0
+    games_skipped: int = 0
+    events_matched: int = 0
+    events_created: int = 0
+    snapshots_inserted: int = 0
+    game_logs_linked: int = 0
+    injuries_linked: int = 0
+    seasons_downloaded: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+async def find_existing_event(
+    session: AsyncSession,
+    home_team: str,
+    away_team: str,
+    commence_time: datetime,
+) -> str | None:
+    """Find an existing Event matching the given game within a +/-24h window."""
+    window_start = commence_time - timedelta(hours=24)
+    window_end = commence_time + timedelta(hours=24)
+
+    query = select(Event.id).where(
+        and_(
+            Event.commence_time >= window_start,
+            Event.commence_time <= window_end,
+            Event.home_team == home_team,
+            Event.away_team == away_team,
+        )
+    )
+    result = await session.execute(query)
+    candidates = list(result.scalars().all())
+
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        log.warning(
+            "Ambiguous match for %s @ %s on %s: %d candidates",
+            away_team,
+            home_team,
+            commence_time.date(),
+            len(candidates),
+        )
+    return None

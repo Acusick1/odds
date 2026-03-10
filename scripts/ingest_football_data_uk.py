@@ -27,7 +27,6 @@ import csv
 import io
 import logging
 import math
-from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -35,7 +34,13 @@ from urllib.request import urlopen
 
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_lambda.oddsportal_common import decimal_to_american, hours_to_tier, team_abbrev
+from odds_lambda.oddsportal_common import (
+    IngestionStats,
+    decimal_to_american,
+    find_existing_event,
+    hours_to_tier,
+    team_abbrev,
+)
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -103,14 +108,11 @@ BOOKMAKER_PREFIXES: dict[str, str] = {
     "B365": "bet365",
     "BW": "bwin",
     "BFE": "betfair_exchange",
+    "BF": "betfair_sportsbook",
     "IW": "interwetten",
     "WH": "williamhill",
     "VC": "betvictor",
     "LB": "ladbrokes",
-    "BFD": "betfair_sportsbook",
-    "BMGM": "betmgm",
-    "BV": "betvictor",
-    "CL": "coral",
     "1XB": "onexbet",
 }
 
@@ -119,16 +121,6 @@ AGGREGATE_PREFIXES: dict[str, str] = {
     "Max": "market_max",
     "Avg": "market_avg",
 }
-
-
-@dataclass
-class IngestionStats:
-    games_loaded: int = 0
-    games_skipped: int = 0
-    events_matched: int = 0
-    events_created: int = 0
-    snapshots_inserted: int = 0
-    errors: list[str] = field(default_factory=list)
 
 
 def normalize_team(name: str) -> str:
@@ -163,7 +155,11 @@ def download_csv(season: str) -> Path:
 
 def read_csv(path: Path) -> list[dict[str, str]]:
     """Read a football-data.co.uk CSV file."""
-    content = path.read_bytes().decode("latin-1")
+    raw = path.read_bytes()
+    try:
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        content = raw.decode("latin-1")
     reader = csv.DictReader(io.StringIO(content))
     return [row for row in reader if row.get("HomeTeam")]
 
@@ -271,37 +267,6 @@ def _build_snapshot_raw_data(
         "bookmakers": bookmakers,
         "source": SOURCE_TAG,
     }
-
-
-async def find_existing_event(
-    session: AsyncSession,
-    home_team: str,
-    away_team: str,
-    commence_time: datetime,
-) -> str | None:
-    """Find an existing Event matching the given game within a +/-24h window."""
-    window_start = commence_time - timedelta(hours=24)
-    window_end = commence_time + timedelta(hours=24)
-
-    query = select(Event.id).where(
-        and_(
-            Event.commence_time >= window_start,
-            Event.commence_time <= window_end,
-            Event.home_team == home_team,
-            Event.away_team == away_team,
-        )
-    )
-    result = await session.execute(query)
-    candidates = list(result.scalars().all())
-
-    if len(candidates) == 1:
-        return candidates[0]
-    if len(candidates) > 1:
-        log.warning(
-            f"Ambiguous match for {away_team} @ {home_team} on "
-            f"{commence_time.date()}: {len(candidates)} candidates"
-        )
-    return None
 
 
 def build_event_id(
@@ -424,7 +389,7 @@ async def _ingest_one_match(
                 status=EventStatus.FINAL if is_final else EventStatus.SCHEDULED,
                 home_score=home_score,
                 away_score=away_score,
-                completed_at=commence_time if is_final else None,
+                completed_at=commence_time + timedelta(hours=2) if is_final else None,
             )
             session.add(event)
             stats.events_created += 1
@@ -555,7 +520,7 @@ async def _run(
         if download_only:
             try:
                 download_csv(season)
-                totals.games_loaded += 1
+                totals.seasons_downloaded += 1
             except OSError as e:
                 log.error(f"  {season}: download failed — {e}")
                 totals.errors.append(f"{season}: {e}")
@@ -583,7 +548,7 @@ async def _run(
     log.info("")
     log.info("=== Summary ===")
     if download_only:
-        log.info(f"Seasons downloaded: {totals.games_loaded}")
+        log.info(f"Seasons downloaded: {totals.seasons_downloaded}")
     else:
         log.info(f"Matches loaded:     {totals.games_loaded}")
         log.info(f"Matches skipped:    {totals.games_skipped}")
