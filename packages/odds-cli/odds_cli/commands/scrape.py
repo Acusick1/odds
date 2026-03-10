@@ -68,7 +68,7 @@ async def _scrape_upcoming(
             from odds_lambda.jobs.fetch_oddsportal import run_harvester_upcoming
 
             console.print(f"Scraping [bold]{league}[/bold] ({sport})...")
-            raw_matches = run_harvester_upcoming(spec)
+            raw_matches = await run_harvester_upcoming(spec)
             console.print(f"  Scraped {len(raw_matches)} matches")
 
         for mkt in markets:
