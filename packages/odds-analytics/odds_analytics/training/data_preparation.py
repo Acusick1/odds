@@ -196,7 +196,7 @@ async def filter_events_by_date_range(
     start_date: datetime,
     end_date: datetime,
     status: EventStatus = EventStatus.FINAL,
-    data_source: Literal["oddsportal", "oddsapi"] | None = None,
+    data_source: Literal["oddsportal", "oddsapi", "football_data_uk"] | None = None,
     min_snapshots: int | None = None,
     sport_key: str | None = None,
 ) -> list[Event]:
@@ -219,8 +219,9 @@ async def filter_events_by_date_range(
 
     reader = OddsReader(session)
 
-    # oddsportal events use 'op_' ID prefix; push to SQL for efficiency
-    event_id_pattern = "op_%" if data_source == "oddsportal" else None
+    # oddsportal/fduk events use ID prefixes; push to SQL for efficiency
+    prefix_map = {"oddsportal": "op_%", "football_data_uk": "fduk_%"}
+    event_id_pattern = prefix_map.get(data_source) if data_source else None
 
     events = await reader.get_events_by_date_range(
         start_date=start_date,
@@ -231,9 +232,10 @@ async def filter_events_by_date_range(
         min_snapshots=min_snapshots,
     )
 
-    # oddsapi = everything that isn't oddsportal; filter in-memory
+    # oddsapi = everything that isn't from a known scraped source; filter in-memory
     if data_source == "oddsapi":
-        events = [e for e in events if not e.id.startswith("op_")]
+        scraped_prefixes = ("op_", "fduk_")
+        events = [e for e in events if not e.id.startswith(scraped_prefixes)]
 
     logger.info(
         "filtered_events_by_date_range",

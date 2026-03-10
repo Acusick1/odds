@@ -795,9 +795,18 @@ def _select_closing_snapshot(
         return None
     if config.target_type == "devigged_bookmaker":
         market = config.primary_market
-        for candidate in reversed(candidates):
-            if _has_bookmaker_closing(candidate, event, config.target_bookmaker, market):
-                return candidate
+        with_bookmaker = [
+            c
+            for c in candidates
+            if _has_bookmaker_closing(c, event, config.target_bookmaker, market)
+        ]
+        if with_bookmaker:
+            if config.closing_source_priority:
+                for source in config.closing_source_priority:
+                    source_matches = [c for c in with_bookmaker if c.api_request_id == source]
+                    if source_matches:
+                        return source_matches[-1]
+            return with_bookmaker[-1]
     return candidates[-1]
 
 

@@ -8,7 +8,7 @@ Predict line movement (closing line value) using cross-source market data. The m
 
 ## Project Overview
 
-Single-user betting odds data collection and analysis system supporting NBA and EPL football. Two primary data sources: The Odds API (US bookmakers, live polling) and OddsPortal (UK bookmakers, headless scraper). A scoring pipeline produces CLV predictions per snapshot, delivered via daily Discord digest. Supports backtesting strategies against historical data.
+Single-user betting odds data collection and analysis system supporting NBA and EPL football. Three data sources: The Odds API (US bookmakers, live polling), OddsPortal (UK bookmakers, headless scraper), and football-data.co.uk (historical EPL with Pinnacle closing odds). A scoring pipeline produces CLV predictions per snapshot, delivered via daily Discord digest. Supports backtesting strategies against historical data.
 
 ## Package Structure
 
