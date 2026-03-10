@@ -11,12 +11,8 @@ so re-runs after events are marked FINAL find nothing to process.
 from __future__ import annotations
 
 import asyncio
-import json
-import subprocess
-import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import structlog
@@ -25,10 +21,10 @@ from odds_core.models import Event, EventStatus
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.jobs.fetch_oddsportal import _harvester_cmd_prefix
 from odds_lambda.oddsportal_common import (
     build_raw_data,
     parse_match_date,
+    run_scraper_with_retry,
 )
 from odds_lambda.storage.writers import OddsWriter
 
@@ -53,56 +49,19 @@ class ResultsStats:
     errors: list[str] = field(default_factory=list)
 
 
-def run_harvester_historic() -> list[dict[str, Any]]:
-    """Run OddsHarvester historic command for current EPL season.
+async def run_harvester_historic() -> list[dict[str, Any]]:
+    """Scrape historical results for the current EPL season via ``run_scraper_with_retry``."""
+    from oddsharvester.utils.command_enum import CommandEnum
 
-    Returns parsed match list from JSON output.
-    """
-    with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as tf:
-        tmp_path = Path(tf.name)
-
-    try:
-        cmd = [
-            *_harvester_cmd_prefix(),
-            "historic",
-            "-s",
-            HARVESTER_SPORT,
-            "-l",
-            HARVESTER_LEAGUE,
-            "--season",
-            "current",
-            "--max-pages",
-            "1",
-            "-m",
-            "1x2",
-            "-f",
-            "json",
-            "--headless",
-            "-o",
-            str(tmp_path),
-        ]
-
-        logger.info("running_harvester_historic", cmd=" ".join(cmd[-10:]))
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"OddsHarvester exited with code {result.returncode}: {result.stderr[-2000:]}"
-            )
-
-        data = json.loads(tmp_path.read_text())
-        return data if isinstance(data, list) else []
-
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as e:
-        raise RuntimeError(f"OddsHarvester subprocess failed: {e}") from e
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    return await run_scraper_with_retry(
+        command=CommandEnum.HISTORIC,
+        sport=HARVESTER_SPORT,
+        leagues=[HARVESTER_LEAGUE],
+        season="current",
+        max_pages=1,
+        markets=["1x2"],
+        headless=True,
+    )
 
 
 async def get_pending_events(session: AsyncSession) -> list[Event]:
@@ -176,7 +135,7 @@ async def process_results(
         logger.info("pending_events_found", count=len(pending_events))
 
         if raw_matches is None:
-            raw_matches = run_harvester_historic()
+            raw_matches = await run_harvester_historic()
 
         stats.matches_scraped = len(raw_matches)
 

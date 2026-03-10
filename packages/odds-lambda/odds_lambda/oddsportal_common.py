@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import structlog
 from odds_core.models import Event
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 DRAW_OUTCOME = "Draw"
+
+MAX_SCRAPER_RETRIES = 3
+SCRAPER_RETRY_DELAY_SECONDS = 20
 
 # OddsPortal bookmaker name → pipeline key.
 BOOKMAKER_KEY_MAP: dict[str, str] = {
@@ -227,6 +233,56 @@ def build_raw_data(
         "source": "oddsportal",
         "_snapshot_time": snapshot_time.replace(tzinfo=UTC).isoformat() if snapshot_time else None,
     }
+
+
+async def run_scraper_with_retry(**scraper_kwargs: Any) -> list[dict[str, Any]]:
+    """Call oddsharvester's ``run_scraper()`` with retry-on-empty logic.
+
+    Retries up to ``MAX_SCRAPER_RETRIES`` times when the scraper returns
+    empty results (typically caused by Cloudflare blocks returning a blank
+    page). Each retry creates a fresh browser instance.
+
+    Returns:
+        Successful match dicts, or ``[]`` if all retries are exhausted.
+
+    Raises:
+        RuntimeError: If ``run_scraper()`` returns ``None`` (fatal init error).
+    """
+    from oddsharvester.core.scraper_app import run_scraper
+
+    for attempt in range(1, MAX_SCRAPER_RETRIES + 1):
+        logger.info("running_harvester", attempt=attempt, **scraper_kwargs)
+
+        result = await run_scraper(**scraper_kwargs)
+
+        if result is None:
+            raise RuntimeError("OddsHarvester fatal init error (returned None)")
+
+        if result.failed:
+            logger.warning(
+                "harvester_failures",
+                failed=len(result.failed),
+                errors=result.get_error_breakdown(),
+            )
+
+        if result.success:
+            logger.info(
+                "harvester_success",
+                matches=len(result.success),
+                stats=result.stats.to_dict(),
+            )
+            return result.success
+
+        if attempt < MAX_SCRAPER_RETRIES:
+            logger.warning(
+                "harvester_empty_retry",
+                attempt=attempt,
+                delay=SCRAPER_RETRY_DELAY_SECONDS,
+            )
+            await asyncio.sleep(SCRAPER_RETRY_DELAY_SECONDS)
+
+    logger.error("harvester_all_retries_exhausted", attempts=MAX_SCRAPER_RETRIES)
+    return []
 
 
 # ---------------------------------------------------------------------------
