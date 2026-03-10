@@ -77,7 +77,7 @@ resource "aws_iam_role_policy" "ssm_api_key" {
           "ssm:GetParameter",
           "ssm:PutParameter"
         ]
-        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/odds/active-api-key-index"
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/active-api-key-index"
       }
     ]
   })
@@ -85,7 +85,7 @@ resource "aws_iam_role_policy" "ssm_api_key" {
 
 # SSM parameter for active API key index (Lambda manages the value at runtime)
 resource "aws_ssm_parameter" "active_api_key_index" {
-  name  = "/odds/active-api-key-index"
+  name  = "/${var.project_name}/active-api-key-index"
   type  = "String"
   value = "0"
 
@@ -109,6 +109,7 @@ resource "aws_lambda_function" "odds_scheduler" {
       DATABASE_URL      = var.database_url
       ODDS_API_KEY      = var.odds_api_key
       ODDS_API_KEYS     = var.odds_api_keys
+      SSM_API_KEY_INDEX = "/${var.project_name}/active-api-key-index"
       LAMBDA_ARN        = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}"
       RULE_PREFIX       = var.rule_prefix
 

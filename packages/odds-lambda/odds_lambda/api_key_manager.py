@@ -1,5 +1,6 @@
 """API key rotation manager with SSM-backed state persistence."""
 
+import os
 from typing import Any
 
 import boto3
@@ -8,7 +9,7 @@ from botocore.exceptions import ClientError
 
 logger = structlog.get_logger()
 
-SSM_PARAMETER_NAME = "/odds/active-api-key-index"
+DEFAULT_SSM_PARAMETER_NAME = "/odds/active-api-key-index"
 
 
 class AllKeysExhaustedError(Exception):
@@ -23,10 +24,13 @@ class APIKeyManager:
     Falls back to in-memory tracking when SSM is unavailable (local dev).
     """
 
-    def __init__(self, keys: list[str]) -> None:
+    def __init__(self, keys: list[str], ssm_parameter_name: str | None = None) -> None:
         if not keys:
             raise ValueError("At least one API key is required")
         self._keys = keys
+        self._ssm_parameter_name = (
+            ssm_parameter_name or os.environ.get("SSM_API_KEY_INDEX") or DEFAULT_SSM_PARAMETER_NAME
+        )
         self._active_index: int | None = None
         self._start_index: int | None = None
         self._ssm_available: bool | None = None
@@ -48,7 +52,7 @@ class APIKeyManager:
 
         try:
             client = self._get_ssm_client()
-            response = client.get_parameter(Name=SSM_PARAMETER_NAME)
+            response = client.get_parameter(Name=self._ssm_parameter_name)
             index = int(response["Parameter"]["Value"])
             self._ssm_available = True
             return index % len(self._keys)
@@ -72,7 +76,7 @@ class APIKeyManager:
         try:
             client = self._get_ssm_client()
             client.put_parameter(
-                Name=SSM_PARAMETER_NAME,
+                Name=self._ssm_parameter_name,
                 Value=str(index),
                 Type="String",
                 Overwrite=True,
