@@ -167,7 +167,8 @@ def read_csv(path: Path) -> list[dict[str, str]]:
 def _parse_date(row: dict[str, str]) -> datetime:
     """Parse match date + time from CSV row to UTC datetime.
 
-    Date format is DD/MM/YYYY. Time column may or may not exist.
+    Date format is DD/MM/YYYY (4-digit year) or DD/MM/YY (2-digit year).
+    Time column may or may not exist; defaults to 15:00.
     UK kickoff times are in local time (GMT/BST); we approximate as UTC
     since the exact timezone offset per date isn't worth the complexity
     for historical ingestion (max 1h error).
@@ -176,7 +177,8 @@ def _parse_date(row: dict[str, str]) -> datetime:
     time_str = row.get("Time", "15:00")
     if not time_str:
         time_str = "15:00"
-    return datetime.strptime(f"{date_str} {time_str}", "%d/%m/%Y %H:%M").replace(tzinfo=UTC)
+    fmt = "%d/%m/%Y" if len(date_str.split("/")[-1]) == 4 else "%d/%m/%y"
+    return datetime.strptime(f"{date_str} {time_str}", f"{fmt} %H:%M").replace(tzinfo=UTC)
 
 
 def _safe_float(value: str | None) -> float | None:

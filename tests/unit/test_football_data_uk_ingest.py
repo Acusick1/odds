@@ -9,6 +9,7 @@ import pytest
 from scripts.ingest_football_data_uk import (
     _build_snapshot_raw_data,
     _extract_h2h_odds,
+    _parse_date,
     build_event_id,
     normalize_team,
 )
@@ -181,6 +182,39 @@ class TestBuildSnapshotRawData:
         keys = {bk["key"] for bk in result["bookmakers"]}
         assert "betfair_exchange" in keys
 
+    def test_mixed_bookmaker_availability(self) -> None:
+        """Bookmakers with opening but no closing columns (e.g. IW, LB, VC in older seasons)."""
+        row = {
+            # PS has both opening and closing
+            "PSH": "2.50",
+            "PSD": "3.40",
+            "PSA": "2.80",
+            "PSCH": "2.60",
+            "PSCD": "3.30",
+            "PSCA": "2.70",
+            # IW has opening only (no closing columns in older CSVs)
+            "IWH": "2.45",
+            "IWD": "3.35",
+            "IWA": "2.85",
+            # VC has opening only
+            "VCH": "2.40",
+            "VCD": "3.30",
+            "VCA": "2.90",
+        }
+        opening = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=False)
+        assert opening is not None
+        opening_keys = {bk["key"] for bk in opening["bookmakers"]}
+        assert "pinnacle" in opening_keys
+        assert "interwetten" in opening_keys
+        assert "betvictor" in opening_keys
+
+        closing = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=True)
+        assert closing is not None
+        closing_keys = {bk["key"] for bk in closing["bookmakers"]}
+        assert "pinnacle" in closing_keys
+        assert "interwetten" not in closing_keys
+        assert "betvictor" not in closing_keys
+
     def test_betfair_sportsbook_bf_prefix(self) -> None:
         row = {"BFH": "2.50", "BFD": "3.40", "BFA": "2.80"}
         result = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=False)
@@ -188,6 +222,33 @@ class TestBuildSnapshotRawData:
         assert result is not None
         keys = {bk["key"] for bk in result["bookmakers"]}
         assert "betfair_sportsbook" in keys
+
+
+class TestParseDate:
+    def test_four_digit_year(self) -> None:
+        row = {"Date": "16/08/2024", "Time": "20:00"}
+        result = _parse_date(row)
+        assert result == datetime(2024, 8, 16, 20, 0, tzinfo=UTC)
+
+    def test_two_digit_year(self) -> None:
+        row = {"Date": "13/08/16", "Time": "12:30"}
+        result = _parse_date(row)
+        assert result == datetime(2016, 8, 13, 12, 30, tzinfo=UTC)
+
+    def test_missing_time_defaults_to_1500(self) -> None:
+        row = {"Date": "17/08/2024"}
+        result = _parse_date(row)
+        assert result == datetime(2024, 8, 17, 15, 0, tzinfo=UTC)
+
+    def test_empty_time_defaults_to_1500(self) -> None:
+        row = {"Date": "17/08/2024", "Time": ""}
+        result = _parse_date(row)
+        assert result == datetime(2024, 8, 17, 15, 0, tzinfo=UTC)
+
+    def test_result_is_utc(self) -> None:
+        row = {"Date": "01/01/2025", "Time": "15:00"}
+        result = _parse_date(row)
+        assert result.tzinfo == UTC
 
 
 class TestBuildEventId:
