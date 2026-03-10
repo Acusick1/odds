@@ -31,7 +31,7 @@ RUN uv pip install \
     --target /asset \
     --no-cache \
     /wheels/*.whl \
-    "git+https://github.com/Acusick1/OddsHarvester.git@fix/fractional-odds-and-unknown-bookmaker"
+    "git+https://github.com/Acusick1/OddsHarvester.git@master"
 
 # Install Playwright and Chromium browser
 RUN uv pip install \
