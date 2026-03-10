@@ -53,7 +53,7 @@ async def run_harvester_historic() -> list[dict[str, Any]]:
     """Scrape historical results for the current EPL season via ``run_scraper_with_retry``."""
     from oddsharvester.utils.command_enum import CommandEnum
 
-    return await run_scraper_with_retry(
+    result = await run_scraper_with_retry(
         command=CommandEnum.HISTORIC,
         sport=HARVESTER_SPORT,
         leagues=[HARVESTER_LEAGUE],
@@ -62,6 +62,7 @@ async def run_harvester_historic() -> list[dict[str, Any]]:
         markets=["1x2"],
         headless=True,
     )
+    return result.success
 
 
 async def get_pending_events(session: AsyncSession) -> list[Event]:

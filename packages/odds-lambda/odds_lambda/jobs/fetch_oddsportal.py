@@ -81,13 +81,14 @@ async def run_harvester_upcoming(spec: LeagueSpec) -> list[dict[str, Any]]:
     """Scrape upcoming matches for a league via ``run_scraper_with_retry``."""
     from oddsharvester.utils.command_enum import CommandEnum
 
-    return await run_scraper_with_retry(
+    result = await run_scraper_with_retry(
         command=CommandEnum.UPCOMING_MATCHES,
         sport=spec.sport,
         leagues=[spec.league],
         markets=spec.markets,
         headless=True,
     )
+    return result.success
 
 
 async def find_or_create_event(
