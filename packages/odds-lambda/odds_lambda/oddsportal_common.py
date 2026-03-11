@@ -7,15 +7,13 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 from odds_core.models import Event
+from oddsharvester.core.scrape_result import ScrapeResult
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-if TYPE_CHECKING:
-    from oddsharvester.core.scrape_result import ScrapeResult
 
 log = logging.getLogger(__name__)
 logger = structlog.get_logger()
@@ -349,6 +347,7 @@ async def _retry_failed_urls(
         originally_failed=len(retryable_urls),
     )
 
+    # Mutates `result` in-place (and returns it for caller convenience).
     # Merge recovered successes and update failed list, preserving non-retryable
     # failures that were never sent to retry.
     result.success.extend(retry_result.success)

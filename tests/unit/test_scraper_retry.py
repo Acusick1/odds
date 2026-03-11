@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,9 +12,7 @@ from odds_lambda.oddsportal_common import (
     _retry_failed_urls,
     run_scraper_with_retry,
 )
-
-if TYPE_CHECKING:
-    from oddsharvester.core.scrape_result import ScrapeResult
+from oddsharvester.core.scrape_result import ScrapeResult
 
 
 @dataclass
@@ -144,7 +142,7 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock()
 
         with patch(SCRAPER_PATCH, mock_run):
-            out = await _retry_failed_urls(cast("ScrapeResult", result), {"sport": "football"})
+            out = await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
 
         assert out.success == [{"home_team": "Arsenal"}]
         mock_run.assert_not_awaited()
@@ -165,7 +163,7 @@ class TestFailedUrlRetry:
 
         with patch(SCRAPER_PATCH, mock_run):
             out = await _retry_failed_urls(
-                cast("ScrapeResult", result),
+                cast(ScrapeResult, result),
                 {"sport": "football", "markets": ["1x2"], "headless": True},
             )
 
@@ -196,7 +194,7 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock(return_value=retry_result)
 
         with patch(SCRAPER_PATCH, mock_run):
-            out = await _retry_failed_urls(cast("ScrapeResult", result), {"sport": "football"})
+            out = await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
 
         assert len(out.success) == 1  # original only
         assert len(out.failed) == 1  # still failed
@@ -212,7 +210,7 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock(return_value=None)
 
         with patch(SCRAPER_PATCH, mock_run):
-            out = await _retry_failed_urls(cast("ScrapeResult", result), {"sport": "football"})
+            out = await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
 
         assert len(out.success) == 1
         assert len(out.failed) == 1  # unchanged
@@ -229,7 +227,7 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock()
 
         with patch(SCRAPER_PATCH, mock_run):
-            out = await _retry_failed_urls(cast("ScrapeResult", result), {"sport": "football"})
+            out = await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
 
         # No retryable URLs → no retry call
         mock_run.assert_not_awaited()
@@ -264,7 +262,7 @@ class TestFailedUrlRetry:
 
         with patch(SCRAPER_PATCH, mock_run):
             out = await _retry_failed_urls(
-                cast("ScrapeResult", result),
+                cast(ScrapeResult, result),
                 {"sport": "football"},
             )
 
@@ -291,7 +289,7 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock()
 
         with patch(SCRAPER_PATCH, mock_run):
-            out = await _retry_failed_urls(cast("ScrapeResult", result), {"command": "upcoming"})
+            out = await _retry_failed_urls(cast(ScrapeResult, result), {"command": "upcoming"})
 
         mock_run.assert_not_awaited()
         assert len(out.failed) == 1
