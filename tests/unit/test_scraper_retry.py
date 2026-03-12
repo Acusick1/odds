@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from odds_lambda.oddsportal_common import (
     MAX_SCRAPER_RETRIES,
+    _generate_user_agent,
     _retry_failed_urls,
     run_scraper_with_retry,
 )
@@ -293,6 +294,62 @@ class TestFailedUrlRetry:
 
         mock_run.assert_not_awaited()
         assert len(out.failed) == 1
+
+
+class TestUserAgentGeneration:
+    def test_generate_user_agent_returns_chrome_string(self) -> None:
+        ua = _generate_user_agent()
+        assert isinstance(ua, str)
+        assert "Chrome" in ua
+
+    @pytest.mark.asyncio
+    async def test_auto_injects_user_agent(self) -> None:
+        """run_scraper_with_retry injects browser_user_agent when not provided."""
+        matches = [{"home_team": "Arsenal", "away_team": "Chelsea"}]
+        mock_run = AsyncMock(return_value=_make_result(success=matches))
+
+        with patch(SCRAPER_PATCH, mock_run):
+            await run_scraper_with_retry(command="upcoming", sport="football", headless=True)
+
+        call_kwargs = mock_run.call_args.kwargs
+        assert "browser_user_agent" in call_kwargs
+        assert "Chrome" in call_kwargs["browser_user_agent"]
+
+    @pytest.mark.asyncio
+    async def test_does_not_override_explicit_user_agent(self) -> None:
+        """Caller-provided browser_user_agent is preserved."""
+        matches = [{"home_team": "Arsenal", "away_team": "Chelsea"}]
+        mock_run = AsyncMock(return_value=_make_result(success=matches))
+        custom_ua = "CustomAgent/1.0"
+
+        with patch(SCRAPER_PATCH, mock_run):
+            await run_scraper_with_retry(
+                command="upcoming",
+                sport="football",
+                headless=True,
+                browser_user_agent=custom_ua,
+            )
+
+        call_kwargs = mock_run.call_args.kwargs
+        assert call_kwargs["browser_user_agent"] == custom_ua
+
+    @pytest.mark.asyncio
+    async def test_user_agent_forwarded_to_failed_url_retry(self) -> None:
+        """browser_user_agent is passed through to failed URL retry calls."""
+        initial_success = [{"match": 0}]
+        initial_failed = [FakeFailedUrl(url="https://oddsportal.com/match/1")]
+        initial_result = _make_result(success=initial_success, failed=initial_failed)
+
+        retry_result = _make_result(success=[], failed=initial_failed)
+        mock_run = AsyncMock(side_effect=[initial_result, retry_result])
+
+        with patch(SCRAPER_PATCH, mock_run):
+            await run_scraper_with_retry(command="upcoming", sport="football", headless=True)
+
+        # Second call is the failed-URL retry
+        retry_call_kwargs = mock_run.call_args_list[1].kwargs
+        assert "browser_user_agent" in retry_call_kwargs
+        assert "Chrome" in retry_call_kwargs["browser_user_agent"]
 
 
 class TestEndToEndWithFailedUrlRetry:

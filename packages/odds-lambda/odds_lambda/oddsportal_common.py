@@ -237,6 +237,13 @@ def build_raw_data(
     }
 
 
+def _generate_user_agent() -> str:
+    """Generate a fresh Chrome user agent string."""
+    from fake_useragent import UserAgent
+
+    return UserAgent(browsers=["Chrome"]).random
+
+
 async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
     """Call oddsharvester's ``run_scraper()`` with retry-on-empty and failed-URL retry.
 
@@ -251,6 +258,9 @@ async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
        Capped at 1 round — diminishing returns beyond that given Lambda time
        budget.
 
+    A fresh Chrome user agent is generated per invocation (via ``fake-useragent``)
+    and passed as ``browser_user_agent`` unless the caller already supplied one.
+
     Returns:
         ``ScrapeResult`` containing successful matches, remaining failures,
         and merged statistics.
@@ -259,6 +269,11 @@ async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
         RuntimeError: If ``run_scraper()`` returns ``None`` (fatal init error).
     """
     from oddsharvester.core.scraper_app import run_scraper
+
+    if "browser_user_agent" not in scraper_kwargs:
+        ua = _generate_user_agent()
+        scraper_kwargs["browser_user_agent"] = ua
+        logger.info("generated_user_agent", user_agent=ua)
 
     for attempt in range(1, MAX_SCRAPER_RETRIES + 1):
         logger.info("running_harvester", attempt=attempt, **scraper_kwargs)
@@ -330,6 +345,8 @@ async def _retry_failed_urls(
     }
     if "markets" in original_kwargs:
         retry_kwargs["markets"] = original_kwargs["markets"]
+    if "browser_user_agent" in original_kwargs:
+        retry_kwargs["browser_user_agent"] = original_kwargs["browser_user_agent"]
 
     retry_result = await run_scraper(**retry_kwargs)
 
