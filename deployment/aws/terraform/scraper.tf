@@ -35,68 +35,85 @@ resource "aws_cloudwatch_log_group" "scraper_logs" {
   retention_in_days = 14
 }
 
-# EventBridge rule — hourly fixed schedule
-resource "aws_cloudwatch_event_rule" "scraper_schedule" {
+# IAM role for EventBridge Scheduler to invoke the scraper Lambda
+resource "aws_iam_role" "scraper_scheduler_role" {
   count = var.enable_oddsportal_scraper ? 1 : 0
 
-  name                = "${var.rule_prefix}-fetch-oddsportal"
-  description         = "Hourly OddsPortal scrape for upcoming match odds"
+  name = "${var.project_name}-scraper-scheduler-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "scheduler.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "scraper_scheduler_invoke" {
+  count = var.enable_oddsportal_scraper ? 1 : 0
+
+  name = "${var.project_name}-scraper-scheduler-invoke"
+  role = aws_iam_role.scraper_scheduler_role[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "lambda:InvokeFunction"
+      Resource = aws_lambda_function.odds_scraper[0].arn
+    }]
+  })
+}
+
+# EventBridge Scheduler — hourly with 15-minute jitter
+resource "aws_scheduler_schedule" "fetch_oddsportal" {
+  count = var.enable_oddsportal_scraper ? 1 : 0
+
+  name       = "${var.rule_prefix}-fetch-oddsportal"
+  group_name = "default"
+
   schedule_expression = "rate(1 hour)"
-  state               = "ENABLED"
+
+  flexible_time_window {
+    mode                      = "FLEXIBLE"
+    maximum_window_in_minutes = 15
+  }
+
+  target {
+    arn      = aws_lambda_function.odds_scraper[0].arn
+    role_arn = aws_iam_role.scraper_scheduler_role[0].arn
+    input    = jsonencode({ job = "fetch-oddsportal" })
+  }
+
+  state = "ENABLED"
 }
 
-resource "aws_cloudwatch_event_target" "scraper_target" {
+# EventBridge Scheduler — daily results and closing odds collection
+resource "aws_scheduler_schedule" "fetch_oddsportal_results" {
   count = var.enable_oddsportal_scraper ? 1 : 0
 
-  rule      = aws_cloudwatch_event_rule.scraper_schedule[0].name
-  target_id = "1"
-  arn       = aws_lambda_function.odds_scraper[0].arn
+  name       = "${var.rule_prefix}-fetch-oddsportal-results"
+  group_name = "default"
 
-  input = jsonencode({
-    job = "fetch-oddsportal"
-  })
-}
+  schedule_expression          = "cron(0 8 * * ? *)"
+  schedule_expression_timezone = "UTC"
 
-resource "aws_lambda_permission" "allow_eventbridge_scraper" {
-  count = var.enable_oddsportal_scraper ? 1 : 0
+  flexible_time_window {
+    mode                      = "FLEXIBLE"
+    maximum_window_in_minutes = 15
+  }
 
-  statement_id  = "AllowEventBridgeScraper-${var.rule_prefix}"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.odds_scraper[0].function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.scraper_schedule[0].arn
-}
+  target {
+    arn      = aws_lambda_function.odds_scraper[0].arn
+    role_arn = aws_iam_role.scraper_scheduler_role[0].arn
+    input    = jsonencode({ job = "fetch-oddsportal-results" })
+  }
 
-# EventBridge rule — daily results and closing odds collection
-resource "aws_cloudwatch_event_rule" "scraper_results_schedule" {
-  count = var.enable_oddsportal_scraper ? 1 : 0
-
-  name                = "${var.rule_prefix}-fetch-oddsportal-results"
-  description         = "Daily EPL results and closing odds collection"
-  schedule_expression = "cron(0 8 * * ? *)"
-  state               = "ENABLED"
-}
-
-resource "aws_cloudwatch_event_target" "scraper_results_target" {
-  count = var.enable_oddsportal_scraper ? 1 : 0
-
-  rule      = aws_cloudwatch_event_rule.scraper_results_schedule[0].name
-  target_id = "1"
-  arn       = aws_lambda_function.odds_scraper[0].arn
-
-  input = jsonencode({
-    job = "fetch-oddsportal-results"
-  })
-}
-
-resource "aws_lambda_permission" "allow_eventbridge_scraper_results" {
-  count = var.enable_oddsportal_scraper ? 1 : 0
-
-  statement_id  = "AllowEventBridgeScraperResults-${var.rule_prefix}"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.odds_scraper[0].function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.scraper_results_schedule[0].arn
+  state = "ENABLED"
 }
 
 # Outputs

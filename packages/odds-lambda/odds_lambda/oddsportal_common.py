@@ -237,6 +237,13 @@ def build_raw_data(
     }
 
 
+def _generate_user_agent() -> str:
+    """Generate a fresh Chrome user agent string."""
+    from fake_useragent import UserAgent
+
+    return UserAgent(browsers=["Chrome"]).random
+
+
 async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
     """Call oddsharvester's ``run_scraper()`` with retry-on-empty and failed-URL retry.
 
@@ -251,6 +258,9 @@ async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
        Capped at 1 round — diminishing returns beyond that given Lambda time
        budget.
 
+    A fresh Chrome user agent is generated per invocation (via ``fake-useragent``)
+    and passed as ``browser_user_agent`` unless the caller already supplied one.
+
     Returns:
         ``ScrapeResult`` containing successful matches, remaining failures,
         and merged statistics.
@@ -259,6 +269,11 @@ async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
         RuntimeError: If ``run_scraper()`` returns ``None`` (fatal init error).
     """
     from oddsharvester.core.scraper_app import run_scraper
+
+    if "browser_user_agent" not in scraper_kwargs:
+        ua = _generate_user_agent()
+        scraper_kwargs["browser_user_agent"] = ua
+        logger.info("generated_user_agent", user_agent=ua)
 
     for attempt in range(1, MAX_SCRAPER_RETRIES + 1):
         logger.info("running_harvester", attempt=attempt, **scraper_kwargs)
@@ -282,7 +297,7 @@ async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
                 stats=result.stats.to_dict(),
             )
             # Retry failed URLs once with a fresh browser session
-            result = await _retry_failed_urls(result, scraper_kwargs)
+            await _retry_failed_urls(result, scraper_kwargs)
             return result
 
         if attempt < MAX_SCRAPER_RETRIES:
@@ -300,22 +315,22 @@ async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
 async def _retry_failed_urls(
     result: ScrapeResult,
     original_kwargs: dict[str, Any],
-) -> ScrapeResult:
+) -> None:
     """Retry retryable failed URLs once with a fresh browser session.
 
-    Merges recovered matches into the original result and replaces the
-    failed list with only the still-failed URLs from the retry.
+    Mutates *result* in-place: merges recovered matches into ``success``
+    and replaces ``failed`` with only the still-failed URLs from the retry.
     """
     from oddsharvester.core.scraper_app import run_scraper
 
     retryable_urls = result.get_retryable_urls()
     if not retryable_urls:
-        return result
+        return
 
     sport = original_kwargs.get("sport")
     if not sport:
         logger.warning("failed_url_retry_skipped", reason="no sport in kwargs")
-        return result
+        return
 
     logger.info(
         "failed_url_retry_starting",
@@ -323,10 +338,14 @@ async def _retry_failed_urls(
         total_failed=len(result.failed),
     )
 
+    retry_ua = _generate_user_agent()
+    logger.info("retry_generated_user_agent", user_agent=retry_ua)
+
     retry_kwargs: dict[str, Any] = {
         "match_links": retryable_urls,
         "sport": sport,
         "headless": original_kwargs.get("headless", True),
+        "browser_user_agent": retry_ua,
     }
     if "markets" in original_kwargs:
         retry_kwargs["markets"] = original_kwargs["markets"]
@@ -335,7 +354,7 @@ async def _retry_failed_urls(
 
     if retry_result is None:
         logger.warning("failed_url_retry_init_error")
-        return result
+        return
 
     recovered = len(retry_result.success)
     still_failed = len(retry_result.failed)
@@ -347,7 +366,6 @@ async def _retry_failed_urls(
         originally_failed=len(retryable_urls),
     )
 
-    # Mutates `result` in-place (and returns it for caller convenience).
     # Merge recovered successes and update failed list, preserving non-retryable
     # failures that were never sent to retry.
     result.success.extend(retry_result.success)
@@ -356,14 +374,10 @@ async def _retry_failed_urls(
     result.stats.successful = len(result.success)
     result.stats.failed = len(result.failed)
 
-    return result
-
 
 def _empty_scrape_result() -> ScrapeResult:
-    """Create an empty ``ScrapeResult`` without importing at module level."""
-    from oddsharvester.core.scrape_result import ScrapeResult as _ScrapeResult
-
-    return _ScrapeResult()
+    """Create an empty ``ScrapeResult`` for exhausted-retry fallback."""
+    return ScrapeResult()
 
 
 # ---------------------------------------------------------------------------
