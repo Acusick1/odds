@@ -76,8 +76,7 @@ resource "aws_scheduler_schedule" "fetch_oddsportal" {
   name       = "${var.rule_prefix}-fetch-oddsportal"
   group_name = "default"
 
-  schedule_expression          = "rate(1 hour)"
-  schedule_expression_timezone = "UTC"
+  schedule_expression = "rate(1 hour)"
 
   flexible_time_window {
     mode                      = "FLEXIBLE"

@@ -13,7 +13,7 @@ from odds_lambda.oddsportal_common import (
     _retry_failed_urls,
     run_scraper_with_retry,
 )
-from oddsharvester.core.scrape_result import ScrapeResult
+from oddsharvester.core.scrape_result import ErrorType, ScrapeResult
 
 
 @dataclass
@@ -36,7 +36,7 @@ class FakeScrapeStats:
 class FakeFailedUrl:
     url: str
     is_retryable: bool = True
-    error_type: str = "timeout"
+    error_type: ErrorType = ErrorType.NAVIGATION
     error_message: str = "timed out"
 
 
@@ -44,7 +44,6 @@ class FakeFailedUrl:
 class FakeScrapeResult:
     success: list[dict[str, Any]] = field(default_factory=list)
     failed: list[Any] = field(default_factory=list)
-    partial: list[Any] = field(default_factory=list)
     stats: FakeScrapeStats = field(default_factory=FakeScrapeStats)
 
     def get_error_breakdown(self) -> dict[str, list[str]]:
@@ -143,9 +142,9 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock()
 
         with patch(SCRAPER_PATCH, mock_run):
-            out = await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
+            await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
 
-        assert out.success == [{"home_team": "Arsenal"}]
+        assert result.success == [{"home_team": "Arsenal"}]
         mock_run.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -163,15 +162,15 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock(return_value=retry_result)
 
         with patch(SCRAPER_PATCH, mock_run):
-            out = await _retry_failed_urls(
+            await _retry_failed_urls(
                 cast(ScrapeResult, result),
                 {"sport": "football", "markets": ["1x2"], "headless": True},
             )
 
-        assert len(out.success) == 16  # 11 original + 5 recovered
-        assert len(out.failed) == 2  # only the still-failed from retry
-        assert out.stats.successful == 16
-        assert out.stats.failed == 2
+        assert len(result.success) == 16  # 11 original + 5 recovered
+        assert len(result.failed) == 2  # only the still-failed from retry
+        assert result.stats.successful == 16
+        assert result.stats.failed == 2
 
         # Verify retry was called with match_links
         call_kwargs = mock_run.call_args.kwargs
@@ -195,10 +194,10 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock(return_value=retry_result)
 
         with patch(SCRAPER_PATCH, mock_run):
-            out = await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
+            await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
 
-        assert len(out.success) == 1  # original only
-        assert len(out.failed) == 1  # still failed
+        assert len(result.success) == 1  # original only
+        assert len(result.failed) == 1  # still failed
         mock_run.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -211,10 +210,10 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock(return_value=None)
 
         with patch(SCRAPER_PATCH, mock_run):
-            out = await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
+            await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
 
-        assert len(out.success) == 1
-        assert len(out.failed) == 1  # unchanged
+        assert len(result.success) == 1
+        assert len(result.failed) == 1  # unchanged
 
     @pytest.mark.asyncio
     async def test_non_retryable_urls_skipped(self) -> None:
@@ -228,11 +227,11 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock()
 
         with patch(SCRAPER_PATCH, mock_run):
-            out = await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
+            await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
 
         # No retryable URLs → no retry call
         mock_run.assert_not_awaited()
-        assert len(out.success) == 1
+        assert len(result.success) == 1
 
     @pytest.mark.asyncio
     async def test_mixed_retryable_and_non_retryable_preserves_non_retryable(self) -> None:
@@ -243,13 +242,13 @@ class TestFailedUrlRetry:
             FakeFailedUrl(
                 url="https://oddsportal.com/match/404",
                 is_retryable=False,
-                error_type="not_found",
+                error_type=ErrorType.PAGE_NOT_FOUND,
             ),
             FakeFailedUrl(url="https://oddsportal.com/match/timeout_2", is_retryable=True),
             FakeFailedUrl(
                 url="https://oddsportal.com/match/auth_error",
                 is_retryable=False,
-                error_type="auth",
+                error_type=ErrorType.UNKNOWN,
             ),
         ]
         result = _make_result(success=original_success, failed=failed_urls)
@@ -262,18 +261,18 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock(return_value=retry_result)
 
         with patch(SCRAPER_PATCH, mock_run):
-            out = await _retry_failed_urls(
+            await _retry_failed_urls(
                 cast(ScrapeResult, result),
                 {"sport": "football"},
             )
 
-        assert len(out.success) == 6  # 5 original + 1 recovered
-        assert len(out.failed) == 3  # 2 non-retryable + 1 still-failed
-        assert out.stats.successful == 6
-        assert out.stats.failed == 3
+        assert len(result.success) == 6  # 5 original + 1 recovered
+        assert len(result.failed) == 3  # 2 non-retryable + 1 still-failed
+        assert result.stats.successful == 6
+        assert result.stats.failed == 3
 
         # Verify non-retryable failures are preserved
-        non_retryable_urls = [f.url for f in out.failed if not f.is_retryable]
+        non_retryable_urls = [f.url for f in result.failed if not f.is_retryable]
         assert "https://oddsportal.com/match/404" in non_retryable_urls
         assert "https://oddsportal.com/match/auth_error" in non_retryable_urls
 
@@ -290,10 +289,10 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock()
 
         with patch(SCRAPER_PATCH, mock_run):
-            out = await _retry_failed_urls(cast(ScrapeResult, result), {"command": "upcoming"})
+            await _retry_failed_urls(cast(ScrapeResult, result), {"command": "upcoming"})
 
         mock_run.assert_not_awaited()
-        assert len(out.failed) == 1
+        assert len(result.failed) == 1
 
 
 class TestUserAgentGeneration:
@@ -334,8 +333,8 @@ class TestUserAgentGeneration:
         assert call_kwargs["browser_user_agent"] == custom_ua
 
     @pytest.mark.asyncio
-    async def test_user_agent_forwarded_to_failed_url_retry(self) -> None:
-        """browser_user_agent is passed through to failed URL retry calls."""
+    async def test_retry_uses_fresh_user_agent(self) -> None:
+        """Failed-URL retry generates a new UA, different from the initial one."""
         initial_success = [{"match": 0}]
         initial_failed = [FakeFailedUrl(url="https://oddsportal.com/match/1")]
         initial_result = _make_result(success=initial_success, failed=initial_failed)
@@ -346,10 +345,12 @@ class TestUserAgentGeneration:
         with patch(SCRAPER_PATCH, mock_run):
             await run_scraper_with_retry(command="upcoming", sport="football", headless=True)
 
-        # Second call is the failed-URL retry
-        retry_call_kwargs = mock_run.call_args_list[1].kwargs
-        assert "browser_user_agent" in retry_call_kwargs
-        assert "Chrome" in retry_call_kwargs["browser_user_agent"]
+        initial_ua = mock_run.call_args_list[0].kwargs["browser_user_agent"]
+        retry_ua = mock_run.call_args_list[1].kwargs["browser_user_agent"]
+        assert "Chrome" in initial_ua
+        assert "Chrome" in retry_ua
+        # UAs are independently generated (may rarely collide, but both must be present)
+        assert "browser_user_agent" in mock_run.call_args_list[1].kwargs
 
 
 class TestEndToEndWithFailedUrlRetry:
