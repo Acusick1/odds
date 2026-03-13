@@ -1,5 +1,7 @@
 # NBA Injury Report Pipeline
 
+> **Modeling note:** Extensive experimentation (Exp 6, 6b in [MODELING.md](MODELING.md)) showed that injury features add zero predictive signal for CLV prediction at any decision tier when properly tuned. The pipeline remains functional for data collection but is not used in the active prediction model.
+
 Injury data from official NBA injury report PDFs, parsed via the [`nbainjuries`](https://github.com/mcmullarkey/nbainjuries) package.
 
 ## Data Source

@@ -218,7 +218,7 @@ odds backtest export results.json bets.csv
 - `basic_ev` - Expected value betting (sharp vs retail odds)
 - `arbitrage` - Risk-free arbitrage opportunities
 
-See [BACKTESTING_GUIDE.md](BACKTESTING_GUIDE.md) for detailed strategy documentation.
+See [BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md) for detailed strategy documentation.
 
 ## Deployment
 
@@ -492,7 +492,7 @@ alembic upgrade head
 ## Documentation
 
 - **[CLAUDE.md](CLAUDE.md)** - Complete technical specification for LLM agents
-- **[BACKTESTING_GUIDE.md](BACKTESTING_GUIDE.md)** - Backtesting strategies and metrics reference
+- **[BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md)** - Backtesting strategies and metrics reference
 
 ## License
 

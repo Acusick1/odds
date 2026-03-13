@@ -367,7 +367,7 @@ dev = [
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.10.7" },
     { name = "numpy", specifier = ">=1.24.0" },
-    { name = "oddsharvester", git = "https://github.com/Acusick1/OddsHarvester.git?branch=master" },
+    { name = "oddsharvester", git = "https://github.com/Acusick1/OddsHarvester.git?branch=fix%2Ffractional-odds-and-unknown-bookmaker" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "plotly", specifier = ">=6.3.1" },
     { name = "pre-commit", specifier = ">=3.5.0" },
@@ -927,6 +927,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/cc/28/c14e053b6762b1044f34a13aab6859bbf40456d37d23aa286ac24cfd9a5d/executing-2.2.1.tar.gz", hash = "sha256:3632cc370565f6648cc328b32435bd120a1e4ebb20c77e3fdde9a13cd1e533c4", size = 1129488, upload-time = "2025-09-01T09:48:10.866Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/ea/53f2148663b321f21b5a606bd5f191517cf40b7072c0497d3c92c4a13b1e/executing-2.2.1-py2.py3-none-any.whl", hash = "sha256:760643d3452b4d777d295bb167ccc74c64a81df23fb5e08eff250c425a4b2017", size = 28317, upload-time = "2025-09-01T09:48:08.5Z" },
+]
+
+[[package]]
+name = "fake-useragent"
+version = "2.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/41/43/948d10bf42735709edb5ae51e23297d034086f17fc7279fef385a7acb473/fake_useragent-2.2.0.tar.gz", hash = "sha256:4e6ab6571e40cc086d788523cf9e018f618d07f9050f822ff409a4dfe17c16b2", size = 158898, upload-time = "2025-04-14T15:32:19.238Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/51/37/b3ea9cd5558ff4cb51957caca2193981c6b0ff30bd0d2630ac62505d99d0/fake_useragent-2.2.0-py3-none-any.whl", hash = "sha256:67f35ca4d847b0d298187443aaf020413746e56acd985a611908c73dba2daa24", size = 161695, upload-time = "2025-04-14T15:32:17.732Z" },
 ]
 
 [[package]]
@@ -2777,6 +2786,7 @@ dependencies = [
     { name = "alembic" },
     { name = "apscheduler" },
     { name = "boto3" },
+    { name = "fake-useragent" },
     { name = "nba-api" },
     { name = "nbainjuries" },
     { name = "odds-core" },
@@ -2791,6 +2801,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "apscheduler", specifier = ">=3.10.4" },
     { name = "boto3", specifier = ">=1.34.0" },
+    { name = "fake-useragent", specifier = ">=2.2.0" },
     { name = "nba-api", specifier = ">=1.1.0" },
     { name = "nbainjuries", specifier = ">=1.1.1" },
     { name = "odds-core", editable = "packages/odds-core" },
@@ -2802,7 +2813,7 @@ requires-dist = [
 [[package]]
 name = "oddsharvester"
 version = "0.1.0"
-source = { git = "https://github.com/Acusick1/OddsHarvester.git?branch=master#c2f58411b11631c27c09d4a5dafbb5b6518e03a6" }
+source = { git = "https://github.com/Acusick1/OddsHarvester.git?branch=fix%2Ffractional-odds-and-unknown-bookmaker#a8c429261917368f7c1d100b11a2c4d13f35f5a3" }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "boto3" },

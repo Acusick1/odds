@@ -14,13 +14,8 @@ This job:
 from __future__ import annotations
 
 import asyncio
-import json
-import subprocess
-import sys
-import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import structlog
@@ -33,14 +28,10 @@ from odds_lambda.oddsportal_adapter import (
     MatchOdds,
     convert_upcoming_matches,
 )
-from odds_lambda.oddsportal_common import hours_to_tier, team_abbrev
+from odds_lambda.oddsportal_common import hours_to_tier, run_scraper_with_retry, team_abbrev
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
-
-FORK_SPEC = (
-    "git+https://github.com/Acusick1/OddsHarvester.git@fix/fractional-odds-and-unknown-bookmaker"
-)
 
 
 @dataclass
@@ -86,69 +77,18 @@ def _build_event_id(home_team: str, away_team: str, match_date: datetime) -> str
     return f"op_live_{home_abbrev}_{away_abbrev}_{date_str}"
 
 
-def _harvester_cmd_prefix() -> list[str]:
-    """Return the command prefix for invoking OddsHarvester.
+async def run_harvester_upcoming(spec: LeagueSpec) -> list[dict[str, Any]]:
+    """Scrape upcoming matches for a league via ``run_scraper_with_retry``."""
+    from oddsharvester.utils.command_enum import CommandEnum
 
-    Uses ``python -m oddsharvester`` when the package is installed (Lambda
-    container), otherwise falls back to ``uvx`` for local development.
-    """
-    try:
-        import oddsharvester  # noqa: F401
-
-        return [sys.executable, "-m", "oddsharvester"]
-    except ImportError:
-        return ["uvx", "--from", FORK_SPEC, "oddsharvester"]
-
-
-def run_harvester_upcoming(spec: LeagueSpec) -> list[dict[str, Any]]:
-    """Run OddsHarvester upcoming command and return parsed match list.
-
-    Raises:
-        RuntimeError: If the harvester subprocess fails.
-    """
-    with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as tf:
-        tmp_path = Path(tf.name)
-
-    try:
-        cmd = [
-            *_harvester_cmd_prefix(),
-            "upcoming",
-            "-s",
-            spec.sport,
-            "-l",
-            spec.league,
-            "-m",
-            ",".join(spec.markets),
-            "--headless",
-            "--odds-format",
-            "Fractional Odds",
-            "-f",
-            "json",
-            "-o",
-            str(tmp_path),
-        ]
-
-        logger.info("running_harvester", cmd=" ".join(cmd[-8:]))
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"OddsHarvester exited with code {result.returncode}: {result.stderr[:500]}"
-            )
-
-        data = json.loads(tmp_path.read_text())
-        return data if isinstance(data, list) else []
-
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as e:
-        raise RuntimeError(f"OddsHarvester subprocess failed: {e}") from e
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    result = await run_scraper_with_retry(
+        command=CommandEnum.UPCOMING_MATCHES,
+        sport=spec.sport,
+        leagues=[spec.league],
+        markets=spec.markets,
+        headless=True,
+    )
+    return result.success
 
 
 async def find_or_create_event(
@@ -229,7 +169,7 @@ async def ingest_league(
 
     if raw_matches is None:
         logger.info("scraping_league", league=spec.league, sport=spec.sport)
-        raw_matches = run_harvester_upcoming(spec)
+        raw_matches = await run_harvester_upcoming(spec)
 
     stats.matches_scraped = len(raw_matches)
 

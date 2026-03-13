@@ -271,13 +271,9 @@ Time-series per snapshot:
 
 ### Active
 
-### 8. Cross-venue execution analysis
-Compare execution opportunity across sportsbook and Polymarket for the same events. Requires Polymarket pipeline running live. Key questions:
-- When the model predicts a line move, which venue is slower to adjust?
-- Is the PM-SB price gap (~2.4pp) exploitable net of transaction costs?
-- What is the effective edge after vig/fees on each venue?
-
-Prerequisite: Polymarket fetch pipeline deployed on scheduler.
+### 8. Cross-venue execution analysis (deprioritized)
+~~Compare execution opportunity across sportsbook and Polymarket for the same events.~~
+**Deprioritized:** Polymarket not accessible from UK; focus shifted to EPL football with Betfair exchange as the cross-venue execution target (deep liquidity confirmed — 0.5-0.7% spreads on EPL favourites).
 
 ### ~~9. Position sizing / Kelly criterion~~
 **Deprioritized** (Exp 7): flat betting is unprofitable — Kelly sizing cannot fix an insufficient edge. Revisit only if signal improves via non-public features or cross-venue execution.

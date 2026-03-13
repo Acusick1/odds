@@ -1,12 +1,27 @@
-"""Shared utilities for OddsPortal data ingestion (historical and live)."""
+"""Shared utilities for odds data ingestion (historical and live)."""
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
-from datetime import UTC, datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import structlog
+from odds_core.models import Event
+from oddsharvester.core.scrape_result import ScrapeResult
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+log = logging.getLogger(__name__)
+logger = structlog.get_logger()
+
 DRAW_OUTCOME = "Draw"
+
+MAX_SCRAPER_RETRIES = 3
+SCRAPER_RETRY_DELAY_SECONDS = 20
 
 # OddsPortal bookmaker name → pipeline key.
 BOOKMAKER_KEY_MAP: dict[str, str] = {
@@ -174,9 +189,10 @@ def build_raw_data(
         if any(e is None for e in entries):
             continue
 
-        decimals = [e.get("odds") for e in entries]  # type: ignore[union-attr]
-        if any(d is None for d in decimals):
+        raw_decimals = [e.get("odds") for e in entries]  # type: ignore[union-attr]
+        if any(d is None for d in raw_decimals):
             continue
+        decimals: list[float] = raw_decimals  # type: ignore[assignment]  # None filtered above
 
         if outcome_names:
             outcomes: list[dict[str, Any]] = []
@@ -219,3 +235,200 @@ def build_raw_data(
         "source": "oddsportal",
         "_snapshot_time": snapshot_time.replace(tzinfo=UTC).isoformat() if snapshot_time else None,
     }
+
+
+def _generate_user_agent() -> str:
+    """Generate a fresh Chrome user agent string."""
+    from fake_useragent import UserAgent
+
+    return UserAgent(browsers=["Chrome"]).random
+
+
+async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
+    """Call oddsharvester's ``run_scraper()`` with retry-on-empty and failed-URL retry.
+
+    Two retry mechanisms:
+
+    1. **Empty-page retry** (existing): retries the entire scrape up to
+       ``MAX_SCRAPER_RETRIES`` times when zero successes are returned
+       (Cloudflare blank page recovery).
+
+    2. **Failed-URL retry** (new): after a partially-successful scrape, collects
+       retryable failed URLs and re-scrapes them in a fresh browser session.
+       Capped at 1 round — diminishing returns beyond that given Lambda time
+       budget.
+
+    A fresh Chrome user agent is generated per invocation (via ``fake-useragent``)
+    and passed as ``browser_user_agent`` unless the caller already supplied one.
+
+    Returns:
+        ``ScrapeResult`` containing successful matches, remaining failures,
+        and merged statistics.
+
+    Raises:
+        RuntimeError: If ``run_scraper()`` returns ``None`` (fatal init error).
+    """
+    from oddsharvester.core.scraper_app import run_scraper
+
+    if "browser_user_agent" not in scraper_kwargs:
+        ua = _generate_user_agent()
+        scraper_kwargs["browser_user_agent"] = ua
+        logger.info("generated_user_agent", user_agent=ua)
+
+    for attempt in range(1, MAX_SCRAPER_RETRIES + 1):
+        logger.info("running_harvester", attempt=attempt, **scraper_kwargs)
+
+        result = await run_scraper(**scraper_kwargs)
+
+        if result is None:
+            raise RuntimeError("OddsHarvester fatal init error (returned None)")
+
+        if result.failed:
+            logger.warning(
+                "harvester_failures",
+                failed=len(result.failed),
+                errors=result.get_error_breakdown(),
+            )
+
+        if result.success:
+            logger.info(
+                "harvester_success",
+                matches=len(result.success),
+                stats=result.stats.to_dict(),
+            )
+            # Retry failed URLs once with a fresh browser session
+            await _retry_failed_urls(result, scraper_kwargs)
+            return result
+
+        if attempt < MAX_SCRAPER_RETRIES:
+            logger.warning(
+                "harvester_empty_retry",
+                attempt=attempt,
+                delay=SCRAPER_RETRY_DELAY_SECONDS,
+            )
+            await asyncio.sleep(SCRAPER_RETRY_DELAY_SECONDS)
+
+    logger.error("harvester_all_retries_exhausted", attempts=MAX_SCRAPER_RETRIES)
+    return _empty_scrape_result()
+
+
+async def _retry_failed_urls(
+    result: ScrapeResult,
+    original_kwargs: dict[str, Any],
+) -> None:
+    """Retry retryable failed URLs once with a fresh browser session.
+
+    Mutates *result* in-place: merges recovered matches into ``success``
+    and replaces ``failed`` with only the still-failed URLs from the retry.
+    """
+    from oddsharvester.core.scraper_app import run_scraper
+
+    retryable_urls = result.get_retryable_urls()
+    if not retryable_urls:
+        return
+
+    sport = original_kwargs.get("sport")
+    if not sport:
+        logger.warning("failed_url_retry_skipped", reason="no sport in kwargs")
+        return
+
+    logger.info(
+        "failed_url_retry_starting",
+        retryable=len(retryable_urls),
+        total_failed=len(result.failed),
+    )
+
+    retry_ua = _generate_user_agent()
+    logger.info("retry_generated_user_agent", user_agent=retry_ua)
+
+    retry_kwargs: dict[str, Any] = {
+        "match_links": retryable_urls,
+        "sport": sport,
+        "headless": original_kwargs.get("headless", True),
+        "browser_user_agent": retry_ua,
+    }
+    if "markets" in original_kwargs:
+        retry_kwargs["markets"] = original_kwargs["markets"]
+
+    retry_result = await run_scraper(**retry_kwargs)
+
+    if retry_result is None:
+        logger.warning("failed_url_retry_init_error")
+        return
+
+    recovered = len(retry_result.success)
+    still_failed = len(retry_result.failed)
+
+    logger.info(
+        "failed_url_retry_complete",
+        recovered=recovered,
+        still_failed=still_failed,
+        originally_failed=len(retryable_urls),
+    )
+
+    # Merge recovered successes and update failed list, preserving non-retryable
+    # failures that were never sent to retry.
+    result.success.extend(retry_result.success)
+    non_retryable = [f for f in result.failed if not f.is_retryable]
+    result.failed = non_retryable + retry_result.failed
+    result.stats.successful = len(result.success)
+    result.stats.failed = len(result.failed)
+
+
+def _empty_scrape_result() -> ScrapeResult:
+    """Create an empty ``ScrapeResult`` for exhausted-retry fallback."""
+    return ScrapeResult()
+
+
+# ---------------------------------------------------------------------------
+# Shared ingestion helpers
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class IngestionStats:
+    """Tracks ingestion progress across games/matches."""
+
+    games_loaded: int = 0
+    games_skipped: int = 0
+    events_matched: int = 0
+    events_created: int = 0
+    snapshots_inserted: int = 0
+    game_logs_linked: int = 0
+    injuries_linked: int = 0
+    seasons_downloaded: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+async def find_existing_event(
+    session: AsyncSession,
+    home_team: str,
+    away_team: str,
+    commence_time: datetime,
+) -> str | None:
+    """Find an existing Event matching the given game within a +/-24h window."""
+    window_start = commence_time - timedelta(hours=24)
+    window_end = commence_time + timedelta(hours=24)
+
+    query = select(Event.id).where(
+        and_(
+            Event.commence_time >= window_start,
+            Event.commence_time <= window_end,
+            Event.home_team == home_team,
+            Event.away_team == away_team,
+        )
+    )
+    result = await session.execute(query)
+    candidates = list(result.scalars().all())
+
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        log.warning(
+            "Ambiguous match for %s @ %s on %s: %d candidates",
+            away_team,
+            home_team,
+            commence_time.date(),
+            len(candidates),
+        )
+    return None

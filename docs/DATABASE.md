@@ -4,14 +4,15 @@
 
 ## Database Schema
 
-All models defined in `packages/odds-core/odds_core/models.py` using SQLModel.
-
 ### Core Tables
 
+Defined in `packages/odds-core/odds_core/models.py`:
+
 **Event** (`events`):
-- Stores NBA games with teams, commence time, status, final scores
+- Stores games with teams, commence time, status, final scores
+- Supports multiple sports via `sport_key` (e.g. `basketball_nba`, `soccer_epl`)
 - Statuses: SCHEDULED → LIVE → FINAL (or CANCELLED/POSTPONED)
-- Primary key: API event ID (string)
+- Primary key: API event ID (string) or OddsPortal-generated ID (`op_` prefix)
 
 **OddsSnapshot** (`odds_snapshots`):
 - Stores complete API responses as JSON for each fetch
@@ -31,6 +32,56 @@ All models defined in `packages/odds-core/odds_core/models.py` using SQLModel.
 **FetchLog** (`fetch_logs`):
 - Records each API fetch operation
 - Tracks success/failure, quota usage, response times
+
+**AlertHistory** (`alert_history`):
+- Tracks sent alerts to enforce rate limiting
+
+### Prediction Tables
+
+Defined in `packages/odds-core/odds_core/prediction_models.py`:
+
+**Prediction** (`predictions`):
+- Stores CLV predictions from the scoring pipeline
+- Fields: `event_id` (FK), `snapshot_id` (FK), `model_name`, `model_version`, `predicted_clv`, `created_at`
+- Unique constraint: `(event_id, snapshot_id, model_name)` for idempotent upserts
+
+### Injury & Player Stats Tables
+
+Defined in `packages/odds-core/odds_core/injury_models.py`:
+
+**NbaInjuryReport** (`nba_injury_reports`):
+- Point-in-time injury snapshots from official NBA PDFs
+- Fields: `report_time`, `game_date`, `team`, `player_name`, `status`, `reason`, `event_id` (FK)
+- Unique constraint: `(report_time, team, player_name, game_date)`
+
+**NbaPlayerSeasonStats** (`nba_player_season_stats`):
+- Per-player per-season stats from PBPStats
+- Used for injury impact weighting (on/off ratings, minutes per game)
+
+**NbaTeamGameLog** (`nba_team_game_logs`):
+- NBA team game logs from stats.nba.com
+- Used for rest/schedule features and score backfill
+
+### Polymarket Tables
+
+Defined in `packages/odds-core/odds_core/polymarket_models.py`:
+
+**PolymarketEvent** (`polymarket_events`):
+- NBA game mapping with `pm_event_id`, `ticker`, `event_id` (FK, nullable)
+
+**PolymarketMarket** (`polymarket_markets`):
+- Tradable market within event, classified by type (moneyline/spread/total/player_prop)
+
+**PolymarketPriceSnapshot** (`polymarket_price_snapshots`):
+- Price time series with bid/ask/spread data
+
+**PolymarketOrderBookSnapshot** (`polymarket_orderbook_snapshots`):
+- Full order book depth with derived ML metrics
+
+**PolymarketFetchLog** (`polymarket_fetch_logs`):
+- Fetch audit log
+
+See [POLYMARKET.md](POLYMARKET.md) for full schema details.
 
 ## Storage Strategy: Hybrid Approach
 
@@ -91,7 +142,7 @@ All models defined in `packages/odds-core/odds_core/models.py` using SQLModel.
 
 ## Database Migrations
 
-**CRITICAL:** Always create migrations when modifying `packages/odds-core/odds_core/models.py`.
+**CRITICAL:** Always create migrations when modifying model files in `packages/odds-core/odds_core/`.
 
 ```bash
 # Create migration after model changes
@@ -129,6 +180,21 @@ uv run alembic current
 - Test migrations in order: local -> test -> CI dev -> prod
 
 ## Query Patterns
+
+### Storage Modules
+
+All in `packages/odds-lambda/odds_lambda/storage/`:
+
+| Module | Purpose |
+|--------|---------|
+| `readers.py` | `OddsReader` — time-aware odds queries |
+| `writers.py` | `OddsWriter` — hybrid raw + normalized storage |
+| `polymarket_reader.py` / `polymarket_writer.py` | Polymarket data |
+| `injury_reader.py` / `injury_writer.py` | Injury reports |
+| `game_log_reader.py` / `game_log_writer.py` | NBA game logs |
+| `pbpstats_reader.py` / `pbpstats_writer.py` | Player season stats |
+| `validators.py` | Data quality checks |
+| `tier_validator.py` | Tier assignment validation |
 
 ### OddsReader Methods
 

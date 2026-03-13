@@ -17,6 +17,7 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+      ODDS_API_KEYS: ${{ secrets.ODDS_API_KEYS }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
     steps:
@@ -83,6 +84,7 @@ jobs:
             -var="rule_prefix=odds" \
             -var="database_url=$DATABASE_URL" \
             -var="odds_api_key=$ODDS_API_KEY" \
+            -var="odds_api_keys=$ODDS_API_KEYS" \
             -var="discord_webhook_url=$DISCORD_WEBHOOK_URL" \
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
             -var="enable_oddsportal_scraper=true" \
@@ -105,7 +107,7 @@ jobs:
       - name: Test read-only CLI commands
         run: uv run pytest tests/migration/test_cli_readonly.py -v
 
-      - name: Test Lambda functions
+      - name: Test Lambda functions (invokes all jobs to trigger self-scheduling)
         run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
 
       - name: Verify schedule activation
