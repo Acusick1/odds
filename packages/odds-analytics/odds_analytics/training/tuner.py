@@ -987,7 +987,7 @@ def create_objective(
                     "using_cv_for_tuning",
                     trial_number=trial.number,
                     n_samples=len(X_full),
-                    n_folds=modified_config.training.data.n_folds,
+                    cv_method=modified_config.training.data.cv_method,
                 )
 
                 # Run cross-validation

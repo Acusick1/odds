@@ -214,11 +214,12 @@ class DataConfig(BaseModel):
         "(TimeSeriesSplit), 'kfold' uses standard K-Fold, "
         "'walk_forward' uses event-grouped walk-forward with configurable step size.",
     )
-    n_folds: int = Field(
-        default=5,
+    n_folds: int | None = Field(
+        default=None,
         ge=2,
         le=20,
-        description="Number of folds for cross-validation (only used when use_kfold=True)",
+        description="Number of folds for kfold/timeseries CV. "
+        "Required for kfold and timeseries methods, ignored for walk_forward.",
     )
     kfold_shuffle: bool = Field(
         default=True,
@@ -648,7 +649,15 @@ class FeatureConfig(BaseModel):
     feature_groups: tuple[str, ...] = Field(
         default=("tabular",),
         min_length=1,
-        description="Feature groups to compose. Available: tabular, trajectory, polymarket, injuries, rest",
+        description="Feature groups to compose. Available: tabular, trajectory, polymarket, injuries, rest, standings",
+    )
+
+    # Standings feature configuration
+    form_window: int = Field(
+        default=5,
+        ge=1,
+        le=38,
+        description="Number of recent matches for form calculation in standings features.",
     )
 
     # Trajectory feature configuration

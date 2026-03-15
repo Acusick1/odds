@@ -1,0 +1,121 @@
+experiment:
+  name: "lstm_pinnacle_tuning"
+  tags: ["lstm", "pinnacle", "tuning"]
+  description: |
+    LSTM tuning on Pinnacle/US bookmaker set (live API data only). Uses pregame
+    decision tier to capture dense PREGAME snapshot sequences. 24h lookback with
+    8 timesteps (3h intervals) matches the live API fetch frequency.
+    min_valid_timesteps=3 filters to events with sufficient sequence data.
+
+training:
+  strategy_type: "lstm_line_movement"
+
+  data:
+    start_date: "2025-03-01"
+    end_date: "2026-02-27"
+    data_source: "oddsapi"
+    test_split: 0.0
+    validation_split: 0.0
+    random_seed: 42
+    shuffle: false
+    use_kfold: true
+    cv_method: "walk_forward"
+    kfold_shuffle: false
+    window_type: "expanding"
+    min_train_events: 200
+    max_train_events: null
+    val_step_events: 50
+
+  model:
+    hidden_size: 64
+    num_layers: 2
+    dropout: 0.2
+    bidirectional: false
+    lookback_hours: 24
+    timesteps: 8
+    epochs: 500
+    batch_size: 32
+    learning_rate: 0.001
+    loss_function: "mse"
+    weight_decay: 0.0
+    patience: 10
+    min_delta: 0.0001
+    min_valid_timesteps: 3
+
+  features:
+    adapter: "lstm"
+    sharp_bookmakers: ["pinnacle"]
+    retail_bookmakers: ["fanduel", "draftkings", "betmgm"]
+    markets: ["h2h"]
+    outcome: "home"
+    closing_tier: "closing"
+    lookback_hours: 24
+    timesteps: 8
+    normalize: false
+    feature_groups: ["tabular", "injuries"]
+    movement_threshold: 0.005
+    target_type: "devigged_bookmaker"
+    target_bookmaker: "pinnacle"
+    sampling:
+      strategy: "tier"
+      decision_tier: "pregame"
+      min_hours: 3.0
+      max_hours: 12.0
+      max_samples_per_event: 5
+
+  feature_selection:
+    enabled: false
+
+  min_predicted_movement: 0.02
+  movement_confidence_scale: 5.0
+  base_confidence: 0.52
+  output_path: "models"
+
+tuning:
+  n_trials: 5
+  timeout: null
+  direction: "minimize"
+  metric: "val_mse"
+  pruner: "median"
+  sampler: "tpe"
+
+  search_spaces:
+    hidden_size:
+      type: int
+      low: 32
+      high: 128
+      step: 16
+
+    num_layers:
+      type: int
+      low: 1
+      high: 3
+
+    dropout:
+      type: float
+      low: 0.1
+      high: 0.5
+      step: 0.1
+
+    learning_rate:
+      type: float
+      low: 0.0001
+      high: 0.01
+      log: true
+
+    batch_size:
+      type: categorical
+      choices: [16, 32, 64]
+
+    weight_decay:
+      type: float
+      low: 0.0
+      high: 0.001
+
+    patience:
+      type: int
+      low: 5
+      high: 20
+      step: 5
+
+tracking: null

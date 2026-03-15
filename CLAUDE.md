@@ -68,6 +68,12 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system architectur
 - No wrapper functions — use `async_session_maker()` directly everywhere
 - Lambda uses NullPool automatically. Local/Railway use pool of 5
 
+### Model Evaluation
+
+- Walk-forward CV is the primary evaluation metric — it simulates the production retrain cycle (train on past, predict next chunk, roll forward)
+- Set `test_split: 0.0` for walk-forward CV experiments — a fixed chronological test split wastes training data and doesn't reflect deployment (we retrain on all available data before predicting new events)
+- CV R² from tuning is optimistically biased (best of N trials), but relative comparisons between experiments are fair when both are tuned
+
 ### Look-Ahead Bias (Backtesting)
 
 - ALWAYS use `get_odds_at_time()` for historical analysis

@@ -151,7 +151,7 @@ class TestDataConfig:
         )
         assert config.use_kfold is True  # Changed default to True for robust model selection
         assert config.cv_method == "timeseries"  # Default CV method for temporal data
-        assert config.n_folds == 5
+        assert config.n_folds is None  # Must be set explicitly for kfold/timeseries
         assert config.kfold_shuffle is True
 
     def test_kfold_enabled(self):

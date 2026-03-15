@@ -19,13 +19,12 @@ training:
     end_date: '2026-03-10'
     sport_key: soccer_epl
     data_source: null
-    test_split: 0.15
+    test_split: 0.0
     validation_split: 0.0
     random_seed: 42
     shuffle: false
     use_kfold: true
     cv_method: walk_forward
-    n_folds: 5
     kfold_shuffle: false
     window_type: expanding
     min_train_events: 700
