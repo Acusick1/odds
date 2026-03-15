@@ -106,6 +106,7 @@ class EventDataBundle:
     injury_reports: list[InjuryReport] = field(default_factory=list)
     player_stats: dict[str, NbaPlayerSeasonStats] = field(default_factory=dict)
     game_logs: list[NbaTeamGameLog] = field(default_factory=list)
+    prior_season_events: list[Event] = field(default_factory=list)
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
@@ -119,6 +120,44 @@ def _snapshot_has_market(snapshot: OddsSnapshot, market: str) -> bool:
             if mkt.get("key") == market:
                 return True
     return False
+
+
+async def _load_prior_season_events(
+    session: AsyncSession,
+    event: Event,
+    season: str,
+) -> list[Event]:
+    """Load completed EPL events from the same season before the given event.
+
+    Returns events ordered by commence_time ascending, filtered to FINAL
+    status with non-null scores and commence_time strictly before the
+    current event.
+    """
+    from odds_analytics.standings_features import epl_season_key
+
+    # Determine season date boundaries from the season key (e.g. "2024-25")
+    start_year = int(season.split("-")[0])
+    from datetime import UTC
+
+    season_start = datetime(start_year, 7, 1, tzinfo=UTC)
+    season_end = datetime(start_year + 1, 6, 30, 23, 59, 59, tzinfo=UTC)
+
+    result = await session.execute(
+        select(Event)
+        .where(
+            Event.sport_key == event.sport_key,
+            Event.status == EventStatus.FINAL,
+            Event.home_score.is_not(None),
+            Event.away_score.is_not(None),
+            Event.commence_time >= season_start,
+            Event.commence_time < event.commence_time,
+            Event.commence_time <= season_end,
+        )
+        .order_by(Event.commence_time)
+    )
+    prior = result.scalars().all()
+    # Extra safety: only keep events whose season key matches
+    return [e for e in prior if epl_season_key(e.commence_time) == season]
 
 
 async def collect_event_data(
@@ -229,6 +268,14 @@ async def collect_event_data(
                 all_logs.append(prev)
         game_logs = all_logs
 
+    # Prior season events for standings features
+    prior_season_events: list[Event] = []
+    if "standings" in config.feature_groups:
+        from odds_analytics.standings_features import epl_season_key
+
+        season = epl_season_key(event.commence_time)
+        prior_season_events = await _load_prior_season_events(session, event, season)
+
     # Sequences for LSTM adapter
     sequences: list[list[Odds]] = []
     if config.adapter == "lstm":
@@ -244,6 +291,7 @@ async def collect_event_data(
         injury_reports=injury_reports,
         player_stats=player_stats,
         game_logs=game_logs,
+        prior_season_events=prior_season_events,
         sequences=sequences,
     )
 
@@ -449,7 +497,7 @@ class FeatureAdapter(Protocol):
         ...
 
 
-_STATIC_FEATURE_GROUPS = frozenset({"tabular", "polymarket", "injuries", "rest"})
+_STATIC_FEATURE_GROUPS = frozenset({"tabular", "polymarket", "injuries", "rest", "standings"})
 
 
 def _static_feature_group_names(config: FeatureConfig) -> list[str]:
@@ -473,6 +521,10 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
         from odds_analytics.schedule_features import RestScheduleFeatures
 
         names.extend(f"rest_{n}" for n in RestScheduleFeatures.get_feature_names())
+    if "standings" in config.feature_groups:
+        from odds_analytics.standings_features import StandingsFeatures
+
+        names.extend(f"stnd_{n}" for n in StandingsFeatures.get_feature_names())
     return names
 
 
@@ -618,6 +670,23 @@ def _extract_static_feature_parts(
             except Exception:
                 logger.debug("rest_feature_extraction_failed", event_id=event.id)
                 parts.append(nan_block_rest)
+
+    # --- Standings features (NaN-fill when unavailable to keep row) ---
+    if "standings" in config.feature_groups:
+        from odds_analytics.standings_features import StandingsFeatures, extract_standings_features
+
+        n_stnd = len(StandingsFeatures.get_feature_names())
+        nan_block_stnd = np.full(n_stnd, np.nan)
+
+        if not bundle.prior_season_events:
+            parts.append(nan_block_stnd)
+        else:
+            try:
+                stnd_feats = extract_standings_features(bundle.prior_season_events, event)
+                parts.append(stnd_feats.to_array())
+            except Exception:
+                logger.debug("standings_feature_extraction_failed", event_id=event.id)
+                parts.append(nan_block_stnd)
 
     return parts
 
