@@ -298,13 +298,22 @@ class TierSampler:
     """Returns the latest snapshot no closer to game than the decision tier (single row per event).
 
     Snapshots in the decision tier or any earlier tier (further from game) are
-    candidates. The most recent candidate by wall-clock time is returned.
+    candidates. When required_bookmakers is set, only snapshots containing all
+    specified bookmakers for the given market are eligible. The most recent
+    candidate by wall-clock time is returned.
     """
 
-    def __init__(self, decision_tier: str) -> None:
+    def __init__(
+        self,
+        decision_tier: str,
+        required_bookmakers: list[str] | None = None,
+        market: str = "h2h",
+    ) -> None:
         from odds_lambda.fetch_tier import FetchTier
 
         self._decision_tier = FetchTier(decision_tier)
+        self._required_bookmakers = required_bookmakers or []
+        self._market = market
 
     def sample(self, bundle: EventDataBundle) -> list[OddsSnapshot]:
         from odds_lambda.fetch_tier import FetchTier
@@ -327,6 +336,16 @@ class TierSampler:
                         candidates.append(s)
                 except ValueError:
                     pass
+
+        # Filter to snapshots that contain all required bookmakers
+        if self._required_bookmakers:
+            candidates = [
+                s
+                for s in candidates
+                if all(
+                    snapshot_has_bookmaker(s, bm, self._market) for bm in self._required_bookmakers
+                )
+            ]
 
         if not candidates:
             return []
@@ -384,7 +403,8 @@ def _make_sampler(config: FeatureConfig) -> SnapshotSampler:
     """Instantiate the sampler specified in config.sampling."""
     sc = config.sampling
     if sc.strategy == "tier":
-        return TierSampler(sc.decision_tier.value)
+        required_bms = config.sharp_bookmakers if _should_filter_missing_sharp(config) else None
+        return TierSampler(sc.decision_tier.value, required_bms, config.primary_market)
     return TimeRangeSampler(sc.min_hours, sc.max_hours, sc.max_samples_per_event)
 
 
@@ -556,14 +576,14 @@ def _extract_static_feature_parts(
             logger.debug("tabular_extraction_failed", event_id=event.id)
             return None
 
-    # --- Polymarket features (NaN-fill when unavailable to keep row) ---
+    # --- Polymarket features (zero-fill when unavailable to keep row) ---
     if "polymarket" in config.feature_groups:
         n_pm = len(PolymarketTabularFeatures.get_feature_names())
         n_xsrc = len(CrossSourceFeatures.get_feature_names())
-        nan_block = np.full(n_pm + n_xsrc, np.nan)
+        zero_block = np.zeros(n_pm + n_xsrc)
 
         if bundle.pm_context is None:
-            parts.append(nan_block)
+            parts.append(zero_block)
         else:
             ctx = bundle.pm_context
             target_time = snapshot.snapshot_time
@@ -572,7 +592,7 @@ def _extract_static_feature_parts(
             )
 
             if price_snap is None:
-                parts.append(nan_block)
+                parts.append(zero_block)
             else:
                 ob_snap = _find_nearest_pm_orderbook(
                     bundle.pm_orderbooks, target_time, config.pm_price_tolerance_minutes
@@ -615,17 +635,17 @@ def _extract_static_feature_parts(
                     parts.append(np.concatenate([pm_feats.to_array(), xsrc_feats.to_array()]))
                 except Exception:
                     logger.debug("pm_feature_extraction_failed", event_id=event.id)
-                    parts.append(nan_block)
+                    parts.append(zero_block)
 
-    # --- Injury features (NaN-fill when unavailable to keep row) ---
+    # --- Injury features (zero-fill when unavailable to keep row) ---
     if "injuries" in config.feature_groups:
         from odds_analytics.injury_features import InjuryFeatures, extract_injury_features
 
         n_inj = len(InjuryFeatures.get_feature_names())
-        nan_block_inj = np.full(n_inj, np.nan)
+        zero_block_inj = np.zeros(n_inj)
 
         if not bundle.injury_reports:
-            parts.append(nan_block_inj)
+            parts.append(zero_block_inj)
         else:
             try:
                 inj_feats = extract_injury_features(
@@ -637,34 +657,34 @@ def _extract_static_feature_parts(
                 parts.append(inj_feats.to_array())
             except Exception:
                 logger.debug("injury_feature_extraction_failed", event_id=event.id)
-                parts.append(nan_block_inj)
+                parts.append(zero_block_inj)
 
-    # --- Rest/schedule features (NaN-fill when unavailable to keep row) ---
+    # --- Rest/schedule features (zero-fill when unavailable to keep row) ---
     if "rest" in config.feature_groups:
         from odds_analytics.schedule_features import RestScheduleFeatures, extract_rest_features
 
         n_rest = len(RestScheduleFeatures.get_feature_names())
-        nan_block_rest = np.full(n_rest, np.nan)
+        zero_block_rest = np.zeros(n_rest)
 
         if not bundle.game_logs:
-            parts.append(nan_block_rest)
+            parts.append(zero_block_rest)
         else:
             try:
                 rest_feats = extract_rest_features(bundle.game_logs, event)
                 parts.append(rest_feats.to_array())
             except Exception:
                 logger.debug("rest_feature_extraction_failed", event_id=event.id)
-                parts.append(nan_block_rest)
+                parts.append(zero_block_rest)
 
-    # --- Standings features (NaN-fill when unavailable to keep row) ---
+    # --- Standings features (zero-fill when unavailable to keep row) ---
     if "standings" in config.feature_groups:
         from odds_analytics.standings_features import StandingsFeatures, extract_standings_features
 
         n_stnd = len(StandingsFeatures.get_feature_names())
-        nan_block_stnd = np.full(n_stnd, np.nan)
+        zero_block_stnd = np.zeros(n_stnd)
 
         if not bundle.prior_season_events:
-            parts.append(nan_block_stnd)
+            parts.append(zero_block_stnd)
         else:
             try:
                 stnd_feats = extract_standings_features(
@@ -673,7 +693,7 @@ def _extract_static_feature_parts(
                 parts.append(stnd_feats.to_array())
             except Exception:
                 logger.debug("standings_feature_extraction_failed", event_id=event.id)
-                parts.append(nan_block_stnd)
+                parts.append(zero_block_stnd)
 
     return parts
 
@@ -1025,7 +1045,6 @@ async def prepare_training_data(
 
     X = np.array(X_list, dtype=np.float32)
     y = np.array(y_list, dtype=np.float32)
-    X = np.nan_to_num(X, nan=0.0)
     event_ids = np.array(event_id_list)
     masks = np.array(masks_list, dtype=bool) if masks_list else None
 
@@ -1033,7 +1052,6 @@ async def prepare_training_data(
     static_features: np.ndarray | None = None
     if static_list:
         static_features = np.array(static_list, dtype=np.float32)
-        static_features = np.nan_to_num(static_features, nan=0.0)
 
     from odds_analytics.training.feature_selection import apply_variance_filter
 

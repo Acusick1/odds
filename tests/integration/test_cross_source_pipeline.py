@@ -438,7 +438,7 @@ class TestPrepareTrainingDataWithPolymarket:
         sb_only_rows = result.X[result.event_ids == sb_only_id]
         assert len(sb_only_rows) > 0
 
-        # PM/cross-source features should be 0 (NaN-filled and then nan_to_num)
+        # PM/cross-source features should be 0 (zero-filled when PM unavailable)
         pm_indices = [
             i
             for i, name in enumerate(result.feature_names)

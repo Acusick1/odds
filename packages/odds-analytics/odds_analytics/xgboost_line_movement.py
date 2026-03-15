@@ -213,9 +213,6 @@ class XGBoostLineMovementStrategy(BettingStrategy):
                 features, self.feature_names if self.feature_names else None
             )
 
-            # Handle NaN values (replace with 0 for prediction)
-            feature_vector = np.nan_to_num(feature_vector, nan=0.0)
-
             # Predict line movement delta
             predicted_movement = self._predict_movement(feature_vector)
 
