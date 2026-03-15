@@ -12,7 +12,7 @@ resource "aws_lambda_function" "odds_scraper" {
   role          = aws_iam_role.lambda_exec.arn
   package_type  = "Image"
   image_uri     = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/odds-scraper:${var.scraper_image_tag}"
-  timeout       = 600
+  timeout       = 900
   memory_size   = 2048
 
   environment {
