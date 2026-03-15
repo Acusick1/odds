@@ -298,13 +298,22 @@ class TierSampler:
     """Returns the latest snapshot no closer to game than the decision tier (single row per event).
 
     Snapshots in the decision tier or any earlier tier (further from game) are
-    candidates. The most recent candidate by wall-clock time is returned.
+    candidates. When required_bookmakers is set, only snapshots containing all
+    specified bookmakers for the given market are eligible. The most recent
+    candidate by wall-clock time is returned.
     """
 
-    def __init__(self, decision_tier: str) -> None:
+    def __init__(
+        self,
+        decision_tier: str,
+        required_bookmakers: list[str] | None = None,
+        market: str = "h2h",
+    ) -> None:
         from odds_lambda.fetch_tier import FetchTier
 
         self._decision_tier = FetchTier(decision_tier)
+        self._required_bookmakers = required_bookmakers or []
+        self._market = market
 
     def sample(self, bundle: EventDataBundle) -> list[OddsSnapshot]:
         from odds_lambda.fetch_tier import FetchTier
@@ -327,6 +336,16 @@ class TierSampler:
                         candidates.append(s)
                 except ValueError:
                     pass
+
+        # Filter to snapshots that contain all required bookmakers
+        if self._required_bookmakers:
+            candidates = [
+                s
+                for s in candidates
+                if all(
+                    snapshot_has_bookmaker(s, bm, self._market) for bm in self._required_bookmakers
+                )
+            ]
 
         if not candidates:
             return []
@@ -384,7 +403,8 @@ def _make_sampler(config: FeatureConfig) -> SnapshotSampler:
     """Instantiate the sampler specified in config.sampling."""
     sc = config.sampling
     if sc.strategy == "tier":
-        return TierSampler(sc.decision_tier.value)
+        required_bms = config.sharp_bookmakers if _should_filter_missing_sharp(config) else None
+        return TierSampler(sc.decision_tier.value, required_bms, config.primary_market)
     return TimeRangeSampler(sc.min_hours, sc.max_hours, sc.max_samples_per_event)
 
 
@@ -1025,7 +1045,6 @@ async def prepare_training_data(
 
     X = np.array(X_list, dtype=np.float32)
     y = np.array(y_list, dtype=np.float32)
-    X = np.nan_to_num(X, nan=0.0)
     event_ids = np.array(event_id_list)
     masks = np.array(masks_list, dtype=bool) if masks_list else None
 
@@ -1033,7 +1052,6 @@ async def prepare_training_data(
     static_features: np.ndarray | None = None
     if static_list:
         static_features = np.array(static_list, dtype=np.float32)
-        static_features = np.nan_to_num(static_features, nan=0.0)
 
     from odds_analytics.training.feature_selection import apply_variance_filter
 

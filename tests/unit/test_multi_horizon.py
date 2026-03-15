@@ -479,6 +479,86 @@ class TestTierSampler:
         sampler = TierSampler("pregame")
         assert sampler.sample(self._make_bundle(event, [])) == []
 
+    def _raw_data_with_bookmakers(self, bookmaker_keys: list[str]) -> dict:
+        """Build minimal raw_data containing the given bookmakers with h2h market."""
+        return {
+            "bookmakers": [
+                {"key": bm, "markets": [{"key": "h2h", "outcomes": []}]} for bm in bookmaker_keys
+            ]
+        }
+
+    def test_required_bookmakers_filters_candidates(self, event):
+        """Sampler with required_bookmakers drops snapshots missing those bookmakers."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=24),
+                raw_data=self._raw_data_with_bookmakers(["pinnacle", "bet365"]),
+                bookmaker_count=2,
+                fetch_tier="early",
+            ),
+            OddsSnapshot(
+                id=2,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=12),
+                raw_data=self._raw_data_with_bookmakers(["bet365", "betway"]),
+                bookmaker_count=2,
+                fetch_tier="sharp",
+            ),
+        ]
+        sampler = TierSampler("sharp", required_bookmakers=["pinnacle"], market="h2h")
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 1
+        assert result[0].id == 1  # Earlier but has Pinnacle
+
+    def test_required_bookmakers_no_candidates_returns_empty(self, event):
+        """When filtering removes all candidates, returns empty list."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=12),
+                raw_data=self._raw_data_with_bookmakers(["bet365", "betway"]),
+                bookmaker_count=2,
+                fetch_tier="sharp",
+            ),
+        ]
+        sampler = TierSampler("sharp", required_bookmakers=["pinnacle"], market="h2h")
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert result == []
+
+    def test_no_required_bookmakers_unchanged_behavior(self, event):
+        """Default (no required_bookmakers) still picks latest eligible snapshot."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=24),
+                raw_data=self._raw_data_with_bookmakers(["pinnacle", "bet365"]),
+                bookmaker_count=2,
+                fetch_tier="early",
+            ),
+            OddsSnapshot(
+                id=2,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=12),
+                raw_data=self._raw_data_with_bookmakers(["bet365"]),
+                bookmaker_count=1,
+                fetch_tier="sharp",
+            ),
+        ]
+        sampler = TierSampler("sharp")
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 1
+        assert result[0].id == 2  # Latest, no bookmaker filter
+
 
 class TestTimeRangeSampler:
     """Tests for TimeRangeSampler stratified snapshot selection."""
