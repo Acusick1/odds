@@ -7,7 +7,10 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from oddsharvester.core.scrape_result import FailedUrl
 
 import structlog
 from odds_core.models import Event
@@ -298,7 +301,7 @@ async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
                 matches=len(result.success),
                 stats=result.stats.to_dict(),
             )
-            # Retry failed URLs once with a fresh browser session
+            # Retry failed URLs up to MAX_FAILED_URL_RETRY_PASSES times with fresh browser sessions
             await _retry_failed_urls(result, scraper_kwargs)
             return result
 
@@ -314,7 +317,7 @@ async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
     return _empty_scrape_result()
 
 
-def _get_retriable_failed_urls(failed: list[Any]) -> list[str]:
+def _get_retriable_failed_urls(failed: list[FailedUrl]) -> list[str]:
     """Return URLs from failed list that should be retried.
 
     Retries all failures except PAGE_NOT_FOUND (404), which are permanent.

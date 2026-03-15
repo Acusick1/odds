@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from odds_lambda.oddsportal_common import (
@@ -51,9 +51,6 @@ class FakeScrapeResult:
     def get_error_breakdown(self) -> dict[str, list[str]]:
         return {}
 
-    def get_retryable_urls(self) -> list[str]:
-        return [f.url for f in self.failed if f.is_retryable]
-
 
 def _make_result(
     success: list[dict[str, Any]] | None = None,
@@ -74,6 +71,19 @@ def _make_result(
 
 SCRAPER_PATCH = "oddsharvester.core.scraper_app.run_scraper"
 SLEEP_PATCH = "odds_lambda.oddsportal_common.asyncio.sleep"
+USERAGENT_PATCH = "fake_useragent.UserAgent"
+
+
+def _mock_useragent() -> MagicMock:
+    """Create a mock UserAgent that returns a realistic Chrome UA string."""
+    mock_cls = MagicMock()
+    type(mock_cls.return_value).random = PropertyMock(
+        return_value=(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+    )
+    return mock_cls
 
 
 class TestRunScraperWithRetry:
@@ -462,7 +472,8 @@ class TestFailedUrlRetry:
 
 class TestUserAgentGeneration:
     def test_generate_user_agent_returns_chrome_string(self) -> None:
-        ua = _generate_user_agent()
+        with patch(USERAGENT_PATCH, _mock_useragent()):
+            ua = _generate_user_agent()
         assert isinstance(ua, str)
         assert "Chrome" in ua
 
@@ -471,7 +482,7 @@ class TestUserAgentGeneration:
         matches = [{"home_team": "Arsenal", "away_team": "Chelsea"}]
         mock_run = AsyncMock(return_value=_make_result(success=matches))
 
-        with patch(SCRAPER_PATCH, mock_run):
+        with patch(SCRAPER_PATCH, mock_run), patch(USERAGENT_PATCH, _mock_useragent()):
             await run_scraper_with_retry(command="upcoming", sport="football", headless=True)
 
         call_kwargs = mock_run.call_args.kwargs
@@ -507,7 +518,11 @@ class TestUserAgentGeneration:
         retry_result = _make_result(success=[], failed=initial_failed)
         mock_run = AsyncMock(side_effect=[initial_result, retry_result, retry_result, retry_result])
 
-        with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
+        with (
+            patch(SCRAPER_PATCH, mock_run),
+            patch(SLEEP_PATCH, new_callable=AsyncMock),
+            patch(USERAGENT_PATCH, _mock_useragent()),
+        ):
             await run_scraper_with_retry(command="upcoming", sport="football", headless=True)
 
         initial_ua = mock_run.call_args_list[0].kwargs["browser_user_agent"]

@@ -68,11 +68,11 @@ resource "aws_lambda_permission" "allow_eventbridge_daily_digest" {
 }
 
 # Score predictions: runs CLV model inference after scraper has landed new snapshots.
-# Offset 30 min past the hour to account for scraper jitter (up to 15 min) + runtime (up to 10 min).
+# Offset 15 min past the hour so the hourly scraper job has time to finish.
 resource "aws_cloudwatch_event_rule" "score_predictions" {
   name                = format("%s-score-predictions", var.rule_prefix)
   description         = "Hourly CLV model inference on new snapshots"
-  schedule_expression = "cron(30 * * * ? *)"
+  schedule_expression = "cron(15 * * * ? *)"
   state               = "ENABLED"
 }
 
