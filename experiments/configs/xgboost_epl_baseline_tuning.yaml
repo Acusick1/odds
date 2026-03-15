@@ -1,24 +1,23 @@
 experiment:
-  name: xgboost_epl_combined_bet365sharp_tuning
+  name: xgboost_epl_baseline_tuning
   tags:
   - xgboost
   - epl
-  - combined
+  - oddsportal
   - tuning
   - football
-  - control
   description: >
-    Control experiment: combined OddsPortal + FDUK data but with bet365 as sharp
-    reference (same as OddsPortal-only baseline). Isolates whether R² improvement
-    comes from Pinnacle features or just more data/snapshots per event.
+    Hyperparameter tuning for EPL home CLV prediction with tabular-only features.
+    ~1.8K events across 5 EPL seasons (2021-2026), UK bookmaker set.
+    First football experiment — baseline to compare against NBA results.
 
 training:
   strategy_type: xgboost_line_movement
   data:
     start_date: '2021-08-01'
-    end_date: '2026-03-10'
+    end_date: '2026-03-02'
     sport_key: soccer_epl
-    data_source: null
+    data_source: oddsportal
     test_split: 0.0
     validation_split: 0.0
     random_seed: 42
@@ -59,8 +58,6 @@ training:
     - h2h
     outcome: home
     closing_tier: closing
-    closing_source_priority:
-    - football_data_uk
     sampling:
       strategy: tier
       decision_tier: sharp

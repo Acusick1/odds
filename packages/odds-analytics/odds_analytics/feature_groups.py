@@ -106,6 +106,7 @@ class EventDataBundle:
     injury_reports: list[InjuryReport] = field(default_factory=list)
     player_stats: dict[str, NbaPlayerSeasonStats] = field(default_factory=dict)
     game_logs: list[NbaTeamGameLog] = field(default_factory=list)
+    prior_season_events: list[Event] = field(default_factory=list)
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
@@ -125,6 +126,7 @@ async def collect_event_data(
     event: Event,
     session: AsyncSession,
     config: FeatureConfig,
+    standings_cache: dict[str, list[Event]] | None = None,
 ) -> EventDataBundle:
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
@@ -229,6 +231,13 @@ async def collect_event_data(
                 all_logs.append(prev)
         game_logs = all_logs
 
+    # Prior season events for standings features (from preloaded cache)
+    prior_season_events: list[Event] = []
+    if "standings" in config.feature_groups and standings_cache is not None:
+        from odds_analytics.standings_features import get_prior_events_from_cache
+
+        prior_season_events = get_prior_events_from_cache(standings_cache, event)
+
     # Sequences for LSTM adapter
     sequences: list[list[Odds]] = []
     if config.adapter == "lstm":
@@ -244,6 +253,7 @@ async def collect_event_data(
         injury_reports=injury_reports,
         player_stats=player_stats,
         game_logs=game_logs,
+        prior_season_events=prior_season_events,
         sequences=sequences,
     )
 
@@ -449,7 +459,7 @@ class FeatureAdapter(Protocol):
         ...
 
 
-_STATIC_FEATURE_GROUPS = frozenset({"tabular", "polymarket", "injuries", "rest"})
+_STATIC_FEATURE_GROUPS = frozenset({"tabular", "polymarket", "injuries", "rest", "standings"})
 
 
 def _static_feature_group_names(config: FeatureConfig) -> list[str]:
@@ -473,6 +483,10 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
         from odds_analytics.schedule_features import RestScheduleFeatures
 
         names.extend(f"rest_{n}" for n in RestScheduleFeatures.get_feature_names())
+    if "standings" in config.feature_groups:
+        from odds_analytics.standings_features import StandingsFeatures
+
+        names.extend(f"stnd_{n}" for n in StandingsFeatures.get_feature_names())
     return names
 
 
@@ -618,6 +632,23 @@ def _extract_static_feature_parts(
             except Exception:
                 logger.debug("rest_feature_extraction_failed", event_id=event.id)
                 parts.append(nan_block_rest)
+
+    # --- Standings features (NaN-fill when unavailable to keep row) ---
+    if "standings" in config.feature_groups:
+        from odds_analytics.standings_features import StandingsFeatures, extract_standings_features
+
+        n_stnd = len(StandingsFeatures.get_feature_names())
+        nan_block_stnd = np.full(n_stnd, np.nan)
+
+        if not bundle.prior_season_events:
+            parts.append(nan_block_stnd)
+        else:
+            try:
+                stnd_feats = extract_standings_features(bundle.prior_season_events, event)
+                parts.append(stnd_feats.to_array())
+            except Exception:
+                logger.debug("standings_feature_extraction_failed", event_id=event.id)
+                parts.append(nan_block_stnd)
 
     return parts
 
@@ -892,9 +923,18 @@ async def prepare_training_data(
     lstm_adapter = isinstance(adapter, LSTMAdapter)
     static_names = _static_feature_group_names(config) if lstm_adapter else None
 
+    # Preload standings cache to avoid N+1 queries
+    standings_cache: dict[str, list[Event]] | None = None
+    if "standings" in config.feature_groups:
+        from odds_analytics.standings_features import load_season_events_cache
+
+        sport_key = config.sport_key or (valid_events[0].sport_key if valid_events else None)
+        if sport_key:
+            standings_cache = await load_season_events_cache(session, sport_key)
+
     for event in valid_events:
         # Load all data for this event in bulk
-        bundle = await collect_event_data(event, session, config)
+        bundle = await collect_event_data(event, session, config, standings_cache=standings_cache)
 
         # Closing snapshot is required
         if bundle.closing_snapshot is None:
