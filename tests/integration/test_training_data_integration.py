@@ -339,10 +339,12 @@ class TestInjuryFeaturesIntegration:
         events = test_events_with_odds
         base_time = datetime(2024, 10, 15, 19, 0, tzinfo=UTC)
 
-        # Add injury reports for the first 3 events only
+        # Add injury reports for the first 3 events only.
+        # Vary report_time offsets so timing features have non-zero variance.
+        report_offsets_hours = [10, 20, 30]
         for i in range(3):
             commence_time = base_time + timedelta(days=i)
-            report_time = commence_time - timedelta(hours=10)
+            report_time = commence_time - timedelta(hours=report_offsets_hours[i])
 
             # Two reports per event (one per team)
             report_home = InjuryReport(

@@ -428,7 +428,7 @@ class TestPrepareTrainingDataWithPolymarket:
     async def test_sb_only_event_has_zero_pm_features(
         self, pglite_async_session, cross_source_test_data
     ):
-        """The SB-only event row should have zeros (NaN→0) for PM feature columns."""
+        """The SB-only event row should have NaN for PM feature columns."""
         events = cross_source_test_data["events"]
         config = self._make_config()
         result = await prepare_training_data(events, pglite_async_session, config)
@@ -438,7 +438,7 @@ class TestPrepareTrainingDataWithPolymarket:
         sb_only_rows = result.X[result.event_ids == sb_only_id]
         assert len(sb_only_rows) > 0
 
-        # PM/cross-source features should be 0 (zero-filled when PM unavailable)
+        # PM/cross-source features should be NaN when PM unavailable
         pm_indices = [
             i
             for i, name in enumerate(result.feature_names)
@@ -446,4 +446,4 @@ class TestPrepareTrainingDataWithPolymarket:
         ]
         if pm_indices:
             pm_block = sb_only_rows[0, pm_indices]
-            assert np.all(pm_block == 0.0)
+            assert np.all(np.isnan(pm_block))

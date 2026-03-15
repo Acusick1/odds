@@ -576,14 +576,14 @@ def _extract_static_feature_parts(
             logger.debug("tabular_extraction_failed", event_id=event.id)
             return None
 
-    # --- Polymarket features (zero-fill when unavailable to keep row) ---
+    # --- Polymarket features (NaN-fill when unavailable to keep row) ---
     if "polymarket" in config.feature_groups:
         n_pm = len(PolymarketTabularFeatures.get_feature_names())
         n_xsrc = len(CrossSourceFeatures.get_feature_names())
-        zero_block = np.zeros(n_pm + n_xsrc)
+        nan_block = np.full(n_pm + n_xsrc, np.nan)
 
         if bundle.pm_context is None:
-            parts.append(zero_block)
+            parts.append(nan_block)
         else:
             ctx = bundle.pm_context
             target_time = snapshot.snapshot_time
@@ -592,7 +592,7 @@ def _extract_static_feature_parts(
             )
 
             if price_snap is None:
-                parts.append(zero_block)
+                parts.append(nan_block)
             else:
                 ob_snap = _find_nearest_pm_orderbook(
                     bundle.pm_orderbooks, target_time, config.pm_price_tolerance_minutes
@@ -635,17 +635,17 @@ def _extract_static_feature_parts(
                     parts.append(np.concatenate([pm_feats.to_array(), xsrc_feats.to_array()]))
                 except Exception:
                     logger.debug("pm_feature_extraction_failed", event_id=event.id)
-                    parts.append(zero_block)
+                    parts.append(nan_block)
 
-    # --- Injury features (zero-fill when unavailable to keep row) ---
+    # --- Injury features (NaN-fill when unavailable to keep row) ---
     if "injuries" in config.feature_groups:
         from odds_analytics.injury_features import InjuryFeatures, extract_injury_features
 
         n_inj = len(InjuryFeatures.get_feature_names())
-        zero_block_inj = np.zeros(n_inj)
+        nan_block_inj = np.full(n_inj, np.nan)
 
         if not bundle.injury_reports:
-            parts.append(zero_block_inj)
+            parts.append(nan_block_inj)
         else:
             try:
                 inj_feats = extract_injury_features(
@@ -657,34 +657,34 @@ def _extract_static_feature_parts(
                 parts.append(inj_feats.to_array())
             except Exception:
                 logger.debug("injury_feature_extraction_failed", event_id=event.id)
-                parts.append(zero_block_inj)
+                parts.append(nan_block_inj)
 
-    # --- Rest/schedule features (zero-fill when unavailable to keep row) ---
+    # --- Rest/schedule features (NaN-fill when unavailable to keep row) ---
     if "rest" in config.feature_groups:
         from odds_analytics.schedule_features import RestScheduleFeatures, extract_rest_features
 
         n_rest = len(RestScheduleFeatures.get_feature_names())
-        zero_block_rest = np.zeros(n_rest)
+        nan_block_rest = np.full(n_rest, np.nan)
 
         if not bundle.game_logs:
-            parts.append(zero_block_rest)
+            parts.append(nan_block_rest)
         else:
             try:
                 rest_feats = extract_rest_features(bundle.game_logs, event)
                 parts.append(rest_feats.to_array())
             except Exception:
                 logger.debug("rest_feature_extraction_failed", event_id=event.id)
-                parts.append(zero_block_rest)
+                parts.append(nan_block_rest)
 
-    # --- Standings features (zero-fill when unavailable to keep row) ---
+    # --- Standings features (NaN-fill when unavailable to keep row) ---
     if "standings" in config.feature_groups:
         from odds_analytics.standings_features import StandingsFeatures, extract_standings_features
 
         n_stnd = len(StandingsFeatures.get_feature_names())
-        zero_block_stnd = np.zeros(n_stnd)
+        nan_block_stnd = np.full(n_stnd, np.nan)
 
         if not bundle.prior_season_events:
-            parts.append(zero_block_stnd)
+            parts.append(nan_block_stnd)
         else:
             try:
                 stnd_feats = extract_standings_features(
@@ -693,7 +693,7 @@ def _extract_static_feature_parts(
                 parts.append(stnd_feats.to_array())
             except Exception:
                 logger.debug("standings_feature_extraction_failed", event_id=event.id)
-                parts.append(zero_block_stnd)
+                parts.append(nan_block_stnd)
 
     return parts
 
