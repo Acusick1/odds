@@ -60,6 +60,7 @@ experiments/*
 !experiments/configs/
 experiments/configs/*
 !experiments/configs/*.yaml
+experiments/configs/*_best.yaml
 !experiments/scripts/
 !experiments/results/
 experiments/results/**/*.png
