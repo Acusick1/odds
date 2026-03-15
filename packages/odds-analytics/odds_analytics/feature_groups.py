@@ -817,18 +817,29 @@ def _has_bookmaker_closing(
 def _select_closing_snapshot(
     candidates: list[OddsSnapshot], event: Event, config: FeatureConfig
 ) -> OddsSnapshot | None:
-    """Pick the best closing snapshot from candidates ordered by time.
+    """Pick the best closing snapshot from candidates ordered chronologically.
 
-    When target_type is bookmaker-specific, prefer the candidate containing
-    the target bookmaker's data for the configured market. Falls back to last-by-time.
+    Assumes candidates are sorted by snapshot_time ascending ([-1] = latest).
+    When target_type is bookmaker-specific, prefer candidates with the target
+    bookmaker's data. If closing_source_priority is set, prefer sources in that
+    order among candidates with the target bookmaker. Falls back to last-by-time.
     """
     if not candidates:
         return None
     if config.target_type == "devigged_bookmaker":
         market = config.primary_market
-        for candidate in reversed(candidates):
-            if _has_bookmaker_closing(candidate, event, config.target_bookmaker, market):
-                return candidate
+        with_bookmaker = [
+            c
+            for c in candidates
+            if _has_bookmaker_closing(c, event, config.target_bookmaker, market)
+        ]
+        if with_bookmaker:
+            if config.closing_source_priority:
+                for source in config.closing_source_priority:
+                    source_matches = [c for c in with_bookmaker if c.api_request_id == source]
+                    if source_matches:
+                        return source_matches[-1]
+            return with_bookmaker[-1]
     return candidates[-1]
 
 
