@@ -1,6 +1,6 @@
 """Unit tests for EPL standings and form feature extraction."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 from odds_analytics.standings_features import (
@@ -335,8 +335,6 @@ class TestExtractStandingsFeatures:
         # Results: L, W, W, W, D, W
         scores = [(0, 1), (3, 0), (2, 1), (1, 0), (0, 0), (4, 0)]
         for i, (opp, (hs, as_)) in enumerate(zip(opponents, scores, strict=True)):
-            from datetime import timedelta
-
             prior.append(
                 _make_completed_event(
                     f"e{i}",

@@ -7,22 +7,35 @@ produce point-in-time standings with no look-ahead bias.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from collections import defaultdict
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 
 import numpy as np
+import structlog
 from odds_core.models import Event, EventStatus
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
     "StandingsFeatures",
     "extract_standings_features",
     "build_league_table",
     "TeamRecord",
+    "load_season_events_cache",
+    "get_prior_events_from_cache",
 ]
+
+logger = structlog.get_logger()
 
 _FORM_WINDOW = 5
 _POINTS_WIN = 3
 _POINTS_DRAW = 1
+
+_SUPPORTED_SPORT_KEYS = frozenset({"soccer_epl"})
+
+# Type alias for the preloaded cache: season key -> list of completed events (chronological)
+StandingsCache = dict[str, list[Event]]
 
 
 @dataclass
@@ -71,11 +84,7 @@ class TeamRecord:
     lost: int = 0
     goals_for: int = 0
     goals_against: int = 0
-    form: list[float] = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        if self.form is None:
-            self.form = []
+    form: list[float] = field(default_factory=list)
 
     @property
     def points(self) -> int:
@@ -164,6 +173,61 @@ def build_league_table(
         records[event.away_team].record_result(event.away_score, event.home_score)
 
     return records
+
+
+async def load_season_events_cache(
+    session: AsyncSession,
+    sport_key: str,
+) -> StandingsCache:
+    """Bulk-load all completed events for a sport, grouped by season.
+
+    Returns a dict mapping season key (e.g. '2024-25') to a chronologically
+    ordered list of completed events. Intended to be called once before the
+    per-event loop to avoid N+1 queries.
+    """
+    if sport_key not in _SUPPORTED_SPORT_KEYS:
+        raise ValueError(
+            f"Standings features only support {_SUPPORTED_SPORT_KEYS}, got '{sport_key}'"
+        )
+
+    result = await session.execute(
+        select(Event)
+        .where(
+            Event.sport_key == sport_key,
+            Event.status == EventStatus.FINAL,
+            Event.home_score.is_not(None),
+            Event.away_score.is_not(None),
+        )
+        .order_by(Event.commence_time)
+    )
+    all_events = result.scalars().all()
+
+    cache: StandingsCache = defaultdict(list)
+    for event in all_events:
+        season = epl_season_key(event.commence_time)
+        cache[season].append(event)
+
+    logger.info(
+        "standings_cache_loaded",
+        sport_key=sport_key,
+        seasons=len(cache),
+        total_events=len(all_events),
+    )
+    return dict(cache)
+
+
+def get_prior_events_from_cache(
+    cache: StandingsCache,
+    event: Event,
+) -> list[Event]:
+    """Extract prior season events for a given event from the preloaded cache.
+
+    Returns completed events from the same season with commence_time strictly
+    before the given event, in chronological order.
+    """
+    season = epl_season_key(event.commence_time)
+    season_events = cache.get(season, [])
+    return [e for e in season_events if e.commence_time < event.commence_time]
 
 
 def extract_standings_features(

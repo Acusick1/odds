@@ -122,48 +122,11 @@ def _snapshot_has_market(snapshot: OddsSnapshot, market: str) -> bool:
     return False
 
 
-async def _load_prior_season_events(
-    session: AsyncSession,
-    event: Event,
-    season: str,
-) -> list[Event]:
-    """Load completed EPL events from the same season before the given event.
-
-    Returns events ordered by commence_time ascending, filtered to FINAL
-    status with non-null scores and commence_time strictly before the
-    current event.
-    """
-    from odds_analytics.standings_features import epl_season_key
-
-    # Determine season date boundaries from the season key (e.g. "2024-25")
-    start_year = int(season.split("-")[0])
-    from datetime import UTC
-
-    season_start = datetime(start_year, 7, 1, tzinfo=UTC)
-    season_end = datetime(start_year + 1, 6, 30, 23, 59, 59, tzinfo=UTC)
-
-    result = await session.execute(
-        select(Event)
-        .where(
-            Event.sport_key == event.sport_key,
-            Event.status == EventStatus.FINAL,
-            Event.home_score.is_not(None),
-            Event.away_score.is_not(None),
-            Event.commence_time >= season_start,
-            Event.commence_time < event.commence_time,
-            Event.commence_time <= season_end,
-        )
-        .order_by(Event.commence_time)
-    )
-    prior = result.scalars().all()
-    # Extra safety: only keep events whose season key matches
-    return [e for e in prior if epl_season_key(e.commence_time) == season]
-
-
 async def collect_event_data(
     event: Event,
     session: AsyncSession,
     config: FeatureConfig,
+    standings_cache: dict[str, list[Event]] | None = None,
 ) -> EventDataBundle:
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
@@ -268,13 +231,12 @@ async def collect_event_data(
                 all_logs.append(prev)
         game_logs = all_logs
 
-    # Prior season events for standings features
+    # Prior season events for standings features (from preloaded cache)
     prior_season_events: list[Event] = []
-    if "standings" in config.feature_groups:
-        from odds_analytics.standings_features import epl_season_key
+    if "standings" in config.feature_groups and standings_cache is not None:
+        from odds_analytics.standings_features import get_prior_events_from_cache
 
-        season = epl_season_key(event.commence_time)
-        prior_season_events = await _load_prior_season_events(session, event, season)
+        prior_season_events = get_prior_events_from_cache(standings_cache, event)
 
     # Sequences for LSTM adapter
     sequences: list[list[Odds]] = []
@@ -950,9 +912,18 @@ async def prepare_training_data(
     lstm_adapter = isinstance(adapter, LSTMAdapter)
     static_names = _static_feature_group_names(config) if lstm_adapter else None
 
+    # Preload standings cache to avoid N+1 queries
+    standings_cache: dict[str, list[Event]] | None = None
+    if "standings" in config.feature_groups:
+        from odds_analytics.standings_features import load_season_events_cache
+
+        sport_key = config.sport_key or (valid_events[0].sport_key if valid_events else None)
+        if sport_key:
+            standings_cache = await load_season_events_cache(session, sport_key)
+
     for event in valid_events:
         # Load all data for this event in bulk
-        bundle = await collect_event_data(event, session, config)
+        bundle = await collect_event_data(event, session, config, standings_cache=standings_cache)
 
         # Closing snapshot is required
         if bundle.closing_snapshot is None:
