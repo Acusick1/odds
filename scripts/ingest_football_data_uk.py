@@ -220,6 +220,42 @@ def _extract_h2h_odds(
     }
 
 
+# Match stats columns: (csv_column, json_key) pairs.
+# These are post-match stats from the FDUK CSVs stored in raw_data for
+# downstream rolling feature computation.
+MATCH_STATS_COLUMNS: list[tuple[str, str]] = [
+    ("HS", "home_shots"),
+    ("AS", "away_shots"),
+    ("HST", "home_shots_on_target"),
+    ("AST", "away_shots_on_target"),
+    ("HC", "home_corners"),
+    ("AC", "away_corners"),
+    ("HF", "home_fouls"),
+    ("AF", "away_fouls"),
+    ("HY", "home_yellow_cards"),
+    ("AY", "away_yellow_cards"),
+    ("HR", "home_red_cards"),
+    ("AR", "away_red_cards"),
+    ("HTHG", "home_ht_goals"),
+    ("HTAG", "away_ht_goals"),
+]
+
+
+def _extract_match_stats(row: dict[str, str]) -> dict[str, Any]:
+    """Extract match stats from a CSV row. Returns dict with non-null int stats and referee."""
+    stats: dict[str, Any] = {}
+    for csv_col, json_key in MATCH_STATS_COLUMNS:
+        val = _safe_int(row.get(csv_col))
+        if val is not None:
+            stats[json_key] = val
+
+    referee = row.get("Referee", "").strip()
+    if referee:
+        stats["referee"] = referee
+
+    return stats
+
+
 def _build_snapshot_raw_data(
     row: dict[str, str],
     home_team: str,
@@ -249,10 +285,16 @@ def _build_snapshot_raw_data(
     if not bookmakers:
         return None
 
-    return {
+    raw_data: dict[str, Any] = {
         "bookmakers": bookmakers,
         "source": SOURCE_TAG,
     }
+
+    match_stats = _extract_match_stats(row)
+    if match_stats:
+        raw_data["match_stats"] = match_stats
+
+    return raw_data
 
 
 def build_event_id(

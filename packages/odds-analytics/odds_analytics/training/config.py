@@ -649,7 +649,7 @@ class FeatureConfig(BaseModel):
     feature_groups: tuple[str, ...] = Field(
         default=("tabular",),
         min_length=1,
-        description="Feature groups to compose. Available: tabular, trajectory, polymarket, injuries, rest, standings",
+        description="Feature groups to compose. Available: tabular, trajectory, polymarket, injuries, rest, standings, match_stats",
     )
 
     # Standings feature configuration
@@ -658,6 +658,14 @@ class FeatureConfig(BaseModel):
         ge=1,
         le=38,
         description="Number of recent matches for form calculation in standings features.",
+    )
+
+    # Match stats feature configuration
+    match_stats_window: int = Field(
+        default=5,
+        ge=1,
+        le=38,
+        description="Rolling window size for match stats averages (shots, corners, etc.).",
     )
 
     # Trajectory feature configuration
