@@ -10,7 +10,7 @@ Predict line movement (closing line value) using cross-source market data. The m
 
 Single-user betting odds data collection and analysis system. **Active focus is EPL football** — NBA support exists but is deprioritised (NBA CLV ~3.6% R² is insufficient to overcome vig, and cross-source execution isn't viable: Polymarket inaccessible from UK, Betfair has no NBA match odds liquidity. Football has deep Betfair liquidity, more data, and more bookmaker competition).
 
-Two primary data sources: The Odds API (US bookmakers, live polling — currently disabled) and OddsPortal (UK bookmakers, headless scraper — active, hourly EPL collection). A scoring pipeline produces CLV predictions per snapshot, delivered via daily Discord digest. Supports backtesting strategies against historical data.
+Three primary data sources: The Odds API (US bookmakers, live polling — currently disabled), OddsPortal (UK bookmakers, headless scraper — active, hourly EPL collection), and football-data.co.uk (historical EPL with Pinnacle + Betfair Exchange closing odds). A scoring pipeline produces CLV predictions per snapshot, delivered via daily Discord digest. Supports backtesting strategies against historical data.
 
 ## Package Structure
 

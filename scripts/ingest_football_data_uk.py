@@ -79,26 +79,10 @@ SEASONS: dict[str, str] = {
 # Liverpool, Everton, Bournemouth, Brentford, Crystal Palace, Fulham,
 # Aston Villa, Southampton, Burnley, Watford, Luton, Ipswich).
 TEAM_NAME_MAP: dict[str, str] = {
-    "Man United": "Manchester United",
+    "Man United": "Manchester Utd",
     "Man City": "Manchester City",
-    "Nott'm Forest": "Nottingham Forest",
+    "Nott'm Forest": "Nottingham",
     "Sheffield United": "Sheffield Utd",
-    "Leeds": "Leeds United",
-    "Leicester": "Leicester City",
-    "Newcastle": "Newcastle United",
-    "Norwich": "Norwich City",
-    "Wolves": "Wolverhampton Wanderers",
-    "West Ham": "West Ham United",
-    "Tottenham": "Tottenham Hotspur",
-    "Brighton": "Brighton and Hove Albion",
-    "West Brom": "West Bromwich Albion",
-    "Stoke": "Stoke City",
-    "Swansea": "Swansea City",
-    "Huddersfield": "Huddersfield Town",
-    "Cardiff": "Cardiff City",
-    "Hull": "Hull City",
-    "Sunderland": "Sunderland AFC",
-    "Middlesbrough": "Middlesbrough FC",
 }
 
 # Bookmaker column prefixes → pipeline bookmaker key.

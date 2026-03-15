@@ -2,32 +2,37 @@
 
 ## Goal
 
-Predict line movement: the delta between current fair price and closing fair price. A positive signal here means we can identify mispriced lines before they correct, enabling +EV execution on either sportsbook or Polymarket.
+Predict line movement: the delta between current fair price and closing fair price. A positive signal here means we can identify mispriced lines before they correct, enabling +EV execution on either sportsbook or Betfair exchange.
 
-We have confirmed a weak but real signal (~3.6% R² with XGBoost on public features). Current focus: characterize when and where the signal is strongest to inform execution strategy.
+We have confirmed a weak but real signal (~3.1% R² on EPL with Pinnacle as sharp reference, ~3.6% R² on NBA with bet365 self-reference). Current focus: EPL with cross-source features (Pinnacle sharp vs bet365 retail) and Betfair exchange execution.
 
 ## Data Sources
 
-Two data sources with **non-overlapping bookmaker sets**:
+Three data sources with complementary bookmaker coverage:
 
-| | OddsPortal | Odds API |
-|--|-----------|----------|
-| **Events** | ~5,000 (5 NBA seasons, 2021-2026) | ~1,000 (Mar–Apr 2025 + Oct 2025 – Feb 2026) |
-| **Snapshots/event** | 2 (opening + closing) | 15+ avg (all tiers) |
-| **Bookmakers** | UK: bet365, betway, betfred, bwin | US: pinnacle, fanduel, draftkings, betmgm, bovada |
-| **Event ID pattern** | `op_YYYY-YYYY_AWAY_HOME_DATE` | hex UUID |
-| **Overlap** | 141 events matched to Odds API events (Oct 2025+) |
+| | OddsPortal | Odds API | football-data.co.uk |
+|--|-----------|----------|---------------------|
+| **Events** | ~5K NBA (5 seasons) + ~1.8K EPL (5 seasons) | ~1K NBA (Mar–Apr 2025 + Oct 2025–Feb 2026) | ~4K EPL (11 seasons, 2015-2026) |
+| **Snapshots/event** | 2 (opening + closing) | 15+ avg (all tiers) | 2 (opening + closing) |
+| **Bookmakers** | UK: bet365, betway, betfred, bwin | US: pinnacle, fanduel, draftkings, betmgm, bovada | pinnacle, bet365, bwin, williamhill, betvictor, interwetten, ladbrokes |
+| **Event ID pattern** | `op_YYYY-YYYY_AWAY_HOME_DATE` | hex UUID | `fduk_YYYY-YYYY_HOME_AWAY_DATE` |
+| **Key value** | UK retail bookmakers | Dense snapshots, US bookmakers | Pinnacle closing odds (sharp reference) |
+| **Overlap** | 1,810 EPL events matched to FDUK | 141 NBA events matched to OddsPortal | 1,810 EPL events matched to OddsPortal |
+
+football-data.co.uk is collected manually by Joseph Buchdahl (twice weekly, post-match). Pinnacle odds sourced from Pinnacle's public API, which became unreliable after July 2025 — 81 events in 2025-26 season lack Pinnacle closing data.
 
 ### Config fields
 
-- `data_source`: `"oddsportal"`, `"oddsapi"`, `"all"`, or `null` (no filter). Filters by event ID prefix (`op_` = OddsPortal).
+- `data_source`: `"oddsportal"`, `"oddsapi"`, `"football_data_uk"`, `"all"`, or `null` (no filter). Filters by event ID prefix (`op_` = OddsPortal, `fduk_` = football-data.co.uk).
+- `closing_source_priority`: ordered list of preferred sources for closing snapshot selection (by `api_request_id`). When multiple sources provide closing snapshots for the same event, prefer sources in this order.
 - `min_snapshots`: Minimum snapshots per event (e.g., `min_snapshots: 5` for dense sequence data).
 - `start_date` / `end_date`: Date range filter (always required).
 
 ### Which source for which experiment
 
-- **bet365 target** → `data_source: oddsportal` — bet365 only available from OddsPortal. ~5K events, 5 seasons. Best for tabular/injury features with 2-snapshot coverage.
-- **Pinnacle target** → `data_source: oddsapi` — Pinnacle only available from Odds API. ~1K events but dense snapshots. Best for LSTM/sequence features.
+- **EPL bet365 target with Pinnacle sharp** → `data_source: null` (combined OddsPortal + FDUK), `sharp_bookmakers: [pinnacle]`, `closing_source_priority: [football_data_uk]`. Best current EPL setup — Pinnacle as genuine sharp reference, FDUK closing preferred for target.
+- **NBA bet365 target** → `data_source: oddsportal` — bet365 only available from OddsPortal. ~5K events, 5 seasons.
+- **Pinnacle target** → `data_source: oddsapi` — Pinnacle only available from Odds API for NBA. ~1K events but dense snapshots.
 - **LSTM experiments** → also set `min_snapshots: 5` (or higher) to ensure sufficient sequence data.
 - `target_bookmaker` must belong to the corresponding source's bookmaker set.
 
@@ -228,14 +233,32 @@ Time-series per snapshot:
 - **Conclusion**: line shopping is directionally correct but insufficient — the ~2.5pp vig reduction is smaller than the ~4% gap between signal strength and breakeven. Would need either exchange-level execution costs or stronger signal
 - Full results: [experiments/results/exp7b_line_shopping/FINDINGS.md](../experiments/results/exp7b_line_shopping/FINDINGS.md)
 
+### EPL with Pinnacle sharp reference (Mar 2026, ~1.8K events combined)
+
+Three-way comparison isolating the effect of Pinnacle as sharp reference vs more data:
+
+| Experiment | Sharp Ref | Data | CV R² | CV MSE |
+|---|---|---|---|---|
+| OddsPortal-only baseline | bet365 | OP only | 0.016 ± 0.045 | 0.002410 |
+| Combined + bet365 sharp (control) | bet365 | OP + FDUK | -0.005 ± 0.008 | 0.000777 |
+| Combined + Pinnacle sharp | pinnacle | OP + FDUK | **0.031 ± 0.014** | 0.000749 |
+
+- **Pinnacle as sharp reference doubles R²** (0.016 → 0.031) with halved variance (±0.045 → ±0.014)
+- **More data alone adds no signal** — the control (combined data, bet365 sharp) went negative R². FDUK snapshots with bet365 as its own sharp reference adds noise, not signal.
+- The improvement is entirely from Pinnacle cross-source features — a genuinely different price signal from bet365
+- MSE drops from 0.0024 to 0.00075 because Pinnacle closing prices are tighter reference points
+- Tuner still converges to high regularization (subsample=0.5) — weak signal regime
+- 81/1,810 events (Jan-Mar 2026) lack Pinnacle closing data due to Pinnacle API shutdown (July 2025); small impact
+- Configs: `experiments/configs/xgboost_epl_combined_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_bet365sharp_tuning_best.yaml`
+
 ## Open Questions
 
 ### Signal
-- ~3.6% R² is the ceiling for public sportsbook features at 5K events, with the learning curve plateaued. Can Polymarket cross-source features push it higher?
+- ~~~3.6% R² is the ceiling for public sportsbook features at 5K events, with the learning curve plateaued. Can Polymarket cross-source features push it higher?~~ — **Partially answered**: Pinnacle cross-source features push EPL R² to 3.1% (from 1.6% OddsPortal-only baseline). This is a different sharp reference, not more features — the signal comes from Pinnacle being a genuinely different price from bet365. PM features remain untested at scale.
 - ~~Injury features dominate importance~~ — **Answered** (Exp 6 + 6b): injuries add zero signal at all decision tiers when properly tuned. GTD injury r=0.28 (Exp 4, Pinnacle) does not transfer to bet365 target (r=-0.01, Exp 6b). At closing tier, the line has already priced in GTD designations. Earlier apparent importance was a tuning artifact.
-- Does the signal generalize to other sports, or is it NBA-specific?
+- ~~Does the signal generalize to other sports, or is it NBA-specific?~~ — **Answered**: EPL CLV is predictable (R²=3.1% with Pinnacle sharp), confirming the signal generalizes beyond NBA. Cross-source sharp-retail divergence appears to be the key feature across sports.
 - Do PM features add signal? Untested at scale — only tested with 230 events (insufficient data). PM order flow from CLOB snapshots remains untapped.
-- Does sharp-retail divergence (Pinnacle vs DraftKings/FanDuel) contain more signal than cross-source (PM vs SB)?
+- ~~Does sharp-retail divergence (Pinnacle vs DraftKings/FanDuel) contain more signal than cross-source (PM vs SB)?~~ — **Partially answered**: Pinnacle vs bet365 divergence is the strongest signal found (R²=3.1% on EPL). PM features remain untested at scale but are deprioritized (UK inaccessible).
 
 ### Execution
 - ~~At what hours-before-game does the model's edge peak?~~ — **Answered** (Exp 4 + 6b): sharp-retail diff peaks at 3-6h (Exp 4). GTD injury r=0.28 at 0-3h (Exp 4, Pinnacle target) does NOT transfer to bet365 target (r=-0.01, Exp 6b) — the closing-tier catch-22 means the line has already priced in GTD designations by the time they're visible.
@@ -244,9 +267,9 @@ Time-series per snapshot:
 
 ### Data
 - ~~Is more OddsPortal data worth collecting?~~ — **No** (Exp 6): learning curve plateaued at ~1.5K events. More events of the same type won't help.
-- PM order flow features from existing CLOB snapshots — untapped data source
-- Is order book microstructure (depth, imbalance) informative at our snapshot frequency (5min)?
-- Would higher-frequency PM data (sub-minute) improve velocity/acceleration features?
+- **Pinnacle data continuity risk**: football-data.co.uk sources Pinnacle odds from Pinnacle's public API, which became unreliable after July 2025. 81 EPL events in 2025-26 already lack Pinnacle closing. Need an alternative Pinnacle source (direct API access requires commercial partnership application to `api@pinnacle.com`; or via The Odds API which carries Pinnacle).
+- PM order flow features from existing CLOB snapshots — untapped data source (deprioritized — UK inaccessible)
+- Betfair Exchange historical data (historicdata.betfair.com) offers 1-min to 50ms tick data — could replace Pinnacle as sharp reference with even finer granularity
 
 ### Methodology
 - Is devigged Pinnacle the right target, or should we explore market-wide targets?
@@ -325,3 +348,5 @@ Every experiment must produce:
 | 2026-03-01 | Exp 6b: injury closing tier | tabular 4 ± injury 6 | devigged bet365 | 479 (closing) / 826 (sharp) events (Odds API) | Closing R²=0.596 (artifact); sharp R²=-0.02 | GTD hypothesis falsified | Closing-tier target near-zero (std=0.0016); injuries add zero at both tiers; inj_impact_gtd_away r=-0.01 (not r=0.28 from Exp 4) |
 | 2026-03-01 | Exp 7: backtest sim | tabular 4 | devigged bet365 | 2,088 bets (4,524 events OddsPortal) | Best ROI +3.36% (p=0.260) | Not profitable | Flat $100, 12-fold walk-forward; all thresholds ≤0.03 negative ROI; CLV signal too weak to overcome ~4.5% vig |
 | 2026-03-01 | Exp 7b: line shopping | tabular 4 | devigged bet365 | 2,088 bets (4 bookmakers) | Best ROI +3.68% (p=0.334) | Still not profitable | Vig drops 4.13%→1.59% (2.55pp); ROI +0.3–1.3pp at all thresholds; bet365 best price 67% of time |
+| 2026-03-10 | EPL combined + Pinnacle sharp | tabular 7, pinnacle sharp | devigged bet365 | 1,801 (~1.8K EPL events, OP+FDUK) | CV R²=0.031±0.014 | Best EPL result | Pinnacle cross-source features double R² vs OddsPortal-only (0.016); FDUK data adds Pinnacle closing |
+| 2026-03-10 | EPL combined + bet365 sharp (control) | tabular 7, bet365 sharp | devigged bet365 | 1,801 (~1.8K EPL events, OP+FDUK) | CV R²=-0.005±0.008 | More data ≠ signal | Control proves improvement from Pinnacle features, not data volume |

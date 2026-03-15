@@ -190,10 +190,11 @@ class DataConfig(BaseModel):
         description="Filter events by sport key (e.g. 'basketball_nba', 'soccer_epl'). "
         "None = no filter (all sports).",
     )
-    data_source: Literal["all", "oddsportal", "oddsapi"] | None = Field(
+    data_source: Literal["all", "oddsportal", "oddsapi", "football_data_uk"] | None = Field(
         default=None,
         description="Filter events by data source. 'oddsportal' = historical scrape "
-        "(op_ prefix), 'oddsapi' = live API. None or 'all' = no filter.",
+        "(op_ prefix), 'football_data_uk' = FDUK (fduk_ prefix), "
+        "'oddsapi' = live API. None or 'all' = no filter.",
     )
     min_snapshots: int | None = Field(
         default=None,
@@ -690,6 +691,13 @@ class FeatureConfig(BaseModel):
     target_bookmaker: str = Field(
         default="pinnacle",
         description="Bookmaker key for devigged target computation (used when target_type='devigged_bookmaker').",
+    )
+
+    closing_source_priority: list[str] | None = Field(
+        default=None,
+        description="Preferred source(s) for closing snapshot selection, ordered by priority. "
+        "Matched against snapshot.api_request_id (e.g. 'oddsportal', 'football_data_uk'). "
+        "When set, among candidates with the target bookmaker, prefer those from these sources.",
     )
 
     sport_key: str | None = Field(
