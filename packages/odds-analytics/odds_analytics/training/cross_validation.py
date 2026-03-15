@@ -368,13 +368,17 @@ def run_cv(
     cv_method = data_config.cv_method
     shuffle = data_config.kfold_shuffle
     random_seed = data_config.random_seed
+    resolved_n_folds = data_config.n_folds
 
-    # Fallback: event-grouped methods require event_ids
+    # Fallback: event-grouped methods require event_ids.
+    # Default to 5 folds for the timeseries fallback when n_folds not configured.
     if cv_method == "walk_forward" and event_ids is None:
+        if resolved_n_folds is None:
+            resolved_n_folds = 5
         logger.warning(
             "walk_forward_missing_event_ids",
             message="cv_method='walk_forward' but event_ids not provided. "
-            "Falling back to standard timeseries CV.",
+            f"Falling back to standard timeseries CV with n_folds={resolved_n_folds}.",
         )
         cv_method = "timeseries"
 
@@ -407,8 +411,9 @@ def run_cv(
         fold_iter: list[tuple[np.ndarray, np.ndarray]] = wf_splits
 
     elif cv_method == "timeseries":
-        assert data_config.n_folds is not None  # guaranteed by validate_n_folds_required
-        n_folds = data_config.n_folds
+        if resolved_n_folds is None:
+            raise ValueError("n_folds is required for cv_method='timeseries'")
+        n_folds = resolved_n_folds
         if shuffle:
             logger.warning(
                 "timeseries_cv_ignoring_shuffle",
@@ -427,7 +432,8 @@ def run_cv(
         )
         fold_iter = list(splitter.split(X))
     else:
-        assert data_config.n_folds is not None  # guaranteed by validate_n_folds_required
+        if data_config.n_folds is None:
+            raise ValueError("n_folds is required for cv_method='kfold'")
         n_folds = data_config.n_folds
         splitter = KFold(n_splits=n_folds, shuffle=shuffle, random_state=random_seed)
         logger.info(
