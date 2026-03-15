@@ -219,10 +219,15 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
 
             if use_kfold:
                 # Cross-Validation training
-                n_folds = config.training.data.n_folds
                 cv_method = config.training.data.cv_method
-                cv_method_display = "Time Series CV" if cv_method == "timeseries" else "K-Fold CV"
-                console.print(f"\n[bold]Running {n_folds}-Fold {cv_method_display}...[/bold]")
+                cv_method_display = {
+                    "timeseries": "Time Series CV",
+                    "kfold": "K-Fold CV",
+                    "walk_forward": "Walk-Forward CV",
+                }.get(cv_method, cv_method)
+                n_folds = config.training.data.n_folds
+                fold_label = f"{n_folds}-Fold " if n_folds is not None else ""
+                console.print(f"\n[bold]Running {fold_label}{cv_method_display}...[/bold]")
 
                 with Progress(
                     SpinnerColumn(),
@@ -230,7 +235,7 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                     console=console,
                 ) as progress:
                     task = progress.add_task(
-                        f"Cross-validating ({n_folds} folds, {cv_method_display})...", total=None
+                        f"Cross-validating ({cv_method_display})...", total=None
                     )
 
                     try:

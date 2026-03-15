@@ -214,11 +214,12 @@ class DataConfig(BaseModel):
         "(TimeSeriesSplit), 'kfold' uses standard K-Fold, "
         "'walk_forward' uses event-grouped walk-forward with configurable step size.",
     )
-    n_folds: int = Field(
+    n_folds: int | None = Field(
         default=5,
         ge=2,
         le=20,
-        description="Number of folds for cross-validation (only used when use_kfold=True)",
+        description="Number of folds for kfold/timeseries CV. "
+        "Required for kfold and timeseries methods, ignored for walk_forward.",
     )
     kfold_shuffle: bool = Field(
         default=True,
@@ -295,6 +296,14 @@ class DataConfig(BaseModel):
                     f"max_train_events ({self.max_train_events}) must be >= "
                     f"min_train_events ({self.min_train_events})"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def validate_n_folds_required(self) -> DataConfig:
+        """Ensure n_folds is set for kfold and timeseries CV methods."""
+        if self.cv_method in ("kfold", "timeseries") and self.use_kfold:
+            if self.n_folds is None:
+                raise ValueError(f"n_folds is required for cv_method='{self.cv_method}'")
         return self
 
 

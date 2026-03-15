@@ -365,7 +365,6 @@ def run_cv(
         >>> print(f"CV MSE: {cv_result.mean_val_mse:.4f} ± {cv_result.std_val_mse:.4f}")
     """
     data_config = config.training.data
-    n_folds = data_config.n_folds
     cv_method = data_config.cv_method
     shuffle = data_config.kfold_shuffle
     random_seed = data_config.random_seed
@@ -408,6 +407,8 @@ def run_cv(
         fold_iter: list[tuple[np.ndarray, np.ndarray]] = wf_splits
 
     elif cv_method == "timeseries":
+        assert data_config.n_folds is not None  # guaranteed by validate_n_folds_required
+        n_folds = data_config.n_folds
         if shuffle:
             logger.warning(
                 "timeseries_cv_ignoring_shuffle",
@@ -426,6 +427,8 @@ def run_cv(
         )
         fold_iter = list(splitter.split(X))
     else:
+        assert data_config.n_folds is not None  # guaranteed by validate_n_folds_required
+        n_folds = data_config.n_folds
         splitter = KFold(n_splits=n_folds, shuffle=shuffle, random_state=random_seed)
         logger.info(
             "starting_kfold_cv",
@@ -535,7 +538,7 @@ def train_with_cv(
     logger.info(
         "starting_train_with_cv",
         experiment_name=config.experiment.name,
-        n_folds=config.training.data.n_folds,
+        cv_method=config.training.data.cv_method,
         n_samples=len(X),
         n_features=len(feature_names),
     )

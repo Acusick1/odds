@@ -75,6 +75,7 @@ __all__ = [
     "prepare_training_data",
     "filter_completed_events",
     "resolve_outcome_name",
+    "snapshot_has_bookmaker",
 ]
 
 
@@ -120,6 +121,28 @@ def _snapshot_has_market(snapshot: OddsSnapshot, market: str) -> bool:
             if mkt.get("key") == market:
                 return True
     return False
+
+
+def snapshot_has_bookmaker(snapshot: OddsSnapshot, bookmaker_key: str, market: str) -> bool:
+    """Check if a snapshot's raw_data contains odds from a specific bookmaker for a market."""
+    raw = snapshot.raw_data
+    if not raw or "bookmakers" not in raw:
+        return False
+    for bm in raw["bookmakers"]:
+        if bm.get("key") == bookmaker_key:
+            for mkt in bm.get("markets", []):
+                if mkt.get("key") == market:
+                    return True
+    return False
+
+
+def _should_filter_missing_sharp(config: FeatureConfig) -> bool:
+    """Whether to exclude events missing sharp bookmaker closing odds.
+
+    Only applies when sharp_bookmakers differ from target_bookmaker — if they
+    match, there are no cross-source features that would degrade from missing data.
+    """
+    return set(config.sharp_bookmakers) != {config.target_bookmaker}
 
 
 async def collect_event_data(
@@ -917,6 +940,7 @@ async def prepare_training_data(
     static_list: list[np.ndarray] = []
     event_id_list: list[str] = []
     skipped_events = 0
+    sharp_filtered_count = 0
     total_rows = 0
 
     # Determine static feature names upfront (empty list if no static groups)
@@ -948,6 +972,19 @@ async def prepare_training_data(
         ):
             skipped_events += 1
             continue
+
+        # Filter events missing sharp bookmaker closing odds (cross-source features).
+        # Only applies when sharp_bookmakers differ from target_bookmaker — if they
+        # match, there are no cross-source features to degrade.
+        if _should_filter_missing_sharp(config):
+            missing_sharp = [
+                bm
+                for bm in config.sharp_bookmakers
+                if not snapshot_has_bookmaker(bundle.closing_snapshot, bm, market)
+            ]
+            if missing_sharp:
+                sharp_filtered_count += 1
+                continue
 
         # Get sampled decision snapshots
         decision_snapshots = sampler.sample(bundle)
@@ -1001,6 +1038,14 @@ async def prepare_training_data(
     X, feature_names, _ = apply_variance_filter(X, feature_names, config.variance_threshold)
 
     n_events = len(set(event_id_list))
+
+    if sharp_filtered_count > 0:
+        logger.info(
+            "excluded_events_missing_sharp_closing",
+            count=sharp_filtered_count,
+            sharp_bookmakers=config.sharp_bookmakers,
+        )
+
     logger.info(
         "prepared_training_data",
         num_samples=len(X),
@@ -1009,6 +1054,7 @@ async def prepare_training_data(
         num_static_features=static_features.shape[1] if static_features is not None else 0,
         avg_rows_per_event=total_rows / max(n_events, 1),
         skipped_events=skipped_events,
+        sharp_filtered=sharp_filtered_count,
         sampling_strategy=config.sampling.strategy,
         target_type=config.target_type,
         target_mean=float(np.mean(y)),

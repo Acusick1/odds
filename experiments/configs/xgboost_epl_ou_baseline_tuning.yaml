@@ -25,7 +25,6 @@ training:
     shuffle: false
     use_kfold: true
     cv_method: walk_forward
-    n_folds: 5
     kfold_shuffle: false
     window_type: expanding
     min_train_events: 700
