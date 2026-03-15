@@ -23,7 +23,7 @@ training:
   data:
     start_date: "2024-10-01"
     end_date: "2024-12-31"
-    test_split: 0.2
+    test_split: 0.0
     validation_split: 0.1
     random_seed: 42
     shuffle: true

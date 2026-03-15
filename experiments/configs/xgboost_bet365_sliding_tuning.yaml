@@ -1,0 +1,131 @@
+experiment:
+  name: xgboost_bet365_sliding_tuning
+  tags:
+  - xgboost
+  - bet365
+  - oddsportal
+  - sliding
+  - tuning
+  description: >
+    Sliding-window tuning for bet365 CLV prediction with tabular features.
+    2-season sliding window (max 2400 events) tests whether recency
+    matters more than training volume.
+
+training:
+  strategy_type: xgboost_line_movement
+
+  data:
+    start_date: '2021-10-01'
+    end_date: '2026-02-27'
+    data_source: oddsportal
+    test_split: 0.0
+    validation_split: 0.0
+    random_seed: 42
+    shuffle: false
+    use_kfold: true
+    cv_method: walk_forward
+    min_train_events: 2000
+    max_train_events: 2400
+    val_step_events: 200
+    window_type: sliding
+    kfold_shuffle: false
+
+  model:
+    n_estimators: 150
+    max_depth: 3
+    learning_rate: 0.05
+    min_child_weight: 10
+    gamma: 0.1
+    subsample: 0.7
+    colsample_bytree: 0.7
+    reg_alpha: 0.5
+    reg_lambda: 2.0
+    objective: reg:squarederror
+    random_state: 42
+    n_jobs: -1
+    early_stopping_rounds: 15
+
+  features:
+    adapter: xgboost
+    sharp_bookmakers:
+    - bet365
+    retail_bookmakers:
+    - betway
+    - betfred
+    - bwin
+    markets:
+    - h2h
+    outcome: home
+    closing_tier: closing
+    feature_groups:
+    - tabular
+    target_type: devigged_bookmaker
+    target_bookmaker: bet365
+    sampling:
+      strategy: tier
+      decision_tier: sharp
+
+  feature_selection:
+    enabled: false
+
+  output_path: models
+
+tuning:
+  n_trials: 100
+  timeout: null
+  direction: minimize
+  metric: val_mse
+  pruner: median
+  sampler: tpe
+
+  search_spaces:
+    n_estimators:
+      type: int
+      low: 50
+      high: 400
+      step: 50
+
+    max_depth:
+      type: int
+      low: 2
+      high: 6
+
+    learning_rate:
+      type: float
+      low: 0.01
+      high: 0.3
+      log: true
+
+    min_child_weight:
+      type: int
+      low: 5
+      high: 50
+
+    subsample:
+      type: float
+      low: 0.5
+      high: 1.0
+      step: 0.1
+
+    colsample_bytree:
+      type: float
+      low: 0.5
+      high: 1.0
+      step: 0.1
+
+    gamma:
+      type: float
+      low: 0.0
+      high: 1.0
+
+    reg_alpha:
+      type: float
+      low: 0.0
+      high: 2.0
+
+    reg_lambda:
+      type: float
+      low: 0.5
+      high: 5.0
+
+tracking: null
