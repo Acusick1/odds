@@ -667,7 +667,9 @@ def _extract_static_feature_parts(
             parts.append(nan_block_stnd)
         else:
             try:
-                stnd_feats = extract_standings_features(bundle.prior_season_events, event)
+                stnd_feats = extract_standings_features(
+                    bundle.prior_season_events, event, form_window=config.form_window
+                )
                 parts.append(stnd_feats.to_array())
             except Exception:
                 logger.debug("standings_feature_extraction_failed", event_id=event.id)

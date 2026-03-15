@@ -85,6 +85,7 @@ class TeamRecord:
     goals_for: int = 0
     goals_against: int = 0
     form: list[float] = field(default_factory=list)
+    form_window: int = _FORM_WINDOW
 
     @property
     def points(self) -> int:
@@ -107,10 +108,10 @@ class TeamRecord:
         return self.goals_against / self.played
 
     @property
-    def form_last_5(self) -> float | None:
+    def form_last_n(self) -> float | None:
         if not self.form:
             return None
-        window = self.form[-_FORM_WINDOW:]
+        window = self.form[-self.form_window :]
         return sum(window) / len(window)
 
     def record_result(self, goals_for: int, goals_against: int) -> None:
@@ -151,6 +152,7 @@ def _sort_table(records: dict[str, TeamRecord]) -> list[TeamRecord]:
 
 def build_league_table(
     completed_events: list[Event],
+    form_window: int = _FORM_WINDOW,
 ) -> dict[str, TeamRecord]:
     """Build league table from a list of completed events.
 
@@ -165,9 +167,9 @@ def build_league_table(
             continue
 
         if event.home_team not in records:
-            records[event.home_team] = TeamRecord(team=event.home_team)
+            records[event.home_team] = TeamRecord(team=event.home_team, form_window=form_window)
         if event.away_team not in records:
-            records[event.away_team] = TeamRecord(team=event.away_team)
+            records[event.away_team] = TeamRecord(team=event.away_team, form_window=form_window)
 
         records[event.home_team].record_result(event.home_score, event.away_score)
         records[event.away_team].record_result(event.away_score, event.home_score)
@@ -233,6 +235,7 @@ def get_prior_events_from_cache(
 def extract_standings_features(
     prior_events: list[Event],
     event: Event,
+    form_window: int = _FORM_WINDOW,
 ) -> StandingsFeatures:
     """Extract standings features from completed matches prior to event.
 
@@ -240,6 +243,7 @@ def extract_standings_features(
         prior_events: Completed EPL events from the same season, ordered
             chronologically, all strictly before the current event.
         event: The current event to extract features for.
+        form_window: Number of recent matches used for form calculation.
 
     Returns:
         StandingsFeatures with league context, or all-None if no prior
@@ -248,7 +252,7 @@ def extract_standings_features(
     if not prior_events:
         return StandingsFeatures()
 
-    table = build_league_table(prior_events)
+    table = build_league_table(prior_events, form_window=form_window)
     sorted_table = _sort_table(table)
 
     # Build position lookup
@@ -275,8 +279,8 @@ def extract_standings_features(
         points_gap=points_gap,
         home_goal_difference=float(home.goal_difference) if home is not None else None,
         away_goal_difference=float(away.goal_difference) if away is not None else None,
-        home_form_last_5=home.form_last_5 if home is not None else None,
-        away_form_last_5=away.form_last_5 if away is not None else None,
+        home_form_last_5=home.form_last_n if home is not None else None,
+        away_form_last_5=away.form_last_n if away is not None else None,
         home_goals_scored_rate=home.goals_scored_rate if home is not None else None,
         home_goals_conceded_rate=home.goals_conceded_rate if home is not None else None,
         away_goals_scored_rate=away.goals_scored_rate if away is not None else None,

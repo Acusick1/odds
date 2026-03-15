@@ -120,7 +120,7 @@ class TestTeamRecord:
         record.record_result(1, 2)
         assert record.goal_difference == 2  # (3+1) - (0+2)
 
-    def test_form_last_5(self) -> None:
+    def test_form_last_n(self) -> None:
         record = TeamRecord(team="Arsenal")
         # 6 results: form_last_5 should use only last 5
         record.record_result(0, 1)  # L -> 0 (excluded from window)
@@ -129,17 +129,26 @@ class TestTeamRecord:
         record.record_result(3, 0)  # W -> 3
         record.record_result(0, 0)  # D -> 1
         record.record_result(2, 1)  # W -> 3
-        assert record.form_last_5 == (3 + 1 + 3 + 1 + 3) / 5
+        assert record.form_last_n == (3 + 1 + 3 + 1 + 3) / 5
 
-    def test_form_last_5_fewer_than_5(self) -> None:
+    def test_form_last_n_fewer_than_5(self) -> None:
         record = TeamRecord(team="Arsenal")
         record.record_result(2, 0)  # W -> 3
         record.record_result(1, 1)  # D -> 1
-        assert record.form_last_5 == (3 + 1) / 2
+        assert record.form_last_n == (3 + 1) / 2
 
-    def test_form_last_5_empty(self) -> None:
+    def test_form_last_n_empty(self) -> None:
         record = TeamRecord(team="Arsenal")
-        assert record.form_last_5 is None
+        assert record.form_last_n is None
+
+    def test_form_window_custom(self) -> None:
+        record = TeamRecord(team="Arsenal", form_window=3)
+        record.record_result(0, 1)  # L -> 0
+        record.record_result(2, 0)  # W -> 3
+        record.record_result(1, 1)  # D -> 1
+        record.record_result(3, 0)  # W -> 3
+        # Last 3: W(3) D(1) W(3) = 7/3
+        assert record.form_last_n == (3 + 1 + 3) / 3
 
     def test_goals_rates_zero_played(self) -> None:
         record = TeamRecord(team="Arsenal")
@@ -207,6 +216,18 @@ class TestBuildLeagueTable:
         ]
         table = build_league_table(events)
         assert len(table) == 0
+
+    def test_custom_form_window(self) -> None:
+        events = [
+            _make_completed_event(
+                "e1", "Arsenal", "Chelsea", 2, 0, datetime(2024, 8, 17, 15, 0, tzinfo=UTC)
+            ),
+            _make_completed_event(
+                "e2", "Chelsea", "Arsenal", 1, 1, datetime(2024, 8, 24, 15, 0, tzinfo=UTC)
+            ),
+        ]
+        table = build_league_table(events, form_window=3)
+        assert table["Arsenal"].form_window == 3
 
     def test_skips_null_scores(self) -> None:
         events = [
@@ -357,6 +378,30 @@ class TestExtractStandingsFeatures:
         # Last 5 results (excluding first L): W(3) W(3) W(3) D(1) W(3) = 13/5 = 2.6
         assert features.home_form_last_5 is not None
         assert abs(features.home_form_last_5 - 2.6) < 0.01
+
+    def test_custom_form_window(self) -> None:
+        """Custom form_window=3 uses last 3 matches instead of 5."""
+        prior = []
+        base = datetime(2024, 8, 17, 15, 0, tzinfo=UTC)
+        opponents = ["Chelsea", "Liverpool", "Man City", "Tottenham"]
+        # Results: L, W, W, D -> form with window=3: W(3) W(3) D(1) = 7/3
+        scores = [(0, 1), (3, 0), (2, 1), (0, 0)]
+        for i, (opp, (hs, as_)) in enumerate(zip(opponents, scores, strict=True)):
+            prior.append(
+                _make_completed_event(
+                    f"e{i}", "Arsenal", opp, hs, as_, base + timedelta(days=7 * i)
+                )
+            )
+
+        event = _make_event(
+            event_id="e_target",
+            home_team="Arsenal",
+            away_team="Wolves",
+            commence_time=base + timedelta(days=7 * 4),
+        )
+        features = extract_standings_features(prior, event, form_window=3)
+        assert features.home_form_last_5 is not None
+        assert abs(features.home_form_last_5 - (3 + 3 + 1) / 3) < 0.01
 
     def test_both_teams_unknown(self) -> None:
         """Both teams not in prior events returns all None."""

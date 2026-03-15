@@ -652,6 +652,14 @@ class FeatureConfig(BaseModel):
         description="Feature groups to compose. Available: tabular, trajectory, polymarket, injuries, rest, standings",
     )
 
+    # Standings feature configuration
+    form_window: int = Field(
+        default=5,
+        ge=1,
+        le=38,
+        description="Number of recent matches for form calculation in standings features.",
+    )
+
     # Trajectory feature configuration
     movement_threshold: float = Field(
         default=0.005,
