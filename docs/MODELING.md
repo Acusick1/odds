@@ -272,21 +272,20 @@ Time-series per snapshot:
 
 Three-way comparison isolating the effect of Pinnacle as sharp reference vs more data. **Note**: the original Mar 10 results (R²=0.031) were inflated by a cross-source snapshot contamination bug (#231, fixed Mar 15) — OddsPortal snapshots without Pinnacle were selected over FDUK snapshots with Pinnacle, then `nan_to_num` silently filled missing Pinnacle probs with 0.0. Post-fix results below are the trustworthy baseline.
 
-**Current results (sliding 1-season, val_step=10, 100 trials each):**
+**Current results (sliding 1-season, val_step=50, 100 trials each):**
 
-| Experiment | Sharp Ref | Data | Features | CV MSE |
-|---|---|---|---|---|
-| OddsPortal-only baseline | bet365 | OP only | 7 tabular | 0.002410 |
-| Combined + Pinnacle sharp | pinnacle | OP + FDUK | 7 tabular | 0.000706 |
-| Combined + Pinnacle + match_stats | pinnacle | OP + FDUK | 21 (7 tab + 14 match_stats) | 0.000701 |
-| Combined + Pinnacle + standings | pinnacle | OP + FDUK | 18 (7 tab + 11 standings) | 0.000700 |
-| Combined + Pinnacle + standings + match_stats | pinnacle | OP + FDUK | 32 (7 tab + 11 stnd + 14 mstat) | **0.000693** |
+| Experiment | Sharp Ref | Data | Features | CV MSE | CV R² |
+|---|---|---|---|---|---|
+| OddsPortal-only baseline | bet365 | OP only | 7 tabular | 0.002410 | — |
+| Combined + Pinnacle sharp | pinnacle | OP + FDUK | 7 tabular | **0.000732** ± 0.000244 | 0.026 ± 0.060 |
+| Combined + Pinnacle + standings | pinnacle | OP + FDUK | 18 (7 tab + 11 standings) | **0.000726** ± 0.000210 | 0.023 ± 0.069 |
+| Combined + Pinnacle + match_stats | pinnacle | OP + FDUK | 21 (7 tab + 14 match_stats) | 0.000740 ± 0.000229 | 0.010 ± 0.063 |
+| Combined + Pinnacle + standings + match_stats | pinnacle | OP + FDUK | 32 (7 tab + 11 stnd + 14 mstat) | 0.000762 ± 0.000250 | -0.013 ± 0.036 |
 
-*Note: these results use val_step=10 (matchday granularity). The standard tuning protocol is val_step=50 — re-tuning pending.*
-
-- **MSE improves monotonically** as features are added — standings and match_stats each contribute incremental signal
-- **All four combined configs converge to identical hyperparameters** (n_est=250, depth=2, lr=0.248, mcw=43, subsample=0.5, colsample=0.8, lambda=4.83) — with val_step=10, the tuner is forced into heavy regularization regardless of feature set (this is the reason val_step=50 was chosen as the standard protocol)
-- **Feature group ranking preserved** from the prior expanding-window protocol — combined standings + match_stats remains the best EPL result
+- **Standings add marginal improvement** (0.000732 → 0.000726) — the only feature group that helps
+- **Match stats hurt** (0.000732 → 0.000740 alone, 0.000726 → 0.000762 on top of standings) — rolling shots/corners/fouls/cards add noise, not signal
+- **Prior val_step=10 results showed monotonic improvement** across all feature groups — that was an artifact of the tuner being forced into identical heavy-regularization params (n_est=250, depth=2, mcw=43) regardless of features, which masked overfitting from extra features
+- **val_step=50 selects different params** per feature set (tabular: n_est=100, depth=5, mcw=9; all: n_est=50, depth=5, mcw=14), confirming the protocol provides tuner discrimination
 - **More data alone adds no signal** — the control (combined data, bet365 sharp) gave R²=-0.005 ± 0.008
 - MSE drop (0.0024 → 0.0007) reflects lower target variance with Pinnacle closing, not necessarily better prediction
 - 81/1,810 events (Jan-Mar 2026) lack Pinnacle closing data due to Pinnacle API shutdown (July 2025); small impact
@@ -297,7 +296,7 @@ Three-way comparison isolating the effect of Pinnacle as sharp reference vs more
 ## Open Questions
 
 ### Signal
-- ~~~3.6% R² is the ceiling for public sportsbook features at 5K events, with the learning curve plateaued. Can Polymarket cross-source features push it higher?~~ — **Partially answered**: Pinnacle cross-source features push EPL R² to ~2% (from 1.6% OddsPortal-only baseline); adding standings reaches ~3%, and standings + match stats reaches ~5.2%. Non-odds public features (league context + match performance) nearly triple the tabular-only baseline. PM features remain untested at scale.
+- ~~~3.6% R² is the ceiling for public sportsbook features at 5K events, with the learning curve plateaued. Can Polymarket cross-source features push it higher?~~ — **Partially answered**: Pinnacle cross-source features push EPL R² to ~2.6% (from 1.6% OddsPortal-only baseline); standings add marginal improvement (~2.3% R², lower MSE). Match stats (shots, corners, fouls, cards) add noise, not signal — they hurt both alone and stacked on standings. PM features remain untested at scale.
 - ~~Injury features dominate importance~~ — **Answered** (Exp 6 + 6b): injuries add zero signal at all decision tiers when properly tuned. GTD injury r=0.28 (Exp 4, Pinnacle) does not transfer to bet365 target (r=-0.01, Exp 6b). At closing tier, the line has already priced in GTD designations. Earlier apparent importance was a tuning artifact.
 - ~~Does the signal generalize to other sports, or is it NBA-specific?~~ — **Answered**: EPL CLV is predictable (R²≈2-3% with Pinnacle sharp + standings), confirming the signal generalizes beyond NBA. Cross-source sharp-retail divergence appears to be the key feature across sports.
 - Do PM features add signal? Untested at scale — only tested with 230 events (insufficient data). PM order flow from CLOB snapshots remains untapped.
