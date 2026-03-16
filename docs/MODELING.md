@@ -53,6 +53,33 @@ Why delta (not absolute close):
 - Delta is stationary and mean-zero, easier to learn than absolute levels
 - Directly maps to CLV: positive delta = current price is too low, line will move up
 
+## Cross-Validation Protocol
+
+Walk-forward CV with a **sliding 1-season window** and **~5 matchday validation steps**:
+
+```yaml
+cv_method: walk_forward
+window_type: sliding
+min_train_events: 380    # ~1 EPL season
+max_train_events: 380
+val_step_events: 50      # ~5 matchdays
+```
+
+This balances production fidelity with tuner signal quality. Yields ~26 folds for ~1.8K EPL events — enough per-fold samples for the tuner to discriminate between feature sets, while still reflecting a realistic retrain cadence.
+
+**Protocol chosen via grid search** (`experiments/scripts/cv_protocol_grid.py`) over 3 independent axes: window type (expanding vs sliding), window size (95–760 events), and validation step size (10, 50, 150). Key findings:
+
+| val_step | expanding | sliding-95 | sliding-190 | sliding-380 | sliding-760 |
+|----------|-----------|------------|-------------|-------------|-------------|
+| **10** | 0.000728 | 0.000752 | 0.000749 | **0.000706** | 0.000789 |
+| **50** | 0.000757 | 0.000748 | 0.000756 | **0.000732** | 0.000794 |
+| **150** | 0.000793 | 0.000758 | 0.000742 | 0.000752 | 0.000758 |
+
+- **Sliding-380 (1 season) is the optimal window size** — shorter windows starve the model of data, longer windows include stale data that hurts
+- **val_step=10 gives lowest MSE but forces all feature sets to identical hyperparameters** — the tuner can only distinguish "regularized enough" from "not enough", losing ability to differentiate feature sets
+- **val_step=50 preserves the sliding-380 advantage** while giving the tuner enough per-fold signal to select different hyperparameters per feature set
+- Full results and plots: `experiments/results/cv_protocol_grid/`
+
 ## Available Features
 
 ### Sportsbook Tabular (28 features)
@@ -245,23 +272,21 @@ Time-series per snapshot:
 
 Three-way comparison isolating the effect of Pinnacle as sharp reference vs more data. **Note**: the original Mar 10 results (R²=0.031) were inflated by a cross-source snapshot contamination bug (#231, fixed Mar 15) — OddsPortal snapshots without Pinnacle were selected over FDUK snapshots with Pinnacle, then `nan_to_num` silently filled missing Pinnacle probs with 0.0. Post-fix results below are the trustworthy baseline.
 
-**Post-fix results (walk-forward, 100 trials each):**
+**Current results (sliding 1-season, matchday-step CV, 100 trials each):**
 
-| Experiment | Sharp Ref | Data | Features | CV R² | CV MSE |
-|---|---|---|---|---|---|
-| OddsPortal-only baseline | bet365 | OP only | 7 tabular | 0.016 ± 0.045 | 0.002410 |
-| Combined + Pinnacle sharp | pinnacle | OP + FDUK | 7 tabular | 0.019 ± 0.043 | 0.000793 |
-| Combined + Pinnacle + match_stats | pinnacle | OP + FDUK | 21 (7 tab + 14 match_stats) | 0.025 ± 0.042 | 0.000782 |
-| Combined + Pinnacle + standings | pinnacle | OP + FDUK | 18 (7 tab + 11 standings) | 0.030 ± 0.040 | 0.000774 |
-| Combined + Pinnacle + standings + match_stats | pinnacle | OP + FDUK | 32 (7 tab + 11 stnd + 14 mstat) | **0.052 ± 0.045** | 0.000767 |
+| Experiment | Sharp Ref | Data | Features | CV MSE |
+|---|---|---|---|---|
+| OddsPortal-only baseline | bet365 | OP only | 7 tabular | 0.002410 |
+| Combined + Pinnacle sharp | pinnacle | OP + FDUK | 7 tabular | 0.000706 |
+| Combined + Pinnacle + match_stats | pinnacle | OP + FDUK | 21 (7 tab + 14 match_stats) | 0.000701 |
+| Combined + Pinnacle + standings | pinnacle | OP + FDUK | 18 (7 tab + 11 standings) | 0.000700 |
+| Combined + Pinnacle + standings + match_stats | pinnacle | OP + FDUK | 32 (7 tab + 11 stnd + 14 mstat) | **0.000693** |
 
-- **Pinnacle as sharp reference** improves R² modestly (0.016 → 0.019) with much lower MSE (0.0024 → 0.0008) because Pinnacle closing prices are tighter reference points
-- **Standings features add ~1% absolute R²** (0.019 → 0.030) — league position, points gap, GD, last-5 form, goal rates. Std overlap means not conclusive.
-- **Match stats add incremental signal** (0.019 → 0.025 alone, 0.030 → 0.052 on top of standings) — rolling shots, corners, fouls, cards. The stacking pattern suggests match stats and standings capture complementary information.
-- **Combined standings + match_stats is the best EPL result** (R²=0.052) — nearly 3× the tabular-only baseline. MSE improves monotonically across all configs.
+- **MSE improves monotonically** as features are added — standings and match_stats each contribute incremental signal
+- **All four combined configs converge to identical hyperparameters** (n_est=250, depth=2, lr=0.248, mcw=43, subsample=0.5, colsample=0.8, lambda=4.83) — with matchday-granularity validation, the tuner is forced into heavy regularization regardless of feature set
+- **Feature group ranking preserved** from the prior expanding-window protocol — combined standings + match_stats remains the best EPL result
 - **More data alone adds no signal** — the control (combined data, bet365 sharp) gave R²=-0.005 ± 0.008
-- MSE drop (0.0024 → 0.0008) reflects lower target variance with Pinnacle closing, not necessarily better prediction
-- Tuner still converges to high regularization — weak signal regime
+- MSE drop (0.0024 → 0.0007) reflects lower target variance with Pinnacle closing, not necessarily better prediction
 - 81/1,810 events (Jan-Mar 2026) lack Pinnacle closing data due to Pinnacle API shutdown (July 2025); small impact
 - Configs: `experiments/configs/xgboost_epl_combined_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_standings_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_match_stats_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_all_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_bet365sharp_tuning_best.yaml`
 
@@ -288,6 +313,7 @@ Three-way comparison isolating the effect of Pinnacle as sharp reference vs more
 - Betfair Exchange historical data (historicdata.betfair.com) offers 1-min to 50ms tick data — could replace Pinnacle as sharp reference with even finer granularity
 
 ### Methodology
+- ~~Does CV protocol affect hyperparameter selection?~~ — **Yes** (Mar 2026): Expanding 150-event windows select materially different hyperparams than sliding 1-season with matchday steps. Production-matched CV (sliding, val_step=10) now the standard protocol.
 - Is devigged Pinnacle the right target, or should we explore market-wide targets?
 - Multi-horizon sampling: does it genuinely increase effective sample size, or just add correlated noise?
 
@@ -371,3 +397,4 @@ Every experiment must produce:
 | 2026-03-15 | EPL combined + standings | tabular 7 + standings 11, pinnacle sharp | devigged bet365 | ~1.7K EPL (OP+FDUK) | CV R²=0.030±0.040 | +1% R² from standings | 6-fold walk-forward, 100 trials; league position, form, GD features |
 | 2026-03-16 | EPL combined + match_stats | tabular 7 + match_stats 14, pinnacle sharp | devigged bet365 | ~1.7K EPL (OP+FDUK) | CV R²=0.025±0.042 | +0.6% R² over tabular | 5-fold walk-forward, 100 trials; rolling shots, corners, fouls, cards |
 | 2026-03-16 | EPL combined + standings + match_stats | tabular 7 + standings 11 + match_stats 14, pinnacle sharp | devigged bet365 | ~1.7K EPL (OP+FDUK) | CV R²=0.052±0.045 | Best EPL result | 5-fold walk-forward, 100 trials; match stats add incremental signal on top of standings |
+| 2026-03-16 | CV protocol grid search | tabular 7, pinnacle sharp | devigged bet365 | ~1.7K EPL (OP+FDUK) | Sliding-380 best window; val_step=50 balances signal | Adopt sliding-380:50 | 15-cell grid (5 windows × 3 val steps); sliding-380:10 lowest MSE (0.000706) but val_step=10 forces identical hyperparams across feature sets; val_step=50 (MSE=0.000732) preserves discrimination |
