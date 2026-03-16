@@ -1,0 +1,115 @@
+"""EPL schedule and rest feature extraction from match dates.
+
+Derives rest-day features directly from Event commence times within the same
+EPL season. Independent of NBA-specific models (NbaTeamGameLog).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, fields
+
+import numpy as np
+from odds_core.models import Event
+
+__all__ = [
+    "EplScheduleFeatures",
+    "extract_epl_schedule_features",
+    "get_prior_team_events",
+]
+
+
+@dataclass
+class EplScheduleFeatures:
+    """Rest and schedule features for a single EPL event.
+
+    All fields optional (None -> np.nan). Days rest counts calendar days
+    between commence times: a Saturday-to-Tuesday turnaround = 3.
+    """
+
+    home_rest_days: float | None = None
+    away_rest_days: float | None = None
+    rest_advantage: float | None = None
+    is_midweek: float | None = None
+
+    def to_array(self) -> np.ndarray:
+        """Convert to numpy array. None -> np.nan."""
+        return np.array(
+            [
+                getattr(self, f.name) if getattr(self, f.name) is not None else np.nan
+                for f in fields(self)
+            ],
+            dtype=np.float64,
+        )
+
+    @classmethod
+    def get_feature_names(cls) -> list[str]:
+        return [f.name for f in fields(cls)]
+
+
+def _find_previous_match(
+    prior_events: list[Event],
+    team: str,
+) -> Event | None:
+    """Find the most recent prior event involving team (home or away).
+
+    prior_events must be chronologically ordered and strictly before the
+    current event.
+    """
+    for event in reversed(prior_events):
+        if event.home_team == team or event.away_team == team:
+            return event
+    return None
+
+
+def get_prior_team_events(
+    prior_events: list[Event],
+    team: str,
+) -> list[Event]:
+    """Return prior events involving team, preserving chronological order."""
+    return [e for e in prior_events if e.home_team == team or e.away_team == team]
+
+
+def extract_epl_schedule_features(
+    prior_events: list[Event],
+    event: Event,
+) -> EplScheduleFeatures:
+    """Extract rest/schedule features from prior EPL events in the same season.
+
+    Args:
+        prior_events: Completed or scheduled EPL events from the same season,
+            ordered chronologically, all strictly before the current event.
+            Typically obtained via ``get_prior_events_from_cache()``.
+        event: The current event to extract features for.
+
+    Returns:
+        EplScheduleFeatures, or all-None if no prior matches found.
+    """
+    home_rest: float | None = None
+    away_rest: float | None = None
+
+    home_prev = _find_previous_match(prior_events, event.home_team)
+    if home_prev is not None:
+        delta = event.commence_time - home_prev.commence_time
+        home_rest = delta.total_seconds() / 86400.0
+
+    away_prev = _find_previous_match(prior_events, event.away_team)
+    if away_prev is not None:
+        delta = event.commence_time - away_prev.commence_time
+        away_rest = delta.total_seconds() / 86400.0
+
+    rest_advantage: float | None = None
+    if home_rest is not None and away_rest is not None:
+        rest_advantage = home_rest - away_rest
+
+    # Midweek: Tuesday (1), Wednesday (2), Thursday (3)
+    is_midweek: float | None = None
+    if event.commence_time is not None:
+        weekday = event.commence_time.weekday()
+        is_midweek = 1.0 if weekday in (1, 2, 3) else 0.0
+
+    return EplScheduleFeatures(
+        home_rest_days=home_rest,
+        away_rest_days=away_rest,
+        rest_advantage=rest_advantage,
+        is_midweek=is_midweek,
+    )

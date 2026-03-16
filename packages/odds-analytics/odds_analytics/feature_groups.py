@@ -257,9 +257,9 @@ async def collect_event_data(
                 all_logs.append(prev)
         game_logs = all_logs
 
-    # Prior season events for standings features (from preloaded cache)
+    # Prior season events for standings / epl_schedule features (from preloaded cache)
     prior_season_events: list[Event] = []
-    if "standings" in config.feature_groups and standings_cache is not None:
+    if {"standings", "epl_schedule"} & set(config.feature_groups) and standings_cache is not None:
         from odds_analytics.standings_features import get_prior_events_from_cache
 
         prior_season_events = get_prior_events_from_cache(standings_cache, event)
@@ -514,7 +514,7 @@ class FeatureAdapter(Protocol):
 
 
 _STATIC_FEATURE_GROUPS = frozenset(
-    {"tabular", "polymarket", "injuries", "rest", "standings", "match_stats"}
+    {"tabular", "polymarket", "injuries", "rest", "standings", "match_stats", "epl_schedule"}
 )
 
 
@@ -547,6 +547,10 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
         from odds_analytics.match_stats_features import MatchStatsFeatures
 
         names.extend(f"mstat_{n}" for n in MatchStatsFeatures.get_feature_names())
+    if "epl_schedule" in config.feature_groups:
+        from odds_analytics.epl_schedule_features import EplScheduleFeatures
+
+        names.extend(f"eplsched_{n}" for n in EplScheduleFeatures.get_feature_names())
     return names
 
 
@@ -733,6 +737,26 @@ def _extract_static_feature_parts(
             except Exception:
                 logger.debug("match_stats_feature_extraction_failed", event_id=event.id)
                 parts.append(nan_block_mstat)
+
+    # --- EPL schedule features (NaN-fill when unavailable to keep row) ---
+    if "epl_schedule" in config.feature_groups:
+        from odds_analytics.epl_schedule_features import (
+            EplScheduleFeatures,
+            extract_epl_schedule_features,
+        )
+
+        n_eplsched = len(EplScheduleFeatures.get_feature_names())
+        nan_block_eplsched = np.full(n_eplsched, np.nan)
+
+        if not bundle.prior_season_events:
+            parts.append(nan_block_eplsched)
+        else:
+            try:
+                eplsched_feats = extract_epl_schedule_features(bundle.prior_season_events, event)
+                parts.append(eplsched_feats.to_array())
+            except Exception:
+                logger.debug("epl_schedule_feature_extraction_failed", event_id=event.id)
+                parts.append(nan_block_eplsched)
 
     return parts
 
@@ -1011,9 +1035,9 @@ async def prepare_training_data(
     # Resolve sport_key once for cache loaders
     sport_key = config.sport_key or (valid_events[0].sport_key if valid_events else None)
 
-    # Preload standings cache to avoid N+1 queries
+    # Preload standings cache to avoid N+1 queries (also used by epl_schedule)
     standings_cache: dict[str, list[Event]] | None = None
-    if "standings" in config.feature_groups:
+    if {"standings", "epl_schedule"} & set(config.feature_groups):
         from odds_analytics.standings_features import load_season_events_cache
 
         if sport_key:
