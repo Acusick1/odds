@@ -34,7 +34,9 @@ log = logging.getLogger("ingest_espn_lineups")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "espn_lineups"
 
-BASE_URL = "http://site.api.espn.com/apis/site/v2/sports/soccer/eng.1"
+BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1"
+
+FIXTURES_DIR = Path(__file__).resolve().parent.parent / "data" / "espn_fixtures"
 
 # ESPN displayName -> pipeline canonical name (matching FDUK / OddsPortal).
 # Duplicated from ingest_espn_fixtures.py to keep scripts self-contained.
@@ -122,18 +124,58 @@ def _fetch_json(client: httpx.Client, url: str) -> dict[str, Any]:
     raise RuntimeError("unreachable")
 
 
+def _load_match_dates_from_fixtures(season: int) -> list[str] | None:
+    """Load unique match dates from the ESPN fixtures CSV for a season.
+
+    Returns sorted list of YYYYMMDD strings, or None if the CSV doesn't exist.
+    """
+    label = SEASONS[season]
+    csv_path = FIXTURES_DIR / f"fixtures_{label}.csv"
+    if not csv_path.exists():
+        return None
+
+    dates: set[str] = set()
+    with open(csv_path) as fh:
+        reader = csv.DictReader(fh)
+        for row in reader:
+            # Only EPL matches (fixture CSV includes cups/European competitions)
+            if row.get("competition") != "Premier League":
+                continue
+            date_str = row.get("date", "")
+            if date_str:
+                # Parse ISO date and convert to YYYYMMDD
+                day = date_str[:10].replace("-", "")
+                if len(day) == 8:
+                    dates.add(day)
+
+    return sorted(dates) if dates else None
+
+
 def _discover_game_ids(client: httpx.Client, season: int) -> list[tuple[str, str]]:
     """Discover EPL game IDs for a season via the scoreboard endpoint.
 
+    If the ESPN fixtures CSV exists for this season, only query match dates
+    (~38 requests) instead of every calendar day (~270 requests).
+
     Returns list of (game_id, date_iso) tuples.
     """
-    start_date, end_date = SEASON_DATE_RANGES[season]
+    match_dates = _load_match_dates_from_fixtures(season)
+    if match_dates is not None:
+        log.info(f"  Using {len(match_dates)} match dates from fixtures CSV")
+        dates_to_query = match_dates
+    else:
+        log.info("  Fixtures CSV not found, scanning all season dates")
+        start_date, end_date = SEASON_DATE_RANGES[season]
+        dates_to_query = []
+        current = start_date
+        while current <= end_date:
+            dates_to_query.append(current.strftime("%Y%m%d"))
+            current += timedelta(days=1)
+
     games: list[tuple[str, str]] = []
     seen_ids: set[str] = set()
 
-    current = start_date
-    while current <= end_date:
-        date_str = current.strftime("%Y%m%d")
+    for date_str in dates_to_query:
         url = f"{BASE_URL}/scoreboard?dates={date_str}"
         time.sleep(REQUEST_DELAY)
 
@@ -141,7 +183,6 @@ def _discover_game_ids(client: httpx.Client, season: int) -> list[tuple[str, str
             data = _fetch_json(client, url)
         except Exception as e:
             log.warning(f"  Failed scoreboard for {date_str}: {e}")
-            current += timedelta(days=1)
             continue
 
         for event in data.get("events", []):
@@ -150,8 +191,6 @@ def _discover_game_ids(client: httpx.Client, season: int) -> list[tuple[str, str
             if game_id and game_id not in seen_ids:
                 seen_ids.add(game_id)
                 games.append((game_id, event_date))
-
-        current += timedelta(days=1)
 
     log.info(f"  Discovered {len(games)} games from scoreboard")
     return games

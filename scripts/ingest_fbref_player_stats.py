@@ -56,6 +56,7 @@ SEASON_URL_SLUGS: dict[int, str] = {
 }
 
 # FBref team name -> pipeline canonical name.
+# Only teams whose FBref name differs from canonical need entries.
 FBREF_TEAM_NAME_MAP: dict[str, str] = {
     "Brighton and Hove Albion": "Brighton",
     "Brighton & Hove Albion": "Brighton",
@@ -65,19 +66,12 @@ FBREF_TEAM_NAME_MAP: dict[str, str] = {
     "Ipswich Town": "Ipswich",
     "Leicester City": "Leicester",
     "Leeds United": "Leeds",
-    "Manchester Utd": "Manchester Utd",
     "Newcastle Utd": "Newcastle",
     "Norwich City": "Norwich",
     "Nott'ham Forest": "Nottingham",
     "Nottingham Forest": "Nottingham",
-    "Sheffield Utd": "Sheffield Utd",
     "Stoke City": "Stoke",
     "Swansea City": "Swansea",
-    "West Brom": "West Brom",
-    "West Ham": "West Ham",
-    "Wolves": "Wolves",
-    "Tottenham": "Tottenham",
-    "Bournemouth": "Bournemouth",
     "AFC Bournemouth": "Bournemouth",
 }
 
@@ -156,7 +150,7 @@ def fetch_season(client: httpx.Client, season: int) -> pd.DataFrame:
     log.info(f"  Fetching {url}")
 
     html = _fetch_html(client, url)
-    tables = pd.read_html(html)
+    tables = pd.read_html(html, flavor="html.parser")
 
     if not tables:
         raise ValueError(f"No tables found on FBref page for {SEASONS[season]}")
@@ -169,11 +163,7 @@ def fetch_season(client: httpx.Client, season: int) -> pd.DataFrame:
             f"{[list(t.columns[:5]) for t in tables[:5]]}"
         )
 
-    # Flatten MultiIndex columns if not already done
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [col[-1] if col[-1] != "" else col[-2] for col in df.columns]
-
-    # Rename columns to output names
+    # Rename columns to output names (MultiIndex already flattened by _find_standard_stats_table)
     df = df.rename(columns=COLUMN_RENAMES)
 
     # Drop separator/header rows that FBref inserts (Player == "Player")
