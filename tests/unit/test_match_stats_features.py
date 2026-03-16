@@ -13,6 +13,8 @@ from odds_analytics.match_stats_features import (
 )
 from odds_core.models import Event, EventStatus
 
+from scripts.ingest_football_data_uk import _extract_match_stats
+
 
 def _make_event(
     event_id: str = "test_event",
@@ -120,41 +122,30 @@ class TestExtractTeamStats:
 
 class TestRollingAverage:
     def test_basic_average(self) -> None:
-        dummy = datetime(2025, 1, 1, tzinfo=UTC)
-        entries = [
-            _TeamMatchEntry(dummy, {"shots": 10}),
-            _TeamMatchEntry(dummy, {"shots": 12}),
-            _TeamMatchEntry(dummy, {"shots": 8}),
-        ]
-        assert _rolling_average(entries, "shots", window=3) == 10.0
+        history = [{"shots": 10}, {"shots": 12}, {"shots": 8}]
+        assert _rolling_average(history, "shots", window=3) == 10.0
 
     def test_window_smaller_than_history(self) -> None:
-        dummy = datetime(2025, 1, 1, tzinfo=UTC)
-        entries = [
-            _TeamMatchEntry(dummy, {"shots": 10}),
-            _TeamMatchEntry(dummy, {"shots": 12}),
-            _TeamMatchEntry(dummy, {"shots": 8}),
-            _TeamMatchEntry(dummy, {"shots": 14}),
-            _TeamMatchEntry(dummy, {"shots": 6}),
+        history = [
+            {"shots": 10},
+            {"shots": 12},
+            {"shots": 8},
+            {"shots": 14},
+            {"shots": 6},
         ]
         # Window of 3: uses last 3 values (8, 14, 6) = 28/3
-        result = _rolling_average(entries, "shots", window=3)
+        result = _rolling_average(history, "shots", window=3)
         assert result is not None
         assert abs(result - 28.0 / 3) < 0.001
 
     def test_window_larger_than_history(self) -> None:
-        dummy = datetime(2025, 1, 1, tzinfo=UTC)
-        entries = [
-            _TeamMatchEntry(dummy, {"shots": 10}),
-            _TeamMatchEntry(dummy, {"shots": 12}),
-        ]
+        history = [{"shots": 10}, {"shots": 12}]
         # Window of 5 but only 2 values: uses all 2 = 22/2
-        assert _rolling_average(entries, "shots", window=5) == 11.0
+        assert _rolling_average(history, "shots", window=5) == 11.0
 
     def test_missing_stat_key(self) -> None:
-        dummy = datetime(2025, 1, 1, tzinfo=UTC)
-        entries = [_TeamMatchEntry(dummy, {"shots": 10})]
-        assert _rolling_average(entries, "corners", window=5) is None
+        history = [{"shots": 10}]
+        assert _rolling_average(history, "corners", window=5) is None
 
     def test_empty_entries(self) -> None:
         assert _rolling_average([], "shots", window=5) is None
@@ -289,3 +280,62 @@ class TestExtractMatchStatsFeatures:
         features = extract_match_stats_features(prior, event, window=5)
         # Only 2 matches, uses all -> avg 12
         assert features.home_avg_shots == 12.0
+
+
+class TestExtractMatchStatsIngestion:
+    def test_normal_row(self) -> None:
+        row = {
+            "HS": "15",
+            "AS": "8",
+            "HST": "6",
+            "AST": "3",
+            "HC": "7",
+            "AC": "4",
+            "HF": "10",
+            "AF": "12",
+            "HY": "2",
+            "AY": "3",
+            "HR": "0",
+            "AR": "1",
+            "HTHG": "1",
+            "HTAG": "0",
+            "Referee": "Michael Oliver",
+        }
+        result = _extract_match_stats(row)
+        assert result["home_shots"] == 15
+        assert result["away_shots"] == 8
+        assert result["home_shots_on_target"] == 6
+        assert result["away_corners"] == 4
+        assert result["home_red_cards"] == 0
+        assert result["away_ht_goals"] == 0
+        assert result["referee"] == "Michael Oliver"
+
+    def test_missing_stats_columns(self) -> None:
+        row = {
+            "HS": "10",
+            "AS": "5",
+            "Referee": "Anthony Taylor",
+        }
+        result = _extract_match_stats(row)
+        assert result["home_shots"] == 10
+        assert result["away_shots"] == 5
+        assert result["referee"] == "Anthony Taylor"
+        assert "home_corners" not in result
+        assert "away_yellow_cards" not in result
+
+    def test_non_numeric_values(self) -> None:
+        row = {
+            "HS": "abc",
+            "AS": "",
+            "HST": "6",
+            "Referee": "",
+        }
+        result = _extract_match_stats(row)
+        assert "home_shots" not in result
+        assert "away_shots" not in result
+        assert result["home_shots_on_target"] == 6
+        assert "referee" not in result
+
+    def test_empty_row(self) -> None:
+        result = _extract_match_stats({})
+        assert result == {}

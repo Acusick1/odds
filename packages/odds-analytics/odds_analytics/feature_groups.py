@@ -1008,12 +1008,14 @@ async def prepare_training_data(
     lstm_adapter = isinstance(adapter, LSTMAdapter)
     static_names = _static_feature_group_names(config) if lstm_adapter else None
 
+    # Resolve sport_key once for cache loaders
+    sport_key = config.sport_key or (valid_events[0].sport_key if valid_events else None)
+
     # Preload standings cache to avoid N+1 queries
     standings_cache: dict[str, list[Event]] | None = None
     if "standings" in config.feature_groups:
         from odds_analytics.standings_features import load_season_events_cache
 
-        sport_key = config.sport_key or (valid_events[0].sport_key if valid_events else None)
         if sport_key:
             standings_cache = await load_season_events_cache(session, sport_key)
 
@@ -1022,7 +1024,6 @@ async def prepare_training_data(
     if "match_stats" in config.feature_groups:
         from odds_analytics.match_stats_features import load_match_stats_cache
 
-        sport_key = config.sport_key or (valid_events[0].sport_key if valid_events else None)
         if sport_key:
             match_stats_cache = await load_match_stats_cache(session, sport_key)
 

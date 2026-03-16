@@ -122,16 +122,19 @@ def _extract_team_stats_from_raw_data(
 
 
 def _rolling_average(
-    entries: list[_TeamMatchEntry],
+    stats_history: list[dict[str, int]],
     stat_key: str,
     window: int,
 ) -> float | None:
     """Compute rolling average of a stat over the last `window` entries."""
-    values = [e.stats[stat_key] for e in entries if stat_key in e.stats]
+    values = [entry[stat_key] for entry in stats_history if stat_key in entry]
     if not values:
         return None
     window_values = values[-window:]
     return sum(window_values) / len(window_values)
+
+
+_FDUK_SOURCE_TAG = "football_data_uk"
 
 
 async def load_match_stats_cache(
@@ -140,39 +143,38 @@ async def load_match_stats_cache(
 ) -> MatchStatsCache:
     """Bulk-load all match stats from FDUK snapshots, grouped by team.
 
-    Loads closing-tier snapshots (1h before game) for all completed events,
+    Only loads events that have FDUK snapshots (not all completed events),
     extracts match_stats from raw_data, and builds a chronological per-team
     cache. Called once before the per-event loop to avoid N+1 queries.
     """
-    # Load all completed events for the sport
+    # Load FDUK snapshots directly — only events with FDUK data matter
+    snapshot_result = await session.execute(
+        select(OddsSnapshot)
+        .where(OddsSnapshot.api_request_id == _FDUK_SOURCE_TAG)
+        .order_by(OddsSnapshot.snapshot_time)
+    )
+    all_snapshots = list(snapshot_result.scalars().all())
+
+    if not all_snapshots:
+        return {}
+
+    # Load only the events referenced by these snapshots
+    fduk_event_ids = {s.event_id for s in all_snapshots}
     event_result = await session.execute(
-        select(Event)
-        .where(
+        select(Event).where(
+            Event.id.in_(fduk_event_ids),
             Event.sport_key == sport_key,
             Event.status == EventStatus.FINAL,
             Event.home_score.is_not(None),
             Event.away_score.is_not(None),
         )
-        .order_by(Event.commence_time)
     )
     all_events = list(event_result.scalars().all())
 
     if not all_events:
         return {}
 
-    event_ids = [e.id for e in all_events]
     event_map = {e.id: e for e in all_events}
-
-    # Load all FDUK snapshots for these events
-    snapshot_result = await session.execute(
-        select(OddsSnapshot)
-        .where(
-            OddsSnapshot.event_id.in_(event_ids),
-            OddsSnapshot.api_request_id == "football_data_uk",
-        )
-        .order_by(OddsSnapshot.snapshot_time)
-    )
-    all_snapshots = list(snapshot_result.scalars().all())
 
     # Pick one snapshot per event (prefer closing = latest by time)
     best_snapshot: dict[str, OddsSnapshot] = {}
@@ -253,14 +255,9 @@ def extract_match_stats_features(
     if not home_history and not away_history:
         return MatchStatsFeatures()
 
-    # Wrap in _TeamMatchEntry for _rolling_average (dummy timestamp, not used)
-    dummy_time = event.commence_time
-    home_entries = [_TeamMatchEntry(commence_time=dummy_time, stats=s) for s in home_history]
-    away_entries = [_TeamMatchEntry(commence_time=dummy_time, stats=s) for s in away_history]
-
     kwargs: dict[str, Any] = {}
     for _, _, suffix in _STAT_KEYS:
-        kwargs[f"home_avg_{suffix}"] = _rolling_average(home_entries, suffix, window)
-        kwargs[f"away_avg_{suffix}"] = _rolling_average(away_entries, suffix, window)
+        kwargs[f"home_avg_{suffix}"] = _rolling_average(home_history, suffix, window)
+        kwargs[f"away_avg_{suffix}"] = _rolling_average(away_history, suffix, window)
 
     return MatchStatsFeatures(**kwargs)
