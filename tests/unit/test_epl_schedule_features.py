@@ -197,7 +197,7 @@ class TestExtractEplScheduleFeatures:
         assert features.is_midweek == 0.0  # Saturday
 
     def test_is_midweek_classification(self) -> None:
-        """Tuesday, Wednesday, Thursday are midweek; others are not."""
+        """Tuesday and Wednesday are midweek; others are not."""
         # Monday
         event = _make_event(commence_time=datetime(2025, 1, 6, 20, 0, tzinfo=UTC))
         assert extract_epl_schedule_features([], event).is_midweek == 0.0
@@ -212,7 +212,7 @@ class TestExtractEplScheduleFeatures:
 
         # Thursday
         event = _make_event(commence_time=datetime(2025, 1, 9, 20, 0, tzinfo=UTC))
-        assert extract_epl_schedule_features([], event).is_midweek == 1.0
+        assert extract_epl_schedule_features([], event).is_midweek == 0.0
 
         # Friday
         event = _make_event(commence_time=datetime(2025, 1, 10, 20, 0, tzinfo=UTC))
