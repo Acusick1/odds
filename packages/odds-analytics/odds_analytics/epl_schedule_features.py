@@ -1,29 +1,39 @@
 """EPL schedule and rest feature extraction from match dates.
 
-Derives rest-day features directly from Event commence times within the same
-EPL season. When an all-competition fixture cache is provided (from ESPN data),
-rest days account for European and cup matches, not just EPL.
+Derives rest-day and congestion features from Event commence times and an
+optional all-competition fixtures DataFrame (from ESPN data). When the
+DataFrame is provided, rest days account for European and cup matches.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 import numpy as np
 from odds_core.models import Event
 
-from odds_analytics.fixture_cache import FixtureCache, get_last_fixture_date
+if TYPE_CHECKING:
+    import pandas as pd
 
 __all__ = [
     "EplScheduleFeatures",
     "extract_epl_schedule_features",
 ]
 
+_EUROPEAN_COMPETITIONS = frozenset(
+    {
+        "Champions League",
+        "Europa League",
+        "Conference League",
+    }
+)
+
 
 @dataclass
 class EplScheduleFeatures:
-    """Rest and schedule features for a single EPL event.
+    """Rest, schedule, and congestion features for a single EPL event.
 
     All fields optional (None -> np.nan). Rest days are fractional days
     between commence times: a Saturday 15:00 to Tuesday 19:45 = ~3.2.
@@ -33,6 +43,10 @@ class EplScheduleFeatures:
     away_rest_days: float | None = None
     rest_advantage: float | None = None
     is_midweek: float | None = None
+    home_matches_last_14d: float | None = None
+    away_matches_last_14d: float | None = None
+    home_european_last_7d: float | None = None
+    away_european_last_7d: float | None = None
 
     def to_array(self) -> np.ndarray:
         """Convert to numpy array. None -> np.nan."""
@@ -64,9 +78,23 @@ def _find_previous_match(
     return None
 
 
-def _rest_days_from_date(event_time: datetime, prev_time: datetime) -> float:
-    """Compute fractional rest days between two datetimes."""
-    return (event_time - prev_time).total_seconds() / 86400.0
+def _team_fixtures_before(
+    fixtures_df: pd.DataFrame,
+    team: str,
+    before: datetime,
+) -> pd.DataFrame:
+    """Filter fixtures DataFrame to a team's matches strictly before a time."""
+    mask = ((fixtures_df["team"] == team) | (fixtures_df["opponent"] == team)) & (
+        fixtures_df["date"] < before
+    )
+    return fixtures_df.loc[mask]
+
+
+def _last_fixture_date(team_df: pd.DataFrame) -> datetime | None:
+    """Get the most recent fixture date from a pre-filtered DataFrame."""
+    if team_df.empty:
+        return None
+    return team_df["date"].max()
 
 
 def _best_rest_days(
@@ -89,42 +117,70 @@ def _best_rest_days(
         return None
 
     most_recent = max(candidates)
-    return _rest_days_from_date(event_time, most_recent)
+    return (event_time - most_recent).total_seconds() / 86400.0
+
+
+def _matches_in_window(team_df: pd.DataFrame, after: datetime) -> int:
+    """Count matches in a team's DataFrame on or after the given time."""
+    return int((team_df["date"] >= after).sum())
+
+
+def _european_in_window(team_df: pd.DataFrame, after: datetime) -> bool:
+    """Check if any European match occurred on or after the given time."""
+    recent = team_df.loc[team_df["date"] >= after]
+    if recent.empty:
+        return False
+    return bool(recent["competition"].isin(_EUROPEAN_COMPETITIONS).any())
 
 
 def extract_epl_schedule_features(
     prior_events: list[Event],
     event: Event,
-    fixture_cache: FixtureCache | None = None,
+    fixtures_df: pd.DataFrame | None = None,
 ) -> EplScheduleFeatures:
-    """Extract rest/schedule features from prior events.
+    """Extract rest/schedule/congestion features from prior events.
 
-    When ``fixture_cache`` is provided, rest days account for all competitions
-    (EPL + cups + European). Without it, only EPL matches are considered
-    (backward-compatible with the original behavior).
+    When ``fixtures_df`` is provided, rest days account for all competitions
+    (EPL + cups + European) and congestion features are computed. Without it,
+    only EPL matches are considered (backward-compatible).
 
     Args:
         prior_events: Completed EPL events from the same season,
             ordered chronologically, all strictly before the current event.
         event: The current event to extract features for.
-        fixture_cache: Optional all-competition fixture cache from ESPN data.
+        fixtures_df: Optional all-competition fixtures DataFrame with columns
+            ``date``, ``team``, ``opponent``, ``competition``. Dates must be
+            timezone-aware datetimes.
 
     Returns:
-        EplScheduleFeatures, or all-None if no prior matches found.
+        EplScheduleFeatures with rest, congestion, and midweek fields.
     """
     home_prev = _find_previous_match(prior_events, event.home_team)
     away_prev = _find_previous_match(prior_events, event.away_team)
 
-    # All-competition lookup (if cache available)
     home_fixture_date: datetime | None = None
     away_fixture_date: datetime | None = None
-    if fixture_cache is not None:
-        home_fixture_date = get_last_fixture_date(
-            fixture_cache, event.home_team, event.commence_time
-        )
-        away_fixture_date = get_last_fixture_date(
-            fixture_cache, event.away_team, event.commence_time
-        )
+    home_matches_14d: float | None = None
+    away_matches_14d: float | None = None
+    home_european_7d: float | None = None
+    away_european_7d: float | None = None
+
+    if fixtures_df is not None and not fixtures_df.empty:
+        t = event.commence_time
+
+        home_df = _team_fixtures_before(fixtures_df, event.home_team, t)
+        away_df = _team_fixtures_before(fixtures_df, event.away_team, t)
+
+        home_fixture_date = _last_fixture_date(home_df)
+        away_fixture_date = _last_fixture_date(away_df)
+
+        cutoff_14d = t - timedelta(days=14)
+        home_matches_14d = float(_matches_in_window(home_df, cutoff_14d))
+        away_matches_14d = float(_matches_in_window(away_df, cutoff_14d))
+
+        cutoff_7d = t - timedelta(days=7)
+        home_european_7d = 1.0 if _european_in_window(home_df, cutoff_7d) else 0.0
+        away_european_7d = 1.0 if _european_in_window(away_df, cutoff_7d) else 0.0
 
     home_rest = _best_rest_days(home_prev, home_fixture_date, event.commence_time)
     away_rest = _best_rest_days(away_prev, away_fixture_date, event.commence_time)
@@ -142,4 +198,8 @@ def extract_epl_schedule_features(
         away_rest_days=away_rest,
         rest_advantage=rest_advantage,
         is_midweek=is_midweek,
+        home_matches_last_14d=home_matches_14d,
+        away_matches_last_14d=away_matches_14d,
+        home_european_last_7d=home_european_7d,
+        away_european_last_7d=away_european_7d,
     )

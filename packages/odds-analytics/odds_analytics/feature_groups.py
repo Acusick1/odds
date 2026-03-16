@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
@@ -58,7 +59,8 @@ from odds_analytics.sequence_loader import (
 )
 
 if TYPE_CHECKING:
-    from odds_analytics.fixture_cache import FixtureCache
+    import pandas as pd
+
     from odds_analytics.match_stats_features import MatchStatsCache
     from odds_analytics.training.config import FeatureConfig
 
@@ -111,7 +113,7 @@ class EventDataBundle:
     game_logs: list[NbaTeamGameLog] = field(default_factory=list)
     prior_season_events: list[Event] = field(default_factory=list)
     prior_match_stats: dict[str, list[dict[str, int]]] = field(default_factory=dict)
-    fixture_cache: FixtureCache | None = None
+    fixtures_df: pd.DataFrame | None = None
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
@@ -155,7 +157,7 @@ async def collect_event_data(
     config: FeatureConfig,
     standings_cache: dict[str, list[Event]] | None = None,
     match_stats_cache: MatchStatsCache | None = None,
-    fixture_cache: FixtureCache | None = None,
+    fixtures_df: pd.DataFrame | None = None,
 ) -> EventDataBundle:
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
@@ -291,7 +293,7 @@ async def collect_event_data(
         game_logs=game_logs,
         prior_season_events=prior_season_events,
         prior_match_stats=prior_match_stats,
-        fixture_cache=fixture_cache,
+        fixtures_df=fixtures_df,
         sequences=sequences,
     )
 
@@ -754,7 +756,7 @@ def _extract_static_feature_parts(
 
         try:
             eplsched_feats = extract_epl_schedule_features(
-                bundle.prior_season_events, event, fixture_cache=bundle.fixture_cache
+                bundle.prior_season_events, event, fixtures_df=bundle.fixtures_df
             )
             parts.append(eplsched_feats.to_array())
         except Exception:
@@ -958,6 +960,33 @@ def _select_closing_snapshot(
 # Layer 5: Orchestrator
 # =============================================================================
 
+_FIXTURES_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "espn_fixtures"
+
+
+def _load_fixtures_df() -> pd.DataFrame | None:
+    """Load all ESPN fixture CSVs into a single DataFrame.
+
+    Returns None if no CSV files are found (e.g. in Lambda or before first run).
+    """
+    import pandas as pd_
+
+    csv_files = sorted(_FIXTURES_DATA_DIR.glob("fixtures_*.csv"))
+    if not csv_files:
+        logger.warning("espn_fixtures_not_found", data_dir=str(_FIXTURES_DATA_DIR))
+        return None
+
+    frames = [pd_.read_csv(f, parse_dates=["date"]) for f in csv_files]
+    df = pd_.concat(frames, ignore_index=True)
+    # Ensure dates are UTC-aware
+    if df["date"].dt.tz is None:
+        df["date"] = df["date"].dt.tz_localize("UTC")
+    logger.info(
+        "espn_fixtures_loaded",
+        rows=len(df),
+        csv_files=len(csv_files),
+    )
+    return df
+
 
 class PreparedFeatureData:
     """Pre-split feature matrix with targets and metadata."""
@@ -1054,12 +1083,10 @@ async def prepare_training_data(
         if sport_key:
             match_stats_cache = await load_match_stats_cache(session, sport_key)
 
-    # Preload all-competition fixture cache for accurate rest-day calculation
-    fixture_cache: FixtureCache | None = None
+    # Preload all-competition fixtures DataFrame for rest/congestion features
+    fixtures_df: pd.DataFrame | None = None
     if "epl_schedule" in config.feature_groups:
-        from odds_analytics.fixture_cache import load_fixture_cache
-
-        fixture_cache = load_fixture_cache()
+        fixtures_df = _load_fixtures_df()
 
     for event in valid_events:
         # Load all data for this event in bulk
@@ -1069,7 +1096,7 @@ async def prepare_training_data(
             config,
             standings_cache=standings_cache,
             match_stats_cache=match_stats_cache,
-            fixture_cache=fixture_cache,
+            fixtures_df=fixtures_df,
         )
 
         # Closing snapshot is required

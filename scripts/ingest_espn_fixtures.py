@@ -5,8 +5,9 @@ Downloads fixture schedules for every EPL team across all relevant competitions
 (Premier League, FA Cup, League Cup, Champions League, Europa League, Conference
 League) and writes one CSV per season to data/espn_fixtures/.
 
-These CSVs are consumed by the fixture_cache module to provide accurate rest-day
-calculations that account for midweek European and cup matches.
+These CSVs are loaded as a pandas DataFrame by the training pipeline to provide
+accurate rest-day and congestion features that account for midweek European and
+cup matches.
 
 Usage:
     # Fetch all seasons (2015-2025)
@@ -48,6 +49,9 @@ LEAGUE_SLUGS: dict[str, str] = {
     "uefa.europa.conf": "Conference League",
 }
 
+# European competition names for tagging.
+EUROPEAN_COMPETITIONS = frozenset({"Champions League", "Europa League", "Conference League"})
+
 # Seasons: start year -> display label (matches FDUK convention).
 SEASONS: dict[int, str] = {
     2015: "2015-16",
@@ -87,6 +91,18 @@ ESPN_TEAM_NAME_MAP: dict[str, str] = {
     "Tottenham Hotspur": "Tottenham",
 }
 
+CSV_COLUMNS = [
+    "date",
+    "team",
+    "opponent",
+    "competition",
+    "round",
+    "home_away",
+    "score_team",
+    "score_opponent",
+    "status",
+]
+
 REQUEST_DELAY = 0.5  # seconds between HTTP requests
 
 
@@ -110,6 +126,16 @@ def _fetch_json(client: httpx.Client, url: str) -> dict[str, Any]:
     raise RuntimeError("unreachable")
 
 
+def _extract_score(competitor: dict[str, Any]) -> str:
+    """Extract score from a competitor entry. Returns empty string if unavailable."""
+    score = competitor.get("score")
+    if score is None:
+        return ""
+    if isinstance(score, dict):
+        return score.get("displayValue", "")
+    return str(score)
+
+
 def fetch_teams(client: httpx.Client, season: int) -> list[dict[str, str]]:
     """Fetch EPL teams for a season. Returns list of {id, name}."""
     url = f"{BASE_URL}/eng.1/teams?season={season}"
@@ -126,8 +152,7 @@ def fetch_team_schedule(
 ) -> list[dict[str, str]]:
     """Fetch a team's schedule for one competition/season.
 
-    Returns list of fixture dicts with keys: date, team, opponent,
-    competition, home_away.
+    Returns list of fixture dicts matching CSV_COLUMNS.
     """
     url = f"{BASE_URL}/{league_slug}/teams/{team_id}/schedule?season={season}"
     data = _fetch_json(client, url)
@@ -144,7 +169,8 @@ def fetch_team_schedule(
         if not comps:
             continue
 
-        competitors = comps[0].get("competitors", [])
+        comp = comps[0]
+        competitors = comp.get("competitors", [])
         if len(competitors) != 2:
             continue
 
@@ -162,7 +188,13 @@ def fetch_team_schedule(
 
         team_name = _normalize_team(team_entry["team"]["displayName"])
         opponent_name = _normalize_team(opponent_entry["team"]["displayName"])
-        home_away = team_entry["homeAway"]
+
+        # Status
+        status_type = comp.get("status", {}).get("type", {})
+        status = status_type.get("description", "")
+
+        # Round/phase
+        round_name = event.get("seasonType", {}).get("name", "")
 
         fixtures.append(
             {
@@ -170,7 +202,11 @@ def fetch_team_schedule(
                 "team": team_name,
                 "opponent": opponent_name,
                 "competition": competition,
-                "home_away": home_away,
+                "round": round_name,
+                "home_away": team_entry["homeAway"],
+                "score_team": _extract_score(team_entry),
+                "score_opponent": _extract_score(opponent_entry),
+                "status": status,
             }
         )
 
@@ -220,9 +256,7 @@ def write_csv(fixtures: list[dict[str, str]], season: int) -> Path:
     path = DATA_DIR / f"fixtures_{label}.csv"
 
     with open(path, "w", newline="") as fh:
-        writer = csv.DictWriter(
-            fh, fieldnames=["date", "team", "opponent", "competition", "home_away"]
-        )
+        writer = csv.DictWriter(fh, fieldnames=CSV_COLUMNS)
         writer.writeheader()
         writer.writerows(fixtures)
 
