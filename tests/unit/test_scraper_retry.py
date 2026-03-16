@@ -507,6 +507,34 @@ class TestUserAgentGeneration:
         assert call_kwargs["browser_user_agent"] == custom_ua
 
     @pytest.mark.asyncio
+    async def test_empty_page_retry_generates_fresh_user_agent(self) -> None:
+        """Each empty-page retry attempt generates and uses a distinct UA."""
+        matches = [{"home_team": "Arsenal", "away_team": "Chelsea"}]
+        empty = _make_result(success=[])
+        success = _make_result(success=matches)
+
+        mock_run = AsyncMock(side_effect=[empty, success])
+        ua_gen = MagicMock(side_effect=["UA-1", "UA-2", "UA-3"])
+
+        with (
+            patch(SCRAPER_PATCH, mock_run),
+            patch(SLEEP_PATCH, new_callable=AsyncMock),
+            patch("odds_lambda.oddsportal_common._generate_user_agent", ua_gen),
+        ):
+            result = await run_scraper_with_retry(
+                command="upcoming", sport="football", headless=True
+            )
+
+        assert result.success == matches
+        assert mock_run.await_count == 2
+
+        ua_attempt_1 = mock_run.call_args_list[0].kwargs["browser_user_agent"]
+        ua_attempt_2 = mock_run.call_args_list[1].kwargs["browser_user_agent"]
+        assert ua_attempt_1 == "UA-1"
+        assert ua_attempt_2 == "UA-2"
+        assert ua_attempt_1 != ua_attempt_2
+
+    @pytest.mark.asyncio
     async def test_retry_uses_fresh_user_agent(self) -> None:
         """Failed-URL retry generates a new UA, different from the initial one."""
         initial_success = [{"match": 0}]
