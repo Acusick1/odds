@@ -4,7 +4,7 @@
 
 Predict line movement: the delta between current fair price and closing fair price. A positive signal here means we can identify mispriced lines before they correct, enabling +EV execution on either sportsbook or Betfair exchange.
 
-We have confirmed a weak but real signal (~3.1% R² on EPL with Pinnacle as sharp reference, ~3.6% R² on NBA with bet365 self-reference). Current focus: EPL with cross-source features (Pinnacle sharp vs bet365 retail) and Betfair exchange execution.
+We have confirmed a weak but real signal (~2-3% R² on EPL with Pinnacle as sharp reference, ~3.6% R² on NBA with bet365 self-reference). Current focus: EPL with cross-source features (Pinnacle sharp vs bet365 retail) and Betfair exchange execution.
 
 ## Data Sources
 
@@ -95,6 +95,14 @@ Game context from NBA game logs:
 - **Days rest**: home/away days since previous game
 - **Rest advantage**: home days rest minus away days rest
 - **Back-to-back**: home/away boolean flags
+
+### Match Stats (14 features)
+Rolling averages of prior match statistics from football-data.co.uk:
+- **Shots**: home/away total shots, shots on target (rolling avg over last N matches, configurable `match_stats_window`, default 5)
+- **Set pieces**: home/away corners
+- **Discipline**: home/away fouls, yellow cards, red cards
+- **Half-time**: home/away half-time goals scored
+- Strict time filtering: only uses completed matches prior to the event's `commence_time` (no look-ahead bias)
 
 ### Sequence (13 features per timestep, for LSTM)
 Time-series per snapshot:
@@ -233,32 +241,40 @@ Time-series per snapshot:
 - **Conclusion**: line shopping is directionally correct but insufficient — the ~2.5pp vig reduction is smaller than the ~4% gap between signal strength and breakeven. Would need either exchange-level execution costs or stronger signal
 - Full results: [experiments/results/exp7b_line_shopping/FINDINGS.md](../experiments/results/exp7b_line_shopping/FINDINGS.md)
 
-### EPL with Pinnacle sharp reference (Mar 2026, ~1.8K events combined)
+### EPL with Pinnacle sharp reference (Mar 2026, ~1.7K events combined)
 
-Three-way comparison isolating the effect of Pinnacle as sharp reference vs more data:
+Three-way comparison isolating the effect of Pinnacle as sharp reference vs more data. **Note**: the original Mar 10 results (R²=0.031) were inflated by a cross-source snapshot contamination bug (#231, fixed Mar 15) — OddsPortal snapshots without Pinnacle were selected over FDUK snapshots with Pinnacle, then `nan_to_num` silently filled missing Pinnacle probs with 0.0. Post-fix results below are the trustworthy baseline.
 
-| Experiment | Sharp Ref | Data | CV R² | CV MSE |
-|---|---|---|---|---|
-| OddsPortal-only baseline | bet365 | OP only | 0.016 ± 0.045 | 0.002410 |
-| Combined + bet365 sharp (control) | bet365 | OP + FDUK | -0.005 ± 0.008 | 0.000777 |
-| Combined + Pinnacle sharp | pinnacle | OP + FDUK | **0.031 ± 0.014** | 0.000749 |
+**Post-fix results (walk-forward, 100 trials each):**
 
-- **Pinnacle as sharp reference doubles R²** (0.016 → 0.031) with halved variance (±0.045 → ±0.014)
-- **More data alone adds no signal** — the control (combined data, bet365 sharp) went negative R². FDUK snapshots with bet365 as its own sharp reference adds noise, not signal.
-- The improvement is entirely from Pinnacle cross-source features — a genuinely different price signal from bet365
-- MSE drops from 0.0024 to 0.00075 because Pinnacle closing prices are tighter reference points
-- Tuner still converges to high regularization (subsample=0.5) — weak signal regime
+| Experiment | Sharp Ref | Data | Features | CV R² | CV MSE |
+|---|---|---|---|---|---|
+| OddsPortal-only baseline | bet365 | OP only | 7 tabular | 0.016 ± 0.045 | 0.002410 |
+| Combined + Pinnacle sharp | pinnacle | OP + FDUK | 7 tabular | 0.019 ± 0.043 | 0.000793 |
+| Combined + Pinnacle + match_stats | pinnacle | OP + FDUK | 21 (7 tab + 14 match_stats) | 0.025 ± 0.042 | 0.000782 |
+| Combined + Pinnacle + standings | pinnacle | OP + FDUK | 18 (7 tab + 11 standings) | 0.030 ± 0.040 | 0.000774 |
+| Combined + Pinnacle + standings + match_stats | pinnacle | OP + FDUK | 32 (7 tab + 11 stnd + 14 mstat) | **0.052 ± 0.045** | 0.000767 |
+
+- **Pinnacle as sharp reference** improves R² modestly (0.016 → 0.019) with much lower MSE (0.0024 → 0.0008) because Pinnacle closing prices are tighter reference points
+- **Standings features add ~1% absolute R²** (0.019 → 0.030) — league position, points gap, GD, last-5 form, goal rates. Std overlap means not conclusive.
+- **Match stats add incremental signal** (0.019 → 0.025 alone, 0.030 → 0.052 on top of standings) — rolling shots, corners, fouls, cards. The stacking pattern suggests match stats and standings capture complementary information.
+- **Combined standings + match_stats is the best EPL result** (R²=0.052) — nearly 3× the tabular-only baseline. MSE improves monotonically across all configs.
+- **More data alone adds no signal** — the control (combined data, bet365 sharp) gave R²=-0.005 ± 0.008
+- MSE drop (0.0024 → 0.0008) reflects lower target variance with Pinnacle closing, not necessarily better prediction
+- Tuner still converges to high regularization — weak signal regime
 - 81/1,810 events (Jan-Mar 2026) lack Pinnacle closing data due to Pinnacle API shutdown (July 2025); small impact
-- Configs: `experiments/configs/xgboost_epl_combined_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_bet365sharp_tuning_best.yaml`
+- Configs: `experiments/configs/xgboost_epl_combined_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_standings_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_match_stats_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_all_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_bet365sharp_tuning_best.yaml`
+
+**Cross-source contamination bug (#231):** TierSampler selected decision snapshots by latest wall-clock time from eligible tiers. OddsPortal `sharp`-tier snapshots (no Pinnacle) won over FDUK `early`-tier snapshots (has Pinnacle) for ~37/150 events in the final walk-forward fold (Apr-Oct 2025). Combined with `np.nan_to_num(X, nan=0.0)` converting missing Pinnacle probs to 0.0, this corrupted cross-source features and distorted tuner optimization across all folds. Fix: TierSampler now accepts `required_bookmakers` to filter candidates; all `nan_to_num` calls removed (XGBoost handles NaN natively).
 
 ## Open Questions
 
 ### Signal
-- ~~~3.6% R² is the ceiling for public sportsbook features at 5K events, with the learning curve plateaued. Can Polymarket cross-source features push it higher?~~ — **Partially answered**: Pinnacle cross-source features push EPL R² to 3.1% (from 1.6% OddsPortal-only baseline). This is a different sharp reference, not more features — the signal comes from Pinnacle being a genuinely different price from bet365. PM features remain untested at scale.
+- ~~~3.6% R² is the ceiling for public sportsbook features at 5K events, with the learning curve plateaued. Can Polymarket cross-source features push it higher?~~ — **Partially answered**: Pinnacle cross-source features push EPL R² to ~2% (from 1.6% OddsPortal-only baseline); adding standings reaches ~3%, and standings + match stats reaches ~5.2%. Non-odds public features (league context + match performance) nearly triple the tabular-only baseline. PM features remain untested at scale.
 - ~~Injury features dominate importance~~ — **Answered** (Exp 6 + 6b): injuries add zero signal at all decision tiers when properly tuned. GTD injury r=0.28 (Exp 4, Pinnacle) does not transfer to bet365 target (r=-0.01, Exp 6b). At closing tier, the line has already priced in GTD designations. Earlier apparent importance was a tuning artifact.
-- ~~Does the signal generalize to other sports, or is it NBA-specific?~~ — **Answered**: EPL CLV is predictable (R²=3.1% with Pinnacle sharp), confirming the signal generalizes beyond NBA. Cross-source sharp-retail divergence appears to be the key feature across sports.
+- ~~Does the signal generalize to other sports, or is it NBA-specific?~~ — **Answered**: EPL CLV is predictable (R²≈2-3% with Pinnacle sharp + standings), confirming the signal generalizes beyond NBA. Cross-source sharp-retail divergence appears to be the key feature across sports.
 - Do PM features add signal? Untested at scale — only tested with 230 events (insufficient data). PM order flow from CLOB snapshots remains untapped.
-- ~~Does sharp-retail divergence (Pinnacle vs DraftKings/FanDuel) contain more signal than cross-source (PM vs SB)?~~ — **Partially answered**: Pinnacle vs bet365 divergence is the strongest signal found (R²=3.1% on EPL). PM features remain untested at scale but are deprioritized (UK inaccessible).
+- ~~Does sharp-retail divergence (Pinnacle vs DraftKings/FanDuel) contain more signal than cross-source (PM vs SB)?~~ — **Partially answered**: Pinnacle vs bet365 divergence is the strongest signal found (R²≈2-3% on EPL). PM features remain untested at scale but are deprioritized (UK inaccessible).
 
 ### Execution
 - ~~At what hours-before-game does the model's edge peak?~~ — **Answered** (Exp 4 + 6b): sharp-retail diff peaks at 3-6h (Exp 4). GTD injury r=0.28 at 0-3h (Exp 4, Pinnacle target) does NOT transfer to bet365 target (r=-0.01, Exp 6b) — the closing-tier catch-22 means the line has already priced in GTD designations by the time they're visible.
@@ -348,5 +364,10 @@ Every experiment must produce:
 | 2026-03-01 | Exp 6b: injury closing tier | tabular 4 ± injury 6 | devigged bet365 | 479 (closing) / 826 (sharp) events (Odds API) | Closing R²=0.596 (artifact); sharp R²=-0.02 | GTD hypothesis falsified | Closing-tier target near-zero (std=0.0016); injuries add zero at both tiers; inj_impact_gtd_away r=-0.01 (not r=0.28 from Exp 4) |
 | 2026-03-01 | Exp 7: backtest sim | tabular 4 | devigged bet365 | 2,088 bets (4,524 events OddsPortal) | Best ROI +3.36% (p=0.260) | Not profitable | Flat $100, 12-fold walk-forward; all thresholds ≤0.03 negative ROI; CLV signal too weak to overcome ~4.5% vig |
 | 2026-03-01 | Exp 7b: line shopping | tabular 4 | devigged bet365 | 2,088 bets (4 bookmakers) | Best ROI +3.68% (p=0.334) | Still not profitable | Vig drops 4.13%→1.59% (2.55pp); ROI +0.3–1.3pp at all thresholds; bet365 best price 67% of time |
-| 2026-03-10 | EPL combined + Pinnacle sharp | tabular 7, pinnacle sharp | devigged bet365 | 1,801 (~1.8K EPL events, OP+FDUK) | CV R²=0.031±0.014 | Best EPL result | Pinnacle cross-source features double R² vs OddsPortal-only (0.016); FDUK data adds Pinnacle closing |
-| 2026-03-10 | EPL combined + bet365 sharp (control) | tabular 7, bet365 sharp | devigged bet365 | 1,801 (~1.8K EPL events, OP+FDUK) | CV R²=-0.005±0.008 | More data ≠ signal | Control proves improvement from Pinnacle features, not data volume |
+| 2026-03-10 | EPL combined + Pinnacle sharp | tabular 7, pinnacle sharp | devigged bet365 | ~1.8K EPL (OP+FDUK) | ~~CV R²=0.031±0.014~~ | ~~Best EPL result~~ | **Inflated by #231 bug** — pre-fix snapshot contamination + nan_to_num; see post-fix row below |
+| 2026-03-10 | EPL combined + bet365 sharp (control) | tabular 7, bet365 sharp | devigged bet365 | ~1.8K EPL (OP+FDUK) | CV R²=-0.005±0.008 | More data ≠ signal | Control proves improvement from Pinnacle features, not data volume |
+| 2026-03-15 | #231 bug fix | — | — | — | — | Bug fix | Cross-source snapshot contamination: TierSampler picked OP (no Pinnacle) over FDUK; nan_to_num filled NaN→0.0. Fix: required_bookmakers filter + remove nan_to_num |
+| 2026-03-15 | EPL combined + Pinnacle (post-fix) | tabular 7, pinnacle sharp | devigged bet365 | ~1.7K EPL (OP+FDUK) | CV R²=0.019±0.043 | Trustworthy baseline | 6-fold walk-forward, 100 trials; post-fix clean results |
+| 2026-03-15 | EPL combined + standings | tabular 7 + standings 11, pinnacle sharp | devigged bet365 | ~1.7K EPL (OP+FDUK) | CV R²=0.030±0.040 | +1% R² from standings | 6-fold walk-forward, 100 trials; league position, form, GD features |
+| 2026-03-16 | EPL combined + match_stats | tabular 7 + match_stats 14, pinnacle sharp | devigged bet365 | ~1.7K EPL (OP+FDUK) | CV R²=0.025±0.042 | +0.6% R² over tabular | 5-fold walk-forward, 100 trials; rolling shots, corners, fouls, cards |
+| 2026-03-16 | EPL combined + standings + match_stats | tabular 7 + standings 11 + match_stats 14, pinnacle sharp | devigged bet365 | ~1.7K EPL (OP+FDUK) | CV R²=0.052±0.045 | Best EPL result | 5-fold walk-forward, 100 trials; match stats add incremental signal on top of standings |
