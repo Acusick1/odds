@@ -58,6 +58,7 @@ from odds_analytics.sequence_loader import (
 )
 
 if TYPE_CHECKING:
+    from odds_analytics.fixture_cache import FixtureCache
     from odds_analytics.match_stats_features import MatchStatsCache
     from odds_analytics.training.config import FeatureConfig
 
@@ -110,6 +111,7 @@ class EventDataBundle:
     game_logs: list[NbaTeamGameLog] = field(default_factory=list)
     prior_season_events: list[Event] = field(default_factory=list)
     prior_match_stats: dict[str, list[dict[str, int]]] = field(default_factory=dict)
+    fixture_cache: FixtureCache | None = None
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
@@ -153,6 +155,7 @@ async def collect_event_data(
     config: FeatureConfig,
     standings_cache: dict[str, list[Event]] | None = None,
     match_stats_cache: MatchStatsCache | None = None,
+    fixture_cache: FixtureCache | None = None,
 ) -> EventDataBundle:
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
@@ -288,6 +291,7 @@ async def collect_event_data(
         game_logs=game_logs,
         prior_season_events=prior_season_events,
         prior_match_stats=prior_match_stats,
+        fixture_cache=fixture_cache,
         sequences=sequences,
     )
 
@@ -752,7 +756,9 @@ def _extract_static_feature_parts(
             parts.append(nan_block_eplsched)
         else:
             try:
-                eplsched_feats = extract_epl_schedule_features(bundle.prior_season_events, event)
+                eplsched_feats = extract_epl_schedule_features(
+                    bundle.prior_season_events, event, fixture_cache=bundle.fixture_cache
+                )
                 parts.append(eplsched_feats.to_array())
             except Exception:
                 logger.debug("epl_schedule_feature_extraction_failed", event_id=event.id)
@@ -1051,6 +1057,13 @@ async def prepare_training_data(
         if sport_key:
             match_stats_cache = await load_match_stats_cache(session, sport_key)
 
+    # Preload all-competition fixture cache for accurate rest-day calculation
+    fixture_cache: FixtureCache | None = None
+    if "epl_schedule" in config.feature_groups:
+        from odds_analytics.fixture_cache import load_fixture_cache
+
+        fixture_cache = load_fixture_cache()
+
     for event in valid_events:
         # Load all data for this event in bulk
         bundle = await collect_event_data(
@@ -1059,6 +1072,7 @@ async def prepare_training_data(
             config,
             standings_cache=standings_cache,
             match_stats_cache=match_stats_cache,
+            fixture_cache=fixture_cache,
         )
 
         # Closing snapshot is required

@@ -1,0 +1,793 @@
+date,team,opponent,competition,home_away
+2020-09-05T14:00Z,Nottingham,Barnsley,League Cup,away
+2020-09-05T14:00Z,Sunderland,Hull,League Cup,home
+2020-09-06T11:00Z,Brentford,Wycombe Wanderers,League Cup,home
+2020-09-12T11:30Z,Arsenal,Fulham,Premier League,away
+2020-09-12T11:30Z,Fulham,Arsenal,Premier League,home
+2020-09-12T14:00Z,Crystal Palace,Southampton,Premier League,home
+2020-09-12T16:30Z,Leeds,Liverpool,Premier League,away
+2020-09-12T16:30Z,Liverpool,Leeds,Premier League,home
+2020-09-12T19:00Z,Newcastle,West Ham,Premier League,away
+2020-09-12T19:00Z,West Ham,Newcastle,Premier League,home
+2020-09-13T15:30Z,Everton,Tottenham,Premier League,away
+2020-09-13T15:30Z,Tottenham,Everton,Premier League,home
+2020-09-14T17:00Z,Wolves,Sheffield Utd,Premier League,away
+2020-09-14T19:15Z,Brighton,Chelsea,Premier League,home
+2020-09-14T19:15Z,Chelsea,Brighton,Premier League,away
+2020-09-15T18:30Z,Newcastle,Blackburn Rovers,League Cup,home
+2020-09-15T18:30Z,West Ham,Charlton Athletic,League Cup,home
+2020-09-15T18:45Z,Bournemouth,Crystal Palace,League Cup,home
+2020-09-15T18:45Z,Aston Villa,Burton Albion,League Cup,away
+2020-09-15T18:45Z,Crystal Palace,Bournemouth,League Cup,away
+2020-09-16T18:00Z,Fulham,Ipswich,League Cup,away
+2020-09-16T18:45Z,Brentford,Southampton,League Cup,away
+2020-09-16T18:45Z,Leeds,Hull,League Cup,home
+2020-09-16T19:15Z,Everton,Salford City,League Cup,home
+2020-09-17T16:30Z,Burnley,Sheffield Utd,League Cup,home
+2020-09-17T18:00Z,Wolves,Stoke,League Cup,home
+2020-09-17T18:45Z,Brighton,Portsmouth,League Cup,home
+2020-09-19T11:30Z,Everton,West Brom,Premier League,home
+2020-09-19T14:00Z,Fulham,Leeds,Premier League,away
+2020-09-19T14:00Z,Leeds,Fulham,Premier League,home
+2020-09-19T16:30Z,Crystal Palace,Manchester Utd,Premier League,away
+2020-09-19T16:30Z,Manchester Utd,Crystal Palace,Premier League,home
+2020-09-19T19:00Z,Arsenal,West Ham,Premier League,home
+2020-09-19T19:00Z,West Ham,Arsenal,Premier League,away
+2020-09-20T11:00Z,Tottenham,Southampton,Premier League,away
+2020-09-20T13:00Z,Brighton,Newcastle,Premier League,away
+2020-09-20T13:00Z,Newcastle,Brighton,Premier League,home
+2020-09-20T15:30Z,Chelsea,Liverpool,Premier League,home
+2020-09-20T15:30Z,Liverpool,Chelsea,Premier League,away
+2020-09-20T18:00Z,Burnley,Leicester,Premier League,away
+2020-09-21T17:00Z,Aston Villa,Sheffield Utd,Premier League,home
+2020-09-21T19:15Z,Manchester City,Wolves,Premier League,away
+2020-09-21T19:15Z,Wolves,Manchester City,Premier League,home
+2020-09-22T18:00Z,Brentford,West Brom,League Cup,away
+2020-09-22T18:30Z,West Ham,Hull,League Cup,home
+2020-09-22T19:15Z,Manchester Utd,Luton Town,League Cup,away
+2020-09-23T18:00Z,Brighton,Preston North End,League Cup,away
+2020-09-23T18:00Z,Burnley,Millwall,League Cup,away
+2020-09-23T18:00Z,Fulham,Sheffield Wednesday,League Cup,home
+2020-09-23T18:45Z,Arsenal,Leicester,League Cup,away
+2020-09-23T18:45Z,Chelsea,Barnsley,League Cup,home
+2020-09-23T18:45Z,Everton,Fleetwood Town,League Cup,away
+2020-09-23T18:45Z,Newcastle,Morecambe,League Cup,away
+2020-09-24T18:00Z,Aston Villa,Bristol City,League Cup,away
+2020-09-24T18:45Z,Bournemouth,Manchester City,League Cup,away
+2020-09-24T18:45Z,Liverpool,Lincoln City,League Cup,away
+2020-09-24T18:45Z,Manchester City,Bournemouth,League Cup,home
+2020-09-26T11:30Z,Brighton,Manchester Utd,Premier League,home
+2020-09-26T11:30Z,Manchester Utd,Brighton,Premier League,away
+2020-09-26T14:00Z,Crystal Palace,Everton,Premier League,home
+2020-09-26T14:00Z,Everton,Crystal Palace,Premier League,away
+2020-09-26T16:30Z,Chelsea,West Brom,Premier League,away
+2020-09-26T19:00Z,Burnley,Southampton,Premier League,home
+2020-09-27T11:00Z,Leeds,Sheffield Utd,Premier League,away
+2020-09-27T13:00Z,Newcastle,Tottenham,Premier League,away
+2020-09-27T13:00Z,Tottenham,Newcastle,Premier League,home
+2020-09-27T15:30Z,Manchester City,Leicester,Premier League,home
+2020-09-27T18:00Z,West Ham,Wolves,Premier League,home
+2020-09-27T18:00Z,Wolves,West Ham,Premier League,away
+2020-09-28T16:45Z,Aston Villa,Fulham,Premier League,away
+2020-09-28T16:45Z,Fulham,Aston Villa,Premier League,home
+2020-09-28T19:00Z,Arsenal,Liverpool,Premier League,away
+2020-09-28T19:00Z,Liverpool,Arsenal,Premier League,home
+2020-09-29T18:45Z,Chelsea,Tottenham,League Cup,away
+2020-09-29T18:45Z,Tottenham,Chelsea,League Cup,home
+2020-09-30T16:30Z,Newcastle,Newport County,League Cup,away
+2020-09-30T18:00Z,Burnley,Manchester City,League Cup,home
+2020-09-30T18:00Z,Manchester City,Burnley,League Cup,away
+2020-09-30T18:45Z,Brighton,Manchester Utd,League Cup,home
+2020-09-30T18:45Z,Everton,West Ham,League Cup,home
+2020-09-30T18:45Z,Manchester Utd,Brighton,League Cup,away
+2020-09-30T18:45Z,West Ham,Everton,League Cup,away
+2020-10-01T16:30Z,Brentford,Fulham,League Cup,home
+2020-10-01T16:30Z,Fulham,Brentford,League Cup,away
+2020-10-01T18:00Z,Aston Villa,Stoke,League Cup,home
+2020-10-01T18:45Z,Arsenal,Liverpool,League Cup,away
+2020-10-01T18:45Z,Liverpool,Arsenal,League Cup,home
+2020-10-03T11:30Z,Chelsea,Crystal Palace,Premier League,home
+2020-10-03T11:30Z,Crystal Palace,Chelsea,Premier League,away
+2020-10-03T14:00Z,Brighton,Everton,Premier League,away
+2020-10-03T14:00Z,Everton,Brighton,Premier League,home
+2020-10-03T16:30Z,Leeds,Manchester City,Premier League,home
+2020-10-03T16:30Z,Manchester City,Leeds,Premier League,away
+2020-10-03T19:00Z,Burnley,Newcastle,Premier League,away
+2020-10-03T19:00Z,Newcastle,Burnley,Premier League,home
+2020-10-04T11:00Z,West Ham,Leicester,Premier League,away
+2020-10-04T13:00Z,Arsenal,Sheffield Utd,Premier League,home
+2020-10-04T13:00Z,Fulham,Wolves,Premier League,away
+2020-10-04T13:00Z,Wolves,Fulham,Premier League,home
+2020-10-04T15:30Z,Manchester Utd,Tottenham,Premier League,home
+2020-10-04T15:30Z,Tottenham,Manchester Utd,Premier League,away
+2020-10-04T18:15Z,Aston Villa,Liverpool,Premier League,home
+2020-10-04T18:15Z,Liverpool,Aston Villa,Premier League,away
+2020-10-17T11:30Z,Everton,Liverpool,Premier League,home
+2020-10-17T11:30Z,Liverpool,Everton,Premier League,away
+2020-10-17T14:00Z,Chelsea,Southampton,Premier League,home
+2020-10-17T16:30Z,Arsenal,Manchester City,Premier League,away
+2020-10-17T16:30Z,Manchester City,Arsenal,Premier League,home
+2020-10-17T19:00Z,Manchester Utd,Newcastle,Premier League,away
+2020-10-17T19:00Z,Newcastle,Manchester Utd,Premier League,home
+2020-10-18T11:00Z,Fulham,Sheffield Utd,Premier League,away
+2020-10-18T13:00Z,Brighton,Crystal Palace,Premier League,away
+2020-10-18T13:00Z,Crystal Palace,Brighton,Premier League,home
+2020-10-18T15:30Z,Tottenham,West Ham,Premier League,home
+2020-10-18T15:30Z,West Ham,Tottenham,Premier League,away
+2020-10-18T18:15Z,Aston Villa,Leicester,Premier League,away
+2020-10-19T16:30Z,Burnley,West Brom,Premier League,away
+2020-10-19T19:00Z,Leeds,Wolves,Premier League,home
+2020-10-19T19:00Z,Wolves,Leeds,Premier League,away
+2020-10-20T19:00Z,Chelsea,Sevilla,Champions League,home
+2020-10-20T19:00Z,Manchester Utd,Paris Saint-Germain,Champions League,away
+2020-10-21T19:00Z,Liverpool,Ajax Amsterdam,Champions League,away
+2020-10-21T19:00Z,Manchester City,FC Porto,Champions League,home
+2020-10-22T16:55Z,Arsenal,Rapid Vienna,Europa League,away
+2020-10-22T19:00Z,Tottenham,LASK Linz,Europa League,home
+2020-10-23T19:00Z,Aston Villa,Leeds,Premier League,home
+2020-10-23T19:00Z,Leeds,Aston Villa,Premier League,away
+2020-10-24T11:30Z,Manchester City,West Ham,Premier League,away
+2020-10-24T11:30Z,West Ham,Manchester City,Premier League,home
+2020-10-24T14:00Z,Crystal Palace,Fulham,Premier League,away
+2020-10-24T14:00Z,Fulham,Crystal Palace,Premier League,home
+2020-10-24T16:30Z,Chelsea,Manchester Utd,Premier League,away
+2020-10-24T16:30Z,Manchester Utd,Chelsea,Premier League,home
+2020-10-24T19:00Z,Liverpool,Sheffield Utd,Premier League,home
+2020-10-25T14:00Z,Everton,Southampton,Premier League,away
+2020-10-25T16:30Z,Newcastle,Wolves,Premier League,away
+2020-10-25T16:30Z,Wolves,Newcastle,Premier League,home
+2020-10-25T19:15Z,Arsenal,Leicester,Premier League,home
+2020-10-26T17:30Z,Brighton,West Brom,Premier League,home
+2020-10-26T20:00Z,Burnley,Tottenham,Premier League,home
+2020-10-26T20:00Z,Tottenham,Burnley,Premier League,away
+2020-10-27T20:00Z,Liverpool,FC Midtjylland,Champions League,home
+2020-10-27T20:00Z,Manchester City,Marseille,Champions League,away
+2020-10-28T17:55Z,Chelsea,Krasnodar,Champions League,away
+2020-10-28T20:00Z,Manchester Utd,RB Leipzig,Champions League,home
+2020-10-29T17:55Z,Tottenham,Antwerp,Europa League,away
+2020-10-29T20:00Z,Arsenal,Dundalk,Europa League,home
+2020-10-30T20:00Z,Crystal Palace,Wolves,Premier League,away
+2020-10-30T20:00Z,Wolves,Crystal Palace,Premier League,home
+2020-10-31T12:30Z,Manchester City,Sheffield Utd,Premier League,away
+2020-10-31T15:00Z,Burnley,Chelsea,Premier League,home
+2020-10-31T15:00Z,Chelsea,Burnley,Premier League,away
+2020-10-31T17:30Z,Liverpool,West Ham,Premier League,home
+2020-10-31T17:30Z,West Ham,Liverpool,Premier League,away
+2020-11-01T12:00Z,Aston Villa,Southampton,Premier League,home
+2020-11-01T14:00Z,Everton,Newcastle,Premier League,away
+2020-11-01T14:00Z,Newcastle,Everton,Premier League,home
+2020-11-01T16:30Z,Arsenal,Manchester Utd,Premier League,away
+2020-11-01T16:30Z,Manchester Utd,Arsenal,Premier League,home
+2020-11-01T19:15Z,Brighton,Tottenham,Premier League,away
+2020-11-01T19:15Z,Tottenham,Brighton,Premier League,home
+2020-11-02T17:30Z,Fulham,West Brom,Premier League,home
+2020-11-02T20:00Z,Leeds,Leicester,Premier League,home
+2020-11-03T20:00Z,Liverpool,Atalanta,Champions League,away
+2020-11-03T20:00Z,Manchester City,Olympiacos,Champions League,home
+2020-11-04T17:55Z,Manchester Utd,Istanbul Basaksehir,Champions League,away
+2020-11-04T20:00Z,Chelsea,Stade Rennais,Champions League,home
+2020-11-05T17:55Z,Tottenham,Ludogorets Razgrad,Europa League,away
+2020-11-05T20:00Z,Arsenal,Molde,Europa League,home
+2020-11-06T17:30Z,Brighton,Burnley,Premier League,home
+2020-11-06T17:30Z,Burnley,Brighton,Premier League,away
+2020-11-06T20:00Z,Newcastle,Southampton,Premier League,away
+2020-11-07T12:30Z,Everton,Manchester Utd,Premier League,home
+2020-11-07T12:30Z,Manchester Utd,Everton,Premier League,away
+2020-11-07T15:00Z,Crystal Palace,Leeds,Premier League,home
+2020-11-07T15:00Z,Leeds,Crystal Palace,Premier League,away
+2020-11-07T15:00Z,Sunderland,Mansfield Town,FA Cup,home
+2020-11-07T17:30Z,Chelsea,Sheffield Utd,Premier League,home
+2020-11-07T20:00Z,Fulham,West Ham,Premier League,away
+2020-11-07T20:00Z,West Ham,Fulham,Premier League,home
+2020-11-08T12:00Z,Tottenham,West Brom,Premier League,away
+2020-11-08T14:00Z,Wolves,Leicester,Premier League,away
+2020-11-08T16:30Z,Liverpool,Manchester City,Premier League,away
+2020-11-08T16:30Z,Manchester City,Liverpool,Premier League,home
+2020-11-08T19:15Z,Arsenal,Aston Villa,Premier League,home
+2020-11-08T19:15Z,Aston Villa,Arsenal,Premier League,away
+2020-11-21T12:30Z,Chelsea,Newcastle,Premier League,away
+2020-11-21T12:30Z,Newcastle,Chelsea,Premier League,home
+2020-11-21T15:00Z,Aston Villa,Brighton,Premier League,home
+2020-11-21T15:00Z,Brighton,Aston Villa,Premier League,away
+2020-11-21T17:30Z,Manchester City,Tottenham,Premier League,away
+2020-11-21T17:30Z,Tottenham,Manchester City,Premier League,home
+2020-11-21T20:00Z,Manchester Utd,West Brom,Premier League,home
+2020-11-22T12:00Z,Everton,Fulham,Premier League,away
+2020-11-22T12:00Z,Fulham,Everton,Premier League,home
+2020-11-22T14:00Z,West Ham,Sheffield Utd,Premier League,away
+2020-11-22T16:30Z,Arsenal,Leeds,Premier League,away
+2020-11-22T16:30Z,Leeds,Arsenal,Premier League,home
+2020-11-22T19:15Z,Liverpool,Leicester,Premier League,home
+2020-11-23T17:30Z,Burnley,Crystal Palace,Premier League,home
+2020-11-23T17:30Z,Crystal Palace,Burnley,Premier League,away
+2020-11-23T20:00Z,Wolves,Southampton,Premier League,home
+2020-11-24T17:55Z,Chelsea,Stade Rennais,Champions League,away
+2020-11-24T20:00Z,Manchester Utd,Istanbul Basaksehir,Champions League,home
+2020-11-25T17:55Z,Manchester City,Olympiacos,Champions League,away
+2020-11-25T20:00Z,Liverpool,Atalanta,Champions League,home
+2020-11-26T17:55Z,Arsenal,Molde,Europa League,away
+2020-11-26T20:00Z,Tottenham,Ludogorets Razgrad,Europa League,home
+2020-11-27T20:00Z,Crystal Palace,Newcastle,Premier League,home
+2020-11-27T20:00Z,Newcastle,Crystal Palace,Premier League,away
+2020-11-28T12:30Z,Brighton,Liverpool,Premier League,home
+2020-11-28T12:30Z,Liverpool,Brighton,Premier League,away
+2020-11-28T15:00Z,Burnley,Manchester City,Premier League,away
+2020-11-28T15:00Z,Manchester City,Burnley,Premier League,home
+2020-11-28T17:30Z,Everton,Leeds,Premier League,home
+2020-11-28T17:30Z,Leeds,Everton,Premier League,away
+2020-11-29T14:00Z,Manchester Utd,Southampton,Premier League,away
+2020-11-29T16:30Z,Chelsea,Tottenham,Premier League,home
+2020-11-29T16:30Z,Tottenham,Chelsea,Premier League,away
+2020-11-29T19:15Z,Arsenal,Wolves,Premier League,home
+2020-11-29T19:15Z,Wolves,Arsenal,Premier League,away
+2020-11-30T17:30Z,Fulham,Leicester,Premier League,away
+2020-11-30T20:00Z,Aston Villa,West Ham,Premier League,away
+2020-11-30T20:00Z,West Ham,Aston Villa,Premier League,home
+2020-12-01T20:00Z,Liverpool,Ajax Amsterdam,Champions League,home
+2020-12-01T20:00Z,Manchester City,FC Porto,Champions League,away
+2020-12-02T20:00Z,Chelsea,Sevilla,Champions League,away
+2020-12-02T20:00Z,Manchester Utd,Paris Saint-Germain,Champions League,home
+2020-12-03T17:55Z,Tottenham,LASK Linz,Europa League,away
+2020-12-03T20:00Z,Arsenal,Rapid Vienna,Europa League,home
+2020-12-05T12:30Z,Burnley,Everton,Premier League,home
+2020-12-05T12:30Z,Everton,Burnley,Premier League,away
+2020-12-05T15:00Z,Fulham,Manchester City,Premier League,away
+2020-12-05T15:00Z,Manchester City,Fulham,Premier League,home
+2020-12-05T17:30Z,Manchester Utd,West Ham,Premier League,away
+2020-12-05T17:30Z,West Ham,Manchester Utd,Premier League,home
+2020-12-05T20:00Z,Chelsea,Leeds,Premier League,home
+2020-12-05T20:00Z,Leeds,Chelsea,Premier League,away
+2020-12-06T12:00Z,Crystal Palace,West Brom,Premier League,away
+2020-12-06T16:30Z,Arsenal,Tottenham,Premier League,away
+2020-12-06T16:30Z,Tottenham,Arsenal,Premier League,home
+2020-12-06T19:15Z,Liverpool,Wolves,Premier League,home
+2020-12-06T19:15Z,Wolves,Liverpool,Premier League,away
+2020-12-07T20:00Z,Brighton,Southampton,Premier League,home
+2020-12-08T20:00Z,Chelsea,Krasnodar,Champions League,home
+2020-12-08T20:00Z,Manchester Utd,RB Leipzig,Champions League,away
+2020-12-09T17:55Z,Liverpool,FC Midtjylland,Champions League,away
+2020-12-09T20:00Z,Manchester City,Marseille,Champions League,home
+2020-12-10T17:55Z,Arsenal,Dundalk,Europa League,away
+2020-12-10T20:00Z,Tottenham,Antwerp,Europa League,home
+2020-12-11T20:00Z,Leeds,West Ham,Premier League,home
+2020-12-11T20:00Z,West Ham,Leeds,Premier League,away
+2020-12-12T12:30Z,Aston Villa,Wolves,Premier League,away
+2020-12-12T12:30Z,Wolves,Aston Villa,Premier League,home
+2020-12-12T15:00Z,Newcastle,West Brom,Premier League,home
+2020-12-12T17:30Z,Manchester City,Manchester Utd,Premier League,away
+2020-12-12T17:30Z,Manchester Utd,Manchester City,Premier League,home
+2020-12-12T20:00Z,Chelsea,Everton,Premier League,away
+2020-12-12T20:00Z,Everton,Chelsea,Premier League,home
+2020-12-13T14:15Z,Crystal Palace,Tottenham,Premier League,home
+2020-12-13T14:15Z,Tottenham,Crystal Palace,Premier League,away
+2020-12-13T16:30Z,Fulham,Liverpool,Premier League,home
+2020-12-13T16:30Z,Liverpool,Fulham,Premier League,away
+2020-12-13T19:15Z,Arsenal,Burnley,Premier League,home
+2020-12-13T19:15Z,Brighton,Leicester,Premier League,away
+2020-12-13T19:15Z,Burnley,Arsenal,Premier League,away
+2020-12-15T18:00Z,Chelsea,Wolves,Premier League,away
+2020-12-15T18:00Z,Wolves,Chelsea,Premier League,home
+2020-12-15T20:00Z,Manchester City,West Brom,Premier League,home
+2020-12-16T18:00Z,Arsenal,Southampton,Premier League,home
+2020-12-16T18:00Z,Everton,Leicester,Premier League,away
+2020-12-16T18:00Z,Leeds,Newcastle,Premier League,home
+2020-12-16T18:00Z,Newcastle,Leeds,Premier League,away
+2020-12-16T20:00Z,Brighton,Fulham,Premier League,away
+2020-12-16T20:00Z,Crystal Palace,West Ham,Premier League,away
+2020-12-16T20:00Z,Fulham,Brighton,Premier League,home
+2020-12-16T20:00Z,Liverpool,Tottenham,Premier League,home
+2020-12-16T20:00Z,Tottenham,Liverpool,Premier League,away
+2020-12-16T20:00Z,West Ham,Crystal Palace,Premier League,home
+2020-12-17T18:00Z,Aston Villa,Burnley,Premier League,home
+2020-12-17T18:00Z,Burnley,Aston Villa,Premier League,away
+2020-12-17T20:00Z,Manchester Utd,Sheffield Utd,Premier League,away
+2020-12-19T12:30Z,Crystal Palace,Liverpool,Premier League,home
+2020-12-19T12:30Z,Liverpool,Crystal Palace,Premier League,away
+2020-12-19T15:00Z,Manchester City,Southampton,Premier League,away
+2020-12-19T17:30Z,Arsenal,Everton,Premier League,away
+2020-12-19T17:30Z,Everton,Arsenal,Premier League,home
+2020-12-19T20:00Z,Fulham,Newcastle,Premier League,away
+2020-12-19T20:00Z,Newcastle,Fulham,Premier League,home
+2020-12-20T12:00Z,Brighton,Sheffield Utd,Premier League,home
+2020-12-20T14:15Z,Tottenham,Leicester,Premier League,home
+2020-12-20T16:30Z,Leeds,Manchester Utd,Premier League,away
+2020-12-20T16:30Z,Manchester Utd,Leeds,Premier League,home
+2020-12-20T19:15Z,Aston Villa,West Brom,Premier League,away
+2020-12-21T17:30Z,Burnley,Wolves,Premier League,home
+2020-12-21T17:30Z,Wolves,Burnley,Premier League,away
+2020-12-21T20:00Z,Chelsea,West Ham,Premier League,home
+2020-12-21T20:00Z,West Ham,Chelsea,Premier League,away
+2020-12-22T17:30Z,Brentford,Newcastle,League Cup,home
+2020-12-22T17:30Z,Newcastle,Brentford,League Cup,away
+2020-12-22T20:00Z,Arsenal,Manchester City,League Cup,home
+2020-12-22T20:00Z,Manchester City,Arsenal,League Cup,away
+2020-12-23T17:30Z,Tottenham,Stoke,League Cup,away
+2020-12-23T20:00Z,Everton,Manchester Utd,League Cup,home
+2020-12-23T20:00Z,Manchester Utd,Everton,League Cup,away
+2020-12-26T12:30Z,Manchester Utd,Leicester,Premier League,away
+2020-12-26T15:00Z,Aston Villa,Crystal Palace,Premier League,home
+2020-12-26T15:00Z,Crystal Palace,Aston Villa,Premier League,away
+2020-12-26T15:00Z,Fulham,Southampton,Premier League,home
+2020-12-26T17:30Z,Arsenal,Chelsea,Premier League,home
+2020-12-26T17:30Z,Chelsea,Arsenal,Premier League,away
+2020-12-26T20:00Z,Everton,Sheffield Utd,Premier League,away
+2020-12-26T20:00Z,Manchester City,Newcastle,Premier League,home
+2020-12-26T20:00Z,Newcastle,Manchester City,Premier League,away
+2020-12-27T12:00Z,Burnley,Leeds,Premier League,away
+2020-12-27T12:00Z,Leeds,Burnley,Premier League,home
+2020-12-27T14:15Z,Brighton,West Ham,Premier League,away
+2020-12-27T14:15Z,West Ham,Brighton,Premier League,home
+2020-12-27T16:30Z,Liverpool,West Brom,Premier League,home
+2020-12-27T19:15Z,Tottenham,Wolves,Premier League,away
+2020-12-27T19:15Z,Wolves,Tottenham,Premier League,home
+2020-12-28T15:00Z,Crystal Palace,Leicester,Premier League,home
+2020-12-28T17:30Z,Aston Villa,Chelsea,Premier League,away
+2020-12-28T17:30Z,Chelsea,Aston Villa,Premier League,home
+2020-12-29T18:00Z,Arsenal,Brighton,Premier League,away
+2020-12-29T18:00Z,Brighton,Arsenal,Premier League,home
+2020-12-29T18:00Z,Burnley,Sheffield Utd,Premier League,home
+2020-12-29T18:00Z,Leeds,West Brom,Premier League,away
+2020-12-29T18:00Z,West Ham,Southampton,Premier League,away
+2020-12-29T20:00Z,Manchester Utd,Wolves,Premier League,home
+2020-12-29T20:00Z,Wolves,Manchester Utd,Premier League,away
+2020-12-30T20:00Z,Liverpool,Newcastle,Premier League,away
+2020-12-30T20:00Z,Newcastle,Liverpool,Premier League,home
+2021-01-01T17:30Z,Everton,West Ham,Premier League,home
+2021-01-01T17:30Z,West Ham,Everton,Premier League,away
+2021-01-01T20:00Z,Aston Villa,Manchester Utd,Premier League,away
+2021-01-01T20:00Z,Manchester Utd,Aston Villa,Premier League,home
+2021-01-02T12:30Z,Leeds,Tottenham,Premier League,away
+2021-01-02T12:30Z,Tottenham,Leeds,Premier League,home
+2021-01-02T15:00Z,Crystal Palace,Sheffield Utd,Premier League,home
+2021-01-02T17:30Z,Brighton,Wolves,Premier League,home
+2021-01-02T17:30Z,Wolves,Brighton,Premier League,away
+2021-01-02T20:00Z,Arsenal,West Brom,Premier League,away
+2021-01-03T14:15Z,Newcastle,Leicester,Premier League,home
+2021-01-03T16:30Z,Chelsea,Manchester City,Premier League,home
+2021-01-03T16:30Z,Manchester City,Chelsea,Premier League,away
+2021-01-04T20:00Z,Liverpool,Southampton,Premier League,away
+2021-01-05T19:45Z,Brentford,Tottenham,League Cup,away
+2021-01-05T19:45Z,Tottenham,Brentford,League Cup,home
+2021-01-06T19:45Z,Manchester City,Manchester Utd,League Cup,away
+2021-01-06T19:45Z,Manchester Utd,Manchester City,League Cup,home
+2021-01-08T19:45Z,Aston Villa,Liverpool,FA Cup,home
+2021-01-08T19:45Z,Crystal Palace,Wolves,FA Cup,away
+2021-01-08T19:45Z,Liverpool,Aston Villa,FA Cup,away
+2021-01-08T19:45Z,Wolves,Crystal Palace,FA Cup,home
+2021-01-09T12:00Z,Everton,Rotherham United,FA Cup,home
+2021-01-09T12:00Z,Nottingham,Cardiff,FA Cup,home
+2021-01-09T15:00Z,Bournemouth,Oldham Athletic,FA Cup,home
+2021-01-09T15:00Z,Burnley,Milton Keynes Dons,FA Cup,home
+2021-01-09T15:00Z,Fulham,Queens Park Rangers,FA Cup,away
+2021-01-09T17:30Z,Arsenal,Newcastle,FA Cup,home
+2021-01-09T17:30Z,Newcastle,Arsenal,FA Cup,away
+2021-01-09T18:00Z,Brentford,Middlesbrough,FA Cup,home
+2021-01-09T20:00Z,Manchester Utd,Watford,FA Cup,home
+2021-01-10T13:30Z,Chelsea,Morecambe,FA Cup,home
+2021-01-10T13:30Z,Leeds,Crawley Town,FA Cup,away
+2021-01-10T13:30Z,Manchester City,Birmingham City,FA Cup,home
+2021-01-10T17:00Z,Tottenham,Marine,FA Cup,away
+2021-01-10T19:45Z,Brighton,Newport County,FA Cup,away
+2021-01-11T20:00Z,West Ham,Stockport County,FA Cup,away
+2021-01-12T18:00Z,Newcastle,Sheffield Utd,Premier League,away
+2021-01-12T20:15Z,Burnley,Manchester Utd,Premier League,home
+2021-01-12T20:15Z,Everton,Wolves,Premier League,away
+2021-01-12T20:15Z,Manchester Utd,Burnley,Premier League,away
+2021-01-12T20:15Z,Wolves,Everton,Premier League,home
+2021-01-13T18:00Z,Brighton,Manchester City,Premier League,away
+2021-01-13T18:00Z,Manchester City,Brighton,Premier League,home
+2021-01-13T20:15Z,Fulham,Tottenham,Premier League,away
+2021-01-13T20:15Z,Tottenham,Fulham,Premier League,home
+2021-01-14T20:00Z,Arsenal,Crystal Palace,Premier League,home
+2021-01-14T20:00Z,Crystal Palace,Arsenal,Premier League,away
+2021-01-16T12:30Z,Wolves,West Brom,Premier League,home
+2021-01-16T15:00Z,Brighton,Leeds,Premier League,away
+2021-01-16T15:00Z,Burnley,West Ham,Premier League,away
+2021-01-16T15:00Z,Leeds,Brighton,Premier League,home
+2021-01-16T15:00Z,West Ham,Burnley,Premier League,home
+2021-01-16T17:30Z,Chelsea,Fulham,Premier League,away
+2021-01-16T17:30Z,Fulham,Chelsea,Premier League,home
+2021-01-17T14:00Z,Tottenham,Sheffield Utd,Premier League,away
+2021-01-17T16:30Z,Liverpool,Manchester Utd,Premier League,home
+2021-01-17T16:30Z,Manchester Utd,Liverpool,Premier League,away
+2021-01-17T19:15Z,Crystal Palace,Manchester City,Premier League,away
+2021-01-17T19:15Z,Manchester City,Crystal Palace,Premier League,home
+2021-01-18T20:00Z,Arsenal,Newcastle,Premier League,home
+2021-01-18T20:00Z,Newcastle,Arsenal,Premier League,away
+2021-01-19T18:00Z,West Ham,West Brom,Premier League,home
+2021-01-19T20:15Z,Chelsea,Leicester,Premier League,away
+2021-01-20T18:00Z,Aston Villa,Manchester City,Premier League,away
+2021-01-20T18:00Z,Manchester City,Aston Villa,Premier League,home
+2021-01-20T20:15Z,Fulham,Manchester Utd,Premier League,home
+2021-01-20T20:15Z,Manchester Utd,Fulham,Premier League,away
+2021-01-21T20:00Z,Burnley,Liverpool,Premier League,away
+2021-01-21T20:00Z,Liverpool,Burnley,Premier League,home
+2021-01-22T19:45Z,Wolves,Chorley,FA Cup,away
+2021-01-23T12:15Z,Arsenal,Southampton,FA Cup,away
+2021-01-23T15:00Z,Brighton,Blackpool,FA Cup,home
+2021-01-23T15:00Z,Nottingham,Swansea,FA Cup,away
+2021-01-23T15:00Z,West Ham,Doncaster Rovers,FA Cup,home
+2021-01-23T17:30Z,Manchester City,Cheltenham Town,FA Cup,away
+2021-01-23T20:00Z,Aston Villa,Newcastle,Premier League,home
+2021-01-23T20:00Z,Newcastle,Aston Villa,Premier League,away
+2021-01-24T12:00Z,Chelsea,Luton Town,FA Cup,home
+2021-01-24T14:30Z,Brentford,Leicester,FA Cup,home
+2021-01-24T14:30Z,Burnley,Fulham,FA Cup,away
+2021-01-24T14:30Z,Fulham,Burnley,FA Cup,home
+2021-01-24T17:00Z,Liverpool,Manchester Utd,FA Cup,away
+2021-01-24T17:00Z,Manchester Utd,Liverpool,FA Cup,home
+2021-01-24T20:00Z,Everton,Sheffield Wednesday,FA Cup,home
+2021-01-25T19:45Z,Tottenham,Wycombe Wanderers,FA Cup,away
+2021-01-26T18:00Z,Crystal Palace,West Ham,Premier League,home
+2021-01-26T18:00Z,Leeds,Newcastle,Premier League,away
+2021-01-26T18:00Z,Newcastle,Leeds,Premier League,home
+2021-01-26T18:00Z,West Ham,Crystal Palace,Premier League,away
+2021-01-26T19:00Z,Bournemouth,Crawley Town,FA Cup,home
+2021-01-26T20:15Z,Arsenal,Southampton,Premier League,away
+2021-01-26T20:15Z,Manchester City,West Brom,Premier League,away
+2021-01-27T18:00Z,Aston Villa,Burnley,Premier League,away
+2021-01-27T18:00Z,Burnley,Aston Villa,Premier League,home
+2021-01-27T18:00Z,Chelsea,Wolves,Premier League,home
+2021-01-27T18:00Z,Wolves,Chelsea,Premier League,away
+2021-01-27T19:30Z,Brighton,Fulham,Premier League,home
+2021-01-27T19:30Z,Fulham,Brighton,Premier League,away
+2021-01-27T20:15Z,Everton,Leicester,Premier League,home
+2021-01-27T20:15Z,Manchester Utd,Sheffield Utd,Premier League,home
+2021-01-28T20:00Z,Liverpool,Tottenham,Premier League,away
+2021-01-28T20:00Z,Tottenham,Liverpool,Premier League,home
+2021-01-30T12:30Z,Everton,Newcastle,Premier League,home
+2021-01-30T12:30Z,Newcastle,Everton,Premier League,away
+2021-01-30T15:00Z,Crystal Palace,Wolves,Premier League,home
+2021-01-30T15:00Z,Fulham,West Brom,Premier League,away
+2021-01-30T15:00Z,Manchester City,Sheffield Utd,Premier League,home
+2021-01-30T15:00Z,Wolves,Crystal Palace,Premier League,away
+2021-01-30T17:30Z,Arsenal,Manchester Utd,Premier League,home
+2021-01-30T17:30Z,Manchester Utd,Arsenal,Premier League,away
+2021-01-30T20:00Z,Aston Villa,Southampton,Premier League,away
+2021-01-31T12:00Z,Burnley,Chelsea,Premier League,away
+2021-01-31T12:00Z,Chelsea,Burnley,Premier League,home
+2021-01-31T14:00Z,Leeds,Leicester,Premier League,away
+2021-01-31T16:30Z,Liverpool,West Ham,Premier League,away
+2021-01-31T16:30Z,West Ham,Liverpool,Premier League,home
+2021-01-31T19:15Z,Brighton,Tottenham,Premier League,home
+2021-01-31T19:15Z,Tottenham,Brighton,Premier League,away
+2021-02-02T18:00Z,Arsenal,Wolves,Premier League,away
+2021-02-02T18:00Z,Wolves,Arsenal,Premier League,home
+2021-02-02T20:15Z,Crystal Palace,Newcastle,Premier League,away
+2021-02-02T20:15Z,Manchester Utd,Southampton,Premier League,home
+2021-02-02T20:15Z,Newcastle,Crystal Palace,Premier League,home
+2021-02-03T18:00Z,Burnley,Manchester City,Premier League,home
+2021-02-03T18:00Z,Fulham,Leicester,Premier League,home
+2021-02-03T18:00Z,Manchester City,Burnley,Premier League,away
+2021-02-03T19:30Z,Everton,Leeds,Premier League,away
+2021-02-03T19:30Z,Leeds,Everton,Premier League,home
+2021-02-03T20:15Z,Aston Villa,West Ham,Premier League,home
+2021-02-03T20:15Z,Brighton,Liverpool,Premier League,away
+2021-02-03T20:15Z,Liverpool,Brighton,Premier League,home
+2021-02-03T20:15Z,West Ham,Aston Villa,Premier League,away
+2021-02-04T20:00Z,Chelsea,Tottenham,Premier League,away
+2021-02-04T20:00Z,Tottenham,Chelsea,Premier League,home
+2021-02-06T12:30Z,Arsenal,Aston Villa,Premier League,away
+2021-02-06T12:30Z,Aston Villa,Arsenal,Premier League,home
+2021-02-06T15:00Z,Brighton,Burnley,Premier League,away
+2021-02-06T15:00Z,Burnley,Brighton,Premier League,home
+2021-02-06T15:00Z,Newcastle,Southampton,Premier League,home
+2021-02-06T17:30Z,Fulham,West Ham,Premier League,home
+2021-02-06T17:30Z,West Ham,Fulham,Premier League,away
+2021-02-06T20:00Z,Everton,Manchester Utd,Premier League,away
+2021-02-06T20:00Z,Manchester Utd,Everton,Premier League,home
+2021-02-07T12:00Z,Tottenham,West Brom,Premier League,home
+2021-02-07T14:00Z,Wolves,Leicester,Premier League,home
+2021-02-07T16:30Z,Liverpool,Manchester City,Premier League,home
+2021-02-07T16:30Z,Manchester City,Liverpool,Premier League,away
+2021-02-07T19:15Z,Chelsea,Sheffield Utd,Premier League,away
+2021-02-08T20:00Z,Crystal Palace,Leeds,Premier League,away
+2021-02-08T20:00Z,Leeds,Crystal Palace,Premier League,home
+2021-02-09T17:30Z,Bournemouth,Burnley,FA Cup,away
+2021-02-09T17:30Z,Burnley,Bournemouth,FA Cup,home
+2021-02-09T19:30Z,Manchester Utd,West Ham,FA Cup,home
+2021-02-09T19:30Z,West Ham,Manchester Utd,FA Cup,away
+2021-02-10T17:30Z,Manchester City,Swansea,FA Cup,away
+2021-02-10T19:30Z,Brighton,Leicester,FA Cup,away
+2021-02-10T20:15Z,Everton,Tottenham,FA Cup,home
+2021-02-10T20:15Z,Tottenham,Everton,FA Cup,away
+2021-02-11T17:30Z,Wolves,Southampton,FA Cup,home
+2021-02-11T20:00Z,Chelsea,Barnsley,FA Cup,away
+2021-02-13T12:30Z,Liverpool,Leicester,Premier League,away
+2021-02-13T15:00Z,Burnley,Crystal Palace,Premier League,away
+2021-02-13T15:00Z,Crystal Palace,Burnley,Premier League,home
+2021-02-13T17:30Z,Manchester City,Tottenham,Premier League,home
+2021-02-13T17:30Z,Tottenham,Manchester City,Premier League,away
+2021-02-13T20:00Z,Aston Villa,Brighton,Premier League,away
+2021-02-13T20:00Z,Brighton,Aston Villa,Premier League,home
+2021-02-14T12:00Z,Wolves,Southampton,Premier League,away
+2021-02-14T14:00Z,Manchester Utd,West Brom,Premier League,away
+2021-02-14T16:30Z,Arsenal,Leeds,Premier League,home
+2021-02-14T16:30Z,Leeds,Arsenal,Premier League,away
+2021-02-14T19:00Z,Everton,Fulham,Premier League,home
+2021-02-14T19:00Z,Fulham,Everton,Premier League,away
+2021-02-15T18:00Z,West Ham,Sheffield Utd,Premier League,home
+2021-02-15T20:00Z,Chelsea,Newcastle,Premier League,home
+2021-02-15T20:00Z,Newcastle,Chelsea,Premier League,away
+2021-02-16T20:00Z,Liverpool,RB Leipzig,Champions League,away
+2021-02-17T18:00Z,Burnley,Fulham,Premier League,home
+2021-02-17T18:00Z,Fulham,Burnley,Premier League,away
+2021-02-17T20:15Z,Everton,Manchester City,Premier League,home
+2021-02-17T20:15Z,Manchester City,Everton,Premier League,away
+2021-02-18T17:55Z,Manchester Utd,Real Sociedad,Europa League,away
+2021-02-18T17:55Z,Tottenham,Wolfsberger,Europa League,away
+2021-02-18T20:00Z,Arsenal,Benfica,Europa League,away
+2021-02-19T20:00Z,Leeds,Wolves,Premier League,away
+2021-02-19T20:00Z,Wolves,Leeds,Premier League,home
+2021-02-20T12:30Z,Chelsea,Southampton,Premier League,away
+2021-02-20T15:00Z,Burnley,West Brom,Premier League,home
+2021-02-20T17:30Z,Everton,Liverpool,Premier League,away
+2021-02-20T17:30Z,Liverpool,Everton,Premier League,home
+2021-02-20T20:00Z,Fulham,Sheffield Utd,Premier League,home
+2021-02-21T12:00Z,Tottenham,West Ham,Premier League,away
+2021-02-21T12:00Z,West Ham,Tottenham,Premier League,home
+2021-02-21T14:05Z,Aston Villa,Leicester,Premier League,home
+2021-02-21T16:30Z,Arsenal,Manchester City,Premier League,home
+2021-02-21T16:30Z,Manchester City,Arsenal,Premier League,away
+2021-02-21T19:00Z,Manchester Utd,Newcastle,Premier League,home
+2021-02-21T19:00Z,Newcastle,Manchester Utd,Premier League,away
+2021-02-22T20:00Z,Brighton,Crystal Palace,Premier League,home
+2021-02-22T20:00Z,Crystal Palace,Brighton,Premier League,away
+2021-02-23T18:00Z,Leeds,Southampton,Premier League,home
+2021-02-23T20:00Z,Chelsea,Atlético Madrid,Champions League,away
+2021-02-24T17:00Z,Tottenham,Wolfsberger,Europa League,home
+2021-02-24T20:00Z,Manchester City,Borussia Mönchengladbach,Champions League,away
+2021-02-25T17:55Z,Arsenal,Benfica,Europa League,home
+2021-02-25T20:00Z,Manchester Utd,Real Sociedad,Europa League,home
+2021-02-27T12:30Z,Manchester City,West Ham,Premier League,home
+2021-02-27T12:30Z,West Ham,Manchester City,Premier League,away
+2021-02-27T15:00Z,Brighton,West Brom,Premier League,away
+2021-02-27T17:30Z,Aston Villa,Leeds,Premier League,away
+2021-02-27T17:30Z,Leeds,Aston Villa,Premier League,home
+2021-02-27T20:00Z,Newcastle,Wolves,Premier League,home
+2021-02-27T20:00Z,Wolves,Newcastle,Premier League,away
+2021-02-28T12:00Z,Arsenal,Leicester,Premier League,away
+2021-02-28T12:00Z,Crystal Palace,Fulham,Premier League,home
+2021-02-28T12:00Z,Fulham,Crystal Palace,Premier League,away
+2021-02-28T14:00Z,Burnley,Tottenham,Premier League,away
+2021-02-28T14:00Z,Tottenham,Burnley,Premier League,home
+2021-02-28T16:30Z,Chelsea,Manchester Utd,Premier League,home
+2021-02-28T16:30Z,Manchester Utd,Chelsea,Premier League,away
+2021-02-28T19:15Z,Liverpool,Sheffield Utd,Premier League,away
+2021-03-01T20:00Z,Everton,Southampton,Premier League,home
+2021-03-02T20:00Z,Manchester City,Wolves,Premier League,home
+2021-03-02T20:00Z,Wolves,Manchester City,Premier League,away
+2021-03-03T18:00Z,Aston Villa,Sheffield Utd,Premier League,away
+2021-03-03T18:00Z,Burnley,Leicester,Premier League,home
+2021-03-03T20:15Z,Crystal Palace,Manchester Utd,Premier League,home
+2021-03-03T20:15Z,Manchester Utd,Crystal Palace,Premier League,away
+2021-03-04T18:00Z,Everton,West Brom,Premier League,away
+2021-03-04T18:00Z,Fulham,Tottenham,Premier League,home
+2021-03-04T18:00Z,Tottenham,Fulham,Premier League,away
+2021-03-04T20:15Z,Chelsea,Liverpool,Premier League,away
+2021-03-04T20:15Z,Liverpool,Chelsea,Premier League,home
+2021-03-06T12:30Z,Arsenal,Burnley,Premier League,away
+2021-03-06T12:30Z,Burnley,Arsenal,Premier League,home
+2021-03-06T17:30Z,Aston Villa,Wolves,Premier League,home
+2021-03-06T17:30Z,Wolves,Aston Villa,Premier League,away
+2021-03-06T20:00Z,Brighton,Leicester,Premier League,home
+2021-03-07T12:00Z,Newcastle,West Brom,Premier League,away
+2021-03-07T14:00Z,Fulham,Liverpool,Premier League,away
+2021-03-07T14:00Z,Liverpool,Fulham,Premier League,home
+2021-03-07T16:30Z,Manchester City,Manchester Utd,Premier League,home
+2021-03-07T16:30Z,Manchester Utd,Manchester City,Premier League,away
+2021-03-07T19:15Z,Crystal Palace,Tottenham,Premier League,away
+2021-03-07T19:15Z,Tottenham,Crystal Palace,Premier League,home
+2021-03-08T18:00Z,Chelsea,Everton,Premier League,home
+2021-03-08T18:00Z,Everton,Chelsea,Premier League,away
+2021-03-08T20:00Z,Leeds,West Ham,Premier League,away
+2021-03-08T20:00Z,West Ham,Leeds,Premier League,home
+2021-03-10T18:00Z,Manchester City,Southampton,Premier League,home
+2021-03-10T20:00Z,Liverpool,RB Leipzig,Champions League,home
+2021-03-11T17:55Z,Manchester Utd,AC Milan,Europa League,home
+2021-03-11T20:00Z,Arsenal,Olympiacos,Europa League,away
+2021-03-11T20:00Z,Tottenham,Dinamo Zagreb,Europa League,home
+2021-03-12T20:00Z,Aston Villa,Newcastle,Premier League,away
+2021-03-12T20:00Z,Newcastle,Aston Villa,Premier League,home
+2021-03-13T12:30Z,Chelsea,Leeds,Premier League,away
+2021-03-13T12:30Z,Leeds,Chelsea,Premier League,home
+2021-03-13T15:00Z,Crystal Palace,West Brom,Premier League,home
+2021-03-13T17:30Z,Burnley,Everton,Premier League,away
+2021-03-13T17:30Z,Everton,Burnley,Premier League,home
+2021-03-13T20:00Z,Fulham,Manchester City,Premier League,home
+2021-03-13T20:00Z,Manchester City,Fulham,Premier League,away
+2021-03-14T12:00Z,Brighton,Southampton,Premier League,away
+2021-03-14T16:30Z,Arsenal,Tottenham,Premier League,home
+2021-03-14T16:30Z,Tottenham,Arsenal,Premier League,away
+2021-03-14T19:15Z,Manchester Utd,West Ham,Premier League,home
+2021-03-14T19:15Z,West Ham,Manchester Utd,Premier League,away
+2021-03-15T20:00Z,Liverpool,Wolves,Premier League,away
+2021-03-15T20:00Z,Wolves,Liverpool,Premier League,home
+2021-03-16T20:00Z,Manchester City,Borussia Mönchengladbach,Champions League,home
+2021-03-17T20:00Z,Chelsea,Atlético Madrid,Champions League,home
+2021-03-18T17:55Z,Arsenal,Olympiacos,Europa League,home
+2021-03-18T17:55Z,Tottenham,Dinamo Zagreb,Europa League,away
+2021-03-18T20:00Z,Manchester Utd,AC Milan,Europa League,away
+2021-03-19T20:00Z,Fulham,Leeds,Premier League,home
+2021-03-19T20:00Z,Leeds,Fulham,Premier League,away
+2021-03-20T12:15Z,Bournemouth,Southampton,FA Cup,home
+2021-03-20T17:30Z,Everton,Manchester City,FA Cup,home
+2021-03-20T17:30Z,Manchester City,Everton,FA Cup,away
+2021-03-20T20:00Z,Brighton,Newcastle,Premier League,home
+2021-03-20T20:00Z,Newcastle,Brighton,Premier League,away
+2021-03-21T13:30Z,Chelsea,Sheffield Utd,FA Cup,home
+2021-03-21T15:00Z,Arsenal,West Ham,Premier League,away
+2021-03-21T15:00Z,West Ham,Arsenal,Premier League,home
+2021-03-21T17:00Z,Manchester Utd,Leicester,FA Cup,away
+2021-03-21T19:30Z,Aston Villa,Tottenham,Premier League,home
+2021-03-21T19:30Z,Tottenham,Aston Villa,Premier League,away
+2021-04-03T11:30Z,Chelsea,West Brom,Premier League,home
+2021-04-03T14:00Z,Leeds,Sheffield Utd,Premier League,home
+2021-04-03T16:30Z,Manchester City,Leicester,Premier League,away
+2021-04-03T19:00Z,Arsenal,Liverpool,Premier League,home
+2021-04-03T19:00Z,Liverpool,Arsenal,Premier League,away
+2021-04-04T11:00Z,Burnley,Southampton,Premier League,away
+2021-04-04T13:05Z,Newcastle,Tottenham,Premier League,home
+2021-04-04T13:05Z,Tottenham,Newcastle,Premier League,away
+2021-04-04T15:30Z,Aston Villa,Fulham,Premier League,home
+2021-04-04T15:30Z,Fulham,Aston Villa,Premier League,away
+2021-04-04T18:30Z,Brighton,Manchester Utd,Premier League,away
+2021-04-04T18:30Z,Manchester Utd,Brighton,Premier League,home
+2021-04-05T17:00Z,Crystal Palace,Everton,Premier League,away
+2021-04-05T17:00Z,Everton,Crystal Palace,Premier League,home
+2021-04-05T19:15Z,West Ham,Wolves,Premier League,away
+2021-04-05T19:15Z,Wolves,West Ham,Premier League,home
+2021-04-06T19:00Z,Liverpool,Real Madrid,Champions League,away
+2021-04-06T19:00Z,Manchester City,Borussia Dortmund,Champions League,home
+2021-04-07T19:00Z,Chelsea,FC Porto,Champions League,away
+2021-04-08T19:00Z,Arsenal,Slavia Prague,Europa League,home
+2021-04-08T19:00Z,Manchester Utd,Granada,Europa League,away
+2021-04-09T19:00Z,Fulham,Wolves,Premier League,home
+2021-04-09T19:00Z,Wolves,Fulham,Premier League,away
+2021-04-10T11:30Z,Leeds,Manchester City,Premier League,away
+2021-04-10T11:30Z,Manchester City,Leeds,Premier League,home
+2021-04-10T14:00Z,Aston Villa,Liverpool,Premier League,away
+2021-04-10T14:00Z,Liverpool,Aston Villa,Premier League,home
+2021-04-10T16:30Z,Chelsea,Crystal Palace,Premier League,away
+2021-04-10T16:30Z,Crystal Palace,Chelsea,Premier League,home
+2021-04-11T11:00Z,Burnley,Newcastle,Premier League,home
+2021-04-11T11:00Z,Newcastle,Burnley,Premier League,away
+2021-04-11T13:05Z,West Ham,Leicester,Premier League,home
+2021-04-11T15:30Z,Manchester Utd,Tottenham,Premier League,away
+2021-04-11T15:30Z,Tottenham,Manchester Utd,Premier League,home
+2021-04-11T18:00Z,Arsenal,Sheffield Utd,Premier League,away
+2021-04-12T19:15Z,Brighton,Everton,Premier League,home
+2021-04-12T19:15Z,Everton,Brighton,Premier League,away
+2021-04-13T19:00Z,Chelsea,FC Porto,Champions League,home
+2021-04-14T19:00Z,Liverpool,Real Madrid,Champions League,home
+2021-04-14T19:00Z,Manchester City,Borussia Dortmund,Champions League,away
+2021-04-15T19:00Z,Arsenal,Slavia Prague,Europa League,away
+2021-04-15T19:00Z,Manchester Utd,Granada,Europa League,home
+2021-04-16T19:00Z,Everton,Tottenham,Premier League,home
+2021-04-16T19:00Z,Tottenham,Everton,Premier League,away
+2021-04-17T11:30Z,Newcastle,West Ham,Premier League,home
+2021-04-17T11:30Z,West Ham,Newcastle,Premier League,away
+2021-04-17T16:30Z,Chelsea,Manchester City,FA Cup,home
+2021-04-17T16:30Z,Manchester City,Chelsea,FA Cup,away
+2021-04-17T19:15Z,Wolves,Sheffield Utd,Premier League,home
+2021-04-18T12:30Z,Arsenal,Fulham,Premier League,home
+2021-04-18T12:30Z,Fulham,Arsenal,Premier League,away
+2021-04-18T15:00Z,Burnley,Manchester Utd,Premier League,away
+2021-04-18T15:00Z,Manchester Utd,Burnley,Premier League,home
+2021-04-19T19:00Z,Leeds,Liverpool,Premier League,home
+2021-04-19T19:00Z,Liverpool,Leeds,Premier League,away
+2021-04-20T19:15Z,Brighton,Chelsea,Premier League,away
+2021-04-20T19:15Z,Chelsea,Brighton,Premier League,home
+2021-04-21T17:00Z,Tottenham,Southampton,Premier League,home
+2021-04-21T19:15Z,Aston Villa,Manchester City,Premier League,home
+2021-04-21T19:15Z,Manchester City,Aston Villa,Premier League,away
+2021-04-23T19:00Z,Arsenal,Everton,Premier League,home
+2021-04-23T19:00Z,Everton,Arsenal,Premier League,away
+2021-04-24T11:30Z,Liverpool,Newcastle,Premier League,home
+2021-04-24T11:30Z,Newcastle,Liverpool,Premier League,away
+2021-04-24T16:30Z,Chelsea,West Ham,Premier League,away
+2021-04-24T16:30Z,West Ham,Chelsea,Premier League,home
+2021-04-24T19:00Z,Brighton,Sheffield Utd,Premier League,away
+2021-04-25T11:00Z,Burnley,Wolves,Premier League,away
+2021-04-25T11:00Z,Wolves,Burnley,Premier League,home
+2021-04-25T13:00Z,Leeds,Manchester Utd,Premier League,home
+2021-04-25T13:00Z,Manchester Utd,Leeds,Premier League,away
+2021-04-25T15:30Z,Manchester City,Tottenham,League Cup,home
+2021-04-25T15:30Z,Tottenham,Manchester City,League Cup,away
+2021-04-25T18:00Z,Aston Villa,West Brom,Premier League,home
+2021-04-26T19:00Z,Crystal Palace,Leicester,Premier League,away
+2021-04-27T19:00Z,Chelsea,Real Madrid,Champions League,away
+2021-04-28T19:00Z,Manchester City,Paris Saint-Germain,Champions League,away
+2021-04-29T19:00Z,Arsenal,Villarreal,Europa League,away
+2021-04-29T19:00Z,Manchester Utd,AS Roma,Europa League,home
+2021-05-01T11:30Z,Crystal Palace,Manchester City,Premier League,home
+2021-05-01T11:30Z,Manchester City,Crystal Palace,Premier League,away
+2021-05-01T14:00Z,Brighton,Leeds,Premier League,home
+2021-05-01T14:00Z,Leeds,Brighton,Premier League,away
+2021-05-01T16:30Z,Chelsea,Fulham,Premier League,home
+2021-05-01T16:30Z,Fulham,Chelsea,Premier League,away
+2021-05-01T19:00Z,Aston Villa,Everton,Premier League,away
+2021-05-01T19:00Z,Everton,Aston Villa,Premier League,home
+2021-05-02T13:00Z,Arsenal,Newcastle,Premier League,away
+2021-05-02T13:00Z,Newcastle,Arsenal,Premier League,home
+2021-05-02T18:15Z,Tottenham,Sheffield Utd,Premier League,home
+2021-05-03T17:00Z,Wolves,West Brom,Premier League,away
+2021-05-03T19:15Z,Burnley,West Ham,Premier League,home
+2021-05-03T19:15Z,West Ham,Burnley,Premier League,away
+2021-05-04T19:00Z,Manchester City,Paris Saint-Germain,Champions League,home
+2021-05-05T19:00Z,Chelsea,Real Madrid,Champions League,home
+2021-05-06T19:00Z,Arsenal,Villarreal,Europa League,home
+2021-05-06T19:00Z,Manchester Utd,AS Roma,Europa League,away
+2021-05-07T19:00Z,Newcastle,Leicester,Premier League,away
+2021-05-08T11:30Z,Leeds,Tottenham,Premier League,home
+2021-05-08T11:30Z,Tottenham,Leeds,Premier League,away
+2021-05-08T14:00Z,Crystal Palace,Sheffield Utd,Premier League,away
+2021-05-08T16:30Z,Chelsea,Manchester City,Premier League,away
+2021-05-08T16:30Z,Manchester City,Chelsea,Premier League,home
+2021-05-08T19:15Z,Liverpool,Southampton,Premier League,home
+2021-05-09T11:00Z,Brighton,Wolves,Premier League,away
+2021-05-09T11:00Z,Wolves,Brighton,Premier League,home
+2021-05-09T13:05Z,Aston Villa,Manchester Utd,Premier League,home
+2021-05-09T13:05Z,Manchester Utd,Aston Villa,Premier League,away
+2021-05-09T15:30Z,Everton,West Ham,Premier League,away
+2021-05-09T15:30Z,West Ham,Everton,Premier League,home
+2021-05-09T18:00Z,Arsenal,West Brom,Premier League,home
+2021-05-10T19:00Z,Burnley,Fulham,Premier League,away
+2021-05-10T19:00Z,Fulham,Burnley,Premier League,home
+2021-05-11T17:00Z,Manchester Utd,Leicester,Premier League,home
+2021-05-11T19:15Z,Crystal Palace,Southampton,Premier League,away
+2021-05-12T19:15Z,Arsenal,Chelsea,Premier League,away
+2021-05-12T19:15Z,Chelsea,Arsenal,Premier League,home
+2021-05-13T17:00Z,Aston Villa,Everton,Premier League,home
+2021-05-13T17:00Z,Everton,Aston Villa,Premier League,away
+2021-05-13T19:15Z,Liverpool,Manchester Utd,Premier League,away
+2021-05-13T19:15Z,Manchester Utd,Liverpool,Premier League,home
+2021-05-14T19:00Z,Manchester City,Newcastle,Premier League,away
+2021-05-14T19:00Z,Newcastle,Manchester City,Premier League,home
+2021-05-15T11:30Z,Burnley,Leeds,Premier League,home
+2021-05-15T11:30Z,Leeds,Burnley,Premier League,away
+2021-05-15T14:00Z,Fulham,Southampton,Premier League,away
+2021-05-15T16:15Z,Chelsea,Leicester,FA Cup,home
+2021-05-15T19:00Z,Brighton,West Ham,Premier League,home
+2021-05-15T19:00Z,West Ham,Brighton,Premier League,away
+2021-05-16T11:00Z,Aston Villa,Crystal Palace,Premier League,away
+2021-05-16T11:00Z,Crystal Palace,Aston Villa,Premier League,home
+2021-05-16T13:05Z,Tottenham,Wolves,Premier League,home
+2021-05-16T13:05Z,Wolves,Tottenham,Premier League,away
+2021-05-16T15:30Z,Liverpool,West Brom,Premier League,away
+2021-05-16T18:00Z,Everton,Sheffield Utd,Premier League,home
+2021-05-18T17:00Z,Fulham,Manchester Utd,Premier League,away
+2021-05-18T17:00Z,Leeds,Southampton,Premier League,away
+2021-05-18T17:00Z,Manchester Utd,Fulham,Premier League,home
+2021-05-18T18:00Z,Brighton,Manchester City,Premier League,home
+2021-05-18T18:00Z,Manchester City,Brighton,Premier League,away
+2021-05-18T19:15Z,Chelsea,Leicester,Premier League,home
+2021-05-19T17:00Z,Aston Villa,Tottenham,Premier League,away
+2021-05-19T17:00Z,Everton,Wolves,Premier League,home
+2021-05-19T17:00Z,Newcastle,Sheffield Utd,Premier League,home
+2021-05-19T17:00Z,Tottenham,Aston Villa,Premier League,home
+2021-05-19T17:00Z,Wolves,Everton,Premier League,away
+2021-05-19T18:00Z,Arsenal,Crystal Palace,Premier League,away
+2021-05-19T18:00Z,Crystal Palace,Arsenal,Premier League,home
+2021-05-19T19:15Z,Burnley,Liverpool,Premier League,home
+2021-05-19T19:15Z,Liverpool,Burnley,Premier League,away
+2021-05-19T19:15Z,West Ham,West Brom,Premier League,away
+2021-05-23T15:00Z,Arsenal,Brighton,Premier League,home
+2021-05-23T15:00Z,Aston Villa,Chelsea,Premier League,home
+2021-05-23T15:00Z,Brighton,Arsenal,Premier League,away
+2021-05-23T15:00Z,Burnley,Sheffield Utd,Premier League,away
+2021-05-23T15:00Z,Chelsea,Aston Villa,Premier League,away
+2021-05-23T15:00Z,Crystal Palace,Liverpool,Premier League,away
+2021-05-23T15:00Z,Everton,Manchester City,Premier League,away
+2021-05-23T15:00Z,Fulham,Newcastle,Premier League,home
+2021-05-23T15:00Z,Leeds,West Brom,Premier League,home
+2021-05-23T15:00Z,Liverpool,Crystal Palace,Premier League,home
+2021-05-23T15:00Z,Manchester City,Everton,Premier League,home
+2021-05-23T15:00Z,Manchester Utd,Wolves,Premier League,away
+2021-05-23T15:00Z,Newcastle,Fulham,Premier League,away
+2021-05-23T15:00Z,Tottenham,Leicester,Premier League,away
+2021-05-23T15:00Z,West Ham,Southampton,Premier League,home
+2021-05-23T15:00Z,Wolves,Manchester Utd,Premier League,home
+2021-05-26T19:00Z,Manchester Utd,Villarreal,Europa League,away
+2021-05-29T19:00Z,Chelsea,Manchester City,Champions League,away
+2021-05-29T19:00Z,Manchester City,Chelsea,Champions League,home

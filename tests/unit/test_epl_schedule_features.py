@@ -7,6 +7,7 @@ from odds_analytics.epl_schedule_features import (
     EplScheduleFeatures,
     extract_epl_schedule_features,
 )
+from odds_analytics.fixture_cache import FixtureCache, FixtureRecord
 from odds_core.models import Event, EventStatus
 
 
@@ -313,3 +314,176 @@ class TestExtractEplScheduleFeatures:
         expected = (3 * 24 + 4 + 45 / 60) / 24
         assert features.home_rest_days is not None
         assert abs(features.home_rest_days - expected) < 0.001
+
+
+class TestFixtureCacheIntegration:
+    """Tests for fixture_cache parameter on extract_epl_schedule_features."""
+
+    def test_cl_midweek_reduces_rest_days(self) -> None:
+        """EPL Sat -> CL Wed -> EPL Sun: without cache=8d, with cache=4d."""
+        saturday_epl = datetime(2025, 1, 4, 15, 0, tzinfo=UTC)
+        wednesday_cl = datetime(2025, 1, 8, 20, 0, tzinfo=UTC)
+        next_sunday = datetime(2025, 1, 12, 14, 0, tzinfo=UTC)
+
+        prior_events = [
+            _make_event(
+                event_id="e1",
+                home_team="Arsenal",
+                away_team="Liverpool",
+                commence_time=saturday_epl,
+                home_score=2,
+                away_score=1,
+            ),
+        ]
+        event = _make_event(
+            event_id="e2",
+            home_team="Arsenal",
+            away_team="Chelsea",
+            commence_time=next_sunday,
+        )
+
+        # Without fixture cache: 8 days rest (Sat to Sun)
+        features_no_cache = extract_epl_schedule_features(prior_events, event)
+        assert features_no_cache.home_rest_days is not None
+        assert features_no_cache.home_rest_days > 7.5
+
+        # With fixture cache showing CL on Wednesday: ~4 days rest (Wed to Sun)
+        fixture_cache: FixtureCache = {
+            "Arsenal": [
+                FixtureRecord(date=saturday_epl, competition="Premier League"),
+                FixtureRecord(date=wednesday_cl, competition="Champions League"),
+            ],
+        }
+        features_with_cache = extract_epl_schedule_features(
+            prior_events, event, fixture_cache=fixture_cache
+        )
+        assert features_with_cache.home_rest_days is not None
+        assert features_with_cache.home_rest_days < 4.0
+
+    def test_fixture_cache_no_effect_when_epl_is_more_recent(self) -> None:
+        """When EPL match is more recent than any cup match, rest stays the same."""
+        wednesday_epl = datetime(2025, 1, 8, 19, 45, tzinfo=UTC)
+        saturday = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
+
+        prior_events = [
+            _make_event(
+                event_id="e1",
+                home_team="Arsenal",
+                away_team="Brighton",
+                commence_time=wednesday_epl,
+                home_score=1,
+                away_score=0,
+            ),
+        ]
+        event = _make_event(
+            event_id="e2",
+            home_team="Arsenal",
+            away_team="Chelsea",
+            commence_time=saturday,
+        )
+
+        # Fixture cache only has older matches
+        fixture_cache: FixtureCache = {
+            "Arsenal": [
+                FixtureRecord(date=datetime(2025, 1, 1, 15, tzinfo=UTC), competition="FA Cup"),
+                FixtureRecord(date=wednesday_epl, competition="Premier League"),
+            ],
+        }
+
+        no_cache = extract_epl_schedule_features(prior_events, event)
+        with_cache = extract_epl_schedule_features(prior_events, event, fixture_cache=fixture_cache)
+        assert no_cache.home_rest_days == with_cache.home_rest_days
+
+    def test_fixture_cache_only_no_prior_events(self) -> None:
+        """Cache provides rest data even when prior_events is empty."""
+        wednesday_cl = datetime(2025, 1, 8, 20, 0, tzinfo=UTC)
+        saturday = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
+
+        event = _make_event(
+            event_id="e1",
+            home_team="Arsenal",
+            away_team="Chelsea",
+            commence_time=saturday,
+        )
+
+        fixture_cache: FixtureCache = {
+            "Arsenal": [
+                FixtureRecord(date=wednesday_cl, competition="Champions League"),
+            ],
+        }
+
+        features = extract_epl_schedule_features([], event, fixture_cache=fixture_cache)
+        assert features.home_rest_days is not None
+        assert abs(features.home_rest_days - 2.791666666666) < 0.01
+        # Chelsea not in cache, so away rest is None
+        assert features.away_rest_days is None
+        assert features.rest_advantage is None
+
+    def test_rest_advantage_with_fixture_cache(self) -> None:
+        """Home team plays CL midweek, away doesn't -> negative rest advantage."""
+        saturday_epl = datetime(2025, 1, 4, 15, 0, tzinfo=UTC)
+        wednesday_cl = datetime(2025, 1, 8, 20, 0, tzinfo=UTC)
+        next_saturday = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
+
+        prior_events = [
+            _make_event(
+                event_id="e1",
+                home_team="Arsenal",
+                away_team="Chelsea",
+                commence_time=saturday_epl,
+                home_score=1,
+                away_score=1,
+            ),
+        ]
+        event = _make_event(
+            event_id="e2",
+            home_team="Arsenal",
+            away_team="Chelsea",
+            commence_time=next_saturday,
+        )
+
+        fixture_cache: FixtureCache = {
+            "Arsenal": [
+                FixtureRecord(date=saturday_epl, competition="Premier League"),
+                FixtureRecord(date=wednesday_cl, competition="Champions League"),
+            ],
+            "Chelsea": [
+                FixtureRecord(date=saturday_epl, competition="Premier League"),
+            ],
+        }
+
+        features = extract_epl_schedule_features(prior_events, event, fixture_cache=fixture_cache)
+        assert features.home_rest_days is not None
+        assert features.away_rest_days is not None
+        # Arsenal: ~3 days (Wed to Sat), Chelsea: 7 days (Sat to Sat)
+        assert features.home_rest_days < 3.0
+        assert features.away_rest_days == 7.0
+        assert features.rest_advantage is not None
+        assert features.rest_advantage < 0  # Home team has less rest
+
+    def test_backward_compatible_with_none_cache(self) -> None:
+        """fixture_cache=None gives identical results to no-argument call."""
+        base = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
+        prior = [
+            _make_event(
+                event_id="e1",
+                home_team="Arsenal",
+                away_team="Liverpool",
+                commence_time=base - timedelta(days=7),
+                home_score=1,
+                away_score=0,
+            ),
+        ]
+        event = _make_event(
+            event_id="e2",
+            home_team="Arsenal",
+            away_team="Chelsea",
+            commence_time=base,
+        )
+
+        default = extract_epl_schedule_features(prior, event)
+        explicit_none = extract_epl_schedule_features(prior, event, fixture_cache=None)
+        assert default.home_rest_days == explicit_none.home_rest_days
+        assert default.away_rest_days == explicit_none.away_rest_days
+        assert default.rest_advantage == explicit_none.rest_advantage
+        assert default.is_midweek == explicit_none.is_midweek

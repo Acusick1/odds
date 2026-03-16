@@ -46,6 +46,7 @@ htmlcov/
 
 # Config files and data
 *.csv
+!data/espn_fixtures/*.csv
 *.json
 
 # Database

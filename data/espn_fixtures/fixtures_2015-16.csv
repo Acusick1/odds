@@ -1,0 +1,680 @@
+date,team,opponent,competition,home_away
+2015-07-02T18:45Z,West Ham,Lusitanos,Europa League,home
+2015-07-09T17:30Z,West Ham,Lusitanos,Europa League,away
+2015-07-16T18:45Z,West Ham,Birkirkara,Europa League,home
+2015-07-23T18:45Z,West Ham,Birkirkara,Europa League,away
+2015-07-30T18:45Z,West Ham,FK Astra Giurgiu,Europa League,home
+2015-08-06T18:00Z,West Ham,FK Astra Giurgiu,Europa League,away
+2015-08-08T11:45Z,Manchester Utd,Tottenham,Premier League,home
+2015-08-08T11:45Z,Tottenham,Manchester Utd,Premier League,away
+2015-08-08T14:00Z,Bournemouth,Aston Villa,Premier League,home
+2015-08-08T14:00Z,Aston Villa,Bournemouth,Premier League,away
+2015-08-08T14:00Z,Crystal Palace,Norwich,Premier League,away
+2015-08-08T14:00Z,Everton,Watford,Premier League,home
+2015-08-08T14:00Z,Sunderland,Leicester,Premier League,away
+2015-08-08T16:30Z,Chelsea,Swansea,Premier League,home
+2015-08-09T12:30Z,Arsenal,West Ham,Premier League,home
+2015-08-09T12:30Z,Newcastle,Southampton,Premier League,home
+2015-08-09T12:30Z,West Ham,Arsenal,Premier League,away
+2015-08-09T15:00Z,Liverpool,Stoke,Premier League,away
+2015-08-10T19:00Z,Manchester City,West Brom,Premier League,away
+2015-08-11T18:45Z,Brentford,Oxford United,League Cup,home
+2015-08-11T18:45Z,Brighton,Southend United,League Cup,away
+2015-08-11T18:45Z,Burnley,Port Vale,League Cup,away
+2015-08-11T18:45Z,Fulham,Wycombe Wanderers,League Cup,away
+2015-08-11T18:45Z,Nottingham,Walsall,League Cup,home
+2015-08-11T18:45Z,Wolves,Newport County,League Cup,home
+2015-08-13T18:45Z,Leeds,Doncaster Rovers,League Cup,away
+2015-08-14T18:45Z,Aston Villa,Manchester Utd,Premier League,home
+2015-08-14T18:45Z,Manchester Utd,Aston Villa,Premier League,away
+2015-08-15T11:45Z,Everton,Southampton,Premier League,away
+2015-08-15T14:00Z,Newcastle,Swansea,Premier League,away
+2015-08-15T14:00Z,Sunderland,Norwich,Premier League,home
+2015-08-15T14:00Z,Tottenham,Stoke,Premier League,home
+2015-08-15T14:00Z,West Ham,Leicester,Premier League,home
+2015-08-16T12:30Z,Arsenal,Crystal Palace,Premier League,away
+2015-08-16T12:30Z,Crystal Palace,Arsenal,Premier League,home
+2015-08-16T15:00Z,Chelsea,Manchester City,Premier League,away
+2015-08-16T15:00Z,Manchester City,Chelsea,Premier League,home
+2015-08-17T19:00Z,Bournemouth,Liverpool,Premier League,away
+2015-08-17T19:00Z,Liverpool,Bournemouth,Premier League,home
+2015-08-18T18:45Z,Manchester Utd,Club Brugge,Champions League,home
+2015-08-22T11:45Z,Manchester Utd,Newcastle,Premier League,home
+2015-08-22T11:45Z,Newcastle,Manchester Utd,Premier League,away
+2015-08-22T14:00Z,Bournemouth,West Ham,Premier League,away
+2015-08-22T14:00Z,Aston Villa,Crystal Palace,Premier League,away
+2015-08-22T14:00Z,Crystal Palace,Aston Villa,Premier League,home
+2015-08-22T14:00Z,Sunderland,Swansea,Premier League,home
+2015-08-22T14:00Z,Tottenham,Leicester,Premier League,away
+2015-08-22T14:00Z,West Ham,Bournemouth,Premier League,home
+2015-08-23T12:30Z,Chelsea,West Brom,Premier League,away
+2015-08-23T15:00Z,Everton,Manchester City,Premier League,home
+2015-08-23T15:00Z,Manchester City,Everton,Premier League,away
+2015-08-24T19:00Z,Arsenal,Liverpool,Premier League,home
+2015-08-24T19:00Z,Liverpool,Arsenal,Premier League,away
+2015-08-25T18:45Z,Bournemouth,Hartlepool United,League Cup,away
+2015-08-25T18:45Z,Aston Villa,Notts County,League Cup,home
+2015-08-25T18:45Z,Brighton,Walsall,League Cup,away
+2015-08-25T18:45Z,Crystal Palace,Shrewsbury Town,League Cup,home
+2015-08-25T18:45Z,Fulham,Sheffield Utd,League Cup,home
+2015-08-25T18:45Z,Newcastle,Northampton Town,League Cup,home
+2015-08-25T18:45Z,Sunderland,Exeter City,League Cup,home
+2015-08-25T18:45Z,Wolves,Barnet,League Cup,home
+2015-08-26T18:45Z,Everton,Barnsley,League Cup,away
+2015-08-26T18:45Z,Manchester Utd,Club Brugge,Champions League,away
+2015-08-29T11:45Z,Arsenal,Newcastle,Premier League,away
+2015-08-29T11:45Z,Newcastle,Arsenal,Premier League,home
+2015-08-29T14:00Z,Bournemouth,Leicester,Premier League,home
+2015-08-29T14:00Z,Aston Villa,Sunderland,Premier League,home
+2015-08-29T14:00Z,Chelsea,Crystal Palace,Premier League,home
+2015-08-29T14:00Z,Crystal Palace,Chelsea,Premier League,away
+2015-08-29T14:00Z,Liverpool,West Ham,Premier League,home
+2015-08-29T14:00Z,Manchester City,Watford,Premier League,home
+2015-08-29T14:00Z,Sunderland,Aston Villa,Premier League,away
+2015-08-29T14:00Z,West Ham,Liverpool,Premier League,away
+2015-08-29T16:30Z,Everton,Tottenham,Premier League,away
+2015-08-29T16:30Z,Tottenham,Everton,Premier League,home
+2015-08-30T15:00Z,Manchester Utd,Swansea,Premier League,away
+2015-09-12T11:45Z,Chelsea,Everton,Premier League,away
+2015-09-12T11:45Z,Everton,Chelsea,Premier League,home
+2015-09-12T14:00Z,Bournemouth,Norwich,Premier League,away
+2015-09-12T14:00Z,Arsenal,Stoke,Premier League,home
+2015-09-12T14:00Z,Crystal Palace,Manchester City,Premier League,home
+2015-09-12T14:00Z,Manchester City,Crystal Palace,Premier League,away
+2015-09-12T16:30Z,Liverpool,Manchester Utd,Premier League,away
+2015-09-12T16:30Z,Manchester Utd,Liverpool,Premier League,home
+2015-09-13T12:30Z,Sunderland,Tottenham,Premier League,home
+2015-09-13T12:30Z,Tottenham,Sunderland,Premier League,away
+2015-09-13T15:00Z,Aston Villa,Leicester,Premier League,away
+2015-09-14T19:00Z,Newcastle,West Ham,Premier League,away
+2015-09-14T19:00Z,West Ham,Newcastle,Premier League,home
+2015-09-15T18:45Z,Manchester City,Juventus,Champions League,home
+2015-09-15T18:45Z,Manchester Utd,PSV Eindhoven,Champions League,away
+2015-09-16T18:45Z,Arsenal,Dinamo Zagreb,Champions League,away
+2015-09-16T18:45Z,Chelsea,Maccabi Tel-Aviv,Champions League,home
+2015-09-17T17:00Z,Liverpool,Bordeaux,Europa League,away
+2015-09-17T19:05Z,Tottenham,FK Qarabag,Europa League,home
+2015-09-19T11:45Z,Arsenal,Chelsea,Premier League,away
+2015-09-19T11:45Z,Chelsea,Arsenal,Premier League,home
+2015-09-19T14:00Z,Bournemouth,Sunderland,Premier League,home
+2015-09-19T14:00Z,Aston Villa,West Brom,Premier League,home
+2015-09-19T14:00Z,Everton,Swansea,Premier League,away
+2015-09-19T14:00Z,Newcastle,Watford,Premier League,home
+2015-09-19T14:00Z,Sunderland,Bournemouth,Premier League,away
+2015-09-19T16:30Z,Manchester City,West Ham,Premier League,home
+2015-09-19T16:30Z,West Ham,Manchester City,Premier League,away
+2015-09-20T12:30Z,Crystal Palace,Tottenham,Premier League,away
+2015-09-20T12:30Z,Tottenham,Crystal Palace,Premier League,home
+2015-09-20T15:00Z,Liverpool,Norwich,Premier League,home
+2015-09-20T15:00Z,Manchester Utd,Southampton,Premier League,away
+2015-09-22T18:45Z,Bournemouth,Preston North End,League Cup,away
+2015-09-22T18:45Z,Aston Villa,Birmingham City,League Cup,home
+2015-09-22T18:45Z,Fulham,Stoke,League Cup,home
+2015-09-22T18:45Z,Manchester City,Sunderland,League Cup,away
+2015-09-22T18:45Z,Sunderland,Manchester City,League Cup,home
+2015-09-22T18:45Z,West Ham,Leicester,League Cup,away
+2015-09-22T18:45Z,Wolves,Middlesbrough,League Cup,away
+2015-09-22T19:00Z,Everton,Reading,League Cup,away
+2015-09-23T18:45Z,Arsenal,Tottenham,League Cup,away
+2015-09-23T18:45Z,Chelsea,Walsall,League Cup,away
+2015-09-23T18:45Z,Crystal Palace,Charlton Athletic,League Cup,home
+2015-09-23T18:45Z,Newcastle,Sheffield Wednesday,League Cup,home
+2015-09-23T18:45Z,Tottenham,Arsenal,League Cup,home
+2015-09-23T19:00Z,Liverpool,Carlisle United,League Cup,home
+2015-09-23T19:00Z,Manchester Utd,Ipswich,League Cup,home
+2015-09-26T11:45Z,Manchester City,Tottenham,Premier League,away
+2015-09-26T11:45Z,Tottenham,Manchester City,Premier League,home
+2015-09-26T14:00Z,Bournemouth,Stoke,Premier League,away
+2015-09-26T14:00Z,Arsenal,Leicester,Premier League,away
+2015-09-26T14:00Z,Aston Villa,Liverpool,Premier League,away
+2015-09-26T14:00Z,Liverpool,Aston Villa,Premier League,home
+2015-09-26T14:00Z,Manchester Utd,Sunderland,Premier League,home
+2015-09-26T14:00Z,Sunderland,Manchester Utd,Premier League,away
+2015-09-26T14:00Z,West Ham,Norwich,Premier League,home
+2015-09-26T16:30Z,Chelsea,Newcastle,Premier League,away
+2015-09-26T16:30Z,Newcastle,Chelsea,Premier League,home
+2015-09-27T15:00Z,Crystal Palace,Watford,Premier League,away
+2015-09-28T19:00Z,Everton,West Brom,Premier League,away
+2015-09-29T18:45Z,Arsenal,Olympiacos,Champions League,home
+2015-09-29T18:45Z,Chelsea,FC Porto,Champions League,away
+2015-09-30T18:45Z,Manchester City,Borussia Mönchengladbach,Champions League,away
+2015-09-30T18:45Z,Manchester Utd,VfL Wolfsburg,Champions League,home
+2015-10-01T17:00Z,Tottenham,AS Monaco,Europa League,away
+2015-10-01T19:05Z,Liverpool,FC Sion,Europa League,home
+2015-10-03T11:45Z,Crystal Palace,West Brom,Premier League,home
+2015-10-03T14:00Z,Bournemouth,Watford,Premier League,home
+2015-10-03T14:00Z,Aston Villa,Stoke,Premier League,home
+2015-10-03T14:00Z,Manchester City,Newcastle,Premier League,home
+2015-10-03T14:00Z,Newcastle,Manchester City,Premier League,away
+2015-10-03T14:00Z,Sunderland,West Ham,Premier League,home
+2015-10-03T14:00Z,West Ham,Sunderland,Premier League,away
+2015-10-03T16:30Z,Chelsea,Southampton,Premier League,home
+2015-10-04T12:30Z,Everton,Liverpool,Premier League,home
+2015-10-04T12:30Z,Liverpool,Everton,Premier League,away
+2015-10-04T15:00Z,Arsenal,Manchester Utd,Premier League,home
+2015-10-04T15:00Z,Manchester Utd,Arsenal,Premier League,away
+2015-10-04T15:00Z,Tottenham,Swansea,Premier League,away
+2015-10-17T11:45Z,Liverpool,Tottenham,Premier League,away
+2015-10-17T11:45Z,Tottenham,Liverpool,Premier League,home
+2015-10-17T14:00Z,Bournemouth,Manchester City,Premier League,away
+2015-10-17T14:00Z,Aston Villa,Chelsea,Premier League,away
+2015-10-17T14:00Z,Chelsea,Aston Villa,Premier League,home
+2015-10-17T14:00Z,Crystal Palace,West Ham,Premier League,home
+2015-10-17T14:00Z,Everton,Manchester Utd,Premier League,home
+2015-10-17T14:00Z,Manchester City,Bournemouth,Premier League,home
+2015-10-17T14:00Z,Manchester Utd,Everton,Premier League,away
+2015-10-17T14:00Z,Sunderland,West Brom,Premier League,away
+2015-10-17T14:00Z,West Ham,Crystal Palace,Premier League,away
+2015-10-17T16:30Z,Arsenal,Watford,Premier League,away
+2015-10-18T15:00Z,Newcastle,Norwich,Premier League,home
+2015-10-20T18:45Z,Arsenal,Bayern Munich,Champions League,home
+2015-10-20T18:45Z,Chelsea,Dynamo Kyiv,Champions League,away
+2015-10-21T18:45Z,Manchester City,Sevilla,Champions League,home
+2015-10-21T18:45Z,Manchester Utd,CSKA Moscow,Champions League,away
+2015-10-22T17:00Z,Tottenham,Anderlecht,Europa League,away
+2015-10-22T19:05Z,Liverpool,Rubin Kazan,Europa League,home
+2015-10-24T14:00Z,Aston Villa,Swansea,Premier League,home
+2015-10-24T14:00Z,Chelsea,West Ham,Premier League,away
+2015-10-24T14:00Z,Crystal Palace,Leicester,Premier League,away
+2015-10-24T14:00Z,West Ham,Chelsea,Premier League,home
+2015-10-24T16:30Z,Arsenal,Everton,Premier League,home
+2015-10-24T16:30Z,Everton,Arsenal,Premier League,away
+2015-10-25T12:00Z,Newcastle,Sunderland,Premier League,away
+2015-10-25T12:00Z,Sunderland,Newcastle,Premier League,home
+2015-10-25T14:05Z,Bournemouth,Tottenham,Premier League,home
+2015-10-25T14:05Z,Manchester City,Manchester Utd,Premier League,away
+2015-10-25T14:05Z,Manchester Utd,Manchester City,Premier League,home
+2015-10-25T14:05Z,Tottenham,Bournemouth,Premier League,away
+2015-10-25T16:15Z,Liverpool,Southampton,Premier League,home
+2015-10-27T19:45Z,Arsenal,Sheffield Wednesday,League Cup,away
+2015-10-27T19:45Z,Chelsea,Stoke,League Cup,away
+2015-10-27T19:45Z,Everton,Norwich,League Cup,home
+2015-10-28T19:45Z,Bournemouth,Liverpool,League Cup,away
+2015-10-28T19:45Z,Aston Villa,Southampton,League Cup,away
+2015-10-28T19:45Z,Crystal Palace,Manchester City,League Cup,away
+2015-10-28T19:45Z,Liverpool,Bournemouth,League Cup,home
+2015-10-28T19:45Z,Manchester City,Crystal Palace,League Cup,home
+2015-10-28T20:00Z,Manchester Utd,Middlesbrough,League Cup,home
+2015-10-31T12:45Z,Chelsea,Liverpool,Premier League,home
+2015-10-31T12:45Z,Liverpool,Chelsea,Premier League,away
+2015-10-31T15:00Z,Arsenal,Swansea,Premier League,away
+2015-10-31T15:00Z,Crystal Palace,Manchester Utd,Premier League,home
+2015-10-31T15:00Z,Manchester City,Norwich,Premier League,home
+2015-10-31T15:00Z,Manchester Utd,Crystal Palace,Premier League,away
+2015-10-31T15:00Z,Newcastle,Stoke,Premier League,home
+2015-10-31T15:00Z,West Ham,Watford,Premier League,away
+2015-11-01T13:30Z,Everton,Sunderland,Premier League,home
+2015-11-01T13:30Z,Sunderland,Everton,Premier League,away
+2015-11-01T16:00Z,Bournemouth,Southampton,Premier League,away
+2015-11-02T20:00Z,Aston Villa,Tottenham,Premier League,away
+2015-11-02T20:00Z,Tottenham,Aston Villa,Premier League,home
+2015-11-03T19:45Z,Manchester City,Sevilla,Champions League,away
+2015-11-03T19:45Z,Manchester Utd,CSKA Moscow,Champions League,home
+2015-11-04T19:45Z,Arsenal,Bayern Munich,Champions League,away
+2015-11-04T19:45Z,Chelsea,Dynamo Kyiv,Champions League,home
+2015-11-05T18:00Z,Liverpool,Rubin Kazan,Europa League,away
+2015-11-05T20:05Z,Tottenham,Anderlecht,Europa League,home
+2015-11-07T12:45Z,Bournemouth,Newcastle,Premier League,home
+2015-11-07T12:45Z,Newcastle,Bournemouth,Premier League,away
+2015-11-07T15:00Z,Everton,West Ham,Premier League,away
+2015-11-07T15:00Z,Manchester Utd,West Brom,Premier League,home
+2015-11-07T15:00Z,Sunderland,Southampton,Premier League,home
+2015-11-07T15:00Z,West Ham,Everton,Premier League,home
+2015-11-07T17:30Z,Chelsea,Stoke,Premier League,away
+2015-11-08T13:30Z,Aston Villa,Manchester City,Premier League,home
+2015-11-08T13:30Z,Manchester City,Aston Villa,Premier League,away
+2015-11-08T16:00Z,Arsenal,Tottenham,Premier League,home
+2015-11-08T16:00Z,Crystal Palace,Liverpool,Premier League,away
+2015-11-08T16:00Z,Liverpool,Crystal Palace,Premier League,home
+2015-11-08T16:00Z,Tottenham,Arsenal,Premier League,away
+2015-11-21T12:45Z,Manchester Utd,Watford,Premier League,away
+2015-11-21T15:00Z,Bournemouth,Swansea,Premier League,away
+2015-11-21T15:00Z,Arsenal,West Brom,Premier League,away
+2015-11-21T15:00Z,Aston Villa,Everton,Premier League,away
+2015-11-21T15:00Z,Chelsea,Norwich,Premier League,home
+2015-11-21T15:00Z,Everton,Aston Villa,Premier League,home
+2015-11-21T15:00Z,Newcastle,Leicester,Premier League,home
+2015-11-21T17:30Z,Liverpool,Manchester City,Premier League,away
+2015-11-21T17:30Z,Manchester City,Liverpool,Premier League,home
+2015-11-22T16:00Z,Tottenham,West Ham,Premier League,home
+2015-11-22T16:00Z,West Ham,Tottenham,Premier League,away
+2015-11-23T20:00Z,Crystal Palace,Sunderland,Premier League,home
+2015-11-23T20:00Z,Sunderland,Crystal Palace,Premier League,away
+2015-11-24T19:45Z,Arsenal,Dinamo Zagreb,Champions League,home
+2015-11-24T19:45Z,Chelsea,Maccabi Tel-Aviv,Champions League,away
+2015-11-25T19:45Z,Manchester City,Juventus,Champions League,away
+2015-11-25T19:45Z,Manchester Utd,PSV Eindhoven,Champions League,home
+2015-11-26T18:00Z,Tottenham,FK Qarabag,Europa League,away
+2015-11-26T20:05Z,Liverpool,Bordeaux,Europa League,home
+2015-11-28T15:00Z,Bournemouth,Everton,Premier League,home
+2015-11-28T15:00Z,Aston Villa,Watford,Premier League,home
+2015-11-28T15:00Z,Crystal Palace,Newcastle,Premier League,home
+2015-11-28T15:00Z,Everton,Bournemouth,Premier League,away
+2015-11-28T15:00Z,Manchester City,Southampton,Premier League,home
+2015-11-28T15:00Z,Newcastle,Crystal Palace,Premier League,away
+2015-11-28T15:00Z,Sunderland,Stoke,Premier League,home
+2015-11-28T17:30Z,Manchester Utd,Leicester,Premier League,away
+2015-11-29T12:00Z,Chelsea,Tottenham,Premier League,away
+2015-11-29T12:00Z,Tottenham,Chelsea,Premier League,home
+2015-11-29T14:05Z,West Ham,West Brom,Premier League,home
+2015-11-29T16:15Z,Arsenal,Norwich,Premier League,away
+2015-11-29T16:15Z,Liverpool,Swansea,Premier League,home
+2015-12-01T19:45Z,Everton,Middlesbrough,League Cup,away
+2015-12-01T19:45Z,Manchester City,Hull,League Cup,home
+2015-12-02T19:45Z,Liverpool,Southampton,League Cup,away
+2015-12-05T12:45Z,Manchester City,Stoke,Premier League,away
+2015-12-05T15:00Z,Arsenal,Sunderland,Premier League,home
+2015-12-05T15:00Z,Aston Villa,Southampton,Premier League,away
+2015-12-05T15:00Z,Manchester Utd,West Ham,Premier League,home
+2015-12-05T15:00Z,Sunderland,Arsenal,Premier League,away
+2015-12-05T15:00Z,Tottenham,West Brom,Premier League,away
+2015-12-05T15:00Z,West Ham,Manchester Utd,Premier League,away
+2015-12-05T17:30Z,Bournemouth,Chelsea,Premier League,away
+2015-12-05T17:30Z,Chelsea,Bournemouth,Premier League,home
+2015-12-06T16:00Z,Liverpool,Newcastle,Premier League,away
+2015-12-06T16:00Z,Newcastle,Liverpool,Premier League,home
+2015-12-07T20:00Z,Crystal Palace,Everton,Premier League,away
+2015-12-07T20:00Z,Everton,Crystal Palace,Premier League,home
+2015-12-08T19:45Z,Manchester City,Borussia Mönchengladbach,Champions League,home
+2015-12-08T19:45Z,Manchester Utd,VfL Wolfsburg,Champions League,away
+2015-12-09T19:45Z,Arsenal,Olympiacos,Champions League,away
+2015-12-09T19:45Z,Chelsea,FC Porto,Champions League,home
+2015-12-10T18:00Z,Liverpool,FC Sion,Europa League,away
+2015-12-10T20:05Z,Tottenham,AS Monaco,Europa League,home
+2015-12-12T12:45Z,Everton,Norwich,Premier League,away
+2015-12-12T15:00Z,Crystal Palace,Southampton,Premier League,home
+2015-12-12T15:00Z,Manchester City,Swansea,Premier League,home
+2015-12-12T15:00Z,Sunderland,Watford,Premier League,home
+2015-12-12T15:00Z,West Ham,Stoke,Premier League,home
+2015-12-12T17:30Z,Bournemouth,Manchester Utd,Premier League,home
+2015-12-12T17:30Z,Manchester Utd,Bournemouth,Premier League,away
+2015-12-13T13:30Z,Arsenal,Aston Villa,Premier League,away
+2015-12-13T13:30Z,Aston Villa,Arsenal,Premier League,home
+2015-12-13T16:00Z,Liverpool,West Brom,Premier League,home
+2015-12-13T16:00Z,Newcastle,Tottenham,Premier League,away
+2015-12-13T16:00Z,Tottenham,Newcastle,Premier League,home
+2015-12-14T20:00Z,Chelsea,Leicester,Premier League,away
+2015-12-19T15:00Z,Bournemouth,West Brom,Premier League,away
+2015-12-19T15:00Z,Chelsea,Sunderland,Premier League,home
+2015-12-19T15:00Z,Crystal Palace,Stoke,Premier League,away
+2015-12-19T15:00Z,Everton,Leicester,Premier League,home
+2015-12-19T15:00Z,Manchester Utd,Norwich,Premier League,home
+2015-12-19T15:00Z,Sunderland,Chelsea,Premier League,away
+2015-12-19T15:00Z,Tottenham,Southampton,Premier League,away
+2015-12-19T17:30Z,Aston Villa,Newcastle,Premier League,away
+2015-12-19T17:30Z,Newcastle,Aston Villa,Premier League,home
+2015-12-20T13:30Z,Liverpool,Watford,Premier League,away
+2015-12-20T16:00Z,West Ham,Swansea,Premier League,away
+2015-12-21T20:00Z,Arsenal,Manchester City,Premier League,home
+2015-12-21T20:00Z,Manchester City,Arsenal,Premier League,away
+2015-12-26T12:45Z,Manchester Utd,Stoke,Premier League,away
+2015-12-26T15:00Z,Bournemouth,Crystal Palace,Premier League,home
+2015-12-26T15:00Z,Aston Villa,West Ham,Premier League,home
+2015-12-26T15:00Z,Chelsea,Watford,Premier League,home
+2015-12-26T15:00Z,Crystal Palace,Bournemouth,Premier League,away
+2015-12-26T15:00Z,Liverpool,Leicester,Premier League,home
+2015-12-26T15:00Z,Manchester City,Sunderland,Premier League,home
+2015-12-26T15:00Z,Sunderland,Manchester City,Premier League,away
+2015-12-26T15:00Z,Tottenham,Norwich,Premier League,home
+2015-12-26T15:00Z,West Ham,Aston Villa,Premier League,away
+2015-12-26T17:30Z,Everton,Newcastle,Premier League,away
+2015-12-26T17:30Z,Newcastle,Everton,Premier League,home
+2015-12-26T19:45Z,Arsenal,Southampton,Premier League,away
+2015-12-28T15:00Z,Aston Villa,Norwich,Premier League,away
+2015-12-28T15:00Z,Crystal Palace,Swansea,Premier League,home
+2015-12-28T15:00Z,Everton,Stoke,Premier League,home
+2015-12-28T15:00Z,Newcastle,West Brom,Premier League,away
+2015-12-28T15:00Z,Tottenham,Watford,Premier League,away
+2015-12-28T17:30Z,Bournemouth,Arsenal,Premier League,away
+2015-12-28T17:30Z,Arsenal,Bournemouth,Premier League,home
+2015-12-28T17:30Z,Chelsea,Manchester Utd,Premier League,away
+2015-12-28T17:30Z,Manchester Utd,Chelsea,Premier League,home
+2015-12-28T17:30Z,West Ham,Southampton,Premier League,home
+2015-12-29T19:45Z,Manchester City,Leicester,Premier League,away
+2015-12-30T19:45Z,Liverpool,Sunderland,Premier League,away
+2015-12-30T19:45Z,Sunderland,Liverpool,Premier League,home
+2016-01-02T12:45Z,Liverpool,West Ham,Premier League,away
+2016-01-02T12:45Z,West Ham,Liverpool,Premier League,home
+2016-01-02T15:00Z,Bournemouth,Leicester,Premier League,away
+2016-01-02T15:00Z,Arsenal,Newcastle,Premier League,home
+2016-01-02T15:00Z,Aston Villa,Sunderland,Premier League,away
+2016-01-02T15:00Z,Manchester Utd,Swansea,Premier League,home
+2016-01-02T15:00Z,Newcastle,Arsenal,Premier League,away
+2016-01-02T15:00Z,Sunderland,Aston Villa,Premier League,home
+2016-01-02T17:30Z,Manchester City,Watford,Premier League,away
+2016-01-03T13:30Z,Chelsea,Crystal Palace,Premier League,away
+2016-01-03T13:30Z,Crystal Palace,Chelsea,Premier League,home
+2016-01-03T16:00Z,Everton,Tottenham,Premier League,home
+2016-01-03T16:00Z,Tottenham,Everton,Premier League,away
+2016-01-05T20:00Z,Liverpool,Stoke,League Cup,away
+2016-01-06T20:00Z,Everton,Manchester City,League Cup,home
+2016-01-06T20:00Z,Manchester City,Everton,League Cup,away
+2016-01-08T19:55Z,Liverpool,Exeter City,FA Cup,away
+2016-01-09T12:45Z,Aston Villa,Wycombe Wanderers,FA Cup,away
+2016-01-09T15:00Z,Bournemouth,Birmingham City,FA Cup,away
+2016-01-09T15:00Z,Arsenal,Sunderland,FA Cup,home
+2016-01-09T15:00Z,Brentford,Walsall,FA Cup,home
+2016-01-09T15:00Z,Brighton,Hull,FA Cup,away
+2016-01-09T15:00Z,Burnley,Middlesbrough,FA Cup,away
+2016-01-09T15:00Z,Crystal Palace,Southampton,FA Cup,away
+2016-01-09T15:00Z,Everton,Dagenham & Redbridge,FA Cup,home
+2016-01-09T15:00Z,Fulham,Sheffield Wednesday,FA Cup,away
+2016-01-09T15:00Z,Leeds,Rotherham United,FA Cup,home
+2016-01-09T15:00Z,Manchester City,Norwich,FA Cup,away
+2016-01-09T15:00Z,Newcastle,Watford,FA Cup,away
+2016-01-09T15:00Z,Nottingham,Queens Park Rangers,FA Cup,home
+2016-01-09T15:00Z,Sunderland,Arsenal,FA Cup,away
+2016-01-09T15:00Z,West Ham,Wolves,FA Cup,home
+2016-01-09T15:00Z,Wolves,West Ham,FA Cup,away
+2016-01-09T17:30Z,Manchester Utd,Sheffield Utd,FA Cup,home
+2016-01-10T14:00Z,Chelsea,Scunthorpe United,FA Cup,home
+2016-01-10T16:00Z,Tottenham,Leicester,FA Cup,home
+2016-01-12T19:45Z,Bournemouth,West Ham,Premier League,home
+2016-01-12T19:45Z,Aston Villa,Crystal Palace,Premier League,home
+2016-01-12T19:45Z,Crystal Palace,Aston Villa,Premier League,away
+2016-01-12T19:45Z,Manchester Utd,Newcastle,Premier League,away
+2016-01-12T19:45Z,Newcastle,Manchester Utd,Premier League,home
+2016-01-12T19:45Z,West Ham,Bournemouth,Premier League,away
+2016-01-13T19:45Z,Chelsea,West Brom,Premier League,home
+2016-01-13T19:45Z,Everton,Manchester City,Premier League,away
+2016-01-13T19:45Z,Manchester City,Everton,Premier League,home
+2016-01-13T19:45Z,Sunderland,Swansea,Premier League,away
+2016-01-13T20:00Z,Arsenal,Liverpool,Premier League,away
+2016-01-13T20:00Z,Liverpool,Arsenal,Premier League,home
+2016-01-13T20:00Z,Tottenham,Leicester,Premier League,home
+2016-01-16T12:45Z,Sunderland,Tottenham,Premier League,away
+2016-01-16T12:45Z,Tottenham,Sunderland,Premier League,home
+2016-01-16T15:00Z,Bournemouth,Norwich,Premier League,home
+2016-01-16T15:00Z,Chelsea,Everton,Premier League,home
+2016-01-16T15:00Z,Crystal Palace,Manchester City,Premier League,away
+2016-01-16T15:00Z,Everton,Chelsea,Premier League,away
+2016-01-16T15:00Z,Manchester City,Crystal Palace,Premier League,home
+2016-01-16T15:00Z,Newcastle,West Ham,Premier League,home
+2016-01-16T15:00Z,West Ham,Newcastle,Premier League,away
+2016-01-16T17:30Z,Aston Villa,Leicester,Premier League,home
+2016-01-17T14:05Z,Liverpool,Manchester Utd,Premier League,home
+2016-01-17T14:05Z,Manchester Utd,Liverpool,Premier League,away
+2016-01-17T16:15Z,Arsenal,Stoke,Premier League,away
+2016-01-19T19:45Z,Aston Villa,Wycombe Wanderers,FA Cup,home
+2016-01-20T19:45Z,Tottenham,Leicester,FA Cup,away
+2016-01-20T20:00Z,Liverpool,Exeter City,FA Cup,home
+2016-01-23T12:45Z,Liverpool,Norwich,Premier League,away
+2016-01-23T15:00Z,Bournemouth,Sunderland,Premier League,away
+2016-01-23T15:00Z,Aston Villa,West Brom,Premier League,away
+2016-01-23T15:00Z,Crystal Palace,Tottenham,Premier League,home
+2016-01-23T15:00Z,Manchester Utd,Southampton,Premier League,home
+2016-01-23T15:00Z,Newcastle,Watford,Premier League,away
+2016-01-23T15:00Z,Sunderland,Bournemouth,Premier League,home
+2016-01-23T15:00Z,Tottenham,Crystal Palace,Premier League,away
+2016-01-23T17:30Z,Manchester City,West Ham,Premier League,away
+2016-01-23T17:30Z,West Ham,Manchester City,Premier League,home
+2016-01-24T13:30Z,Everton,Swansea,Premier League,home
+2016-01-24T16:00Z,Arsenal,Chelsea,Premier League,home
+2016-01-24T16:00Z,Chelsea,Arsenal,Premier League,away
+2016-01-26T19:45Z,Liverpool,Stoke,League Cup,home
+2016-01-27T19:45Z,Everton,Manchester City,League Cup,away
+2016-01-27T19:45Z,Manchester City,Everton,League Cup,home
+2016-01-29T19:55Z,Manchester Utd,Derby County,FA Cup,away
+2016-01-30T12:45Z,Tottenham,Colchester United,FA Cup,away
+2016-01-30T15:00Z,Bournemouth,Portsmouth,FA Cup,away
+2016-01-30T15:00Z,Arsenal,Burnley,FA Cup,home
+2016-01-30T15:00Z,Aston Villa,Manchester City,FA Cup,home
+2016-01-30T15:00Z,Burnley,Arsenal,FA Cup,away
+2016-01-30T15:00Z,Crystal Palace,Stoke,FA Cup,home
+2016-01-30T15:00Z,Leeds,Bolton Wanderers,FA Cup,away
+2016-01-30T15:00Z,Manchester City,Aston Villa,FA Cup,away
+2016-01-30T15:00Z,Nottingham,Watford,FA Cup,home
+2016-01-30T17:30Z,Liverpool,West Ham,FA Cup,home
+2016-01-30T17:30Z,West Ham,Liverpool,FA Cup,away
+2016-01-31T13:30Z,Everton,Carlisle United,FA Cup,away
+2016-01-31T16:00Z,Chelsea,Milton Keynes Dons,FA Cup,away
+2016-02-02T19:45Z,Arsenal,Southampton,Premier League,home
+2016-02-02T19:45Z,Aston Villa,West Ham,Premier League,away
+2016-02-02T19:45Z,Liverpool,Leicester,Premier League,away
+2016-02-02T19:45Z,Manchester City,Sunderland,Premier League,away
+2016-02-02T19:45Z,Sunderland,Manchester City,Premier League,home
+2016-02-02T19:45Z,Tottenham,Norwich,Premier League,away
+2016-02-02T19:45Z,West Ham,Aston Villa,Premier League,home
+2016-02-02T20:00Z,Bournemouth,Crystal Palace,Premier League,away
+2016-02-02T20:00Z,Crystal Palace,Bournemouth,Premier League,home
+2016-02-02T20:00Z,Manchester Utd,Stoke,Premier League,home
+2016-02-03T19:45Z,Chelsea,Watford,Premier League,away
+2016-02-03T19:45Z,Everton,Newcastle,Premier League,home
+2016-02-03T19:45Z,Newcastle,Everton,Premier League,away
+2016-02-06T12:45Z,Manchester City,Leicester,Premier League,home
+2016-02-06T15:00Z,Aston Villa,Norwich,Premier League,home
+2016-02-06T15:00Z,Crystal Palace,Swansea,Premier League,away
+2016-02-06T15:00Z,Everton,Stoke,Premier League,away
+2016-02-06T15:00Z,Liverpool,Sunderland,Premier League,home
+2016-02-06T15:00Z,Newcastle,West Brom,Premier League,home
+2016-02-06T15:00Z,Sunderland,Liverpool,Premier League,away
+2016-02-06T15:00Z,Tottenham,Watford,Premier League,home
+2016-02-06T17:30Z,West Ham,Southampton,Premier League,away
+2016-02-07T13:30Z,Bournemouth,Arsenal,Premier League,home
+2016-02-07T13:30Z,Arsenal,Bournemouth,Premier League,away
+2016-02-07T16:00Z,Chelsea,Manchester Utd,Premier League,home
+2016-02-07T16:00Z,Manchester Utd,Chelsea,Premier League,away
+2016-02-09T19:45Z,Liverpool,West Ham,FA Cup,away
+2016-02-09T19:45Z,West Ham,Liverpool,FA Cup,home
+2016-02-13T12:45Z,Manchester Utd,Sunderland,Premier League,away
+2016-02-13T12:45Z,Sunderland,Manchester Utd,Premier League,home
+2016-02-13T15:00Z,Bournemouth,Stoke,Premier League,home
+2016-02-13T15:00Z,Crystal Palace,Watford,Premier League,home
+2016-02-13T15:00Z,Everton,West Brom,Premier League,home
+2016-02-13T15:00Z,West Ham,Norwich,Premier League,away
+2016-02-13T17:30Z,Chelsea,Newcastle,Premier League,home
+2016-02-13T17:30Z,Newcastle,Chelsea,Premier League,away
+2016-02-14T12:00Z,Arsenal,Leicester,Premier League,home
+2016-02-14T14:05Z,Aston Villa,Liverpool,Premier League,home
+2016-02-14T14:05Z,Liverpool,Aston Villa,Premier League,away
+2016-02-14T16:15Z,Manchester City,Tottenham,Premier League,home
+2016-02-14T16:15Z,Tottenham,Manchester City,Premier League,away
+2016-02-16T19:45Z,Chelsea,Paris Saint-Germain,Champions League,away
+2016-02-18T18:00Z,Manchester Utd,FC Midtjylland,Europa League,away
+2016-02-18T18:00Z,Tottenham,Fiorentina,Europa League,away
+2016-02-18T20:05Z,Liverpool,FC Augsburg,Europa League,away
+2016-02-20T12:45Z,Arsenal,Hull,FA Cup,home
+2016-02-20T15:00Z,Leeds,Watford,FA Cup,away
+2016-02-20T17:15Z,Bournemouth,Everton,FA Cup,home
+2016-02-20T17:15Z,Everton,Bournemouth,FA Cup,away
+2016-02-21T14:00Z,West Ham,Blackburn Rovers,FA Cup,away
+2016-02-21T15:00Z,Crystal Palace,Tottenham,FA Cup,away
+2016-02-21T15:00Z,Tottenham,Crystal Palace,FA Cup,home
+2016-02-21T16:00Z,Chelsea,Manchester City,FA Cup,home
+2016-02-21T16:00Z,Manchester City,Chelsea,FA Cup,away
+2016-02-22T19:45Z,Manchester Utd,Shrewsbury Town,FA Cup,away
+2016-02-23T19:45Z,Arsenal,Barcelona,Champions League,home
+2016-02-24T19:45Z,Manchester City,Dynamo Kyiv,Champions League,away
+2016-02-25T18:00Z,Liverpool,FC Augsburg,Europa League,home
+2016-02-25T20:05Z,Manchester Utd,FC Midtjylland,Europa League,home
+2016-02-25T20:05Z,Tottenham,Fiorentina,Europa League,home
+2016-02-27T12:45Z,Sunderland,West Ham,Premier League,away
+2016-02-27T12:45Z,West Ham,Sunderland,Premier League,home
+2016-02-27T15:00Z,Bournemouth,Watford,Premier League,away
+2016-02-27T15:00Z,Aston Villa,Stoke,Premier League,away
+2016-02-27T15:00Z,Chelsea,Southampton,Premier League,away
+2016-02-27T17:30Z,Crystal Palace,West Brom,Premier League,away
+2016-02-28T14:05Z,Arsenal,Manchester Utd,Premier League,away
+2016-02-28T14:05Z,Manchester Utd,Arsenal,Premier League,home
+2016-02-28T14:05Z,Tottenham,Swansea,Premier League,home
+2016-02-28T16:30Z,Liverpool,Manchester City,League Cup,home
+2016-02-28T16:30Z,Manchester City,Liverpool,League Cup,away
+2016-03-01T19:45Z,Bournemouth,Southampton,Premier League,home
+2016-03-01T19:45Z,Aston Villa,Everton,Premier League,home
+2016-03-01T19:45Z,Chelsea,Norwich,Premier League,away
+2016-03-01T19:45Z,Crystal Palace,Sunderland,Premier League,away
+2016-03-01T19:45Z,Everton,Aston Villa,Premier League,away
+2016-03-01T19:45Z,Sunderland,Crystal Palace,Premier League,home
+2016-03-02T19:45Z,Arsenal,Swansea,Premier League,home
+2016-03-02T19:45Z,Newcastle,Stoke,Premier League,away
+2016-03-02T19:45Z,Tottenham,West Ham,Premier League,away
+2016-03-02T19:45Z,West Ham,Tottenham,Premier League,home
+2016-03-02T20:00Z,Liverpool,Manchester City,Premier League,home
+2016-03-02T20:00Z,Manchester City,Liverpool,Premier League,away
+2016-03-02T20:00Z,Manchester Utd,Watford,Premier League,home
+2016-03-05T12:45Z,Arsenal,Tottenham,Premier League,away
+2016-03-05T12:45Z,Tottenham,Arsenal,Premier League,home
+2016-03-05T15:00Z,Bournemouth,Newcastle,Premier League,away
+2016-03-05T15:00Z,Aston Villa,Manchester City,Premier League,away
+2016-03-05T15:00Z,Chelsea,Stoke,Premier League,home
+2016-03-05T15:00Z,Everton,West Ham,Premier League,home
+2016-03-05T15:00Z,Manchester City,Aston Villa,Premier League,home
+2016-03-05T15:00Z,Newcastle,Bournemouth,Premier League,home
+2016-03-05T15:00Z,Sunderland,Southampton,Premier League,away
+2016-03-05T15:00Z,West Ham,Everton,Premier League,away
+2016-03-06T13:30Z,Crystal Palace,Liverpool,Premier League,home
+2016-03-06T13:30Z,Liverpool,Crystal Palace,Premier League,away
+2016-03-06T16:00Z,Manchester Utd,West Brom,Premier League,away
+2016-03-08T19:00Z,Arsenal,Hull,FA Cup,away
+2016-03-09T19:45Z,Chelsea,Paris Saint-Germain,Champions League,home
+2016-03-10T18:00Z,Tottenham,Borussia Dortmund,Europa League,away
+2016-03-10T20:05Z,Liverpool,Manchester Utd,Europa League,home
+2016-03-10T20:05Z,Manchester Utd,Liverpool,Europa League,away
+2016-03-11T19:55Z,Crystal Palace,Reading,FA Cup,away
+2016-03-12T12:45Z,Manchester City,Norwich,Premier League,away
+2016-03-12T15:00Z,Bournemouth,Swansea,Premier League,home
+2016-03-12T17:30Z,Chelsea,Everton,FA Cup,away
+2016-03-12T17:30Z,Everton,Chelsea,FA Cup,home
+2016-03-13T13:30Z,Arsenal,Watford,FA Cup,home
+2016-03-13T16:00Z,Aston Villa,Tottenham,Premier League,home
+2016-03-13T16:00Z,Manchester Utd,West Ham,FA Cup,home
+2016-03-13T16:00Z,Tottenham,Aston Villa,Premier League,away
+2016-03-13T16:00Z,West Ham,Manchester Utd,FA Cup,away
+2016-03-14T20:00Z,Newcastle,Leicester,Premier League,away
+2016-03-15T19:45Z,Manchester City,Dynamo Kyiv,Champions League,home
+2016-03-16T19:45Z,Arsenal,Barcelona,Champions League,away
+2016-03-17T20:05Z,Liverpool,Manchester Utd,Europa League,away
+2016-03-17T20:05Z,Manchester Utd,Liverpool,Europa League,home
+2016-03-17T20:05Z,Tottenham,Borussia Dortmund,Europa League,home
+2016-03-19T12:45Z,Arsenal,Everton,Premier League,away
+2016-03-19T12:45Z,Everton,Arsenal,Premier League,home
+2016-03-19T15:00Z,Chelsea,West Ham,Premier League,home
+2016-03-19T15:00Z,Crystal Palace,Leicester,Premier League,home
+2016-03-19T15:00Z,West Ham,Chelsea,Premier League,away
+2016-03-19T17:30Z,Aston Villa,Swansea,Premier League,away
+2016-03-20T13:30Z,Liverpool,Southampton,Premier League,away
+2016-03-20T13:30Z,Newcastle,Sunderland,Premier League,home
+2016-03-20T13:30Z,Sunderland,Newcastle,Premier League,away
+2016-03-20T16:00Z,Bournemouth,Tottenham,Premier League,away
+2016-03-20T16:00Z,Manchester City,Manchester Utd,Premier League,home
+2016-03-20T16:00Z,Manchester Utd,Manchester City,Premier League,away
+2016-03-20T16:00Z,Tottenham,Bournemouth,Premier League,home
+2016-04-02T11:45Z,Aston Villa,Chelsea,Premier League,home
+2016-04-02T11:45Z,Chelsea,Aston Villa,Premier League,away
+2016-04-02T14:00Z,Bournemouth,Manchester City,Premier League,home
+2016-04-02T14:00Z,Arsenal,Watford,Premier League,home
+2016-04-02T14:00Z,Crystal Palace,West Ham,Premier League,away
+2016-04-02T14:00Z,Manchester City,Bournemouth,Premier League,away
+2016-04-02T14:00Z,Newcastle,Norwich,Premier League,away
+2016-04-02T14:00Z,Sunderland,West Brom,Premier League,home
+2016-04-02T14:00Z,West Ham,Crystal Palace,Premier League,home
+2016-04-02T16:30Z,Liverpool,Tottenham,Premier League,home
+2016-04-02T16:30Z,Tottenham,Liverpool,Premier League,away
+2016-04-03T15:00Z,Everton,Manchester Utd,Premier League,away
+2016-04-03T15:00Z,Manchester Utd,Everton,Premier League,home
+2016-04-06T18:45Z,Manchester City,Paris Saint-Germain,Champions League,away
+2016-04-07T19:05Z,Liverpool,Borussia Dortmund,Europa League,away
+2016-04-09T11:45Z,Arsenal,West Ham,Premier League,away
+2016-04-09T11:45Z,West Ham,Arsenal,Premier League,home
+2016-04-09T14:00Z,Bournemouth,Aston Villa,Premier League,away
+2016-04-09T14:00Z,Aston Villa,Bournemouth,Premier League,home
+2016-04-09T14:00Z,Chelsea,Swansea,Premier League,away
+2016-04-09T14:00Z,Crystal Palace,Norwich,Premier League,home
+2016-04-09T14:00Z,Everton,Watford,Premier League,away
+2016-04-09T14:00Z,Newcastle,Southampton,Premier League,away
+2016-04-09T16:30Z,Manchester City,West Brom,Premier League,home
+2016-04-10T12:30Z,Sunderland,Leicester,Premier League,home
+2016-04-10T15:00Z,Liverpool,Stoke,Premier League,home
+2016-04-10T15:00Z,Manchester Utd,Tottenham,Premier League,away
+2016-04-10T15:00Z,Tottenham,Manchester Utd,Premier League,home
+2016-04-12T18:45Z,Manchester City,Paris Saint-Germain,Champions League,home
+2016-04-13T14:00Z,Crystal Palace,Everton,Premier League,home
+2016-04-13T14:00Z,Everton,Crystal Palace,Premier League,away
+2016-04-13T18:00Z,Manchester Utd,West Ham,FA Cup,away
+2016-04-13T18:00Z,West Ham,Manchester Utd,FA Cup,home
+2016-04-14T19:05Z,Liverpool,Borussia Dortmund,Europa League,home
+2016-04-16T11:45Z,Sunderland,Norwich,Premier League,away
+2016-04-16T14:00Z,Aston Villa,Manchester Utd,Premier League,away
+2016-04-16T14:00Z,Everton,Southampton,Premier League,home
+2016-04-16T14:00Z,Manchester Utd,Aston Villa,Premier League,home
+2016-04-16T14:00Z,Newcastle,Swansea,Premier League,home
+2016-04-16T16:30Z,Chelsea,Manchester City,Premier League,home
+2016-04-16T16:30Z,Manchester City,Chelsea,Premier League,away
+2016-04-17T12:30Z,West Ham,Leicester,Premier League,away
+2016-04-17T14:00Z,Bournemouth,Liverpool,Premier League,home
+2016-04-17T14:00Z,Liverpool,Bournemouth,Premier League,away
+2016-04-17T15:00Z,Arsenal,Crystal Palace,Premier League,home
+2016-04-17T15:00Z,Crystal Palace,Arsenal,Premier League,away
+2016-04-18T19:00Z,Tottenham,Stoke,Premier League,away
+2016-04-19T18:45Z,Manchester City,Newcastle,Premier League,away
+2016-04-19T18:45Z,Newcastle,Manchester City,Premier League,home
+2016-04-20T18:45Z,Crystal Palace,Manchester Utd,Premier League,away
+2016-04-20T18:45Z,Everton,Liverpool,Premier League,away
+2016-04-20T18:45Z,Liverpool,Everton,Premier League,home
+2016-04-20T18:45Z,Manchester Utd,Crystal Palace,Premier League,home
+2016-04-20T18:45Z,West Ham,Watford,Premier League,home
+2016-04-21T18:45Z,Arsenal,West Brom,Premier League,home
+2016-04-23T11:00Z,Manchester City,Stoke,Premier League,home
+2016-04-23T14:00Z,Bournemouth,Chelsea,Premier League,home
+2016-04-23T14:00Z,Aston Villa,Southampton,Premier League,home
+2016-04-23T14:00Z,Chelsea,Bournemouth,Premier League,away
+2016-04-23T14:00Z,Liverpool,Newcastle,Premier League,home
+2016-04-23T14:00Z,Newcastle,Liverpool,Premier League,away
+2016-04-23T16:15Z,Everton,Manchester Utd,FA Cup,home
+2016-04-23T16:15Z,Manchester Utd,Everton,FA Cup,away
+2016-04-24T13:05Z,Arsenal,Sunderland,Premier League,away
+2016-04-24T13:05Z,Sunderland,Arsenal,Premier League,home
+2016-04-24T15:00Z,Crystal Palace,Watford,FA Cup,home
+2016-04-25T19:00Z,Tottenham,West Brom,Premier League,home
+2016-04-26T18:45Z,Manchester City,Real Madrid,Champions League,home
+2016-04-28T19:05Z,Liverpool,Villarreal,Europa League,away
+2016-04-30T14:00Z,Bournemouth,Everton,Premier League,away
+2016-04-30T14:00Z,Aston Villa,Watford,Premier League,away
+2016-04-30T14:00Z,Crystal Palace,Newcastle,Premier League,away
+2016-04-30T14:00Z,Everton,Bournemouth,Premier League,home
+2016-04-30T14:00Z,Newcastle,Crystal Palace,Premier League,home
+2016-04-30T14:00Z,Sunderland,Stoke,Premier League,away
+2016-04-30T14:00Z,West Ham,West Brom,Premier League,away
+2016-04-30T16:30Z,Arsenal,Norwich,Premier League,home
+2016-05-01T11:45Z,Liverpool,Swansea,Premier League,away
+2016-05-01T12:30Z,Manchester Utd,Leicester,Premier League,home
+2016-05-01T15:00Z,Manchester City,Southampton,Premier League,away
+2016-05-02T19:00Z,Chelsea,Tottenham,Premier League,home
+2016-05-02T19:00Z,Tottenham,Chelsea,Premier League,away
+2016-05-04T18:45Z,Manchester City,Real Madrid,Champions League,away
+2016-05-05T19:05Z,Liverpool,Villarreal,Europa League,home
+2016-05-07T14:00Z,Bournemouth,West Brom,Premier League,home
+2016-05-07T14:00Z,Aston Villa,Newcastle,Premier League,home
+2016-05-07T14:00Z,Chelsea,Sunderland,Premier League,away
+2016-05-07T14:00Z,Crystal Palace,Stoke,Premier League,home
+2016-05-07T14:00Z,Everton,Leicester,Premier League,away
+2016-05-07T14:00Z,Manchester Utd,Norwich,Premier League,away
+2016-05-07T14:00Z,Newcastle,Aston Villa,Premier League,away
+2016-05-07T14:00Z,Sunderland,Chelsea,Premier League,home
+2016-05-07T14:00Z,West Ham,Swansea,Premier League,home
+2016-05-08T14:00Z,Arsenal,Manchester City,Premier League,away
+2016-05-08T14:00Z,Liverpool,Watford,Premier League,home
+2016-05-08T14:00Z,Manchester City,Arsenal,Premier League,home
+2016-05-08T14:00Z,Tottenham,Southampton,Premier League,home
+2016-05-10T14:00Z,Manchester Utd,West Ham,Premier League,away
+2016-05-10T14:00Z,West Ham,Manchester Utd,Premier League,home
+2016-05-11T16:00Z,Chelsea,Liverpool,Premier League,away
+2016-05-11T16:00Z,Liverpool,Chelsea,Premier League,home
+2016-05-11T18:45Z,Everton,Sunderland,Premier League,away
+2016-05-11T18:45Z,Sunderland,Everton,Premier League,home
+2016-05-15T14:00Z,Arsenal,Aston Villa,Premier League,home
+2016-05-15T14:00Z,Aston Villa,Arsenal,Premier League,away
+2016-05-15T14:00Z,Chelsea,Leicester,Premier League,home
+2016-05-15T14:00Z,Crystal Palace,Southampton,Premier League,away
+2016-05-15T14:00Z,Everton,Norwich,Premier League,home
+2016-05-15T14:00Z,Liverpool,West Brom,Premier League,away
+2016-05-15T14:00Z,Manchester City,Swansea,Premier League,away
+2016-05-15T14:00Z,Newcastle,Tottenham,Premier League,home
+2016-05-15T14:00Z,Sunderland,Watford,Premier League,away
+2016-05-15T14:00Z,Tottenham,Newcastle,Premier League,away
+2016-05-15T14:00Z,West Ham,Stoke,Premier League,away
+2016-05-17T14:00Z,Bournemouth,Manchester Utd,Premier League,away
+2016-05-17T14:00Z,Manchester Utd,Bournemouth,Premier League,home
+2016-05-18T18:45Z,Liverpool,Sevilla,Europa League,home
+2016-05-21T16:30Z,Crystal Palace,Manchester Utd,FA Cup,home
+2016-05-21T16:30Z,Manchester Utd,Crystal Palace,FA Cup,away
