@@ -239,6 +239,38 @@ class TestOddsValidator:
         assert not is_valid
         assert any("No bookmakers" in w for w in warnings)
 
+    def test_validate_odds_snapshot_vig_warning_does_not_invalidate(self):
+        """Vig warnings are informational and should not set is_valid=False."""
+        data = {
+            "id": "test123",
+            "sport_key": "basketball_nba",
+            "commence_time": datetime.now(UTC).isoformat(),
+            "home_team": "Lakers",
+            "away_team": "Celtics",
+            "bookmakers": [
+                {
+                    "key": "fanduel",
+                    "title": "FanDuel",
+                    "last_update": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+                    "markets": [
+                        {
+                            "key": "totals",
+                            "outcomes": [
+                                {"name": "Over", "price": -101},
+                                {"name": "Under", "price": -101},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        is_valid, warnings = OddsValidator.validate_odds_snapshot(data, "test123")
+        # Vig is ~0.5% which is below the 2.0% retail floor, producing a warning
+        assert len(warnings) > 0
+        assert any("too low" in w for w in warnings)
+        # But the snapshot is still valid — vig anomalies are informational
+        assert is_valid
+
     def test_validate_odds_snapshot_future_timestamp(self):
         """Test validation catches future timestamps."""
         data = {

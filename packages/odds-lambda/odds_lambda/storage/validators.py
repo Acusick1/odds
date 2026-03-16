@@ -22,7 +22,9 @@ class OddsValidator:
     MAX_SPREAD_MOVEMENT = 10.0  # Maximum point spread change
     MAX_TOTAL_MOVEMENT = 20.0  # Maximum total points change
 
-    # Bookmaker classifications for vig validation
+    # Bookmaker classifications for vig validation.
+    # These are The Odds API / production bookmaker keys, distinct from the
+    # OddsPortal display-name mapping in oddsportal_common.py.
     EXCHANGE_BOOKMAKERS: set[str] = {
         "betfair_exchange",
         "betdaq",
@@ -69,13 +71,14 @@ class OddsValidator:
             - Returns warnings but does not reject data
             - Logs all validation issues
         """
-        warnings = []
+        errors: list[str] = []
+        vig_warnings: list[str] = []
 
         # Check if data is a list (multiple events) or dict (single event)
         if isinstance(data, list):
             if not data:
-                warnings.append("Empty odds data received")
-                return False, warnings
+                errors.append("Empty odds data received")
+                return False, errors
 
             # Find the specific event
             event_data = None
@@ -85,16 +88,16 @@ class OddsValidator:
                     break
 
             if not event_data:
-                warnings.append(f"Event {event_id} not found in response")
-                return False, warnings
+                errors.append(f"Event {event_id} not found in response")
+                return False, errors
         else:
             event_data = data
 
         # Validate bookmakers exist
         bookmakers = event_data.get("bookmakers", [])
         if not bookmakers:
-            warnings.append("No bookmakers data found")
-            return False, warnings
+            errors.append("No bookmakers data found")
+            return False, errors
 
         # Validate each bookmaker
         for bookmaker in bookmakers:
@@ -106,9 +109,9 @@ class OddsValidator:
                 try:
                     update_time = parse_api_datetime(last_update)
                     if update_time > datetime.now(UTC):
-                        warnings.append(f"Future timestamp for {bookmaker_key}: {last_update}")
+                        errors.append(f"Future timestamp for {bookmaker_key}: {last_update}")
                 except Exception as e:
-                    warnings.append(f"Invalid timestamp format for {bookmaker_key}: {str(e)}")
+                    errors.append(f"Invalid timestamp format for {bookmaker_key}: {str(e)}")
 
             # Validate markets
             markets = bookmaker.get("markets", [])
@@ -117,7 +120,7 @@ class OddsValidator:
                 outcomes = market.get("outcomes", [])
 
                 if not outcomes:
-                    warnings.append(f"No outcomes for {bookmaker_key} {market_key}")
+                    errors.append(f"No outcomes for {bookmaker_key} {market_key}")
                     continue
 
                 # Validate each outcome
@@ -127,24 +130,24 @@ class OddsValidator:
                         price_warnings = cls.validate_odds_value(
                             price, bookmaker_key, market_key, outcome.get("name", "unknown")
                         )
-                        warnings.extend(price_warnings)
+                        errors.extend(price_warnings)
 
-                # Validate vig for two-way markets
+                # Validate vig for two-way markets (informational, not an error)
                 if market_key in ["h2h", "spreads", "totals"] and len(outcomes) == 2:
-                    vig_warnings = cls.validate_vig(outcomes, bookmaker_key, market_key)
-                    warnings.extend(vig_warnings)
+                    vig_warnings.extend(cls.validate_vig(outcomes, bookmaker_key, market_key))
 
-        is_valid = len(warnings) == 0
+        is_valid = len(errors) == 0
+        all_warnings = errors + vig_warnings
 
-        if warnings:
+        if all_warnings:
             logger.warning(
                 "odds_validation_warnings",
                 event_id=event_id,
-                warning_count=len(warnings),
-                warnings=warnings[:5],  # Log first 5 warnings
+                warning_count=len(all_warnings),
+                warnings=all_warnings[:5],  # Log first 5 warnings
             )
 
-        return is_valid, warnings
+        return is_valid, all_warnings
 
     @classmethod
     def validate_odds_value(
