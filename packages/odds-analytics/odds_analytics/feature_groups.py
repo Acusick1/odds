@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
@@ -58,6 +59,8 @@ from odds_analytics.sequence_loader import (
 )
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from odds_analytics.match_stats_features import MatchStatsCache
     from odds_analytics.training.config import FeatureConfig
 
@@ -110,6 +113,7 @@ class EventDataBundle:
     game_logs: list[NbaTeamGameLog] = field(default_factory=list)
     prior_season_events: list[Event] = field(default_factory=list)
     prior_match_stats: dict[str, list[dict[str, int]]] = field(default_factory=dict)
+    fixtures_df: pd.DataFrame | None = None
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
@@ -153,6 +157,7 @@ async def collect_event_data(
     config: FeatureConfig,
     standings_cache: dict[str, list[Event]] | None = None,
     match_stats_cache: MatchStatsCache | None = None,
+    fixtures_df: pd.DataFrame | None = None,
 ) -> EventDataBundle:
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
@@ -257,9 +262,9 @@ async def collect_event_data(
                 all_logs.append(prev)
         game_logs = all_logs
 
-    # Prior season events for standings features (from preloaded cache)
+    # Prior season events for standings / epl_schedule features (from preloaded cache)
     prior_season_events: list[Event] = []
-    if "standings" in config.feature_groups and standings_cache is not None:
+    if {"standings", "epl_schedule"} & set(config.feature_groups) and standings_cache is not None:
         from odds_analytics.standings_features import get_prior_events_from_cache
 
         prior_season_events = get_prior_events_from_cache(standings_cache, event)
@@ -288,6 +293,7 @@ async def collect_event_data(
         game_logs=game_logs,
         prior_season_events=prior_season_events,
         prior_match_stats=prior_match_stats,
+        fixtures_df=fixtures_df,
         sequences=sequences,
     )
 
@@ -514,7 +520,7 @@ class FeatureAdapter(Protocol):
 
 
 _STATIC_FEATURE_GROUPS = frozenset(
-    {"tabular", "polymarket", "injuries", "rest", "standings", "match_stats"}
+    {"tabular", "polymarket", "injuries", "rest", "standings", "match_stats", "epl_schedule"}
 )
 
 
@@ -547,6 +553,10 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
         from odds_analytics.match_stats_features import MatchStatsFeatures
 
         names.extend(f"mstat_{n}" for n in MatchStatsFeatures.get_feature_names())
+    if "epl_schedule" in config.feature_groups:
+        from odds_analytics.epl_schedule_features import EplScheduleFeatures
+
+        names.extend(f"eplsched_{n}" for n in EplScheduleFeatures.get_feature_names())
     return names
 
 
@@ -733,6 +743,25 @@ def _extract_static_feature_parts(
             except Exception:
                 logger.debug("match_stats_feature_extraction_failed", event_id=event.id)
                 parts.append(nan_block_mstat)
+
+    # --- EPL schedule features (NaN-fill on failure to keep row) ---
+    if "epl_schedule" in config.feature_groups:
+        from odds_analytics.epl_schedule_features import (
+            EplScheduleFeatures,
+            extract_epl_schedule_features,
+        )
+
+        n_eplsched = len(EplScheduleFeatures.get_feature_names())
+        nan_block_eplsched = np.full(n_eplsched, np.nan)
+
+        try:
+            eplsched_feats = extract_epl_schedule_features(
+                bundle.prior_season_events, event, fixtures_df=bundle.fixtures_df
+            )
+            parts.append(eplsched_feats.to_array())
+        except Exception:
+            logger.debug("epl_schedule_feature_extraction_failed", event_id=event.id)
+            parts.append(nan_block_eplsched)
 
     return parts
 
@@ -931,6 +960,33 @@ def _select_closing_snapshot(
 # Layer 5: Orchestrator
 # =============================================================================
 
+_FIXTURES_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "espn_fixtures"
+
+
+def _load_fixtures_df() -> pd.DataFrame | None:
+    """Load all ESPN fixture CSVs into a single DataFrame.
+
+    Returns None if no CSV files are found (e.g. in Lambda or before first run).
+    """
+    import pandas as pd_
+
+    csv_files = sorted(_FIXTURES_DATA_DIR.glob("fixtures_*.csv"))
+    if not csv_files:
+        logger.warning("espn_fixtures_not_found", data_dir=str(_FIXTURES_DATA_DIR))
+        return None
+
+    frames = [pd_.read_csv(f, parse_dates=["date"]) for f in csv_files]
+    df = pd_.concat(frames, ignore_index=True)
+    # Ensure dates are UTC-aware
+    if df["date"].dt.tz is None:
+        df["date"] = df["date"].dt.tz_localize("UTC")
+    logger.info(
+        "espn_fixtures_loaded",
+        rows=len(df),
+        csv_files=len(csv_files),
+    )
+    return df
+
 
 class PreparedFeatureData:
     """Pre-split feature matrix with targets and metadata."""
@@ -1011,9 +1067,9 @@ async def prepare_training_data(
     # Resolve sport_key once for cache loaders
     sport_key = config.sport_key or (valid_events[0].sport_key if valid_events else None)
 
-    # Preload standings cache to avoid N+1 queries
+    # Preload standings cache to avoid N+1 queries (also used by epl_schedule)
     standings_cache: dict[str, list[Event]] | None = None
-    if "standings" in config.feature_groups:
+    if {"standings", "epl_schedule"} & set(config.feature_groups):
         from odds_analytics.standings_features import load_season_events_cache
 
         if sport_key:
@@ -1027,6 +1083,11 @@ async def prepare_training_data(
         if sport_key:
             match_stats_cache = await load_match_stats_cache(session, sport_key)
 
+    # Preload all-competition fixtures DataFrame for rest/congestion features
+    fixtures_df: pd.DataFrame | None = None
+    if "epl_schedule" in config.feature_groups:
+        fixtures_df = _load_fixtures_df()
+
     for event in valid_events:
         # Load all data for this event in bulk
         bundle = await collect_event_data(
@@ -1035,6 +1096,7 @@ async def prepare_training_data(
             config,
             standings_cache=standings_cache,
             match_stats_cache=match_stats_cache,
+            fixtures_df=fixtures_df,
         )
 
         # Closing snapshot is required

@@ -48,6 +48,9 @@ htmlcov/
 *.csv
 *.json
 
+# ESPN fixture data (regenerated via scripts/ingest_espn_fixtures.py)
+data/espn_fixtures/
+
 # Database
 *.db
 *.sqlite3
