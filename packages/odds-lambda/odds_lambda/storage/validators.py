@@ -16,10 +16,26 @@ class OddsValidator:
     # Validation thresholds
     MIN_ODDS = -10000
     MAX_ODDS = 10000
-    MIN_VIG_PERCENT = 2.0  # Minimum expected vig/juice
+    MIN_VIG_PERCENT = 2.0  # Minimum expected vig for retail bookmakers
+    MIN_VIG_PERCENT_SHARP = 1.0  # Lower floor for sharp bookmakers
     MAX_VIG_PERCENT = 15.0  # Maximum reasonable vig/juice
     MAX_SPREAD_MOVEMENT = 10.0  # Maximum point spread change
     MAX_TOTAL_MOVEMENT = 20.0  # Maximum total points change
+
+    # Bookmaker classifications for vig validation
+    EXCHANGE_BOOKMAKERS: set[str] = {
+        "betfair_exchange",
+        "betdaq",
+        "smarkets",
+        "matchbook",
+    }
+    SHARP_BOOKMAKERS: set[str] = {
+        "pinnacle",
+        "onexbet",
+        "onexbetir",
+        "1xbetir",
+        "betinasia",
+    }
 
     @staticmethod
     def american_to_probability(odds: int) -> float:
@@ -168,6 +184,10 @@ class OddsValidator:
         """
         Validate vig/juice for two-way markets.
 
+        Exchange bookmakers (Betfair, Betdaq, etc.) legitimately operate near 0% vig,
+        so only negative vig and excessive vig are flagged. Sharp bookmakers use a
+        lower floor than retail.
+
         Args:
             outcomes: List of outcome dictionaries
             bookmaker: Bookmaker key
@@ -175,9 +195,6 @@ class OddsValidator:
 
         Returns:
             List of warning messages
-
-        Note:
-            Vig should typically be between 2-15% for legitimate markets
         """
         warnings = []
 
@@ -191,14 +208,27 @@ class OddsValidator:
             total_prob = prob1 + prob2
             vig_percent = (total_prob - 1.0) * 100
 
-            if vig_percent < cls.MIN_VIG_PERCENT:
+            if vig_percent > cls.MAX_VIG_PERCENT:
+                warnings.append(
+                    f"{bookmaker} {market}: Vig too high ({vig_percent:.2f}%), possible data error"
+                )
+            elif vig_percent < 0:
+                warnings.append(
+                    f"{bookmaker} {market}: Negative vig ({vig_percent:.2f}%), "
+                    "possible arbitrage or data error"
+                )
+            elif bookmaker in cls.EXCHANGE_BOOKMAKERS:
+                pass  # Any non-negative vig is normal for exchanges
+            elif bookmaker in cls.SHARP_BOOKMAKERS:
+                if vig_percent < cls.MIN_VIG_PERCENT_SHARP:
+                    warnings.append(
+                        f"{bookmaker} {market}: Vig below sharp threshold "
+                        f"({vig_percent:.2f}% < {cls.MIN_VIG_PERCENT_SHARP}%)"
+                    )
+            elif vig_percent < cls.MIN_VIG_PERCENT:
                 warnings.append(
                     f"{bookmaker} {market}: Vig too low ({vig_percent:.2f}%), "
                     "possible arbitrage or data error"
-                )
-            elif vig_percent > cls.MAX_VIG_PERCENT:
-                warnings.append(
-                    f"{bookmaker} {market}: Vig too high ({vig_percent:.2f}%), possible data error"
                 )
 
         except Exception as e:
