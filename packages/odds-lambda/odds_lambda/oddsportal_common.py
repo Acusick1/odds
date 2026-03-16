@@ -263,7 +263,7 @@ async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
        with a delay and fresh browser session. This bypasses the upstream
        ``is_retryable`` flag which is unreliable.
 
-    A fresh Chrome user agent is generated per invocation (via ``fake-useragent``)
+    A fresh Chrome user agent is generated per attempt (via ``fake-useragent``)
     and passed as ``browser_user_agent`` unless the caller already supplied one.
 
     Returns:
@@ -275,12 +275,14 @@ async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
     """
     from oddsharvester.core.scraper_app import run_scraper
 
-    if "browser_user_agent" not in scraper_kwargs:
-        ua = _generate_user_agent()
-        scraper_kwargs["browser_user_agent"] = ua
-        logger.info("generated_user_agent", user_agent=ua)
+    caller_supplied_ua = "browser_user_agent" in scraper_kwargs
 
     for attempt in range(1, MAX_SCRAPER_RETRIES + 1):
+        if not caller_supplied_ua:
+            ua = _generate_user_agent()
+            scraper_kwargs["browser_user_agent"] = ua
+            logger.info("generated_user_agent", user_agent=ua, attempt=attempt)
+
         logger.info("running_harvester", attempt=attempt, **scraper_kwargs)
 
         result = await run_scraper(**scraper_kwargs)
@@ -297,13 +299,24 @@ async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
 
         if result.success:
             logger.info(
-                "harvester_success",
+                "harvester_attempt_result",
+                attempt=attempt,
+                outcome="success",
                 matches=len(result.success),
+                user_agent=scraper_kwargs.get("browser_user_agent"),
                 stats=result.stats.to_dict(),
             )
             # Retry failed URLs up to MAX_FAILED_URL_RETRY_PASSES times with fresh browser sessions
             await _retry_failed_urls(result, scraper_kwargs)
             return result
+
+        logger.warning(
+            "harvester_attempt_result",
+            attempt=attempt,
+            outcome="empty",
+            matches=0,
+            user_agent=scraper_kwargs.get("browser_user_agent"),
+        )
 
         if attempt < MAX_SCRAPER_RETRIES:
             logger.warning(
