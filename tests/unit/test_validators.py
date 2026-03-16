@@ -50,15 +50,28 @@ class TestOddsValidator:
         warnings = OddsValidator.validate_vig(outcomes, "fanduel", "h2h")
         assert len(warnings) == 0  # Normal vig (~4.5%)
 
-    def test_validate_vig_too_low(self):
-        """Test vig validation for suspiciously low vig (arbitrage)."""
+    def test_validate_vig_too_low_retail(self):
+        """Test vig validation for suspiciously low vig from retail bookmaker."""
+        # -101/-101: prob = 101/201 = 0.5025 each, total = 1.005, vig = 0.5%
+        outcomes = [
+            {"price": -101},
+            {"price": -101},
+        ]
+        warnings = OddsValidator.validate_vig(outcomes, "fanduel", "totals")
+        assert len(warnings) == 1
+        assert "too low" in warnings[0]
+
+    def test_validate_vig_negative(self):
+        """Test negative vig flagged for all bookmakers including exchanges."""
+        # +110/+110: prob = 100/210 = 0.476 each, total = 0.952, vig = -4.76%
         outcomes = [
             {"price": 110},
             {"price": 110},
         ]
-        warnings = OddsValidator.validate_vig(outcomes, "fanduel", "h2h")
-        assert len(warnings) > 0
-        assert "too low" in warnings[0]
+        for bookmaker in ["fanduel", "betfair_exchange", "pinnacle"]:
+            warnings = OddsValidator.validate_vig(outcomes, bookmaker, "h2h")
+            assert len(warnings) == 1, f"Expected warning for {bookmaker}"
+            assert "Negative vig" in warnings[0]
 
     def test_validate_vig_too_high(self):
         """Test vig validation for unreasonably high vig."""
@@ -69,6 +82,28 @@ class TestOddsValidator:
         warnings = OddsValidator.validate_vig(outcomes, "fanduel", "h2h")
         assert len(warnings) > 0
         assert "too high" in warnings[0]
+
+    def test_validate_vig_too_high_exchange(self):
+        """Excessive vig flagged even for exchange bookmakers."""
+        outcomes = [
+            {"price": -200},
+            {"price": -200},
+        ]
+        warnings = OddsValidator.validate_vig(outcomes, "betfair_exchange", "totals")
+        assert len(warnings) == 1
+        assert "too high" in warnings[0]
+
+    def test_validate_vig_exchange_low_vig_no_warning(self):
+        """Exchange bookmakers with legitimately low vig produce no warnings."""
+        # -105/-105: prob = 105/205 = 0.5122 each, total = 1.0244, vig = 2.44%
+        # -102/-102: prob = 102/202 = 0.5050 each, total = 1.0099, vig = 0.99%
+        for price in [-102, -103, -105]:
+            outcomes = [{"price": price}, {"price": price}]
+            for bookmaker in OddsValidator.EXCHANGE_BOOKMAKERS:
+                warnings = OddsValidator.validate_vig(outcomes, bookmaker, "totals")
+                assert len(warnings) == 0, (
+                    f"Unexpected warning for {bookmaker} at {price}: {warnings}"
+                )
 
     def test_validate_vig_wrong_number_of_outcomes(self):
         """Test vig validation skips non-two-way markets."""
@@ -184,6 +219,38 @@ class TestOddsValidator:
         is_valid, warnings = OddsValidator.validate_odds_snapshot(data, "test123")
         assert not is_valid
         assert any("No bookmakers" in w for w in warnings)
+
+    def test_validate_odds_snapshot_vig_warning_does_not_invalidate(self):
+        """Vig warnings are informational and should not set is_valid=False."""
+        data = {
+            "id": "test123",
+            "sport_key": "basketball_nba",
+            "commence_time": datetime.now(UTC).isoformat(),
+            "home_team": "Lakers",
+            "away_team": "Celtics",
+            "bookmakers": [
+                {
+                    "key": "fanduel",
+                    "title": "FanDuel",
+                    "last_update": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+                    "markets": [
+                        {
+                            "key": "totals",
+                            "outcomes": [
+                                {"name": "Over", "price": -101},
+                                {"name": "Under", "price": -101},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        is_valid, warnings = OddsValidator.validate_odds_snapshot(data, "test123")
+        # Vig is ~0.5% which is below the 2.0% retail floor, producing a warning
+        assert len(warnings) > 0
+        assert any("too low" in w for w in warnings)
+        # But the snapshot is still valid — vig anomalies are informational
+        assert is_valid
 
     def test_validate_odds_snapshot_future_timestamp(self):
         """Test validation catches future timestamps."""
