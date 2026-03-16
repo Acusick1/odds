@@ -441,6 +441,7 @@ class IngestionStats:
     events_matched: int = 0
     events_created: int = 0
     snapshots_inserted: int = 0
+    snapshots_updated: int = 0
     game_logs_linked: int = 0
     injuries_linked: int = 0
     seasons_downloaded: int = 0

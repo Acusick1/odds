@@ -58,6 +58,7 @@ from odds_analytics.sequence_loader import (
 )
 
 if TYPE_CHECKING:
+    from odds_analytics.match_stats_features import MatchStatsCache
     from odds_analytics.training.config import FeatureConfig
 
 logger = structlog.get_logger()
@@ -108,6 +109,7 @@ class EventDataBundle:
     player_stats: dict[str, NbaPlayerSeasonStats] = field(default_factory=dict)
     game_logs: list[NbaTeamGameLog] = field(default_factory=list)
     prior_season_events: list[Event] = field(default_factory=list)
+    prior_match_stats: dict[str, list[dict[str, int]]] = field(default_factory=dict)
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
@@ -150,6 +152,7 @@ async def collect_event_data(
     session: AsyncSession,
     config: FeatureConfig,
     standings_cache: dict[str, list[Event]] | None = None,
+    match_stats_cache: MatchStatsCache | None = None,
 ) -> EventDataBundle:
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
@@ -261,6 +264,13 @@ async def collect_event_data(
 
         prior_season_events = get_prior_events_from_cache(standings_cache, event)
 
+    # Prior match stats for rolling match stats features (from preloaded cache)
+    prior_match_stats: dict[str, list[dict[str, int]]] = {}
+    if "match_stats" in config.feature_groups and match_stats_cache is not None:
+        from odds_analytics.match_stats_features import get_prior_match_stats_from_cache
+
+        prior_match_stats = get_prior_match_stats_from_cache(match_stats_cache, event)
+
     # Sequences for LSTM adapter
     sequences: list[list[Odds]] = []
     if config.adapter == "lstm":
@@ -277,6 +287,7 @@ async def collect_event_data(
         player_stats=player_stats,
         game_logs=game_logs,
         prior_season_events=prior_season_events,
+        prior_match_stats=prior_match_stats,
         sequences=sequences,
     )
 
@@ -502,7 +513,9 @@ class FeatureAdapter(Protocol):
         ...
 
 
-_STATIC_FEATURE_GROUPS = frozenset({"tabular", "polymarket", "injuries", "rest", "standings"})
+_STATIC_FEATURE_GROUPS = frozenset(
+    {"tabular", "polymarket", "injuries", "rest", "standings", "match_stats"}
+)
 
 
 def _static_feature_group_names(config: FeatureConfig) -> list[str]:
@@ -530,6 +543,10 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
         from odds_analytics.standings_features import StandingsFeatures
 
         names.extend(f"stnd_{n}" for n in StandingsFeatures.get_feature_names())
+    if "match_stats" in config.feature_groups:
+        from odds_analytics.match_stats_features import MatchStatsFeatures
+
+        names.extend(f"mstat_{n}" for n in MatchStatsFeatures.get_feature_names())
     return names
 
 
@@ -694,6 +711,28 @@ def _extract_static_feature_parts(
             except Exception:
                 logger.debug("standings_feature_extraction_failed", event_id=event.id)
                 parts.append(nan_block_stnd)
+
+    # --- Match stats features (NaN-fill when unavailable to keep row) ---
+    if "match_stats" in config.feature_groups:
+        from odds_analytics.match_stats_features import (
+            MatchStatsFeatures,
+            extract_match_stats_features,
+        )
+
+        n_mstat = len(MatchStatsFeatures.get_feature_names())
+        nan_block_mstat = np.full(n_mstat, np.nan)
+
+        if not bundle.prior_match_stats:
+            parts.append(nan_block_mstat)
+        else:
+            try:
+                mstat_feats = extract_match_stats_features(
+                    bundle.prior_match_stats, event, window=config.match_stats_window
+                )
+                parts.append(mstat_feats.to_array())
+            except Exception:
+                logger.debug("match_stats_feature_extraction_failed", event_id=event.id)
+                parts.append(nan_block_mstat)
 
     return parts
 
@@ -969,18 +1008,34 @@ async def prepare_training_data(
     lstm_adapter = isinstance(adapter, LSTMAdapter)
     static_names = _static_feature_group_names(config) if lstm_adapter else None
 
+    # Resolve sport_key once for cache loaders
+    sport_key = config.sport_key or (valid_events[0].sport_key if valid_events else None)
+
     # Preload standings cache to avoid N+1 queries
     standings_cache: dict[str, list[Event]] | None = None
     if "standings" in config.feature_groups:
         from odds_analytics.standings_features import load_season_events_cache
 
-        sport_key = config.sport_key or (valid_events[0].sport_key if valid_events else None)
         if sport_key:
             standings_cache = await load_season_events_cache(session, sport_key)
 
+    # Preload match stats cache to avoid N+1 queries
+    match_stats_cache: MatchStatsCache | None = None
+    if "match_stats" in config.feature_groups:
+        from odds_analytics.match_stats_features import load_match_stats_cache
+
+        if sport_key:
+            match_stats_cache = await load_match_stats_cache(session, sport_key)
+
     for event in valid_events:
         # Load all data for this event in bulk
-        bundle = await collect_event_data(event, session, config, standings_cache=standings_cache)
+        bundle = await collect_event_data(
+            event,
+            session,
+            config,
+            standings_cache=standings_cache,
+            match_stats_cache=match_stats_cache,
+        )
 
         # Closing snapshot is required
         if bundle.closing_snapshot is None:

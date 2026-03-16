@@ -220,6 +220,42 @@ def _extract_h2h_odds(
     }
 
 
+# Match stats columns: (csv_column, json_key) pairs.
+# These are post-match stats from the FDUK CSVs stored in raw_data for
+# downstream rolling feature computation.
+MATCH_STATS_COLUMNS: list[tuple[str, str]] = [
+    ("HS", "home_shots"),
+    ("AS", "away_shots"),
+    ("HST", "home_shots_on_target"),
+    ("AST", "away_shots_on_target"),
+    ("HC", "home_corners"),
+    ("AC", "away_corners"),
+    ("HF", "home_fouls"),
+    ("AF", "away_fouls"),
+    ("HY", "home_yellow_cards"),
+    ("AY", "away_yellow_cards"),
+    ("HR", "home_red_cards"),
+    ("AR", "away_red_cards"),
+    ("HTHG", "home_ht_goals"),
+    ("HTAG", "away_ht_goals"),
+]
+
+
+def _extract_match_stats(row: dict[str, str]) -> dict[str, Any]:
+    """Extract match stats from a CSV row. Returns dict with non-null int stats and referee."""
+    stats: dict[str, Any] = {}
+    for csv_col, json_key in MATCH_STATS_COLUMNS:
+        val = _safe_int(row.get(csv_col))
+        if val is not None:
+            stats[json_key] = val
+
+    referee = row.get("Referee", "").strip()
+    if referee:
+        stats["referee"] = referee
+
+    return stats
+
+
 def _build_snapshot_raw_data(
     row: dict[str, str],
     home_team: str,
@@ -249,10 +285,16 @@ def _build_snapshot_raw_data(
     if not bookmakers:
         return None
 
-    return {
+    raw_data: dict[str, Any] = {
         "bookmakers": bookmakers,
         "source": SOURCE_TAG,
     }
+
+    match_stats = _extract_match_stats(row)
+    if match_stats:
+        raw_data["match_stats"] = match_stats
+
+    return raw_data
 
 
 def build_event_id(
@@ -380,16 +422,26 @@ async def _ingest_one_match(
             session.add(event)
             stats.events_created += 1
 
-    # --- Check for existing snapshots (idempotency) ---
-    existing_check = await session.execute(
-        select(OddsSnapshot.id).where(
+    # --- Check for existing snapshots (idempotency / update) ---
+    existing_snap_result = await session.execute(
+        select(OddsSnapshot).where(
             and_(
                 OddsSnapshot.event_id == event_id,
                 OddsSnapshot.api_request_id == SOURCE_TAG,
             )
         )
     )
-    if existing_check.scalars().first() is not None:
+    existing_snaps = list(existing_snap_result.scalars().all())
+    if existing_snaps:
+        # Merge match_stats into existing snapshots' raw_data if missing
+        match_stats = _extract_match_stats(row)
+        if match_stats:
+            for snap in existing_snaps:
+                raw = snap.raw_data
+                if raw and "match_stats" not in raw:
+                    # Reassign a new dict so SQLAlchemy detects the JSON mutation
+                    snap.raw_data = {**raw, "match_stats": match_stats}
+                    stats.snapshots_updated += 1
         return
 
     # --- Build opening snapshot ---
@@ -523,12 +575,14 @@ async def _run(
         totals.events_matched += stats.events_matched
         totals.events_created += stats.events_created
         totals.snapshots_inserted += stats.snapshots_inserted
+        totals.snapshots_updated += stats.snapshots_updated
         totals.errors.extend(stats.errors)
 
         if not dry_run and not download_only:
             log.info(
                 f"  → matched={stats.events_matched}, created={stats.events_created}, "
-                f"snapshots={stats.snapshots_inserted}, skipped={stats.games_skipped}"
+                f"snapshots={stats.snapshots_inserted}, updated={stats.snapshots_updated}, "
+                f"skipped={stats.games_skipped}"
             )
 
     log.info("")
@@ -541,6 +595,7 @@ async def _run(
         log.info(f"Events matched:     {totals.events_matched}")
         log.info(f"Events created:     {totals.events_created}")
         log.info(f"Snapshots inserted: {totals.snapshots_inserted}")
+        log.info(f"Snapshots updated:  {totals.snapshots_updated}")
 
     if totals.errors:
         log.info(f"Errors:             {len(totals.errors)}")
