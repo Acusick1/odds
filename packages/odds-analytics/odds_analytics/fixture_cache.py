@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import bisect
 import csv
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+
+import structlog
 
 __all__ = [
     "FixtureRecord",
@@ -20,6 +23,8 @@ __all__ = [
     "load_fixture_cache",
     "get_last_fixture_date",
 ]
+
+logger = structlog.get_logger()
 
 # Default location relative to project root
 _DEFAULT_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "espn_fixtures"
@@ -41,36 +46,57 @@ def load_fixture_cache(data_dir: str | Path | None = None) -> FixtureCache:
     """Load all fixture CSVs from the data directory into a unified cache.
 
     Each team maps to a chronologically sorted list of FixtureRecord entries
-    spanning all competitions and all seasons.
+    spanning all competitions and all seasons. Both the ``team`` and ``opponent``
+    columns are indexed so that promoted teams (which may be missing from the
+    ESPN teams API) still get fixture entries.
     """
     directory = Path(data_dir) if data_dir is not None else _DEFAULT_DATA_DIR
-    cache: FixtureCache = {}
+    cache: FixtureCache = defaultdict(list)
 
     csv_files = sorted(directory.glob("fixtures_*.csv"))
     if not csv_files:
-        return cache
+        logger.warning("fixture_cache_empty", data_dir=str(directory))
+        return dict(cache)
 
     for csv_path in csv_files:
         with open(csv_path, newline="") as fh:
             reader = csv.DictReader(fh)
             for row in reader:
-                team = row["team"]
-                date_str = row["date"]
+                dt = _parse_date(row["date"])
                 competition = row["competition"]
-
-                dt = _parse_date(date_str)
                 record = FixtureRecord(date=dt, competition=competition)
 
-                if team not in cache:
-                    cache[team] = []
-                cache[team].append(record)
+                cache[row["team"]].append(record)
+                cache[row["opponent"]].append(record)
 
-    # Sort each team's fixtures chronologically (CSVs are per-season and sorted,
-    # but loading multiple seasons can interleave)
+    # Sort each team's fixtures chronologically and deduplicate (each match
+    # is recorded from both perspectives in the CSV, and we now index both
+    # team and opponent, so the same (date, competition) pair can appear twice)
     for team in cache:
         cache[team].sort(key=lambda r: r.date)
+        cache[team] = _deduplicate(cache[team])
 
-    return cache
+    total_records = sum(len(v) for v in cache.values())
+    logger.info(
+        "fixture_cache_loaded",
+        teams=len(cache),
+        records=total_records,
+        csv_files=len(csv_files),
+    )
+
+    return dict(cache)
+
+
+def _deduplicate(records: list[FixtureRecord]) -> list[FixtureRecord]:
+    """Remove duplicate records (same date + competition) while preserving order."""
+    seen: set[tuple[datetime, str]] = set()
+    result: list[FixtureRecord] = []
+    for r in records:
+        key = (r.date, r.competition)
+        if key not in seen:
+            seen.add(key)
+            result.append(r)
+    return result
 
 
 def get_last_fixture_date(

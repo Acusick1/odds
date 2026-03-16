@@ -108,6 +108,11 @@ class TestLoadFixtureCache:
         assert len(cache["Arsenal"]) == 2
         assert cache["Arsenal"][0].competition == "Premier League"
         assert cache["Arsenal"][1].competition == "Champions League"
+        # Opponents are also indexed
+        assert "Chelsea" in cache
+        assert len(cache["Chelsea"]) == 1
+        assert "PSG" in cache
+        assert len(cache["PSG"]) == 1
 
     def test_empty_dir(self, tmp_path: object) -> None:
         from pathlib import Path
@@ -143,3 +148,83 @@ class TestLoadFixtureCache:
         assert len(cache["Arsenal"]) == 2
         assert cache["Arsenal"][0].date.year == 2024
         assert cache["Arsenal"][1].date.year == 2025
+        # Chelsea appears as opponent in both seasons
+        assert len(cache["Chelsea"]) == 2
+
+    def test_opponent_indexing_for_promoted_teams(self, tmp_path: object) -> None:
+        """Teams only appearing as opponents are still indexed."""
+        import csv
+        from pathlib import Path
+
+        data_dir = Path(str(tmp_path))
+        csv_path = data_dir / "fixtures_2024-25.csv"
+
+        with open(csv_path, "w", newline="") as fh:
+            writer = csv.DictWriter(
+                fh, fieldnames=["date", "team", "opponent", "competition", "home_away"]
+            )
+            writer.writeheader()
+            # Ipswich only appears as an opponent (promoted, not in ESPN teams API)
+            writer.writerow(
+                {
+                    "date": "2025-01-04T15:00Z",
+                    "team": "Arsenal",
+                    "opponent": "Ipswich",
+                    "competition": "Premier League",
+                    "home_away": "home",
+                }
+            )
+            writer.writerow(
+                {
+                    "date": "2025-01-11T15:00Z",
+                    "team": "Liverpool",
+                    "opponent": "Ipswich",
+                    "competition": "Premier League",
+                    "home_away": "home",
+                }
+            )
+
+        cache = load_fixture_cache(data_dir)
+        assert "Ipswich" in cache
+        assert len(cache["Ipswich"]) == 2
+        # Can look up Ipswich's most recent fixture
+        result = get_last_fixture_date(cache, "Ipswich", _dt(2025, 1, 12))
+        assert result == _dt(2025, 1, 11, 15)
+
+    def test_deduplicates_team_opponent_overlap(self, tmp_path: object) -> None:
+        """When same match appears for team and opponent, no duplicates."""
+        import csv
+        from pathlib import Path
+
+        data_dir = Path(str(tmp_path))
+        csv_path = data_dir / "fixtures_2024-25.csv"
+
+        with open(csv_path, "w", newline="") as fh:
+            writer = csv.DictWriter(
+                fh, fieldnames=["date", "team", "opponent", "competition", "home_away"]
+            )
+            writer.writeheader()
+            # Same match from both perspectives
+            writer.writerow(
+                {
+                    "date": "2025-01-04T15:00Z",
+                    "team": "Arsenal",
+                    "opponent": "Chelsea",
+                    "competition": "Premier League",
+                    "home_away": "home",
+                }
+            )
+            writer.writerow(
+                {
+                    "date": "2025-01-04T15:00Z",
+                    "team": "Chelsea",
+                    "opponent": "Arsenal",
+                    "competition": "Premier League",
+                    "home_away": "away",
+                }
+            )
+
+        cache = load_fixture_cache(data_dir)
+        # Arsenal: indexed as team + indexed as opponent = 2 raw, deduped to 1
+        assert len(cache["Arsenal"]) == 1
+        assert len(cache["Chelsea"]) == 1

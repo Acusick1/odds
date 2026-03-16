@@ -9,13 +9,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 import numpy as np
 from odds_core.models import Event
 
-if TYPE_CHECKING:
-    from odds_analytics.fixture_cache import FixtureCache
+from odds_analytics.fixture_cache import FixtureCache, get_last_fixture_date
 
 __all__ = [
     "EplScheduleFeatures",
@@ -121,8 +119,6 @@ def extract_epl_schedule_features(
     home_fixture_date: datetime | None = None
     away_fixture_date: datetime | None = None
     if fixture_cache is not None:
-        from odds_analytics.fixture_cache import get_last_fixture_date
-
         home_fixture_date = get_last_fixture_date(
             fixture_cache, event.home_team, event.commence_time
         )

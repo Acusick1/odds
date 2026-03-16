@@ -278,11 +278,11 @@ class TestExtractEplScheduleFeatures:
                 away_score=1,
             ),
         ]
-        # Ipswich not in prior events (newly promoted)
+        # Unknown FC not in prior events at all
         event = _make_event(
             event_id="e2",
             home_team="Arsenal",
-            away_team="Ipswich Town",
+            away_team="Unknown FC",
             commence_time=base,
         )
         features = extract_epl_schedule_features(prior, event)

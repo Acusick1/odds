@@ -742,7 +742,7 @@ def _extract_static_feature_parts(
                 logger.debug("match_stats_feature_extraction_failed", event_id=event.id)
                 parts.append(nan_block_mstat)
 
-    # --- EPL schedule features (NaN-fill when unavailable to keep row) ---
+    # --- EPL schedule features (NaN-fill on failure to keep row) ---
     if "epl_schedule" in config.feature_groups:
         from odds_analytics.epl_schedule_features import (
             EplScheduleFeatures,
@@ -752,17 +752,14 @@ def _extract_static_feature_parts(
         n_eplsched = len(EplScheduleFeatures.get_feature_names())
         nan_block_eplsched = np.full(n_eplsched, np.nan)
 
-        if not bundle.prior_season_events:
+        try:
+            eplsched_feats = extract_epl_schedule_features(
+                bundle.prior_season_events, event, fixture_cache=bundle.fixture_cache
+            )
+            parts.append(eplsched_feats.to_array())
+        except Exception:
+            logger.debug("epl_schedule_feature_extraction_failed", event_id=event.id)
             parts.append(nan_block_eplsched)
-        else:
-            try:
-                eplsched_feats = extract_epl_schedule_features(
-                    bundle.prior_season_events, event, fixture_cache=bundle.fixture_cache
-                )
-                parts.append(eplsched_feats.to_array())
-            except Exception:
-                logger.debug("epl_schedule_feature_extraction_failed", event_id=event.id)
-                parts.append(nan_block_eplsched)
 
     return parts
 
