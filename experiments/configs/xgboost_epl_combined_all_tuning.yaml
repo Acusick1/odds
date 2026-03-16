@@ -1,5 +1,5 @@
 experiment:
-  name: xgboost_epl_combined_tuning
+  name: xgboost_epl_combined_all_tuning
   tags:
   - xgboost
   - epl
@@ -7,11 +7,12 @@ experiment:
   - tuning
   - football
   - pinnacle
+  - standings
+  - match_stats
   description: >
-    EPL CLV prediction with combined OddsPortal + football-data.co.uk data.
-    Pinnacle as sharp reference (from FDUK), bet365 as target bookmaker.
-    ~1.8K matched events with 4 snapshots each (2 per source).
-    Tests whether Pinnacle cross-source features improve over OddsPortal-only baseline.
+    EPL CLV prediction with combined data, Pinnacle sharp reference, standings,
+    and match stats features. Tests whether match stats add signal on top of
+    the tabular + standings baseline.
 
 training:
   strategy_type: xgboost_line_movement
@@ -26,6 +27,7 @@ training:
     shuffle: false
     use_kfold: true
     cv_method: walk_forward
+    n_folds: 5
     kfold_shuffle: false
     window_type: sliding
     min_train_events: 380
@@ -73,6 +75,8 @@ training:
     normalize: false
     feature_groups:
     - tabular
+    - standings
+    - match_stats
     movement_threshold: 0.005
     pm_velocity_window_hours: 2.0
     pm_price_tolerance_minutes: 30
