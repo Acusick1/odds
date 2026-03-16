@@ -272,7 +272,7 @@ Time-series per snapshot:
 
 Three-way comparison isolating the effect of Pinnacle as sharp reference vs more data. **Note**: the original Mar 10 results (R²=0.031) were inflated by a cross-source snapshot contamination bug (#231, fixed Mar 15) — OddsPortal snapshots without Pinnacle were selected over FDUK snapshots with Pinnacle, then `nan_to_num` silently filled missing Pinnacle probs with 0.0. Post-fix results below are the trustworthy baseline.
 
-**Current results (sliding 1-season, matchday-step CV, 100 trials each):**
+**Current results (sliding 1-season, val_step=10, 100 trials each):**
 
 | Experiment | Sharp Ref | Data | Features | CV MSE |
 |---|---|---|---|---|
@@ -282,8 +282,10 @@ Three-way comparison isolating the effect of Pinnacle as sharp reference vs more
 | Combined + Pinnacle + standings | pinnacle | OP + FDUK | 18 (7 tab + 11 standings) | 0.000700 |
 | Combined + Pinnacle + standings + match_stats | pinnacle | OP + FDUK | 32 (7 tab + 11 stnd + 14 mstat) | **0.000693** |
 
+*Note: these results use val_step=10 (matchday granularity). The standard tuning protocol is val_step=50 — re-tuning pending.*
+
 - **MSE improves monotonically** as features are added — standings and match_stats each contribute incremental signal
-- **All four combined configs converge to identical hyperparameters** (n_est=250, depth=2, lr=0.248, mcw=43, subsample=0.5, colsample=0.8, lambda=4.83) — with matchday-granularity validation, the tuner is forced into heavy regularization regardless of feature set
+- **All four combined configs converge to identical hyperparameters** (n_est=250, depth=2, lr=0.248, mcw=43, subsample=0.5, colsample=0.8, lambda=4.83) — with val_step=10, the tuner is forced into heavy regularization regardless of feature set (this is the reason val_step=50 was chosen as the standard protocol)
 - **Feature group ranking preserved** from the prior expanding-window protocol — combined standings + match_stats remains the best EPL result
 - **More data alone adds no signal** — the control (combined data, bet365 sharp) gave R²=-0.005 ± 0.008
 - MSE drop (0.0024 → 0.0007) reflects lower target variance with Pinnacle closing, not necessarily better prediction
@@ -313,7 +315,7 @@ Three-way comparison isolating the effect of Pinnacle as sharp reference vs more
 - Betfair Exchange historical data (historicdata.betfair.com) offers 1-min to 50ms tick data — could replace Pinnacle as sharp reference with even finer granularity
 
 ### Methodology
-- ~~Does CV protocol affect hyperparameter selection?~~ — **Yes** (Mar 2026): Expanding 150-event windows select materially different hyperparams than sliding 1-season with matchday steps. Production-matched CV (sliding, val_step=10) now the standard protocol.
+- ~~Does CV protocol affect hyperparameter selection?~~ — **Yes** (Mar 2026): Expanding 150-event windows select materially different hyperparams than sliding 1-season with matchday steps. Production-matched CV (sliding, val_step=50) now the standard protocol.
 - Is devigged Pinnacle the right target, or should we explore market-wide targets?
 - Multi-horizon sampling: does it genuinely increase effective sample size, or just add correlated noise?
 

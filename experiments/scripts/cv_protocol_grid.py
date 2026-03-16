@@ -40,7 +40,7 @@ from odds_core.database import async_session_maker
 logger = structlog.get_logger()
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "results" / "cv_protocol_grid"
-BASE_CONFIG_PATH = (
+DEFAULT_CONFIG_PATH = (
     Path(__file__).resolve().parent.parent / "configs" / "xgboost_epl_combined_tuning.yaml"
 )
 
@@ -263,11 +263,11 @@ def plot_results(results_df: pd.DataFrame) -> None:
         logger.info("saved_plot", path="params_comparison.png")
 
 
-async def main(n_trials: int, cells: list[GridCell], max_workers: int) -> None:
+async def main(n_trials: int, cells: list[GridCell], max_workers: int, config_path: Path) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    logger.info("loading_base_config", path=str(BASE_CONFIG_PATH))
-    config = MLTrainingConfig.from_yaml(str(BASE_CONFIG_PATH))
+    logger.info("loading_base_config", path=str(config_path))
+    config = MLTrainingConfig.from_yaml(str(config_path))
 
     logger.info("loading_data")
     async with async_session_maker() as session:
@@ -383,7 +383,7 @@ async def main(n_trials: int, cells: list[GridCell], max_workers: int) -> None:
     print("\n" + "=" * 80)
     print("CV Protocol Grid Search Results")
     print("=" * 80)
-    print(f"\nBase config: {BASE_CONFIG_PATH.name}")
+    print(f"\nBase config: {config_path.name}")
     print(f"Trials per cell: {n_trials}")
     print(f"Workers: {max_workers}")
     print(f"Total wall time: {total_elapsed:.1f}s")
@@ -419,8 +419,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if args.config:
-        BASE_CONFIG_PATH = Path(args.config)
+    config_path = Path(args.config) if args.config else DEFAULT_CONFIG_PATH
 
     if args.cells:
         grid = [parse_cell_spec(c) for c in args.cells]
@@ -434,4 +433,4 @@ if __name__ == "__main__":
         print(f"  {cell.label}")
     print()
 
-    asyncio.run(main(args.n_trials, grid, args.workers))
+    asyncio.run(main(args.n_trials, grid, args.workers, config_path))
