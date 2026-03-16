@@ -16,27 +16,19 @@ class OddsValidator:
     # Validation thresholds
     MIN_ODDS = -10000
     MAX_ODDS = 10000
-    MIN_VIG_PERCENT = 2.0  # Minimum expected vig for retail bookmakers
-    MIN_VIG_PERCENT_SHARP = 1.0  # Lower floor for sharp bookmakers
+    MIN_VIG_PERCENT = 2.0  # Minimum expected vig for non-exchange bookmakers
     MAX_VIG_PERCENT = 15.0  # Maximum reasonable vig/juice
     MAX_SPREAD_MOVEMENT = 10.0  # Maximum point spread change
     MAX_TOTAL_MOVEMENT = 20.0  # Maximum total points change
 
-    # Bookmaker classifications for vig validation.
-    # These are The Odds API / production bookmaker keys, distinct from the
-    # OddsPortal display-name mapping in oddsportal_common.py.
+    # Exchange bookmakers legitimately operate near 0% vig, so the vig floor
+    # check is skipped for them. These are The Odds API / production keys,
+    # distinct from the OddsPortal display-name mapping in oddsportal_common.py.
     EXCHANGE_BOOKMAKERS: set[str] = {
         "betfair_exchange",
         "betdaq",
         "smarkets",
         "matchbook",
-    }
-    SHARP_BOOKMAKERS: set[str] = {
-        "pinnacle",
-        "onexbet",
-        "onexbetir",
-        "1xbetir",
-        "betinasia",
     }
 
     @staticmethod
@@ -188,8 +180,8 @@ class OddsValidator:
         Validate vig/juice for two-way markets.
 
         Exchange bookmakers (Betfair, Betdaq, etc.) legitimately operate near 0% vig,
-        so only negative vig and excessive vig are flagged. Sharp bookmakers use a
-        lower floor than retail.
+        so only negative vig and excessive vig are checked. All other bookmakers use
+        the standard MIN_VIG_PERCENT floor.
 
         Args:
             outcomes: List of outcome dictionaries
@@ -220,15 +212,7 @@ class OddsValidator:
                     f"{bookmaker} {market}: Negative vig ({vig_percent:.2f}%), "
                     "possible arbitrage or data error"
                 )
-            elif bookmaker in cls.EXCHANGE_BOOKMAKERS:
-                pass  # Any non-negative vig is normal for exchanges
-            elif bookmaker in cls.SHARP_BOOKMAKERS:
-                if vig_percent < cls.MIN_VIG_PERCENT_SHARP:
-                    warnings.append(
-                        f"{bookmaker} {market}: Vig below sharp threshold "
-                        f"({vig_percent:.2f}% < {cls.MIN_VIG_PERCENT_SHARP}%)"
-                    )
-            elif vig_percent < cls.MIN_VIG_PERCENT:
+            elif bookmaker not in cls.EXCHANGE_BOOKMAKERS and vig_percent < cls.MIN_VIG_PERCENT:
                 warnings.append(
                     f"{bookmaker} {market}: Vig too low ({vig_percent:.2f}%), "
                     "possible arbitrage or data error"

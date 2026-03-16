@@ -105,25 +105,6 @@ class TestOddsValidator:
                     f"Unexpected warning for {bookmaker} at {price}: {warnings}"
                 )
 
-    def test_validate_vig_sharp_bookmaker_threshold(self):
-        """Sharp bookmakers use a lower vig floor than retail."""
-        # -101/-101: vig ~0.5%, below sharp threshold of 1.0%
-        outcomes = [{"price": -101}, {"price": -101}]
-        for bookmaker in OddsValidator.SHARP_BOOKMAKERS:
-            warnings = OddsValidator.validate_vig(outcomes, bookmaker, "totals")
-            assert len(warnings) == 1, f"Expected warning for {bookmaker}"
-            assert "sharp threshold" in warnings[0]
-
-        # -102/-102: vig ~0.99%, still below 1.0% threshold
-        outcomes = [{"price": -102}, {"price": -102}]
-        warnings = OddsValidator.validate_vig(outcomes, "pinnacle", "totals")
-        assert len(warnings) == 1
-
-        # -103/-103: vig ~1.46%, above sharp threshold — no warning
-        outcomes = [{"price": -103}, {"price": -103}]
-        warnings = OddsValidator.validate_vig(outcomes, "pinnacle", "totals")
-        assert len(warnings) == 0
-
     def test_validate_vig_wrong_number_of_outcomes(self):
         """Test vig validation skips non-two-way markets."""
         outcomes = [
