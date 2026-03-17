@@ -43,6 +43,7 @@ from odds_lambda.oddsportal_common import (
 )
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from team_names import normalize_team as _normalize_team_central
 
 logging.basicConfig(
     level=logging.INFO,
@@ -72,19 +73,6 @@ SEASONS: dict[str, str] = {
     "2025-2026": "2526",
 }
 
-# football-data.co.uk team name → OddsPortal / pipeline canonical name.
-# Only entries that differ need mapping; matching names are passed through.
-# Verified against OddsPortal team names used in existing DB records.
-# Teams not listed here pass through unchanged (e.g. Arsenal, Chelsea,
-# Liverpool, Everton, Bournemouth, Brentford, Crystal Palace, Fulham,
-# Aston Villa, Southampton, Burnley, Watford, Luton, Ipswich).
-TEAM_NAME_MAP: dict[str, str] = {
-    "Man United": "Manchester Utd",
-    "Man City": "Manchester City",
-    "Nott'm Forest": "Nottingham",
-    "Sheffield United": "Sheffield Utd",
-}
-
 # Bookmaker column prefixes → pipeline bookmaker key.
 # Each entry maps (home_col, draw_col, away_col) derived from prefix + H/D/A.
 BOOKMAKER_PREFIXES: dict[str, str] = {
@@ -109,7 +97,7 @@ AGGREGATE_PREFIXES: dict[str, str] = {
 
 def normalize_team(name: str) -> str:
     """Normalize football-data.co.uk team name to pipeline canonical form."""
-    return TEAM_NAME_MAP.get(name, name)
+    return _normalize_team_central(name)
 
 
 def _season_url(season: str) -> str:

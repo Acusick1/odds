@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from team_names import normalize_team as _normalize_team_central
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,30 +38,6 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "espn_lineups"
 BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1"
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "data" / "espn_fixtures"
-
-# ESPN displayName -> pipeline canonical name (matching FDUK / OddsPortal).
-# Duplicated from ingest_espn_fixtures.py to keep scripts self-contained.
-ESPN_TEAM_NAME_MAP: dict[str, str] = {
-    "AFC Bournemouth": "Bournemouth",
-    "Brighton & Hove Albion": "Brighton",
-    "Cardiff City": "Cardiff",
-    "Huddersfield Town": "Huddersfield",
-    "Hull City": "Hull",
-    "Ipswich Town": "Ipswich",
-    "Leicester City": "Leicester",
-    "Leeds United": "Leeds",
-    "Manchester United": "Manchester Utd",
-    "Newcastle United": "Newcastle",
-    "Norwich City": "Norwich",
-    "Nottingham Forest": "Nottingham",
-    "Sheffield United": "Sheffield Utd",
-    "Stoke City": "Stoke",
-    "Swansea City": "Swansea",
-    "West Bromwich Albion": "West Brom",
-    "West Ham United": "West Ham",
-    "Wolverhampton Wanderers": "Wolves",
-    "Tottenham Hotspur": "Tottenham",
-}
 
 SEASONS: dict[int, str] = {
     2020: "2020-21",
@@ -106,7 +83,7 @@ POSITION_MAP: dict[str, str] = {
 
 def _normalize_team(espn_name: str) -> str:
     """Convert ESPN displayName to pipeline canonical name."""
-    return ESPN_TEAM_NAME_MAP.get(espn_name, espn_name)
+    return _normalize_team_central(espn_name)
 
 
 def _fetch_json(client: httpx.Client, url: str) -> dict[str, Any]:

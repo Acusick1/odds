@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from team_names import normalize_team as _normalize_team_central
 
 logging.basicConfig(
     level=logging.INFO,
@@ -67,30 +68,6 @@ SEASONS: dict[int, str] = {
     2025: "2025-26",
 }
 
-# ESPN displayName -> pipeline canonical name (matching FDUK / OddsPortal).
-# Only teams whose ESPN name differs from the canonical name need entries.
-ESPN_TEAM_NAME_MAP: dict[str, str] = {
-    "AFC Bournemouth": "Bournemouth",
-    "Brighton & Hove Albion": "Brighton",
-    "Cardiff City": "Cardiff",
-    "Huddersfield Town": "Huddersfield",
-    "Hull City": "Hull",
-    "Ipswich Town": "Ipswich",
-    "Leicester City": "Leicester",
-    "Leeds United": "Leeds",
-    "Manchester United": "Manchester Utd",
-    "Newcastle United": "Newcastle",
-    "Norwich City": "Norwich",
-    "Nottingham Forest": "Nottingham",
-    "Sheffield United": "Sheffield Utd",
-    "Stoke City": "Stoke",
-    "Swansea City": "Swansea",
-    "West Bromwich Albion": "West Brom",
-    "West Ham United": "West Ham",
-    "Wolverhampton Wanderers": "Wolves",
-    "Tottenham Hotspur": "Tottenham",
-}
-
 CSV_COLUMNS = [
     "date",
     "team",
@@ -108,7 +85,7 @@ REQUEST_DELAY = 0.5  # seconds between HTTP requests
 
 def _normalize_team(espn_name: str) -> str:
     """Convert ESPN displayName to pipeline canonical name."""
-    return ESPN_TEAM_NAME_MAP.get(espn_name, espn_name)
+    return _normalize_team_central(espn_name)
 
 
 def _fetch_json(client: httpx.Client, url: str) -> dict[str, Any]:

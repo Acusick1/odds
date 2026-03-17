@@ -24,6 +24,7 @@ from io import StringIO
 from pathlib import Path
 
 import pandas as pd
+from team_names import normalize_team as _normalize_team_central
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,29 +54,6 @@ SEASON_HTML_FILES: dict[int, str] = {
     2023: "FBREF_EPL_23_24.html",
     2024: "FBREF_EPL_24_25.html",
     2025: "FBREF_EPL_25_26.html",
-}
-
-# FBref team name -> pipeline canonical name.
-# Only teams whose FBref name differs from canonical need entries.
-FBREF_TEAM_NAME_MAP: dict[str, str] = {
-    "Brighton and Hove Albion": "Brighton",
-    "Brighton & Hove Albion": "Brighton",
-    "Cardiff City": "Cardiff",
-    "Huddersfield Town": "Huddersfield",
-    "Hull City": "Hull",
-    "Ipswich Town": "Ipswich",
-    "Leicester City": "Leicester",
-    "Leeds United": "Leeds",
-    "Newcastle Utd": "Newcastle",
-    "Newcastle United": "Newcastle",
-    "Norwich City": "Norwich",
-    "Nott'ham Forest": "Nottingham",
-    "Nottingham Forest": "Nottingham",
-    "Stoke City": "Stoke",
-    "Swansea City": "Swansea",
-    "Tottenham Hotspur": "Tottenham",
-    "West Ham United": "West Ham",
-    "AFC Bournemouth": "Bournemouth",
 }
 
 # Mapping from flattened column names to clean output names. Unique leaf names
@@ -113,7 +91,7 @@ DROP_COLUMNS = {"Rk", "Matches"}
 
 def _normalize_team(fbref_name: str) -> str:
     """Convert FBref team name to pipeline canonical name."""
-    return FBREF_TEAM_NAME_MAP.get(fbref_name, fbref_name)
+    return _normalize_team_central(fbref_name)
 
 
 def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:

@@ -1020,6 +1020,7 @@ def main() -> None:
 
     # FPL availability features
     fpl_df = load_fpl_availability()
+    fpl_features: pd.DataFrame | None = None
     if fpl_df is not None:
         print("\n" + "=" * 60)
         print("Computing FPL expected-disruption features...")
@@ -1028,6 +1029,8 @@ def main() -> None:
             joined_df = joined_df.merge(fpl_features, on="event_id", how="left")
             n_with_fpl = joined_df["home_expected_disruption"].notna().sum()
             print(f"FPL features joined: {n_with_fpl}/{len(joined_df)} events")
+        else:
+            fpl_features = None
     else:
         print("\n" + "=" * 60)
         print("No FPL availability data found in data/fpl_availability/. Skipping.")

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from team_names import normalize_team
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,16 +42,6 @@ REPO_RAW_BASE = "https://github.com/Randdalf/fplcache/raw/main/cache"
 REPO_API_BASE = "https://api.github.com/repos/Randdalf/fplcache"
 
 POSITION_MAP: dict[int, str] = {1: "GK", 2: "DEF", 3: "MID", 4: "FWD"}
-
-# FPL team name -> pipeline canonical name.
-# Most FPL names already match; these are the exceptions.
-FPL_TEAM_NAME_MAP: dict[str, str] = {
-    "Man City": "Manchester City",
-    "Man Utd": "Manchester Utd",
-    "Nott'm Forest": "Nottingham",
-    "Spurs": "Tottenham",
-    "Wolves": "Wolverhampton",
-}
 
 SEASONS: dict[str, tuple[int, int, int, int]] = {
     # label -> (start_year, start_month, end_year, end_month)
@@ -77,7 +68,7 @@ REQUEST_DELAY = 0.3
 
 
 def _normalize_team(fpl_name: str) -> str:
-    return FPL_TEAM_NAME_MAP.get(fpl_name, fpl_name)
+    return normalize_team(fpl_name, source="fpl")
 
 
 def _snapshot_time_from_path(year: int, month: int, day: int, filename: str) -> datetime:
@@ -94,8 +85,17 @@ def _discover_snapshot_paths(
     end_year: int,
     end_month: int,
 ) -> list[tuple[datetime, str]]:
-    """Discover all snapshot file paths via GitHub Git Trees API."""
-    # Get top-level cache tree
+    """Discover all snapshot file paths via GitHub Git Trees API (recursive).
+
+    Uses a single recursive tree call per year instead of per-day calls,
+    reducing API usage from ~300 calls/season to ~3 calls/season.
+    """
+    snapshots: list[tuple[datetime, str]] = []
+
+    start_dt = datetime(start_year, start_month, 1, tzinfo=UTC)
+    end_dt = datetime(end_year, end_month, 28, tzinfo=UTC)
+
+    # Get top-level tree to find cache/ sha
     resp = client.get(f"{REPO_API_BASE}/git/trees/main", timeout=30)
     resp.raise_for_status()
     time.sleep(REQUEST_DELAY)
@@ -107,63 +107,58 @@ def _discover_snapshot_paths(
     if cache_sha is None:
         raise RuntimeError("cache directory not found in repo")
 
+    # Get year-level trees
     resp = client.get(f"{REPO_API_BASE}/git/trees/{cache_sha}", timeout=30)
     resp.raise_for_status()
     time.sleep(REQUEST_DELAY)
-    year_trees: dict[int, str] = {}
-    for item in resp.json()["tree"]:
-        year_trees[int(item["path"])] = item["sha"]
-
-    snapshots: list[tuple[datetime, str]] = []
-
-    # Iterate through relevant years
-    current = datetime(start_year, start_month, 1, tzinfo=UTC)
-    end = datetime(end_year, end_month, 28, tzinfo=UTC)
 
     years_needed = set()
-    while current <= end:
+    current = start_dt
+    while current <= end_dt:
         years_needed.add(current.year)
         current += timedelta(days=32)
         current = current.replace(day=1)
 
-    for year in sorted(years_needed):
-        if year not in year_trees:
-            continue
-        resp = client.get(f"{REPO_API_BASE}/git/trees/{year_trees[year]}", timeout=30)
+    year_shas: dict[int, str] = {}
+    for item in resp.json()["tree"]:
+        y = int(item["path"])
+        if y in years_needed:
+            year_shas[y] = item["sha"]
+
+    # One recursive call per year — returns all month/day/file entries
+    for year in sorted(year_shas):
+        log.info(f"  Fetching recursive tree for {year}...")
+        resp = client.get(
+            f"{REPO_API_BASE}/git/trees/{year_shas[year]}",
+            params={"recursive": "1"},
+            timeout=60,
+        )
         resp.raise_for_status()
         time.sleep(REQUEST_DELAY)
-        month_trees: dict[int, str] = {}
+
         for item in resp.json()["tree"]:
-            month_trees[int(item["path"])] = item["sha"]
+            if item["type"] != "blob" or not item["path"].endswith(".json.xz"):
+                continue
+            # path format: "MM/DD/HHMM.json.xz"
+            parts = item["path"].split("/")
+            if len(parts) != 3:
+                continue
+            try:
+                month = int(parts[0])
+                day = int(parts[1])
+            except ValueError:
+                continue
 
-        for month in sorted(month_trees):
-            # Filter to season range
             dt_check = datetime(year, month, 1, tzinfo=UTC)
-            if dt_check < datetime(start_year, start_month, 1, tzinfo=UTC):
-                continue
-            if dt_check > datetime(end_year, end_month, 28, tzinfo=UTC):
+            if dt_check < start_dt or dt_check > end_dt:
                 continue
 
-            resp = client.get(f"{REPO_API_BASE}/git/trees/{month_trees[month]}", timeout=30)
-            resp.raise_for_status()
-            time.sleep(REQUEST_DELAY)
-            day_trees: dict[int, str] = {}
-            for item in resp.json()["tree"]:
-                day_trees[int(item["path"])] = item["sha"]
-
-            for day in sorted(day_trees):
-                resp = client.get(f"{REPO_API_BASE}/git/trees/{day_trees[day]}", timeout=30)
-                resp.raise_for_status()
-                time.sleep(REQUEST_DELAY)
-                for item in resp.json()["tree"]:
-                    filename = item["path"]
-                    if not filename.endswith(".json.xz"):
-                        continue
-                    snap_time = _snapshot_time_from_path(year, month, day, filename)
-                    url = f"{REPO_RAW_BASE}/{year}/{month}/{day}/{filename}"
-                    snapshots.append((snap_time, url))
+            snap_time = _snapshot_time_from_path(year, month, day, parts[2])
+            url = f"{REPO_RAW_BASE}/{year}/{month}/{day}/{parts[2]}"
+            snapshots.append((snap_time, url))
 
     snapshots.sort()
+    log.info(f"  Discovered {len(snapshots)} snapshots using {2 + len(year_shas)} API calls")
     return snapshots
 
 
