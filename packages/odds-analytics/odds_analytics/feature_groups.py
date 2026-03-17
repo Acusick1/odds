@@ -60,6 +60,7 @@ from odds_analytics.sequence_loader import (
 
 if TYPE_CHECKING:
     from odds_analytics.epl_lineup_features import LineupCache
+    from odds_analytics.fpl_availability_features import FplAvailabilityCache
     from odds_analytics.match_stats_features import MatchStatsCache
     from odds_analytics.training.config import FeatureConfig
 
@@ -114,6 +115,7 @@ class EventDataBundle:
     prior_match_stats: dict[str, list[dict[str, int]]] = field(default_factory=dict)
     fixtures_df: pd.DataFrame | None = None
     lineup_cache: LineupCache | None = None
+    fpl_availability_cache: FplAvailabilityCache | None = None
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
@@ -159,6 +161,7 @@ async def collect_event_data(
     match_stats_cache: MatchStatsCache | None = None,
     fixtures_df: pd.DataFrame | None = None,
     lineup_cache: LineupCache | None = None,
+    fpl_availability_cache: FplAvailabilityCache | None = None,
 ) -> EventDataBundle:
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
@@ -296,6 +299,7 @@ async def collect_event_data(
         prior_match_stats=prior_match_stats,
         fixtures_df=fixtures_df,
         lineup_cache=lineup_cache,
+        fpl_availability_cache=fpl_availability_cache,
         sequences=sequences,
     )
 
@@ -532,6 +536,7 @@ _STATIC_FEATURE_GROUPS = frozenset(
         "match_stats",
         "epl_schedule",
         "epl_lineup",
+        "fpl_availability",
     }
 )
 
@@ -573,6 +578,10 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
         from odds_analytics.epl_lineup_features import EplLineupFeatures
 
         names.extend(f"epllu_{n}" for n in EplLineupFeatures.get_feature_names())
+    if "fpl_availability" in config.feature_groups:
+        from odds_analytics.fpl_availability_features import FplAvailabilityFeatures
+
+        names.extend(f"fplav_{n}" for n in FplAvailabilityFeatures.get_feature_names())
     return names
 
 
@@ -795,6 +804,23 @@ def _extract_static_feature_parts(
         except Exception:
             logger.debug("epl_lineup_feature_extraction_failed", event_id=event.id)
             parts.append(nan_block_epllu)
+
+    # --- FPL availability features (NaN-fill on failure to keep row) ---
+    if "fpl_availability" in config.feature_groups:
+        from odds_analytics.fpl_availability_features import (
+            FplAvailabilityFeatures,
+            extract_fpl_availability_features,
+        )
+
+        n_fplav = len(FplAvailabilityFeatures.get_feature_names())
+        nan_block_fplav = np.full(n_fplav, np.nan)
+
+        try:
+            fplav_feats = extract_fpl_availability_features(bundle.fpl_availability_cache, event)
+            parts.append(fplav_feats.to_array())
+        except Exception:
+            logger.debug("fpl_availability_feature_extraction_failed", event_id=event.id)
+            parts.append(nan_block_fplav)
 
     return parts
 
@@ -1150,6 +1176,13 @@ async def prepare_training_data(
     if "epl_lineup" in config.feature_groups:
         lineup_cache = await _load_lineup_cache(session)
 
+    # Preload FPL availability cache for expected-disruption features
+    fpl_availability_cache: FplAvailabilityCache | None = None
+    if "fpl_availability" in config.feature_groups:
+        from odds_analytics.fpl_availability_features import load_fpl_availability_cache
+
+        fpl_availability_cache = load_fpl_availability_cache()
+
     for event in valid_events:
         # Load all data for this event in bulk
         bundle = await collect_event_data(
@@ -1160,6 +1193,7 @@ async def prepare_training_data(
             match_stats_cache=match_stats_cache,
             fixtures_df=fixtures_df,
             lineup_cache=lineup_cache,
+            fpl_availability_cache=fpl_availability_cache,
         )
 
         # Closing snapshot is required
