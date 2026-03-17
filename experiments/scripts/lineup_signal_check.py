@@ -1,9 +1,13 @@
 """Phase A: Lineup-delta signal check for CLV prediction.
 
-Loads ESPN lineup CSVs and FBref player stats, matches them to pipeline events
-by team name + date, computes lineup-delta metrics (Jaccard similarity,
-XI changes, GK changed, weighted disruption, goals/minutes lost), and
-correlates each against the observed devigged bet365 CLV target.
+Loads ESPN lineup CSVs, matches them to pipeline events by team name + date,
+computes lineup-delta metrics, and correlates each against the observed
+devigged bet365 CLV target.
+
+Two feature families:
+  - Unweighted: xi_jaccard, xi_changes, gk_changed (pure lineup comparison)
+  - Starts-weighted: cumulative_starts_lost (sliding 38-match window of each
+    dropped player's start count — point-in-time, no future data)
 
 Outputs: correlation matrix, scatter plots, per-feature univariate R².
 Results saved to experiments/results/lineup_signal_check/.
@@ -16,8 +20,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import sys
-import unicodedata
+from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -38,16 +41,14 @@ from sklearn.model_selection import cross_val_score
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
 
-# Add scripts/ to path so we can import from ingest_fbref_player_stats
-sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
-from ingest_fbref_player_stats import FBREF_TEAM_NAME_MAP  # noqa: E402
-
 OUTPUT_DIR = SCRIPT_DIR.parent / "results" / "lineup_signal_check"
 
 LINEUP_DIR = PROJECT_ROOT / "data" / "espn_lineups"
-FBREF_DIR = PROJECT_ROOT / "data" / "fbref_player_stats"
 
 DEFAULT_CONFIG = SCRIPT_DIR.parent / "configs" / "xgboost_epl_combined_standings_tuning.yaml"
+
+# Sliding window for cumulative starts (1 full season of matches)
+STARTS_WINDOW = 38
 
 sns.set_style("whitegrid")
 plt.rcParams["figure.figsize"] = (14, 8)
@@ -57,12 +58,6 @@ plt.rcParams["figure.dpi"] = 120
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
-
-
-def _strip_accents(s: str) -> str:
-    """Remove Unicode accents for fuzzy name matching."""
-    nfkd = unicodedata.normalize("NFKD", s)
-    return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
 def load_lineups() -> pd.DataFrame:
@@ -85,51 +80,6 @@ def load_lineups() -> pd.DataFrame:
     return df
 
 
-def load_fbref_stats() -> pd.DataFrame:
-    """Load all FBref player stats CSVs into a single DataFrame."""
-    csv_files = sorted(FBREF_DIR.glob("player_stats_*.csv"))
-    if not csv_files:
-        raise FileNotFoundError(f"No FBref CSVs found in {FBREF_DIR}")
-
-    frames = [pd.read_csv(f) for f in csv_files]
-    df = pd.concat(frames, ignore_index=True)
-
-    # Normalize team names
-    df["team"] = df["team"].map(lambda t: FBREF_TEAM_NAME_MAP.get(t, t))
-
-    # Create normalized player name for matching
-    df["player_norm"] = df["player"].apply(lambda n: _strip_accents(str(n)).lower().strip())
-
-    print(f"Loaded {len(df)} FBref player rows from {len(csv_files)} CSVs")
-    print(f"  Teams: {sorted(df['team'].unique())}")
-    return df
-
-
-def _build_fbref_lookup(
-    fbref_df: pd.DataFrame,
-) -> dict[tuple[str, str, str], dict[str, Any]]:
-    """Build lookup: (team, player_norm, season) -> stats dict."""
-    lookup: dict[tuple[str, str, str], dict[str, Any]] = {}
-    for _, row in fbref_df.iterrows():
-        key = (row["team"], row["player_norm"], row["season"])
-        lookup[key] = {
-            "minutes": row.get("minutes", 0) or 0,
-            "goals": row.get("goals", 0) or 0,
-            "games_starts": row.get("games_starts", 0) or 0,
-            "nineties": row.get("nineties", 0) or 0,
-        }
-    return lookup
-
-
-def _season_label_from_date(d: datetime) -> str:
-    """Derive season label (e.g. '2024-25') from a datetime."""
-    year = d.year
-    month = d.month
-    if month >= 7:
-        return f"{year}-{str(year + 1)[-2:]}"
-    return f"{year - 1}-{str(year)[-2:]}"
-
-
 # ---------------------------------------------------------------------------
 # Feature computation
 # ---------------------------------------------------------------------------
@@ -147,23 +97,21 @@ def _jaccard(set_a: set[str], set_b: set[str]) -> float:
 
 def compute_lineup_metrics(
     lineup_df: pd.DataFrame,
-    fbref_lookup: dict[tuple[str, str, str], dict[str, Any]],
 ) -> pd.DataFrame:
     """Compute per-team per-match lineup-delta metrics.
 
     For each team in each match, compare the starting XI to the previous
-    match's starting XI. Returns a DataFrame with one row per team per match.
+    match's starting XI. Weights dropped players by their cumulative starts
+    over a sliding window (STARTS_WINDOW matches) — point-in-time, no future data.
     """
-    # Build per-match starting XIs: list of (team, match_date, ..., players)
-    # We need player_id -> player_name mapping, so collect as list of tuples
     match_xis: list[dict[str, Any]] = []
 
     for (team, mdate, ht, at, dt_val), grp in lineup_df.groupby(
         ["team", "match_date", "home_team", "away_team", "datetime"]
     ):
-        id_to_name: dict[str, str] = {}
+        player_ids: set[str] = set()
         for _, r in grp.iterrows():
-            id_to_name[str(r["player_id"])] = r["player_name"]
+            player_ids.add(str(r["player_id"]))
         match_xis.append(
             {
                 "team": team,
@@ -171,72 +119,54 @@ def compute_lineup_metrics(
                 "home_team": ht,
                 "away_team": at,
                 "datetime": dt_val,
-                "id_to_name": id_to_name,
+                "player_ids": player_ids,
             }
         )
 
-    # Sort chronologically per team
     match_xis.sort(key=lambda x: (x["team"], x["datetime"]))
 
     rows: list[dict[str, Any]] = []
-    # team -> previous match's {player_id: player_name}
-    prev_xi: dict[str, dict[str, str]] = {}
+    # team -> previous match's player_ids
+    prev_xi: dict[str, set[str]] = {}
+    # team -> sliding window of recent starting XIs (deque of sets)
+    start_history: dict[str, deque[set[str]]] = {}
 
     for match in match_xis:
         team: str = match["team"]
-        match_date = match["match_date"]
-        dt: datetime = match["datetime"]
-        home_team: str = match["home_team"]
-        away_team: str = match["away_team"]
-        current: dict[str, str] = match["id_to_name"]
-        current_ids = set(current.keys())
-        season = _season_label_from_date(dt)
+        current_ids: set[str] = match["player_ids"]
 
         prev = prev_xi.get(team)
+        history = start_history.get(team)
 
-        if prev is not None:
-            prev_ids = set(prev.keys())
-            xi_jaccard = _jaccard(current_ids, prev_ids)
-            xi_changes = len(prev_ids - current_ids)
+        if prev is not None and history is not None:
+            xi_jaccard = _jaccard(current_ids, prev)
+            dropped_ids = prev - current_ids
+            xi_changes = len(dropped_ids)
 
-            # Names of players dropped from previous XI
-            dropped_names = [prev[pid] for pid in prev_ids - current_ids]
+            # Count cumulative starts for each dropped player over the window
+            cumulative_starts_lost = 0.0
+            for pid in dropped_ids:
+                starts = sum(1 for xi in history if pid in xi)
+                cumulative_starts_lost += starts
 
-            # Match dropped players to FBref stats for weighted metrics
-            weighted_change = 0.0
-            goals_lost = 0.0
-            minutes_lost = 0.0
+            rows.append(
+                {
+                    "team": team,
+                    "match_date": match["match_date"],
+                    "datetime": match["datetime"],
+                    "home_team": match["home_team"],
+                    "away_team": match["away_team"],
+                    "xi_jaccard": xi_jaccard,
+                    "xi_changes": float(xi_changes),
+                    "cumulative_starts_lost": cumulative_starts_lost,
+                }
+            )
 
-            for pname in dropped_names:
-                pname_norm = _strip_accents(pname).lower().strip()
-                stats_row = fbref_lookup.get((team, pname_norm, season))
-                if stats_row is None:
-                    continue
-                minutes_val = float(stats_row.get("minutes", 0) or 0)
-                nineties_val = float(stats_row.get("nineties", 0) or 0)
-                goals_val = float(stats_row.get("goals", 0) or 0)
-
-                weighted_change += nineties_val
-                goals_lost += goals_val
-                minutes_lost += minutes_val
-
-            row: dict[str, Any] = {
-                "team": team,
-                "match_date": match_date,
-                "datetime": dt,
-                "home_team": home_team,
-                "away_team": away_team,
-                "season": season,
-                "xi_jaccard": xi_jaccard,
-                "xi_changes": float(xi_changes),
-                "weighted_xi_change": weighted_change,
-                "goals_lost": goals_lost,
-                "minutes_lost": minutes_lost,
-            }
-            rows.append(row)
-
-        # Store current XI for next iteration
-        prev_xi[team] = current
+        # Update state for next iteration
+        prev_xi[team] = current_ids
+        if team not in start_history:
+            start_history[team] = deque(maxlen=STARTS_WINDOW)
+        start_history[team].append(current_ids)
 
     metrics_df = pd.DataFrame(rows)
     print(f"Computed lineup metrics: {len(metrics_df)} team-match rows")
@@ -278,7 +208,7 @@ def build_gk_changed(lineup_df: pd.DataFrame) -> pd.DataFrame:
 def _compute_rolling_metrics(metrics_df: pd.DataFrame, window: int = 3) -> pd.DataFrame:
     """Add rolling average versions of metrics over last N matches."""
     metrics_df = metrics_df.sort_values(["team", "datetime"]).copy()
-    metric_cols = ["xi_jaccard", "xi_changes", "weighted_xi_change", "goals_lost", "minutes_lost"]
+    metric_cols = ["xi_jaccard", "xi_changes", "cumulative_starts_lost"]
 
     for col in metric_cols:
         metrics_df[f"{col}_roll{window}"] = metrics_df.groupby("team")[col].transform(
@@ -330,14 +260,10 @@ def match_metrics_to_events(
     metric_cols = [
         "xi_jaccard",
         "xi_changes",
-        "weighted_xi_change",
-        "goals_lost",
-        "minutes_lost",
+        "cumulative_starts_lost",
         "xi_jaccard_roll3",
         "xi_changes_roll3",
-        "weighted_xi_change_roll3",
-        "goals_lost_roll3",
-        "minutes_lost_roll3",
+        "cumulative_starts_lost_roll3",
     ]
 
     joined_rows: list[dict[str, Any]] = []
@@ -404,6 +330,7 @@ def match_metrics_to_events(
 # ---------------------------------------------------------------------------
 
 LINEUP_FEATURE_COLS = [
+    # Unweighted
     "home_xi_jaccard",
     "away_xi_jaccard",
     "diff_xi_jaccard",
@@ -413,30 +340,20 @@ LINEUP_FEATURE_COLS = [
     "home_gk_changed",
     "away_gk_changed",
     "diff_gk_changed",
-    "home_weighted_xi_change",
-    "away_weighted_xi_change",
-    "diff_weighted_xi_change",
-    "home_goals_lost",
-    "away_goals_lost",
-    "diff_goals_lost",
-    "home_minutes_lost",
-    "away_minutes_lost",
-    "diff_minutes_lost",
+    # Starts-weighted
+    "home_cumulative_starts_lost",
+    "away_cumulative_starts_lost",
+    "diff_cumulative_starts_lost",
+    # Rolling averages
     "home_xi_jaccard_roll3",
     "away_xi_jaccard_roll3",
     "diff_xi_jaccard_roll3",
     "home_xi_changes_roll3",
     "away_xi_changes_roll3",
     "diff_xi_changes_roll3",
-    "home_weighted_xi_change_roll3",
-    "away_weighted_xi_change_roll3",
-    "diff_weighted_xi_change_roll3",
-    "home_goals_lost_roll3",
-    "away_goals_lost_roll3",
-    "diff_goals_lost_roll3",
-    "home_minutes_lost_roll3",
-    "away_minutes_lost_roll3",
-    "diff_minutes_lost_roll3",
+    "home_cumulative_starts_lost_roll3",
+    "away_cumulative_starts_lost_roll3",
+    "diff_cumulative_starts_lost_roll3",
 ]
 
 
@@ -635,16 +552,10 @@ def main() -> None:
     print("Loading ESPN lineups...")
     lineup_df = load_lineups()
 
-    print("\nLoading FBref player stats...")
-    fbref_df = load_fbref_stats()
-    fbref_lookup = _build_fbref_lookup(fbref_df)
-
-    print(f"\nFBref lookup size: {len(fbref_lookup)} (team, player, season) entries")
-
     # Compute lineup metrics
     print("\n" + "=" * 60)
     print("Computing lineup-delta metrics...")
-    metrics_df = compute_lineup_metrics(lineup_df, fbref_lookup)
+    metrics_df = compute_lineup_metrics(lineup_df)
 
     # Add rolling averages
     metrics_df = _compute_rolling_metrics(metrics_df, window=3)
@@ -655,7 +566,7 @@ def main() -> None:
 
     # Summary stats
     print("\nMetric summary statistics:")
-    for col in ["xi_jaccard", "xi_changes", "weighted_xi_change", "goals_lost", "minutes_lost"]:
+    for col in ["xi_jaccard", "xi_changes", "cumulative_starts_lost"]:
         if col in metrics_df.columns:
             vals = metrics_df[col].dropna()
             print(
@@ -663,16 +574,10 @@ def main() -> None:
                 f"min={vals.min():.1f}, max={vals.max():.1f}"
             )
 
-    # FBref match rate
-    n_with_weight = (metrics_df["weighted_xi_change"] > 0).sum()
     n_with_changes = (metrics_df["xi_changes"] > 0).sum()
     print(
         f"\n  Rows with xi_changes > 0: {n_with_changes}/{len(metrics_df)} "
         f"({100 * n_with_changes / len(metrics_df):.1f}%)"
-    )
-    print(
-        f"  Rows with FBref-weighted changes: {n_with_weight}/{n_with_changes} "
-        f"({100 * n_with_weight / max(n_with_changes, 1):.1f}% of changed lineups)"
     )
 
     # Load pipeline data
