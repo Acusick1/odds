@@ -61,6 +61,7 @@ from odds_analytics.sequence_loader import (
 if TYPE_CHECKING:
     import pandas as pd
 
+    from odds_analytics.epl_lineup_features import LineupCache
     from odds_analytics.match_stats_features import MatchStatsCache
     from odds_analytics.training.config import FeatureConfig
 
@@ -114,6 +115,7 @@ class EventDataBundle:
     prior_season_events: list[Event] = field(default_factory=list)
     prior_match_stats: dict[str, list[dict[str, int]]] = field(default_factory=dict)
     fixtures_df: pd.DataFrame | None = None
+    lineup_cache: LineupCache | None = None
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
@@ -158,6 +160,7 @@ async def collect_event_data(
     standings_cache: dict[str, list[Event]] | None = None,
     match_stats_cache: MatchStatsCache | None = None,
     fixtures_df: pd.DataFrame | None = None,
+    lineup_cache: LineupCache | None = None,
 ) -> EventDataBundle:
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
@@ -294,6 +297,7 @@ async def collect_event_data(
         prior_season_events=prior_season_events,
         prior_match_stats=prior_match_stats,
         fixtures_df=fixtures_df,
+        lineup_cache=lineup_cache,
         sequences=sequences,
     )
 
@@ -520,7 +524,16 @@ class FeatureAdapter(Protocol):
 
 
 _STATIC_FEATURE_GROUPS = frozenset(
-    {"tabular", "polymarket", "injuries", "rest", "standings", "match_stats", "epl_schedule"}
+    {
+        "tabular",
+        "polymarket",
+        "injuries",
+        "rest",
+        "standings",
+        "match_stats",
+        "epl_schedule",
+        "epl_lineup",
+    }
 )
 
 
@@ -557,6 +570,10 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
         from odds_analytics.epl_schedule_features import EplScheduleFeatures
 
         names.extend(f"eplsched_{n}" for n in EplScheduleFeatures.get_feature_names())
+    if "epl_lineup" in config.feature_groups:
+        from odds_analytics.epl_lineup_features import EplLineupFeatures
+
+        names.extend(f"epllu_{n}" for n in EplLineupFeatures.get_feature_names())
     return names
 
 
@@ -763,6 +780,23 @@ def _extract_static_feature_parts(
             logger.debug("epl_schedule_feature_extraction_failed", event_id=event.id)
             parts.append(nan_block_eplsched)
 
+    # --- EPL lineup features (NaN-fill on failure to keep row) ---
+    if "epl_lineup" in config.feature_groups:
+        from odds_analytics.epl_lineup_features import (
+            EplLineupFeatures,
+            extract_epl_lineup_features,
+        )
+
+        n_epllu = len(EplLineupFeatures.get_feature_names())
+        nan_block_epllu = np.full(n_epllu, np.nan)
+
+        try:
+            epllu_feats = extract_epl_lineup_features(bundle.lineup_cache, event)
+            parts.append(epllu_feats.to_array())
+        except Exception:
+            logger.debug("epl_lineup_feature_extraction_failed", event_id=event.id)
+            parts.append(nan_block_epllu)
+
     return parts
 
 
@@ -961,6 +995,7 @@ def _select_closing_snapshot(
 # =============================================================================
 
 _FIXTURES_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "espn_fixtures"
+_LINEUPS_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "espn_lineups"
 
 
 def _load_fixtures_df() -> pd.DataFrame | None:
@@ -986,6 +1021,37 @@ def _load_fixtures_df() -> pd.DataFrame | None:
         csv_files=len(csv_files),
     )
     return df
+
+
+def _load_lineup_cache() -> LineupCache | None:
+    """Load all ESPN lineup CSVs and build a per-team starting XI cache.
+
+    Returns None if no CSV files are found (e.g. in Lambda or before first run).
+    """
+    import pandas as pd_
+
+    from odds_analytics.epl_lineup_features import build_lineup_cache
+
+    csv_files = sorted(_LINEUPS_DATA_DIR.glob("lineups_*.csv"))
+    if not csv_files:
+        logger.warning("espn_lineups_not_found", data_dir=str(_LINEUPS_DATA_DIR))
+        return None
+
+    frames = [pd_.read_csv(f) for f in csv_files]
+    df = pd_.concat(frames, ignore_index=True)
+
+    df["datetime"] = pd_.to_datetime(df["date"], utc=True)
+    df["match_date"] = df["datetime"].dt.date
+
+    # Filter to starters only
+    df = df[df["starter"].astype(str).str.lower() == "true"].copy()
+
+    logger.info(
+        "espn_lineups_loaded",
+        rows=len(df),
+        csv_files=len(csv_files),
+    )
+    return build_lineup_cache(df)
 
 
 class PreparedFeatureData:
@@ -1088,6 +1154,11 @@ async def prepare_training_data(
     if "epl_schedule" in config.feature_groups:
         fixtures_df = _load_fixtures_df()
 
+    # Preload lineup cache for lineup-delta features
+    lineup_cache: LineupCache | None = None
+    if "epl_lineup" in config.feature_groups:
+        lineup_cache = _load_lineup_cache()
+
     for event in valid_events:
         # Load all data for this event in bulk
         bundle = await collect_event_data(
@@ -1097,6 +1168,7 @@ async def prepare_training_data(
             standings_cache=standings_cache,
             match_stats_cache=match_stats_cache,
             fixtures_df=fixtures_df,
+            lineup_cache=lineup_cache,
         )
 
         # Closing snapshot is required
