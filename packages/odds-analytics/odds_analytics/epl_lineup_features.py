@@ -77,7 +77,7 @@ def build_lineup_cache(lineup_df: pd.DataFrame) -> LineupCache:
         match_xis.append(
             {
                 "team": str(team),
-                "match_date": mdate if isinstance(mdate, dt.date) else mdate,
+                "match_date": mdate,
                 "datetime": dt_val,
                 "player_ids": player_ids,
             }

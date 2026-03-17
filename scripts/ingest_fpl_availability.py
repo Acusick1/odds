@@ -154,7 +154,7 @@ def _discover_snapshot_paths(
                 continue
 
             snap_time = _snapshot_time_from_path(year, month, day, parts[2])
-            url = f"{REPO_RAW_BASE}/{year}/{month}/{day}/{parts[2]}"
+            url = f"{REPO_RAW_BASE}/{year}/{parts[0]}/{parts[1]}/{parts[2]}"
             snapshots.append((snap_time, url))
 
     snapshots.sort()

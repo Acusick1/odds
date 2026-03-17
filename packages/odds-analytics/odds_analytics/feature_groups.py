@@ -1044,7 +1044,7 @@ def _load_lineup_cache() -> LineupCache | None:
     df["match_date"] = df["datetime"].dt.date
 
     # Filter to starters only
-    df = df[df["starter"].astype(bool)].copy()
+    df = df[df["starter"].astype(str).str.lower() == "true"].copy()
 
     logger.info(
         "espn_lineups_loaded",
