@@ -7,6 +7,7 @@ a sliding 38-match window (point-in-time, no future data).
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any
 
@@ -54,7 +55,7 @@ class EplLineupFeatures:
 
 @dataclass
 class _TeamMatchXI:
-    match_date: str
+    match_date: dt.date
     player_ids: set[str]
 
 
@@ -76,7 +77,7 @@ def build_lineup_cache(lineup_df: pd.DataFrame) -> LineupCache:
         match_xis.append(
             {
                 "team": str(team),
-                "match_date": str(mdate),
+                "match_date": mdate if isinstance(mdate, dt.date) else mdate,
                 "datetime": dt_val,
                 "player_ids": player_ids,
             }
@@ -100,7 +101,7 @@ def build_lineup_cache(lineup_df: pd.DataFrame) -> LineupCache:
 
 def _compute_team_features(
     team_matches: list[_TeamMatchXI],
-    current_date: str,
+    current_date: dt.date,
 ) -> tuple[float, float] | None:
     """Compute xi_changes and cumulative_starts_lost for a team on a given date.
 
@@ -137,15 +138,18 @@ def _compute_team_features(
 
 
 def extract_epl_lineup_features(
-    lineup_cache: LineupCache,
+    lineup_cache: LineupCache | None,
     event: Event,
 ) -> EplLineupFeatures:
     """Extract lineup-delta features for a single event.
 
     Uses the prebuilt lineup cache to find current and previous starting XIs
-    for both teams. Returns all-None when data is unavailable.
+    for both teams. Returns all-None when data is unavailable or cache is None.
     """
-    match_date = str(event.commence_time.date())
+    if lineup_cache is None:
+        return EplLineupFeatures()
+
+    match_date = event.commence_time.date()
 
     home_result = None
     away_result = None

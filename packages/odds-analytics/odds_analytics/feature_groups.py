@@ -790,15 +790,12 @@ def _extract_static_feature_parts(
         n_epllu = len(EplLineupFeatures.get_feature_names())
         nan_block_epllu = np.full(n_epllu, np.nan)
 
-        if bundle.lineup_cache is None:
+        try:
+            epllu_feats = extract_epl_lineup_features(bundle.lineup_cache, event)
+            parts.append(epllu_feats.to_array())
+        except Exception:
+            logger.debug("epl_lineup_feature_extraction_failed", event_id=event.id)
             parts.append(nan_block_epllu)
-        else:
-            try:
-                epllu_feats = extract_epl_lineup_features(bundle.lineup_cache, event)
-                parts.append(epllu_feats.to_array())
-            except Exception:
-                logger.debug("epl_lineup_feature_extraction_failed", event_id=event.id)
-                parts.append(nan_block_epllu)
 
     return parts
 
@@ -1047,7 +1044,7 @@ def _load_lineup_cache() -> LineupCache | None:
     df["match_date"] = df["datetime"].dt.date
 
     # Filter to starters only
-    df = df[df["starter"].astype(str).str.lower() == "true"].copy()
+    df = df[df["starter"].astype(bool)].copy()
 
     logger.info(
         "espn_lineups_loaded",
