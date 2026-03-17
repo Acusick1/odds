@@ -4,12 +4,17 @@ Loads ESPN lineup CSVs, matches them to pipeline events by team name + date,
 computes lineup-delta metrics, and correlates each against the observed
 devigged bet365 CLV target.
 
-Two feature families:
-  - Unweighted: xi_jaccard, xi_changes, gk_changed (pure lineup comparison)
-  - Starts-weighted: cumulative_starts_lost (sliding 38-match window of each
-    dropped player's start count — point-in-time, no future data)
+Three feature categories:
+  - Tendency (bias-free): rolling averages of xi_changes and
+    cumulative_starts_lost over prior N matches (not including the current
+    match). Available at any decision tier — no lineup announcement needed.
+  - Match-specific: xi_jaccard, xi_changes, cumulative_starts_lost, gk_changed
+    (require the current match's starting XI, available ~75min pre-KO).
+  - Rolling (legacy): rolling averages that include the current match value
+    (look-ahead bias when used before lineup announcement).
 
-Outputs: correlation matrix, scatter plots, per-feature univariate R².
+Outputs: correlation matrix, scatter plots, per-feature univariate R²,
+with separate tendency vs match-specific signal assessment.
 Results saved to experiments/results/lineup_signal_check/.
 
 Usage:
@@ -21,7 +26,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -30,13 +35,18 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from odds_analytics.feature_groups import prepare_training_data
+from odds_analytics.sequence_loader import (
+    calculate_devigged_bookmaker_target,
+    extract_odds_from_snapshot,
+)
 from odds_analytics.training.config import MLTrainingConfig
 from odds_analytics.training.data_preparation import filter_events_by_date_range
 from odds_core.database import async_session_maker
-from odds_core.models import EventStatus
+from odds_core.models import Event, EventStatus, OddsSnapshot
 from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import cross_val_score
+from sqlmodel import select
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
@@ -169,6 +179,15 @@ def compute_lineup_metrics(
         start_history[team].append(current_ids)
 
     metrics_df = pd.DataFrame(rows)
+
+    # Tendency features: lagged rolling averages (exclude current match)
+    metrics_df = metrics_df.sort_values(["team", "datetime"]).copy()
+    for window in (3, 5):
+        for col in ("xi_changes", "cumulative_starts_lost"):
+            metrics_df[f"{col}_tendency_{window}"] = metrics_df.groupby("team")[col].transform(
+                lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+            )
+
     print(f"Computed lineup metrics: {len(metrics_df)} team-match rows")
     return metrics_df
 
@@ -264,6 +283,10 @@ def match_metrics_to_events(
         "xi_jaccard_roll3",
         "xi_changes_roll3",
         "cumulative_starts_lost_roll3",
+        "xi_changes_tendency_3",
+        "cumulative_starts_lost_tendency_3",
+        "xi_changes_tendency_5",
+        "cumulative_starts_lost_tendency_5",
     ]
 
     joined_rows: list[dict[str, Any]] = []
@@ -329,8 +352,22 @@ def match_metrics_to_events(
 # Analysis
 # ---------------------------------------------------------------------------
 
-LINEUP_FEATURE_COLS = [
-    # Unweighted
+TENDENCY_FEATURE_COLS = [
+    "home_xi_changes_tendency_3",
+    "away_xi_changes_tendency_3",
+    "diff_xi_changes_tendency_3",
+    "home_cumulative_starts_lost_tendency_3",
+    "away_cumulative_starts_lost_tendency_3",
+    "diff_cumulative_starts_lost_tendency_3",
+    "home_xi_changes_tendency_5",
+    "away_xi_changes_tendency_5",
+    "diff_xi_changes_tendency_5",
+    "home_cumulative_starts_lost_tendency_5",
+    "away_cumulative_starts_lost_tendency_5",
+    "diff_cumulative_starts_lost_tendency_5",
+]
+
+MATCH_SPECIFIC_FEATURE_COLS = [
     "home_xi_jaccard",
     "away_xi_jaccard",
     "diff_xi_jaccard",
@@ -340,11 +377,12 @@ LINEUP_FEATURE_COLS = [
     "home_gk_changed",
     "away_gk_changed",
     "diff_gk_changed",
-    # Starts-weighted
     "home_cumulative_starts_lost",
     "away_cumulative_starts_lost",
     "diff_cumulative_starts_lost",
-    # Rolling averages
+]
+
+LEGACY_ROLLING_FEATURE_COLS = [
     "home_xi_jaccard_roll3",
     "away_xi_jaccard_roll3",
     "diff_xi_jaccard_roll3",
@@ -356,13 +394,19 @@ LINEUP_FEATURE_COLS = [
     "diff_cumulative_starts_lost_roll3",
 ]
 
+LINEUP_FEATURE_COLS = (
+    TENDENCY_FEATURE_COLS + MATCH_SPECIFIC_FEATURE_COLS + LEGACY_ROLLING_FEATURE_COLS
+)
 
-def compute_correlations(df: pd.DataFrame) -> pd.DataFrame:
+
+def compute_correlations(df: pd.DataFrame, feature_cols: list[str] | None = None) -> pd.DataFrame:
     """Compute per-feature correlations with CLV target."""
+    if feature_cols is None:
+        feature_cols = LINEUP_FEATURE_COLS
     target = df["target"].values
     rows: list[dict[str, Any]] = []
 
-    for col in LINEUP_FEATURE_COLS:
+    for col in feature_cols:
         if col not in df.columns:
             continue
         x = df[col].values
@@ -404,9 +448,13 @@ def compute_correlations(df: pd.DataFrame) -> pd.DataFrame:
     return corr_df.sort_values("abs_r", ascending=False)
 
 
-def multivariate_r2(df: pd.DataFrame, cv_folds: int = 5) -> dict[str, Any]:
-    """Cross-validated linear regression R² with all lineup features as ceiling estimate."""
-    available = [c for c in LINEUP_FEATURE_COLS if c in df.columns]
+def multivariate_r2(
+    df: pd.DataFrame, feature_cols: list[str] | None = None, cv_folds: int = 5
+) -> dict[str, Any]:
+    """Cross-validated linear regression R² with lineup features as ceiling estimate."""
+    if feature_cols is None:
+        feature_cols = LINEUP_FEATURE_COLS
+    available = [c for c in feature_cols if c in df.columns]
     subset = df[available + ["target"]].dropna()
 
     if len(subset) < 30:
@@ -433,17 +481,38 @@ def multivariate_r2(df: pd.DataFrame, cv_folds: int = 5) -> dict[str, Any]:
 
 
 def plot_correlation_bars(corr_df: pd.DataFrame) -> None:
-    """Bar plot of Pearson r by feature."""
+    """Bar plot of Pearson r by feature, color-coded by category."""
     plot_df = corr_df.dropna(subset=["pearson_r"]).sort_values("pearson_r")
     fig, ax = plt.subplots(figsize=(10, max(6, len(plot_df) * 0.35)))
 
-    colors = ["#e74c3c" if v < 0 else "#2ecc71" for v in plot_df["pearson_r"]]
+    tendency_set = set(TENDENCY_FEATURE_COLS)
+    match_set = set(MATCH_SPECIFIC_FEATURE_COLS)
+
+    colors = []
+    for feat in plot_df.index:
+        if feat in tendency_set:
+            colors.append("#3498db")  # blue = tendency (bias-free)
+        elif feat in match_set:
+            colors.append("#e67e22")  # orange = match-specific
+        else:
+            colors.append("#95a5a6")  # grey = legacy rolling
+
     ax.barh(plot_df.index, plot_df["pearson_r"], color=colors)
     ax.axvline(0, color="black", linewidth=0.5)
     ax.axvline(0.05, color="grey", linewidth=0.5, linestyle="--", alpha=0.5)
     ax.axvline(-0.05, color="grey", linewidth=0.5, linestyle="--", alpha=0.5)
     ax.set_xlabel("Pearson r")
-    ax.set_title("Lineup-Delta Feature Correlations with CLV Target")
+    ax.set_title("Lineup Feature Correlations with CLV Target")
+
+    from matplotlib.patches import Patch
+
+    legend_elements = [
+        Patch(facecolor="#3498db", label="Tendency (bias-free)"),
+        Patch(facecolor="#e67e22", label="Match-specific (post-announcement)"),
+        Patch(facecolor="#95a5a6", label="Legacy rolling (look-ahead)"),
+    ]
+    ax.legend(handles=legend_elements, loc="lower right", fontsize=8)
+
     plt.tight_layout()
     plt.savefig(OUTPUT_DIR / "correlation_bars.png", bbox_inches="tight")
     plt.close()
@@ -529,6 +598,118 @@ async def load_pipeline_data(
 
 
 # ---------------------------------------------------------------------------
+# Closing-tier target variance analysis
+# ---------------------------------------------------------------------------
+
+
+async def analyze_closing_tier_target_variance(early_targets: np.ndarray) -> None:
+    """Measure CLV target variance in the post-lineup window (0-45 min before KO).
+
+    Compares target magnitude in closing-tier snapshots against the early window
+    (3-12h) to determine whether enough line movement remains post-lineup for
+    match-specific features to be exploitable.
+    """
+    async with async_session_maker() as session:
+        # Get all closing-tier snapshots for final EPL events within 45 min of kickoff
+        stmt = (
+            select(OddsSnapshot, Event)
+            .join(Event, OddsSnapshot.event_id == Event.id)
+            .where(
+                Event.sport_key == "soccer_epl",
+                Event.status == EventStatus.FINAL,
+                OddsSnapshot.fetch_tier == "closing",
+            )
+        )
+        results = (await session.execute(stmt)).all()
+
+    # Group by event, filter to <=45 min before kickoff
+    # For each event: collect qualifying snapshots and find the latest (actual close)
+    events_snapshots: dict[str, list[tuple[OddsSnapshot, Event]]] = {}
+    for snapshot, event in results:
+        time_to_ko = event.commence_time - snapshot.snapshot_time
+        if timedelta(0) <= time_to_ko <= timedelta(minutes=45):
+            events_snapshots.setdefault(event.id, []).append((snapshot, event))
+
+    if not events_snapshots:
+        print("\nTARGET VARIANCE: POST-LINEUP WINDOW (0-45 min)")
+        print("=" * 50)
+        print("No closing-tier snapshots found within 45 min of kickoff.")
+        return
+
+    # For each event, find the latest closing snapshot (actual close) and
+    # compute target for each qualifying snapshot against that close
+    closing_targets: list[float] = []
+
+    for event_id, snap_event_pairs in events_snapshots.items():
+        # Sort by snapshot_time descending — first is the actual close
+        snap_event_pairs.sort(key=lambda x: x[0].snapshot_time, reverse=True)
+        closing_snapshot, event = snap_event_pairs[0]
+        closing_odds = extract_odds_from_snapshot(closing_snapshot, event_id, market="h2h")
+
+        # Compute target for every snapshot in this event (including close vs itself = 0)
+        for snapshot, _ in snap_event_pairs:
+            if snapshot.id == closing_snapshot.id:
+                continue  # skip close vs itself
+            snapshot_odds = extract_odds_from_snapshot(snapshot, event_id, market="h2h")
+            target = calculate_devigged_bookmaker_target(
+                snapshot_odds,
+                closing_odds,
+                event.home_team,
+                event.away_team,
+                bookmaker_key="bet365",
+            )
+            if target is not None:
+                closing_targets.append(target)
+
+    # If no multi-snapshot events, use close-vs-close (target=0) for single-snapshot events
+    # but also report how many events only had one closing snapshot
+    single_snapshot_events = sum(1 for pairs in events_snapshots.values() if len(pairs) == 1)
+
+    closing_arr = np.array(closing_targets) if closing_targets else np.array([])
+    early_arr = early_targets
+
+    print("\n" + "=" * 50)
+    print("TARGET VARIANCE: POST-LINEUP WINDOW (0-45 min)")
+    print("=" * 50)
+    print(f"Events with closing snapshots <=45min: {len(events_snapshots)}")
+    print(f"  (single-snapshot events, no intra-window target: {single_snapshot_events})")
+
+    if len(closing_arr) == 0:
+        print("No intra-window target pairs found (all events have only one closing snapshot).")
+        return
+
+    closing_mean = np.mean(closing_arr)
+    closing_std = np.std(closing_arr)
+    closing_abs_mean = np.mean(np.abs(closing_arr))
+
+    early_abs_mean = np.mean(np.abs(early_arr))
+    early_std = np.std(early_arr)
+
+    print(
+        f"Target mean: {closing_mean:.6f}, std: {closing_std:.6f}, mean |target|: {closing_abs_mean:.6f}"
+    )
+
+    print("\nComparison with early window (3-12h):")
+    print(
+        f"  Early:   mean |target| = {early_abs_mean:.6f}, std = {early_std:.6f}  ({len(early_arr)} samples)"
+    )
+    print(
+        f"  Closing: mean |target| = {closing_abs_mean:.6f}, std = {closing_std:.6f}  ({len(closing_arr)} samples)"
+    )
+
+    ratio = closing_abs_mean / early_abs_mean if early_abs_mean > 0 else float("inf")
+    print(f"  Ratio (closing/early): {ratio:.2f}")
+
+    print("\nTarget magnitude distribution (closing tier):")
+    for thresh in (0.005, 0.010, 0.020):
+        frac = np.mean(np.abs(closing_arr) > thresh) * 100
+        print(f"  |target| > {thresh:.3f}: {frac:.1f}%")
+
+    verdict = "Insufficient" if ratio < 0.25 else "Sufficient"
+    print(f"\nVERDICT: {verdict} target variance for late-window prediction")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -580,10 +761,17 @@ def main() -> None:
         f"({100 * n_with_changes / len(metrics_df):.1f}%)"
     )
 
-    # Load pipeline data
+    # Load pipeline data and analyze closing-tier variance in one event loop
+    async def _load_and_analyze(
+        config_path: str,
+    ) -> tuple[np.ndarray, np.ndarray, list[str], np.ndarray, pd.DataFrame]:
+        result = await load_pipeline_data(config_path)
+        await analyze_closing_tier_target_variance(result[1])  # result[1] = y
+        return result
+
     print("\n" + "=" * 60)
     print("Loading pipeline CLV targets...")
-    X, y, feature_names, event_ids, events_df = asyncio.run(load_pipeline_data(args.config))
+    X, y, feature_names, event_ids, events_df = asyncio.run(_load_and_analyze(args.config))
     print(f"Pipeline: {len(y)} samples, {len(set(event_ids))} events")
 
     # Match lineup metrics to pipeline events
@@ -598,35 +786,74 @@ def main() -> None:
     # Save joined data
     joined_df.to_csv(OUTPUT_DIR / "joined_data.csv", index=False)
 
-    # Compute correlations
+    # Compute correlations — three sections
+    display_cols = ["n", "pearson_r", "pearson_p", "spearman_rho", "univariate_r2"]
+    threshold = 0.05
+
+    # --- Tendency features (bias-free) ---
     print("\n" + "=" * 60)
-    print("Computing correlations with CLV target...")
+    print("TENDENCY FEATURES (bias-free, available at any decision tier)")
+    print("=" * 60)
+    tendency_corr = compute_correlations(joined_df, TENDENCY_FEATURE_COLS)
+    print(tendency_corr[display_cols].to_string())
+    tendency_mv = multivariate_r2(joined_df, TENDENCY_FEATURE_COLS)
+    print(
+        f"\nMultivariate CV R²: {tendency_mv['cv_r2_mean']:.6f} ± {tendency_mv['cv_r2_std']:.6f} "
+        f"(n={tendency_mv['n']}, features={tendency_mv.get('n_features', 'N/A')})"
+    )
+
+    # --- Match-specific features (post-announcement) ---
+    print("\n" + "=" * 60)
+    print("MATCH-SPECIFIC FEATURES (require announced lineup, ~75min pre-KO)")
+    print("=" * 60)
+    match_corr = compute_correlations(joined_df, MATCH_SPECIFIC_FEATURE_COLS)
+    print(match_corr[display_cols].to_string())
+    match_mv = multivariate_r2(joined_df, MATCH_SPECIFIC_FEATURE_COLS)
+    print(
+        f"\nMultivariate CV R²: {match_mv['cv_r2_mean']:.6f} ± {match_mv['cv_r2_std']:.6f} "
+        f"(n={match_mv['n']}, features={match_mv.get('n_features', 'N/A')})"
+    )
+
+    # --- All features ---
+    print("\n" + "=" * 60)
+    print("ALL FEATURES")
+    print("=" * 60)
     corr_df = compute_correlations(joined_df)
-
-    print("\nCorrelation results (sorted by |r|):")
-    print(corr_df[["n", "pearson_r", "pearson_p", "spearman_rho", "univariate_r2"]].to_string())
-
-    # Multivariate ceiling (cross-validated)
+    print(corr_df[display_cols].to_string())
     mv = multivariate_r2(joined_df)
     print(
-        f"\nMultivariate linear regression ceiling ({mv.get('cv_folds', 'N/A')}-fold CV): "
-        f"R²={mv['cv_r2_mean']:.6f} +/- {mv['cv_r2_std']:.6f} "
+        f"\nMultivariate CV R²: {mv['cv_r2_mean']:.6f} ± {mv['cv_r2_std']:.6f} "
         f"(n={mv['n']}, features={mv.get('n_features', 'N/A')})"
     )
 
-    # Go/no-go decision
+    # Go/no-go decision — based on tendency features specifically
     print("\n" + "=" * 60)
-    max_abs_r = corr_df["abs_r"].max()
-    threshold = 0.05
-    if np.isnan(max_abs_r):
-        print("RESULT: No valid correlations computed. Cannot make go/no-go decision.")
-    elif max_abs_r > threshold:
-        top_feat = corr_df["abs_r"].idxmax()
-        print(f"GO: Max |r| = {max_abs_r:.4f} (feature: {top_feat}) > threshold {threshold}")
-        print("Proceed to Phase B: build epl_lineup feature group.")
+    print("GO / NO-GO DECISION")
+    print("=" * 60)
+
+    tendency_max_r = tendency_corr["abs_r"].max()
+    match_max_r = match_corr["abs_r"].max()
+
+    if np.isnan(tendency_max_r):
+        print("RESULT: No valid tendency correlations. Cannot assess bias-free signal.")
+    elif tendency_max_r > threshold:
+        top_tendency = tendency_corr["abs_r"].idxmax()
+        print(
+            f"GO (tendency): Max |r| = {tendency_max_r:.4f} "
+            f"(feature: {top_tendency}) > threshold {threshold}"
+        )
+        print("Bias-free tendency features carry signal — safe for any decision tier.")
     else:
-        print(f"NO-GO: Max |r| = {max_abs_r:.4f} <= threshold {threshold}")
-        print("Lineup-delta features show insufficient signal for CLV prediction.")
+        print(f"NO-GO (tendency): Max |r| = {tendency_max_r:.4f} <= threshold {threshold}")
+        print("Tendency features alone do not carry sufficient signal.")
+
+    if not np.isnan(match_max_r) and match_max_r > threshold:
+        top_match = match_corr["abs_r"].idxmax()
+        print(
+            f"\nNote: Match-specific features have signal (max |r| = {match_max_r:.4f}, "
+            f"feature: {top_match}), but require post-lineup-announcement execution "
+            f"(~75min pre-KO)."
+        )
 
     # Save correlation results
     corr_df.to_csv(OUTPUT_DIR / "correlations.csv")
