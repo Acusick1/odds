@@ -330,28 +330,38 @@ def _build_fpl_to_espn_player_map(
     return mapping
 
 
-def _get_cumulative_starts_at_date(
+def _precompute_cumulative_starts(
     lineup_df: pd.DataFrame,
-    team: str,
-    match_date: Any,
     window: int = STARTS_WINDOW,
-) -> dict[str, int]:
-    """Get cumulative starts per player_id for a team in the window before match_date."""
-    team_matches = lineup_df[
-        (lineup_df["team"] == team) & (lineup_df["match_date"] < match_date)
-    ].copy()
-    team_matches = team_matches.sort_values("datetime")
+) -> dict[tuple[str, Any], dict[str, int]]:
+    """Precompute cumulative starts for every (team, match_date) pair.
 
-    # Take last N unique match dates
-    unique_dates = team_matches["match_date"].unique()
-    if len(unique_dates) > window:
-        cutoff_dates = unique_dates[-window:]
-        team_matches = team_matches[team_matches["match_date"].isin(cutoff_dates)]
+    Returns a lookup keyed by (team, match_date) -> {player_id: start_count}.
+    For each entry, counts starts in the `window` matches strictly before that date.
+    """
+    lookup: dict[tuple[str, Any], dict[str, int]] = {}
 
-    starts: dict[str, int] = {}
-    for pid in team_matches["player_id"].astype(str):
-        starts[pid] = starts.get(pid, 0) + 1
-    return starts
+    for team, team_df in lineup_df.groupby("team"):
+        team_df = team_df.sort_values("datetime")
+        # Get unique match dates in order
+        unique_dates = team_df["match_date"].unique()
+
+        # Build per-match-date player sets
+        date_players: list[tuple[Any, list[str]]] = []
+        for mdate in unique_dates:
+            pids = team_df[team_df["match_date"] == mdate]["player_id"].astype(str).tolist()
+            date_players.append((mdate, pids))
+
+        # For each match date, compute starts from the preceding window matches
+        for i, (mdate, _) in enumerate(date_players):
+            start_idx = max(0, i - window)
+            starts: dict[str, int] = {}
+            for j in range(start_idx, i):
+                for pid in date_players[j][1]:
+                    starts[pid] = starts.get(pid, 0) + 1
+            lookup[(team, mdate)] = starts
+
+    return lookup
 
 
 def compute_fpl_disruption_features(
@@ -368,6 +378,9 @@ def compute_fpl_disruption_features(
       - n_flagged_players: count with chance_of_playing < 100
     """
     player_map = _build_fpl_to_espn_player_map(fpl_df, lineup_df)
+
+    # Precompute cumulative starts for all (team, date) pairs
+    starts_lookup = _precompute_cumulative_starts(lineup_df)
 
     # Get unique snapshot times sorted
     snapshot_times = sorted(fpl_df["snapshot_time"].unique())
@@ -400,7 +413,7 @@ def compute_fpl_disruption_features(
 
         for side, team in [("home", home), ("away", away)]:
             team_players = snap_data[snap_data["team"] == team]
-            cum_starts = _get_cumulative_starts_at_date(lineup_df, team, match_date)
+            cum_starts = starts_lookup.get((team, match_date), {})
 
             disruption_weighted = 0.0
             disruption_unweighted = 0.0

@@ -20,6 +20,8 @@ import csv
 import json
 import logging
 import lzma
+import os
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -47,7 +49,7 @@ FPL_TEAM_NAME_MAP: dict[str, str] = {
     "Man Utd": "Manchester Utd",
     "Nott'm Forest": "Nottingham",
     "Spurs": "Tottenham",
-    "Sheffield Utd": "Sheffield Utd",
+    "Wolves": "Wolverhampton",
 }
 
 SEASONS: dict[str, tuple[int, int, int, int]] = {
@@ -96,6 +98,7 @@ def _discover_snapshot_paths(
     # Get top-level cache tree
     resp = client.get(f"{REPO_API_BASE}/git/trees/main", timeout=30)
     resp.raise_for_status()
+    time.sleep(REQUEST_DELAY)
     cache_sha = None
     for item in resp.json()["tree"]:
         if item["path"] == "cache":
@@ -106,6 +109,7 @@ def _discover_snapshot_paths(
 
     resp = client.get(f"{REPO_API_BASE}/git/trees/{cache_sha}", timeout=30)
     resp.raise_for_status()
+    time.sleep(REQUEST_DELAY)
     year_trees: dict[int, str] = {}
     for item in resp.json()["tree"]:
         year_trees[int(item["path"])] = item["sha"]
@@ -127,6 +131,7 @@ def _discover_snapshot_paths(
             continue
         resp = client.get(f"{REPO_API_BASE}/git/trees/{year_trees[year]}", timeout=30)
         resp.raise_for_status()
+        time.sleep(REQUEST_DELAY)
         month_trees: dict[int, str] = {}
         for item in resp.json()["tree"]:
             month_trees[int(item["path"])] = item["sha"]
@@ -141,6 +146,7 @@ def _discover_snapshot_paths(
 
             resp = client.get(f"{REPO_API_BASE}/git/trees/{month_trees[month]}", timeout=30)
             resp.raise_for_status()
+            time.sleep(REQUEST_DELAY)
             day_trees: dict[int, str] = {}
             for item in resp.json()["tree"]:
                 day_trees[int(item["path"])] = item["sha"]
@@ -148,6 +154,7 @@ def _discover_snapshot_paths(
             for day in sorted(day_trees):
                 resp = client.get(f"{REPO_API_BASE}/git/trees/{day_trees[day]}", timeout=30)
                 resp.raise_for_status()
+                time.sleep(REQUEST_DELAY)
                 for item in resp.json()["tree"]:
                     filename = item["path"]
                     if not filename.endswith(".json.xz"):
@@ -178,21 +185,28 @@ def _select_snapshots_for_gameweeks(
     snapshot_index: list[tuple[datetime, str]],
     gameweek_deadlines: dict[int, datetime],
 ) -> dict[int, list[tuple[datetime, str]]]:
-    """For each gameweek, select the last snapshot before deadline.
+    """For each gameweek, select all snapshots from 48h before the deadline.
+
+    Multi-match gameweeks span several days (e.g. Saturday + Monday).
+    Including all snapshots in the 48h window means later matches get
+    more up-to-date availability data when compute_fpl_disruption_features
+    does per-event matching.
 
     Returns dict of gameweek -> list of (snapshot_time, url) to download.
     """
     selected: dict[int, list[tuple[datetime, str]]] = {}
 
     for gw, deadline in sorted(gameweek_deadlines.items()):
-        # Find the last snapshot before the deadline
-        candidates = [(t, u) for t, u in snapshot_index if t < deadline]
+        cutoff = deadline - timedelta(hours=48)
+        candidates = [(t, u) for t, u in snapshot_index if cutoff <= t < deadline]
         if not candidates:
-            continue
+            # Fall back to last snapshot before deadline if nothing in 48h window
+            all_before = [(t, u) for t, u in snapshot_index if t < deadline]
+            if all_before:
+                candidates = [all_before[-1]]
 
-        # Last before deadline (most up-to-date)
-        last = candidates[-1]
-        selected[gw] = [last]
+        if candidates:
+            selected[gw] = candidates
 
     return selected
 
@@ -318,8 +332,16 @@ def main() -> None:
     else:
         season_list = sorted(SEASONS.keys())
 
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    github_token = os.environ.get("GITHUB_TOKEN")
+    if github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
+        log.info("Using authenticated GitHub API requests (5,000 req/hour)")
+    else:
+        log.warning("No GITHUB_TOKEN set — unauthenticated rate limit is 60 req/hour")
+
     client = httpx.Client(
-        headers={"Accept": "application/vnd.github.v3+json"},
+        headers=headers,
         follow_redirects=True,
     )
     total_rows = 0
