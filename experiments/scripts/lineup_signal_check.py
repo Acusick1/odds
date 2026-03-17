@@ -4,7 +4,7 @@ Loads ESPN lineup CSVs, matches them to pipeline events by team name + date,
 computes lineup-delta metrics, and correlates each against the observed
 devigged bet365 CLV target.
 
-Three feature categories:
+Four feature categories:
   - Tendency (bias-free): rolling averages of xi_changes and
     cumulative_starts_lost over prior N matches (not including the current
     match). Available at any decision tier — no lineup announcement needed.
@@ -12,9 +12,12 @@ Three feature categories:
     (require the current match's starting XI, available ~75min pre-KO).
   - Rolling (legacy): rolling averages that include the current match value
     (look-ahead bias when used before lineup announcement).
+  - FPL availability: expected-disruption features derived from FPL
+    chance_of_playing data, weighted by cumulative ESPN starts. Available
+    24-48h before kickoff (pre-decision tier).
 
 Outputs: correlation matrix, scatter plots, per-feature univariate R²,
-with separate tendency vs match-specific signal assessment.
+with separate tendency vs match-specific vs FPL availability signal assessment.
 Results saved to experiments/results/lineup_signal_check/.
 
 Usage:
@@ -27,6 +30,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from datetime import UTC, datetime, timedelta
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +58,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent
 OUTPUT_DIR = SCRIPT_DIR.parent / "results" / "lineup_signal_check"
 
 LINEUP_DIR = PROJECT_ROOT / "data" / "espn_lineups"
+FPL_DIR = PROJECT_ROOT / "data" / "fpl_availability"
 
 DEFAULT_CONFIG = SCRIPT_DIR.parent / "configs" / "xgboost_epl_combined_standings_tuning.yaml"
 
@@ -238,6 +243,204 @@ def _compute_rolling_metrics(metrics_df: pd.DataFrame, window: int = 3) -> pd.Da
 
 
 # ---------------------------------------------------------------------------
+# FPL availability data
+# ---------------------------------------------------------------------------
+
+
+def load_fpl_availability() -> pd.DataFrame | None:
+    """Load all FPL availability CSVs into a single DataFrame."""
+    csv_files = sorted(FPL_DIR.glob("fpl_availability_*.csv"))
+    if not csv_files:
+        return None
+
+    frames = [pd.read_csv(f) for f in csv_files]
+    df = pd.concat(frames, ignore_index=True)
+    df["snapshot_time"] = pd.to_datetime(df["snapshot_time"], utc=True)
+    print(f"Loaded {len(df)} FPL availability rows from {len(csv_files)} CSVs")
+    return df
+
+
+def _build_fpl_to_espn_player_map(
+    fpl_df: pd.DataFrame,
+    lineup_df: pd.DataFrame,
+) -> dict[tuple[str, int], str]:
+    """Build fuzzy name mapping from (team, fpl_player_code) -> espn_player_id.
+
+    Matches within the same team using SequenceMatcher on player names.
+    """
+    # Build ESPN player lookup: team -> list of (player_id, player_name)
+    espn_players: dict[str, list[tuple[str, str]]] = {}
+    for _, row in (
+        lineup_df[["team", "player_id", "player_name"]]
+        .drop_duplicates(subset=["team", "player_id"])
+        .iterrows()
+    ):
+        espn_players.setdefault(row["team"], []).append(
+            (str(row["player_id"]), str(row["player_name"]))
+        )
+
+    # Build FPL player lookup: team -> list of (code, web_name)
+    fpl_players: dict[str, list[tuple[int, str]]] = {}
+    for _, row in (
+        fpl_df[["team", "player_code", "player_name"]]
+        .drop_duplicates(subset=["team", "player_code"])
+        .iterrows()
+    ):
+        fpl_players.setdefault(row["team"], []).append(
+            (int(row["player_code"]), str(row["player_name"]))
+        )
+
+    mapping: dict[tuple[str, int], str] = {}
+    matched = 0
+    unmatched = 0
+
+    for team in fpl_players:
+        if team not in espn_players:
+            unmatched += len(fpl_players[team])
+            continue
+
+        espn_list = espn_players[team]
+
+        for fpl_code, fpl_name in fpl_players[team]:
+            best_score = 0.0
+            best_espn_id = ""
+            fpl_lower = fpl_name.lower()
+
+            for espn_id, espn_name in espn_list:
+                espn_lower = espn_name.lower()
+                # Try matching FPL web_name against last part of ESPN name
+                espn_parts = espn_lower.split()
+                # Compare against full name and last name
+                score_full = SequenceMatcher(None, fpl_lower, espn_lower).ratio()
+                score_last = (
+                    SequenceMatcher(None, fpl_lower, espn_parts[-1]).ratio() if espn_parts else 0.0
+                )
+                score = max(score_full, score_last)
+                if score > best_score:
+                    best_score = score
+                    best_espn_id = espn_id
+
+            if best_score >= 0.6 and best_espn_id:
+                mapping[(team, fpl_code)] = best_espn_id
+                matched += 1
+            else:
+                unmatched += 1
+
+    print(f"FPL-to-ESPN player matching: {matched} matched, {unmatched} unmatched")
+    return mapping
+
+
+def _get_cumulative_starts_at_date(
+    lineup_df: pd.DataFrame,
+    team: str,
+    match_date: Any,
+    window: int = STARTS_WINDOW,
+) -> dict[str, int]:
+    """Get cumulative starts per player_id for a team in the window before match_date."""
+    team_matches = lineup_df[
+        (lineup_df["team"] == team) & (lineup_df["match_date"] < match_date)
+    ].copy()
+    team_matches = team_matches.sort_values("datetime")
+
+    # Take last N unique match dates
+    unique_dates = team_matches["match_date"].unique()
+    if len(unique_dates) > window:
+        cutoff_dates = unique_dates[-window:]
+        team_matches = team_matches[team_matches["match_date"].isin(cutoff_dates)]
+
+    starts: dict[str, int] = {}
+    for pid in team_matches["player_id"].astype(str):
+        starts[pid] = starts.get(pid, 0) + 1
+    return starts
+
+
+def compute_fpl_disruption_features(
+    fpl_df: pd.DataFrame,
+    lineup_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Compute expected-disruption features from FPL availability data.
+
+    For each pipeline event, finds the latest FPL snapshot within 48h before
+    commence_time, then computes:
+      - expected_disruption: sum of (100 - chance) / 100, weighted by cumulative starts
+      - expected_disruption_unweighted: unweighted severity sum
+      - n_flagged_players: count with chance_of_playing < 100
+    """
+    player_map = _build_fpl_to_espn_player_map(fpl_df, lineup_df)
+
+    # Get unique snapshot times sorted
+    snapshot_times = sorted(fpl_df["snapshot_time"].unique())
+
+    rows: list[dict[str, Any]] = []
+    matched = 0
+    no_snapshot = 0
+
+    for _, event in events_df.iterrows():
+        commence = pd.Timestamp(event["commence_time"])
+        if commence.tzinfo is None:
+            commence = commence.tz_localize(UTC)
+
+        event_id = event["event_id"]
+        home = event["home_team"]
+        away = event["away_team"]
+        match_date = event["match_date"]
+
+        # Find latest FPL snapshot within 48h before commence_time
+        cutoff_early = commence - timedelta(hours=48)
+        valid_snaps = [t for t in snapshot_times if cutoff_early <= t < commence]
+        if not valid_snaps:
+            no_snapshot += 1
+            continue
+
+        snap_time = max(valid_snaps)
+        snap_data = fpl_df[fpl_df["snapshot_time"] == snap_time]
+
+        row_dict: dict[str, Any] = {"event_id": event_id}
+
+        for side, team in [("home", home), ("away", away)]:
+            team_players = snap_data[snap_data["team"] == team]
+            cum_starts = _get_cumulative_starts_at_date(lineup_df, team, match_date)
+
+            disruption_weighted = 0.0
+            disruption_unweighted = 0.0
+            n_flagged = 0
+
+            for _, player in team_players.iterrows():
+                chance = float(player["chance_of_playing"])
+                if chance >= 100:
+                    continue
+
+                severity = (100.0 - chance) / 100.0
+                n_flagged += 1
+                disruption_unweighted += severity
+
+                # Weight by cumulative starts
+                fpl_code = int(player["player_code"])
+                espn_id = player_map.get((team, fpl_code))
+                weight = 0.0
+                if espn_id:
+                    weight = float(cum_starts.get(espn_id, 0))
+                disruption_weighted += severity * weight
+
+            row_dict[f"{side}_expected_disruption"] = disruption_weighted
+            row_dict[f"{side}_expected_disruption_unweighted"] = disruption_unweighted
+            row_dict[f"{side}_n_flagged_players"] = float(n_flagged)
+
+        # Differentials
+        for feat in ("expected_disruption", "expected_disruption_unweighted", "n_flagged_players"):
+            h = row_dict[f"home_{feat}"]
+            a = row_dict[f"away_{feat}"]
+            row_dict[f"diff_{feat}"] = h - a
+
+        rows.append(row_dict)
+        matched += 1
+
+    print(f"FPL disruption: {matched} events matched, {no_snapshot} with no snapshot")
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
 # Match to pipeline events
 # ---------------------------------------------------------------------------
 
@@ -394,8 +597,23 @@ LEGACY_ROLLING_FEATURE_COLS = [
     "diff_cumulative_starts_lost_roll3",
 ]
 
+FPL_AVAILABILITY_FEATURE_COLS = [
+    "home_expected_disruption",
+    "away_expected_disruption",
+    "diff_expected_disruption",
+    "home_expected_disruption_unweighted",
+    "away_expected_disruption_unweighted",
+    "diff_expected_disruption_unweighted",
+    "home_n_flagged_players",
+    "away_n_flagged_players",
+    "diff_n_flagged_players",
+]
+
 LINEUP_FEATURE_COLS = (
-    TENDENCY_FEATURE_COLS + MATCH_SPECIFIC_FEATURE_COLS + LEGACY_ROLLING_FEATURE_COLS
+    TENDENCY_FEATURE_COLS
+    + MATCH_SPECIFIC_FEATURE_COLS
+    + LEGACY_ROLLING_FEATURE_COLS
+    + FPL_AVAILABILITY_FEATURE_COLS
 )
 
 
@@ -487,6 +705,7 @@ def plot_correlation_bars(corr_df: pd.DataFrame) -> None:
 
     tendency_set = set(TENDENCY_FEATURE_COLS)
     match_set = set(MATCH_SPECIFIC_FEATURE_COLS)
+    fpl_set = set(FPL_AVAILABILITY_FEATURE_COLS)
 
     colors = []
     for feat in plot_df.index:
@@ -494,6 +713,8 @@ def plot_correlation_bars(corr_df: pd.DataFrame) -> None:
             colors.append("#3498db")  # blue = tendency (bias-free)
         elif feat in match_set:
             colors.append("#e67e22")  # orange = match-specific
+        elif feat in fpl_set:
+            colors.append("#9b59b6")  # purple = FPL availability
         else:
             colors.append("#95a5a6")  # grey = legacy rolling
 
@@ -509,6 +730,7 @@ def plot_correlation_bars(corr_df: pd.DataFrame) -> None:
     legend_elements = [
         Patch(facecolor="#3498db", label="Tendency (bias-free)"),
         Patch(facecolor="#e67e22", label="Match-specific (post-announcement)"),
+        Patch(facecolor="#9b59b6", label="FPL availability (pre-decision)"),
         Patch(facecolor="#95a5a6", label="Legacy rolling (look-ahead)"),
     ]
     ax.legend(handles=legend_elements, loc="lower right", fontsize=8)
@@ -783,10 +1005,24 @@ def main() -> None:
         print("ERROR: No events matched. Check team name normalization.")
         return
 
+    # FPL availability features
+    fpl_df = load_fpl_availability()
+    if fpl_df is not None:
+        print("\n" + "=" * 60)
+        print("Computing FPL expected-disruption features...")
+        fpl_features = compute_fpl_disruption_features(fpl_df, lineup_df, events_df)
+        if not fpl_features.empty:
+            joined_df = joined_df.merge(fpl_features, on="event_id", how="left")
+            n_with_fpl = joined_df["home_expected_disruption"].notna().sum()
+            print(f"FPL features joined: {n_with_fpl}/{len(joined_df)} events")
+    else:
+        print("\n" + "=" * 60)
+        print("No FPL availability data found in data/fpl_availability/. Skipping.")
+
     # Save joined data
     joined_df.to_csv(OUTPUT_DIR / "joined_data.csv", index=False)
 
-    # Compute correlations — three sections
+    # Compute correlations — four sections
     display_cols = ["n", "pearson_r", "pearson_p", "spearman_rho", "univariate_r2"]
     threshold = 0.05
 
@@ -813,6 +1049,22 @@ def main() -> None:
         f"\nMultivariate CV R²: {match_mv['cv_r2_mean']:.6f} ± {match_mv['cv_r2_std']:.6f} "
         f"(n={match_mv['n']}, features={match_mv.get('n_features', 'N/A')})"
     )
+
+    # --- FPL availability features (pre-decision tier) ---
+    fpl_available = [c for c in FPL_AVAILABILITY_FEATURE_COLS if c in joined_df.columns]
+    if fpl_available:
+        print("\n" + "=" * 60)
+        print("FPL AVAILABILITY FEATURES (pre-decision tier, ~24-48h before KO)")
+        print("=" * 60)
+        fpl_corr = compute_correlations(joined_df, FPL_AVAILABILITY_FEATURE_COLS)
+        print(fpl_corr[display_cols].to_string())
+        fpl_mv = multivariate_r2(joined_df, FPL_AVAILABILITY_FEATURE_COLS)
+        print(
+            f"\nMultivariate CV R²: {fpl_mv['cv_r2_mean']:.6f} ± {fpl_mv['cv_r2_std']:.6f} "
+            f"(n={fpl_mv['n']}, features={fpl_mv.get('n_features', 'N/A')})"
+        )
+    else:
+        fpl_corr = None
 
     # --- All features ---
     print("\n" + "=" * 60)
@@ -854,6 +1106,22 @@ def main() -> None:
             f"feature: {top_match}), but require post-lineup-announcement execution "
             f"(~75min pre-KO)."
         )
+
+    if fpl_corr is not None:
+        fpl_max_r = fpl_corr["abs_r"].max()
+        if not np.isnan(fpl_max_r):
+            if fpl_max_r > threshold:
+                top_fpl = fpl_corr["abs_r"].idxmax()
+                print(
+                    f"\nGO (FPL availability): Max |r| = {fpl_max_r:.4f} "
+                    f"(feature: {top_fpl}) > threshold {threshold}"
+                )
+                print("FPL expected-disruption carries signal — proceed to feature group.")
+            else:
+                print(
+                    f"\nNO-GO (FPL availability): Max |r| = {fpl_max_r:.4f} <= threshold {threshold}"
+                )
+                print("FPL availability features show insufficient signal for CLV prediction.")
 
     # Save correlation results
     corr_df.to_csv(OUTPUT_DIR / "correlations.csv")
