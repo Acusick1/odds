@@ -67,11 +67,14 @@ FBREF_TEAM_NAME_MAP: dict[str, str] = {
     "Leicester City": "Leicester",
     "Leeds United": "Leeds",
     "Newcastle Utd": "Newcastle",
+    "Newcastle United": "Newcastle",
     "Norwich City": "Norwich",
     "Nott'ham Forest": "Nottingham",
     "Nottingham Forest": "Nottingham",
     "Stoke City": "Stoke",
     "Swansea City": "Swansea",
+    "Tottenham Hotspur": "Tottenham",
+    "West Ham United": "West Ham",
     "AFC Bournemouth": "Bournemouth",
 }
 
