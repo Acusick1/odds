@@ -75,11 +75,9 @@ FBREF_TEAM_NAME_MAP: dict[str, str] = {
     "AFC Bournemouth": "Bournemouth",
 }
 
-# Mapping from flattened MultiIndex column names to clean output names.
-# Group-prefixed names disambiguate duplicates (e.g. Performance_Gls vs Per 90 Minutes_Gls).
-# Mapping from flattened column names to clean output names.
-# Unique leaf names keep their original name (e.g. "MP"), duplicates get
-# group-prefixed (e.g. "Performance_Gls" vs "Per 90 Minutes_Gls").
+# Mapping from flattened column names to clean output names. Unique leaf names
+# keep their original name (e.g. "MP"), duplicates get group-prefixed
+# (e.g. "Performance_Gls" vs "Per 90 Minutes_Gls").
 COLUMN_RENAMES: dict[str, str] = {
     "Player": "player",
     "Nation": "nation",
@@ -148,7 +146,7 @@ def _find_standard_stats_table(tables: list[pd.DataFrame]) -> pd.DataFrame | Non
     for df in tables:
         df = _flatten_columns(df)
         col_set = set(df.columns)
-        if "Player" in col_set and len(df) > 100:
+        if "Player" in col_set and "MP" in col_set and "Min" in col_set:
             return df
 
     return None

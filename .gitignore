@@ -57,6 +57,9 @@ data/espn_lineups/
 # FBref player stats (regenerated via scripts/ingest_fbref_player_stats.py)
 data/fbref_player_stats/
 
+# Manually saved external data (FBref HTML pages, etc.)
+data/external/
+
 # Database
 *.db
 *.sqlite3
