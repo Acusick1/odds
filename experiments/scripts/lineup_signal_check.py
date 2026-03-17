@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import sys
 import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,9 +33,14 @@ from odds_core.database import async_session_maker
 from odds_core.models import EventStatus
 from scipy import stats
 from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import cross_val_score
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
+
+# Add scripts/ to path so we can import from ingest_fbref_player_stats
+sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+from ingest_fbref_player_stats import FBREF_TEAM_NAME_MAP  # noqa: E402
 
 OUTPUT_DIR = SCRIPT_DIR.parent / "results" / "lineup_signal_check"
 
@@ -42,28 +48,6 @@ LINEUP_DIR = PROJECT_ROOT / "data" / "espn_lineups"
 FBREF_DIR = PROJECT_ROOT / "data" / "fbref_player_stats"
 
 DEFAULT_CONFIG = SCRIPT_DIR.parent / "configs" / "xgboost_epl_combined_standings_tuning.yaml"
-
-# FBref team name -> canonical (same as ingest script, kept here for self-containment)
-FBREF_TEAM_NAME_MAP: dict[str, str] = {
-    "Brighton and Hove Albion": "Brighton",
-    "Brighton & Hove Albion": "Brighton",
-    "Cardiff City": "Cardiff",
-    "Huddersfield Town": "Huddersfield",
-    "Hull City": "Hull",
-    "Ipswich Town": "Ipswich",
-    "Leicester City": "Leicester",
-    "Leeds United": "Leeds",
-    "Newcastle Utd": "Newcastle",
-    "Newcastle United": "Newcastle",
-    "Norwich City": "Norwich",
-    "Nott'ham Forest": "Nottingham",
-    "Nottingham Forest": "Nottingham",
-    "Stoke City": "Stoke",
-    "Swansea City": "Swansea",
-    "Tottenham Hotspur": "Tottenham",
-    "West Ham United": "West Ham",
-    "AFC Bournemouth": "Bournemouth",
-}
 
 sns.set_style("whitegrid")
 plt.rcParams["figure.figsize"] = (14, 8)
@@ -359,6 +343,7 @@ def match_metrics_to_events(
     joined_rows: list[dict[str, Any]] = []
     matched = 0
     unmatched = 0
+    partial = 0
 
     for (home, away, date_str), (eid, target) in event_lookup.items():
         home_metrics = metrics_lookup.get((home, date_str))
@@ -367,6 +352,9 @@ def match_metrics_to_events(
         if home_metrics is None and away_metrics is None:
             unmatched += 1
             continue
+
+        if home_metrics is None or away_metrics is None:
+            partial += 1
 
         row_dict: dict[str, Any] = {
             "event_id": eid,
@@ -393,13 +381,21 @@ def match_metrics_to_events(
                 row_dict[f"diff_{col}"] = np.nan
 
         # GK changed
-        row_dict["home_gk_changed"] = gk_lookup.get((home, date_str), np.nan)
-        row_dict["away_gk_changed"] = gk_lookup.get((away, date_str), np.nan)
+        home_gk = gk_lookup.get((home, date_str), np.nan)
+        away_gk = gk_lookup.get((away, date_str), np.nan)
+        row_dict["home_gk_changed"] = home_gk
+        row_dict["away_gk_changed"] = away_gk
+        if not np.isnan(home_gk) and not np.isnan(away_gk):
+            row_dict["diff_gk_changed"] = home_gk - away_gk
+        else:
+            row_dict["diff_gk_changed"] = np.nan
 
         joined_rows.append(row_dict)
         matched += 1
 
-    print(f"Event matching: {matched} matched, {unmatched} unmatched")
+    print(
+        f"Event matching: {matched} matched, {unmatched} unmatched, {partial} partial (one side only)"
+    )
     return pd.DataFrame(joined_rows)
 
 
@@ -416,6 +412,7 @@ LINEUP_FEATURE_COLS = [
     "diff_xi_changes",
     "home_gk_changed",
     "away_gk_changed",
+    "diff_gk_changed",
     "home_weighted_xi_change",
     "away_weighted_xi_change",
     "diff_weighted_xi_change",
@@ -490,22 +487,27 @@ def compute_correlations(df: pd.DataFrame) -> pd.DataFrame:
     return corr_df.sort_values("abs_r", ascending=False)
 
 
-def multivariate_r2(df: pd.DataFrame) -> dict[str, float]:
-    """Fit simple linear regression with all lineup features to get ceiling R²."""
+def multivariate_r2(df: pd.DataFrame, cv_folds: int = 5) -> dict[str, Any]:
+    """Cross-validated linear regression R² with all lineup features as ceiling estimate."""
     available = [c for c in LINEUP_FEATURE_COLS if c in df.columns]
     subset = df[available + ["target"]].dropna()
 
     if len(subset) < 30:
-        return {"n": len(subset), "r2": np.nan}
+        return {"n": len(subset), "cv_r2_mean": np.nan, "cv_r2_std": np.nan}
 
     X = subset[available].values
     y = subset["target"].values
 
     model = LinearRegression()
-    model.fit(X, y)
-    r2 = model.score(X, y)
+    scores = cross_val_score(model, X, y, cv=cv_folds, scoring="r2")
 
-    return {"n": len(subset), "r2": r2, "n_features": len(available)}
+    return {
+        "n": len(subset),
+        "cv_r2_mean": scores.mean(),
+        "cv_r2_std": scores.std(),
+        "cv_folds": cv_folds,
+        "n_features": len(available),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -699,10 +701,11 @@ def main() -> None:
     print("\nCorrelation results (sorted by |r|):")
     print(corr_df[["n", "pearson_r", "pearson_p", "spearman_rho", "univariate_r2"]].to_string())
 
-    # Multivariate ceiling
+    # Multivariate ceiling (cross-validated)
     mv = multivariate_r2(joined_df)
     print(
-        f"\nMultivariate linear regression ceiling: R²={mv['r2']:.6f} "
+        f"\nMultivariate linear regression ceiling ({mv.get('cv_folds', 'N/A')}-fold CV): "
+        f"R²={mv['cv_r2_mean']:.6f} +/- {mv['cv_r2_std']:.6f} "
         f"(n={mv['n']}, features={mv.get('n_features', 'N/A')})"
     )
 
