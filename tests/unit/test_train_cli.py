@@ -323,6 +323,7 @@ async def test_run_tuning_async_workflow(sample_config_with_tuning, tmp_path):
         patch("odds_analytics.training.prepare_training_data_from_config") as mock_prepare_data,
         patch("odds_analytics.training.tuner.OptunaTuner") as mock_tuner_class,
         patch("odds_analytics.training.tuner.create_objective") as mock_create_objective,
+        patch("odds_cli.commands.train._save_data_verification"),
     ):
         # Mock session
         mock_session = AsyncMock()
@@ -341,6 +342,7 @@ async def test_run_tuning_async_workflow(sample_config_with_tuning, tmp_path):
         mock_data_result.X_test = Mock()
         mock_data_result.y_test = Mock()
         mock_data_result.feature_names = ["feature_1", "feature_2"]
+        mock_data_result.event_ids_train = None
         mock_prepare_data.return_value = mock_data_result
 
         # Mock tuner
@@ -391,6 +393,7 @@ async def test_run_tuning_async_with_train_best(sample_config_with_tuning, tmp_p
         patch("odds_analytics.training.prepare_training_data_from_config") as mock_prepare_data,
         patch("odds_analytics.training.tuner.OptunaTuner") as mock_tuner_class,
         patch("odds_analytics.training.tuner.create_objective") as mock_create_objective,
+        patch("odds_cli.commands.train._save_data_verification"),
     ):
         # Setup mocks (similar to previous test)
         import numpy as np
@@ -410,6 +413,7 @@ async def test_run_tuning_async_with_train_best(sample_config_with_tuning, tmp_p
         mock_data_result.y_val = np.random.randn(200)
         mock_data_result.X_test = np.random.randn(200, 50)
         mock_data_result.y_test = np.random.randn(200)
+        mock_data_result.event_ids_train = None
         mock_data_result.feature_names = ["feature_1", "feature_2"]
         mock_prepare_data.return_value = mock_data_result
 
@@ -498,6 +502,7 @@ async def test_run_tuning_async_optimization_error(sample_config_with_tuning, tm
         patch("odds_analytics.training.prepare_training_data_from_config") as mock_prepare_data,
         patch("odds_analytics.training.tuner.OptunaTuner") as mock_tuner_class,
         patch("odds_analytics.training.tuner.create_objective") as mock_create_objective,
+        patch("odds_cli.commands.train._save_data_verification"),
     ):
         mock_session = AsyncMock()
         mock_get_session.return_value.__aenter__.return_value = mock_session
@@ -514,6 +519,7 @@ async def test_run_tuning_async_optimization_error(sample_config_with_tuning, tm
         mock_data_result.X_test = Mock()
         mock_data_result.y_test = Mock()
         mock_data_result.feature_names = ["feature_1"]
+        mock_data_result.event_ids_train = None
         mock_prepare_data.return_value = mock_data_result
 
         mock_tuner = Mock()

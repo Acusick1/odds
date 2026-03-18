@@ -35,6 +35,10 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
         "odds_analytics.training.data_preparation",
         "prepare_training_data_from_config",
     ),
+    "save_verification_artifacts": (
+        "odds_analytics.training.data_preparation",
+        "save_verification_artifacts",
+    ),
     "ExperimentTracker": ("odds_analytics.training.tracking", "ExperimentTracker"),
     "MLflowTracker": ("odds_analytics.training.tracking", "MLflowTracker"),
     "create_tracker": ("odds_analytics.training.tracking", "create_tracker"),
@@ -69,6 +73,7 @@ __all__ = [
     "TrackingConfig",
     "MLTrainingConfig",
     "prepare_training_data_from_config",
+    "save_verification_artifacts",
     "filter_events_by_date_range",
     "TrainingDataResult",
     "CVFoldResult",

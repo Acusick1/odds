@@ -35,11 +35,13 @@ Example usage:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
 import structlog
 from odds_core.models import Event, EventStatus
+from scipy import stats
 from sklearn.model_selection import train_test_split
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -76,8 +78,122 @@ def _split_aligned_arrays(
 __all__ = [
     "prepare_training_data_from_config",
     "filter_events_by_date_range",
+    "save_verification_artifacts",
     "TrainingDataResult",
 ]
+
+
+def save_verification_artifacts(
+    X: np.ndarray,
+    y: np.ndarray,
+    feature_names: list[str],
+    output_dir: Path,
+    *,
+    sample_rows: int = 20,
+    event_ids: np.ndarray | None = None,
+) -> None:
+    """Save feature verification artifacts for experiment auditing.
+
+    Writes three CSVs to output_dir:
+    - feature_stats.csv: per-feature count, null_count, null_pct, mean, std, min, max, nunique
+    - feature_sample.csv: first N rows of the feature matrix for spot-checking
+    - feature_target_corr.csv: per-feature Pearson and Spearman correlation with target
+    """
+    import csv
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    n_samples, n_features = X.shape
+
+    # 1. Feature statistics
+    stats_path = output_dir / "feature_stats.csv"
+    with open(stats_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            [
+                "feature",
+                "count",
+                "null_count",
+                "null_pct",
+                "mean",
+                "std",
+                "min",
+                "max",
+                "nunique",
+            ]
+        )
+        for i, name in enumerate(feature_names):
+            col = X[:, i]
+            null_mask = np.isnan(col)
+            null_count = int(null_mask.sum())
+            valid = col[~null_mask]
+            writer.writerow(
+                [
+                    name,
+                    n_samples,
+                    null_count,
+                    round(null_count / n_samples * 100, 2) if n_samples > 0 else 0,
+                    round(float(np.mean(valid)), 6) if len(valid) > 0 else "",
+                    round(float(np.std(valid)), 6) if len(valid) > 0 else "",
+                    round(float(np.min(valid)), 6) if len(valid) > 0 else "",
+                    round(float(np.max(valid)), 6) if len(valid) > 0 else "",
+                    len(np.unique(valid)) if len(valid) > 0 else 0,
+                ]
+            )
+
+    # 2. Feature sample (first N rows)
+    sample_path = output_dir / "feature_sample.csv"
+    n_sample = min(sample_rows, n_samples)
+    with open(sample_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        header = []
+        if event_ids is not None:
+            header.append("event_id")
+        header.extend(feature_names)
+        header.append("target")
+        writer.writerow(header)
+        for j in range(n_sample):
+            row: list[str | float] = []
+            if event_ids is not None:
+                row.append(str(event_ids[j]))
+            row.extend(round(float(v), 6) if not np.isnan(v) else "" for v in X[j])
+            row.append(round(float(y[j]), 6))
+            writer.writerow(row)
+
+    # 3. Feature-target correlations
+    corr_path = output_dir / "feature_target_corr.csv"
+    with open(corr_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["feature", "pearson_r", "pearson_p", "spearman_r", "spearman_p"])
+        for i, name in enumerate(feature_names):
+            col = X[:, i]
+            valid_mask = ~np.isnan(col) & ~np.isnan(y)
+            if valid_mask.sum() < 3:
+                writer.writerow([name, "", "", "", ""])
+                continue
+            import warnings
+
+            col_valid = col[valid_mask]
+            y_valid = y[valid_mask]
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", stats.ConstantInputWarning)
+                pr, pp = stats.pearsonr(col_valid, y_valid)
+                sr, sp = stats.spearmanr(col_valid, y_valid)
+            writer.writerow(
+                [
+                    name,
+                    round(float(pr), 6),
+                    round(float(pp), 6),
+                    round(float(sr), 6),
+                    round(float(sp), 6),
+                ]
+            )
+
+    logger.info(
+        "verification_artifacts_saved",
+        output_dir=str(output_dir),
+        n_features=n_features,
+        n_samples=n_samples,
+    )
 
 
 class TrainingDataResult:
