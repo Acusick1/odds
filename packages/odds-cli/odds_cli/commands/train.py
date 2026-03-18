@@ -11,6 +11,7 @@ from odds_analytics.training import (
     MLTrainingConfig,
     TrackingConfig,
     prepare_training_data_from_config,
+    save_verification_artifacts,
 )
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from odds_core.database import async_session_maker
@@ -207,6 +208,47 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
             console.print(f"  Training samples: {data_result.num_train_samples:,}")
             console.print(f"  Test samples: {data_result.num_test_samples:,}")
             console.print(f"  Features: {data_result.num_features}")
+
+            # Save verification artifacts alongside model
+            import numpy as np
+
+            output_path = _get_output_path(config)
+            artifacts_dir = Path(output_path).parent / "verification"
+            X_all = np.concatenate(
+                [
+                    a
+                    for a in [data_result.X_train, data_result.X_val, data_result.X_test]
+                    if a is not None and len(a) > 0
+                ]
+            )
+            y_all = np.concatenate(
+                [
+                    a
+                    for a in [data_result.y_train, data_result.y_val, data_result.y_test]
+                    if a is not None and len(a) > 0
+                ]
+            )
+            event_ids_all = None
+            if data_result.event_ids_train is not None:
+                event_ids_all = np.concatenate(
+                    [
+                        a
+                        for a in [
+                            data_result.event_ids_train,
+                            data_result.event_ids_val,
+                            data_result.event_ids_test,
+                        ]
+                        if a is not None and len(a) > 0
+                    ]
+                )
+            save_verification_artifacts(
+                X_all,
+                y_all,
+                data_result.feature_names,
+                artifacts_dir,
+                event_ids=event_ids_all,
+            )
+            console.print(f"  Verification artifacts: {artifacts_dir}/")
 
             # Step 2: Initialize strategy and train
             strategy = strategy_class()
@@ -823,6 +865,50 @@ async def _run_tuning_async(
         console.print(f"  Validation samples: {data_result.num_val_samples:,}")
         console.print(f"  Test samples: {data_result.num_test_samples:,}")
         console.print(f"  Features: {data_result.num_features}\n")
+
+        # Save verification artifacts
+        import numpy as np
+
+        if output_path is None:
+            config_file = Path(config_path)
+            tune_artifacts_dir = config_file.parent / f"{config_file.stem}_best_verification"
+        else:
+            tune_artifacts_dir = Path(output_path).parent / "verification"
+        X_all = np.concatenate(
+            [
+                a
+                for a in [data_result.X_train, data_result.X_val, data_result.X_test]
+                if a is not None and len(a) > 0
+            ]
+        )
+        y_all = np.concatenate(
+            [
+                a
+                for a in [data_result.y_train, data_result.y_val, data_result.y_test]
+                if a is not None and len(a) > 0
+            ]
+        )
+        event_ids_all = None
+        if data_result.event_ids_train is not None:
+            event_ids_all = np.concatenate(
+                [
+                    a
+                    for a in [
+                        data_result.event_ids_train,
+                        data_result.event_ids_val,
+                        data_result.event_ids_test,
+                    ]
+                    if a is not None and len(a) > 0
+                ]
+            )
+        save_verification_artifacts(
+            X_all,
+            y_all,
+            data_result.feature_names,
+            tune_artifacts_dir,
+            event_ids=event_ids_all,
+        )
+        console.print(f"  Verification artifacts: {tune_artifacts_dir}/\n")
 
         # Step 2: Initialize tuner with tracking config
         tuner = OptunaTuner(

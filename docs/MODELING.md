@@ -362,6 +362,26 @@ Every experiment must produce:
 - **Plots** saved as PNGs in the same directory.
 - **Data artifacts** (CSVs, etc.) for downstream analysis.
 
+### Verification artifacts (required)
+
+Every experiment must save feature verification artifacts to catch silent data bugs (zeroed features, missing values, wrong data selection). The `train run` and `train tune` CLI commands save these automatically. Standalone experiment scripts must call `save_verification_artifacts()` explicitly after preparing data:
+
+```python
+from odds_analytics.training import save_verification_artifacts
+
+save_verification_artifacts(X, y, feature_names, output_dir, event_ids=event_ids)
+```
+
+This produces three files:
+- **`feature_stats.csv`** — per-feature: count, null_count, null_pct, mean, std, min, max, nunique. Check for features that are all-NaN, all-zero, or constant.
+- **`feature_sample.csv`** — first 20 rows of the feature matrix with event IDs and target. Spot-check that values look reasonable.
+- **`feature_target_corr.csv`** — per-feature Pearson and Spearman correlation with the target. Check for flipped signs or lost signal vs expectations.
+
+Before reporting experiment results in FINDINGS.md, verify:
+1. No features are 100% NaN or constant (unless expected, e.g., optional feature group not loaded)
+2. Feature count matches the expected number for the configured feature groups
+3. Correlations are directionally consistent with prior experiments
+
 ### After running
 
 1. Update the **Experiment Log** table below with the headline result and decision.

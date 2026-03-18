@@ -32,6 +32,7 @@ from odds_analytics.training import (
 from odds_analytics.training.data_preparation import (
     filter_events_by_date_range,
     prepare_training_data_from_config,
+    save_verification_artifacts,
 )
 from odds_core.models import Event, EventStatus
 
@@ -851,3 +852,98 @@ class TestDateRangeFiltering:
                 event_id_pattern="op_%",
                 min_snapshots=None,
             )
+
+
+# =============================================================================
+# Verification Artifacts Tests
+# =============================================================================
+
+
+class TestSaveVerificationArtifacts:
+    """Tests for save_verification_artifacts function."""
+
+    @pytest.fixture
+    def sample_data(self) -> tuple[np.ndarray, np.ndarray, list[str]]:
+        rng = np.random.RandomState(42)
+        X = rng.randn(50, 4).astype(np.float32)
+        # Inject some NaNs in feature 2
+        X[0:5, 2] = np.nan
+        # Make feature 3 constant
+        X[:, 3] = 1.0
+        y = rng.randn(50).astype(np.float32)
+        feature_names = ["feat_a", "feat_b", "feat_with_nan", "feat_constant"]
+        return X, y, feature_names
+
+    def test_creates_three_files(self, tmp_path: Path, sample_data: tuple) -> None:
+        X, y, names = sample_data
+        save_verification_artifacts(X, y, names, tmp_path)
+        assert (tmp_path / "feature_stats.csv").exists()
+        assert (tmp_path / "feature_sample.csv").exists()
+        assert (tmp_path / "feature_target_corr.csv").exists()
+
+    def test_feature_stats_detects_nans(self, tmp_path: Path, sample_data: tuple) -> None:
+        import csv
+
+        X, y, names = sample_data
+        save_verification_artifacts(X, y, names, tmp_path)
+
+        with open(tmp_path / "feature_stats.csv") as f:
+            rows = list(csv.DictReader(f))
+
+        assert len(rows) == 4
+        nan_row = next(r for r in rows if r["feature"] == "feat_with_nan")
+        assert int(nan_row["null_count"]) == 5
+        assert float(nan_row["null_pct"]) == 10.0
+
+        const_row = next(r for r in rows if r["feature"] == "feat_constant")
+        assert int(const_row["nunique"]) == 1
+
+    def test_feature_sample_row_count(self, tmp_path: Path, sample_data: tuple) -> None:
+        import csv
+
+        X, y, names = sample_data
+        save_verification_artifacts(X, y, names, tmp_path, sample_rows=10)
+
+        with open(tmp_path / "feature_sample.csv") as f:
+            rows = list(csv.DictReader(f))
+
+        assert len(rows) == 10
+        # Should have feature columns + target
+        assert "feat_a" in rows[0]
+        assert "target" in rows[0]
+
+    def test_feature_sample_includes_event_ids(self, tmp_path: Path, sample_data: tuple) -> None:
+        import csv
+
+        X, y, names = sample_data
+        event_ids = np.array([f"evt_{i}" for i in range(50)])
+        save_verification_artifacts(X, y, names, tmp_path, event_ids=event_ids)
+
+        with open(tmp_path / "feature_sample.csv") as f:
+            reader = csv.DictReader(f)
+            first_row = next(reader)
+
+        assert "event_id" in first_row
+        assert first_row["event_id"] == "evt_0"
+
+    def test_correlation_output(self, tmp_path: Path, sample_data: tuple) -> None:
+        import csv
+
+        X, y, names = sample_data
+        save_verification_artifacts(X, y, names, tmp_path)
+
+        with open(tmp_path / "feature_target_corr.csv") as f:
+            rows = list(csv.DictReader(f))
+
+        assert len(rows) == 4
+        for row in rows:
+            assert "pearson_r" in row
+            assert "spearman_r" in row
+            # All features have enough valid values for correlation
+            assert row["pearson_r"] != ""
+
+    def test_creates_output_dir_if_missing(self, tmp_path: Path, sample_data: tuple) -> None:
+        X, y, names = sample_data
+        nested = tmp_path / "a" / "b" / "c"
+        save_verification_artifacts(X, y, names, nested)
+        assert (nested / "feature_stats.csv").exists()
