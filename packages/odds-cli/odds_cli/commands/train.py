@@ -253,9 +253,9 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
             console.print(f"  Test samples: {data_result.num_test_samples:,}")
             console.print(f"  Features: {data_result.num_features}")
 
-            # Save verification artifacts alongside model
-            output_path = _get_output_path(config)
-            artifacts_dir = Path(output_path).parent / "verification"
+            # Save verification artifacts to experiments/results/
+            exp_name = config.experiment.name
+            artifacts_dir = Path("experiments/results") / exp_name / "verification"
             _save_data_verification(data_result, artifacts_dir)
             console.print(f"  Verification artifacts: {artifacts_dir}/")
 
@@ -875,12 +875,9 @@ async def _run_tuning_async(
         console.print(f"  Test samples: {data_result.num_test_samples:,}")
         console.print(f"  Features: {data_result.num_features}\n")
 
-        # Save verification artifacts
-        if output_path is None:
-            config_file = Path(config_path)
-            tune_artifacts_dir = config_file.parent / f"{config_file.stem}_best_verification"
-        else:
-            tune_artifacts_dir = Path(output_path).parent / "verification"
+        # Save verification artifacts to experiments/results/
+        exp_name = ml_config.experiment.name
+        tune_artifacts_dir = Path("experiments/results") / exp_name / "verification"
         _save_data_verification(data_result, tune_artifacts_dir)
         console.print(f"  Verification artifacts: {tune_artifacts_dir}/\n")
 
