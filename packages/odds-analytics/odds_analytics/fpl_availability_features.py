@@ -2,7 +2,7 @@
 
 Computes expected squad disruption from FPL chance_of_playing data, weighted
 by each player's cumulative ESPN starts over a sliding 38-match window.
-Features are available 24-48h before kickoff (pre-decision tier).
+Features are computed from the latest FPL snapshot up to 48h before kickoff.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import datetime as dt
 from dataclasses import dataclass, fields
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import structlog
@@ -75,8 +75,8 @@ class FplAvailabilityCache:
 
     fpl_df: pd.DataFrame
     player_map: dict[tuple[str, int], str]
-    starts_lookup: dict[tuple[str, Any], dict[str, int]]
-    snapshot_times: list[Any]
+    starts_lookup: dict[tuple[str, dt.date], dict[str, int]]
+    snapshot_times: list[pd.Timestamp]
 
 
 def _build_fpl_to_espn_player_map(
@@ -154,30 +154,31 @@ def _build_fpl_to_espn_player_map(
 def _precompute_cumulative_starts(
     lineup_df: pd.DataFrame,
     window: int = _STARTS_WINDOW,
-) -> dict[tuple[str, Any], dict[str, int]]:
+) -> dict[tuple[str, dt.date], dict[str, int]]:
     """Precompute cumulative starts for every (team, match_date) pair.
 
     Returns a lookup keyed by (team, match_date) -> {player_id: start_count}.
     For each entry, counts starts in the `window` matches strictly before that date.
     """
-    lookup: dict[tuple[str, Any], dict[str, int]] = {}
+    lookup: dict[tuple[str, dt.date], dict[str, int]] = {}
 
     for team, team_df in lineup_df.groupby("team"):
         team_df = team_df.sort_values("datetime")
         unique_dates = team_df["match_date"].unique()
 
-        date_players: list[tuple[Any, list[str]]] = []
+        date_players: list[tuple[dt.date, list[str]]] = []
         for mdate in unique_dates:
             pids = team_df[team_df["match_date"] == mdate]["player_id"].astype(str).tolist()
-            date_players.append((mdate, pids))
+            key_date: dt.date = mdate.date() if hasattr(mdate, "date") else mdate
+            date_players.append((key_date, pids))
 
-        for i, (mdate, _) in enumerate(date_players):
+        for i, (key_date, _) in enumerate(date_players):
             start_idx = max(0, i - window)
             starts: dict[str, int] = {}
             for j in range(start_idx, i):
                 for pid in date_players[j][1]:
                     starts[pid] = starts.get(pid, 0) + 1
-            lookup[(str(team), mdate)] = starts
+            lookup[(str(team), key_date)] = starts
 
     return lookup
 
@@ -241,13 +242,17 @@ def _compute_team_disruption(
     snap_data: pd.DataFrame,
     match_date: dt.date,
     player_map: dict[tuple[str, int], str],
-    starts_lookup: dict[tuple[str, Any], dict[str, int]],
-) -> tuple[float, float, float]:
+    starts_lookup: dict[tuple[str, dt.date], dict[str, int]],
+) -> tuple[float, float, float] | None:
     """Compute disruption metrics for one team from one FPL snapshot.
 
-    Returns (expected_disruption_weighted, expected_disruption_unweighted, n_flagged).
+    Returns (expected_disruption_weighted, expected_disruption_unweighted, n_flagged),
+    or None if the team is not present in the snapshot.
     """
     team_players = snap_data[snap_data["team"] == team]
+    if team_players.empty:
+        return None
+
     cum_starts = starts_lookup.get((team, match_date), {})
 
     disruption_weighted = 0.0
@@ -298,12 +303,18 @@ def extract_fpl_availability_features(
 
     match_date = commence.date()
 
-    home_weighted, home_unweighted, home_n = _compute_team_disruption(
+    home_result = _compute_team_disruption(
         event.home_team, snap_data, match_date, cache.player_map, cache.starts_lookup
     )
-    away_weighted, away_unweighted, away_n = _compute_team_disruption(
+    away_result = _compute_team_disruption(
         event.away_team, snap_data, match_date, cache.player_map, cache.starts_lookup
     )
+
+    if home_result is None or away_result is None:
+        return FplAvailabilityFeatures()
+
+    home_weighted, home_unweighted, home_n = home_result
+    away_weighted, away_unweighted, away_n = away_result
 
     return FplAvailabilityFeatures(
         home_expected_disruption=home_weighted,

@@ -1071,6 +1071,16 @@ async def _load_lineup_cache(session: AsyncSession) -> LineupCache | None:
     return build_lineup_cache(df[df["starter"]].drop(columns=["starter"]))
 
 
+def _load_fpl_availability_cache() -> FplAvailabilityCache | None:
+    """Load FPL availability and ESPN lineup CSVs and build the feature cache.
+
+    Returns None if no FPL CSV files are found (e.g. in Lambda or before first run).
+    """
+    from odds_analytics.fpl_availability_features import load_fpl_availability_cache
+
+    return load_fpl_availability_cache()
+
+
 class PreparedFeatureData:
     """Pre-split feature matrix with targets and metadata."""
 
@@ -1179,9 +1189,7 @@ async def prepare_training_data(
     # Preload FPL availability cache for expected-disruption features
     fpl_availability_cache: FplAvailabilityCache | None = None
     if "fpl_availability" in config.feature_groups:
-        from odds_analytics.fpl_availability_features import load_fpl_availability_cache
-
-        fpl_availability_cache = load_fpl_availability_cache()
+        fpl_availability_cache = _load_fpl_availability_cache()
 
     for event in valid_events:
         # Load all data for this event in bulk
