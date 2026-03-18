@@ -1,9 +1,12 @@
 """CLI commands for ML model training."""
 
+from __future__ import annotations
+
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import typer
 from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
 from odds_analytics.training import (
@@ -20,6 +23,9 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+if TYPE_CHECKING:
+    from odds_analytics.training import TrainingDataResult
+
 app = typer.Typer()
 console = Console()
 
@@ -31,6 +37,44 @@ STRATEGY_CLASSES = {
 
 # Default directory for experiment configs
 DEFAULT_CONFIG_DIR = Path("experiments")
+
+
+def _save_data_verification(data_result: TrainingDataResult, output_dir: Path) -> None:
+    """Save verification artifacts from a TrainingDataResult."""
+    X_all = np.concatenate(
+        [
+            a
+            for a in [data_result.X_train, data_result.X_val, data_result.X_test]
+            if a is not None and len(a) > 0
+        ]
+    )
+    y_all = np.concatenate(
+        [
+            a
+            for a in [data_result.y_train, data_result.y_val, data_result.y_test]
+            if a is not None and len(a) > 0
+        ]
+    )
+    event_ids_all = None
+    if data_result.event_ids_train is not None:
+        event_ids_all = np.concatenate(
+            [
+                a
+                for a in [
+                    data_result.event_ids_train,
+                    data_result.event_ids_val,
+                    data_result.event_ids_test,
+                ]
+                if a is not None and len(a) > 0
+            ]
+        )
+    save_verification_artifacts(
+        X_all,
+        y_all,
+        data_result.feature_names,
+        output_dir,
+        event_ids=event_ids_all,
+    )
 
 
 def load_config(config_path: str) -> MLTrainingConfig:
@@ -210,44 +254,9 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
             console.print(f"  Features: {data_result.num_features}")
 
             # Save verification artifacts alongside model
-            import numpy as np
-
             output_path = _get_output_path(config)
             artifacts_dir = Path(output_path).parent / "verification"
-            X_all = np.concatenate(
-                [
-                    a
-                    for a in [data_result.X_train, data_result.X_val, data_result.X_test]
-                    if a is not None and len(a) > 0
-                ]
-            )
-            y_all = np.concatenate(
-                [
-                    a
-                    for a in [data_result.y_train, data_result.y_val, data_result.y_test]
-                    if a is not None and len(a) > 0
-                ]
-            )
-            event_ids_all = None
-            if data_result.event_ids_train is not None:
-                event_ids_all = np.concatenate(
-                    [
-                        a
-                        for a in [
-                            data_result.event_ids_train,
-                            data_result.event_ids_val,
-                            data_result.event_ids_test,
-                        ]
-                        if a is not None and len(a) > 0
-                    ]
-                )
-            save_verification_artifacts(
-                X_all,
-                y_all,
-                data_result.feature_names,
-                artifacts_dir,
-                event_ids=event_ids_all,
-            )
+            _save_data_verification(data_result, artifacts_dir)
             console.print(f"  Verification artifacts: {artifacts_dir}/")
 
             # Step 2: Initialize strategy and train
@@ -867,47 +876,12 @@ async def _run_tuning_async(
         console.print(f"  Features: {data_result.num_features}\n")
 
         # Save verification artifacts
-        import numpy as np
-
         if output_path is None:
             config_file = Path(config_path)
             tune_artifacts_dir = config_file.parent / f"{config_file.stem}_best_verification"
         else:
             tune_artifacts_dir = Path(output_path).parent / "verification"
-        X_all = np.concatenate(
-            [
-                a
-                for a in [data_result.X_train, data_result.X_val, data_result.X_test]
-                if a is not None and len(a) > 0
-            ]
-        )
-        y_all = np.concatenate(
-            [
-                a
-                for a in [data_result.y_train, data_result.y_val, data_result.y_test]
-                if a is not None and len(a) > 0
-            ]
-        )
-        event_ids_all = None
-        if data_result.event_ids_train is not None:
-            event_ids_all = np.concatenate(
-                [
-                    a
-                    for a in [
-                        data_result.event_ids_train,
-                        data_result.event_ids_val,
-                        data_result.event_ids_test,
-                    ]
-                    if a is not None and len(a) > 0
-                ]
-            )
-        save_verification_artifacts(
-            X_all,
-            y_all,
-            data_result.feature_names,
-            tune_artifacts_dir,
-            event_ids=event_ids_all,
-        )
+        _save_data_verification(data_result, tune_artifacts_dir)
         console.print(f"  Verification artifacts: {tune_artifacts_dir}/\n")
 
         # Step 2: Initialize tuner with tracking config
