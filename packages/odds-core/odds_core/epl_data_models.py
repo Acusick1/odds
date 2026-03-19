@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Index, UniqueConstraint
+from sqlalchemy import Column, DateTime, Index, UniqueConstraint, func
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
@@ -86,7 +86,7 @@ class EspnFixture(SQLModel, table=True):
     season: str = Field(index=True)
 
     created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True)),
+        sa_column=Column(DateTime(timezone=True), server_default=func.now()),
         default_factory=utc_now,
     )
 
@@ -120,7 +120,7 @@ class EspnLineup(SQLModel, table=True):
     season: str = Field(index=True)
 
     created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True)),
+        sa_column=Column(DateTime(timezone=True), server_default=func.now()),
         default_factory=utc_now,
     )
 
@@ -155,7 +155,7 @@ class FplAvailability(SQLModel, table=True):
     news: str | None = Field(default=None)
 
     created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True)),
+        sa_column=Column(DateTime(timezone=True), server_default=func.now()),
         default_factory=utc_now,
     )
 
