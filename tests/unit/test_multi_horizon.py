@@ -559,6 +559,84 @@ class TestTierSampler:
         assert len(result) == 1
         assert result[0].id == 2  # Latest, no bookmaker filter
 
+    def test_required_bookmakers_any_semantics_accepts_partial(self, event):
+        """With [pinnacle, betfair_exchange], a snapshot with only BFE is valid."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=12),
+                raw_data=self._raw_data_with_bookmakers(["betfair_exchange", "bet365"]),
+                bookmaker_count=2,
+                fetch_tier="sharp",
+            ),
+        ]
+        sampler = TierSampler(
+            "sharp", required_bookmakers=["pinnacle", "betfair_exchange"], market="h2h"
+        )
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 1
+        assert result[0].id == 1
+
+    def test_required_bookmakers_any_semantics_rejects_none(self, event):
+        """With [pinnacle, betfair_exchange], a snapshot with neither is rejected."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=12),
+                raw_data=self._raw_data_with_bookmakers(["bet365", "betway"]),
+                bookmaker_count=2,
+                fetch_tier="sharp",
+            ),
+        ]
+        sampler = TierSampler(
+            "sharp", required_bookmakers=["pinnacle", "betfair_exchange"], market="h2h"
+        )
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert result == []
+
+    def test_required_bookmakers_prefers_latest_with_any_sharp(self, event):
+        """Picks latest snapshot that has at least one required bookmaker."""
+        commence = event.commence_time
+        snaps = [
+            OddsSnapshot(
+                id=1,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=24),
+                raw_data=self._raw_data_with_bookmakers(["pinnacle", "bet365"]),
+                bookmaker_count=2,
+                fetch_tier="early",
+            ),
+            OddsSnapshot(
+                id=2,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=6),
+                raw_data=self._raw_data_with_bookmakers(["betfair_exchange", "bet365"]),
+                bookmaker_count=2,
+                fetch_tier="sharp",
+            ),
+            OddsSnapshot(
+                id=3,
+                event_id=event.id,
+                snapshot_time=commence - timedelta(hours=3),
+                raw_data=self._raw_data_with_bookmakers(["bet365"]),
+                bookmaker_count=1,
+                fetch_tier="pregame",
+            ),
+        ]
+        sampler = TierSampler(
+            "sharp", required_bookmakers=["pinnacle", "betfair_exchange"], market="h2h"
+        )
+        result = sampler.sample(self._make_bundle(event, snaps))
+
+        assert len(result) == 1
+        assert result[0].id == 2  # Latest with a required bookmaker
+
 
 class TestTimeRangeSampler:
     """Tests for TimeRangeSampler stratified snapshot selection."""

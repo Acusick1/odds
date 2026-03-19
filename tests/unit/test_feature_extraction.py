@@ -9,6 +9,7 @@ from odds_analytics.feature_extraction import (
     FeatureExtractor,
     SequenceFeatureExtractor,
     TabularFeatureExtractor,
+    calculate_sharp_retail_metrics,
 )
 from odds_analytics.training.config import FeatureConfig
 from odds_core.models import EventStatus, Odds
@@ -1131,3 +1132,145 @@ class TestFeatureExtractorFromConfig:
         config = FeatureConfig(lookback_hours=72, timesteps=24)
         extractor = SequenceFeatureExtractor.from_config(config)
         assert isinstance(extractor, SequenceFeatureExtractor)
+
+
+def _make_odds(
+    bookmaker_key: str,
+    outcome_name: str,
+    price: int,
+    *,
+    event_id: str = "test_event",
+    market_key: str = "h2h",
+) -> Odds:
+    ts = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
+    return Odds(
+        id=0,
+        event_id=event_id,
+        bookmaker_key=bookmaker_key,
+        bookmaker_title=bookmaker_key.title(),
+        market_key=market_key,
+        outcome_name=outcome_name,
+        price=price,
+        point=None,
+        odds_timestamp=ts,
+        last_update=ts,
+    )
+
+
+class TestSharpBookmakerPriorityFallback:
+    """Test priority-ordered fallback for sharp bookmaker selection."""
+
+    def _odds_with_bookmakers(self, bookmaker_keys: list[str]) -> list[Odds]:
+        """Build h2h odds for given bookmakers with distinct prices."""
+        prices = {"pinnacle": -120, "betfair_exchange": -125, "bet365": -115}
+        odds = []
+        for bm in bookmaker_keys:
+            odds.append(_make_odds(bm, "Home", prices.get(bm, -110)))
+            odds.append(_make_odds(bm, "Away", prices.get(bm, -110) + 10))
+        return odds
+
+    def test_prefers_first_bookmaker_when_both_present(self) -> None:
+        odds = self._odds_with_bookmakers(["pinnacle", "betfair_exchange", "bet365"])
+        result = calculate_sharp_retail_metrics(
+            odds,
+            sharp_bookmakers=["pinnacle", "betfair_exchange"],
+            retail_bookmakers=["bet365"],
+        )
+        # sharp_prob should come from pinnacle (-120), not BFE (-125)
+        pinnacle_only = calculate_sharp_retail_metrics(
+            odds, sharp_bookmakers=["pinnacle"], retail_bookmakers=["bet365"]
+        )
+        assert result["sharp_prob"] == pinnacle_only["sharp_prob"]
+
+    def test_falls_back_to_second_bookmaker(self) -> None:
+        odds = self._odds_with_bookmakers(["betfair_exchange", "bet365"])
+        result = calculate_sharp_retail_metrics(
+            odds,
+            sharp_bookmakers=["pinnacle", "betfair_exchange"],
+            retail_bookmakers=["bet365"],
+        )
+        bfe_only = calculate_sharp_retail_metrics(
+            odds, sharp_bookmakers=["betfair_exchange"], retail_bookmakers=["bet365"]
+        )
+        assert result["sharp_prob"] == bfe_only["sharp_prob"]
+        assert result["sharp_prob"] is not None
+
+    def test_returns_none_when_no_sharp_present(self) -> None:
+        odds = self._odds_with_bookmakers(["bet365"])
+        result = calculate_sharp_retail_metrics(
+            odds,
+            sharp_bookmakers=["pinnacle", "betfair_exchange"],
+            retail_bookmakers=["bet365"],
+        )
+        assert result["sharp_prob"] is None
+        assert result["diff"] is None
+
+    def test_single_bookmaker_list_unchanged(self) -> None:
+        odds = self._odds_with_bookmakers(["pinnacle", "bet365"])
+        result = calculate_sharp_retail_metrics(
+            odds, sharp_bookmakers=["pinnacle"], retail_bookmakers=["bet365"]
+        )
+        assert result["sharp_prob"] is not None
+
+
+class TestTabularExtractorPriorityFallback:
+    """Test priority-ordered fallback in TabularFeatureExtractor."""
+
+    @pytest.fixture
+    def event(self) -> BacktestEvent:
+        return BacktestEvent(
+            id="fallback_test",
+            commence_time=datetime(2025, 1, 15, 15, 0, 0, tzinfo=UTC),
+            home_team="Arsenal",
+            away_team="Chelsea",
+            home_score=2,
+            away_score=1,
+            status=EventStatus.FINAL,
+        )
+
+    def _odds_for(self, bookmaker_keys: list[str], event: BacktestEvent) -> list[Odds]:
+        prices = {"pinnacle": -120, "betfair_exchange": -125, "bet365": -115}
+        odds = []
+        for bm in bookmaker_keys:
+            p = prices.get(bm, -110)
+            odds.append(_make_odds(bm, event.home_team, p, event_id=event.id))
+            odds.append(_make_odds(bm, event.away_team, p + 10, event_id=event.id))
+        return odds
+
+    def test_uses_primary_sharp_when_available(self, event: BacktestEvent) -> None:
+        odds = self._odds_for(["pinnacle", "betfair_exchange", "bet365"], event)
+        extractor = TabularFeatureExtractor(
+            sharp_bookmakers=["pinnacle", "betfair_exchange"],
+            retail_bookmakers=["bet365"],
+        )
+        features = extractor.extract_features(event, odds, market="h2h", outcome=event.home_team)
+
+        pinnacle_extractor = TabularFeatureExtractor(
+            sharp_bookmakers=["pinnacle"], retail_bookmakers=["bet365"]
+        )
+        pinnacle_features = pinnacle_extractor.extract_features(
+            event, odds, market="h2h", outcome=event.home_team
+        )
+        assert features.sharp_prob == pinnacle_features.sharp_prob
+
+    def test_falls_back_when_primary_absent(self, event: BacktestEvent) -> None:
+        odds = self._odds_for(["betfair_exchange", "bet365"], event)
+        extractor = TabularFeatureExtractor(
+            sharp_bookmakers=["pinnacle", "betfair_exchange"],
+            retail_bookmakers=["bet365"],
+        )
+        features = extractor.extract_features(event, odds, market="h2h", outcome=event.home_team)
+
+        assert features.sharp_prob is not None
+        assert features.retail_sharp_diff is not None
+
+    def test_no_sharp_yields_none(self, event: BacktestEvent) -> None:
+        odds = self._odds_for(["bet365"], event)
+        extractor = TabularFeatureExtractor(
+            sharp_bookmakers=["pinnacle", "betfair_exchange"],
+            retail_bookmakers=["bet365"],
+        )
+        features = extractor.extract_features(event, odds, market="h2h", outcome=event.home_team)
+
+        assert features.sharp_prob is None
+        assert features.retail_sharp_diff is None
