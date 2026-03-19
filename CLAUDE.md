@@ -45,6 +45,13 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system architectur
 - NEVER use `datetime.now()` without timezone
 - Store UTC in database, convert only for display
 
+### Feature Data Storage
+
+- All data consumed by feature groups MUST be read from the database, never directly from filesystem
+- Raw data files in `data/` are inputs to ingestion scripts only — `packages/` code must not reference `data/`
+- Ingestion scripts in `scripts/` write to DB tables; feature groups read via storage readers in `odds_lambda/storage/`
+- Pattern: raw file → `scripts/ingest_*.py` → DB table → `storage/reader` → feature group
+
 ### AWS Lambda
 
 - Two Lambda functions: scheduler (512 MB, 5 min) and scraper (2 GB, 10 min)
