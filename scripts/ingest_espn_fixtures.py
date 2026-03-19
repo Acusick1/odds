@@ -73,7 +73,7 @@ CSV_COLUMNS = [
     "team",
     "opponent",
     "competition",
-    "round",
+    "match_round",
     "home_away",
     "score_team",
     "score_opponent",
@@ -179,7 +179,7 @@ def fetch_team_schedule(
                 "team": team_name,
                 "opponent": opponent_name,
                 "competition": competition,
-                "round": round_name,
+                "match_round": round_name,
                 "home_away": team_entry["homeAway"],
                 "score_team": _extract_score(team_entry),
                 "score_opponent": _extract_score(opponent_entry),
@@ -261,7 +261,7 @@ async def write_db(fixtures: list[dict[str, str]], season: int) -> int:
                 "team": f["team"],
                 "opponent": f["opponent"],
                 "competition": f["competition"],
-                "round": f.get("round", ""),
+                "match_round": f.get("match_round", ""),
                 "home_away": f["home_away"],
                 "score_team": f.get("score_team", ""),
                 "score_opponent": f.get("score_opponent", ""),
@@ -287,9 +287,9 @@ def main() -> None:
         help="Single season start year (e.g. 2024 for 2024-25). Default: all seasons.",
     )
     parser.add_argument(
-        "--db",
+        "--skip-db",
         action="store_true",
-        help="Write to database in addition to CSV.",
+        help="Skip writing to database (CSV only).",
     )
     args = parser.parse_args()
 
@@ -312,7 +312,7 @@ def main() -> None:
             total_fixtures += len(fixtures)
             log.info(f"[{label}] Wrote {len(fixtures)} fixtures to {path}")
 
-            if args.db:
+            if not args.skip_db:
                 import asyncio
 
                 count = asyncio.run(write_db(fixtures, season))

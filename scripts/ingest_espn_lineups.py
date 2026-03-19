@@ -336,9 +336,9 @@ def main() -> None:
         help="Single season start year (e.g. 2024 for 2024-25). Default: all seasons.",
     )
     parser.add_argument(
-        "--db",
+        "--skip-db",
         action="store_true",
-        help="Write to database in addition to CSV.",
+        help="Skip writing to database (CSV only).",
     )
     args = parser.parse_args()
 
@@ -361,7 +361,7 @@ def main() -> None:
             total_rows += len(rows)
             log.info(f"[{label}] Wrote {len(rows)} player rows to {path}")
 
-            if args.db:
+            if not args.skip_db:
                 import asyncio
 
                 count = asyncio.run(write_db(rows, season))

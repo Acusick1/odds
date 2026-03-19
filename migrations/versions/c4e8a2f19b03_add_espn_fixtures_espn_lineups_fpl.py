@@ -26,7 +26,7 @@ def upgrade() -> None:
         sa.Column("team", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("opponent", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("competition", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-        sa.Column("round", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+        sa.Column("match_round", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("home_away", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("score_team", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("score_opponent", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
@@ -77,6 +77,7 @@ def upgrade() -> None:
         sa.Column("position", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("chance_of_playing", sa.Float(), nullable=False),
         sa.Column("status", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+        sa.Column("news", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(

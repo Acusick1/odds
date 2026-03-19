@@ -1015,7 +1015,7 @@ async def _load_fixtures_df(session: AsyncSession) -> pd.DataFrame | None:
             "team": f.team,
             "opponent": f.opponent,
             "competition": f.competition,
-            "round": f.round,
+            "round": f.match_round,
             "home_away": f.home_away,
             "score_team": f.score_team,
             "score_opponent": f.score_opponent,
@@ -1032,7 +1032,11 @@ async def _load_fixtures_df(session: AsyncSession) -> pd.DataFrame | None:
 
 
 async def _load_lineup_cache(session: AsyncSession) -> LineupCache | None:
-    """Load all ESPN lineup starters from DB and build a per-team starting XI cache.
+    """Load all ESPN lineups from DB and build a per-team starting XI cache.
+
+    Loads the full roster (starters + subs) with player_name so that downstream
+    consumers like the FPL availability feature group can do fuzzy name matching.
+    The build_lineup_cache function filters to starters internally.
 
     Returns None if no lineup data exists in the database.
     """
@@ -1042,7 +1046,7 @@ async def _load_lineup_cache(session: AsyncSession) -> LineupCache | None:
     from odds_analytics.epl_lineup_features import build_lineup_cache
 
     reader = EspnLineupReader(session)
-    lineups = await reader.get_starters()
+    lineups = await reader.get_all_lineups()
     if not lineups:
         logger.warning("espn_lineups_not_found_in_db")
         return None
@@ -1051,8 +1055,10 @@ async def _load_lineup_cache(session: AsyncSession) -> LineupCache | None:
         {
             "team": lu.team,
             "player_id": lu.player_id,
+            "player_name": lu.player_name,
             "datetime": lu.date,
-            "match_date": lu.date.date() if hasattr(lu.date, "date") else lu.date,
+            "match_date": lu.date.date(),
+            "starter": lu.starter,
         }
         for lu in lineups
     ]
@@ -1060,7 +1066,7 @@ async def _load_lineup_cache(session: AsyncSession) -> LineupCache | None:
     df["datetime"] = pd_.to_datetime(df["datetime"], utc=True)
 
     logger.info("espn_lineups_loaded_from_db", rows=len(df))
-    return build_lineup_cache(df)
+    return build_lineup_cache(df[df["starter"]].drop(columns=["starter"]))
 
 
 class PreparedFeatureData:

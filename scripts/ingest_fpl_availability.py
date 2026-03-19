@@ -62,6 +62,7 @@ CSV_COLUMNS = [
     "position",
     "chance_of_playing",
     "status",
+    "news",
 ]
 
 REQUEST_DELAY = 0.3
@@ -239,6 +240,7 @@ def _extract_players(
                 "position": position,
                 "chance_of_playing": chance,
                 "status": el.get("status", ""),
+                "news": el.get("news") or "",
             }
         )
 
@@ -335,6 +337,7 @@ async def write_db(rows: list[dict[str, Any]], season_label: str) -> int:
                 "position": r.get("position", ""),
                 "chance_of_playing": float(r["chance_of_playing"]),
                 "status": r.get("status", ""),
+                "news": r.get("news") or None,
             }
         )
 
@@ -355,9 +358,9 @@ def main() -> None:
         help="Single season label (e.g. 2024-25). Default: all seasons.",
     )
     parser.add_argument(
-        "--db",
+        "--skip-db",
         action="store_true",
-        help="Write to database in addition to CSV.",
+        help="Skip writing to database (CSV only).",
     )
     args = parser.parse_args()
 
@@ -391,7 +394,7 @@ def main() -> None:
                 total_rows += len(rows)
                 log.info(f"[{season_label}] Wrote {len(rows)} rows to {path}")
 
-                if args.db:
+                if not args.skip_db:
                     import asyncio
 
                     count = asyncio.run(write_db(rows, season_label))

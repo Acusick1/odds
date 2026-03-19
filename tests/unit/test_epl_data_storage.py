@@ -19,7 +19,7 @@ def _fixture_dict(**overrides: object) -> dict:
         "team": "Arsenal",
         "opponent": "Chelsea",
         "competition": "Premier League",
-        "round": "Regular Season",
+        "match_round": "Regular Season",
         "home_away": "home",
         "score_team": "2",
         "score_opponent": "1",

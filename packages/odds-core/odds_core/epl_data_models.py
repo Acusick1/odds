@@ -25,7 +25,7 @@ class EspnFixture(SQLModel, table=True):
     team: str = Field(index=True)
     opponent: str = Field()
     competition: str = Field()
-    round: str = Field(default="")
+    match_round: str = Field(default="")
     home_away: str = Field()
     score_team: str = Field(default="")
     score_opponent: str = Field(default="")
@@ -99,6 +99,7 @@ class FplAvailability(SQLModel, table=True):
     position: str = Field()
     chance_of_playing: float = Field()
     status: str = Field(default="")
+    news: str | None = Field(default=None)
 
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True)),
