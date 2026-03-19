@@ -119,7 +119,12 @@ def calculate_sharp_retail_metrics(
     - retail_prob: Average retail bookmaker probability
     - diff: Differential (retail_prob - sharp_prob)
     """
-    sharp_odds = filter_odds_by_bookmakers(odds, sharp_bookmakers)
+    # Try sharp bookmakers in priority order (fallback chain)
+    sharp_odds: list[Odds] = []
+    for bm in sharp_bookmakers:
+        sharp_odds = filter_odds_by_bookmakers(odds, [bm])
+        if sharp_odds:
+            break
     retail_odds = filter_odds_by_bookmakers(odds, retail_bookmakers)
 
     result: dict[str, float | None] = {
@@ -442,8 +447,13 @@ class TabularFeatureExtractor(FeatureExtractor):
         if not market_odds:
             return TabularFeatures(**feature_values)
 
-        # Sharp and retail bookmaker odds
-        sharp_odds = filter_odds_by_bookmakers(market_odds, self.sharp_bookmakers)
+        # Sharp bookmaker odds — try in priority order for consistent fallback
+        # (e.g. [pinnacle, betfair_exchange] uses Pinnacle when available, BFE otherwise)
+        sharp_odds: list[Odds] = []
+        for bm in self.sharp_bookmakers:
+            sharp_odds = filter_odds_by_bookmakers(market_odds, [bm])
+            if sharp_odds:
+                break
         retail_odds = filter_odds_by_bookmakers(market_odds, self.retail_bookmakers)
 
         # Resolve outcome (team name for h2h, "Over"/"Under" for totals)

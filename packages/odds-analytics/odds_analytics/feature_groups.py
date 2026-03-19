@@ -358,12 +358,13 @@ class TierSampler:
                 except ValueError:
                     pass
 
-        # Filter to snapshots that contain all required bookmakers
+        # Filter to snapshots that contain at least one required bookmaker
+        # (priority-ordered fallback: e.g. [pinnacle, betfair_exchange])
         if self._required_bookmakers:
             candidates = [
                 s
                 for s in candidates
-                if all(
+                if any(
                     snapshot_has_bookmaker(s, bm, self._market) for bm in self._required_bookmakers
                 )
             ]
@@ -1184,16 +1185,15 @@ async def prepare_training_data(
             skipped_events += 1
             continue
 
-        # Filter events missing sharp bookmaker closing odds (cross-source features).
-        # Only applies when sharp_bookmakers differ from target_bookmaker — if they
-        # match, there are no cross-source features to degrade.
+        # Filter events missing ALL sharp bookmaker closing odds (cross-source features).
+        # Events are kept if at least one sharp bookmaker is present, enabling
+        # priority-ordered fallback (e.g. [pinnacle, betfair_exchange]).
         if _should_filter_missing_sharp(config):
-            missing_sharp = [
-                bm
+            has_any_sharp = any(
+                snapshot_has_bookmaker(bundle.closing_snapshot, bm, market)
                 for bm in config.sharp_bookmakers
-                if not snapshot_has_bookmaker(bundle.closing_snapshot, bm, market)
-            ]
-            if missing_sharp:
+            )
+            if not has_any_sharp:
                 sharp_filtered_count += 1
                 continue
 

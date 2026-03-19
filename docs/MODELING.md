@@ -4,7 +4,7 @@
 
 Predict line movement: the delta between current fair price and closing fair price. A positive signal here means we can identify mispriced lines before they correct, enabling +EV execution on either sportsbook or Betfair exchange.
 
-We have confirmed a weak but real signal (~2-3% R² on EPL with Pinnacle as sharp reference, ~3.6% R² on NBA with bet365 self-reference). Current focus: EPL with cross-source features (Pinnacle sharp vs bet365 retail) and Betfair exchange execution.
+We have confirmed a weak but real signal (~2-6% R² on EPL depending on CV protocol, ~3.6% R² on NBA with bet365 self-reference). Current focus: EPL with cross-source features (sharp reference vs bet365 retail) and Betfair exchange execution. Sharp reference uses a hybrid fallback: Pinnacle when available, Betfair Exchange for post-shutdown events (Jan 2026+).
 
 ## Data Sources
 
@@ -16,10 +16,10 @@ Three data sources with complementary bookmaker coverage:
 | **Snapshots/event** | 2 (opening + closing) | 15+ avg (all tiers) | 2 (opening + closing) |
 | **Bookmakers** | UK: bet365, betway, betfred, bwin | US: pinnacle, fanduel, draftkings, betmgm, bovada | pinnacle, bet365, bwin, williamhill, betvictor, interwetten, ladbrokes |
 | **Event ID pattern** | `op_YYYY-YYYY_AWAY_HOME_DATE` | hex UUID | `fduk_YYYY-YYYY_HOME_AWAY_DATE` |
-| **Key value** | UK retail bookmakers | Dense snapshots, US bookmakers | Pinnacle closing odds (sharp reference) |
+| **Key value** | UK retail bookmakers | Dense snapshots, US bookmakers | Pinnacle + Betfair Exchange closing odds (sharp reference) |
 | **Overlap** | 1,810 EPL events matched to FDUK | 141 NBA events matched to OddsPortal | 1,810 EPL events matched to OddsPortal |
 
-football-data.co.uk is collected manually by Joseph Buchdahl (twice weekly, post-match). Pinnacle odds sourced from Pinnacle's public API, which became unreliable after July 2025 — 81 events in 2025-26 season lack Pinnacle closing data.
+football-data.co.uk is collected manually by Joseph Buchdahl (twice weekly, post-match). Pinnacle odds sourced from Pinnacle's public API, which became unreliable after July 2025 — 81 events in 2025-26 season lack Pinnacle closing data. Betfair Exchange closing odds available from 2024-25 season onwards (FDUK columns `BFE*`/`BFEC*`), ingested as `betfair_exchange` bookmaker key.
 
 ### Config fields
 
@@ -30,7 +30,7 @@ football-data.co.uk is collected manually by Joseph Buchdahl (twice weekly, post
 
 ### Which source for which experiment
 
-- **EPL bet365 target with Pinnacle sharp** → `data_source: null` (combined OddsPortal + FDUK), `sharp_bookmakers: [pinnacle]`, `closing_source_priority: [football_data_uk]`. Best current EPL setup — Pinnacle as genuine sharp reference, FDUK closing preferred for target.
+- **EPL bet365 target with hybrid sharp** → `data_source: null` (combined OddsPortal + FDUK), `sharp_bookmakers: [pinnacle, betfair_exchange]`, `closing_source_priority: [football_data_uk]`. Best current EPL setup — Pinnacle as primary sharp reference with Betfair Exchange fallback for post-shutdown events, FDUK closing preferred for target.
 - **NBA bet365 target** → `data_source: oddsportal` — bet365 only available from OddsPortal. ~5K events, 5 seasons.
 - **Pinnacle target** → `data_source: oddsapi` — Pinnacle only available from Odds API for NBA. ~1K events but dense snapshots.
 - **LSTM experiments** → also set `min_snapshots: 5` (or higher) to ensure sufficient sequence data.
@@ -291,8 +291,19 @@ Three-way comparison isolating the effect of Pinnacle as sharp reference vs more
 - **val_step=50 selects different params** per feature set (tabular: n_est=100, depth=5, mcw=9; all: n_est=50, depth=5, mcw=14), confirming the protocol provides tuner discrimination
 - **More data alone adds no signal** — the control (combined data, bet365 sharp) gave R²=-0.005 ± 0.008
 - MSE drop (0.0024 → 0.0007) reflects lower target variance with Pinnacle closing, not necessarily better prediction
-- 81/1,810 events (Jan-Mar 2026) lack Pinnacle closing data due to Pinnacle API shutdown (July 2025); small impact
+- 71 events (Jan-Mar 2026) lacked Pinnacle closing data due to Pinnacle API shutdown (Jan 2026); resolved by hybrid sharp fallback to Betfair Exchange (see below)
 - Configs: `experiments/configs/xgboost_epl_combined_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_standings_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_match_stats_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_all_tuning_best.yaml`, `experiments/configs/xgboost_epl_combined_bet365sharp_tuning_best.yaml`
+
+**Hybrid sharp reference (Pinnacle + Betfair Exchange, Mar 2026):**
+
+Pinnacle API shutdown (Jan 2026) excluded 71 events from training. Betfair Exchange (available in FDUK from 2024-25 onwards) validated as a drop-in replacement:
+- `tab_sharp_prob` correlation between Pinnacle and BFE: **0.9994** on 589 overlapping events
+- Systematic level shift of ~1.1pp (BFE back prices slightly worse than Pinnacle devigged) — XGBoost handles this via split point adjustment
+- Hybrid config `sharp_bookmakers: [pinnacle, betfair_exchange]` recovers all 71 excluded events (1800 vs 1729 total)
+- Folds 0-19 produce identical results to Pinnacle-only; folds 20-21 (post-shutdown) show positive R² (7.4%, 2.7%)
+- Sharp bookmaker selection uses priority-ordered fallback: first available bookmaker in the list wins
+- Config: `experiments/configs/xgboost_epl_hybrid_sharp.yaml`
+- Results: `experiments/results/hybrid_sharp_validation/`
 
 **Cross-source contamination bug (#231):** TierSampler selected decision snapshots by latest wall-clock time from eligible tiers. OddsPortal `sharp`-tier snapshots (no Pinnacle) won over FDUK `early`-tier snapshots (has Pinnacle) for ~37/150 events in the final walk-forward fold (Apr-Oct 2025). Combined with `np.nan_to_num(X, nan=0.0)` converting missing Pinnacle probs to 0.0, this corrupted cross-source features and distorted tuner optimization across all folds. Fix: TierSampler now accepts `required_bookmakers` to filter candidates; all `nan_to_num` calls removed (XGBoost handles NaN natively).
 
@@ -312,9 +323,9 @@ Three-way comparison isolating the effect of Pinnacle as sharp reference vs more
 
 ### Data
 - ~~Is more OddsPortal data worth collecting?~~ — **No for NBA** (Exp 6): learning curve plateaued at ~1.5K events. EPL has ~1.8K events currently — similar plateau likely but not independently confirmed.
-- **Pinnacle data continuity risk**: football-data.co.uk sources Pinnacle odds from Pinnacle's public API, which became unreliable after July 2025. 81 EPL events in 2025-26 already lack Pinnacle closing. Need an alternative Pinnacle source (direct API access requires commercial partnership application to `api@pinnacle.com`; or via The Odds API which carries Pinnacle).
+- ~~**Pinnacle data continuity risk**~~ — **Resolved** (Mar 2026): Betfair Exchange validated as Pinnacle replacement (sharp_prob correlation 0.9994). Hybrid config `sharp_bookmakers: [pinnacle, betfair_exchange]` uses Pinnacle for historical events and BFE for post-shutdown (Jan 2026+). BFE available in FDUK from 2024-25 onwards; for live production, would need Betfair API or historicdata.betfair.com feed.
 - PM order flow features from existing CLOB snapshots — untapped data source (deprioritized — UK inaccessible)
-- Betfair Exchange historical data (historicdata.betfair.com) offers 1-min to 50ms tick data — could replace Pinnacle as sharp reference with even finer granularity
+- Betfair Exchange historical data (historicdata.betfair.com) offers 1-min to 50ms tick data — could provide finer-grained sharp reference for live production
 
 ### Methodology
 - ~~Does CV protocol affect hyperparameter selection?~~ — **Yes** (Mar 2026): Expanding 150-event windows select materially different hyperparams than sliding 1-season with matchday steps. Production-matched CV (sliding, val_step=50) now the standard protocol.
@@ -422,3 +433,4 @@ Before reporting experiment results in FINDINGS.md, verify:
 | 2026-03-16 | EPL combined + match_stats | tabular 7 + match_stats 14, pinnacle sharp | devigged bet365 | ~1.7K EPL (OP+FDUK) | CV R²=0.025±0.042 | +0.6% R² over tabular | 5-fold walk-forward, 100 trials; rolling shots, corners, fouls, cards |
 | 2026-03-16 | EPL combined + standings + match_stats | tabular 7 + standings 11 + match_stats 14, pinnacle sharp | devigged bet365 | ~1.7K EPL (OP+FDUK) | CV R²=0.052±0.045 | Best EPL result | 5-fold walk-forward, 100 trials; match stats add incremental signal on top of standings |
 | 2026-03-16 | CV protocol grid search | tabular 7, pinnacle sharp | devigged bet365 | ~1.7K EPL (OP+FDUK) | Sliding-380 best window; val_step=50 balances signal | Adopt sliding-380:50 | 15-cell grid (5 windows × 3 val steps); sliding-380:10 lowest MSE (0.000706) but val_step=10 forces identical hyperparams across feature sets; val_step=50 (MSE=0.000732) preserves discrimination |
+| 2026-03-19 | Hybrid sharp: Pinnacle + BFE | 32 features, hybrid sharp [pinnacle, betfair_exchange] | devigged bet365 | 1.8K EPL (OP+FDUK) | R²=0.060±0.080 (fixed params, expanding:50) | Adopt hybrid sharp | BFE sharp_prob correlates 0.9994 with Pinnacle. Hybrid recovers 71 post-shutdown events (1800 vs 1729). Folds 0-19 identical to Pinnacle-only; extra folds 20-21 show R²=+7.4%, +2.7%. Code change: sharp_bookmakers uses priority-ordered fallback (ANY, not ALL). |
