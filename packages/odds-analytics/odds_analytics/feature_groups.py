@@ -1007,22 +1007,8 @@ async def _load_fixtures_df(session: AsyncSession) -> pd.DataFrame | None:
         logger.warning("espn_fixtures_not_found_in_db")
         return None
 
-    rows = [
-        {
-            "date": f.date,
-            "team": f.team,
-            "opponent": f.opponent,
-            "competition": f.competition,
-            "round": f.match_round,
-            "home_away": f.home_away,
-            "score_team": f.score_team,
-            "score_opponent": f.score_opponent,
-            "status": f.status,
-            "season": f.season,
-        }
-        for f in fixtures
-    ]
-    df = pd.DataFrame(rows)
+    rows = [f.model_dump(exclude={"id", "created_at"}) for f in fixtures]
+    df = pd.DataFrame(rows).rename(columns={"match_round": "round"})
     df["date"] = pd.to_datetime(df["date"], utc=True)
     logger.info("espn_fixtures_loaded_from_db", rows=len(df))
     return df
@@ -1048,18 +1034,12 @@ async def _load_lineup_cache(session: AsyncSession) -> LineupCache | None:
         return None
 
     rows = [
-        {
-            "team": lu.team,
-            "player_id": lu.player_id,
-            "player_name": lu.player_name,
-            "datetime": lu.date,
-            "match_date": lu.date.date(),
-            "starter": lu.starter,
-        }
+        lu.model_dump(include={"team", "player_id", "player_name", "date", "starter"})
         for lu in lineups
     ]
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows).rename(columns={"date": "datetime"})
     df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
+    df["match_date"] = df["datetime"].dt.date
 
     logger.info("espn_lineups_loaded_from_db", rows=len(df))
     return build_lineup_cache(df[df["starter"]].drop(columns=["starter"]))
