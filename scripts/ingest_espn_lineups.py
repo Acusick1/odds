@@ -288,6 +288,45 @@ def write_csv(rows: list[dict[str, str]], season: int) -> Path:
     return path
 
 
+async def write_db(rows: list[dict[str, str]], season: int) -> int:
+    """Write lineup rows to database via EspnLineupWriter."""
+    from datetime import UTC, datetime
+
+    from odds_core.database import async_session_maker
+    from odds_lambda.storage.espn_lineup_writer import EspnLineupWriter
+
+    label = SEASONS[season]
+    records = []
+    for r in rows:
+        date_str = r["date"]
+        dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        records.append(
+            {
+                "date": dt,
+                "home_team": r["home_team"],
+                "away_team": r["away_team"],
+                "team": r["team"],
+                "player_id": r["player_id"],
+                "player_name": r["player_name"],
+                "position": r.get("position", ""),
+                "starter": r["starter"].lower() == "true"
+                if isinstance(r["starter"], str)
+                else bool(r["starter"]),
+                "formation_place": int(r.get("formation_place", 0)),
+                "season": label,
+            }
+        )
+
+    async with async_session_maker() as session:
+        writer = EspnLineupWriter(session)
+        count = await writer.upsert_lineups(records)
+        await session.commit()
+
+    return count
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch ESPN starting XIs for EPL matches")
     parser.add_argument(
@@ -295,6 +334,11 @@ def main() -> None:
         type=int,
         default=None,
         help="Single season start year (e.g. 2024 for 2024-25). Default: all seasons.",
+    )
+    parser.add_argument(
+        "--db",
+        action="store_true",
+        help="Write to database in addition to CSV.",
     )
     args = parser.parse_args()
 
@@ -316,6 +360,12 @@ def main() -> None:
             path = write_csv(rows, season)
             total_rows += len(rows)
             log.info(f"[{label}] Wrote {len(rows)} player rows to {path}")
+
+            if args.db:
+                import asyncio
+
+                count = asyncio.run(write_db(rows, season))
+                log.info(f"[{label}] Upserted {count} lineup rows to database")
     finally:
         client.close()
 

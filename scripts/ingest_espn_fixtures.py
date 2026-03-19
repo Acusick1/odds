@@ -240,6 +240,44 @@ def write_csv(fixtures: list[dict[str, str]], season: int) -> Path:
     return path
 
 
+async def write_db(fixtures: list[dict[str, str]], season: int) -> int:
+    """Write fixtures to database via EspnFixtureWriter."""
+    from datetime import UTC, datetime
+
+    from odds_core.database import async_session_maker
+    from odds_lambda.storage.espn_fixture_writer import EspnFixtureWriter
+
+    label = SEASONS[season]
+    records = []
+    for f in fixtures:
+        date_str = f["date"]
+        # Parse ISO datetime, ensure UTC
+        dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        records.append(
+            {
+                "date": dt,
+                "team": f["team"],
+                "opponent": f["opponent"],
+                "competition": f["competition"],
+                "round": f.get("round", ""),
+                "home_away": f["home_away"],
+                "score_team": f.get("score_team", ""),
+                "score_opponent": f.get("score_opponent", ""),
+                "status": f.get("status", ""),
+                "season": label,
+            }
+        )
+
+    async with async_session_maker() as session:
+        writer = EspnFixtureWriter(session)
+        count = await writer.upsert_fixtures(records)
+        await session.commit()
+
+    return count
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch ESPN fixture schedules for EPL teams")
     parser.add_argument(
@@ -247,6 +285,11 @@ def main() -> None:
         type=int,
         default=None,
         help="Single season start year (e.g. 2024 for 2024-25). Default: all seasons.",
+    )
+    parser.add_argument(
+        "--db",
+        action="store_true",
+        help="Write to database in addition to CSV.",
     )
     args = parser.parse_args()
 
@@ -268,6 +311,12 @@ def main() -> None:
             path = write_csv(fixtures, season)
             total_fixtures += len(fixtures)
             log.info(f"[{label}] Wrote {len(fixtures)} fixtures to {path}")
+
+            if args.db:
+                import asyncio
+
+                count = asyncio.run(write_db(fixtures, season))
+                log.info(f"[{label}] Upserted {count} fixtures to database")
     finally:
         client.close()
 

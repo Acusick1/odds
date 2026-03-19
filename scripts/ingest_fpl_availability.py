@@ -310,6 +310,42 @@ def write_csv(rows: list[dict[str, Any]], season_label: str) -> Path:
     return path
 
 
+async def write_db(rows: list[dict[str, Any]], season_label: str) -> int:
+    """Write FPL availability rows to database via FplAvailabilityWriter."""
+    from datetime import UTC
+    from datetime import datetime as dt_cls
+
+    from odds_core.database import async_session_maker
+    from odds_lambda.storage.fpl_availability_writer import FplAvailabilityWriter
+
+    records = []
+    for r in rows:
+        snap_str = r["snapshot_time"]
+        snap_time = dt_cls.fromisoformat(snap_str.replace("Z", "+00:00"))
+        if snap_time.tzinfo is None:
+            snap_time = snap_time.replace(tzinfo=UTC)
+        records.append(
+            {
+                "snapshot_time": snap_time,
+                "gameweek": int(r["gameweek"]),
+                "season": r["season"],
+                "player_code": int(r["player_code"]),
+                "player_name": r["player_name"],
+                "team": r["team"],
+                "position": r.get("position", ""),
+                "chance_of_playing": float(r["chance_of_playing"]),
+                "status": r.get("status", ""),
+            }
+        )
+
+    async with async_session_maker() as session:
+        writer = FplAvailabilityWriter(session)
+        count = await writer.upsert_availability(records)
+        await session.commit()
+
+    return count
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest FPL availability snapshots from fplcache")
     parser.add_argument(
@@ -317,6 +353,11 @@ def main() -> None:
         type=str,
         default=None,
         help="Single season label (e.g. 2024-25). Default: all seasons.",
+    )
+    parser.add_argument(
+        "--db",
+        action="store_true",
+        help="Write to database in addition to CSV.",
     )
     args = parser.parse_args()
 
@@ -349,6 +390,12 @@ def main() -> None:
                 path = write_csv(rows, season_label)
                 total_rows += len(rows)
                 log.info(f"[{season_label}] Wrote {len(rows)} rows to {path}")
+
+                if args.db:
+                    import asyncio
+
+                    count = asyncio.run(write_db(rows, season_label))
+                    log.info(f"[{season_label}] Upserted {count} rows to database")
             else:
                 log.warning(f"[{season_label}] No data extracted")
     finally:
