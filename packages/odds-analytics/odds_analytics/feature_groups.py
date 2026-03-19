@@ -21,10 +21,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
+import pandas as pd
 import structlog
 from odds_core.game_log_models import NbaTeamGameLog
 from odds_core.injury_models import InjuryReport
@@ -59,8 +59,6 @@ from odds_analytics.sequence_loader import (
 )
 
 if TYPE_CHECKING:
-    import pandas as pd
-
     from odds_analytics.epl_lineup_features import LineupCache
     from odds_analytics.match_stats_features import MatchStatsCache
     from odds_analytics.training.config import FeatureConfig
@@ -995,64 +993,56 @@ def _select_closing_snapshot(
 # Layer 5: Orchestrator
 # =============================================================================
 
-_FIXTURES_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "espn_fixtures"
-_LINEUPS_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "espn_lineups"
 
+async def _load_fixtures_df(session: AsyncSession) -> pd.DataFrame | None:
+    """Load all ESPN fixtures from DB into a DataFrame.
 
-def _load_fixtures_df() -> pd.DataFrame | None:
-    """Load all ESPN fixture CSVs into a single DataFrame.
-
-    Returns None if no CSV files are found (e.g. in Lambda or before first run).
+    Returns None if no fixtures exist in the database.
     """
-    import pandas as pd_
+    from odds_lambda.storage.espn_fixture_reader import EspnFixtureReader
 
-    csv_files = sorted(_FIXTURES_DATA_DIR.glob("fixtures_*.csv"))
-    if not csv_files:
-        logger.warning("espn_fixtures_not_found", data_dir=str(_FIXTURES_DATA_DIR))
+    reader = EspnFixtureReader(session)
+    fixtures = await reader.get_all_fixtures()
+    if not fixtures:
+        logger.warning("espn_fixtures_not_found_in_db")
         return None
 
-    frames = [pd_.read_csv(f, parse_dates=["date"]) for f in csv_files]
-    df = pd_.concat(frames, ignore_index=True)
-    # Ensure dates are UTC-aware
-    if df["date"].dt.tz is None:
-        df["date"] = df["date"].dt.tz_localize("UTC")
-    logger.info(
-        "espn_fixtures_loaded",
-        rows=len(df),
-        csv_files=len(csv_files),
-    )
+    rows = [f.model_dump(exclude={"id", "created_at"}) for f in fixtures]
+    df = pd.DataFrame(rows).rename(columns={"match_round": "round"})
+    df["date"] = pd.to_datetime(df["date"], utc=True)
+    logger.info("espn_fixtures_loaded_from_db", rows=len(df))
     return df
 
 
-def _load_lineup_cache() -> LineupCache | None:
-    """Load all ESPN lineup CSVs and build a per-team starting XI cache.
+async def _load_lineup_cache(session: AsyncSession) -> LineupCache | None:
+    """Load all ESPN lineups from DB and build a per-team starting XI cache.
 
-    Returns None if no CSV files are found (e.g. in Lambda or before first run).
+    Loads the full roster (starters + subs) with player_name so that downstream
+    consumers like the FPL availability feature group can do fuzzy name matching.
+    The build_lineup_cache function filters to starters internally.
+
+    Returns None if no lineup data exists in the database.
     """
-    import pandas as pd_
+    from odds_lambda.storage.espn_lineup_reader import EspnLineupReader
 
     from odds_analytics.epl_lineup_features import build_lineup_cache
 
-    csv_files = sorted(_LINEUPS_DATA_DIR.glob("lineups_*.csv"))
-    if not csv_files:
-        logger.warning("espn_lineups_not_found", data_dir=str(_LINEUPS_DATA_DIR))
+    reader = EspnLineupReader(session)
+    lineups = await reader.get_all_lineups()
+    if not lineups:
+        logger.warning("espn_lineups_not_found_in_db")
         return None
 
-    frames = [pd_.read_csv(f) for f in csv_files]
-    df = pd_.concat(frames, ignore_index=True)
-
-    df["datetime"] = pd_.to_datetime(df["date"], utc=True)
+    rows = [
+        lu.model_dump(include={"team", "player_id", "player_name", "date", "starter"})
+        for lu in lineups
+    ]
+    df = pd.DataFrame(rows).rename(columns={"date": "datetime"})
+    df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
     df["match_date"] = df["datetime"].dt.date
 
-    # Filter to starters only
-    df = df[df["starter"].astype(str).str.lower() == "true"].copy()
-
-    logger.info(
-        "espn_lineups_loaded",
-        rows=len(df),
-        csv_files=len(csv_files),
-    )
-    return build_lineup_cache(df)
+    logger.info("espn_lineups_loaded_from_db", rows=len(df))
+    return build_lineup_cache(df[df["starter"]].drop(columns=["starter"]))
 
 
 class PreparedFeatureData:
@@ -1153,12 +1143,12 @@ async def prepare_training_data(
     # Preload all-competition fixtures DataFrame for rest/congestion features
     fixtures_df: pd.DataFrame | None = None
     if "epl_schedule" in config.feature_groups:
-        fixtures_df = _load_fixtures_df()
+        fixtures_df = await _load_fixtures_df(session)
 
     # Preload lineup cache for lineup-delta features
     lineup_cache: LineupCache | None = None
     if "epl_lineup" in config.feature_groups:
-        lineup_cache = _load_lineup_cache()
+        lineup_cache = await _load_lineup_cache(session)
 
     for event in valid_events:
         # Load all data for this event in bulk

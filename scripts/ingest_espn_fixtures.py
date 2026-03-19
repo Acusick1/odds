@@ -73,7 +73,7 @@ CSV_COLUMNS = [
     "team",
     "opponent",
     "competition",
-    "round",
+    "match_round",
     "home_away",
     "score_team",
     "score_opponent",
@@ -179,7 +179,7 @@ def fetch_team_schedule(
                 "team": team_name,
                 "opponent": opponent_name,
                 "competition": competition,
-                "round": round_name,
+                "match_round": round_name,
                 "home_away": team_entry["homeAway"],
                 "score_team": _extract_score(team_entry),
                 "score_opponent": _extract_score(opponent_entry),
@@ -240,6 +240,44 @@ def write_csv(fixtures: list[dict[str, str]], season: int) -> Path:
     return path
 
 
+async def write_db(fixtures: list[dict[str, str]], season: int) -> int:
+    """Write fixtures to database via EspnFixtureWriter."""
+    from datetime import UTC, datetime
+
+    from odds_core.database import async_session_maker
+    from odds_core.epl_data_models import EspnFixtureRecord
+    from odds_lambda.storage.espn_fixture_writer import EspnFixtureWriter
+
+    label = SEASONS[season]
+    records: list[EspnFixtureRecord] = []
+    for f in fixtures:
+        date_str = f["date"]
+        dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        records.append(
+            EspnFixtureRecord(
+                date=dt,
+                team=f["team"],
+                opponent=f["opponent"],
+                competition=f["competition"],
+                match_round=f.get("match_round", ""),
+                home_away=f["home_away"],
+                score_team=f.get("score_team", ""),
+                score_opponent=f.get("score_opponent", ""),
+                status=f.get("status", ""),
+                season=label,
+            )
+        )
+
+    async with async_session_maker() as session:
+        writer = EspnFixtureWriter(session)
+        count = await writer.upsert_fixtures(records)
+        await session.commit()
+
+    return count
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch ESPN fixture schedules for EPL teams")
     parser.add_argument(
@@ -247,6 +285,11 @@ def main() -> None:
         type=int,
         default=None,
         help="Single season start year (e.g. 2024 for 2024-25). Default: all seasons.",
+    )
+    parser.add_argument(
+        "--skip-db",
+        action="store_true",
+        help="Skip writing to database (CSV only).",
     )
     args = parser.parse_args()
 
@@ -268,6 +311,12 @@ def main() -> None:
             path = write_csv(fixtures, season)
             total_fixtures += len(fixtures)
             log.info(f"[{label}] Wrote {len(fixtures)} fixtures to {path}")
+
+            if not args.skip_db:
+                import asyncio
+
+                count = asyncio.run(write_db(fixtures, season))
+                log.info(f"[{label}] Upserted {count} fixtures to database")
     finally:
         client.close()
 
