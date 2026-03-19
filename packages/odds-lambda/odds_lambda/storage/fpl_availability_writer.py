@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import asdict
 
 import structlog
-from odds_core.epl_data_models import FplAvailability
+from odds_core.epl_data_models import FplAvailability, FplAvailabilityRecord
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,14 +18,11 @@ class FplAvailabilityWriter:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def upsert_availability(self, records: list[dict[str, Any]]) -> int:
+    async def upsert_availability(self, records: list[FplAvailabilityRecord]) -> int:
         """Insert or update FPL availability records.
 
         Uses PostgreSQL ON CONFLICT DO UPDATE on the composite unique constraint
         (snapshot_time, gameweek, player_code, season) for idempotent upserts.
-
-        Args:
-            records: List of dicts with keys matching FplAvailability columns.
 
         Returns:
             Number of rows upserted.
@@ -33,9 +30,10 @@ class FplAvailabilityWriter:
         if not records:
             return 0
 
+        dicts = [asdict(r) for r in records]
         batch_size = 1000
-        for i in range(0, len(records), batch_size):
-            batch = records[i : i + batch_size]
+        for i in range(0, len(dicts), batch_size):
+            batch = dicts[i : i + batch_size]
             stmt = insert(FplAvailability).values(batch)
             set_ = {
                 col.name: stmt.excluded[col.name]

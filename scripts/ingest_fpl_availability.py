@@ -318,27 +318,28 @@ async def write_db(rows: list[dict[str, Any]], season_label: str) -> int:
     from datetime import datetime as dt_cls
 
     from odds_core.database import async_session_maker
+    from odds_core.epl_data_models import FplAvailabilityRecord
     from odds_lambda.storage.fpl_availability_writer import FplAvailabilityWriter
 
-    records = []
+    records: list[FplAvailabilityRecord] = []
     for r in rows:
         snap_str = r["snapshot_time"]
         snap_time = dt_cls.fromisoformat(snap_str.replace("Z", "+00:00"))
         if snap_time.tzinfo is None:
             snap_time = snap_time.replace(tzinfo=UTC)
         records.append(
-            {
-                "snapshot_time": snap_time,
-                "gameweek": int(r["gameweek"]),
-                "season": r["season"],
-                "player_code": int(r["player_code"]),
-                "player_name": r["player_name"],
-                "team": r["team"],
-                "position": r.get("position", ""),
-                "chance_of_playing": float(r["chance_of_playing"]),
-                "status": r.get("status", ""),
-                "news": r.get("news") or None,
-            }
+            FplAvailabilityRecord(
+                snapshot_time=snap_time,
+                gameweek=int(r["gameweek"]),
+                season=r["season"],
+                player_code=int(r["player_code"]),
+                player_name=r["player_name"],
+                team=r["team"],
+                position=r.get("position", ""),
+                chance_of_playing=float(r["chance_of_playing"]),
+                status=r.get("status", ""),
+                news=r.get("news") or None,
+            )
         )
 
     async with async_session_maker() as session:

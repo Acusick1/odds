@@ -245,29 +245,29 @@ async def write_db(fixtures: list[dict[str, str]], season: int) -> int:
     from datetime import UTC, datetime
 
     from odds_core.database import async_session_maker
+    from odds_core.epl_data_models import EspnFixtureRecord
     from odds_lambda.storage.espn_fixture_writer import EspnFixtureWriter
 
     label = SEASONS[season]
-    records = []
+    records: list[EspnFixtureRecord] = []
     for f in fixtures:
         date_str = f["date"]
-        # Parse ISO datetime, ensure UTC
         dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=UTC)
         records.append(
-            {
-                "date": dt,
-                "team": f["team"],
-                "opponent": f["opponent"],
-                "competition": f["competition"],
-                "match_round": f.get("match_round", ""),
-                "home_away": f["home_away"],
-                "score_team": f.get("score_team", ""),
-                "score_opponent": f.get("score_opponent", ""),
-                "status": f.get("status", ""),
-                "season": label,
-            }
+            EspnFixtureRecord(
+                date=dt,
+                team=f["team"],
+                opponent=f["opponent"],
+                competition=f["competition"],
+                match_round=f.get("match_round", ""),
+                home_away=f["home_away"],
+                score_team=f.get("score_team", ""),
+                score_opponent=f.get("score_opponent", ""),
+                status=f.get("status", ""),
+                season=label,
+            )
         )
 
     async with async_session_maker() as session:

@@ -1,11 +1,64 @@
 """EPL supplementary data tables: ESPN fixtures, ESPN lineups, FPL availability."""
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
+
+# ---------------------------------------------------------------------------
+# Typed ingest records (fetcher → writer boundary)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class EspnFixtureRecord:
+    """Parsed ESPN fixture record ready for database storage."""
+
+    date: datetime
+    team: str
+    opponent: str
+    competition: str
+    match_round: str
+    home_away: str
+    score_team: str
+    score_opponent: str
+    status: str
+    season: str
+
+
+@dataclass(slots=True)
+class EspnLineupRecord:
+    """Parsed ESPN lineup record ready for database storage."""
+
+    date: datetime
+    home_team: str
+    away_team: str
+    team: str
+    player_id: str
+    player_name: str
+    position: str
+    starter: bool
+    formation_place: int
+    season: str
+
+
+@dataclass(slots=True)
+class FplAvailabilityRecord:
+    """Parsed FPL availability record ready for database storage."""
+
+    snapshot_time: datetime
+    gameweek: int
+    season: str
+    player_code: int
+    player_name: str
+    team: str
+    position: str
+    chance_of_playing: float
+    status: str
+    news: str | None
 
 
 class EspnFixture(SQLModel, table=True):

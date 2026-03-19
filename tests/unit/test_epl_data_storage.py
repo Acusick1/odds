@@ -1,9 +1,17 @@
 """Tests for EPL data storage: ESPN fixtures, ESPN lineups, FPL availability."""
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
-from odds_core.epl_data_models import EspnFixture, EspnLineup, FplAvailability
+from odds_core.epl_data_models import (
+    EspnFixture,
+    EspnFixtureRecord,
+    EspnLineup,
+    EspnLineupRecord,
+    FplAvailability,
+    FplAvailabilityRecord,
+)
 from odds_lambda.storage.espn_fixture_reader import EspnFixtureReader
 from odds_lambda.storage.espn_fixture_writer import EspnFixtureWriter
 from odds_lambda.storage.espn_lineup_reader import EspnLineupReader
@@ -13,8 +21,8 @@ from odds_lambda.storage.fpl_availability_writer import FplAvailabilityWriter
 from sqlalchemy import select
 
 
-def _fixture_dict(**overrides: object) -> dict:
-    defaults = {
+def _fixture_record(**overrides: Any) -> EspnFixtureRecord:
+    defaults: dict[str, Any] = {
         "date": datetime(2025, 1, 15, 15, 0, tzinfo=UTC),
         "team": "Arsenal",
         "opponent": "Chelsea",
@@ -27,11 +35,11 @@ def _fixture_dict(**overrides: object) -> dict:
         "season": "2024-25",
     }
     defaults.update(overrides)
-    return defaults
+    return EspnFixtureRecord(**defaults)
 
 
-def _lineup_dict(**overrides: object) -> dict:
-    defaults = {
+def _lineup_record(**overrides: Any) -> EspnLineupRecord:
+    defaults: dict[str, Any] = {
         "date": datetime(2025, 1, 15, 15, 0, tzinfo=UTC),
         "home_team": "Arsenal",
         "away_team": "Chelsea",
@@ -44,11 +52,11 @@ def _lineup_dict(**overrides: object) -> dict:
         "season": "2024-25",
     }
     defaults.update(overrides)
-    return defaults
+    return EspnLineupRecord(**defaults)
 
 
-def _fpl_dict(**overrides: object) -> dict:
-    defaults = {
+def _fpl_record(**overrides: Any) -> FplAvailabilityRecord:
+    defaults: dict[str, Any] = {
         "snapshot_time": datetime(2025, 1, 14, 18, 0, tzinfo=UTC),
         "gameweek": 21,
         "season": "2024-25",
@@ -58,16 +66,17 @@ def _fpl_dict(**overrides: object) -> dict:
         "position": "MID",
         "chance_of_playing": 75.0,
         "status": "d",
+        "news": None,
     }
     defaults.update(overrides)
-    return defaults
+    return FplAvailabilityRecord(**defaults)
 
 
 class TestEspnFixtureWriter:
     @pytest.mark.asyncio
     async def test_upsert_creates_records(self, pglite_async_session):
         writer = EspnFixtureWriter(pglite_async_session)
-        records = [_fixture_dict(), _fixture_dict(team="Chelsea", home_away="away")]
+        records = [_fixture_record(), _fixture_record(team="Chelsea", home_away="away")]
         count = await writer.upsert_fixtures(records)
         await pglite_async_session.commit()
 
@@ -78,7 +87,7 @@ class TestEspnFixtureWriter:
     @pytest.mark.asyncio
     async def test_upsert_idempotent(self, pglite_async_session):
         writer = EspnFixtureWriter(pglite_async_session)
-        records = [_fixture_dict()]
+        records = [_fixture_record()]
 
         await writer.upsert_fixtures(records)
         await pglite_async_session.commit()
@@ -93,10 +102,10 @@ class TestEspnFixtureWriter:
     async def test_upsert_updates_on_conflict(self, pglite_async_session):
         writer = EspnFixtureWriter(pglite_async_session)
 
-        await writer.upsert_fixtures([_fixture_dict(score_team="0")])
+        await writer.upsert_fixtures([_fixture_record(score_team="0")])
         await pglite_async_session.commit()
 
-        await writer.upsert_fixtures([_fixture_dict(score_team="2")])
+        await writer.upsert_fixtures([_fixture_record(score_team="2")])
         await pglite_async_session.commit()
 
         result = await pglite_async_session.execute(select(EspnFixture))
@@ -111,8 +120,8 @@ class TestEspnFixtureReader:
         writer = EspnFixtureWriter(pglite_async_session)
         await writer.upsert_fixtures(
             [
-                _fixture_dict(),
-                _fixture_dict(
+                _fixture_record(),
+                _fixture_record(
                     date=datetime(2025, 1, 22, 15, 0, tzinfo=UTC),
                     opponent="Liverpool",
                 ),
@@ -129,8 +138,8 @@ class TestEspnFixtureReader:
         writer = EspnFixtureWriter(pglite_async_session)
         await writer.upsert_fixtures(
             [
-                _fixture_dict(season="2024-25"),
-                _fixture_dict(
+                _fixture_record(season="2024-25"),
+                _fixture_record(
                     date=datetime(2024, 1, 15, 15, 0, tzinfo=UTC),
                     season="2023-24",
                 ),
@@ -148,8 +157,8 @@ class TestEspnFixtureReader:
         writer = EspnFixtureWriter(pglite_async_session)
         await writer.upsert_fixtures(
             [
-                _fixture_dict(team="Arsenal"),
-                _fixture_dict(team="Chelsea", home_away="away"),
+                _fixture_record(team="Arsenal"),
+                _fixture_record(team="Chelsea", home_away="away"),
             ]
         )
         await pglite_async_session.commit()
@@ -164,8 +173,8 @@ class TestEspnLineupWriter:
     async def test_upsert_creates_records(self, pglite_async_session):
         writer = EspnLineupWriter(pglite_async_session)
         records = [
-            _lineup_dict(),
-            _lineup_dict(player_id="67890", player_name="Martin Odegaard"),
+            _lineup_record(),
+            _lineup_record(player_id="67890", player_name="Martin Odegaard"),
         ]
         count = await writer.upsert_lineups(records)
         await pglite_async_session.commit()
@@ -177,7 +186,7 @@ class TestEspnLineupWriter:
     @pytest.mark.asyncio
     async def test_upsert_idempotent(self, pglite_async_session):
         writer = EspnLineupWriter(pglite_async_session)
-        records = [_lineup_dict()]
+        records = [_lineup_record()]
 
         await writer.upsert_lineups(records)
         await pglite_async_session.commit()
@@ -195,8 +204,8 @@ class TestEspnLineupReader:
         writer = EspnLineupWriter(pglite_async_session)
         await writer.upsert_lineups(
             [
-                _lineup_dict(starter=True),
-                _lineup_dict(player_id="67890", player_name="Sub Player", starter=False),
+                _lineup_record(starter=True),
+                _lineup_record(player_id="67890", player_name="Sub Player", starter=False),
             ]
         )
         await pglite_async_session.commit()
@@ -210,8 +219,8 @@ class TestEspnLineupReader:
         writer = EspnLineupWriter(pglite_async_session)
         await writer.upsert_lineups(
             [
-                _lineup_dict(starter=True),
-                _lineup_dict(player_id="67890", player_name="Sub Player", starter=False),
+                _lineup_record(starter=True),
+                _lineup_record(player_id="67890", player_name="Sub Player", starter=False),
             ]
         )
         await pglite_async_session.commit()
@@ -226,8 +235,8 @@ class TestEspnLineupReader:
         writer = EspnLineupWriter(pglite_async_session)
         await writer.upsert_lineups(
             [
-                _lineup_dict(season="2024-25"),
-                _lineup_dict(
+                _lineup_record(season="2024-25"),
+                _lineup_record(
                     date=datetime(2024, 1, 15, 15, 0, tzinfo=UTC),
                     player_id="99999",
                     season="2023-24",
@@ -246,8 +255,8 @@ class TestFplAvailabilityWriter:
     async def test_upsert_creates_records(self, pglite_async_session):
         writer = FplAvailabilityWriter(pglite_async_session)
         records = [
-            _fpl_dict(),
-            _fpl_dict(player_code=205651, player_name="G.Jesus"),
+            _fpl_record(),
+            _fpl_record(player_code=205651, player_name="G.Jesus"),
         ]
         count = await writer.upsert_availability(records)
         await pglite_async_session.commit()
@@ -259,7 +268,7 @@ class TestFplAvailabilityWriter:
     @pytest.mark.asyncio
     async def test_upsert_idempotent(self, pglite_async_session):
         writer = FplAvailabilityWriter(pglite_async_session)
-        records = [_fpl_dict()]
+        records = [_fpl_record()]
 
         await writer.upsert_availability(records)
         await pglite_async_session.commit()
@@ -274,10 +283,10 @@ class TestFplAvailabilityWriter:
     async def test_upsert_updates_on_conflict(self, pglite_async_session):
         writer = FplAvailabilityWriter(pglite_async_session)
 
-        await writer.upsert_availability([_fpl_dict(chance_of_playing=50.0)])
+        await writer.upsert_availability([_fpl_record(chance_of_playing=50.0)])
         await pglite_async_session.commit()
 
-        await writer.upsert_availability([_fpl_dict(chance_of_playing=75.0)])
+        await writer.upsert_availability([_fpl_record(chance_of_playing=75.0)])
         await pglite_async_session.commit()
 
         result = await pglite_async_session.execute(select(FplAvailability))
@@ -292,8 +301,8 @@ class TestFplAvailabilityReader:
         writer = FplAvailabilityWriter(pglite_async_session)
         await writer.upsert_availability(
             [
-                _fpl_dict(),
-                _fpl_dict(player_code=205651, player_name="G.Jesus"),
+                _fpl_record(),
+                _fpl_record(player_code=205651, player_name="G.Jesus"),
             ]
         )
         await pglite_async_session.commit()
@@ -307,8 +316,8 @@ class TestFplAvailabilityReader:
         writer = FplAvailabilityWriter(pglite_async_session)
         await writer.upsert_availability(
             [
-                _fpl_dict(season="2024-25"),
-                _fpl_dict(
+                _fpl_record(season="2024-25"),
+                _fpl_record(
                     season="2023-24",
                     snapshot_time=datetime(2024, 1, 14, 18, 0, tzinfo=UTC),
                 ),
@@ -325,8 +334,8 @@ class TestFplAvailabilityReader:
         writer = FplAvailabilityWriter(pglite_async_session)
         await writer.upsert_availability(
             [
-                _fpl_dict(gameweek=21),
-                _fpl_dict(
+                _fpl_record(gameweek=21),
+                _fpl_record(
                     gameweek=22,
                     snapshot_time=datetime(2025, 1, 21, 18, 0, tzinfo=UTC),
                 ),

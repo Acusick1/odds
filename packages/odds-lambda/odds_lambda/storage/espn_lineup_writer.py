@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import asdict
 
 import structlog
-from odds_core.epl_data_models import EspnLineup
+from odds_core.epl_data_models import EspnLineup, EspnLineupRecord
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,24 +18,22 @@ class EspnLineupWriter:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def upsert_lineups(self, lineup_dicts: list[dict[str, Any]]) -> int:
+    async def upsert_lineups(self, records: list[EspnLineupRecord]) -> int:
         """Insert or update ESPN lineup records.
 
         Uses PostgreSQL ON CONFLICT DO UPDATE on the composite unique constraint
         (date, team, player_id) for idempotent upserts.
 
-        Args:
-            lineup_dicts: List of dicts with keys matching EspnLineup columns.
-
         Returns:
             Number of rows upserted.
         """
-        if not lineup_dicts:
+        if not records:
             return 0
 
+        dicts = [asdict(r) for r in records]
         batch_size = 1000
-        for i in range(0, len(lineup_dicts), batch_size):
-            batch = lineup_dicts[i : i + batch_size]
+        for i in range(0, len(dicts), batch_size):
+            batch = dicts[i : i + batch_size]
             stmt = insert(EspnLineup).values(batch)
             set_ = {
                 col.name: stmt.excluded[col.name]
@@ -50,5 +48,5 @@ class EspnLineupWriter:
 
         await self.session.flush()
 
-        logger.info("espn_lineups_upserted", count=len(lineup_dicts))
-        return len(lineup_dicts)
+        logger.info("espn_lineups_upserted", count=len(records))
+        return len(records)

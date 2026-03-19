@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
+import pandas as pd
 import structlog
 from odds_core.game_log_models import NbaTeamGameLog
 from odds_core.injury_models import InjuryReport
@@ -58,8 +59,6 @@ from odds_analytics.sequence_loader import (
 )
 
 if TYPE_CHECKING:
-    import pandas as pd
-
     from odds_analytics.epl_lineup_features import LineupCache
     from odds_analytics.match_stats_features import MatchStatsCache
     from odds_analytics.training.config import FeatureConfig
@@ -1000,7 +999,6 @@ async def _load_fixtures_df(session: AsyncSession) -> pd.DataFrame | None:
 
     Returns None if no fixtures exist in the database.
     """
-    import pandas as pd_
     from odds_lambda.storage.espn_fixture_reader import EspnFixtureReader
 
     reader = EspnFixtureReader(session)
@@ -1024,9 +1022,8 @@ async def _load_fixtures_df(session: AsyncSession) -> pd.DataFrame | None:
         }
         for f in fixtures
     ]
-    df = pd_.DataFrame(rows)
-    # Ensure dates are UTC-aware
-    df["date"] = pd_.to_datetime(df["date"], utc=True)
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"], utc=True)
     logger.info("espn_fixtures_loaded_from_db", rows=len(df))
     return df
 
@@ -1040,7 +1037,6 @@ async def _load_lineup_cache(session: AsyncSession) -> LineupCache | None:
 
     Returns None if no lineup data exists in the database.
     """
-    import pandas as pd_
     from odds_lambda.storage.espn_lineup_reader import EspnLineupReader
 
     from odds_analytics.epl_lineup_features import build_lineup_cache
@@ -1062,8 +1058,8 @@ async def _load_lineup_cache(session: AsyncSession) -> LineupCache | None:
         }
         for lu in lineups
     ]
-    df = pd_.DataFrame(rows)
-    df["datetime"] = pd_.to_datetime(df["datetime"], utc=True)
+    df = pd.DataFrame(rows)
+    df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
 
     logger.info("espn_lineups_loaded_from_db", rows=len(df))
     return build_lineup_cache(df[df["starter"]].drop(columns=["starter"]))

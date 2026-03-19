@@ -293,30 +293,31 @@ async def write_db(rows: list[dict[str, str]], season: int) -> int:
     from datetime import UTC, datetime
 
     from odds_core.database import async_session_maker
+    from odds_core.epl_data_models import EspnLineupRecord
     from odds_lambda.storage.espn_lineup_writer import EspnLineupWriter
 
     label = SEASONS[season]
-    records = []
+    records: list[EspnLineupRecord] = []
     for r in rows:
         date_str = r["date"]
         dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=UTC)
         records.append(
-            {
-                "date": dt,
-                "home_team": r["home_team"],
-                "away_team": r["away_team"],
-                "team": r["team"],
-                "player_id": r["player_id"],
-                "player_name": r["player_name"],
-                "position": r.get("position", ""),
-                "starter": r["starter"].lower() == "true"
+            EspnLineupRecord(
+                date=dt,
+                home_team=r["home_team"],
+                away_team=r["away_team"],
+                team=r["team"],
+                player_id=r["player_id"],
+                player_name=r["player_name"],
+                position=r.get("position", ""),
+                starter=r["starter"].lower() == "true"
                 if isinstance(r["starter"], str)
                 else bool(r["starter"]),
-                "formation_place": int(r.get("formation_place", 0)),
-                "season": label,
-            }
+                formation_place=int(r.get("formation_place", 0)),
+                season=label,
+            )
         )
 
     async with async_session_maker() as session:

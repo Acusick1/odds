@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import asdict
 
 import structlog
-from odds_core.epl_data_models import EspnFixture
+from odds_core.epl_data_models import EspnFixture, EspnFixtureRecord
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,24 +18,22 @@ class EspnFixtureWriter:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def upsert_fixtures(self, fixture_dicts: list[dict[str, Any]]) -> int:
+    async def upsert_fixtures(self, records: list[EspnFixtureRecord]) -> int:
         """Insert or update ESPN fixture records.
 
         Uses PostgreSQL ON CONFLICT DO UPDATE on the composite unique constraint
         (date, team, competition) for idempotent upserts.
 
-        Args:
-            fixture_dicts: List of dicts with keys matching EspnFixture columns.
-
         Returns:
             Number of rows upserted.
         """
-        if not fixture_dicts:
+        if not records:
             return 0
 
+        dicts = [asdict(r) for r in records]
         batch_size = 1000
-        for i in range(0, len(fixture_dicts), batch_size):
-            batch = fixture_dicts[i : i + batch_size]
+        for i in range(0, len(dicts), batch_size):
+            batch = dicts[i : i + batch_size]
             stmt = insert(EspnFixture).values(batch)
             set_ = {
                 col.name: stmt.excluded[col.name]
@@ -50,5 +48,5 @@ class EspnFixtureWriter:
 
         await self.session.flush()
 
-        logger.info("espn_fixtures_upserted", count=len(fixture_dicts))
-        return len(fixture_dicts)
+        logger.info("espn_fixtures_upserted", count=len(records))
+        return len(records)
