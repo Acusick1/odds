@@ -302,6 +302,8 @@ def main() -> None:
 
     client = httpx.Client()
     total_fixtures = 0
+    # Collect per-season data for a single async DB write pass
+    season_data: list[tuple[list[dict[str, str]], int]] = []
 
     try:
         for season in seasons:
@@ -311,14 +313,19 @@ def main() -> None:
             path = write_csv(fixtures, season)
             total_fixtures += len(fixtures)
             log.info(f"[{label}] Wrote {len(fixtures)} fixtures to {path}")
-
-            if not args.skip_db:
-                import asyncio
-
-                count = asyncio.run(write_db(fixtures, season))
-                log.info(f"[{label}] Upserted {count} fixtures to database")
+            season_data.append((fixtures, season))
     finally:
         client.close()
+
+    if not args.skip_db and season_data:
+        import asyncio
+
+        async def _write_all() -> None:
+            for fixtures, season in season_data:
+                count = await write_db(fixtures, season)
+                log.info(f"[{SEASONS[season]}] Upserted {count} fixtures to database")
+
+        asyncio.run(_write_all())
 
     log.info(f"\nTotal: {total_fixtures} fixtures across {len(seasons)} seasons")
 
