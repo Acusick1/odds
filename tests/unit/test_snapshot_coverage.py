@@ -3,8 +3,9 @@
 from datetime import UTC, datetime
 
 import pytest
+from odds_analytics.standings_features import epl_season_key
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_lambda.storage.readers import OddsReader, _season_from_date
+from odds_lambda.storage.readers import OddsReader
 
 
 def _make_event(event_id: str, commence_time: datetime) -> Event:
@@ -37,19 +38,19 @@ def _make_snapshot(
     )
 
 
-class TestSeasonFromDate:
+class TestEplSeasonKey:
     def test_august_is_new_season(self):
-        assert _season_from_date(2024, 8) == "2024-25"
+        assert epl_season_key(datetime(2024, 8, 1, tzinfo=UTC)) == "2024-25"
 
     def test_july_is_prior_season(self):
-        assert _season_from_date(2025, 7) == "2024-25"
+        assert epl_season_key(datetime(2025, 7, 31, tzinfo=UTC)) == "2024-25"
 
     def test_january_is_current_year_minus_one(self):
-        assert _season_from_date(2024, 1) == "2023-24"
+        assert epl_season_key(datetime(2024, 1, 15, tzinfo=UTC)) == "2023-24"
 
     def test_boundary_month_7_vs_8(self):
-        assert _season_from_date(2023, 7) == "2022-23"
-        assert _season_from_date(2023, 8) == "2023-24"
+        assert epl_season_key(datetime(2023, 7, 31, tzinfo=UTC)) == "2022-23"
+        assert epl_season_key(datetime(2023, 8, 1, tzinfo=UTC)) == "2023-24"
 
 
 class TestGetSnapshotCoverage:

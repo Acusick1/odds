@@ -298,6 +298,9 @@ _TIER_BUCKETS = ["72h+", "24-72h", "12-24h", "3-12h", "<3h"]
 # Preferred display order for sources
 _SOURCE_ORDER = ["football_data_uk", "oddsportal", "odds_api"]
 
+# Abbreviated display names for column headers
+_SOURCE_DISPLAY = {"football_data_uk": "fduk", "oddsportal": "op", "odds_api": "api"}
+
 
 @app.command("coverage")
 def show_coverage(
@@ -336,8 +339,9 @@ async def _show_coverage(sport: str) -> None:
         table.add_column("Season", style="cyan", no_wrap=True)
         table.add_column("Events", justify="right", style="white")
         for source in sources_present:
+            display = _SOURCE_DISPLAY.get(source, source)
             for bucket in _TIER_BUCKETS:
-                table.add_column(f"{source}\n{bucket}", justify="right")
+                table.add_column(f"{display}\n{bucket}", justify="right")
 
         totals: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         total_event_count = 0

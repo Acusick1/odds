@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from odds_analytics.standings_features import epl_season_key
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,16 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from odds_lambda.fetch_tier import FetchTier
 
 logger = structlog.get_logger()
-
-
-def _season_from_date(year: int, month: int) -> str:
-    """Return the Aug–Jul season label for a given year and month.
-
-    Aug 2024–Jul 2025 maps to "2024-25".
-    """
-    if month >= 8:
-        return f"{year}-{str(year + 1)[-2:]}"
-    return f"{year - 1}-{str(year)[-2:]}"
 
 
 class OddsReader:
@@ -683,7 +674,7 @@ class OddsReader:
         season_events: dict[str, set[str]] = defaultdict(set)
 
         for commence_time, api_request_id, hours_until_commence, event_id in rows:
-            season = _season_from_date(commence_time.year, commence_time.month)
+            season = epl_season_key(commence_time)
 
             if api_request_id is None:
                 source = "odds_api"
