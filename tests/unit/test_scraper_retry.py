@@ -217,7 +217,9 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock()
 
         with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
-            await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
+            await _retry_failed_urls(
+                cast(ScrapeResult, result), {"command": "upcoming", "sport": "football"}
+            )
 
         assert result.success == [{"home_team": "Arsenal"}]
         mock_run.assert_not_awaited()
@@ -252,7 +254,7 @@ class TestFailedUrlRetry:
         with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
             await _retry_failed_urls(
                 cast(ScrapeResult, result),
-                {"sport": "football", "markets": ["1x2"], "headless": True},
+                {"command": "upcoming", "sport": "football", "markets": ["1x2"], "headless": True},
             )
 
         assert len(result.success) == 18  # 11 original + 5 + 2 recovered
@@ -279,7 +281,9 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock(return_value=still_failed)
 
         with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
-            await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
+            await _retry_failed_urls(
+                cast(ScrapeResult, result), {"command": "upcoming", "sport": "football"}
+            )
 
         assert len(result.success) == 1  # original only
         assert len(result.failed) == 1  # still failed
@@ -297,7 +301,9 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock(return_value=None)
 
         with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
-            await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
+            await _retry_failed_urls(
+                cast(ScrapeResult, result), {"command": "upcoming", "sport": "football"}
+            )
 
         assert len(result.success) == 1
         assert len(result.failed) == 1  # unchanged
@@ -319,7 +325,9 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock()
 
         with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
-            await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
+            await _retry_failed_urls(
+                cast(ScrapeResult, result), {"command": "upcoming", "sport": "football"}
+            )
 
         # No retriable URLs → no retry call
         mock_run.assert_not_awaited()
@@ -347,7 +355,9 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock(return_value=retry_result)
 
         with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
-            await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
+            await _retry_failed_urls(
+                cast(ScrapeResult, result), {"command": "upcoming", "sport": "football"}
+            )
 
         assert len(result.success) == 2  # original + recovered
         assert len(result.failed) == 0
@@ -393,7 +403,7 @@ class TestFailedUrlRetry:
         with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
             await _retry_failed_urls(
                 cast(ScrapeResult, result),
-                {"sport": "football"},
+                {"command": "upcoming", "sport": "football"},
             )
 
         assert len(result.success) == 8  # 5 original + 3 recovered
@@ -405,6 +415,45 @@ class TestFailedUrlRetry:
         # Only non-404 URLs were sent to retry
         first_call_kwargs = mock_run.call_args_list[0].kwargs
         assert len(first_call_kwargs["match_links"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_command_forwarded_to_retry_calls(self) -> None:
+        """The command kwarg must be passed through to retry run_scraper calls."""
+        original_success = [{"match": 0}]
+        failed_urls = [
+            FakeFailedUrl(url="https://oddsportal.com/match/1", error_type=ErrorType.NAVIGATION)
+        ]
+        result = _make_result(success=original_success, failed=failed_urls)
+
+        retry_result = _make_result(success=[{"match": "recovered"}], failed=[])
+        mock_run = AsyncMock(return_value=retry_result)
+
+        with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
+            await _retry_failed_urls(
+                cast(ScrapeResult, result),
+                {"command": "historic", "sport": "football", "headless": True},
+            )
+
+        retry_call_kwargs = mock_run.call_args.kwargs
+        assert retry_call_kwargs["command"] == "historic"
+        assert retry_call_kwargs["sport"] == "football"
+
+    @pytest.mark.asyncio
+    async def test_missing_command_raises_key_error(self) -> None:
+        """Missing command in original_kwargs surfaces a clear KeyError."""
+        failed_urls = [
+            FakeFailedUrl(url="https://oddsportal.com/match/1", error_type=ErrorType.NAVIGATION)
+        ]
+        result = _make_result(success=[{"match": 0}], failed=failed_urls)
+
+        mock_run = AsyncMock()
+
+        with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
+            with pytest.raises(KeyError, match="command"):
+                await _retry_failed_urls(
+                    cast(ScrapeResult, result),
+                    {"sport": "football"},
+                )
 
     @pytest.mark.asyncio
     async def test_no_sport_skips_retry(self) -> None:
@@ -440,7 +489,9 @@ class TestFailedUrlRetry:
         mock_run = AsyncMock(return_value=retry_result)
 
         with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
-            await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
+            await _retry_failed_urls(
+                cast(ScrapeResult, result), {"command": "upcoming", "sport": "football"}
+            )
 
         assert len(result.success) == 3
         assert len(result.failed) == 0
@@ -465,7 +516,9 @@ class TestFailedUrlRetry:
         mock_sleep = AsyncMock()
 
         with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, mock_sleep):
-            await _retry_failed_urls(cast(ScrapeResult, result), {"sport": "football"})
+            await _retry_failed_urls(
+                cast(ScrapeResult, result), {"command": "upcoming", "sport": "football"}
+            )
 
         assert mock_sleep.await_count == MAX_FAILED_URL_RETRY_PASSES
 
@@ -596,3 +649,7 @@ class TestEndToEndWithFailedUrlRetry:
         assert len(result.failed) == 6  # still failed after 3 passes
         # 1 initial + 3 retry passes
         assert mock_run.await_count == 4
+
+        # Verify command was forwarded to retry calls
+        retry_call_kwargs = mock_run.call_args_list[1].kwargs
+        assert retry_call_kwargs["command"] == "upcoming"
