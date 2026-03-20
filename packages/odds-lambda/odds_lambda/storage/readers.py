@@ -15,6 +15,16 @@ from odds_lambda.fetch_tier import FetchTier
 logger = structlog.get_logger()
 
 
+def _season_from_date(year: int, month: int) -> str:
+    """Return the Aug–Jul season label for a given year and month.
+
+    Aug 2024–Jul 2025 maps to "2024-25".
+    """
+    if month >= 8:
+        return f"{year}-{str(year + 1)[-2:]}"
+    return f"{year - 1}-{str(year)[-2:]}"
+
+
 class OddsReader:
     """Handles all read operations from the database."""
 
@@ -624,11 +634,13 @@ class OddsReader:
     async def get_snapshot_coverage(
         self,
         sport_key: str = "soccer_epl",
-    ) -> list[tuple[str, str, str, int]]:
+    ) -> tuple[list[tuple[str, str, str, int]], dict[str, int]]:
         """
         Query snapshot coverage grouped by season, source, and tier bucket.
 
-        Returns distinct event counts per (season, source, tier) cell.
+        Returns distinct event counts per (season, source, tier) cell, plus a
+        per-season total of distinct events (for the Events column in the CLI table).
+
         Tier buckets are derived from hours_until_commence:
           - "72h+"   : >= 72 hours
           - "24-72h" : 24 to < 72 hours
@@ -647,7 +659,9 @@ class OddsReader:
             sport_key: Sport key to filter on
 
         Returns:
-            List of (season, source, tier_bucket, distinct_event_count) tuples, sorted by season
+            Tuple of:
+              - List of (season, source, tier_bucket, distinct_event_count), sorted by season
+              - Dict mapping season label to distinct event count across all sources
         """
         query = (
             select(
@@ -666,14 +680,10 @@ class OddsReader:
         rows = result.all()
 
         counts: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+        season_events: dict[str, set[str]] = defaultdict(set)
 
         for commence_time, api_request_id, hours_until_commence, event_id in rows:
-            year = commence_time.year
-            month = commence_time.month
-            if month >= 8:
-                season = f"{year}-{str(year + 1)[-2:]}"
-            else:
-                season = f"{year - 1}-{str(year)[-2:]}"
+            season = _season_from_date(commence_time.year, commence_time.month)
 
             if api_request_id is None:
                 source = "odds_api"
@@ -697,51 +707,14 @@ class OddsReader:
                 bucket = "<3h"
 
             counts[(season, source, bucket)].add(event_id)
+            season_events[season].add(event_id)
 
-        return [
+        coverage = [
             (season, source, bucket, len(event_ids))
             for (season, source, bucket), event_ids in sorted(counts.items())
         ]
-
-    async def get_season_event_counts(
-        self,
-        sport_key: str = "soccer_epl",
-    ) -> dict[str, int]:
-        """
-        Return the count of distinct events per season for a given sport.
-
-        Season is an Aug–Jul window: Aug 2024–Jul 2025 = "2024-25".
-        Only events with at least one snapshot (hours_until_commence not null) are counted,
-        consistent with get_snapshot_coverage.
-
-        Args:
-            sport_key: Sport key to filter on
-
-        Returns:
-            Mapping of season label to distinct event count
-        """
-        query = (
-            select(Event.commence_time, Event.id)
-            .join(OddsSnapshot, OddsSnapshot.event_id == Event.id)
-            .where(Event.sport_key == sport_key)
-            .where(OddsSnapshot.hours_until_commence.isnot(None))
-            .distinct()
-        )
-
-        result = await self.session.execute(query)
-        rows = result.all()
-
-        season_events: dict[str, set[str]] = defaultdict(set)
-        for commence_time, event_id in rows:
-            year = commence_time.year
-            month = commence_time.month
-            if month >= 8:
-                season = f"{year}-{str(year + 1)[-2:]}"
-            else:
-                season = f"{year - 1}-{str(year)[-2:]}"
-            season_events[season].add(event_id)
-
-        return {season: len(ids) for season, ids in season_events.items()}
+        season_totals = {season: len(ids) for season, ids in season_events.items()}
+        return coverage, season_totals
 
     async def get_games_by_date(
         self, target_date: datetime, status: EventStatus | None = EventStatus.FINAL

@@ -1,6 +1,7 @@
 """CLI commands for system status and monitoring."""
 
 import asyncio
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
 import typer
@@ -307,15 +308,12 @@ def show_coverage(
 
 
 async def _show_coverage(sport: str) -> None:
-    from collections import defaultdict
-
     console.print(f"\n[bold blue]Snapshot Coverage — {sport}[/bold blue]\n")
 
     try:
         async with async_session_maker() as session:
             reader = OddsReader(session)
-            coverage_rows = await reader.get_snapshot_coverage(sport_key=sport)
-            season_event_counts = await reader.get_season_event_counts(sport_key=sport)
+            coverage_rows, season_event_counts = await reader.get_snapshot_coverage(sport_key=sport)
 
         if not coverage_rows:
             console.print("[yellow]No snapshot data found[/yellow]\n")
