@@ -6,10 +6,11 @@ experiment:
   - fpl_availability
   - tuning
   - football
-  - pinnacle
+  - hybrid_sharp
   description: >
     EPL CLV prediction with FPL availability features on top of the combined
-    tabular + standings + match stats baseline. Tests whether expected squad
+    tabular + standings + match stats baseline using hybrid sharp reference
+    (Pinnacle + Betfair Exchange fallback). Tests whether expected squad
     disruption (weighted by cumulative ESPN starts) adds signal beyond the
     ~5.2% R² baseline.
 
@@ -17,7 +18,7 @@ training:
   strategy_type: xgboost_line_movement
   data:
     start_date: '2021-08-01'
-    end_date: '2026-03-10'
+    end_date: '2026-03-20'
     sport_key: soccer_epl
     data_source: null
     test_split: 0.0
@@ -52,6 +53,7 @@ training:
     adapter: xgboost
     sharp_bookmakers:
     - pinnacle
+    - betfair_exchange
     retail_bookmakers:
     - bet365
     - betway

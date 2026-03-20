@@ -1071,14 +1071,62 @@ async def _load_lineup_cache(session: AsyncSession) -> LineupCache | None:
     return build_lineup_cache(df[df["starter"]].drop(columns=["starter"]))
 
 
-def _load_fpl_availability_cache() -> FplAvailabilityCache | None:
-    """Load FPL availability and ESPN lineup CSVs and build the feature cache.
+async def _load_fpl_availability_cache(session: AsyncSession) -> FplAvailabilityCache | None:
+    """Load FPL availability and ESPN lineups from DB and build the feature cache.
 
-    Returns None if no FPL CSV files are found (e.g. in Lambda or before first run).
+    Returns None if no FPL data or lineup data exists in the database.
     """
-    from odds_analytics.fpl_availability_features import load_fpl_availability_cache
+    from odds_lambda.storage.espn_lineup_reader import EspnLineupReader
+    from odds_lambda.storage.fpl_availability_reader import FplAvailabilityReader
 
-    return load_fpl_availability_cache()
+    from odds_analytics.fpl_availability_features import (
+        FplAvailabilityCache,
+        _build_fpl_to_espn_player_map,
+        _precompute_cumulative_starts,
+    )
+
+    reader = FplAvailabilityReader(session)
+    records = await reader.get_all_availability()
+    if not records:
+        logger.warning("fpl_availability_not_found_in_db")
+        return None
+
+    fpl_df = pd.DataFrame([r.model_dump(exclude={"id", "created_at"}) for r in records])
+    fpl_df["snapshot_time"] = pd.to_datetime(fpl_df["snapshot_time"], utc=True)
+
+    # Load lineups from DB (need player_name for fuzzy matching with FPL names)
+    lineup_reader = EspnLineupReader(session)
+    lineups = await lineup_reader.get_all_lineups()
+    if not lineups:
+        logger.warning("fpl_availability_skipped_no_lineups_in_db")
+        return None
+
+    lineup_rows = [
+        lu.model_dump(include={"team", "player_id", "player_name", "date", "starter"})
+        for lu in lineups
+    ]
+    lineup_df = pd.DataFrame(lineup_rows).rename(columns={"date": "datetime"})
+    lineup_df["datetime"] = pd.to_datetime(lineup_df["datetime"], utc=True)
+    lineup_df["match_date"] = lineup_df["datetime"].dt.date
+    lineup_df = lineup_df[lineup_df["starter"]].copy()
+
+    player_map = _build_fpl_to_espn_player_map(fpl_df, lineup_df)
+    starts_lookup = _precompute_cumulative_starts(lineup_df)
+    snapshot_times = sorted(fpl_df["snapshot_time"].unique())
+
+    logger.info(
+        "fpl_availability_cache_built_from_db",
+        fpl_rows=len(fpl_df),
+        lineup_rows=len(lineup_df),
+        snapshot_times=len(snapshot_times),
+    )
+
+    return FplAvailabilityCache(
+        fpl_df=fpl_df,
+        player_map=player_map,
+        starts_lookup=starts_lookup,
+        snapshot_times=snapshot_times,
+    )
 
 
 class PreparedFeatureData:
@@ -1189,7 +1237,7 @@ async def prepare_training_data(
     # Preload FPL availability cache for expected-disruption features
     fpl_availability_cache: FplAvailabilityCache | None = None
     if "fpl_availability" in config.feature_groups:
-        fpl_availability_cache = _load_fpl_availability_cache()
+        fpl_availability_cache = await _load_fpl_availability_cache(session)
 
     for event in valid_events:
         # Load all data for this event in bulk
