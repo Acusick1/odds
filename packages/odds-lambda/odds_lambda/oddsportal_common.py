@@ -385,6 +385,7 @@ async def _retry_failed_urls(
         logger.info("retry_generated_user_agent", user_agent=retry_ua, pass_num=pass_num)
 
         retry_kwargs: dict[str, Any] = {
+            "command": original_kwargs["command"],
             "match_links": pending_urls,
             "sport": sport,
             "headless": original_kwargs.get("headless", True),
