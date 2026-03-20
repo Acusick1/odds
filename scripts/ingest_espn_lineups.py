@@ -352,6 +352,7 @@ def main() -> None:
 
     client = httpx.Client()
     total_rows = 0
+    season_data: list[tuple[list[dict[str, str]], int]] = []
 
     try:
         for season in seasons:
@@ -361,14 +362,19 @@ def main() -> None:
             path = write_csv(rows, season)
             total_rows += len(rows)
             log.info(f"[{label}] Wrote {len(rows)} player rows to {path}")
-
-            if not args.skip_db:
-                import asyncio
-
-                count = asyncio.run(write_db(rows, season))
-                log.info(f"[{label}] Upserted {count} lineup rows to database")
+            season_data.append((rows, season))
     finally:
         client.close()
+
+    if not args.skip_db and season_data:
+        import asyncio
+
+        async def _write_all() -> None:
+            for rows, season in season_data:
+                count = await write_db(rows, season)
+                log.info(f"[{SEASONS[season]}] Upserted {count} lineup rows to database")
+
+        asyncio.run(_write_all())
 
     log.info(f"\nTotal: {total_rows} player rows across {len(seasons)} seasons")
 

@@ -385,6 +385,7 @@ def main() -> None:
         follow_redirects=True,
     )
     total_rows = 0
+    season_data: list[tuple[list[dict[str, Any]], str]] = []
 
     try:
         for season_label in season_list:
@@ -394,16 +395,21 @@ def main() -> None:
                 path = write_csv(rows, season_label)
                 total_rows += len(rows)
                 log.info(f"[{season_label}] Wrote {len(rows)} rows to {path}")
-
-                if not args.skip_db:
-                    import asyncio
-
-                    count = asyncio.run(write_db(rows, season_label))
-                    log.info(f"[{season_label}] Upserted {count} rows to database")
+                season_data.append((rows, season_label))
             else:
                 log.warning(f"[{season_label}] No data extracted")
     finally:
         client.close()
+
+    if not args.skip_db and season_data:
+        import asyncio
+
+        async def _write_all() -> None:
+            for rows, season_label in season_data:
+                count = await write_db(rows, season_label)
+                log.info(f"[{season_label}] Upserted {count} rows to database")
+
+        asyncio.run(_write_all())
 
     log.info(f"Total: {total_rows} player rows across {len(season_list)} seasons")
 
