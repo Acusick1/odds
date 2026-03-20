@@ -678,7 +678,7 @@ class OddsReader:
 
             if api_request_id is None:
                 source = "odds_api"
-            elif api_request_id.startswith("oddsportal_live"):
+            elif api_request_id.startswith("oddsportal"):
                 source = "oddsportal"
             elif api_request_id == "football_data_uk":
                 source = "football_data_uk"
