@@ -173,9 +173,9 @@ class TestEplSeasonKey:
         dt = datetime(2025, 6, 1, 15, 0, tzinfo=UTC)
         assert epl_season_key(dt) == "2024-25"
 
-    def test_july_new_season(self) -> None:
+    def test_july_prior_season(self) -> None:
         dt = datetime(2025, 7, 1, 15, 0, tzinfo=UTC)
-        assert epl_season_key(dt) == "2025-26"
+        assert epl_season_key(dt) == "2024-25"
 
 
 class TestBuildLeagueTable:

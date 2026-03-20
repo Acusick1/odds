@@ -1,6 +1,7 @@
 """CLI commands for system status and monitoring."""
 
 import asyncio
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
 import typer
@@ -288,4 +289,84 @@ async def _show_events(days: int, team: str | None):
 
     except Exception as e:
         console.print(f"\n[bold red]✗ Failed to get events: {str(e)}[/bold red]")
+        raise typer.Exit(code=1) from e
+
+
+# Ordered tier buckets for consistent column display
+_TIER_BUCKETS = ["72h+", "24-72h", "12-24h", "3-12h", "<3h"]
+
+# Preferred display order for sources
+_SOURCE_ORDER = ["football_data_uk", "oddsportal", "odds_api"]
+
+# Abbreviated display names for column headers
+_SOURCE_DISPLAY = {"football_data_uk": "fduk", "oddsportal": "op", "odds_api": "api"}
+
+
+@app.command("coverage")
+def show_coverage(
+    sport: str = typer.Option("soccer_epl", "--sport", help="Sport key to filter"),
+):
+    """Show snapshot coverage by season, source, and tier bucket."""
+    asyncio.run(_show_coverage(sport))
+
+
+async def _show_coverage(sport: str) -> None:
+    console.print(f"\n[bold blue]Snapshot Coverage — {sport}[/bold blue]\n")
+
+    try:
+        async with async_session_maker() as session:
+            reader = OddsReader(session)
+            coverage_rows, season_event_counts = await reader.get_snapshot_coverage(sport_key=sport)
+
+        if not coverage_rows:
+            console.print("[yellow]No snapshot data found[/yellow]\n")
+            return
+
+        # data[season][source][bucket] = distinct_event_count
+        data: dict[str, dict[str, dict[str, int]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(int))
+        )
+        for season, source, bucket, count in coverage_rows:
+            data[season][source][bucket] = count
+
+        seasons = sorted(data.keys())
+        sources_present = sorted(
+            {src for season_data in data.values() for src in season_data},
+            key=lambda s: _SOURCE_ORDER.index(s) if s in _SOURCE_ORDER else len(_SOURCE_ORDER),
+        )
+
+        table = Table(show_header=True)
+        table.add_column("Season", style="cyan", no_wrap=True)
+        table.add_column("Events", justify="right", style="white")
+        for source in sources_present:
+            display = _SOURCE_DISPLAY.get(source, source)
+            for bucket in _TIER_BUCKETS:
+                table.add_column(f"{display}\n{bucket}", justify="right")
+
+        totals: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        total_event_count = 0
+
+        for season in seasons:
+            event_count = season_event_counts.get(season, 0)
+            total_event_count += event_count
+            cells: list[str] = [season, str(event_count)]
+            for source in sources_present:
+                for bucket in _TIER_BUCKETS:
+                    val = data[season][source].get(bucket, 0)
+                    totals[source][bucket] += val
+                    cells.append(str(val) if val > 0 else "-")
+            table.add_row(*cells)
+
+        total_cells: list[str] = ["Total", str(total_event_count)]
+        for source in sources_present:
+            for bucket in _TIER_BUCKETS:
+                val = totals[source].get(bucket, 0)
+                total_cells.append(str(val) if val > 0 else "-")
+        table.add_row(*total_cells, style="bold")
+
+        console.print(table)
+        console.print()
+
+    except Exception as e:
+        console.print(f"\n[bold red]✗ Failed to get coverage: {str(e)}[/bold red]")
         raise typer.Exit(code=1) from e
