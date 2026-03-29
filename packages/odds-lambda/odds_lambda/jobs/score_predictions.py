@@ -231,10 +231,14 @@ async def score_events(
     return stats
 
 
-async def main() -> None:
-    """Main job entry point."""
-    logger.info("score_predictions_started")
-    await score_events()
+async def main(model_name: str | None = None) -> None:
+    """Main job entry point.
+
+    Args:
+        model_name: S3 model name. Falls back to MODEL_NAME env var.
+    """
+    logger.info("score_predictions_started", model_name=model_name)
+    await score_events(model_name=model_name)
 
 
 if __name__ == "__main__":

@@ -50,7 +50,9 @@ resource "aws_cloudwatch_event_target" "daily_digest_target" {
   arn       = aws_lambda_function.odds_scheduler.arn
 
   input = jsonencode({
-    job = "daily-digest"
+    job        = "daily-digest"
+    sport_key  = "soccer_epl"
+    model_name = "epl-clv-home"
   })
 }
 
@@ -82,7 +84,8 @@ resource "aws_cloudwatch_event_target" "score_predictions_target" {
   arn       = aws_lambda_function.odds_scheduler.arn
 
   input = jsonencode({
-    job = "score-predictions"
+    job        = "score-predictions"
+    model_name = "epl-clv-home"
   })
 }
 

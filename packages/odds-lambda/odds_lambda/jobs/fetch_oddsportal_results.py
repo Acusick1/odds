@@ -21,6 +21,7 @@ from odds_core.models import Event, EventStatus
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPECS, LeagueSpec
 from odds_lambda.oddsportal_common import (
     build_raw_data,
     parse_match_date,
@@ -30,12 +31,20 @@ from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-SPORT_KEY = "soccer_epl"
-SPORT_TITLE = "EPL"
-HARVESTER_SPORT = "football"
-HARVESTER_LEAGUE = "england-premier-league"
+DEFAULT_SPORT_KEY = "soccer_epl"
 MARKET_KEY = "1x2_market"
 API_REQUEST_ID = "oddsportal_closing"
+
+
+def _get_league_spec(sport_key: str) -> LeagueSpec:
+    """Look up a LeagueSpec by sport_key from the configured LEAGUE_SPECS."""
+    for spec in LEAGUE_SPECS:
+        if spec.sport_key == sport_key:
+            return spec
+    raise ValueError(
+        f"No LeagueSpec found for sport_key={sport_key!r}. "
+        f"Available: {[s.sport_key for s in LEAGUE_SPECS]}"
+    )
 
 
 @dataclass
@@ -49,14 +58,14 @@ class ResultsStats:
     errors: list[str] = field(default_factory=list)
 
 
-async def run_harvester_historic() -> list[dict[str, Any]]:
-    """Scrape historical results for the current EPL season via ``run_scraper_with_retry``."""
+async def run_harvester_historic(spec: LeagueSpec) -> list[dict[str, Any]]:
+    """Scrape historical results for the given league's current season via ``run_scraper_with_retry``."""
     from oddsharvester.utils.command_enum import CommandEnum
 
     result = await run_scraper_with_retry(
         command=CommandEnum.HISTORIC,
-        sport=HARVESTER_SPORT,
-        leagues=[HARVESTER_LEAGUE],
+        sport=spec.sport,
+        leagues=[spec.league],
         season="current",
         max_pages=1,
         markets=["1x2"],
@@ -65,11 +74,13 @@ async def run_harvester_historic() -> list[dict[str, Any]]:
     return result.success
 
 
-async def get_pending_events(session: AsyncSession) -> list[Event]:
-    """Get SCHEDULED EPL events with commence_time in the past."""
+async def get_pending_events(
+    session: AsyncSession, sport_key: str = DEFAULT_SPORT_KEY
+) -> list[Event]:
+    """Get SCHEDULED events with commence_time in the past for the given sport."""
     query = select(Event).where(
         and_(
-            Event.sport_key == SPORT_KEY,
+            Event.sport_key == sport_key,
             Event.status == EventStatus.SCHEDULED,
             Event.commence_time < datetime.now(UTC),
         )
@@ -118,25 +129,28 @@ def _match_record_to_event(
 
 async def process_results(
     raw_matches: list[dict[str, Any]] | None = None,
+    sport_key: str = DEFAULT_SPORT_KEY,
 ) -> ResultsStats:
     """Process scraped results: update scores and store closing snapshots.
 
     Args:
         raw_matches: Pre-scraped data (skips harvester call). For testing.
+        sport_key: Sport/league to query pending events for.
     """
+    spec = _get_league_spec(sport_key)
     stats = ResultsStats()
 
     async with async_session_maker() as session:
-        pending_events = await get_pending_events(session)
+        pending_events = await get_pending_events(session, sport_key)
 
         if not pending_events:
-            logger.info("no_pending_events", sport_key=SPORT_KEY)
+            logger.info("no_pending_events", sport_key=sport_key)
             return stats
 
         logger.info("pending_events_found", count=len(pending_events))
 
         if raw_matches is None:
-            raw_matches = await run_harvester_historic()
+            raw_matches = await run_harvester_historic(spec)
 
         stats.matches_scraped = len(raw_matches)
 
@@ -229,10 +243,14 @@ async def process_results(
     return stats
 
 
-async def main() -> None:
-    """Main job entry point."""
-    logger.info("fetch_oddsportal_results_started")
-    await process_results()
+async def main(sport_key: str = DEFAULT_SPORT_KEY) -> None:
+    """Main job entry point.
+
+    Args:
+        sport_key: Sport/league to fetch results for.
+    """
+    logger.info("fetch_oddsportal_results_started", sport_key=sport_key)
+    await process_results(sport_key=sport_key)
 
 
 if __name__ == "__main__":

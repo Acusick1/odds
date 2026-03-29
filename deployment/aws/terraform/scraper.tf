@@ -110,7 +110,10 @@ resource "aws_scheduler_schedule" "fetch_oddsportal_results" {
   target {
     arn      = aws_lambda_function.odds_scraper[0].arn
     role_arn = aws_iam_role.scraper_scheduler_role[0].arn
-    input    = jsonencode({ job = "fetch-oddsportal-results" })
+    input = jsonencode({
+      job       = "fetch-oddsportal-results"
+      sport_key = "soccer_epl"
+    })
   }
 
   state = "ENABLED"

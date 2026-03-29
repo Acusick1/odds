@@ -33,9 +33,10 @@ logger = structlog.get_logger()
 async def _run_job_async(job_name: str, **kwargs: object) -> None:
     """Run the job module's main function asynchronously.
 
-    Extra kwargs from the event payload are passed to the job function.
-    Jobs that accept parameters should declare **kwargs to receive them;
-    jobs that don't will ignore extra fields (we inspect the signature).
+    Extra kwargs from the event payload are forwarded to the job function.
+    The handler inspects the job's signature and passes only kwargs that
+    match declared parameter names (or all kwargs if **kwargs is declared).
+    Unrecognised payload fields are silently dropped.
     """
     import inspect
 
@@ -43,11 +44,14 @@ async def _run_job_async(job_name: str, **kwargs: object) -> None:
 
     job_fn = get_job_function(job_name)
     sig = inspect.signature(job_fn)
-    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+    params = sig.parameters
+    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+
     if kwargs and has_var_keyword:
         await job_fn(**kwargs)
     else:
-        await job_fn()
+        accepted = {k: v for k, v in kwargs.items() if k in params}
+        await job_fn(**accepted)
 
 
 def lambda_handler(event, context):
