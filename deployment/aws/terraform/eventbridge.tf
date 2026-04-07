@@ -214,7 +214,17 @@ output "dynamic_rules" {
   )
 }
 
+output "scheduler_jobs" {
+  description = "Job names routed to the scheduler Lambda (CSV for scripts)"
+  value       = join(",", local.self_scheduling_jobs)
+}
+
+output "scraper_jobs" {
+  description = "Job names routed to the scraper Lambda (CSV for scripts)"
+  value       = join(",", local.scraper_jobs)
+}
+
 output "self_scheduling_jobs" {
-  description = "Job names that use self-scheduling (CSV for scripts)"
+  description = "All self-scheduling job names (CSV for scripts)"
   value       = join(",", concat(local.self_scheduling_jobs, local.scraper_jobs))
 }
