@@ -175,7 +175,8 @@ resource "aws_cloudwatch_event_target" "scraper_dynamic" {
   })
 
   retry_policy {
-    maximum_retry_attempts = 0
+    maximum_retry_attempts         = 0
+    maximum_event_age_in_seconds   = 60
   }
 }
 

@@ -426,6 +426,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
                         "Input": json.dumps(target_input),
                         "RetryPolicy": {
                             "MaximumRetryAttempts": 0,
+                            "MaximumEventAgeInSeconds": 60,
                         },
                     }
                 ],
