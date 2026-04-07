@@ -32,6 +32,7 @@ from odds_lambda.oddsportal_adapter import (
 )
 from odds_lambda.oddsportal_common import hours_to_tier, run_scraper_with_retry, team_abbrev
 from odds_lambda.scheduling.backends import get_scheduler_backend
+from odds_lambda.scheduling.jobs import make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -66,6 +67,9 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         markets=["1x2", "over_under_2_5"],
     ),
 ]
+
+# Index by sport_key for fast lookup from event payload
+_LEAGUE_SPEC_BY_SPORT: dict[str, LeagueSpec] = {spec.sport_key: spec for spec in LEAGUE_SPECS}
 
 
 @dataclass
@@ -329,18 +333,21 @@ async def _self_schedule(
     next_time: datetime,
     next_retry_count: int,
     dry_run: bool,
+    sport: str | None = None,
 ) -> None:
     """Schedule the next execution via the scheduler backend."""
     backend = get_scheduler_backend(dry_run=dry_run)
 
-    payload: dict[str, object] | None = None
+    payload: dict[str, object] = {}
     if next_retry_count > 0:
-        payload = {"retry_count": next_retry_count}
+        payload["retry_count"] = next_retry_count
+    if sport:
+        payload["sport"] = sport
 
     await backend.schedule_next_execution(
         job_name=job_name,
         next_time=next_time,
-        payload=payload,
+        payload=payload or None,
     )
 
     logger.info(
@@ -351,20 +358,43 @@ async def _self_schedule(
     )
 
 
-async def main(*, retry_count: int = 0, **_kwargs: object) -> None:
-    """Main job execution — iterates all configured leagues, then self-schedules."""
+async def main(
+    *,
+    sport: str | None = None,
+    retry_count: int = 0,
+    **_kwargs: object,
+) -> None:
+    """Main job execution — scrapes configured league(s), then self-schedules.
+
+    Args:
+        sport: Sport key (e.g. "soccer_epl"). When provided, only the matching
+            LeagueSpec is scraped. Falls back to all LEAGUE_SPECS.
+        retry_count: Current retry attempt (passed via self-scheduling payload).
+    """
     from odds_core.config import get_settings
 
     settings = get_settings()
+
+    # Resolve which leagues to scrape
+    if sport:
+        spec = _LEAGUE_SPEC_BY_SPORT.get(sport)
+        if spec is None:
+            logger.error("unknown_sport_key", sport=sport, available=list(_LEAGUE_SPEC_BY_SPORT))
+            return
+        specs = [spec]
+    else:
+        specs = LEAGUE_SPECS
+
     logger.info(
         "fetch_oddsportal_started",
-        leagues=len(LEAGUE_SPECS),
+        sport=sport,
+        leagues=len(specs),
         retry_count=retry_count,
     )
 
     all_stats: list[IngestionStats] = []
 
-    for spec in LEAGUE_SPECS:
+    for spec in specs:
         try:
             stats = await ingest_league(spec)
             all_stats.append(stats)
@@ -398,15 +428,17 @@ async def main(*, retry_count: int = 0, **_kwargs: object) -> None:
     )
 
     # Apply overnight / no-games-soon skip
-    next_game_time = await _get_next_game_time()
+    sport_key_for_lookup = sport or LEAGUE_SPECS[0].sport_key
+    next_game_time = await _get_next_game_time(sport_key=sport_key_for_lookup)
     next_time = _apply_overnight_skip(next_time, next_game_time)
 
     try:
         await _self_schedule(
-            job_name="fetch-oddsportal",
+            job_name=make_compound_job_name("fetch-oddsportal", sport),
             next_time=next_time,
             next_retry_count=next_retry_count,
             dry_run=settings.scheduler.dry_run,
+            sport=sport,
         )
     except Exception as e:
         logger.error("fetch_oddsportal_scheduling_failed", error=str(e), exc_info=True)

@@ -18,6 +18,7 @@ from odds_lambda.event_sync import EventSyncService
 from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.scheduling.backends import get_scheduler_backend
 from odds_lambda.scheduling.intelligence import SchedulingIntelligence
+from odds_lambda.scheduling.jobs import make_compound_job_name
 
 logger = structlog.get_logger()
 
@@ -32,9 +33,13 @@ def build_event_sync_service(client: TheOddsAPIClient) -> EventSyncService:
     return EventSyncService(client=client)
 
 
-async def main():
+async def main(sport: str | None = None, **_kwargs: object) -> None:
     """
     Main job execution flow.
+
+    Args:
+        sport: Sport key to fetch (e.g. "soccer_epl"). Falls back to
+            ``data_collection.sports`` config when not provided.
 
     Flow:
     1. Sync upcoming events from free /events endpoint (discovery)
@@ -44,15 +49,21 @@ async def main():
     5. Schedule next run via backend
     """
     app_settings = get_settings()
+    sports = [sport] if sport else app_settings.data_collection.sports
 
-    logger.info("fetch_odds_job_started", backend=app_settings.scheduler.backend)
+    logger.info(
+        "fetch_odds_job_started",
+        backend=app_settings.scheduler.backend,
+        sport=sport,
+        sports=sports,
+    )
 
     # Sync upcoming events first (free, 0 quota units).
     # Failures here should not block odds ingestion.
     try:
         async with TheOddsAPIClient() as client:
             event_sync = build_event_sync_service(client)
-            sync_results = await event_sync.sync_sports(app_settings.data_collection.sports)
+            sync_results = await event_sync.sync_sports(sports)
 
         for sync_result in sync_results:
             logger.info(
@@ -68,6 +79,12 @@ async def main():
     intelligence = SchedulingIntelligence(lookahead_days=app_settings.scheduler.lookahead_days)
     decision = await intelligence.should_execute_fetch()
 
+    # Self-scheduling uses the sport-suffixed job name to match Terraform rules
+    schedule_job_name = make_compound_job_name("fetch-odds", sport)
+    schedule_payload: dict[str, object] | None = None
+    if sport:
+        schedule_payload = {"sport": sport}
+
     if not decision.should_execute:
         logger.info(
             "fetch_odds_skipped",
@@ -79,7 +96,9 @@ async def main():
         if decision.next_execution:
             backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
             await backend.schedule_next_execution(
-                job_name="fetch-odds", next_time=decision.next_execution
+                job_name=schedule_job_name,
+                next_time=decision.next_execution,
+                payload=schedule_payload,
             )
 
         return
@@ -94,9 +113,7 @@ async def main():
     try:
         async with TheOddsAPIClient() as client:
             ingestion_service = build_ingestion_service(client, app_settings)
-            results = await ingestion_service.ingest_sports(
-                app_settings.data_collection.sports,
-            )
+            results = await ingestion_service.ingest_sports(sports)
 
         for sport_result in results.sport_results:
             for failure in sport_result.failures:
@@ -182,7 +199,9 @@ async def main():
         try:
             backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
             await backend.schedule_next_execution(
-                job_name="fetch-odds", next_time=decision.next_execution
+                job_name=schedule_job_name,
+                next_time=decision.next_execution,
+                payload=schedule_payload,
             )
             logger.info(
                 "fetch_odds_next_scheduled",

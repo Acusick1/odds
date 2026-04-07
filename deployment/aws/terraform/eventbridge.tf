@@ -36,62 +36,43 @@ resource "aws_lambda_permission" "allow_eventbridge_backfill_polymarket" {
   ]
 }
 
-# Daily digest: sends Discord embed with predictions + post-match results at 08:00 UTC
-resource "aws_cloudwatch_event_rule" "daily_digest" {
-  name                = format("%s-daily-digest", var.rule_prefix)
-  description         = "Daily Discord digest with predictions and post-match results"
-  schedule_expression = "cron(0 8 * * ? *)"
+# Per-sport fixed-schedule rules (daily-digest and score-predictions).
+# Generated from sport_configs so each sport gets independent rules.
+resource "aws_cloudwatch_event_rule" "fixed_scheduler" {
+  for_each = local.fixed_scheduler_rules_map
+
+  name                = format("%s-%s", var.rule_prefix, each.key)
+  description         = "Fixed-schedule rule for ${each.key}"
+  schedule_expression = local.fixed_schedule_expressions[each.value.job]
   state               = "ENABLED"
 }
 
-resource "aws_cloudwatch_event_target" "daily_digest_target" {
-  rule      = aws_cloudwatch_event_rule.daily_digest.name
+resource "aws_cloudwatch_event_target" "fixed_scheduler_target" {
+  for_each = local.fixed_scheduler_rules_map
+
+  rule      = aws_cloudwatch_event_rule.fixed_scheduler[each.key].name
   target_id = "1"
   arn       = aws_lambda_function.odds_scheduler.arn
 
   input = jsonencode({
-    job = "daily-digest"
+    job   = each.value.job
+    sport = each.value.sport_key
   })
 }
 
-resource "aws_lambda_permission" "allow_eventbridge_daily_digest" {
-  statement_id  = format("AllowExecutionFromEventBridgeDailyDigest-%s", var.rule_prefix)
+resource "aws_lambda_permission" "allow_fixed_scheduler" {
+  for_each = local.fixed_scheduler_rules_map
+
+  statement_id  = format("AllowFixed-%s-%s", each.key, var.rule_prefix)
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.odds_scheduler.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.daily_digest.arn
+  source_arn    = aws_cloudwatch_event_rule.fixed_scheduler[each.key].arn
 
   depends_on = [
-    aws_cloudwatch_event_rule.daily_digest,
-    aws_cloudwatch_event_target.daily_digest_target
+    aws_cloudwatch_event_rule.fixed_scheduler,
+    aws_cloudwatch_event_target.fixed_scheduler_target
   ]
-}
-
-# Score predictions: runs CLV model inference after scraper has landed new snapshots.
-# Offset 30 min past the hour to account for scraper jitter (up to 15 min) + runtime (up to 10 min).
-resource "aws_cloudwatch_event_rule" "score_predictions" {
-  name                = format("%s-score-predictions", var.rule_prefix)
-  description         = "Hourly CLV model inference on new snapshots"
-  schedule_expression = "cron(30 * * * ? *)"
-  state               = "ENABLED"
-}
-
-resource "aws_cloudwatch_event_target" "score_predictions_target" {
-  rule      = aws_cloudwatch_event_rule.score_predictions.name
-  target_id = "1"
-  arn       = aws_lambda_function.odds_scheduler.arn
-
-  input = jsonencode({
-    job = "score-predictions"
-  })
-}
-
-resource "aws_lambda_permission" "allow_eventbridge_score_predictions" {
-  statement_id  = format("AllowEventBridgeScorePredictions-%s", var.rule_prefix)
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.odds_scheduler.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.score_predictions.arn
 }
 
 # Self-scheduling rules: pre-created by Terraform, schedule updated by Lambda at runtime.
@@ -100,15 +81,81 @@ resource "aws_lambda_permission" "allow_eventbridge_score_predictions" {
 # Initial state is DISABLED with a placeholder schedule; the post-deploy invocation activates them.
 
 locals {
-  core_jobs        = ["fetch-odds", "fetch-scores", "update-status", "check-health"]
-  polymarket_jobs  = var.enable_polymarket ? ["fetch-polymarket"] : []
-  self_scheduling_jobs = concat(local.core_jobs, local.polymarket_jobs)
+  # Per-sport configuration. Adding a new sport requires only a new entry here.
+  sport_configs = {
+    epl = { sport_key = "soccer_epl", scraper = true }
+    # mlb = { sport_key = "baseball_mlb", scraper = false }
+  }
 
-  scraper_jobs = var.enable_oddsportal_scraper ? ["fetch-oddsportal", "fetch-oddsportal-results"] : []
+  # Jobs that run once per sport (scheduler Lambda)
+  per_sport_scheduler_jobs = ["fetch-odds", "fetch-scores"]
+
+  # Jobs that run once per sport (scraper Lambda)
+  per_sport_scraper_jobs = ["fetch-oddsportal", "fetch-oddsportal-results"]
+
+  # Jobs that run once globally (no sport param)
+  global_jobs = ["update-status", "check-health"]
+
+  polymarket_jobs = var.enable_polymarket ? ["fetch-polymarket"] : []
+
+  # Generate per-sport scheduler job names: "fetch-odds-epl", "fetch-scores-epl", etc.
+  sport_scheduler_rules = flatten([
+    for sport_suffix, cfg in local.sport_configs : [
+      for job in local.per_sport_scheduler_jobs : {
+        key       = "${job}-${sport_suffix}"
+        job       = job
+        sport_key = cfg.sport_key
+      }
+    ]
+  ])
+
+  # Generate per-sport scraper job names (only for sports with scraper = true)
+  sport_scraper_rules = var.enable_oddsportal_scraper ? flatten([
+    for sport_suffix, cfg in local.sport_configs : [
+      for job in local.per_sport_scraper_jobs : {
+        key       = "${job}-${sport_suffix}"
+        job       = job
+        sport_key = cfg.sport_key
+      }
+    ] if cfg.scraper
+  ]) : []
+
+  # Maps for for_each (keyed by compound name)
+  scheduler_rules_map = merge(
+    { for r in local.sport_scheduler_rules : r.key => r },
+    { for j in local.global_jobs : j => { key = j, job = j, sport_key = null } },
+    { for j in local.polymarket_jobs : j => { key = j, job = j, sport_key = null } },
+  )
+
+  scraper_rules_map = { for r in local.sport_scraper_rules : r.key => r }
+
+  # Flat lists for outputs
+  self_scheduling_scheduler_jobs = [for k, _ in local.scheduler_rules_map : k]
+  self_scheduling_scraper_jobs   = [for k, _ in local.scraper_rules_map : k]
+
+  # Schedule expressions for fixed-schedule jobs (map lookup prevents
+  # a new job silently inheriting the wrong schedule via a ternary fallback).
+  fixed_schedule_expressions = {
+    "daily-digest"      = "cron(0 8 * * ? *)"
+    "score-predictions" = "cron(30 * * * ? *)"
+  }
+
+  # Per-sport fixed-schedule jobs (daily-digest, score-predictions)
+  sport_fixed_scheduler_rules = flatten([
+    for sport_suffix, cfg in local.sport_configs : [
+      for job in ["daily-digest", "score-predictions"] : {
+        key       = "${job}-${sport_suffix}"
+        job       = job
+        sport_key = cfg.sport_key
+      }
+    ]
+  ])
+
+  fixed_scheduler_rules_map = { for r in local.sport_fixed_scheduler_rules : r.key => r }
 }
 
 resource "aws_cloudwatch_event_rule" "dynamic" {
-  for_each = toset(local.self_scheduling_jobs)
+  for_each = local.scheduler_rules_map
 
   name                = "${var.rule_prefix}-${each.key}"
   description         = "Self-scheduling rule for ${each.key} (updated by Lambda)"
@@ -121,19 +168,20 @@ resource "aws_cloudwatch_event_rule" "dynamic" {
 }
 
 resource "aws_cloudwatch_event_target" "dynamic" {
-  for_each = toset(local.self_scheduling_jobs)
+  for_each = local.scheduler_rules_map
 
   rule      = aws_cloudwatch_event_rule.dynamic[each.key].name
   target_id = "1"
   arn       = aws_lambda_function.odds_scheduler.arn
 
-  input = jsonencode({
-    job = each.key
-  })
+  input = jsonencode(merge(
+    { job = each.value.job },
+    each.value.sport_key != null ? { sport = each.value.sport_key } : {}
+  ))
 }
 
 resource "aws_lambda_permission" "allow_dynamic" {
-  for_each = toset(local.self_scheduling_jobs)
+  for_each = local.scheduler_rules_map
 
   statement_id  = format("AllowDynamic-%s-%s", each.key, var.rule_prefix)
   action        = "lambda:InvokeFunction"
@@ -148,10 +196,8 @@ resource "aws_lambda_permission" "allow_dynamic" {
 }
 
 # Self-scheduling rules for scraper Lambda (same pattern as scheduler, different target).
-# Lambda's put_rule() updates the schedule_expression and sets State=ENABLED; Terraform
-# ignores those changes but owns the lifecycle (create/destroy).
 resource "aws_cloudwatch_event_rule" "scraper_dynamic" {
-  for_each = toset(local.scraper_jobs)
+  for_each = local.scraper_rules_map
 
   name                = "${var.rule_prefix}-${each.key}"
   description         = "Self-scheduling rule for ${each.key} (updated by scraper Lambda)"
@@ -164,14 +210,15 @@ resource "aws_cloudwatch_event_rule" "scraper_dynamic" {
 }
 
 resource "aws_cloudwatch_event_target" "scraper_dynamic" {
-  for_each = toset(local.scraper_jobs)
+  for_each = local.scraper_rules_map
 
   rule      = aws_cloudwatch_event_rule.scraper_dynamic[each.key].name
   target_id = "1"
   arn       = aws_lambda_function.odds_scraper[0].arn
 
   input = jsonencode({
-    job = each.key
+    job   = each.value.job
+    sport = each.value.sport_key
   })
 
   retry_policy {
@@ -181,7 +228,7 @@ resource "aws_cloudwatch_event_target" "scraper_dynamic" {
 }
 
 resource "aws_lambda_permission" "allow_scraper_dynamic" {
-  for_each = toset(local.scraper_jobs)
+  for_each = local.scraper_rules_map
 
   statement_id  = format("AllowScraperDynamic-%s-%s", each.key, var.rule_prefix)
   action        = "lambda:InvokeFunction"
@@ -199,7 +246,7 @@ resource "aws_lambda_permission" "allow_scraper_dynamic" {
 output "bootstrap_rules" {
   description = "Bootstrap EventBridge rules (fixed-schedule, not self-scheduling)"
   value = merge(
-    { daily_digest = aws_cloudwatch_event_rule.daily_digest.name },
+    { for k, v in aws_cloudwatch_event_rule.fixed_scheduler : k => v.name },
     var.enable_polymarket ? {
       backfill_polymarket = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket[0].name
     } : {}
@@ -216,15 +263,15 @@ output "dynamic_rules" {
 
 output "scheduler_jobs" {
   description = "Job names routed to the scheduler Lambda (CSV for scripts)"
-  value       = join(",", local.self_scheduling_jobs)
+  value       = join(",", concat(local.self_scheduling_scheduler_jobs, keys(local.fixed_scheduler_rules_map)))
 }
 
 output "scraper_jobs" {
   description = "Job names routed to the scraper Lambda (CSV for scripts)"
-  value       = join(",", local.scraper_jobs)
+  value       = join(",", local.self_scheduling_scraper_jobs)
 }
 
 output "self_scheduling_jobs" {
   description = "All self-scheduling job names (CSV for scripts)"
-  value       = join(",", concat(local.self_scheduling_jobs, local.scraper_jobs))
+  value       = join(",", concat(local.self_scheduling_scheduler_jobs, local.self_scheduling_scraper_jobs))
 }

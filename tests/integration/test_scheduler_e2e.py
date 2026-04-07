@@ -288,8 +288,13 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
         )
         stub_client = StubOddsClient(response)
 
-        async def mock_schedule_next(job_name: str, next_time: datetime, _calls=scheduled_calls):
-            _calls.append({"job_name": job_name, "next_time": next_time})
+        async def mock_schedule_next(
+            job_name: str,
+            next_time: datetime,
+            payload: dict[str, object] | None = None,
+            _calls=scheduled_calls,
+        ):
+            _calls.append({"job_name": job_name, "next_time": next_time, "payload": payload})
 
         def build_service(client_arg, settings, _client=stub_client):
             return OddsIngestionService(

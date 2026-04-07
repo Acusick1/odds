@@ -19,14 +19,19 @@ from odds_core.models import EventStatus
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.scheduling.backends import get_scheduler_backend
 from odds_lambda.scheduling.intelligence import SchedulingIntelligence
+from odds_lambda.scheduling.jobs import make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
 
-async def main():
+async def main(sport: str | None = None, **_kwargs: object) -> None:
     """
     Main job execution flow.
+
+    Args:
+        sport: Sport key to fetch scores for (e.g. "soccer_epl"). Falls back
+            to ``data_collection.sports`` config when not provided.
 
     Flow:
     1. Check if we should execute (smart gating)
@@ -35,12 +40,24 @@ async def main():
     4. Schedule next run via backend
     """
     app_settings = get_settings()
+    sports = [sport] if sport else app_settings.data_collection.sports
 
-    logger.info("fetch_scores_job_started", backend=app_settings.scheduler.backend)
+    logger.info(
+        "fetch_scores_job_started",
+        backend=app_settings.scheduler.backend,
+        sport=sport,
+        sports=sports,
+    )
 
     # Smart execution gating
     intelligence = SchedulingIntelligence(lookahead_days=app_settings.scheduler.lookahead_days)
     decision = await intelligence.should_execute_scores()
+
+    # Self-scheduling uses the sport-suffixed job name to match Terraform rules
+    schedule_job_name = make_compound_job_name("fetch-scores", sport)
+    schedule_payload: dict[str, object] | None = None
+    if sport:
+        schedule_payload = {"sport": sport}
 
     if not decision.should_execute:
         logger.info(
@@ -53,7 +70,9 @@ async def main():
         if decision.next_execution:
             backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
             await backend.schedule_next_execution(
-                job_name="fetch-scores", next_time=decision.next_execution
+                job_name=schedule_job_name,
+                next_time=decision.next_execution,
+                payload=schedule_payload,
             )
 
         return
@@ -62,7 +81,7 @@ async def main():
     logger.info("fetch_scores_executing", reason=decision.reason)
 
     try:
-        await _fetch_and_update_scores(app_settings)
+        await _fetch_and_update_scores(sports)
         logger.info("fetch_scores_completed")
 
     except Exception as e:
@@ -81,7 +100,9 @@ async def main():
         try:
             backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
             await backend.schedule_next_execution(
-                job_name="fetch-scores", next_time=decision.next_execution
+                job_name=schedule_job_name,
+                next_time=decision.next_execution,
+                payload=schedule_payload,
             )
             logger.info(
                 "fetch_scores_next_scheduled",
@@ -98,16 +119,12 @@ async def main():
                 await send_error(f"Fetch scores scheduling failed: {type(e).__name__}: {str(e)}")
 
 
-async def _fetch_and_update_scores(app_settings):
-    """
-    Core score fetching and update logic.
-
-    Adapted from scheduler/jobs.py:fetch_scores_job()
-    """
+async def _fetch_and_update_scores(sports: list[str]) -> None:
+    """Core score fetching and update logic."""
     async with async_session_maker() as session:
         writer = OddsWriter(session)
 
-        for sport_key in app_settings.data_collection.sports:
+        for sport_key in sports:
             logger.info("fetching_scores", sport=sport_key)
 
             async with TheOddsAPIClient() as client:
