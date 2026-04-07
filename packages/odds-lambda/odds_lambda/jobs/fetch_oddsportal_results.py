@@ -57,7 +57,7 @@ async def run_harvester_historic() -> list[dict[str, Any]]:
         command=CommandEnum.HISTORIC,
         sport=HARVESTER_SPORT,
         leagues=[HARVESTER_LEAGUE],
-        season="current",
+        season=None,
         max_pages=1,
         markets=["1x2"],
         headless=True,
