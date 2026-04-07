@@ -194,7 +194,7 @@ class LocalSchedulerBackend(SchedulerBackend):
         self,
         job_name: str,
         next_time: datetime,
-        payload: dict[str, object] | None = None,
+        _payload: dict[str, object] | None = None,
     ) -> None:
         """
         Schedule job using APScheduler date trigger.
@@ -202,7 +202,7 @@ class LocalSchedulerBackend(SchedulerBackend):
         Args:
             job_name: Job identifier (e.g., 'fetch-odds')
             next_time: UTC datetime for next execution
-            payload: Extra event payload fields (ignored by local backend)
+            _payload: Extra event payload fields (ignored by local backend)
 
         Raises:
             SchedulingFailedError: If scheduling fails
