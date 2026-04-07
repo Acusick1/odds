@@ -43,7 +43,7 @@ resource "aws_cloudwatch_event_rule" "fixed_scheduler" {
 
   name                = format("%s-%s", var.rule_prefix, each.key)
   description         = "Fixed-schedule rule for ${each.key}"
-  schedule_expression = each.value.job == "daily-digest" ? "cron(0 8 * * ? *)" : "cron(30 * * * ? *)"
+  schedule_expression = local.fixed_schedule_expressions[each.value.job]
   state               = "ENABLED"
 }
 
@@ -132,6 +132,13 @@ locals {
   # Flat lists for outputs
   self_scheduling_scheduler_jobs = [for k, _ in local.scheduler_rules_map : k]
   self_scheduling_scraper_jobs   = [for k, _ in local.scraper_rules_map : k]
+
+  # Schedule expressions for fixed-schedule jobs (map lookup prevents
+  # a new job silently inheriting the wrong schedule via a ternary fallback).
+  fixed_schedule_expressions = {
+    "daily-digest"      = "cron(0 8 * * ? *)"
+    "score-predictions" = "cron(30 * * * ? *)"
+  }
 
   # Per-sport fixed-schedule jobs (daily-digest, score-predictions)
   sport_fixed_scheduler_rules = flatten([

@@ -25,6 +25,8 @@ import structlog
 from odds_core.config import get_settings
 from odds_core.logging_setup import configure_logging
 
+from odds_lambda.scheduling.jobs import resolve_job_name
+
 # Configure structured logging for Lambda (JSON output for CloudWatch)
 configure_logging(get_settings(), json_output=True)
 
@@ -82,8 +84,6 @@ def lambda_handler(event: dict, context: object) -> dict:
         dict with statusCode and body
     """
     try:
-        from odds_lambda.scheduling.jobs import resolve_job_name
-
         raw_job_name = event.get("job")
 
         # Validate job name

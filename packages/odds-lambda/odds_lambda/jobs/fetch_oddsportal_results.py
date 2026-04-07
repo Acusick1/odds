@@ -26,6 +26,7 @@ from odds_lambda.oddsportal_common import (
     parse_match_date,
     run_scraper_with_retry,
 )
+from odds_lambda.scheduling.jobs import make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -65,11 +66,11 @@ async def run_harvester_historic() -> list[dict[str, Any]]:
     return result.success
 
 
-async def get_pending_events(session: AsyncSession) -> list[Event]:
-    """Get SCHEDULED EPL events with commence_time in the past."""
+async def get_pending_events(session: AsyncSession, sport_key: str = SPORT_KEY) -> list[Event]:
+    """Get SCHEDULED events with commence_time in the past for the given sport."""
     query = select(Event).where(
         and_(
-            Event.sport_key == SPORT_KEY,
+            Event.sport_key == sport_key,
             Event.status == EventStatus.SCHEDULED,
             Event.commence_time < datetime.now(UTC),
         )
@@ -118,19 +119,22 @@ def _match_record_to_event(
 
 async def process_results(
     raw_matches: list[dict[str, Any]] | None = None,
+    sport: str | None = None,
 ) -> ResultsStats:
     """Process scraped results: update scores and store closing snapshots.
 
     Args:
         raw_matches: Pre-scraped data (skips harvester call). For testing.
+        sport: Sport key to filter (e.g. "soccer_epl"). Defaults to SPORT_KEY.
     """
     stats = ResultsStats()
+    sport_key = sport or SPORT_KEY
 
     async with async_session_maker() as session:
-        pending_events = await get_pending_events(session)
+        pending_events = await get_pending_events(session, sport_key=sport_key)
 
         if not pending_events:
-            logger.info("no_pending_events", sport_key=SPORT_KEY)
+            logger.info("no_pending_events", sport_key=sport_key)
             return stats
 
         logger.info("pending_events_found", count=len(pending_events))
@@ -240,7 +244,7 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
     settings = get_settings()
     logger.info("fetch_oddsportal_results_started", sport=sport)
 
-    await process_results()
+    await process_results(sport=sport)
 
     # Self-schedule: run again tomorrow at 08:00 UTC
     now = datetime.now(UTC)
@@ -254,8 +258,6 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
         from odds_lambda.scheduling.backends import get_scheduler_backend
 
         backend = get_scheduler_backend(dry_run=settings.scheduler.dry_run)
-        from odds_lambda.scheduling.jobs import make_compound_job_name
-
         schedule_job_name = make_compound_job_name("fetch-oddsportal-results", sport)
         await backend.schedule_next_execution(
             job_name=schedule_job_name,
