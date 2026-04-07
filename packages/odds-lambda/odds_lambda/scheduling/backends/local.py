@@ -190,13 +190,19 @@ class LocalSchedulerBackend(SchedulerBackend):
             status=JobStatus.SCHEDULED,
         )
 
-    async def schedule_next_execution(self, job_name: str, next_time: datetime) -> None:
+    async def schedule_next_execution(
+        self,
+        job_name: str,
+        next_time: datetime,
+        payload: dict[str, object] | None = None,
+    ) -> None:
         """
         Schedule job using APScheduler date trigger.
 
         Args:
             job_name: Job identifier (e.g., 'fetch-odds')
             next_time: UTC datetime for next execution
+            payload: Extra event payload fields (ignored by local backend)
 
         Raises:
             SchedulingFailedError: If scheduling fails

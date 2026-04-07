@@ -103,6 +103,8 @@ locals {
   core_jobs        = ["fetch-odds", "fetch-scores", "update-status", "check-health"]
   polymarket_jobs  = var.enable_polymarket ? ["fetch-polymarket"] : []
   self_scheduling_jobs = concat(local.core_jobs, local.polymarket_jobs)
+
+  scraper_jobs = var.enable_oddsportal_scraper ? ["fetch-oddsportal", "fetch-oddsportal-results"] : []
 }
 
 resource "aws_cloudwatch_event_rule" "dynamic" {
@@ -145,6 +147,53 @@ resource "aws_lambda_permission" "allow_dynamic" {
   ]
 }
 
+# Self-scheduling rules for scraper Lambda (same pattern as scheduler, different target).
+# Lambda's put_rule() updates the schedule_expression and sets State=ENABLED; Terraform
+# ignores those changes but owns the lifecycle (create/destroy).
+resource "aws_cloudwatch_event_rule" "scraper_dynamic" {
+  for_each = toset(local.scraper_jobs)
+
+  name                = "${var.rule_prefix}-${each.key}"
+  description         = "Self-scheduling rule for ${each.key} (updated by scraper Lambda)"
+  schedule_expression = "rate(1 day)"
+  state               = "DISABLED"
+
+  lifecycle {
+    ignore_changes = [schedule_expression, state]
+  }
+}
+
+resource "aws_cloudwatch_event_target" "scraper_dynamic" {
+  for_each = toset(local.scraper_jobs)
+
+  rule      = aws_cloudwatch_event_rule.scraper_dynamic[each.key].name
+  target_id = "1"
+  arn       = aws_lambda_function.odds_scraper[0].arn
+
+  input = jsonencode({
+    job = each.key
+  })
+
+  retry_policy {
+    maximum_retry_attempts = 0
+  }
+}
+
+resource "aws_lambda_permission" "allow_scraper_dynamic" {
+  for_each = toset(local.scraper_jobs)
+
+  statement_id  = format("AllowScraperDynamic-%s-%s", each.key, var.rule_prefix)
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.odds_scraper[0].function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.scraper_dynamic[each.key].arn
+
+  depends_on = [
+    aws_cloudwatch_event_rule.scraper_dynamic,
+    aws_cloudwatch_event_target.scraper_dynamic
+  ]
+}
+
 # Outputs
 output "bootstrap_rules" {
   description = "Bootstrap EventBridge rules (fixed-schedule, not self-scheduling)"
@@ -158,10 +207,13 @@ output "bootstrap_rules" {
 
 output "dynamic_rules" {
   description = "Self-scheduling EventBridge rules (schedule updated by Lambda)"
-  value = { for k, v in aws_cloudwatch_event_rule.dynamic : k => v.name }
+  value = merge(
+    { for k, v in aws_cloudwatch_event_rule.dynamic : k => v.name },
+    { for k, v in aws_cloudwatch_event_rule.scraper_dynamic : k => v.name }
+  )
 }
 
 output "self_scheduling_jobs" {
   description = "Job names that use self-scheduling (CSV for scripts)"
-  value       = join(",", local.self_scheduling_jobs)
+  value       = join(",", concat(local.self_scheduling_jobs, local.scraper_jobs))
 }

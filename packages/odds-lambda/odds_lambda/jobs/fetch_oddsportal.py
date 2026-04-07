@@ -1,19 +1,21 @@
 """Fetch upcoming odds from OddsPortal via OddsHarvester.
 
 Scrapes pre-match odds for configured leagues, converts to pipeline format,
-and stores via OddsWriter. Designed for hourly Lambda execution or manual
-CLI invocation.
+and stores via OddsWriter. Self-schedules next execution based on scrape
+outcome and game proximity.
 
 This job:
 1. Scrapes upcoming matches from OddsPortal (via OddsHarvester)
 2. Converts fractional odds to pipeline raw_data format
 3. Matches or creates Event records
 4. Stores snapshots via OddsWriter.store_odds_snapshot()
+5. Self-schedules next execution via scheduler backend
 """
 
 from __future__ import annotations
 
 import asyncio
+import random
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -32,6 +34,15 @@ from odds_lambda.oddsportal_common import hours_to_tier, run_scraper_with_retry,
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
+
+# Self-scheduling constants
+NORMAL_INTERVAL_HOURS = 1.0
+RETRY_DELAY_MINUTES_MIN = 10
+RETRY_DELAY_MINUTES_MAX = 15
+MAX_FAST_RETRIES = 2
+OVERNIGHT_RESUME_HOUR_UTC = 6
+OVERNIGHT_START_HOUR_UTC = 22
+GAME_LOOKAHEAD_HOURS = 8
 
 
 @dataclass
@@ -243,9 +254,114 @@ async def ingest_league(
     return stats
 
 
-async def main() -> None:
-    """Main job execution — iterates all configured leagues."""
-    logger.info("fetch_oddsportal_started", leagues=len(LEAGUE_SPECS))
+async def _get_next_game_time(sport_key: str = "soccer_epl") -> datetime | None:
+    """Find the commence_time of the nearest upcoming scheduled game."""
+    from odds_lambda.storage.readers import OddsReader
+
+    async with async_session_maker() as session:
+        reader = OddsReader(session)
+        now = datetime.now(UTC)
+        events = await reader.get_events_by_date_range(
+            start_date=now,
+            end_date=now + timedelta(days=14),
+            sport_key=sport_key,
+            status=EventStatus.SCHEDULED,
+        )
+
+    if not events:
+        return None
+    return min(e.commence_time for e in events)
+
+
+def _calculate_next_execution(
+    *,
+    success: bool,
+    retry_count: int,
+    now: datetime | None = None,
+) -> tuple[datetime, int]:
+    """Determine next execution time and updated retry_count.
+
+    Returns:
+        (next_time, next_retry_count)
+    """
+    if now is None:
+        now = datetime.now(UTC)
+
+    if success:
+        return now + timedelta(hours=NORMAL_INTERVAL_HOURS), 0
+
+    # Fast failure path
+    if retry_count < MAX_FAST_RETRIES:
+        jitter_minutes = random.randint(RETRY_DELAY_MINUTES_MIN, RETRY_DELAY_MINUTES_MAX)
+        return now + timedelta(minutes=jitter_minutes), retry_count + 1
+
+    # Exhausted retries — back to normal cadence
+    return now + timedelta(hours=NORMAL_INTERVAL_HOURS), 0
+
+
+def _apply_overnight_skip(next_time: datetime, next_game_time: datetime | None) -> datetime:
+    """Push next_time to morning if overnight and no imminent games."""
+    hours_to_game = float("inf")
+    if next_game_time is not None:
+        hours_to_game = (next_game_time - next_time).total_seconds() / 3600
+
+    is_overnight = (
+        next_time.hour >= OVERNIGHT_START_HOUR_UTC or next_time.hour < OVERNIGHT_RESUME_HOUR_UTC
+    )
+    no_imminent_games = hours_to_game > GAME_LOOKAHEAD_HOURS
+
+    if is_overnight and no_imminent_games:
+        # Skip to 06:00 UTC the next morning (or same morning if before 06:00)
+        resume = next_time.replace(
+            hour=OVERNIGHT_RESUME_HOUR_UTC, minute=0, second=0, microsecond=0
+        )
+        if resume <= next_time:
+            resume += timedelta(days=1)
+        return resume
+
+    return next_time
+
+
+async def _self_schedule(
+    *,
+    job_name: str,
+    next_time: datetime,
+    next_retry_count: int,
+    dry_run: bool,
+) -> None:
+    """Schedule the next execution via the scheduler backend."""
+    from odds_lambda.scheduling.backends import get_scheduler_backend
+
+    backend = get_scheduler_backend(dry_run=dry_run)
+
+    payload: dict[str, object] | None = None
+    if next_retry_count > 0:
+        payload = {"retry_count": next_retry_count}
+
+    await backend.schedule_next_execution(
+        job_name=job_name,
+        next_time=next_time,
+        payload=payload,
+    )
+
+    logger.info(
+        "fetch_oddsportal_next_scheduled",
+        next_time=next_time.isoformat(),
+        retry_count=next_retry_count,
+        backend=backend.get_backend_name(),
+    )
+
+
+async def main(*, retry_count: int = 0, **_kwargs: object) -> None:
+    """Main job execution — iterates all configured leagues, then self-schedules."""
+    from odds_core.config import get_settings
+
+    settings = get_settings()
+    logger.info(
+        "fetch_oddsportal_started",
+        leagues=len(LEAGUE_SPECS),
+        retry_count=retry_count,
+    )
 
     all_stats: list[IngestionStats] = []
 
@@ -272,6 +388,29 @@ async def main() -> None:
         total_snapshots_stored=total_snapshots,
         total_errors=total_errors,
     )
+
+    # Self-schedule next execution
+    scrape_success = total_scraped > 0
+    now = datetime.now(UTC)
+    next_time, next_retry_count = _calculate_next_execution(
+        success=scrape_success,
+        retry_count=retry_count,
+        now=now,
+    )
+
+    # Apply overnight / no-games-soon skip
+    next_game_time = await _get_next_game_time()
+    next_time = _apply_overnight_skip(next_time, next_game_time)
+
+    try:
+        await _self_schedule(
+            job_name="fetch-oddsportal",
+            next_time=next_time,
+            next_retry_count=next_retry_count,
+            dry_run=settings.scheduler.dry_run,
+        )
+    except Exception as e:
+        logger.error("fetch_oddsportal_scheduling_failed", error=str(e), exc_info=True)
 
 
 if __name__ == "__main__":

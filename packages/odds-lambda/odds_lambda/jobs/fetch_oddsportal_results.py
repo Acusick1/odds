@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -229,10 +229,33 @@ async def process_results(
     return stats
 
 
-async def main() -> None:
-    """Main job entry point."""
+async def main(**_kwargs: object) -> None:
+    """Main job entry point — runs results collection, then self-schedules for tomorrow."""
+    from odds_core.config import get_settings
+
+    settings = get_settings()
     logger.info("fetch_oddsportal_results_started")
     await process_results()
+
+    # Self-schedule: run again tomorrow at 08:00 UTC
+    now = datetime.now(UTC)
+    tomorrow_8am = (now + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
+
+    try:
+        from odds_lambda.scheduling.backends import get_scheduler_backend
+
+        backend = get_scheduler_backend(dry_run=settings.scheduler.dry_run)
+        await backend.schedule_next_execution(
+            job_name="fetch-oddsportal-results",
+            next_time=tomorrow_8am,
+        )
+        logger.info(
+            "fetch_oddsportal_results_next_scheduled",
+            next_time=tomorrow_8am.isoformat(),
+            backend=backend.get_backend_name(),
+        )
+    except Exception as e:
+        logger.error("fetch_oddsportal_results_scheduling_failed", error=str(e), exc_info=True)
 
 
 if __name__ == "__main__":
