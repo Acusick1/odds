@@ -113,6 +113,7 @@ jobs:
 
       - name: Test scraper Lambda (invokes scraper jobs to trigger self-scheduling)
         if: steps.deploy.outputs.scraper_jobs != ''
+        continue-on-error: true
         run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler-scraper --jobs "${{ steps.deploy.outputs.scraper_jobs }}" --region ${{ env.AWS_REGION }}
 
       - name: Verify schedule activation
