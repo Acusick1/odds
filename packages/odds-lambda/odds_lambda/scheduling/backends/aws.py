@@ -424,6 +424,9 @@ class AWSEventBridgeBackend(SchedulerBackend):
                         "Id": "1",
                         "Arn": self.lambda_arn,
                         "Input": json.dumps(target_input),
+                        "RetryPolicy": {
+                            "MaximumRetryAttempts": 0,
+                        },
                     }
                 ],
             )

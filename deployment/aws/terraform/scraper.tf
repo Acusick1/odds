@@ -37,10 +37,6 @@ resource "aws_cloudwatch_log_group" "scraper_logs" {
   retention_in_days = 14
 }
 
-# Note: Static EventBridge Scheduler schedules (fetch_oddsportal, fetch_oddsportal_results)
-# removed in favour of self-scheduling EventBridge Rules in eventbridge.tf.
-# The scraper_scheduler_role IAM role is also removed (no longer needed).
-
 # Outputs
 output "scraper_function_arn" {
   description = "ARN of the scraper Lambda function"

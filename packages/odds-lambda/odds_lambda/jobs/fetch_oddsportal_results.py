@@ -256,6 +256,7 @@ async def main(**_kwargs: object) -> None:
         )
     except Exception as e:
         logger.error("fetch_oddsportal_results_scheduling_failed", error=str(e), exc_info=True)
+        raise
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ from odds_lambda.oddsportal_adapter import (
     convert_upcoming_matches,
 )
 from odds_lambda.oddsportal_common import hours_to_tier, run_scraper_with_retry, team_abbrev
+from odds_lambda.scheduling.backends import get_scheduler_backend
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -254,7 +255,7 @@ async def ingest_league(
     return stats
 
 
-async def _get_next_game_time(sport_key: str = "soccer_epl") -> datetime | None:
+async def _get_next_game_time(sport_key: str = LEAGUE_SPECS[0].sport_key) -> datetime | None:
     """Find the commence_time of the nearest upcoming scheduled game."""
     from odds_lambda.storage.readers import OddsReader
 
@@ -330,8 +331,6 @@ async def _self_schedule(
     dry_run: bool,
 ) -> None:
     """Schedule the next execution via the scheduler backend."""
-    from odds_lambda.scheduling.backends import get_scheduler_backend
-
     backend = get_scheduler_backend(dry_run=dry_run)
 
     payload: dict[str, object] | None = None
@@ -411,6 +410,7 @@ async def main(*, retry_count: int = 0, **_kwargs: object) -> None:
         )
     except Exception as e:
         logger.error("fetch_oddsportal_scheduling_failed", error=str(e), exc_info=True)
+        raise
 
 
 if __name__ == "__main__":
