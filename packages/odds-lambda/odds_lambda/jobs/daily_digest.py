@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger()
 
-SPORT_KEY = "soccer_epl"
+DEFAULT_SPORT_KEY = "soccer_epl"
 EMBED_COLOR = 3066993  # Green
 MAX_FIELD_CHARS = 1024
 
@@ -30,6 +30,7 @@ async def _get_completed_events_with_predictions(
     session: AsyncSession,
     since: datetime,
     model_name: str,
+    sport_key: str = DEFAULT_SPORT_KEY,
 ) -> list[dict[str, Any]]:
     """Get events completed since `since` that have predictions.
 
@@ -58,7 +59,7 @@ async def _get_completed_events_with_predictions(
         )
         .where(
             and_(
-                Event.sport_key == SPORT_KEY,
+                Event.sport_key == sport_key,
                 Event.status == EventStatus.FINAL,
                 Event.completed_at >= since,
             )
@@ -88,6 +89,7 @@ async def _get_upcoming_events_with_predictions(
     session: AsyncSession,
     until: datetime,
     model_name: str,
+    sport_key: str = DEFAULT_SPORT_KEY,
 ) -> list[dict[str, Any]]:
     """Get SCHEDULED events before `until` that have at least one prediction.
 
@@ -118,7 +120,7 @@ async def _get_upcoming_events_with_predictions(
         .join(OddsSnapshot, OddsSnapshot.id == Prediction.snapshot_id)
         .where(
             and_(
-                Event.sport_key == SPORT_KEY,
+                Event.sport_key == sport_key,
                 Event.status == EventStatus.SCHEDULED,
                 Event.commence_time > now,
                 Event.commence_time <= until,
@@ -215,11 +217,18 @@ def _format_window(hours: float) -> str:
     return f"{int(hours)}h"
 
 
+_SPORT_DISPLAY_NAMES: dict[str, str] = {
+    "soccer_epl": "EPL",
+    "basketball_nba": "NBA",
+}
+
+
 def build_digest_embed(
     results: list[dict[str, Any]],
     upcoming: list[dict[str, Any]],
     lookback_hours: float = 24,
     lookahead_hours: float = 48,
+    sport_key: str = DEFAULT_SPORT_KEY,
 ) -> dict[str, Any]:
     """Build a Discord embed dict for the daily digest."""
     now = datetime.now(UTC)
@@ -243,8 +252,10 @@ def build_digest_embed(
             }
         )
 
+    display_name = _SPORT_DISPLAY_NAMES.get(sport_key, sport_key.upper())
+
     return {
-        "title": "EPL Daily Digest",
+        "title": f"{display_name} Daily Digest",
         "color": EMBED_COLOR,
         "fields": fields,
         "timestamp": now.isoformat(),
@@ -255,6 +266,7 @@ async def send_digest(
     model_name: str | None = None,
     lookback_hours: float = 24,
     lookahead_hours: float = 48,
+    sport_key: str = DEFAULT_SPORT_KEY,
 ) -> dict[str, int]:
     """Query predictions and results, send Discord digest.
 
@@ -262,6 +274,7 @@ async def send_digest(
         model_name: Model to filter predictions by. Defaults to MODEL_NAME env var.
         lookback_hours: How far back to look for completed events.
         lookahead_hours: How far ahead to look for upcoming events.
+        sport_key: Sport to generate digest for.
 
     Returns dict with counts: results_count, upcoming_count, sent (0 or 1).
     """
@@ -274,17 +287,23 @@ async def send_digest(
     stats = {"results_count": 0, "upcoming_count": 0, "sent": 0}
 
     async with async_session_maker() as session:
-        results = await _get_completed_events_with_predictions(session, since, model_name)
-        upcoming = await _get_upcoming_events_with_predictions(session, until, model_name)
+        results = await _get_completed_events_with_predictions(
+            session, since, model_name, sport_key=sport_key
+        )
+        upcoming = await _get_upcoming_events_with_predictions(
+            session, until, model_name, sport_key=sport_key
+        )
 
     stats["results_count"] = len(results)
     stats["upcoming_count"] = len(upcoming)
 
     if not results and not upcoming:
-        logger.info("daily_digest_empty", reason="no predictions or results")
+        logger.info("daily_digest_empty", reason="no predictions or results", sport_key=sport_key)
         return stats
 
-    embed = build_digest_embed(results, upcoming, lookback_hours, lookahead_hours)
+    embed = build_digest_embed(
+        results, upcoming, lookback_hours, lookahead_hours, sport_key=sport_key
+    )
 
     from odds_cli.alerts.base import AlertManager
 
@@ -292,11 +311,12 @@ async def send_digest(
     await manager.send_embed(embed)
     stats["sent"] = 1
 
-    logger.info("daily_digest_sent", **stats)
+    logger.info("daily_digest_sent", sport_key=sport_key, **stats)
     return stats
 
 
 async def main(
+    sport: str | None = None,
     lookback_hours: float = 24,
     lookahead_hours: float = 48,
     **_kwargs: object,
@@ -304,15 +324,24 @@ async def main(
     """Main job entry point.
 
     Args:
+        sport: Sport key (e.g. "soccer_epl"). Defaults to DEFAULT_SPORT_KEY.
         lookback_hours: How far back to look for completed events.
         lookahead_hours: How far ahead to look for upcoming events.
     """
+    sport_key = sport or DEFAULT_SPORT_KEY
     logger.info(
-        "daily_digest_started", lookback_hours=lookback_hours, lookahead_hours=lookahead_hours
+        "daily_digest_started",
+        sport_key=sport_key,
+        lookback_hours=lookback_hours,
+        lookahead_hours=lookahead_hours,
     )
 
     try:
-        stats = await send_digest(lookback_hours=lookback_hours, lookahead_hours=lookahead_hours)
+        stats = await send_digest(
+            lookback_hours=lookback_hours,
+            lookahead_hours=lookahead_hours,
+            sport_key=sport_key,
+        )
         logger.info("daily_digest_complete", **stats)
     except Exception as e:
         logger.error("daily_digest_failed", error=str(e), exc_info=True)

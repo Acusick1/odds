@@ -37,6 +37,16 @@ HARVESTER_LEAGUE = "england-premier-league"
 MARKET_KEY = "1x2_market"
 API_REQUEST_ID = "oddsportal_closing"
 
+# Sport-key -> scraper config for parameterized invocation
+_SPORT_CONFIG: dict[str, dict[str, str]] = {
+    "soccer_epl": {
+        "sport_key": SPORT_KEY,
+        "sport_title": SPORT_TITLE,
+        "harvester_sport": HARVESTER_SPORT,
+        "harvester_league": HARVESTER_LEAGUE,
+    },
+}
+
 
 @dataclass
 class ResultsStats:
@@ -229,17 +239,34 @@ async def process_results(
     return stats
 
 
-async def main(**_kwargs: object) -> None:
-    """Main job entry point — runs results collection, then self-schedules for tomorrow."""
+async def main(sport: str | None = None, **_kwargs: object) -> None:
+    """Main job entry point — runs results collection, then self-schedules for tomorrow.
+
+    Args:
+        sport: Sport key (e.g. "soccer_epl"). Currently only soccer_epl is supported.
+    """
     from odds_core.config import get_settings
 
     settings = get_settings()
-    logger.info("fetch_oddsportal_results_started")
+    logger.info("fetch_oddsportal_results_started", sport=sport)
+
+    if sport and sport not in _SPORT_CONFIG:
+        logger.error(
+            "unknown_sport_key",
+            sport=sport,
+            available=list(_SPORT_CONFIG),
+        )
+        return
+
     await process_results()
 
     # Self-schedule: run again tomorrow at 08:00 UTC
     now = datetime.now(UTC)
     tomorrow_8am = (now + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
+
+    schedule_payload: dict[str, object] | None = None
+    if sport:
+        schedule_payload = {"sport": sport}
 
     try:
         from odds_lambda.scheduling.backends import get_scheduler_backend
@@ -248,6 +275,7 @@ async def main(**_kwargs: object) -> None:
         await backend.schedule_next_execution(
             job_name="fetch-oddsportal-results",
             next_time=tomorrow_8am,
+            payload=schedule_payload,
         )
         logger.info(
             "fetch_oddsportal_results_next_scheduled",

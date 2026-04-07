@@ -2,11 +2,12 @@
 Universal AWS Lambda handler for all scheduled jobs.
 
 This handler routes EventBridge events to the appropriate job module.
-The event payload specifies which job to execute.
+The event payload specifies which job to execute, optionally with a sport.
 
 Event payload format:
 {
-    "job": "fetch-odds" | "fetch-scores" | "update-status" | "check-health" | "fetch-polymarket" | "backfill-polymarket" | "fetch-oddsportal"
+    "job": "fetch-odds" | "fetch-odds-epl" | "fetch-scores" | ...,
+    "sport": "soccer_epl"  (optional, extracted from compound job name if absent)
 }
 
 Environment variables required:
@@ -43,51 +44,80 @@ async def _run_job_async(job_name: str, **kwargs: object) -> None:
 
     job_fn = get_job_function(job_name)
     sig = inspect.signature(job_fn)
+
+    # Determine which kwargs the function can accept
+    accepted_params = set(sig.parameters.keys())
     has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-    if kwargs and has_var_keyword:
-        await job_fn(**kwargs)
+
+    if kwargs:
+        if has_var_keyword:
+            await job_fn(**kwargs)
+        else:
+            # Pass only kwargs that match named parameters
+            filtered = {k: v for k, v in kwargs.items() if k in accepted_params}
+            if filtered:
+                await job_fn(**filtered)
+            else:
+                await job_fn()
     else:
         await job_fn()
 
 
-def lambda_handler(event, context):
+def lambda_handler(event: dict, context: object) -> dict:
     """
     AWS Lambda entry point.
 
+    Resolves compound job names (e.g. "fetch-odds-epl") into a base job name
+    and sport parameter. The sport is added to the structlog context for
+    CloudWatch filtering and passed to the job function.
+
     Args:
-        event: EventBridge event payload with 'job' key
+        event: EventBridge event payload with 'job' key and optional 'sport'
         context: Lambda context object
 
     Returns:
-        dict: Response with statusCode and body
-
-    Raises:
-        Exception: If job execution fails
+        dict with statusCode and body
     """
     try:
-        job_name = event.get("job")
+        from odds_lambda.scheduling.jobs import resolve_job_name
+
+        raw_job_name = event.get("job")
+
+        # Validate job name
+        if not raw_job_name:
+            raise ValueError("Missing 'job' in event payload")
+
+        # Resolve compound name: "fetch-odds-epl" -> ("fetch-odds", "soccer_epl")
+        base_job_name, resolved_sport = resolve_job_name(raw_job_name)
+
+        # Explicit sport in payload takes precedence over suffix-derived sport
+        sport = event.get("sport") or resolved_sport
+
+        # Bind sport to structlog context for all downstream log entries
+        if sport:
+            structlog.contextvars.bind_contextvars(sport=sport)
 
         logger.info(
             "lambda_invoked",
-            job=job_name,
+            job=base_job_name,
+            sport=sport,
+            raw_job=raw_job_name,
             request_id=context.aws_request_id,
             function_name=context.function_name,
             memory_limit=context.memory_limit_in_mb,
         )
 
-        # Validate job name
-        if not job_name:
-            raise ValueError("Missing 'job' in event payload")
+        # Build job params: everything except "job", plus sport if resolved
+        job_params: dict[str, object] = {k: v for k, v in event.items() if k != "job"}
+        if sport and "sport" not in job_params:
+            job_params["sport"] = sport
 
         # Run async job
-        # Use asyncio.run() to ensure clean event loop per invocation
-        # Extra event fields are passed as kwargs to jobs that accept them
-        job_params = {k: v for k, v in event.items() if k != "job"}
-        asyncio.run(_run_job_async(job_name, **job_params))
+        asyncio.run(_run_job_async(base_job_name, **job_params))
 
         logger.info(
             "lambda_completed",
-            job=job_name,
+            job=base_job_name,
             request_id=context.aws_request_id,
         )
 
@@ -96,7 +126,8 @@ def lambda_handler(event, context):
             "body": json.dumps(
                 {
                     "status": "success",
-                    "job": job_name,
+                    "job": base_job_name,
+                    "sport": sport,
                     "request_id": context.aws_request_id,
                 }
             ),
@@ -135,3 +166,5 @@ def lambda_handler(event, context):
                 }
             ),
         }
+    finally:
+        structlog.contextvars.unbind_contextvars("sport")

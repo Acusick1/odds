@@ -134,6 +134,7 @@ async def score_events(
     model_name: str | None = None,
     bucket: str | None = None,
     config: FeatureConfig | None = None,
+    sport: str | None = None,
 ) -> dict[str, int]:
     """Score all unscored snapshots for upcoming events.
 
@@ -144,6 +145,8 @@ async def score_events(
         bucket: S3 bucket. Defaults to MODEL_BUCKET env var.
         config: Override feature config (mainly for testing). If None, uses
             the config bundled in the model artifact.
+        sport: Sport key from event payload. When provided, validated against
+            the model's bundled sport_key to prevent mismatched scoring.
 
     Returns:
         Dict with counts: events_checked, snapshots_scored, snapshots_skipped, errors.
@@ -175,6 +178,17 @@ async def score_events(
         logger.error(
             "no_sport_key",
             msg="FeatureConfig has no sport_key — cannot determine which events to score",
+        )
+        return stats
+
+    # Validate that requested sport matches the model's sport
+    if sport and sport != sport_key:
+        logger.error(
+            "sport_mismatch",
+            requested_sport=sport,
+            model_sport=sport_key,
+            model_name=model_name,
+            msg="Requested sport does not match model's sport_key",
         )
         return stats
 
@@ -231,10 +245,15 @@ async def score_events(
     return stats
 
 
-async def main() -> None:
-    """Main job entry point."""
-    logger.info("score_predictions_started")
-    await score_events()
+async def main(sport: str | None = None, **_kwargs: object) -> None:
+    """Main job entry point.
+
+    Args:
+        sport: Sport key from event payload. Passed to ``score_events`` for
+            validation against the model's bundled sport_key.
+    """
+    logger.info("score_predictions_started", sport=sport)
+    await score_events(sport=sport)
 
 
 if __name__ == "__main__":

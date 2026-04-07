@@ -10,6 +10,38 @@ import boto3
 from botocore.config import Config
 
 
+def _build_payload(job_name: str) -> dict[str, str]:
+    """Build Lambda invocation payload, including sport for per-sport jobs.
+
+    Per-sport job names use a compound format like "fetch-odds-epl". The payload
+    includes both the base job name and the sport key so the handler can route
+    correctly.
+    """
+    # Sport suffix -> sport_key mapping (mirrors _SPORT_SUFFIX_MAP in jobs.py)
+    sport_suffixes: dict[str, str] = {
+        "epl": "soccer_epl",
+    }
+
+    # Per-sport job bases that accept a sport parameter
+    per_sport_jobs = {
+        "fetch-odds",
+        "fetch-scores",
+        "fetch-oddsportal",
+        "fetch-oddsportal-results",
+        "score-predictions",
+        "daily-digest",
+    }
+
+    # Try to extract sport suffix
+    for suffix, sport_key in sport_suffixes.items():
+        if job_name.endswith(f"-{suffix}"):
+            base = job_name[: -(len(suffix) + 1)]
+            if base in per_sport_jobs:
+                return {"job": base, "sport": sport_key}
+
+    return {"job": job_name}
+
+
 def test_lambda_job(lambda_name: str, region: str, job_name: str) -> tuple[bool, str | None]:
     """
     Test a specific Lambda job.
@@ -17,7 +49,7 @@ def test_lambda_job(lambda_name: str, region: str, job_name: str) -> tuple[bool,
     Args:
         lambda_name: Name of the Lambda function
         region: AWS region
-        job_name: Name of the job to test (fetch-odds, fetch-scores, update-status)
+        job_name: Name of the job to test (fetch-odds-epl, fetch-scores-epl, check-health, etc.)
 
     Returns:
         tuple: (success: bool, request_id: str | None)
@@ -30,11 +62,13 @@ def test_lambda_job(lambda_name: str, region: str, job_name: str) -> tuple[bool,
         config=Config(read_timeout=300),
     )
 
+    payload = _build_payload(job_name)
+
     try:
         # Invoke Lambda (synchronous, waits for completion)
         response = lambda_client.invoke(
             FunctionName=lambda_name,
-            Payload=json.dumps({"job": job_name}).encode(),
+            Payload=json.dumps(payload).encode(),
         )
 
         # Get request ID from response metadata
