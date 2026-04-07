@@ -37,16 +37,6 @@ HARVESTER_LEAGUE = "england-premier-league"
 MARKET_KEY = "1x2_market"
 API_REQUEST_ID = "oddsportal_closing"
 
-# Sport-key -> scraper config for parameterized invocation
-_SPORT_CONFIG: dict[str, dict[str, str]] = {
-    "soccer_epl": {
-        "sport_key": SPORT_KEY,
-        "sport_title": SPORT_TITLE,
-        "harvester_sport": HARVESTER_SPORT,
-        "harvester_league": HARVESTER_LEAGUE,
-    },
-}
-
 
 @dataclass
 class ResultsStats:
@@ -250,14 +240,6 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
     settings = get_settings()
     logger.info("fetch_oddsportal_results_started", sport=sport)
 
-    if sport and sport not in _SPORT_CONFIG:
-        logger.error(
-            "unknown_sport_key",
-            sport=sport,
-            available=list(_SPORT_CONFIG),
-        )
-        return
-
     await process_results()
 
     # Self-schedule: run again tomorrow at 08:00 UTC
@@ -272,8 +254,11 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
         from odds_lambda.scheduling.backends import get_scheduler_backend
 
         backend = get_scheduler_backend(dry_run=settings.scheduler.dry_run)
+        from odds_lambda.scheduling.jobs import make_compound_job_name
+
+        schedule_job_name = make_compound_job_name("fetch-oddsportal-results", sport)
         await backend.schedule_next_execution(
-            job_name="fetch-oddsportal-results",
+            job_name=schedule_job_name,
             next_time=tomorrow_8am,
             payload=schedule_payload,
         )

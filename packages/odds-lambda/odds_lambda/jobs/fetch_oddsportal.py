@@ -32,6 +32,7 @@ from odds_lambda.oddsportal_adapter import (
 )
 from odds_lambda.oddsportal_common import hours_to_tier, run_scraper_with_retry, team_abbrev
 from odds_lambda.scheduling.backends import get_scheduler_backend
+from odds_lambda.scheduling.jobs import make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -433,7 +434,7 @@ async def main(
 
     try:
         await _self_schedule(
-            job_name="fetch-oddsportal",
+            job_name=make_compound_job_name("fetch-oddsportal", sport),
             next_time=next_time,
             next_retry_count=next_retry_count,
             dry_run=settings.scheduler.dry_run,

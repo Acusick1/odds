@@ -18,6 +18,7 @@ from odds_lambda.event_sync import EventSyncService
 from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.scheduling.backends import get_scheduler_backend
 from odds_lambda.scheduling.intelligence import SchedulingIntelligence
+from odds_lambda.scheduling.jobs import make_compound_job_name
 
 logger = structlog.get_logger()
 
@@ -78,8 +79,8 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
     intelligence = SchedulingIntelligence(lookahead_days=app_settings.scheduler.lookahead_days)
     decision = await intelligence.should_execute_fetch()
 
-    # Self-scheduling uses the sport-suffixed job name when sport is explicit
-    schedule_job_name = "fetch-odds"
+    # Self-scheduling uses the sport-suffixed job name to match Terraform rules
+    schedule_job_name = make_compound_job_name("fetch-odds", sport)
     schedule_payload: dict[str, object] | None = None
     if sport:
         schedule_payload = {"sport": sport}

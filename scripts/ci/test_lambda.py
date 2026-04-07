@@ -17,28 +17,11 @@ def _build_payload(job_name: str) -> dict[str, str]:
     includes both the base job name and the sport key so the handler can route
     correctly.
     """
-    # Sport suffix -> sport_key mapping (mirrors _SPORT_SUFFIX_MAP in jobs.py)
-    sport_suffixes: dict[str, str] = {
-        "epl": "soccer_epl",
-    }
+    from odds_lambda.scheduling.jobs import resolve_job_name
 
-    # Per-sport job bases that accept a sport parameter
-    per_sport_jobs = {
-        "fetch-odds",
-        "fetch-scores",
-        "fetch-oddsportal",
-        "fetch-oddsportal-results",
-        "score-predictions",
-        "daily-digest",
-    }
-
-    # Try to extract sport suffix
-    for suffix, sport_key in sport_suffixes.items():
-        if job_name.endswith(f"-{suffix}"):
-            base = job_name[: -(len(suffix) + 1)]
-            if base in per_sport_jobs:
-                return {"job": base, "sport": sport_key}
-
+    base_name, sport_key = resolve_job_name(job_name)
+    if sport_key:
+        return {"job": base_name, "sport": sport_key}
     return {"job": job_name}
 
 

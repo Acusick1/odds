@@ -55,6 +55,9 @@ async def _run_job_async(job_name: str, **kwargs: object) -> None:
         else:
             # Pass only kwargs that match named parameters
             filtered = {k: v for k, v in kwargs.items() if k in accepted_params}
+            dropped = {k: v for k, v in kwargs.items() if k not in accepted_params}
+            if dropped:
+                logger.debug("job_kwargs_filtered", job=job_name, dropped_keys=list(dropped))
             if filtered:
                 await job_fn(**filtered)
             else:

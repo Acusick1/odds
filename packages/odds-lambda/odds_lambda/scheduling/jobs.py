@@ -44,6 +44,34 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
 _loaded_jobs: dict[str, Callable[..., Awaitable[Any]]] = {}
 
 
+def sport_key_to_suffix(sport_key: str) -> str | None:
+    """Map a sport key to its scheduling suffix.
+
+    Reverse of ``_SPORT_SUFFIX_MAP``: e.g. ``"soccer_epl"`` -> ``"epl"``.
+
+    Returns:
+        The suffix string, or None if the sport key has no mapping.
+    """
+    for suffix, key in _SPORT_SUFFIX_MAP.items():
+        if key == sport_key:
+            return suffix
+    return None
+
+
+def make_compound_job_name(base_job_name: str, sport: str | None) -> str:
+    """Build the compound job name used for self-scheduling.
+
+    When a sport is provided and the job supports per-sport routing,
+    appends the sport suffix so the EventBridge rule name matches
+    Terraform (e.g. ``"fetch-odds"`` + ``"soccer_epl"`` -> ``"fetch-odds-epl"``).
+    """
+    if sport and base_job_name in _PER_SPORT_JOBS:
+        suffix = sport_key_to_suffix(sport)
+        if suffix:
+            return f"{base_job_name}-{suffix}"
+    return base_job_name
+
+
 def resolve_job_name(compound_name: str) -> tuple[str, str | None]:
     """Resolve a potentially sport-suffixed job name.
 
