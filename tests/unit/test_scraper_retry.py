@@ -101,12 +101,10 @@ class TestRunScraperWithRetry:
         assert mock_run.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_retries_on_empty_then_succeeds(self) -> None:
-        matches = [{"home_team": "Arsenal", "away_team": "Chelsea"}]
+    async def test_empty_result_returned_with_single_attempt(self) -> None:
+        """With MAX_SCRAPER_RETRIES=1, empty result is returned immediately (no retry)."""
         empty = _make_result(success=[])
-        success = _make_result(success=matches)
-
-        mock_run = AsyncMock(side_effect=[empty, success])
+        mock_run = AsyncMock(return_value=empty)
 
         with (
             patch(SCRAPER_PATCH, mock_run),
@@ -116,8 +114,8 @@ class TestRunScraperWithRetry:
                 command="upcoming", sport="football", headless=True
             )
 
-        assert result.success == matches
-        assert mock_run.await_count == 2
+        assert result.success == []
+        assert mock_run.await_count == 1
 
     @pytest.mark.asyncio
     async def test_returns_empty_after_all_retries_exhausted(self) -> None:
@@ -226,7 +224,7 @@ class TestFailedUrlRetry:
 
     @pytest.mark.asyncio
     async def test_partial_failure_triggers_retry_and_recovers(self) -> None:
-        """7 of 18 fail, retry recovers 5 of those 7 in first pass."""
+        """7 of 18 fail, single retry pass recovers 5 of those 7."""
         original_success = [{"match": i} for i in range(11)]
         failed_urls = [
             FakeFailedUrl(
@@ -236,7 +234,7 @@ class TestFailedUrlRetry:
         ]
         result = _make_result(success=original_success, failed=failed_urls)
 
-        # First retry pass recovers 5, still fails 2; second pass recovers the remaining 2
+        # Single retry pass recovers 5, still fails 2
         retry1_success = [{"match": f"recovered_{i}"} for i in range(5)]
         retry1_failed = [
             FakeFailedUrl(
@@ -246,10 +244,7 @@ class TestFailedUrlRetry:
         ]
         retry1_result = _make_result(success=retry1_success, failed=retry1_failed)
 
-        retry2_success = [{"match": f"recovered2_{i}"} for i in range(2)]
-        retry2_result = _make_result(success=retry2_success, failed=[])
-
-        mock_run = AsyncMock(side_effect=[retry1_result, retry2_result])
+        mock_run = AsyncMock(return_value=retry1_result)
 
         with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
             await _retry_failed_urls(
@@ -257,11 +252,11 @@ class TestFailedUrlRetry:
                 {"command": "upcoming", "sport": "football", "markets": ["1x2"], "headless": True},
             )
 
-        assert len(result.success) == 18  # 11 original + 5 + 2 recovered
-        assert len(result.failed) == 0
-        assert result.stats.successful == 18
-        assert result.stats.failed == 0
-        assert mock_run.await_count == 2
+        assert len(result.success) == 16  # 11 original + 5 recovered
+        assert len(result.failed) == 2  # still failed after single pass
+        assert result.stats.successful == 16
+        assert result.stats.failed == 2
+        assert mock_run.await_count == 1
 
     @pytest.mark.asyncio
     async def test_retry_exhausts_all_passes(self) -> None:
@@ -386,7 +381,7 @@ class TestFailedUrlRetry:
         ]
         result = _make_result(success=original_success, failed=failed_urls)
 
-        # Retry recovers 2 of 3 retriable, still fails 1
+        # Single pass recovers 2 of 3 retriable, still fails 1
         retry_success = [{"match": "recovered_0"}, {"match": "recovered_1"}]
         retry_failed = [
             FakeFailedUrl(
@@ -395,10 +390,7 @@ class TestFailedUrlRetry:
         ]
         retry_result = _make_result(success=retry_success, failed=retry_failed)
 
-        # Second pass recovers the last one
-        retry2_result = _make_result(success=[{"match": "recovered_2"}], failed=[])
-
-        mock_run = AsyncMock(side_effect=[retry_result, retry2_result])
+        mock_run = AsyncMock(return_value=retry_result)
 
         with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
             await _retry_failed_urls(
@@ -406,11 +398,11 @@ class TestFailedUrlRetry:
                 {"command": "upcoming", "sport": "football"},
             )
 
-        assert len(result.success) == 8  # 5 original + 3 recovered
-        assert len(result.failed) == 1  # only the 404
-        assert result.failed[0].error_type == ErrorType.PAGE_NOT_FOUND
-        assert result.stats.successful == 8
-        assert result.stats.failed == 1
+        assert len(result.success) == 7  # 5 original + 2 recovered
+        assert len(result.failed) == 2  # 404 + 1 still-failing retriable
+        assert any(f.error_type == ErrorType.PAGE_NOT_FOUND for f in result.failed)
+        assert result.stats.successful == 7
+        assert result.stats.failed == 2
 
         # Only non-404 URLs were sent to retry
         first_call_kwargs = mock_run.call_args_list[0].kwargs
@@ -560,18 +552,16 @@ class TestUserAgentGeneration:
         assert call_kwargs["browser_user_agent"] == custom_ua
 
     @pytest.mark.asyncio
-    async def test_empty_page_retry_generates_fresh_user_agent(self) -> None:
-        """Each empty-page retry attempt generates and uses a distinct UA."""
+    async def test_single_attempt_generates_user_agent(self) -> None:
+        """With MAX_SCRAPER_RETRIES=1, a single UA is generated for the one attempt."""
         matches = [{"home_team": "Arsenal", "away_team": "Chelsea"}]
-        empty = _make_result(success=[])
         success = _make_result(success=matches)
 
-        mock_run = AsyncMock(side_effect=[empty, success])
-        ua_gen = MagicMock(side_effect=["UA-1", "UA-2", "UA-3"])
+        mock_run = AsyncMock(return_value=success)
+        ua_gen = MagicMock(return_value="UA-1")
 
         with (
             patch(SCRAPER_PATCH, mock_run),
-            patch(SLEEP_PATCH, new_callable=AsyncMock),
             patch("odds_lambda.oddsportal_common._generate_user_agent", ua_gen),
         ):
             result = await run_scraper_with_retry(
@@ -579,13 +569,9 @@ class TestUserAgentGeneration:
             )
 
         assert result.success == matches
-        assert mock_run.await_count == 2
-
-        ua_attempt_1 = mock_run.call_args_list[0].kwargs["browser_user_agent"]
-        ua_attempt_2 = mock_run.call_args_list[1].kwargs["browser_user_agent"]
-        assert ua_attempt_1 == "UA-1"
-        assert ua_attempt_2 == "UA-2"
-        assert ua_attempt_1 != ua_attempt_2
+        assert mock_run.await_count == 1
+        assert mock_run.call_args.kwargs["browser_user_agent"] == "UA-1"
+        ua_gen.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_retry_uses_fresh_user_agent(self) -> None:
@@ -616,7 +602,7 @@ class TestUserAgentGeneration:
 class TestEndToEndWithFailedUrlRetry:
     @pytest.mark.asyncio
     async def test_partial_scrape_triggers_failed_url_retry(self) -> None:
-        """Full flow: initial scrape partially fails, retry recovers some."""
+        """Full flow: initial scrape partially fails, single retry pass recovers some."""
         initial_success = [{"match": i} for i in range(11)]
         initial_failed = [
             FakeFailedUrl(
@@ -635,10 +621,7 @@ class TestEndToEndWithFailedUrlRetry:
         ]
         retry_result = _make_result(success=retry_success, failed=retry_failed)
 
-        # Passes 2 and 3 recover nothing
-        still_failed = _make_result(success=[], failed=retry_failed)
-
-        mock_run = AsyncMock(side_effect=[initial_result, retry_result, still_failed, still_failed])
+        mock_run = AsyncMock(side_effect=[initial_result, retry_result])
 
         with patch(SCRAPER_PATCH, mock_run), patch(SLEEP_PATCH, new_callable=AsyncMock):
             result = await run_scraper_with_retry(
@@ -646,9 +629,9 @@ class TestEndToEndWithFailedUrlRetry:
             )
 
         assert len(result.success) == 12  # 11 + 1 recovered
-        assert len(result.failed) == 6  # still failed after 3 passes
-        # 1 initial + 3 retry passes
-        assert mock_run.await_count == 4
+        assert len(result.failed) == 6  # still failed after single pass
+        # 1 initial + 1 retry pass
+        assert mock_run.await_count == 2
 
         # Verify command was forwarded to retry calls
         retry_call_kwargs = mock_run.call_args_list[1].kwargs
