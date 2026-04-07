@@ -87,13 +87,19 @@ class SchedulerBackend(ABC):
         self.retry_config = retry_config or RetryConfig()
 
     @abstractmethod
-    async def schedule_next_execution(self, job_name: str, next_time: datetime) -> None:
+    async def schedule_next_execution(
+        self,
+        job_name: str,
+        next_time: datetime,
+        payload: dict[str, object] | None = None,
+    ) -> None:
         """
         Schedule next execution of a job at a specific time.
 
         Args:
             job_name: Identifier for the job (e.g., 'fetch-odds', 'fetch-scores')
             next_time: UTC datetime when job should execute next
+            payload: Extra fields merged into the event payload alongside ``{"job": job_name}``
 
         Raises:
             SchedulingFailedError: If scheduling fails after retries

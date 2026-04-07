@@ -313,7 +313,12 @@ class AWSEventBridgeBackend(SchedulerBackend):
         except Exception as e:
             raise BackendUnavailableError(f"Failed to get job status: {e}") from e
 
-    async def schedule_next_execution(self, job_name: str, next_time: datetime) -> None:
+    async def schedule_next_execution(
+        self,
+        job_name: str,
+        next_time: datetime,
+        payload: dict[str, object] | None = None,
+    ) -> None:
         """
         Update EventBridge rule to trigger at specific time with retry logic.
 
@@ -325,6 +330,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
         Args:
             job_name: Job identifier (e.g., 'fetch-odds')
             next_time: UTC datetime for next execution
+            payload: Extra fields merged into the event payload alongside ``{"job": job_name}``
 
         Raises:
             SchedulingFailedError: If scheduling fails after all retries
@@ -335,18 +341,24 @@ class AWSEventBridgeBackend(SchedulerBackend):
                 job=job_name,
                 next_time=next_time.isoformat(),
                 backend="aws_eventbridge",
+                payload=payload,
             )
             return
 
         # Delegate to retrying implementation
         try:
-            await self._schedule_with_retry(job_name, next_time)
+            await self._schedule_with_retry(job_name, next_time, payload=payload)
         except Exception as e:
             raise SchedulingFailedError(
                 f"Failed to schedule {job_name} after {self.retry_config.max_attempts} attempts: {e}"
             ) from e
 
-    async def _schedule_with_retry(self, job_name: str, next_time: datetime) -> None:
+    async def _schedule_with_retry(
+        self,
+        job_name: str,
+        next_time: datetime,
+        payload: dict[str, object] | None = None,
+    ) -> None:
         """
         Internal method with tenacity retry decorator.
 
@@ -401,13 +413,20 @@ class AWSEventBridgeBackend(SchedulerBackend):
             )
 
             # Ensure Lambda target is attached
+            target_input: dict[str, object] = {"job": job_name}
+            if payload:
+                target_input.update(payload)
+
             self.events_client.put_targets(
                 Rule=rule_name,
                 Targets=[
                     {
                         "Id": "1",
                         "Arn": self.lambda_arn,
-                        "Input": json.dumps({"job": job_name}),
+                        "Input": json.dumps(target_input),
+                        "RetryPolicy": {
+                            "MaximumRetryAttempts": 0,
+                        },
                     }
                 ],
             )

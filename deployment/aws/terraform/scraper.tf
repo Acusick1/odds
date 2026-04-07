@@ -22,6 +22,8 @@ resource "aws_lambda_function" "odds_scraper" {
       ODDS_API_KEY      = var.odds_api_key
       ODDS_API_KEYS     = var.odds_api_keys
       SSM_API_KEY_INDEX = "/${var.project_name}/active-api-key-index"
+      LAMBDA_ARN        = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-scraper"
+      RULE_PREFIX       = var.rule_prefix
       LOG_LEVEL         = "INFO"
     }
   }
@@ -33,87 +35,6 @@ resource "aws_cloudwatch_log_group" "scraper_logs" {
 
   name              = "/aws/lambda/${aws_lambda_function.odds_scraper[0].function_name}"
   retention_in_days = 14
-}
-
-# IAM role for EventBridge Scheduler to invoke the scraper Lambda
-resource "aws_iam_role" "scraper_scheduler_role" {
-  count = var.enable_oddsportal_scraper ? 1 : 0
-
-  name = "${var.project_name}-scraper-scheduler-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = {
-        Service = "scheduler.amazonaws.com"
-      }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "scraper_scheduler_invoke" {
-  count = var.enable_oddsportal_scraper ? 1 : 0
-
-  name = "${var.project_name}-scraper-scheduler-invoke"
-  role = aws_iam_role.scraper_scheduler_role[0].id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = "lambda:InvokeFunction"
-      Resource = aws_lambda_function.odds_scraper[0].arn
-    }]
-  })
-}
-
-# EventBridge Scheduler — hourly with 15-minute jitter
-resource "aws_scheduler_schedule" "fetch_oddsportal" {
-  count = var.enable_oddsportal_scraper ? 1 : 0
-
-  name       = "${var.rule_prefix}-fetch-oddsportal"
-  group_name = "default"
-
-  schedule_expression = "rate(1 hour)"
-
-  flexible_time_window {
-    mode                      = "FLEXIBLE"
-    maximum_window_in_minutes = 15
-  }
-
-  target {
-    arn      = aws_lambda_function.odds_scraper[0].arn
-    role_arn = aws_iam_role.scraper_scheduler_role[0].arn
-    input    = jsonencode({ job = "fetch-oddsportal" })
-  }
-
-  state = "ENABLED"
-}
-
-# EventBridge Scheduler — daily results and closing odds collection
-resource "aws_scheduler_schedule" "fetch_oddsportal_results" {
-  count = var.enable_oddsportal_scraper ? 1 : 0
-
-  name       = "${var.rule_prefix}-fetch-oddsportal-results"
-  group_name = "default"
-
-  schedule_expression          = "cron(0 8 * * ? *)"
-  schedule_expression_timezone = "UTC"
-
-  flexible_time_window {
-    mode                      = "FLEXIBLE"
-    maximum_window_in_minutes = 15
-  }
-
-  target {
-    arn      = aws_lambda_function.odds_scraper[0].arn
-    role_arn = aws_iam_role.scraper_scheduler_role[0].arn
-    input    = jsonencode({ job = "fetch-oddsportal-results" })
-  }
-
-  state = "ENABLED"
 }
 
 # Outputs
