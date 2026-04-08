@@ -184,7 +184,7 @@ async def send_critical(message: str):
 _DEFAULT_RATE_LIMIT_MINUTES = 30
 
 
-async def _check_rate_limit(
+async def check_rate_limit(
     alert_type: str, rate_limit_minutes: int = _DEFAULT_RATE_LIMIT_MINUTES
 ) -> bool:
     """Return True if an alert of this type is allowed (not rate-limited).
@@ -206,7 +206,7 @@ async def _check_rate_limit(
         return result.scalar_one() == 0
 
 
-async def _record_to_alert_history(
+async def record_to_alert_history(
     alert_type: str,
     severity: str,
     message: str,
@@ -244,18 +244,32 @@ async def job_alert_context(job_name: str) -> AsyncIterator[None]:
         yield
     except Exception as e:
         alert_type = f"job_failure:{job_name}"
-        if alert_manager.enabled and await _check_rate_limit(alert_type):
+        if alert_manager.enabled and await check_rate_limit(alert_type):
             msg = f"🚨 Job {job_name} failed: {type(e).__name__}: {e}"
             await alert_manager.alert(msg, "critical")
-            await _record_to_alert_history(alert_type, "critical", msg)
+            await record_to_alert_history(alert_type, "critical", msg)
         raise
     else:
         # Record heartbeat on success
         try:
-            await _record_to_alert_history(
+            await record_to_alert_history(
                 alert_type=f"heartbeat:{job_name}",
                 severity="info",
                 message=f"Job {job_name} completed successfully",
             )
         except Exception:
             logger.warning("heartbeat_record_failed", job=job_name, exc_info=True)
+
+
+async def send_job_warning(alert_type: str, message: str) -> bool:
+    """Send a rate-limited WARNING alert for a soft failure (e.g. empty scrape).
+
+    Returns True if the alert was sent, False if disabled or rate-limited.
+    """
+    if not alert_manager.enabled:
+        return False
+    if not await check_rate_limit(alert_type):
+        return False
+    await alert_manager.alert(message, "warning")
+    await record_to_alert_history(alert_type, "warning", message)
+    return True

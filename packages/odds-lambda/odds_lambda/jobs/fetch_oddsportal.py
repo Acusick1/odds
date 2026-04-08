@@ -371,7 +371,7 @@ async def main(
             LeagueSpec is scraped. Falls back to all LEAGUE_SPECS.
         retry_count: Current retry attempt (passed via self-scheduling payload).
     """
-    from odds_cli.alerts.base import alert_manager, job_alert_context
+    from odds_cli.alerts.base import job_alert_context, send_job_warning
     from odds_core.config import get_settings
 
     settings = get_settings()
@@ -424,18 +424,15 @@ async def main(
         )
 
         if total_scraped == 0:
-            from odds_cli.alerts.base import _check_rate_limit, _record_to_alert_history
-
-            alert_type = f"scrape_empty:{make_compound_job_name('fetch-oddsportal', sport)}"
-            if alert_manager.enabled and await _check_rate_limit(alert_type):
-                detail = (
-                    f"{leagues_failed}/{len(specs)} leagues failed"
-                    if leagues_failed
-                    else "0 matches returned"
-                )
-                msg = f"⚠️ OddsPortal scrape empty ({detail}), retry #{retry_count}"
-                await alert_manager.alert(msg, "warning")
-                await _record_to_alert_history(alert_type, "warning", msg)
+            detail = (
+                f"{leagues_failed}/{len(specs)} leagues failed"
+                if leagues_failed
+                else "0 matches returned"
+            )
+            await send_job_warning(
+                alert_type=f"scrape_empty:{make_compound_job_name('fetch-oddsportal', sport)}",
+                message=f"⚠️ OddsPortal scrape empty ({detail}), retry #{retry_count}",
+            )
 
     # Self-schedule next execution (outside alert context)
     scrape_success = total_scraped > 0

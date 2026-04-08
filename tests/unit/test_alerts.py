@@ -182,7 +182,7 @@ class TestJobAlertContext:
     """Test job_alert_context context manager."""
 
     @pytest.mark.asyncio
-    @patch("odds_cli.alerts.base._record_to_alert_history", new_callable=AsyncMock)
+    @patch("odds_cli.alerts.base.record_to_alert_history", new_callable=AsyncMock)
     async def test_records_heartbeat_on_success(self, mock_record: AsyncMock) -> None:
         """Should write heartbeat row on clean exit."""
         async with job_alert_context("test-job"):
@@ -193,8 +193,8 @@ class TestJobAlertContext:
         assert mock_record.call_args[1]["severity"] == "info"
 
     @pytest.mark.asyncio
-    @patch("odds_cli.alerts.base._record_to_alert_history", new_callable=AsyncMock)
-    @patch("odds_cli.alerts.base._check_rate_limit", new_callable=AsyncMock, return_value=True)
+    @patch("odds_cli.alerts.base.record_to_alert_history", new_callable=AsyncMock)
+    @patch("odds_cli.alerts.base.check_rate_limit", new_callable=AsyncMock, return_value=True)
     @patch("odds_cli.alerts.base.alert_manager")
     async def test_sends_alert_on_failure(
         self,
@@ -221,8 +221,8 @@ class TestJobAlertContext:
         assert mock_record.call_args[0][0] == "job_failure:test-job"
 
     @pytest.mark.asyncio
-    @patch("odds_cli.alerts.base._record_to_alert_history", new_callable=AsyncMock)
-    @patch("odds_cli.alerts.base._check_rate_limit", new_callable=AsyncMock, return_value=False)
+    @patch("odds_cli.alerts.base.record_to_alert_history", new_callable=AsyncMock)
+    @patch("odds_cli.alerts.base.check_rate_limit", new_callable=AsyncMock, return_value=False)
     @patch("odds_cli.alerts.base.alert_manager")
     async def test_rate_limits_failure_alerts(
         self,
@@ -242,7 +242,7 @@ class TestJobAlertContext:
         mock_record.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("odds_cli.alerts.base._record_to_alert_history", new_callable=AsyncMock)
+    @patch("odds_cli.alerts.base.record_to_alert_history", new_callable=AsyncMock)
     @patch("odds_cli.alerts.base.alert_manager")
     async def test_skips_alert_when_disabled(
         self,
