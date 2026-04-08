@@ -233,13 +233,6 @@ class TestHealthMonitor:
         """Should collect all health metrics."""
         monitor = HealthMonitor(mock_session, mock_settings)
 
-        # Mock session.execute for the MAX(snapshot_time) query
-        mock_snapshot_result = MagicMock()
-        mock_snapshot_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(
-            minutes=30
-        )
-        mock_session.execute.return_value = mock_snapshot_result
-
         with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
             mock_reader = AsyncMock()
             mock_reader.get_database_stats.return_value = {
@@ -253,10 +246,11 @@ class TestHealthMonitor:
             }
             mock_reader_class.return_value = mock_reader
 
-            # Mock check methods
-            with patch.object(monitor, "check_consecutive_failures", return_value=(True, 0)):
-                with patch.object(monitor, "check_data_quality", return_value=(True, 2)):
-                    metrics = await monitor.collect_metrics()
+            # Mock shared snapshot query and check methods
+            with patch.object(monitor, "_get_hours_since_latest_snapshot", return_value=0.5):
+                with patch.object(monitor, "check_consecutive_failures", return_value=(True, 0)):
+                    with patch.object(monitor, "check_data_quality", return_value=(True, 2)):
+                        metrics = await monitor.collect_metrics()
 
             assert isinstance(metrics, HealthMetrics)
             assert metrics.fetch_success_rate_24h == 95.5

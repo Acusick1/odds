@@ -8,7 +8,7 @@ This module implements proactive health monitoring to detect:
 - Data quality degradation
 - Database connectivity issues
 
-All checks use existing OddsReader methods to query database state.
+Stale data is detected via OddsSnapshot recency; other checks use OddsReader.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
-from odds_core.models import AlertHistory
+from odds_core.models import AlertHistory, OddsSnapshot
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -151,6 +151,15 @@ class HealthMonitor:
 
         return True
 
+    async def _get_hours_since_latest_snapshot(self) -> float | None:
+        """Query hours since the most recent OddsSnapshot, or None if empty."""
+        query = select(func.max(OddsSnapshot.snapshot_time))
+        result = await self.session.execute(query)
+        latest_snapshot_time = result.scalar_one_or_none()
+        if latest_snapshot_time is None:
+            return None
+        return (datetime.now(UTC) - latest_snapshot_time).total_seconds() / 3600
+
     async def check_stale_data(self) -> tuple[bool, str | None]:
         """
         Check for stale data by looking at the most recent odds snapshot.
@@ -158,16 +167,11 @@ class HealthMonitor:
         Returns:
             (is_healthy, issue_description)
         """
-        from odds_core.models import OddsSnapshot
+        hours_since_data = await self._get_hours_since_latest_snapshot()
 
-        query = select(func.max(OddsSnapshot.snapshot_time))
-        result = await self.session.execute(query)
-        latest_snapshot_time = result.scalar_one_or_none()
-
-        if latest_snapshot_time is None:
+        if hours_since_data is None:
             return False, "No odds snapshots found in database"
 
-        hours_since_data = (datetime.now(UTC) - latest_snapshot_time).total_seconds() / 3600
         threshold_hours = self.settings.alerts.stale_data_hours
 
         if hours_since_data > threshold_hours:
@@ -279,15 +283,7 @@ class HealthMonitor:
         stats = await reader.get_database_stats()
 
         # Calculate hours since last data arrived (any source)
-        from odds_core.models import OddsSnapshot
-
-        latest_result = await self.session.execute(select(func.max(OddsSnapshot.snapshot_time)))
-        latest_snapshot_time = latest_result.scalar_one_or_none()
-        hours_since_last_fetch = None
-        if latest_snapshot_time:
-            hours_since_last_fetch = (
-                datetime.now(UTC) - latest_snapshot_time
-            ).total_seconds() / 3600
+        hours_since_last_fetch = await self._get_hours_since_latest_snapshot()
 
         # Get consecutive failures
         _, consecutive_failures = await self.check_consecutive_failures()
