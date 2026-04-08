@@ -20,10 +20,12 @@ WORKDIR /build
 COPY pyproject.toml uv.lock ./
 COPY packages/odds-core ./packages/odds-core
 COPY packages/odds-lambda ./packages/odds-lambda
+COPY packages/odds-cli ./packages/odds-cli
 
-# Build wheels for core and lambda packages
+# Build wheels for core, lambda, and cli packages
 RUN uv build --wheel --out-dir /wheels ./packages/odds-core && \
-    uv build --wheel --out-dir /wheels ./packages/odds-lambda
+    uv build --wheel --out-dir /wheels ./packages/odds-lambda && \
+    uv build --wheel --out-dir /wheels ./packages/odds-cli
 
 # Install from wheels + OddsHarvester fork
 RUN uv pip install \
