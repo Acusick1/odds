@@ -149,7 +149,7 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
 
                     # Send critical alert
                     if app_settings.alerts.alert_enabled:
-                        from odds_cli.alerts.base import send_critical
+                        from odds_core.alerts import send_critical
 
                         await send_critical(
                             f"🚨 API quota critical: {sport_result.quota_remaining} requests remaining "
@@ -168,7 +168,7 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
 
                     # Send warning alert
                     if app_settings.alerts.alert_enabled:
-                        from odds_cli.alerts.base import send_warning
+                        from odds_core.alerts import send_warning
 
                         await send_warning(
                             f"⚠️ API quota low: {sport_result.quota_remaining} requests remaining "
@@ -187,7 +187,7 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
 
         # Send critical alert
         if app_settings.alerts.alert_enabled:
-            from odds_cli.alerts.base import send_critical
+            from odds_core.alerts import send_critical
 
             await send_critical(f"🚨 Fetch odds job failed: {type(e).__name__}: {str(e)}")
 
@@ -214,7 +214,7 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
 
             # Send error alert
             if app_settings.alerts.alert_enabled:
-                from odds_cli.alerts.base import send_error
+                from odds_core.alerts import send_error
 
                 await send_error(f"Fetch odds scheduling failed: {type(e).__name__}: {str(e)}")
 

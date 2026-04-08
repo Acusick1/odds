@@ -150,7 +150,7 @@ def lambda_handler(event: dict, context: object) -> dict:
 
         app_settings = get_settings()
         if app_settings.alerts.alert_enabled:
-            from odds_cli.alerts.base import send_critical
+            from odds_core.alerts import send_critical
 
             asyncio.run(
                 send_critical(

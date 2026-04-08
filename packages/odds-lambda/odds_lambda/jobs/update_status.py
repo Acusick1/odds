@@ -59,7 +59,7 @@ async def main():
         return
 
     # Execute update logic
-    from odds_cli.alerts.base import job_alert_context
+    from odds_core.alerts import job_alert_context
 
     logger.info("update_status_executing", reason=decision.reason)
 
@@ -82,7 +82,7 @@ async def main():
         except Exception as e:
             logger.error("update_status_scheduling_failed", error=str(e), exc_info=True)
 
-            from odds_cli.alerts.base import send_error
+            from odds_core.alerts import send_error
 
             await send_error(f"Update status scheduling failed: {type(e).__name__}: {e}")
 

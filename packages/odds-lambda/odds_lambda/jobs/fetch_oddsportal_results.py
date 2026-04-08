@@ -239,7 +239,7 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
     Args:
         sport: Sport key (e.g. "soccer_epl"). Currently only soccer_epl is supported.
     """
-    from odds_cli.alerts.base import job_alert_context
+    from odds_core.alerts import job_alert_context
     from odds_core.config import get_settings
 
     settings = get_settings()

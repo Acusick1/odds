@@ -89,7 +89,7 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
 
         # Send critical alert
         if app_settings.alerts.alert_enabled:
-            from odds_cli.alerts.base import send_critical
+            from odds_core.alerts import send_critical
 
             await send_critical(f"🚨 Fetch scores job failed: {type(e).__name__}: {str(e)}")
 
@@ -114,7 +114,7 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
 
             # Send error alert
             if app_settings.alerts.alert_enabled:
-                from odds_cli.alerts.base import send_error
+                from odds_core.alerts import send_error
 
                 await send_error(f"Fetch scores scheduling failed: {type(e).__name__}: {str(e)}")
 

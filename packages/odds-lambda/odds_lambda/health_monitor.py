@@ -142,7 +142,7 @@ class HealthMonitor:
             return False
 
         # Send via alert system
-        from odds_cli.alerts.base import alert_manager
+        from odds_core.alerts import alert_manager
 
         await alert_manager.alert(message, severity)
 

@@ -2761,6 +2761,7 @@ name = "odds-core"
 version = "0.1.0"
 source = { editable = "packages/odds-core" }
 dependencies = [
+    { name = "aiohttp" },
     { name = "asyncpg" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
@@ -2770,6 +2771,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.13.2" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "pydantic-settings", specifier = ">=2.1.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },

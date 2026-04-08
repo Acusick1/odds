@@ -326,7 +326,7 @@ async def send_digest(
         results, upcoming, lookback_hours, lookahead_hours, sport_key=sport_key
     )
 
-    from odds_cli.alerts.base import alert_manager
+    from odds_core.alerts import alert_manager
 
     await alert_manager.send_embed(embed)
     stats["sent"] = 1
@@ -348,7 +348,7 @@ async def main(
         lookback_hours: How far back to look for completed events.
         lookahead_hours: How far ahead to look for upcoming events.
     """
-    from odds_cli.alerts.base import job_alert_context
+    from odds_core.alerts import job_alert_context
 
     from odds_lambda.scheduling.jobs import make_compound_job_name
 

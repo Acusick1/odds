@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from odds_cli.alerts.base import (
+from odds_core.alerts import (
     AlertManager,
     DiscordAlert,
     job_alert_context,
@@ -153,27 +153,21 @@ class TestConvenienceFunctions:
     @pytest.mark.asyncio
     async def test_send_warning_calls_alert_manager(self):
         """send_warning should call alert manager with warning severity."""
-        with patch(
-            "odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock
-        ) as mock_alert:
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
             await send_warning("Test warning")
             mock_alert.assert_called_once_with("Test warning", "warning")
 
     @pytest.mark.asyncio
     async def test_send_error_calls_alert_manager(self):
         """send_error should call alert manager with error severity."""
-        with patch(
-            "odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock
-        ) as mock_alert:
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
             await send_error("Test error")
             mock_alert.assert_called_once_with("Test error", "error")
 
     @pytest.mark.asyncio
     async def test_send_critical_calls_alert_manager(self):
         """send_critical should call alert manager with critical severity."""
-        with patch(
-            "odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock
-        ) as mock_alert:
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
             await send_critical("Test critical")
             mock_alert.assert_called_once_with("Test critical", "critical")
 
@@ -182,7 +176,7 @@ class TestJobAlertContext:
     """Test job_alert_context context manager."""
 
     @pytest.mark.asyncio
-    @patch("odds_cli.alerts.base.record_to_alert_history", new_callable=AsyncMock)
+    @patch("odds_core.alerts.record_to_alert_history", new_callable=AsyncMock)
     async def test_records_heartbeat_on_success(self, mock_record: AsyncMock) -> None:
         """Should write heartbeat row on clean exit."""
         async with job_alert_context("test-job"):
@@ -193,9 +187,9 @@ class TestJobAlertContext:
         assert mock_record.call_args[1]["severity"] == "info"
 
     @pytest.mark.asyncio
-    @patch("odds_cli.alerts.base.record_to_alert_history", new_callable=AsyncMock)
-    @patch("odds_cli.alerts.base.check_rate_limit", new_callable=AsyncMock, return_value=True)
-    @patch("odds_cli.alerts.base.alert_manager")
+    @patch("odds_core.alerts.record_to_alert_history", new_callable=AsyncMock)
+    @patch("odds_core.alerts.check_rate_limit", new_callable=AsyncMock, return_value=True)
+    @patch("odds_core.alerts.alert_manager")
     async def test_sends_alert_on_failure(
         self,
         mock_manager: MagicMock,
@@ -221,9 +215,9 @@ class TestJobAlertContext:
         assert mock_record.call_args[0][0] == "job_failure:test-job"
 
     @pytest.mark.asyncio
-    @patch("odds_cli.alerts.base.record_to_alert_history", new_callable=AsyncMock)
-    @patch("odds_cli.alerts.base.check_rate_limit", new_callable=AsyncMock, return_value=False)
-    @patch("odds_cli.alerts.base.alert_manager")
+    @patch("odds_core.alerts.record_to_alert_history", new_callable=AsyncMock)
+    @patch("odds_core.alerts.check_rate_limit", new_callable=AsyncMock, return_value=False)
+    @patch("odds_core.alerts.alert_manager")
     async def test_rate_limits_failure_alerts(
         self,
         mock_manager: MagicMock,
@@ -242,8 +236,8 @@ class TestJobAlertContext:
         mock_record.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("odds_cli.alerts.base.record_to_alert_history", new_callable=AsyncMock)
-    @patch("odds_cli.alerts.base.alert_manager")
+    @patch("odds_core.alerts.record_to_alert_history", new_callable=AsyncMock)
+    @patch("odds_core.alerts.alert_manager")
     async def test_skips_alert_when_disabled(
         self,
         mock_manager: MagicMock,
