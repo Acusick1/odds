@@ -153,30 +153,27 @@ class HealthMonitor:
 
     async def check_stale_data(self) -> tuple[bool, str | None]:
         """
-        Check for stale data (no recent fetches).
+        Check for stale data by looking at the most recent odds snapshot.
 
         Returns:
             (is_healthy, issue_description)
         """
-        from odds_lambda.storage.readers import OddsReader
+        from odds_core.models import OddsSnapshot
 
-        reader = OddsReader(self.session)
+        query = select(func.max(OddsSnapshot.snapshot_time))
+        result = await self.session.execute(query)
+        latest_snapshot_time = result.scalar_one_or_none()
 
-        # Get most recent fetch
-        fetch_logs = await reader.get_fetch_logs(limit=1)
+        if latest_snapshot_time is None:
+            return False, "No odds snapshots found in database"
 
-        if not fetch_logs:
-            return False, "No fetch logs found in database"
-
-        last_fetch = fetch_logs[0]
-        hours_since_fetch = (datetime.now(UTC) - last_fetch.fetch_time).total_seconds() / 3600
-
+        hours_since_data = (datetime.now(UTC) - latest_snapshot_time).total_seconds() / 3600
         threshold_hours = self.settings.alerts.stale_data_hours
 
-        if hours_since_fetch > threshold_hours:
+        if hours_since_data > threshold_hours:
             return (
                 False,
-                f"No data fetched in {hours_since_fetch:.1f} hours (threshold: {threshold_hours}h)",
+                f"No new data in {hours_since_data:.1f} hours (threshold: {threshold_hours}h)",
             )
 
         return True, None
@@ -281,12 +278,15 @@ class HealthMonitor:
         reader = OddsReader(self.session)
         stats = await reader.get_database_stats()
 
-        # Calculate hours since last fetch
-        fetch_logs = await reader.get_fetch_logs(limit=1)
+        # Calculate hours since last data arrived (any source)
+        from odds_core.models import OddsSnapshot
+
+        latest_result = await self.session.execute(select(func.max(OddsSnapshot.snapshot_time)))
+        latest_snapshot_time = latest_result.scalar_one_or_none()
         hours_since_last_fetch = None
-        if fetch_logs:
+        if latest_snapshot_time:
             hours_since_last_fetch = (
-                datetime.now(UTC) - fetch_logs[0].fetch_time
+                datetime.now(UTC) - latest_snapshot_time
             ).total_seconds() / 3600
 
         # Get consecutive failures

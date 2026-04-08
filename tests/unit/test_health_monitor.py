@@ -110,52 +110,32 @@ class TestHealthMonitor:
 
     @pytest.mark.asyncio
     async def test_check_stale_data_healthy(self, mock_session, mock_settings):
-        """Should return healthy when recent fetch exists."""
+        """Should return healthy when recent snapshot exists."""
         monitor = HealthMonitor(mock_session, mock_settings)
 
-        # Mock recent fetch log
-        recent_fetch = FetchLog(
-            fetch_time=datetime.now(UTC) - timedelta(minutes=30),
-            sport_key="basketball_nba",
-            events_count=5,
-            bookmakers_count=8,
-            success=True,
-        )
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(minutes=30)
+        mock_session.execute.return_value = mock_result
 
-        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
-            mock_reader = AsyncMock()
-            mock_reader.get_fetch_logs.return_value = [recent_fetch]
-            mock_reader_class.return_value = mock_reader
+        is_healthy, issue = await monitor.check_stale_data()
 
-            is_healthy, issue = await monitor.check_stale_data()
-
-            assert is_healthy is True
-            assert issue is None
+        assert is_healthy is True
+        assert issue is None
 
     @pytest.mark.asyncio
     async def test_check_stale_data_unhealthy(self, mock_session, mock_settings):
         """Should return unhealthy when data is stale."""
         monitor = HealthMonitor(mock_session, mock_settings)
 
-        # Mock stale fetch log (3 hours ago)
-        stale_fetch = FetchLog(
-            fetch_time=datetime.now(UTC) - timedelta(hours=3),
-            sport_key="basketball_nba",
-            events_count=5,
-            bookmakers_count=8,
-            success=True,
-        )
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(hours=3)
+        mock_session.execute.return_value = mock_result
 
-        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
-            mock_reader = AsyncMock()
-            mock_reader.get_fetch_logs.return_value = [stale_fetch]
-            mock_reader_class.return_value = mock_reader
+        is_healthy, issue = await monitor.check_stale_data()
 
-            is_healthy, issue = await monitor.check_stale_data()
-
-            assert is_healthy is False
-            assert "No data fetched in" in issue
-            assert "3." in issue  # Should mention 3 hours
+        assert is_healthy is False
+        assert "No new data in" in issue
+        assert "3." in issue  # Should mention 3 hours
 
     @pytest.mark.asyncio
     async def test_check_consecutive_failures_healthy(self, mock_session, mock_settings):
@@ -253,13 +233,12 @@ class TestHealthMonitor:
         """Should collect all health metrics."""
         monitor = HealthMonitor(mock_session, mock_settings)
 
-        recent_fetch = FetchLog(
-            fetch_time=datetime.now(UTC) - timedelta(minutes=30),
-            sport_key="basketball_nba",
-            events_count=5,
-            bookmakers_count=8,
-            success=True,
+        # Mock session.execute for the MAX(snapshot_time) query
+        mock_snapshot_result = MagicMock()
+        mock_snapshot_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(
+            minutes=30
         )
+        mock_session.execute.return_value = mock_snapshot_result
 
         with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
             mock_reader = AsyncMock()
@@ -272,7 +251,6 @@ class TestHealthMonitor:
                     "final": 100,
                 },
             }
-            mock_reader.get_fetch_logs.return_value = [recent_fetch]
             mock_reader_class.return_value = mock_reader
 
             # Mock check methods
