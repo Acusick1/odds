@@ -1,6 +1,11 @@
-"""Alert infrastructure for future use."""
+"""Alert infrastructure: Discord webhooks, job failure alerts, and heartbeat recording."""
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 
 import aiohttp
 import structlog
@@ -170,3 +175,101 @@ async def send_error(message: str):
 async def send_critical(message: str):
     """Send critical alert."""
     await alert_manager.alert(message, "critical")
+
+
+# ---------------------------------------------------------------------------
+# Rate-limited job alerts and heartbeat recording
+# ---------------------------------------------------------------------------
+
+_DEFAULT_RATE_LIMIT_MINUTES = 30
+
+
+async def check_rate_limit(
+    alert_type: str, rate_limit_minutes: int = _DEFAULT_RATE_LIMIT_MINUTES
+) -> bool:
+    """Return True if an alert of this type is allowed (not rate-limited).
+
+    Queries AlertHistory for recent alerts within the rate-limit window.
+    """
+    from odds_core.database import async_session_maker
+    from odds_core.models import AlertHistory
+    from sqlalchemy import func, select
+
+    cutoff = datetime.now(UTC) - timedelta(minutes=rate_limit_minutes)
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(func.count(AlertHistory.id)).where(
+                AlertHistory.alert_type == alert_type,
+                AlertHistory.sent_at >= cutoff,
+            )
+        )
+        return result.scalar_one() == 0
+
+
+async def record_to_alert_history(
+    alert_type: str,
+    severity: str,
+    message: str,
+) -> None:
+    """Insert a row into AlertHistory (used for rate limiting and heartbeats)."""
+    from odds_core.database import async_session_maker
+    from odds_core.models import AlertHistory
+
+    async with async_session_maker() as session:
+        session.add(
+            AlertHistory(
+                alert_type=alert_type,
+                severity=severity,
+                message=message,
+                sent_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+
+@asynccontextmanager
+async def job_alert_context(job_name: str) -> AsyncIterator[None]:
+    """Wrap a job body to standardise failure alerts and heartbeat recording.
+
+    On exception: send a rate-limited CRITICAL alert, then re-raise.
+    On clean exit: write a heartbeat row to AlertHistory.
+
+    Usage::
+
+        async with job_alert_context("fetch-oddsportal"):
+            # job logic (excluding self-scheduling)
+            ...
+    """
+    try:
+        yield
+    except Exception as e:
+        alert_type = f"job_failure:{job_name}"
+        if alert_manager.enabled and await check_rate_limit(alert_type):
+            msg = f"🚨 Job {job_name} failed: {type(e).__name__}: {e}"
+            await alert_manager.alert(msg, "critical")
+            await record_to_alert_history(alert_type, "critical", msg)
+        raise
+    else:
+        # Record heartbeat on success
+        try:
+            await record_to_alert_history(
+                alert_type=f"heartbeat:{job_name}",
+                severity="info",
+                message=f"Job {job_name} completed successfully",
+            )
+        except Exception:
+            logger.warning("heartbeat_record_failed", job=job_name, exc_info=True)
+
+
+async def send_job_warning(alert_type: str, message: str) -> bool:
+    """Send a rate-limited WARNING alert for a soft failure (e.g. empty scrape).
+
+    Returns True if the alert was sent, False if disabled or rate-limited.
+    """
+    if not alert_manager.enabled:
+        return False
+    if not await check_rate_limit(alert_type):
+        return False
+    await alert_manager.alert(message, "warning")
+    await record_to_alert_history(alert_type, "warning", message)
+    return True

@@ -302,6 +302,69 @@ class HealthMonitor:
             events_final=stats.get("events_by_status", {}).get("final", 0),
         )
 
+    async def check_job_heartbeats(self) -> list[str]:
+        """Check that active jobs have reported heartbeats recently.
+
+        Expectations are read from ``settings.alerts.heartbeat_expectations``.
+
+        Returns:
+            List of issue descriptions for jobs that missed their window.
+        """
+        expectations = self.settings.alerts.heartbeat_expectations
+        issues: list[str] = []
+        now = datetime.now(UTC)
+
+        for job_name, max_hours in expectations.items():
+            cutoff = now - timedelta(hours=max_hours)
+            query = select(func.max(AlertHistory.sent_at)).where(
+                AlertHistory.alert_type == f"heartbeat:{job_name}"
+            )
+            result = await self.session.execute(query)
+            last_beat = result.scalar_one_or_none()
+
+            if last_beat is None:
+                # No heartbeat history — job hasn't run since monitoring was
+                # deployed.  Log but don't alert to avoid noise on first deploy.
+                logger.debug("heartbeat_no_history", job=job_name)
+                continue
+
+            if last_beat < cutoff:
+                hours_ago = f"{(now - last_beat).total_seconds() / 3600:.1f}h ago"
+                issue = (
+                    f"Job {job_name} has not completed "
+                    f"(last: {hours_ago}, expected every {max_hours:.0f}h)"
+                )
+                issues.append(issue)
+
+                await self._send_alert(
+                    alert_type=f"missing_heartbeat:{job_name}",
+                    severity="warning",
+                    message=f"⚠️ {issue}",
+                )
+
+        return issues
+
+    async def purge_old_heartbeats(self) -> int:
+        """Delete heartbeat rows older than the configured retention period.
+
+        Returns:
+            Number of rows deleted.
+        """
+        from sqlalchemy import delete
+
+        cutoff = datetime.now(UTC) - timedelta(days=self.settings.alerts.heartbeat_retention_days)
+        result = await self.session.execute(
+            delete(AlertHistory).where(
+                AlertHistory.alert_type.startswith("heartbeat:"),
+                AlertHistory.sent_at < cutoff,
+            )
+        )
+        deleted = result.rowcount
+        if deleted:
+            await self.session.commit()
+            logger.info("heartbeats_purged", deleted=deleted)
+        return deleted
+
     async def check_system_health(self) -> HealthStatus:
         """
         Perform comprehensive system health check.
@@ -311,6 +374,7 @@ class HealthMonitor:
         2. Consecutive failures
         3. API quota levels
         4. Data quality issues
+        5. Job heartbeats (missing completions)
 
         Returns:
             HealthStatus with metrics and alerts sent
@@ -403,6 +467,13 @@ class HealthMonitor:
                     context={"error_count_24h": error_count},
                 ):
                     alerts_sent.append("data_quality_errors")
+
+            # Check 5: Job heartbeats
+            heartbeat_issues = await self.check_job_heartbeats()
+            issues_detected.extend(heartbeat_issues)
+
+            # Housekeeping: purge old heartbeat rows
+            await self.purge_old_heartbeats()
 
             overall_healthy = len(issues_detected) == 0
 

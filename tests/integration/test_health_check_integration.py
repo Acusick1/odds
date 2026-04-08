@@ -16,6 +16,22 @@ from odds_core.models import (
 from sqlalchemy import select
 
 
+async def _create_recent_heartbeats(session) -> None:
+    """Insert recent heartbeat records for all monitored jobs."""
+    from odds_core.config import AlertConfig
+
+    now = datetime.now(UTC)
+    for job_name in AlertConfig().heartbeat_expectations:
+        session.add(
+            AlertHistory(
+                alert_type=f"heartbeat:{job_name}",
+                severity="info",
+                message=f"Job {job_name} completed successfully",
+                sent_at=now - timedelta(minutes=10),
+            )
+        )
+
+
 async def _create_recent_snapshot(session, *, minutes_ago: int = 30) -> None:
     """Insert an Event + OddsSnapshot so check_stale_data sees recent data."""
     event = Event(
@@ -44,8 +60,9 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_health_check_job_with_healthy_system(self, test_session):
         """Test health check job when system is healthy."""
-        # Create recent snapshot so stale data check passes
+        # Create recent snapshot and heartbeats so all checks pass
         await _create_recent_snapshot(test_session)
+        await _create_recent_heartbeats(test_session)
 
         # Create recent successful fetch logs
         for i in range(5):
@@ -302,8 +319,9 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_health_check_with_configurable_thresholds(self, test_session):
         """Test that health check respects configurable thresholds."""
-        # Create recent snapshot so stale data check passes
+        # Create recent snapshot and heartbeats so non-quality checks pass
         await _create_recent_snapshot(test_session, minutes_ago=20)
+        await _create_recent_heartbeats(test_session)
 
         # Create test event for foreign key constraint
         test_event = Event(

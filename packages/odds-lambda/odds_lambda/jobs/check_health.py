@@ -27,15 +27,15 @@ async def main():
     2. Log results
     3. Schedule next execution (60 minutes)
     """
+    from odds_cli.alerts.base import job_alert_context
+
     app_settings = get_settings()
 
     logger.info("health_check_job_started", backend=app_settings.scheduler.backend)
 
-    try:
-        # Execute health check
+    async with job_alert_context("check-health"):
         health_status = await check_system_health()
 
-        # Log results
         logger.info(
             "health_check_results",
             overall_healthy=health_status.overall_healthy,
@@ -53,18 +53,6 @@ async def main():
                 issues=health_status.issues_detected,
                 alerts_sent=health_status.alerts_sent,
             )
-
-    except Exception as e:
-        logger.error("health_check_job_failed", error=str(e), exc_info=True)
-
-        # Send critical alert
-        if app_settings.alerts.alert_enabled:
-            from odds_cli.alerts.base import send_critical
-
-            await send_critical(f"🚨 Health check job failed: {type(e).__name__}: {str(e)}")
-
-        # Don't schedule next run if we failed - let manual intervention happen
-        raise
 
     # Self-schedule next execution (60 minutes from now)
     try:

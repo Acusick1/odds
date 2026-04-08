@@ -181,15 +181,16 @@ class TestBuildDigestEmbed:
 
 class TestSendDigest:
     @pytest.mark.asyncio
-    @patch("odds_cli.alerts.base.AlertManager")
+    @patch("odds_cli.alerts.base.alert_manager")
     @patch("odds_lambda.jobs.daily_digest.async_session_maker")
     async def test_sends_when_data_present(
         self,
         mock_session_maker: MagicMock,
-        mock_alert_cls: MagicMock,
+        mock_manager: AsyncMock,
     ) -> None:
         mock_session = AsyncMock()
         mock_session_maker.return_value.__aenter__.return_value = mock_session
+        mock_manager.send_embed = AsyncMock()
 
         # First query: completed events with predictions
         results_result = MagicMock()
@@ -222,9 +223,6 @@ class TestSendDigest:
 
         mock_session.execute = AsyncMock(side_effect=[results_result, upcoming_result])
 
-        mock_manager = AsyncMock()
-        mock_alert_cls.return_value = mock_manager
-
         stats = await send_digest()
 
         assert stats["upcoming_count"] == 1
@@ -232,12 +230,12 @@ class TestSendDigest:
         mock_manager.send_embed.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("odds_cli.alerts.base.AlertManager")
+    @patch("odds_cli.alerts.base.alert_manager")
     @patch("odds_lambda.jobs.daily_digest.async_session_maker")
     async def test_skips_when_empty(
         self,
         mock_session_maker: MagicMock,
-        mock_alert_cls: MagicMock,
+        mock_manager: AsyncMock,
     ) -> None:
         mock_session = AsyncMock()
         mock_session_maker.return_value.__aenter__.return_value = mock_session
@@ -251,4 +249,4 @@ class TestSendDigest:
         assert stats["results_count"] == 0
         assert stats["upcoming_count"] == 0
         assert stats["sent"] == 0
-        mock_alert_cls.return_value.send_embed.assert_not_called()
+        mock_manager.send_embed.assert_not_called()

@@ -284,7 +284,8 @@ class TestHealthMonitor:
                 with patch.object(monitor, "check_consecutive_failures", return_value=(True, 0)):
                     with patch.object(monitor, "check_api_quota", return_value=(True, 15000, 0.75)):
                         with patch.object(monitor, "check_data_quality", return_value=(True, 2)):
-                            status = await monitor.check_system_health()
+                            with patch.object(monitor, "check_job_heartbeats", return_value=[]):
+                                status = await monitor.check_system_health()
 
             assert isinstance(status, HealthStatus)
             assert status.overall_healthy is True
@@ -316,9 +317,10 @@ class TestHealthMonitor:
                 with patch.object(monitor, "check_consecutive_failures", return_value=(False, 4)):
                     with patch.object(monitor, "check_api_quota", return_value=(False, 1000, 0.05)):
                         with patch.object(monitor, "check_data_quality", return_value=(False, 15)):
-                            # Mock alert sending
-                            with patch.object(monitor, "_send_alert", return_value=True):
-                                status = await monitor.check_system_health()
+                            with patch.object(monitor, "check_job_heartbeats", return_value=[]):
+                                # Mock alert sending
+                                with patch.object(monitor, "_send_alert", return_value=True):
+                                    status = await monitor.check_system_health()
 
             assert status.overall_healthy is False
             assert len(status.issues_detected) > 0
@@ -341,3 +343,50 @@ class TestHealthMonitor:
         assert status.overall_healthy is False
         assert len(status.issues_detected) == 1
         assert "Database connection error" in status.issues_detected[0]
+
+    @pytest.mark.asyncio
+    async def test_check_job_heartbeats_healthy(self, mock_session, mock_settings):
+        """Should return empty list when all heartbeats are recent."""
+        monitor = HealthMonitor(mock_session, mock_settings)
+
+        # Mock query: all jobs have recent heartbeats
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(minutes=30)
+        mock_session.execute.return_value = mock_result
+
+        with patch.object(monitor, "_send_alert", return_value=False):
+            issues = await monitor.check_job_heartbeats()
+
+        assert issues == []
+
+    @pytest.mark.asyncio
+    async def test_check_job_heartbeats_no_history_skipped(self, mock_session, mock_settings):
+        """Should skip alerting when no heartbeat history exists (first deploy)."""
+        monitor = HealthMonitor(mock_session, mock_settings)
+
+        # Mock query: no heartbeat found
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session.execute.return_value = mock_result
+
+        with patch.object(monitor, "_send_alert", return_value=True) as mock_alert:
+            issues = await monitor.check_job_heartbeats()
+
+        assert issues == []
+        mock_alert.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_check_job_heartbeats_stale(self, mock_session, mock_settings):
+        """Should flag jobs with old heartbeats."""
+        monitor = HealthMonitor(mock_session, mock_settings)
+
+        # Mock query: heartbeat from 5 hours ago (exceeds 2h threshold)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(hours=5)
+        mock_session.execute.return_value = mock_result
+
+        with patch.object(monitor, "_send_alert", return_value=True):
+            issues = await monitor.check_job_heartbeats()
+
+        # All hourly jobs should be flagged (2h threshold), daily job may or may not
+        assert len(issues) >= 3  # At least the 3 hourly jobs
