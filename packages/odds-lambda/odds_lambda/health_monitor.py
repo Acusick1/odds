@@ -142,7 +142,7 @@ class HealthMonitor:
             return False
 
         # Send via alert system
-        from odds_cli.alerts.base import alert_manager
+        from odds_core.alerts import alert_manager
 
         await alert_manager.alert(message, severity)
 
@@ -325,7 +325,7 @@ class HealthMonitor:
             if last_beat is None:
                 # No heartbeat history — job hasn't run since monitoring was
                 # deployed.  Log but don't alert to avoid noise on first deploy.
-                logger.debug("heartbeat_no_history", job=job_name)
+                logger.info("heartbeat_no_history", job=job_name)
                 continue
 
             if last_beat < cutoff:

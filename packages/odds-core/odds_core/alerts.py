@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import aiohttp
 import structlog
+
 from odds_core.config import Settings, get_settings
 
 logger = structlog.get_logger()
@@ -191,9 +192,10 @@ async def check_rate_limit(
 
     Queries AlertHistory for recent alerts within the rate-limit window.
     """
+    from sqlalchemy import func, select
+
     from odds_core.database import async_session_maker
     from odds_core.models import AlertHistory
-    from sqlalchemy import func, select
 
     cutoff = datetime.now(UTC) - timedelta(minutes=rate_limit_minutes)
     async with async_session_maker() as session:

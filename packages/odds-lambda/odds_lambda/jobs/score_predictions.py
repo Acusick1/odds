@@ -252,7 +252,7 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
         sport: Sport key from event payload. Passed to ``score_events`` for
             validation against the model's bundled sport_key.
     """
-    from odds_cli.alerts.base import job_alert_context
+    from odds_core.alerts import job_alert_context
 
     from odds_lambda.scheduling.jobs import make_compound_job_name
 

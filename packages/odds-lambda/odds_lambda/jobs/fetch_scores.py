@@ -88,10 +88,9 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
         logger.error("fetch_scores_failed", error=str(e), exc_info=True)
 
         # Send critical alert
-        if app_settings.alerts.alert_enabled:
-            from odds_cli.alerts.base import send_critical
+        from odds_core.alerts import send_critical
 
-            await send_critical(f"🚨 Fetch scores job failed: {type(e).__name__}: {str(e)}")
+        await send_critical(f"🚨 Fetch scores job failed: {type(e).__name__}: {str(e)}")
 
         raise
 
@@ -113,10 +112,9 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
             logger.error("fetch_scores_scheduling_failed", error=str(e), exc_info=True)
 
             # Send error alert
-            if app_settings.alerts.alert_enabled:
-                from odds_cli.alerts.base import send_error
+            from odds_core.alerts import send_error
 
-                await send_error(f"Fetch scores scheduling failed: {type(e).__name__}: {str(e)}")
+            await send_error(f"Fetch scores scheduling failed: {type(e).__name__}: {str(e)}")
 
 
 async def _fetch_and_update_scores(sports: list[str]) -> None:

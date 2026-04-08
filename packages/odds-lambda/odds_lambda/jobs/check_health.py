@@ -27,7 +27,7 @@ async def main():
     2. Log results
     3. Schedule next execution (60 minutes)
     """
-    from odds_cli.alerts.base import job_alert_context
+    from odds_core.alerts import job_alert_context
 
     app_settings = get_settings()
 
@@ -73,10 +73,9 @@ async def main():
         logger.error("health_check_scheduling_failed", error=str(e), exc_info=True)
 
         # Send error alert
-        if app_settings.alerts.alert_enabled:
-            from odds_cli.alerts.base import send_error
+        from odds_core.alerts import send_error
 
-            await send_error(f"Health check scheduling failed: {type(e).__name__}: {str(e)}")
+        await send_error(f"Health check scheduling failed: {type(e).__name__}: {str(e)}")
 
         # Don't fail the job if scheduling fails - the health check itself succeeded
 

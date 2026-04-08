@@ -371,7 +371,7 @@ async def main(
             LeagueSpec is scraped. Falls back to all LEAGUE_SPECS.
         retry_count: Current retry attempt (passed via self-scheduling payload).
     """
-    from odds_cli.alerts.base import job_alert_context, send_job_warning
+    from odds_core.alerts import job_alert_context, send_job_warning
     from odds_core.config import get_settings
 
     settings = get_settings()

@@ -79,7 +79,7 @@ class TestHealthCheckIntegration:
         await test_session.commit()
 
         # Mock alert system to prevent actual alerts
-        with patch("odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock):
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock):
             # Mock get_settings to use test database
             with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
                 mock_settings = get_settings()
@@ -114,7 +114,7 @@ class TestHealthCheckIntegration:
         await test_session.commit()
 
         # Mock alert system
-        with patch("odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock):
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock):
             with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
                 mock_settings = get_settings()
                 mock_settings.alerts.alert_enabled = False
@@ -151,7 +151,7 @@ class TestHealthCheckIntegration:
         await test_session.commit()
 
         # Mock alert system
-        with patch("odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock):
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock):
             with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
                 mock_settings = get_settings()
                 mock_settings.alerts.alert_enabled = False
@@ -186,7 +186,7 @@ class TestHealthCheckIntegration:
         await test_session.commit()
 
         # Mock alert system
-        with patch("odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock):
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock):
             with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
                 mock_settings = get_settings()
                 mock_settings.alerts.alert_enabled = False
@@ -247,7 +247,7 @@ class TestHealthCheckIntegration:
         await test_session.commit()
 
         # Mock alert system
-        with patch("odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock):
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock):
             with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
                 mock_settings = get_settings()
                 mock_settings.alerts.alert_enabled = False
@@ -279,9 +279,7 @@ class TestHealthCheckIntegration:
         await test_session.commit()
 
         # Mock alert system to track calls
-        with patch(
-            "odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock
-        ) as mock_alert:
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
             with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
                 mock_settings = get_settings()
                 mock_settings.alerts.alert_enabled = True  # Enable alerts
@@ -361,7 +359,7 @@ class TestHealthCheckIntegration:
         await test_session.commit()
 
         # Test with default threshold (10) - should be healthy
-        with patch("odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock):
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock):
             with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
                 mock_settings = get_settings()
                 mock_settings.alerts.alert_enabled = False
@@ -377,7 +375,7 @@ class TestHealthCheckIntegration:
         assert health_status.metrics.data_quality_errors_24h == 5
 
         # Test with lower threshold (3) - should be unhealthy
-        with patch("odds_cli.alerts.base.alert_manager.alert", new_callable=AsyncMock):
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock):
             with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
                 mock_settings = get_settings()
                 mock_settings.alerts.alert_enabled = False

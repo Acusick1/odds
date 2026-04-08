@@ -181,7 +181,7 @@ class TestBuildDigestEmbed:
 
 class TestSendDigest:
     @pytest.mark.asyncio
-    @patch("odds_cli.alerts.base.alert_manager")
+    @patch("odds_core.alerts.alert_manager")
     @patch("odds_lambda.jobs.daily_digest.async_session_maker")
     async def test_sends_when_data_present(
         self,
@@ -230,7 +230,7 @@ class TestSendDigest:
         mock_manager.send_embed.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("odds_cli.alerts.base.alert_manager")
+    @patch("odds_core.alerts.alert_manager")
     @patch("odds_lambda.jobs.daily_digest.async_session_maker")
     async def test_skips_when_empty(
         self,

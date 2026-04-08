@@ -148,13 +148,12 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
                     )
 
                     # Send critical alert
-                    if app_settings.alerts.alert_enabled:
-                        from odds_cli.alerts.base import send_critical
+                    from odds_core.alerts import send_critical
 
-                        await send_critical(
-                            f"🚨 API quota critical: {sport_result.quota_remaining} requests remaining "
-                            f"({percentage_remaining}% of {app_settings.api.quota})"
-                        )
+                    await send_critical(
+                        f"🚨 API quota critical: {sport_result.quota_remaining} requests remaining "
+                        f"({percentage_remaining}% of {app_settings.api.quota})"
+                    )
 
                 # Warning threshold (default 20%)
                 elif quota_fraction < app_settings.alerts.quota_warning_threshold:
@@ -167,13 +166,12 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
                     )
 
                     # Send warning alert
-                    if app_settings.alerts.alert_enabled:
-                        from odds_cli.alerts.base import send_warning
+                    from odds_core.alerts import send_warning
 
-                        await send_warning(
-                            f"⚠️ API quota low: {sport_result.quota_remaining} requests remaining "
-                            f"({percentage_remaining}% of {app_settings.api.quota})"
-                        )
+                    await send_warning(
+                        f"⚠️ API quota low: {sport_result.quota_remaining} requests remaining "
+                        f"({percentage_remaining}% of {app_settings.api.quota})"
+                    )
 
         logger.info(
             "fetch_odds_completed",
@@ -186,10 +184,9 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
         logger.error("fetch_odds_failed", error=str(e), exc_info=True)
 
         # Send critical alert
-        if app_settings.alerts.alert_enabled:
-            from odds_cli.alerts.base import send_critical
+        from odds_core.alerts import send_critical
 
-            await send_critical(f"🚨 Fetch odds job failed: {type(e).__name__}: {str(e)}")
+        await send_critical(f"🚨 Fetch odds job failed: {type(e).__name__}: {str(e)}")
 
         # Don't schedule next run if we failed - let manual intervention happen
         raise
@@ -213,10 +210,9 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
             logger.error("fetch_odds_scheduling_failed", error=str(e), exc_info=True)
 
             # Send error alert
-            if app_settings.alerts.alert_enabled:
-                from odds_cli.alerts.base import send_error
+            from odds_core.alerts import send_error
 
-                await send_error(f"Fetch odds scheduling failed: {type(e).__name__}: {str(e)}")
+            await send_error(f"Fetch odds scheduling failed: {type(e).__name__}: {str(e)}")
 
             # Don't fail the job if scheduling fails - the fetch itself succeeded
 
