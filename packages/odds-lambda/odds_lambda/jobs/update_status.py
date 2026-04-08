@@ -82,6 +82,10 @@ async def main():
         except Exception as e:
             logger.error("update_status_scheduling_failed", error=str(e), exc_info=True)
 
+            from odds_cli.alerts.base import send_error
+
+            await send_error(f"Update status scheduling failed: {type(e).__name__}: {e}")
+
 
 async def _update_event_statuses():
     """

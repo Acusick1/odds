@@ -360,8 +360,8 @@ class TestHealthMonitor:
         assert issues == []
 
     @pytest.mark.asyncio
-    async def test_check_job_heartbeats_missing(self, mock_session, mock_settings):
-        """Should flag jobs with no heartbeat."""
+    async def test_check_job_heartbeats_no_history_skipped(self, mock_session, mock_settings):
+        """Should skip alerting when no heartbeat history exists (first deploy)."""
         monitor = HealthMonitor(mock_session, mock_settings)
 
         # Mock query: no heartbeat found
@@ -369,11 +369,11 @@ class TestHealthMonitor:
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
 
-        with patch.object(monitor, "_send_alert", return_value=True):
+        with patch.object(monitor, "_send_alert", return_value=True) as mock_alert:
             issues = await monitor.check_job_heartbeats()
 
-        assert len(issues) == len(monitor._HEARTBEAT_EXPECTATIONS)
-        assert all("has not completed" in issue for issue in issues)
+        assert issues == []
+        mock_alert.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_check_job_heartbeats_stale(self, mock_session, mock_settings):

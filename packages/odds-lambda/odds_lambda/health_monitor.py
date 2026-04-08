@@ -328,11 +328,14 @@ class HealthMonitor:
             result = await self.session.execute(query)
             last_beat = result.scalar_one_or_none()
 
-            if last_beat is None or last_beat < cutoff:
-                if last_beat is None:
-                    hours_ago = "never"
-                else:
-                    hours_ago = f"{(now - last_beat).total_seconds() / 3600:.1f}h ago"
+            if last_beat is None:
+                # No heartbeat history — job hasn't run since monitoring was
+                # deployed.  Log but don't alert to avoid noise on first deploy.
+                logger.debug("heartbeat_no_history", job=job_name)
+                continue
+
+            if last_beat < cutoff:
+                hours_ago = f"{(now - last_beat).total_seconds() / 3600:.1f}h ago"
                 issue = (
                     f"Job {job_name} has not completed "
                     f"(last: {hours_ago}, expected every {max_hours:.0f}h)"
