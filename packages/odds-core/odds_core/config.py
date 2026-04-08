@@ -149,6 +149,23 @@ class AlertConfig(BaseSettings):
         description="Number of error/critical data quality issues in 24h before triggering alert",
     )
 
+    # Job heartbeat monitoring: max hours between completions before alerting
+    heartbeat_expectations: dict[str, float] = Field(
+        default={
+            "fetch-oddsportal": 2,
+            "check-health": 2,
+            "score-predictions": 2,
+            "fetch-oddsportal-results": 26,
+        },
+        description="Max hours between job completions before alerting (job_name -> hours)",
+    )
+
+    # Heartbeat retention
+    heartbeat_retention_days: int = Field(
+        default=7,
+        description="Days to retain heartbeat rows in AlertHistory before purging",
+    )
+
 
 class PolymarketConfig(BaseSettings):
     """Polymarket prediction market configuration."""

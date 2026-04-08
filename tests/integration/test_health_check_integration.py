@@ -18,10 +18,10 @@ from sqlalchemy import select
 
 async def _create_recent_heartbeats(session) -> None:
     """Insert recent heartbeat records for all monitored jobs."""
-    from odds_lambda.health_monitor import HealthMonitor
+    from odds_core.config import AlertConfig
 
     now = datetime.now(UTC)
-    for job_name in HealthMonitor._HEARTBEAT_EXPECTATIONS:
+    for job_name in AlertConfig().heartbeat_expectations:
         session.add(
             AlertHistory(
                 alert_type=f"heartbeat:{job_name}",

@@ -302,25 +302,19 @@ class HealthMonitor:
             events_final=stats.get("events_by_status", {}).get("final", 0),
         )
 
-    # Expected max interval (hours) for each active self-scheduling job.
-    # Alert if no heartbeat within this window.
-    _HEARTBEAT_EXPECTATIONS: dict[str, float] = {
-        "fetch-oddsportal": 2,
-        "check-health": 2,
-        "score-predictions": 2,
-        "fetch-oddsportal-results": 26,
-    }
-
     async def check_job_heartbeats(self) -> list[str]:
         """Check that active jobs have reported heartbeats recently.
+
+        Expectations are read from ``settings.alerts.heartbeat_expectations``.
 
         Returns:
             List of issue descriptions for jobs that missed their window.
         """
+        expectations = self.settings.alerts.heartbeat_expectations
         issues: list[str] = []
         now = datetime.now(UTC)
 
-        for job_name, max_hours in self._HEARTBEAT_EXPECTATIONS.items():
+        for job_name, max_hours in expectations.items():
             cutoff = now - timedelta(hours=max_hours)
             query = select(func.max(AlertHistory.sent_at)).where(
                 AlertHistory.alert_type == f"heartbeat:{job_name}"
@@ -349,6 +343,27 @@ class HealthMonitor:
                 )
 
         return issues
+
+    async def purge_old_heartbeats(self) -> int:
+        """Delete heartbeat rows older than the configured retention period.
+
+        Returns:
+            Number of rows deleted.
+        """
+        from sqlalchemy import delete
+
+        cutoff = datetime.now(UTC) - timedelta(days=self.settings.alerts.heartbeat_retention_days)
+        result = await self.session.execute(
+            delete(AlertHistory).where(
+                AlertHistory.alert_type.startswith("heartbeat:"),
+                AlertHistory.sent_at < cutoff,
+            )
+        )
+        deleted = result.rowcount
+        if deleted:
+            await self.session.commit()
+            logger.info("heartbeats_purged", deleted=deleted)
+        return deleted
 
     async def check_system_health(self) -> HealthStatus:
         """
@@ -456,6 +471,9 @@ class HealthMonitor:
             # Check 5: Job heartbeats
             heartbeat_issues = await self.check_job_heartbeats()
             issues_detected.extend(heartbeat_issues)
+
+            # Housekeeping: purge old heartbeat rows
+            await self.purge_old_heartbeats()
 
             overall_healthy = len(issues_detected) == 0
 
