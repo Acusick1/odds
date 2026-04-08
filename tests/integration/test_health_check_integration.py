@@ -5,8 +5,37 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from odds_core.config import get_settings
-from odds_core.models import AlertHistory, DataQualityLog, FetchLog
+from odds_core.models import (
+    AlertHistory,
+    DataQualityLog,
+    Event,
+    EventStatus,
+    FetchLog,
+    OddsSnapshot,
+)
 from sqlalchemy import select
+
+
+async def _create_recent_snapshot(session, *, minutes_ago: int = 30) -> None:
+    """Insert an Event + OddsSnapshot so check_stale_data sees recent data."""
+    event = Event(
+        id=f"health_test_{minutes_ago}",
+        sport_key="basketball_nba",
+        sport_title="NBA",
+        commence_time=datetime.now(UTC) + timedelta(hours=24),
+        home_team="Team A",
+        away_team="Team B",
+        status=EventStatus.SCHEDULED,
+    )
+    session.add(event)
+    await session.flush()
+    snapshot = OddsSnapshot(
+        event_id=event.id,
+        snapshot_time=datetime.now(UTC) - timedelta(minutes=minutes_ago),
+        raw_data={},
+        bookmaker_count=1,
+    )
+    session.add(snapshot)
 
 
 class TestHealthCheckIntegration:
@@ -15,6 +44,9 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_health_check_job_with_healthy_system(self, test_session):
         """Test health check job when system is healthy."""
+        # Create recent snapshot so stale data check passes
+        await _create_recent_snapshot(test_session)
+
         # Create recent successful fetch logs
         for i in range(5):
             fetch_log = FetchLog(
@@ -78,7 +110,10 @@ class TestHealthCheckIntegration:
 
         assert health_status.overall_healthy is False
         assert len(health_status.issues_detected) > 0
-        assert any("No data fetched in" in issue for issue in health_status.issues_detected)
+        assert any(
+            "No new data in" in issue or "No odds snapshots" in issue
+            for issue in health_status.issues_detected
+        )
 
     @pytest.mark.asyncio
     async def test_health_check_detects_consecutive_failures(self, test_session):
@@ -118,6 +153,9 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_health_check_detects_low_quota(self, test_session):
         """Test health check detects low API quota."""
+        # Create recent snapshot so stale data check passes
+        await _create_recent_snapshot(test_session, minutes_ago=10)
+
         # Create fetch log with low quota (25 out of 500 = 5%, below 10% critical)
         fetch_log = FetchLog(
             fetch_time=datetime.now(UTC) - timedelta(minutes=30),
@@ -151,7 +189,8 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_health_check_detects_data_quality_issues(self, test_session):
         """Test health check detects high data quality error rate."""
-        from odds_core.models import Event, EventStatus
+        # Create recent snapshot so stale data check passes
+        await _create_recent_snapshot(test_session, minutes_ago=15)
 
         # Create test event for foreign key constraint
         test_event = Event(
@@ -263,7 +302,8 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_health_check_with_configurable_thresholds(self, test_session):
         """Test that health check respects configurable thresholds."""
-        from odds_core.models import Event, EventStatus
+        # Create recent snapshot so stale data check passes
+        await _create_recent_snapshot(test_session, minutes_ago=20)
 
         # Create test event for foreign key constraint
         test_event = Event(

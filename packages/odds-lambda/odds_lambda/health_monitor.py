@@ -8,7 +8,7 @@ This module implements proactive health monitoring to detect:
 - Data quality degradation
 - Database connectivity issues
 
-All checks use existing OddsReader methods to query database state.
+Stale data is detected via OddsSnapshot recency; other checks use OddsReader.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
-from odds_core.models import AlertHistory
+from odds_core.models import AlertHistory, OddsSnapshot
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -151,32 +151,33 @@ class HealthMonitor:
 
         return True
 
+    async def _get_hours_since_latest_snapshot(self) -> float | None:
+        """Query hours since the most recent OddsSnapshot, or None if empty."""
+        query = select(func.max(OddsSnapshot.snapshot_time))
+        result = await self.session.execute(query)
+        latest_snapshot_time = result.scalar_one_or_none()
+        if latest_snapshot_time is None:
+            return None
+        return (datetime.now(UTC) - latest_snapshot_time).total_seconds() / 3600
+
     async def check_stale_data(self) -> tuple[bool, str | None]:
         """
-        Check for stale data (no recent fetches).
+        Check for stale data by looking at the most recent odds snapshot.
 
         Returns:
             (is_healthy, issue_description)
         """
-        from odds_lambda.storage.readers import OddsReader
+        hours_since_data = await self._get_hours_since_latest_snapshot()
 
-        reader = OddsReader(self.session)
-
-        # Get most recent fetch
-        fetch_logs = await reader.get_fetch_logs(limit=1)
-
-        if not fetch_logs:
-            return False, "No fetch logs found in database"
-
-        last_fetch = fetch_logs[0]
-        hours_since_fetch = (datetime.now(UTC) - last_fetch.fetch_time).total_seconds() / 3600
+        if hours_since_data is None:
+            return False, "No odds snapshots found in database"
 
         threshold_hours = self.settings.alerts.stale_data_hours
 
-        if hours_since_fetch > threshold_hours:
+        if hours_since_data > threshold_hours:
             return (
                 False,
-                f"No data fetched in {hours_since_fetch:.1f} hours (threshold: {threshold_hours}h)",
+                f"No new data in {hours_since_data:.1f} hours (threshold: {threshold_hours}h)",
             )
 
         return True, None
@@ -281,13 +282,8 @@ class HealthMonitor:
         reader = OddsReader(self.session)
         stats = await reader.get_database_stats()
 
-        # Calculate hours since last fetch
-        fetch_logs = await reader.get_fetch_logs(limit=1)
-        hours_since_last_fetch = None
-        if fetch_logs:
-            hours_since_last_fetch = (
-                datetime.now(UTC) - fetch_logs[0].fetch_time
-            ).total_seconds() / 3600
+        # Calculate hours since last data arrived (any source)
+        hours_since_last_fetch = await self._get_hours_since_latest_snapshot()
 
         # Get consecutive failures
         _, consecutive_failures = await self.check_consecutive_failures()

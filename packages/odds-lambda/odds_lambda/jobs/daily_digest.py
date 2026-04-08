@@ -36,13 +36,30 @@ async def _get_completed_events_with_predictions(
 
     For each event, returns the latest prediction (closest to kickoff).
     """
-    # Subquery: latest prediction per event (max snapshot_id = closest to kickoff)
+    # Filter matching events first, then find latest prediction only for those
+    matching_events = (
+        select(Event.id)
+        .where(
+            and_(
+                Event.sport_key == sport_key,
+                Event.status == EventStatus.FINAL,
+                Event.completed_at >= since,
+            )
+        )
+        .subquery()
+    )
+
     latest_pred = (
         select(
             Prediction.event_id,
             func.max(Prediction.snapshot_id).label("max_snapshot_id"),
         )
-        .where(Prediction.model_name == model_name)
+        .where(
+            and_(
+                Prediction.model_name == model_name,
+                Prediction.event_id.in_(select(matching_events.c.id)),
+            )
+        )
         .group_by(Prediction.event_id)
         .subquery()
     )
@@ -56,13 +73,6 @@ async def _get_completed_events_with_predictions(
                 Prediction.event_id == latest_pred.c.event_id,
                 Prediction.snapshot_id == latest_pred.c.max_snapshot_id,
             ),
-        )
-        .where(
-            and_(
-                Event.sport_key == sport_key,
-                Event.status == EventStatus.FINAL,
-                Event.completed_at >= since,
-            )
         )
         .order_by(Event.commence_time)
     )
@@ -97,12 +107,31 @@ async def _get_upcoming_events_with_predictions(
     """
     now = datetime.now(UTC)
 
+    # Filter matching events first, then find latest prediction only for those
+    matching_events = (
+        select(Event.id)
+        .where(
+            and_(
+                Event.sport_key == sport_key,
+                Event.status == EventStatus.SCHEDULED,
+                Event.commence_time > now,
+                Event.commence_time <= until,
+            )
+        )
+        .subquery()
+    )
+
     latest_pred = (
         select(
             Prediction.event_id,
             func.max(Prediction.snapshot_id).label("max_snapshot_id"),
         )
-        .where(Prediction.model_name == model_name)
+        .where(
+            and_(
+                Prediction.model_name == model_name,
+                Prediction.event_id.in_(select(matching_events.c.id)),
+            )
+        )
         .group_by(Prediction.event_id)
         .subquery()
     )
@@ -118,14 +147,6 @@ async def _get_upcoming_events_with_predictions(
             ),
         )
         .join(OddsSnapshot, OddsSnapshot.id == Prediction.snapshot_id)
-        .where(
-            and_(
-                Event.sport_key == sport_key,
-                Event.status == EventStatus.SCHEDULED,
-                Event.commence_time > now,
-                Event.commence_time <= until,
-            )
-        )
         .order_by(func.abs(Prediction.predicted_clv).desc())
     )
 
