@@ -149,13 +149,15 @@ class AlertConfig(BaseSettings):
         description="Number of error/critical data quality issues in 24h before triggering alert",
     )
 
-    # Job heartbeat monitoring: max hours between completions before alerting
+    # Job heartbeat monitoring: max hours between completions before alerting.
+    # Keys are compound job names matching EventBridge rules (e.g. "fetch-oddsportal-epl").
     heartbeat_expectations: dict[str, float] = Field(
         default={
-            "fetch-oddsportal": 2,
+            "fetch-oddsportal-epl": 2,
+            "fetch-oddsportal-results-epl": 26,
+            "score-predictions-epl": 2,
+            "daily-digest-epl": 26,
             "check-health": 2,
-            "score-predictions": 2,
-            "fetch-oddsportal-results": 26,
         },
         description="Max hours between job completions before alerting (job_name -> hours)",
     )

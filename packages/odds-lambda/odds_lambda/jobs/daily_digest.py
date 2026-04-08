@@ -350,9 +350,11 @@ async def main(
     """
     from odds_cli.alerts.base import job_alert_context
 
+    from odds_lambda.scheduling.jobs import make_compound_job_name
+
     sport_key = sport or DEFAULT_SPORT_KEY
 
-    async with job_alert_context("daily-digest"):
+    async with job_alert_context(make_compound_job_name("daily-digest", sport)):
         logger.info(
             "daily_digest_started",
             sport_key=sport_key,

@@ -386,7 +386,7 @@ async def main(
     else:
         specs = LEAGUE_SPECS
 
-    async with job_alert_context("fetch-oddsportal"):
+    async with job_alert_context(make_compound_job_name("fetch-oddsportal", sport)):
         logger.info(
             "fetch_oddsportal_started",
             sport=sport,
@@ -426,7 +426,7 @@ async def main(
         if total_scraped == 0:
             from odds_cli.alerts.base import _check_rate_limit, _record_to_alert_history
 
-            alert_type = "scrape_empty:fetch-oddsportal"
+            alert_type = f"scrape_empty:{make_compound_job_name('fetch-oddsportal', sport)}"
             if alert_manager.enabled and await _check_rate_limit(alert_type):
                 detail = (
                     f"{leagues_failed}/{len(specs)} leagues failed"

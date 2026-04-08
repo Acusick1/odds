@@ -254,7 +254,9 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
     """
     from odds_cli.alerts.base import job_alert_context
 
-    async with job_alert_context("score-predictions"):
+    from odds_lambda.scheduling.jobs import make_compound_job_name
+
+    async with job_alert_context(make_compound_job_name("score-predictions", sport)):
         logger.info("score_predictions_started", sport=sport)
         await score_events(sport=sport)
 

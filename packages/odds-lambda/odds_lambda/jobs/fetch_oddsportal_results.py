@@ -244,7 +244,7 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
 
     settings = get_settings()
 
-    async with job_alert_context("fetch-oddsportal-results"):
+    async with job_alert_context(make_compound_job_name("fetch-oddsportal-results", sport)):
         logger.info("fetch_oddsportal_results_started", sport=sport)
         await process_results(sport=sport)
 
