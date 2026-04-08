@@ -166,10 +166,9 @@ async def main() -> None:
 
         await _log_fetch(result, success=False, error_message=str(e))
 
-        if app_settings.alerts.alert_enabled:
-            from odds_core.alerts import send_critical
+        from odds_core.alerts import send_critical
 
-            await send_critical(f"🚨 Fetch Polymarket job failed: {type(e).__name__}: {str(e)}")
+        await send_critical(f"🚨 Fetch Polymarket job failed: {type(e).__name__}: {str(e)}")
 
         raise
 
@@ -192,12 +191,9 @@ async def main() -> None:
         except Exception as e:
             logger.error("fetch_polymarket_scheduling_failed", error=str(e), exc_info=True)
 
-            if app_settings.alerts.alert_enabled:
-                from odds_core.alerts import send_error
+            from odds_core.alerts import send_error
 
-                await send_error(
-                    f"Fetch Polymarket scheduling failed: {type(e).__name__}: {str(e)}"
-                )
+            await send_error(f"Fetch Polymarket scheduling failed: {type(e).__name__}: {str(e)}")
 
 
 if __name__ == "__main__":

@@ -146,18 +146,14 @@ def lambda_handler(event: dict, context: object) -> dict:
         )
 
         # Send critical alert
-        from odds_core.config import get_settings
+        from odds_core.alerts import send_critical
 
-        app_settings = get_settings()
-        if app_settings.alerts.alert_enabled:
-            from odds_core.alerts import send_critical
-
-            asyncio.run(
-                send_critical(
-                    f"🚨 Lambda handler failed: {type(e).__name__}: {str(e)} "
-                    f"(job: {event.get('job', 'unknown')})"
-                )
+        asyncio.run(
+            send_critical(
+                f"🚨 Lambda handler failed: {type(e).__name__}: {str(e)} "
+                f"(job: {event.get('job', 'unknown')})"
             )
+        )
 
         return {
             "statusCode": 500,

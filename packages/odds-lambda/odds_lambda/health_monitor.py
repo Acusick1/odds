@@ -325,7 +325,7 @@ class HealthMonitor:
             if last_beat is None:
                 # No heartbeat history — job hasn't run since monitoring was
                 # deployed.  Log but don't alert to avoid noise on first deploy.
-                logger.debug("heartbeat_no_history", job=job_name)
+                logger.info("heartbeat_no_history", job=job_name)
                 continue
 
             if last_beat < cutoff:
