@@ -3,7 +3,14 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from odds_cli.alerts.base import AlertManager, DiscordAlert, send_critical, send_error, send_warning
+from odds_cli.alerts.base import (
+    AlertManager,
+    DiscordAlert,
+    job_alert_context,
+    send_critical,
+    send_error,
+    send_warning,
+)
 from odds_core.config import AlertConfig, Settings
 
 
@@ -169,3 +176,85 @@ class TestConvenienceFunctions:
         ) as mock_alert:
             await send_critical("Test critical")
             mock_alert.assert_called_once_with("Test critical", "critical")
+
+
+class TestJobAlertContext:
+    """Test job_alert_context context manager."""
+
+    @pytest.mark.asyncio
+    @patch("odds_cli.alerts.base._record_to_alert_history", new_callable=AsyncMock)
+    async def test_records_heartbeat_on_success(self, mock_record: AsyncMock) -> None:
+        """Should write heartbeat row on clean exit."""
+        async with job_alert_context("test-job"):
+            pass
+
+        mock_record.assert_called_once()
+        assert mock_record.call_args[1]["alert_type"] == "heartbeat:test-job"
+        assert mock_record.call_args[1]["severity"] == "info"
+
+    @pytest.mark.asyncio
+    @patch("odds_cli.alerts.base._record_to_alert_history", new_callable=AsyncMock)
+    @patch("odds_cli.alerts.base._check_rate_limit", new_callable=AsyncMock, return_value=True)
+    @patch("odds_cli.alerts.base.alert_manager")
+    async def test_sends_alert_on_failure(
+        self,
+        mock_manager: MagicMock,
+        mock_rate_limit: AsyncMock,
+        mock_record: AsyncMock,
+    ) -> None:
+        """Should send CRITICAL alert and re-raise on exception."""
+        mock_manager.enabled = True
+        mock_manager.alert = AsyncMock()
+
+        with pytest.raises(ValueError, match="boom"):
+            async with job_alert_context("test-job"):
+                raise ValueError("boom")
+
+        mock_manager.alert.assert_called_once()
+        msg = mock_manager.alert.call_args[0][0]
+        assert "test-job" in msg
+        assert "ValueError" in msg
+        assert "boom" in msg
+
+        # Should record the failure alert, NOT the heartbeat
+        mock_record.assert_called_once()
+        assert mock_record.call_args[0][0] == "job_failure:test-job"
+
+    @pytest.mark.asyncio
+    @patch("odds_cli.alerts.base._record_to_alert_history", new_callable=AsyncMock)
+    @patch("odds_cli.alerts.base._check_rate_limit", new_callable=AsyncMock, return_value=False)
+    @patch("odds_cli.alerts.base.alert_manager")
+    async def test_rate_limits_failure_alerts(
+        self,
+        mock_manager: MagicMock,
+        mock_rate_limit: AsyncMock,
+        mock_record: AsyncMock,
+    ) -> None:
+        """Should suppress alert when rate-limited, still re-raise."""
+        mock_manager.enabled = True
+        mock_manager.alert = AsyncMock()
+
+        with pytest.raises(ValueError):
+            async with job_alert_context("test-job"):
+                raise ValueError("boom")
+
+        mock_manager.alert.assert_not_called()
+        mock_record.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("odds_cli.alerts.base._record_to_alert_history", new_callable=AsyncMock)
+    @patch("odds_cli.alerts.base.alert_manager")
+    async def test_skips_alert_when_disabled(
+        self,
+        mock_manager: MagicMock,
+        mock_record: AsyncMock,
+    ) -> None:
+        """Should not send alert when alerts are disabled."""
+        mock_manager.enabled = False
+        mock_manager.alert = AsyncMock()
+
+        with pytest.raises(ValueError):
+            async with job_alert_context("test-job"):
+                raise ValueError("boom")
+
+        mock_manager.alert.assert_not_called()

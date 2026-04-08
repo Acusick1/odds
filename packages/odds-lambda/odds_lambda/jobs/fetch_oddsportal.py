@@ -371,6 +371,7 @@ async def main(
             LeagueSpec is scraped. Falls back to all LEAGUE_SPECS.
         retry_count: Current retry attempt (passed via self-scheduling payload).
     """
+    from odds_cli.alerts.base import job_alert_context
     from odds_core.config import get_settings
 
     settings = get_settings()
@@ -385,40 +386,41 @@ async def main(
     else:
         specs = LEAGUE_SPECS
 
-    logger.info(
-        "fetch_oddsportal_started",
-        sport=sport,
-        leagues=len(specs),
-        retry_count=retry_count,
-    )
+    async with job_alert_context("fetch-oddsportal"):
+        logger.info(
+            "fetch_oddsportal_started",
+            sport=sport,
+            leagues=len(specs),
+            retry_count=retry_count,
+        )
 
-    all_stats: list[IngestionStats] = []
+        all_stats: list[IngestionStats] = []
 
-    for spec in specs:
-        try:
-            stats = await ingest_league(spec)
-            all_stats.append(stats)
-        except Exception as e:
-            logger.error(
-                "league_failed",
-                league=spec.league,
-                error=str(e),
-                exc_info=True,
-            )
+        for spec in specs:
+            try:
+                stats = await ingest_league(spec)
+                all_stats.append(stats)
+            except Exception as e:
+                logger.error(
+                    "league_failed",
+                    league=spec.league,
+                    error=str(e),
+                    exc_info=True,
+                )
 
-    total_scraped = sum(s.matches_scraped for s in all_stats)
-    total_snapshots = sum(s.snapshots_stored for s in all_stats)
-    total_errors = sum(len(s.errors) for s in all_stats)
+        total_scraped = sum(s.matches_scraped for s in all_stats)
+        total_snapshots = sum(s.snapshots_stored for s in all_stats)
+        total_errors = sum(len(s.errors) for s in all_stats)
 
-    logger.info(
-        "fetch_oddsportal_completed",
-        leagues=len(all_stats),
-        total_matches_scraped=total_scraped,
-        total_snapshots_stored=total_snapshots,
-        total_errors=total_errors,
-    )
+        logger.info(
+            "fetch_oddsportal_completed",
+            leagues=len(all_stats),
+            total_matches_scraped=total_scraped,
+            total_snapshots_stored=total_snapshots,
+            total_errors=total_errors,
+        )
 
-    # Self-schedule next execution
+    # Self-schedule next execution (outside alert context)
     scrape_success = total_scraped > 0
     now = datetime.now(UTC)
     next_time, next_retry_count = _calculate_next_execution(

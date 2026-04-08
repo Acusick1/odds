@@ -252,8 +252,11 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
         sport: Sport key from event payload. Passed to ``score_events`` for
             validation against the model's bundled sport_key.
     """
-    logger.info("score_predictions_started", sport=sport)
-    await score_events(sport=sport)
+    from odds_cli.alerts.base import job_alert_context
+
+    async with job_alert_context("score-predictions"):
+        logger.info("score_predictions_started", sport=sport)
+        await score_events(sport=sport)
 
 
 if __name__ == "__main__":

@@ -326,10 +326,9 @@ async def send_digest(
         results, upcoming, lookback_hours, lookahead_hours, sport_key=sport_key
     )
 
-    from odds_cli.alerts.base import AlertManager
+    from odds_cli.alerts.base import alert_manager
 
-    manager = AlertManager()
-    await manager.send_embed(embed)
+    await alert_manager.send_embed(embed)
     stats["sent"] = 1
 
     logger.info("daily_digest_sent", sport_key=sport_key, **stats)
@@ -349,31 +348,24 @@ async def main(
         lookback_hours: How far back to look for completed events.
         lookahead_hours: How far ahead to look for upcoming events.
     """
-    sport_key = sport or DEFAULT_SPORT_KEY
-    logger.info(
-        "daily_digest_started",
-        sport_key=sport_key,
-        lookback_hours=lookback_hours,
-        lookahead_hours=lookahead_hours,
-    )
+    from odds_cli.alerts.base import job_alert_context
 
-    try:
+    sport_key = sport or DEFAULT_SPORT_KEY
+
+    async with job_alert_context("daily-digest"):
+        logger.info(
+            "daily_digest_started",
+            sport_key=sport_key,
+            lookback_hours=lookback_hours,
+            lookahead_hours=lookahead_hours,
+        )
+
         stats = await send_digest(
             lookback_hours=lookback_hours,
             lookahead_hours=lookahead_hours,
             sport_key=sport_key,
         )
         logger.info("daily_digest_complete", **stats)
-    except Exception as e:
-        logger.error("daily_digest_failed", error=str(e), exc_info=True)
-
-        from odds_core.config import get_settings
-
-        if get_settings().alerts.alert_enabled:
-            from odds_cli.alerts.base import send_error
-
-            await send_error(f"Daily digest job failed: {e}")
-        raise
 
 
 if __name__ == "__main__":

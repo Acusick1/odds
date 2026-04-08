@@ -239,12 +239,14 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
     Args:
         sport: Sport key (e.g. "soccer_epl"). Currently only soccer_epl is supported.
     """
+    from odds_cli.alerts.base import job_alert_context
     from odds_core.config import get_settings
 
     settings = get_settings()
-    logger.info("fetch_oddsportal_results_started", sport=sport)
 
-    await process_results(sport=sport)
+    async with job_alert_context("fetch-oddsportal-results"):
+        logger.info("fetch_oddsportal_results_started", sport=sport)
+        await process_results(sport=sport)
 
     # Self-schedule: run again tomorrow at 08:00 UTC
     now = datetime.now(UTC)

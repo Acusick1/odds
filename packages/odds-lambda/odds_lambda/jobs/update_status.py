@@ -59,22 +59,13 @@ async def main():
         return
 
     # Execute update logic
+    from odds_cli.alerts.base import job_alert_context
+
     logger.info("update_status_executing", reason=decision.reason)
 
-    try:
+    async with job_alert_context("update-status"):
         await _update_event_statuses()
         logger.info("update_status_completed")
-
-    except Exception as e:
-        logger.error("update_status_failed", error=str(e), exc_info=True)
-
-        # Send critical alert
-        if app_settings.alerts.alert_enabled:
-            from odds_cli.alerts.base import send_critical
-
-            await send_critical(f"🚨 Update status job failed: {type(e).__name__}: {str(e)}")
-
-        raise
 
     # Self-schedule next execution
     if decision.next_execution:
@@ -90,12 +81,6 @@ async def main():
             )
         except Exception as e:
             logger.error("update_status_scheduling_failed", error=str(e), exc_info=True)
-
-            # Send error alert
-            if app_settings.alerts.alert_enabled:
-                from odds_cli.alerts.base import send_error
-
-                await send_error(f"Update status scheduling failed: {type(e).__name__}: {str(e)}")
 
 
 async def _update_event_statuses():
