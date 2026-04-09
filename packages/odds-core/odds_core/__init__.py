@@ -23,6 +23,7 @@ from odds_core.models import (
     Odds,
     OddsSnapshot,
 )
+from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_core.polymarket_models import (
     PolymarketEvent,
     PolymarketFetchLog,
@@ -43,6 +44,9 @@ __all__ = [
     "FetchLog",
     # Prediction
     "Prediction",
+    # Paper Trading
+    "PaperTrade",
+    "TradeResult",
     # Polymarket Models
     "PolymarketMarketType",
     "PolymarketEvent",
