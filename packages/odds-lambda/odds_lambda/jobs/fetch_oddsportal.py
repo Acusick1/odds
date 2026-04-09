@@ -386,7 +386,29 @@ async def main(
     else:
         specs = LEAGUE_SPECS
 
-    async with job_alert_context(make_compound_job_name("fetch-oddsportal", sport)):
+    compound_job_name = make_compound_job_name("fetch-oddsportal", sport)
+    sport_key_for_lookup = sport or LEAGUE_SPECS[0].sport_key
+
+    # Pre-schedule at normal cadence BEFORE scraping so the chain survives
+    # Lambda timeouts. Updated to retry interval after scrape if needed.
+    now = datetime.now(UTC)
+    default_next_time = _apply_overnight_skip(
+        now + timedelta(hours=NORMAL_INTERVAL_HOURS),
+        await _get_next_game_time(sport_key=sport_key_for_lookup),
+    )
+    try:
+        await _self_schedule(
+            job_name=compound_job_name,
+            next_time=default_next_time,
+            next_retry_count=0,
+            dry_run=settings.scheduler.dry_run,
+            sport=sport,
+        )
+    except Exception as e:
+        logger.error("fetch_oddsportal_scheduling_failed", error=str(e), exc_info=True)
+        raise
+
+    async with job_alert_context(compound_job_name):
         logger.info(
             "fetch_oddsportal_started",
             sport=sport,
@@ -430,35 +452,32 @@ async def main(
                 else "0 matches returned"
             )
             await send_job_warning(
-                alert_type=f"scrape_empty:{make_compound_job_name('fetch-oddsportal', sport)}",
+                alert_type=f"scrape_empty:{compound_job_name}",
                 message=f"⚠️ OddsPortal scrape empty ({detail}), retry #{retry_count}",
             )
 
-    # Self-schedule next execution (outside alert context)
+    # If scrape failed, update schedule to retry sooner
     scrape_success = total_scraped > 0
-    now = datetime.now(UTC)
-    next_time, next_retry_count = _calculate_next_execution(
-        success=scrape_success,
-        retry_count=retry_count,
-        now=now,
-    )
-
-    # Apply overnight / no-games-soon skip
-    sport_key_for_lookup = sport or LEAGUE_SPECS[0].sport_key
-    next_game_time = await _get_next_game_time(sport_key=sport_key_for_lookup)
-    next_time = _apply_overnight_skip(next_time, next_game_time)
-
-    try:
-        await _self_schedule(
-            job_name=make_compound_job_name("fetch-oddsportal", sport),
-            next_time=next_time,
-            next_retry_count=next_retry_count,
-            dry_run=settings.scheduler.dry_run,
-            sport=sport,
+    if not scrape_success:
+        retry_next_time, next_retry_count = _calculate_next_execution(
+            success=False,
+            retry_count=retry_count,
+            now=datetime.now(UTC),
         )
-    except Exception as e:
-        logger.error("fetch_oddsportal_scheduling_failed", error=str(e), exc_info=True)
-        raise
+        retry_next_time = _apply_overnight_skip(
+            retry_next_time,
+            await _get_next_game_time(sport_key=sport_key_for_lookup),
+        )
+        try:
+            await _self_schedule(
+                job_name=compound_job_name,
+                next_time=retry_next_time,
+                next_retry_count=next_retry_count,
+                dry_run=settings.scheduler.dry_run,
+                sport=sport,
+            )
+        except Exception as e:
+            logger.error("fetch_oddsportal_retry_scheduling_failed", error=str(e), exc_info=True)
 
 
 if __name__ == "__main__":
