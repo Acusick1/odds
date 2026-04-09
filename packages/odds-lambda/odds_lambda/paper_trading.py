@@ -28,28 +28,6 @@ class PortfolioSummary:
     push_count: int
 
 
-def _determine_result(
-    selection: str,
-    home_score: int,
-    away_score: int,
-) -> TradeResult:
-    """Determine bet result from scores and selection (3-way h2h)."""
-    actual = determine_h2h_winner(home_score, away_score)
-    if selection == actual:
-        return TradeResult.WIN
-    return TradeResult.LOSS
-
-
-def _compute_pnl(odds: int, stake: float, result: TradeResult) -> float:
-    """Compute profit/loss for a settled trade."""
-    if result == TradeResult.WIN:
-        return calculate_profit_from_odds(stake, odds, won=True)
-    if result == TradeResult.LOSS:
-        return calculate_profit_from_odds(stake, odds, won=False)
-    # PUSH or VOID: return 0
-    return 0.0
-
-
 async def place_trade(
     session: AsyncSession,
     *,
@@ -107,8 +85,13 @@ async def settle_trades(session: AsyncSession) -> list[PaperTrade]:
         assert event.home_score is not None
         assert event.away_score is not None
 
-        result = _determine_result(trade.selection, event.home_score, event.away_score)
-        pnl = _compute_pnl(trade.odds, trade.stake, result)
+        winner = determine_h2h_winner(event.home_score, event.away_score)
+        result = TradeResult.WIN if trade.selection == winner else TradeResult.LOSS
+        pnl = (
+            calculate_profit_from_odds(trade.stake, trade.odds, won=(result == TradeResult.WIN))
+            if result in (TradeResult.WIN, TradeResult.LOSS)
+            else 0.0
+        )
 
         trade.result = result
         trade.pnl = pnl

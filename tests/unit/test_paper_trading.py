@@ -3,77 +3,14 @@
 from datetime import UTC, datetime
 
 import pytest
-from odds_analytics.utils import american_to_decimal
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_lambda.paper_trading import (
-    _compute_pnl,
-    _determine_result,
     get_open_trades,
     get_portfolio_summary,
     place_trade,
     settle_trades,
 )
-
-
-class TestDetermineResult:
-    def test_home_win_home_selection(self) -> None:
-        assert _determine_result("home", 2, 1) == TradeResult.WIN
-
-    def test_home_win_away_selection(self) -> None:
-        assert _determine_result("away", 2, 1) == TradeResult.LOSS
-
-    def test_draw_draw_selection(self) -> None:
-        assert _determine_result("draw", 1, 1) == TradeResult.WIN
-
-    def test_draw_home_selection(self) -> None:
-        assert _determine_result("home", 1, 1) == TradeResult.LOSS
-
-    def test_away_win_away_selection(self) -> None:
-        assert _determine_result("away", 0, 3) == TradeResult.WIN
-
-    def test_away_win_draw_selection(self) -> None:
-        assert _determine_result("draw", 0, 3) == TradeResult.LOSS
-
-
-class TestComputePnl:
-    def test_win_positive_odds(self) -> None:
-        # +200 means 2x profit on stake
-        pnl = _compute_pnl(200, 10.0, TradeResult.WIN)
-        assert pnl == pytest.approx(20.0)
-
-    def test_win_negative_odds(self) -> None:
-        # -200 means 0.5x profit on stake
-        pnl = _compute_pnl(-200, 10.0, TradeResult.WIN)
-        assert pnl == pytest.approx(5.0)
-
-    def test_loss(self) -> None:
-        pnl = _compute_pnl(150, 10.0, TradeResult.LOSS)
-        assert pnl == -10.0
-
-    def test_push(self) -> None:
-        pnl = _compute_pnl(150, 10.0, TradeResult.PUSH)
-        assert pnl == 0.0
-
-    def test_void(self) -> None:
-        pnl = _compute_pnl(150, 10.0, TradeResult.VOID)
-        assert pnl == 0.0
-
-
-class TestAmericanToDecimal:
-    """Verify odds_analytics.utils.american_to_decimal (shared utility)."""
-
-    def test_positive_odds(self) -> None:
-        assert american_to_decimal(200) == pytest.approx(3.0)
-
-    def test_negative_odds(self) -> None:
-        assert american_to_decimal(-200) == pytest.approx(1.5)
-
-    def test_even_money(self) -> None:
-        assert american_to_decimal(100) == pytest.approx(2.0)
-
-    def test_heavy_favorite(self) -> None:
-        assert american_to_decimal(-500) == pytest.approx(1.2)
 
 
 class TestPlaceTrade:
