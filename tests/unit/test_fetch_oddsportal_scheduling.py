@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
@@ -99,8 +101,97 @@ class TestApplyOvernightSkip:
         assert result > next_time
 
 
+class TestPreScheduling:
+    """Verify scheduling happens before scraping to survive Lambda timeouts."""
+
+    @pytest.mark.asyncio
+    async def test_schedule_fires_before_ingest(self) -> None:
+        """Pre-schedule must happen before ingest_league so a timeout can't break the chain."""
+        call_order: list[str] = []
+
+        async def fake_ingest(spec):
+            call_order.append("ingest")
+            from odds_lambda.jobs.fetch_oddsportal import IngestionStats
+
+            return IngestionStats(league="test", matches_scraped=5, snapshots_stored=3)
+
+        async def fake_schedule(**kwargs):
+            call_order.append("schedule")
+
+        @asynccontextmanager
+        async def noop_alert_context(name: str) -> AsyncIterator[None]:
+            yield
+
+        mock_backend = AsyncMock()
+        mock_backend.get_backend_name.return_value = "test"
+        mock_backend.schedule_next_execution = AsyncMock(side_effect=fake_schedule)
+
+        with (
+            patch("odds_lambda.jobs.fetch_oddsportal.ingest_league", side_effect=fake_ingest),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal._get_next_game_time",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal.get_scheduler_backend",
+                return_value=mock_backend,
+            ),
+            patch("odds_core.config.get_settings") as mock_settings,
+            patch("odds_core.alerts.job_alert_context", side_effect=noop_alert_context),
+        ):
+            mock_settings.return_value.scheduler.dry_run = False
+            await main(retry_count=0)
+
+        assert call_order[0] == "schedule", (
+            "schedule_next_execution must be called before ingest_league"
+        )
+        assert "ingest" in call_order
+
+    @pytest.mark.asyncio
+    async def test_chain_survives_ingest_exception(self) -> None:
+        """If ingest_league raises, the pre-scheduled rule is still the last schedule call."""
+
+        @asynccontextmanager
+        async def noop_alert_context(name: str) -> AsyncIterator[None]:
+            yield
+
+        mock_backend = AsyncMock()
+        mock_backend.get_backend_name.return_value = "test"
+
+        with (
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal.ingest_league",
+                new_callable=AsyncMock,
+                side_effect=Exception("simulated timeout"),
+            ),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal._get_next_game_time",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal.get_scheduler_backend",
+                return_value=mock_backend,
+            ),
+            patch("odds_core.config.get_settings") as mock_settings,
+            patch("odds_core.alerts.job_alert_context", side_effect=noop_alert_context),
+            patch("odds_core.alerts.send_job_warning", new_callable=AsyncMock),
+        ):
+            mock_settings.return_value.scheduler.dry_run = False
+            await main(retry_count=0)
+
+        # Pre-schedule fired, then retry re-schedule fired (scrape failed)
+        assert mock_backend.schedule_next_execution.call_count == 2
+
+
 class TestRetryCountIntegration:
     """Verify retry_count flows correctly through main()."""
+
+    @staticmethod
+    @asynccontextmanager
+    async def _noop_alert_context(name: str) -> AsyncIterator[None]:
+        yield
 
     @pytest.mark.asyncio
     async def test_failure_increments_retry_count(self) -> None:
@@ -122,6 +213,8 @@ class TestRetryCountIntegration:
                 return_value=mock_backend,
             ),
             patch("odds_core.config.get_settings") as mock_settings,
+            patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
+            patch("odds_core.alerts.send_job_warning", new_callable=AsyncMock),
         ):
             from odds_lambda.jobs.fetch_oddsportal import IngestionStats
 
@@ -130,6 +223,7 @@ class TestRetryCountIntegration:
 
             await main(retry_count=0)
 
+            # Last call is the retry re-schedule (overwrites pre-schedule)
             call_kwargs = mock_backend.schedule_next_execution.call_args
             assert call_kwargs.kwargs["payload"] == {"retry_count": 1}
 
@@ -153,6 +247,7 @@ class TestRetryCountIntegration:
                 return_value=mock_backend,
             ),
             patch("odds_core.config.get_settings") as mock_settings,
+            patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
         ):
             from odds_lambda.jobs.fetch_oddsportal import IngestionStats
 
@@ -163,6 +258,8 @@ class TestRetryCountIntegration:
 
             await main(retry_count=2)
 
+            # Only the pre-schedule fires on success (no retry re-schedule)
+            assert mock_backend.schedule_next_execution.call_count == 1
             call_kwargs = mock_backend.schedule_next_execution.call_args
             # retry_count=0 means no payload (None)
             assert call_kwargs.kwargs.get("payload") is None
