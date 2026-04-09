@@ -138,7 +138,7 @@ class RailwayBackend(SchedulerBackend):
         self,
         job_name: str,
         next_time: datetime,
-        _payload: dict[str, object] | None = None,
+        payload: dict[str, object] | None = None,
     ) -> None:
         """
         No-op: Railway uses static cron schedules.
