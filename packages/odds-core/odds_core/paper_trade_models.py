@@ -38,12 +38,14 @@ class PaperTrade(SQLModel, table=True):
     confidence: float | None = Field(default=None, description="Agent confidence score (0-1)")
 
     # Bankroll tracking
+    # Bankroll snapshots are per-trade only (bankroll_before at placement, bankroll_after at
+    # settlement as bankroll_before + pnl). They do not reflect other trades placed in between.
     bankroll_before: float = Field(description="Bankroll before this bet")
     bankroll_after: float | None = Field(default=None, description="Bankroll after settlement")
 
     # Timestamps
     placed_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True)),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
         default_factory=utc_now,
         description="When the bet was placed",
     )
