@@ -4,15 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 
+from odds_analytics.utils import calculate_profit_from_odds, determine_h2h_winner
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-if TYPE_CHECKING:
-    from odds_analytics.backtesting.models import BetRecord
 
 
 @dataclass(frozen=True)
@@ -31,26 +28,13 @@ class PortfolioSummary:
     push_count: int
 
 
-def _american_to_decimal(american: int) -> float:
-    """Convert American odds to decimal multiplier."""
-    if american > 0:
-        return 1.0 + american / 100.0
-    return 1.0 + 100.0 / abs(american)
-
-
 def _determine_result(
     selection: str,
     home_score: int,
     away_score: int,
 ) -> TradeResult:
     """Determine bet result from scores and selection (3-way h2h)."""
-    if home_score > away_score:
-        actual = "home"
-    elif away_score > home_score:
-        actual = "away"
-    else:
-        actual = "draw"
-
+    actual = determine_h2h_winner(home_score, away_score)
     if selection == actual:
         return TradeResult.WIN
     return TradeResult.LOSS
@@ -59,10 +43,9 @@ def _determine_result(
 def _compute_pnl(odds: int, stake: float, result: TradeResult) -> float:
     """Compute profit/loss for a settled trade."""
     if result == TradeResult.WIN:
-        decimal = _american_to_decimal(odds)
-        return stake * (decimal - 1.0)
+        return calculate_profit_from_odds(stake, odds, won=True)
     if result == TradeResult.LOSS:
-        return -stake
+        return calculate_profit_from_odds(stake, odds, won=False)
     # PUSH or VOID: return 0
     return 0.0
 
@@ -239,35 +222,3 @@ async def get_exposure_by_event(session: AsyncSession) -> list[tuple[str, float]
     )
     rows = (await session.execute(stmt)).all()
     return [(row[0], float(row[1])) for row in rows]
-
-
-def to_bet_record(
-    trade: PaperTrade,
-    event: Event,
-) -> BetRecord:
-    """Convert a settled PaperTrade to a BetRecord for backtest analysis tools."""
-    from odds_analytics.backtesting.models import BetRecord
-
-    assert trade.id is not None
-    return BetRecord(
-        bet_id=trade.id,
-        event_id=trade.event_id,
-        event_date=event.commence_time,
-        home_team=event.home_team,
-        away_team=event.away_team,
-        market=trade.market,
-        outcome=trade.selection,
-        bookmaker=trade.bookmaker,
-        odds=trade.odds,
-        line=None,
-        decision_time=trade.placed_at,
-        stake=trade.stake,
-        bankroll_before=trade.bankroll_before,
-        strategy_confidence=trade.confidence,
-        result=trade.result.value if trade.result else None,
-        profit=trade.pnl,
-        bankroll_after=trade.bankroll_after,
-        home_score=event.home_score,
-        away_score=event.away_score,
-        bet_rationale=trade.reasoning,
-    )

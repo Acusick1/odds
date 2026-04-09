@@ -1,12 +1,20 @@
 """Paper trade model for forward-looking bet tracking and settlement."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Column, DateTime, Index, text
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
+
+if TYPE_CHECKING:
+    from odds_analytics.backtesting.models import BetRecord
+
+    from odds_core.models import Event
 
 
 class TradeResult(str, Enum):
@@ -65,3 +73,31 @@ class PaperTrade(SQLModel, table=True):
         ),
         Index("ix_paper_trades_event_selection", "event_id", "selection"),
     )
+
+    def to_bet_record(self, event: Event) -> BetRecord:
+        """Convert a settled PaperTrade to a BetRecord for backtest analysis tools."""
+        from odds_analytics.backtesting.models import BetRecord
+
+        assert self.id is not None
+        return BetRecord(
+            bet_id=self.id,
+            event_id=self.event_id,
+            event_date=event.commence_time,
+            home_team=event.home_team,
+            away_team=event.away_team,
+            market=self.market,
+            outcome=self.selection,
+            bookmaker=self.bookmaker,
+            odds=self.odds,
+            line=None,
+            decision_time=self.placed_at,
+            stake=self.stake,
+            bankroll_before=self.bankroll_before,
+            strategy_confidence=self.confidence,
+            result=self.result.value if self.result else None,
+            profit=self.pnl,
+            bankroll_after=self.bankroll_after,
+            home_score=event.home_score,
+            away_score=event.away_score,
+            bet_rationale=self.reasoning,
+        )

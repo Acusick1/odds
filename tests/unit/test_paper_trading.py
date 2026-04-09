@@ -3,17 +3,16 @@
 from datetime import UTC, datetime
 
 import pytest
+from odds_analytics.utils import american_to_decimal
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_lambda.paper_trading import (
-    _american_to_decimal,
     _compute_pnl,
     _determine_result,
     get_open_trades,
     get_portfolio_summary,
     place_trade,
     settle_trades,
-    to_bet_record,
 )
 
 
@@ -62,17 +61,19 @@ class TestComputePnl:
 
 
 class TestAmericanToDecimal:
+    """Verify odds_analytics.utils.american_to_decimal (shared utility)."""
+
     def test_positive_odds(self) -> None:
-        assert _american_to_decimal(200) == pytest.approx(3.0)
+        assert american_to_decimal(200) == pytest.approx(3.0)
 
     def test_negative_odds(self) -> None:
-        assert _american_to_decimal(-200) == pytest.approx(1.5)
+        assert american_to_decimal(-200) == pytest.approx(1.5)
 
     def test_even_money(self) -> None:
-        assert _american_to_decimal(100) == pytest.approx(2.0)
+        assert american_to_decimal(100) == pytest.approx(2.0)
 
     def test_heavy_favorite(self) -> None:
-        assert _american_to_decimal(-500) == pytest.approx(1.2)
+        assert american_to_decimal(-500) == pytest.approx(1.2)
 
 
 class TestPlaceTrade:
@@ -352,7 +353,7 @@ class TestToBetRecord:
             settled_at=datetime(2026, 4, 10, 17, 0, tzinfo=UTC),
         )
 
-        record = to_bet_record(trade, event)
+        record = trade.to_bet_record(event)
 
         assert record.bet_id == 42
         assert record.event_id == "evt-conv-1"
