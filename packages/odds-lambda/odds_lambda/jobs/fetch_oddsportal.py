@@ -2,14 +2,20 @@
 
 Scrapes pre-match odds for configured leagues, converts to pipeline format,
 and stores via OddsWriter. Self-schedules next execution based on scrape
-outcome and game proximity.
+outcome.
+
+Self-scheduling strategy: defensively schedule at retry cadence before any
+work (no DB needed), then reschedule at normal cadence on success. If
+anything fails — DB, browser, Lambda timeout — the retry schedule is already
+set and the chain survives.
 
 This job:
-1. Scrapes upcoming matches from OddsPortal (via OddsHarvester)
-2. Converts fractional odds to pipeline raw_data format
-3. Matches or creates Event records
-4. Stores snapshots via OddsWriter.store_odds_snapshot()
-5. Self-schedules next execution via scheduler backend
+1. Pre-schedules next run at retry cadence (no DB, survives any failure)
+2. Scrapes upcoming matches from OddsPortal (via OddsHarvester)
+3. Converts fractional odds to pipeline raw_data format
+4. Matches or creates Event records
+5. Stores snapshots via OddsWriter.store_odds_snapshot()
+6. On success, reschedules at normal cadence (1h) with overnight skip
 """
 
 from __future__ import annotations
@@ -44,7 +50,6 @@ RETRY_DELAY_MINUTES_MAX = 15
 MAX_FAST_RETRIES = 2
 OVERNIGHT_RESUME_HOUR_UTC = 6
 OVERNIGHT_START_HOUR_UTC = 22
-GAME_LOOKAHEAD_HOURS = 8
 
 
 @dataclass
@@ -259,25 +264,6 @@ async def ingest_league(
     return stats
 
 
-async def _get_next_game_time(sport_key: str = LEAGUE_SPECS[0].sport_key) -> datetime | None:
-    """Find the commence_time of the nearest upcoming scheduled game."""
-    from odds_lambda.storage.readers import OddsReader
-
-    async with async_session_maker() as session:
-        reader = OddsReader(session)
-        now = datetime.now(UTC)
-        events = await reader.get_events_by_date_range(
-            start_date=now,
-            end_date=now + timedelta(days=14),
-            sport_key=sport_key,
-            status=EventStatus.SCHEDULED,
-        )
-
-    if not events:
-        return None
-    return min(e.commence_time for e in events)
-
-
 def _calculate_next_execution(
     *,
     success: bool,
@@ -304,19 +290,17 @@ def _calculate_next_execution(
     return now + timedelta(hours=NORMAL_INTERVAL_HOURS), 0
 
 
-def _apply_overnight_skip(next_time: datetime, next_game_time: datetime | None) -> datetime:
-    """Push next_time to morning if overnight and no imminent games."""
-    hours_to_game = float("inf")
-    if next_game_time is not None:
-        hours_to_game = (next_game_time - next_time).total_seconds() / 3600
+def _apply_overnight_skip(next_time: datetime) -> datetime:
+    """Push next_time to morning if overnight.
 
+    EPL games never kick off during the overnight window (22:00-06:00 UTC),
+    so no game-proximity check is needed.
+    """
     is_overnight = (
         next_time.hour >= OVERNIGHT_START_HOUR_UTC or next_time.hour < OVERNIGHT_RESUME_HOUR_UTC
     )
-    no_imminent_games = hours_to_game > GAME_LOOKAHEAD_HOURS
 
-    if is_overnight and no_imminent_games:
-        # Skip to 06:00 UTC the next morning (or same morning if before 06:00)
+    if is_overnight:
         resume = next_time.replace(
             hour=OVERNIGHT_RESUME_HOUR_UTC, minute=0, second=0, microsecond=0
         )
@@ -366,6 +350,10 @@ async def main(
 ) -> None:
     """Main job execution — scrapes configured league(s), then self-schedules.
 
+    Scheduling strategy: defensively pre-schedule at retry cadence (no DB
+    needed) so the chain survives any failure including Lambda timeouts. On
+    success, reschedule at normal cadence with overnight skip.
+
     Args:
         sport: Sport key (e.g. "soccer_epl"). When provided, only the matching
             LeagueSpec is scraped. Falls back to all LEAGUE_SPECS.
@@ -387,20 +375,21 @@ async def main(
         specs = LEAGUE_SPECS
 
     compound_job_name = make_compound_job_name("fetch-oddsportal", sport)
-    sport_key_for_lookup = sport or LEAGUE_SPECS[0].sport_key
 
-    # Pre-schedule at normal cadence BEFORE scraping so the chain survives
-    # Lambda timeouts. Updated to retry interval after scrape if needed.
-    now = datetime.now(UTC)
-    default_next_time = _apply_overnight_skip(
-        now + timedelta(hours=NORMAL_INTERVAL_HOURS),
-        await _get_next_game_time(sport_key=sport_key_for_lookup),
+    # Defensive pre-schedule at retry cadence BEFORE any DB or browser work.
+    # No DB query needed — just now + retry delay. If anything fails (DB down,
+    # browser crash, Lambda timeout), this schedule is already set.
+    defensive_next_time, defensive_retry_count = _calculate_next_execution(
+        success=False,
+        retry_count=retry_count,
+        now=datetime.now(UTC),
     )
+    defensive_next_time = _apply_overnight_skip(defensive_next_time)
     try:
         await _self_schedule(
             job_name=compound_job_name,
-            next_time=default_next_time,
-            next_retry_count=0,
+            next_time=defensive_next_time,
+            next_retry_count=defensive_retry_count,
             dry_run=settings.scheduler.dry_run,
             sport=sport,
         )
@@ -456,28 +445,21 @@ async def main(
                 message=f"⚠️ OddsPortal scrape empty ({detail}), retry #{retry_count}",
             )
 
-    # If scrape failed, update schedule to retry sooner
-    scrape_success = total_scraped > 0
-    if not scrape_success:
-        retry_next_time, next_retry_count = _calculate_next_execution(
-            success=False,
-            retry_count=retry_count,
-            now=datetime.now(UTC),
-        )
-        retry_next_time = _apply_overnight_skip(
-            retry_next_time,
-            await _get_next_game_time(sport_key=sport_key_for_lookup),
+    # On success, push schedule out to normal cadence
+    if total_scraped > 0:
+        success_next_time = _apply_overnight_skip(
+            datetime.now(UTC) + timedelta(hours=NORMAL_INTERVAL_HOURS),
         )
         try:
             await _self_schedule(
                 job_name=compound_job_name,
-                next_time=retry_next_time,
-                next_retry_count=next_retry_count,
+                next_time=success_next_time,
+                next_retry_count=0,
                 dry_run=settings.scheduler.dry_run,
                 sport=sport,
             )
         except Exception as e:
-            logger.error("fetch_oddsportal_retry_scheduling_failed", error=str(e), exc_info=True)
+            logger.error("fetch_oddsportal_success_scheduling_failed", error=str(e), exc_info=True)
 
 
 if __name__ == "__main__":
