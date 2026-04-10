@@ -25,7 +25,7 @@ from odds_lambda.paper_trading import (
     settle_trades,
 )
 from odds_lambda.storage.readers import OddsReader
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 logger = structlog.get_logger()
 
@@ -289,18 +289,24 @@ async def refresh_scrape(
 
 
 @mcp.tool()
-async def get_predictions(event_id: str) -> dict[str, Any]:
+async def get_predictions(
+    event_id: str,
+    limit: int = 5,
+    since_hours: float | None = None,
+) -> dict[str, Any]:
     """Get pre-scored CLV predictions for an event.
 
     Reads predictions stored by the scoring pipeline (not on-demand inference).
-    Returns all predictions (one per snapshot scored) for the given event,
-    ordered by creation time. If no predictions exist, returns an empty list.
+    Returns the most recent predictions for the given event. Use `limit` to
+    control how many are returned, or `since_hours` to filter by recency.
 
     Args:
         event_id: Event identifier.
+        limit: Maximum number of predictions to return (most recent first). Default 5.
+        since_hours: If set, only return predictions from the last N hours.
 
     Returns:
-        Dict with event info and list of prediction records.
+        Dict with event info, total prediction count, and the filtered list.
     """
     async with async_session_maker() as session:
         reader = OddsReader(session)
@@ -308,16 +314,26 @@ async def get_predictions(event_id: str) -> dict[str, Any]:
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        pred_result = await session.execute(
-            select(Prediction)
-            .where(Prediction.event_id == event_id)
-            .order_by(Prediction.created_at)
+        query = select(Prediction).where(Prediction.event_id == event_id)
+
+        if since_hours is not None:
+            cutoff = datetime.now(UTC) - timedelta(hours=since_hours)
+            query = query.where(Prediction.created_at >= cutoff)
+
+        # Total count before limit (so caller knows if there are more)
+        count_result = await session.execute(
+            select(func.count(Prediction.id)).where(Prediction.event_id == event_id)
         )
+        total_count = count_result.scalar() or 0
+
+        query = query.order_by(Prediction.created_at.desc()).limit(max(1, limit))
+        pred_result = await session.execute(query)
         predictions = list(pred_result.scalars().all())
 
     return {
         "event": _event_to_dict(event),
-        "prediction_count": len(predictions),
+        "total_predictions": total_count,
+        "returned": len(predictions),
         "predictions": [
             {
                 "id": p.id,
