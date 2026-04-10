@@ -219,10 +219,17 @@ class LocalSchedulerBackend(SchedulerBackend):
         self._ensure_started()
 
         try:
-            # Get job function from centralized registry
-            from odds_lambda.scheduling.jobs import get_job_function
+            # Resolve compound job names (e.g. "fetch-oddsportal-epl" -> "fetch-oddsportal")
+            # mirroring how the Lambda handler resolves them at invocation time.
+            from odds_lambda.scheduling.jobs import get_job_function, resolve_job_name
 
-            job_func = get_job_function(job_name)
+            base_name, resolved_sport = resolve_job_name(job_name)
+            job_func = get_job_function(base_name)
+
+            # Merge resolved sport into payload so the job receives it as a kwarg
+            job_kwargs: dict[str, object] = dict(payload) if payload else {}
+            if resolved_sport and "sport" not in job_kwargs:
+                job_kwargs["sport"] = resolved_sport
 
             # Remove existing job if present (replace with new schedule)
             if self.scheduler.get_job(job_name):
@@ -237,6 +244,7 @@ class LocalSchedulerBackend(SchedulerBackend):
                 id=job_name,
                 name=f"Odds {job_name}",
                 replace_existing=True,
+                kwargs=job_kwargs if job_kwargs else None,
             )
 
             logger.info(
