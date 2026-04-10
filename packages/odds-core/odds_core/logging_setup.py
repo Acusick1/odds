@@ -47,6 +47,7 @@ def configure_logging(settings: Settings, json_output: bool = False) -> None:
         structlog.stdlib.add_log_level,
         structlog.processors.StackInfoRenderer(),
         structlog.dev.set_exc_info,
+        structlog.processors.format_exc_info,
         structlog.processors.TimeStamper(fmt="iso", utc=True),
     ]
 
@@ -154,6 +155,7 @@ def _configure_console_only(settings: Settings, json_output: bool) -> None:
         structlog.stdlib.add_log_level,
         structlog.processors.StackInfoRenderer(),
         structlog.dev.set_exc_info,
+        structlog.processors.format_exc_info,
         structlog.processors.TimeStamper(fmt="iso", utc=True),
     ]
 
