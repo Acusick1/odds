@@ -10,6 +10,9 @@ from typing import Any, Literal
 
 import structlog
 from fastmcp import FastMCP
+from odds_analytics.backtesting import BacktestEvent
+from odds_analytics.feature_extraction import TabularFeatureExtractor
+from odds_analytics.sequence_loader import extract_odds_from_snapshot
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade
@@ -37,9 +40,11 @@ mcp = FastMCP(
 # Build league lookup from canonical LEAGUE_SPECS
 _LEAGUE_SPEC_BY_NAME: dict[str, Any] = {spec.league: spec for spec in LEAGUE_SPECS}
 
-# Hybrid sharp reference matching production defaults
+# Hybrid sharp reference matching production defaults.
+# Duplicated from feature_extraction.py DEFAULT_SHARP_BOOKMAKERS / DEFAULT_RETAIL_BOOKMAKERS
+# with EPL-specific overrides — keep in sync.
 _DEFAULT_SHARP_BOOKMAKERS = ["pinnacle", "betfair_exchange"]
-_DEFAULT_RETAIL_BOOKMAKERS = ["fanduel", "draftkings", "betmgm"]
+_DEFAULT_RETAIL_BOOKMAKERS = ["bet365", "betway", "betfred"]
 
 
 def _event_to_dict(event: Event) -> dict[str, Any]:
@@ -168,14 +173,18 @@ async def get_upcoming_fixtures(
 
 
 @mcp.tool()
-async def get_current_odds(event_id: str) -> dict[str, Any]:
+async def get_current_odds(
+    event_id: str,
+    include_raw_data: bool = False,
+) -> dict[str, Any]:
     """Get the latest odds snapshot for an event, showing current bookmaker prices.
 
     Args:
         event_id: Event identifier.
+        include_raw_data: If True, also include the full raw_data JSON blob.
 
     Returns:
-        Dict with event info and the latest snapshot including full raw bookmaker odds data.
+        Dict with event info and the latest snapshot with structured odds.
     """
     async with async_session_maker() as session:
         reader = OddsReader(session)
@@ -191,9 +200,12 @@ async def get_current_odds(event_id: str) -> dict[str, Any]:
                 "message": "No odds snapshots available for this event",
             }
 
+    odds = extract_odds_from_snapshot(snapshot, event_id, market="h2h")
     return {
         "event": _event_to_dict(event),
-        "snapshot": _snapshot_to_dict(snapshot, include_raw_data=True),
+        "snapshot": _snapshot_to_dict(
+            snapshot, include_raw_data=include_raw_data, extracted_odds=odds
+        ),
     }
 
 
@@ -210,8 +222,6 @@ async def get_odds_history(event_id: str) -> dict[str, Any]:
     Returns:
         Dict with event info and chronologically ordered list of snapshots.
     """
-    from odds_analytics.sequence_loader import extract_odds_from_snapshot
-
     async with async_session_maker() as session:
         reader = OddsReader(session)
         event = await reader.get_event_by_id(event_id)
@@ -279,9 +289,10 @@ async def refresh_scrape(
 
 
 @mcp.tool()
-async def get_model_prediction(event_id: str) -> dict[str, Any]:
-    """Get CLV model predictions for an event.
+async def get_predictions(event_id: str) -> dict[str, Any]:
+    """Get pre-scored CLV predictions for an event.
 
+    Reads predictions stored by the scoring pipeline (not on-demand inference).
     Returns all predictions (one per snapshot scored) for the given event,
     ordered by creation time. If no predictions exist, returns an empty list.
 
@@ -328,17 +339,18 @@ async def get_event_features(
     sharp_bookmakers: list[str] | None = None,
     retail_bookmakers: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Get the feature vector for an event's latest snapshot.
+    """Get tabular features for an event's latest snapshot.
 
-    Extracts tabular features (bookmaker odds, implied probabilities,
-    market consensus) plus hours_until_event. Uses the same feature
-    extraction pipeline as the scoring job.
+    Extracts tabular features only (bookmaker odds, implied probabilities,
+    market consensus) plus hours_until_event. Does not include other feature
+    groups (standings, schedule, match_stats) which require additional data
+    sources not available via this tool.
 
     Args:
         event_id: Event identifier.
         outcome: Which outcome to extract features for ("home" or "away").
         sharp_bookmakers: Sharp bookmaker keys (default: ["pinnacle", "betfair_exchange"]).
-        retail_bookmakers: Retail bookmaker keys (default: ["fanduel", "draftkings", "betmgm"]).
+        retail_bookmakers: Retail bookmaker keys (default: ["bet365", "betway", "betfred"]).
 
     Returns:
         Dict with event info and feature name/value pairs.
@@ -391,10 +403,6 @@ def _extract_features_for_event(
     retail_bookmakers: list[str],
 ) -> dict[str, float | None]:
     """Extract feature dict from an event and its latest snapshot."""
-    from odds_analytics.backtesting import BacktestEvent
-    from odds_analytics.feature_extraction import TabularFeatureExtractor
-    from odds_analytics.sequence_loader import extract_odds_from_snapshot
-
     odds = extract_odds_from_snapshot(snapshot, event.id, market="h2h")
     if not odds:
         return {"error": "No h2h odds data in snapshot"}
@@ -489,7 +497,10 @@ async def paper_bet(
                 confidence=confidence,
             )
             await session.commit()
+        except ValueError as e:
+            return {"error": str(e), "error_type": "ValueError"}
         except Exception as e:
+            logger.error("paper_bet_failed", event_id=event_id, error=str(e), exc_info=True)
             return {"error": str(e), "error_type": type(e).__name__}
 
     return {

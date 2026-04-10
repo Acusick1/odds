@@ -256,10 +256,10 @@ class TestGetCurrentOddsMissingEvent:
             assert "nonexistent" in result["error"]
 
 
-class TestGetModelPredictionMissingEvent:
+class TestGetPredictionsMissingEvent:
     @pytest.mark.asyncio
     async def test_missing_event(self) -> None:
-        from odds_mcp.server import get_model_prediction
+        from odds_mcp.server import get_predictions
 
         mock_reader = AsyncMock()
         mock_reader.get_event_by_id = AsyncMock(return_value=None)
@@ -271,7 +271,7 @@ class TestGetModelPredictionMissingEvent:
             mock_session_maker.return_value.__aenter__ = AsyncMock()
             mock_session_maker.return_value.__aexit__ = AsyncMock()
 
-            result = await get_model_prediction("nonexistent")
+            result = await get_predictions("nonexistent")
             assert "error" in result
 
 
