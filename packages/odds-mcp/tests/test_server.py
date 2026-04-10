@@ -256,7 +256,33 @@ class TestGetCurrentOddsMissingEvent:
             assert "nonexistent" in result["error"]
 
 
-class TestGetPredictionsMissingEvent:
+class TestGetPredictions:
+    def _make_event(self) -> MagicMock:
+        event = MagicMock(spec=Event)
+        event.id = "evt-1"
+        event.sport_key = "soccer_epl"
+        event.sport_title = "EPL"
+        event.home_team = "Arsenal"
+        event.away_team = "Chelsea"
+        event.commence_time = datetime(2026, 4, 12, 15, 0, tzinfo=UTC)
+        event.status = EventStatus.SCHEDULED
+        event.home_score = None
+        event.away_score = None
+        event.completed_at = None
+        return event
+
+    def _make_prediction(self, id: int, hours_ago: float, clv: float) -> MagicMock:
+        from odds_core.prediction_models import Prediction
+
+        pred = MagicMock(spec=Prediction)
+        pred.id = id
+        pred.snapshot_id = id * 100
+        pred.model_name = "epl-clv-home"
+        pred.model_version = "v1"
+        pred.predicted_clv = clv
+        pred.created_at = datetime(2026, 4, 12, 15, 0, tzinfo=UTC)
+        return pred
+
     @pytest.mark.asyncio
     async def test_missing_event(self) -> None:
         from odds_mcp.server import get_predictions
@@ -273,6 +299,93 @@ class TestGetPredictionsMissingEvent:
 
             result = await get_predictions("nonexistent")
             assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_default_limit(self) -> None:
+        from odds_mcp.server import get_predictions
+
+        preds = [self._make_prediction(i, i, 0.01 * i) for i in range(1, 11)]
+
+        mock_reader = AsyncMock()
+        mock_reader.get_event_by_id = AsyncMock(return_value=self._make_event())
+
+        # Mock session.execute to return count then predictions
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = 10
+
+        mock_pred_result = MagicMock()
+        mock_pred_result.scalars.return_value.all.return_value = preds[:5]
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[mock_count_result, mock_pred_result])
+
+        with (
+            patch("odds_mcp.server.async_session_maker") as mock_session_maker,
+            patch("odds_mcp.server.OddsReader", return_value=mock_reader),
+        ):
+            mock_session_maker.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session_maker.return_value.__aexit__ = AsyncMock()
+
+            result = await get_predictions("evt-1")
+            assert result["total_matching"] == 10
+            assert result["returned"] == 5
+            assert len(result["predictions"]) == 5
+
+    @pytest.mark.asyncio
+    async def test_custom_limit(self) -> None:
+        from odds_mcp.server import get_predictions
+
+        preds = [self._make_prediction(i, i, 0.01 * i) for i in range(1, 4)]
+
+        mock_reader = AsyncMock()
+        mock_reader.get_event_by_id = AsyncMock(return_value=self._make_event())
+
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = 10
+
+        mock_pred_result = MagicMock()
+        mock_pred_result.scalars.return_value.all.return_value = preds
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[mock_count_result, mock_pred_result])
+
+        with (
+            patch("odds_mcp.server.async_session_maker") as mock_session_maker,
+            patch("odds_mcp.server.OddsReader", return_value=mock_reader),
+        ):
+            mock_session_maker.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session_maker.return_value.__aexit__ = AsyncMock()
+
+            result = await get_predictions("evt-1", limit=3)
+            assert result["returned"] == 3
+
+    @pytest.mark.asyncio
+    async def test_no_predictions(self) -> None:
+        from odds_mcp.server import get_predictions
+
+        mock_reader = AsyncMock()
+        mock_reader.get_event_by_id = AsyncMock(return_value=self._make_event())
+
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = 0
+
+        mock_pred_result = MagicMock()
+        mock_pred_result.scalars.return_value.all.return_value = []
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[mock_count_result, mock_pred_result])
+
+        with (
+            patch("odds_mcp.server.async_session_maker") as mock_session_maker,
+            patch("odds_mcp.server.OddsReader", return_value=mock_reader),
+        ):
+            mock_session_maker.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session_maker.return_value.__aexit__ = AsyncMock()
+
+            result = await get_predictions("evt-1")
+            assert result["total_matching"] == 0
+            assert result["returned"] == 0
+            assert result["predictions"] == []
 
 
 class TestPaperBetValidation:

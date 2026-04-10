@@ -294,19 +294,19 @@ async def get_predictions(
     limit: int = 5,
     since_hours: float | None = None,
 ) -> dict[str, Any]:
-    """Get pre-scored CLV predictions for an event.
+    """Get pre-scored CLV predictions for an event (most recent first).
 
     Reads predictions stored by the scoring pipeline (not on-demand inference).
-    Returns the most recent predictions for the given event. Use `limit` to
-    control how many are returned, or `since_hours` to filter by recency.
+    Returns up to `limit` predictions, newest first. Use `since_hours` to
+    restrict to recent predictions only.
 
     Args:
         event_id: Event identifier.
-        limit: Maximum number of predictions to return (most recent first). Default 5.
-        since_hours: If set, only return predictions from the last N hours.
+        limit: Max predictions to return, newest first. Clamped to 1 minimum. Default 5.
+        since_hours: If set, only return predictions created in the last N hours.
 
     Returns:
-        Dict with event info, total prediction count, and the filtered list.
+        Dict with event info, total matching count, and the limited list.
     """
     async with async_session_maker() as session:
         reader = OddsReader(session)
@@ -320,11 +320,10 @@ async def get_predictions(
             cutoff = datetime.now(UTC) - timedelta(hours=since_hours)
             query = query.where(Prediction.created_at >= cutoff)
 
-        # Total count before limit (so caller knows if there are more)
-        count_result = await session.execute(
-            select(func.count(Prediction.id)).where(Prediction.event_id == event_id)
-        )
-        total_count = count_result.scalar() or 0
+        # Count matching rows (respects since_hours filter)
+        count_query = query.with_only_columns(func.count(Prediction.id))
+        count_result = await session.execute(count_query)
+        total_matching = count_result.scalar() or 0
 
         query = query.order_by(Prediction.created_at.desc()).limit(max(1, limit))
         pred_result = await session.execute(query)
@@ -332,7 +331,7 @@ async def get_predictions(
 
     return {
         "event": _event_to_dict(event),
-        "total_predictions": total_count,
+        "total_matching": total_matching,
         "returned": len(predictions),
         "predictions": [
             {
@@ -578,3 +577,7 @@ async def settle_bets() -> dict[str, Any]:
         "total_pnl": total_pnl,
         "settled_trades": serialized,
     }
+
+
+if __name__ == "__main__":
+    mcp.run()
