@@ -241,7 +241,7 @@ class TestLocalSchedulerBackend:
         # Create a flag to track execution
         executed = asyncio.Event()
 
-        async def test_job():
+        async def test_job(ctx):
             executed.set()
 
         with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=test_job):
@@ -264,10 +264,10 @@ class TestLocalSchedulerBackend:
         job1_executed = asyncio.Event()
         job2_executed = asyncio.Event()
 
-        async def job1():
+        async def job1(ctx):
             job1_executed.set()
 
-        async def job2():
+        async def job2(ctx):
             job2_executed.set()
 
         def get_job_func(job_name):

@@ -8,6 +8,7 @@ from freezegun import freeze_time
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.jobs import fetch_polymarket
 from odds_lambda.polymarket_ingestion import PolymarketIngestionResult
+from odds_lambda.scheduling.jobs import JobContext
 
 FROZEN_NOW = datetime(2024, 6, 15, 12, 0, 0, tzinfo=UTC)
 
@@ -120,7 +121,7 @@ class TestFetchPolymarketMain:
     @pytest.mark.asyncio
     async def test_early_return_when_polymarket_disabled(self, job: JobMocks) -> None:
         job.settings.polymarket.enabled = False
-        await fetch_polymarket.main()
+        await fetch_polymarket.main(JobContext())
         job.client.get_nba_events.assert_not_called()
 
     @pytest.mark.asyncio
@@ -129,7 +130,7 @@ class TestFetchPolymarketMain:
         job.client.get_nba_events.return_value = []
         job.reader.get_active_events.return_value = [db_event]
 
-        await fetch_polymarket.main()
+        await fetch_polymarket.main(JobContext())
 
         job.backend.schedule_next_execution.assert_called_once()
         next_time = job.backend.schedule_next_execution.call_args.kwargs["next_time"]
@@ -140,7 +141,7 @@ class TestFetchPolymarketMain:
         job.client.get_nba_events.return_value = []
         job.reader.get_active_events.return_value = []
 
-        await fetch_polymarket.main()
+        await fetch_polymarket.main(JobContext())
 
         job.backend.schedule_next_execution.assert_called_once()
         next_time = job.backend.schedule_next_execution.call_args.kwargs["next_time"]
@@ -159,7 +160,7 @@ class TestFetchPolymarketMain:
         job.service.discover_and_upsert_events.return_value = discovery_result
         job.service.collect_snapshots.return_value = snapshot_result
 
-        await fetch_polymarket.main()
+        await fetch_polymarket.main(JobContext())
 
         job.service.discover_and_upsert_events.assert_called_once_with([{"id": "ev-1"}])
         job.service.collect_snapshots.assert_called_once()
@@ -174,7 +175,7 @@ class TestFetchPolymarketMain:
         job.service.discover_and_upsert_events.return_value = discovery_result
         job.service.collect_snapshots.return_value = snapshot_result
 
-        await fetch_polymarket.main()
+        await fetch_polymarket.main(JobContext())
 
         job.backend.schedule_next_execution.assert_called_once()
         next_time = job.backend.schedule_next_execution.call_args.kwargs["next_time"]
@@ -193,7 +194,7 @@ class TestFetchPolymarketMain:
         job.service.discover_and_upsert_events.return_value = discovery_result
         job.service.collect_snapshots.return_value = snapshot_result
 
-        await fetch_polymarket.main()
+        await fetch_polymarket.main(JobContext())
 
         job.log_writer.log_fetch.assert_called_once()
         log_arg = job.log_writer.log_fetch.call_args.args[0]
@@ -208,7 +209,7 @@ class TestFetchPolymarketMain:
         job.client.get_nba_events.side_effect = Exception("API down")
 
         with pytest.raises(Exception, match="API down"):
-            await fetch_polymarket.main()
+            await fetch_polymarket.main(JobContext())
 
         job.log_writer.log_fetch.assert_called_once()
         log_arg = job.log_writer.log_fetch.call_args.args[0]
@@ -229,7 +230,7 @@ class TestFetchPolymarketMain:
         job.service.discover_and_upsert_events.return_value = discovery_result
         job.service.collect_snapshots.return_value = snapshot_result
 
-        await fetch_polymarket.main()
+        await fetch_polymarket.main(JobContext())
 
         job.backend.schedule_next_execution.assert_called_once()
         next_time = job.backend.schedule_next_execution.call_args.kwargs["next_time"]
@@ -247,4 +248,4 @@ class TestFetchPolymarketMain:
         job.service.collect_snapshots.return_value = snapshot_result
         job.backend.schedule_next_execution.side_effect = Exception("Scheduler unreachable")
 
-        await fetch_polymarket.main()  # must not raise
+        await fetch_polymarket.main(JobContext())  # must not raise

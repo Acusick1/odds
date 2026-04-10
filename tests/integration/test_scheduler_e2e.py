@@ -158,7 +158,7 @@ async def test_scheduler_end_to_end(
             session_factory=mock_session_factory,
         )
 
-    async def wrapped_fetch_odds():
+    async def wrapped_fetch_odds(ctx=None):
         """Wrapped job with mocked dependencies."""
         mock_event_sync = AsyncMock()
         mock_event_sync.sync_sports = AsyncMock(return_value=[])
@@ -173,7 +173,9 @@ async def test_scheduler_end_to_end(
             execution_happened["fetch_odds"] = True
 
             # Execute the real job
-            await original_main()
+            from odds_lambda.scheduling.jobs import JobContext
+
+            await original_main(JobContext())
 
     # Start the scheduler backend
     async with LocalSchedulerBackend(dry_run=False) as backend:
@@ -320,7 +322,9 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
             mock_backend_getter.return_value = mock_backend
 
             # Execute job
-            await fetch_odds.main()
+            from odds_lambda.scheduling.jobs import JobContext
+
+            await fetch_odds.main(JobContext())
 
         # Verify self-scheduling
         assert len(scheduled_calls) == 1, f"Expected 1 schedule call for {tier_name}"

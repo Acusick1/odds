@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from odds_core.polymarket_models import PolymarketMarket, PolymarketMarketType
 from odds_lambda.jobs import backfill_polymarket
+from odds_lambda.scheduling.jobs import JobContext
 
 
 class TestBackfillMarketHistory:
@@ -253,7 +254,7 @@ class TestMainIntegration:
             "odds_lambda.jobs.backfill_polymarket.get_settings",
             return_value=mock_polymarket_settings,
         ):
-            await backfill_polymarket.main(dry_run=True)
+            await backfill_polymarket.main(JobContext(dry_run=True))
 
         # No assertions needed - just verifies no exceptions raised and early return
 
@@ -337,9 +338,7 @@ class TestMainIntegration:
                 patch("odds_lambda.jobs.backfill_polymarket.asyncio.sleep"),
             ):
                 await backfill_polymarket.main(
-                    include_spreads=False,  # Spreads NOT included
-                    include_totals=False,
-                    dry_run=False,
+                    JobContext(include_spreads=False, include_totals=False, dry_run=False)
                 )
 
             # Only 1 call for moneyline market, not 2
@@ -405,9 +404,7 @@ class TestMainIntegration:
                 patch("odds_lambda.jobs.backfill_polymarket.asyncio.sleep"),
             ):
                 await backfill_polymarket.main(
-                    include_spreads=True,  # Spreads INCLUDED
-                    include_totals=False,
-                    dry_run=False,
+                    JobContext(include_spreads=True, include_totals=False, dry_run=False)
                 )
 
             # 2 calls: one for moneyline, one for spread
@@ -479,7 +476,7 @@ class TestMainIntegration:
                 ),
             ):
                 # Should not raise exception
-                await backfill_polymarket.main(dry_run=True)
+                await backfill_polymarket.main(JobContext(dry_run=True))
 
             # Both events attempted
             assert mock_writer.upsert_event.call_count == 2
@@ -535,7 +532,7 @@ class TestMainIntegration:
                 ),
                 patch("odds_lambda.jobs.backfill_polymarket.asyncio.sleep"),
             ):
-                await backfill_polymarket.main(dry_run=True)
+                await backfill_polymarket.main(JobContext(dry_run=True))
 
             # Verify commit NOT called in dry run
             mock_async_session.commit.assert_not_called()
@@ -592,7 +589,7 @@ class TestMainIntegration:
                 ),
                 patch("odds_lambda.jobs.backfill_polymarket.asyncio.sleep"),
             ):
-                await backfill_polymarket.main(dry_run=False)
+                await backfill_polymarket.main(JobContext(dry_run=False))
 
             # Verify commit WAS called
             mock_async_session.commit.assert_called()

@@ -18,7 +18,7 @@ from odds_lambda.event_sync import EventSyncService
 from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.scheduling.backends import get_scheduler_backend
 from odds_lambda.scheduling.intelligence import SchedulingIntelligence
-from odds_lambda.scheduling.jobs import make_compound_job_name
+from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 
 logger = structlog.get_logger()
 
@@ -33,13 +33,8 @@ def build_event_sync_service(client: TheOddsAPIClient) -> EventSyncService:
     return EventSyncService(client=client)
 
 
-async def main(sport: str | None = None, **_kwargs: object) -> None:
-    """
-    Main job execution flow.
-
-    Args:
-        sport: Sport key to fetch (e.g. "soccer_epl"). Falls back to
-            ``data_collection.sports`` config when not provided.
+async def main(ctx: JobContext) -> None:
+    """Main job execution flow.
 
     Flow:
     1. Sync upcoming events from free /events endpoint (discovery)
@@ -49,6 +44,7 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
     5. Schedule next run via backend
     """
     app_settings = get_settings()
+    sport = ctx.sport
     sports = [sport] if sport else app_settings.data_collection.sports
 
     logger.info(
@@ -218,4 +214,4 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(JobContext()))

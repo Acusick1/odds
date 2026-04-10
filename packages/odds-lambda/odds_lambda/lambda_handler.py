@@ -25,7 +25,7 @@ import structlog
 from odds_core.config import get_settings
 from odds_core.logging_setup import configure_logging
 
-from odds_lambda.scheduling.jobs import resolve_job_name
+from odds_lambda.scheduling.jobs import JobContext, resolve_job_name
 
 # Configure structured logging for Lambda (JSON output for CloudWatch)
 configure_logging(get_settings(), json_output=True)
@@ -33,39 +33,12 @@ configure_logging(get_settings(), json_output=True)
 logger = structlog.get_logger()
 
 
-async def _run_job_async(job_name: str, **kwargs: object) -> None:
-    """Run the job module's main function asynchronously.
-
-    Extra kwargs from the event payload are passed to the job function.
-    Jobs that accept parameters should declare **kwargs to receive them;
-    jobs that don't will ignore extra fields (we inspect the signature).
-    """
-    import inspect
-
+async def _run_job_async(job_name: str, ctx: JobContext) -> None:
+    """Run the job module's main function with the given context."""
     from odds_lambda.scheduling.jobs import get_job_function
 
     job_fn = get_job_function(job_name)
-    sig = inspect.signature(job_fn)
-
-    # Determine which kwargs the function can accept
-    accepted_params = set(sig.parameters.keys())
-    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-
-    if kwargs:
-        if has_var_keyword:
-            await job_fn(**kwargs)
-        else:
-            # Pass only kwargs that match named parameters
-            filtered = {k: v for k, v in kwargs.items() if k in accepted_params}
-            dropped = {k: v for k, v in kwargs.items() if k not in accepted_params}
-            if dropped:
-                logger.debug("job_kwargs_filtered", job=job_name, dropped_keys=list(dropped))
-            if filtered:
-                await job_fn(**filtered)
-            else:
-                await job_fn()
-    else:
-        await job_fn()
+    await job_fn(ctx)
 
 
 def lambda_handler(event: dict, context: object) -> dict:
@@ -110,13 +83,14 @@ def lambda_handler(event: dict, context: object) -> dict:
             memory_limit=context.memory_limit_in_mb,
         )
 
-        # Build job params: everything except "job", plus sport if resolved
+        # Build JobContext from payload
         job_params: dict[str, object] = {k: v for k, v in event.items() if k != "job"}
         if sport and "sport" not in job_params:
             job_params["sport"] = sport
+        ctx = JobContext.from_payload(job_params)
 
         # Run async job
-        asyncio.run(_run_job_async(base_job_name, **job_params))
+        asyncio.run(_run_job_async(base_job_name, ctx))
 
         logger.info(
             "lambda_completed",

@@ -19,19 +19,14 @@ from odds_core.models import EventStatus
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.scheduling.backends import get_scheduler_backend
 from odds_lambda.scheduling.intelligence import SchedulingIntelligence
-from odds_lambda.scheduling.jobs import make_compound_job_name
+from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
 
-async def main(sport: str | None = None, **_kwargs: object) -> None:
-    """
-    Main job execution flow.
-
-    Args:
-        sport: Sport key to fetch scores for (e.g. "soccer_epl"). Falls back
-            to ``data_collection.sports`` config when not provided.
+async def main(ctx: JobContext) -> None:
+    """Main job execution flow.
 
     Flow:
     1. Check if we should execute (smart gating)
@@ -40,6 +35,7 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
     4. Schedule next run via backend
     """
     app_settings = get_settings()
+    sport = ctx.sport
     sports = [sport] if sport else app_settings.data_collection.sports
 
     logger.info(
@@ -166,4 +162,4 @@ async def _fetch_and_update_scores(sports: list[str]) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(JobContext()))

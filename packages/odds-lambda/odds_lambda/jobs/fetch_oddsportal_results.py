@@ -26,7 +26,7 @@ from odds_lambda.oddsportal_common import (
     parse_match_date,
     run_scraper_with_retry,
 )
-from odds_lambda.scheduling.jobs import make_compound_job_name
+from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -233,16 +233,13 @@ async def process_results(
     return stats
 
 
-async def main(sport: str | None = None, **_kwargs: object) -> None:
-    """Main job entry point — runs results collection, then self-schedules for tomorrow.
-
-    Args:
-        sport: Sport key (e.g. "soccer_epl"). Currently only soccer_epl is supported.
-    """
+async def main(ctx: JobContext) -> None:
+    """Main job entry point -- runs results collection, then self-schedules for tomorrow."""
     from odds_core.alerts import job_alert_context
     from odds_core.config import get_settings
 
     settings = get_settings()
+    sport = ctx.sport
 
     async with job_alert_context(make_compound_job_name("fetch-oddsportal-results", sport)):
         logger.info("fetch_oddsportal_results_started", sport=sport)
@@ -277,4 +274,4 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(JobContext()))

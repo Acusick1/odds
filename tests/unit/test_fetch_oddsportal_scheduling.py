@@ -18,6 +18,7 @@ from odds_lambda.jobs.fetch_oddsportal import (
     _calculate_next_execution,
     main,
 )
+from odds_lambda.scheduling.jobs import JobContext
 
 
 class TestCalculateNextExecution:
@@ -128,7 +129,7 @@ class TestDefensivePreScheduling:
             patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
         ):
             mock_settings.return_value.scheduler.dry_run = False
-            await main(retry_count=0)
+            await main(JobContext(retry_count=0))
 
         assert call_order[0] == "schedule", (
             "schedule_next_execution must be called before ingest_league"
@@ -159,7 +160,7 @@ class TestDefensivePreScheduling:
                 league="test", matches_scraped=5, snapshots_stored=3
             )
 
-            await main(retry_count=0)
+            await main(JobContext(retry_count=0))
 
         # Pre-schedule (retry cadence) + success reschedule (normal cadence)
         assert mock_backend.schedule_next_execution.call_count == 2
@@ -190,7 +191,7 @@ class TestDefensivePreScheduling:
             mock_settings.return_value.scheduler.dry_run = False
             mock_ingest.return_value = IngestionStats(league="test", matches_scraped=0)
 
-            await main(retry_count=0)
+            await main(JobContext(retry_count=0))
 
         # Only the defensive pre-schedule fires
         assert mock_backend.schedule_next_execution.call_count == 1
@@ -216,7 +217,7 @@ class TestDefensivePreScheduling:
             patch("odds_core.alerts.send_job_warning", new_callable=AsyncMock),
         ):
             mock_settings.return_value.scheduler.dry_run = False
-            await main(retry_count=0)
+            await main(JobContext(retry_count=0))
 
         # Only the defensive pre-schedule fires (no success reschedule)
         assert mock_backend.schedule_next_execution.call_count == 1
@@ -253,7 +254,7 @@ class TestRetryCountIntegration:
             mock_settings.return_value.scheduler.dry_run = False
             mock_ingest.return_value = IngestionStats(league="test", matches_scraped=0)
 
-            await main(retry_count=0)
+            await main(JobContext(retry_count=0))
 
             # Defensive pre-schedule has retry_count=1
             call_kwargs = mock_backend.schedule_next_execution.call_args
@@ -283,7 +284,7 @@ class TestRetryCountIntegration:
                 league="test", matches_scraped=5, snapshots_stored=3
             )
 
-            await main(retry_count=2)
+            await main(JobContext(retry_count=2))
 
             # Last call is the success reschedule with no retry payload
             assert mock_backend.schedule_next_execution.call_count == 2

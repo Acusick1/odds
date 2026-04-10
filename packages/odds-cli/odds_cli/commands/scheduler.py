@@ -60,8 +60,9 @@ def start_local():
 
         try:
             from odds_lambda.jobs import fetch_odds
+            from odds_lambda.scheduling.jobs import JobContext
 
-            await fetch_odds.main()
+            await fetch_odds.main(JobContext())
             console.print("[green]✓ Bootstrap complete[/green]\n")
         except Exception as e:
             console.print(f"[bold red]✗ Bootstrap failed:[/bold red] {e}\n")
@@ -118,12 +119,12 @@ def run_once(
 
     try:
         # Use centralized job registry
-        from odds_lambda.scheduling.jobs import get_job_function, list_available_jobs
+        from odds_lambda.scheduling.jobs import JobContext, get_job_function, list_available_jobs
 
         job_func = get_job_function(job)
 
         # Run job
-        asyncio.run(job_func())
+        asyncio.run(job_func(JobContext()))
 
         console.print(f"\n[bold green]✓ {job} completed[/bold green]")
 

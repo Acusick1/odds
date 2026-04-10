@@ -335,24 +335,16 @@ async def send_digest(
     return stats
 
 
-async def main(
-    sport: str | None = None,
-    lookback_hours: float = 24,
-    lookahead_hours: float = 48,
-    **_kwargs: object,
-) -> None:
-    """Main job entry point.
-
-    Args:
-        sport: Sport key (e.g. "soccer_epl"). Defaults to DEFAULT_SPORT_KEY.
-        lookback_hours: How far back to look for completed events.
-        lookahead_hours: How far ahead to look for upcoming events.
-    """
+async def main(ctx: JobContext) -> None:
+    """Main job entry point."""
     from odds_core.alerts import job_alert_context
 
     from odds_lambda.scheduling.jobs import make_compound_job_name
 
+    sport = ctx.sport
     sport_key = sport or DEFAULT_SPORT_KEY
+    lookback_hours = ctx.lookback_hours
+    lookahead_hours = ctx.lookahead_hours
 
     async with job_alert_context(make_compound_job_name("daily-digest", sport)):
         logger.info(
@@ -371,4 +363,6 @@ async def main(
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from odds_lambda.scheduling.jobs import JobContext
+
+    asyncio.run(main(JobContext()))

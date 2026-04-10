@@ -86,6 +86,7 @@ async def _backfill_async(
 
     # Import job module
     from odds_lambda.jobs import backfill_polymarket
+    from odds_lambda.scheduling.jobs import JobContext
 
     # Execute with progress indicator
     with Progress(
@@ -97,9 +98,11 @@ async def _backfill_async(
 
         try:
             await backfill_polymarket.main(
-                include_spreads=include_spreads,
-                include_totals=include_totals,
-                dry_run=dry_run,
+                JobContext(
+                    include_spreads=include_spreads,
+                    include_totals=include_totals,
+                    dry_run=dry_run,
+                )
             )
             progress.update(task, completed=True)
 
