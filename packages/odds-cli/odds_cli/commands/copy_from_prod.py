@@ -15,7 +15,7 @@ console = Console()
 def copy_from_production(
     start: str = typer.Argument(..., help="Start date (YYYY-MM-DD)"),
     end: str = typer.Argument(..., help="End date (YYYY-MM-DD)"),
-    sport: str = typer.Option("basketball_nba", "--sport", "-s", help="Sport to copy"),
+    sport: str = typer.Option("soccer_epl", "--sport", "-s", help="Sport to copy"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Perform dry run without writing data"),
     skip_existing: bool = typer.Option(
         True, "--skip-existing/--overwrite", help="Skip existing events"
@@ -24,22 +24,15 @@ def copy_from_production(
     local_url: str | None = typer.Option(None, "--local-url", help="Local database URL"),
 ):
     """
-    Copy completed games from production database to local database.
-
-    This performs a selective merge, copying only completed games with results
-    while preserving existing local data.
+    Copy events, snapshots, and predictions from production to local database.
 
     Examples:
-        # Copy October-November 2025 data (dry run first)
-        odds copy from-prod 2025-10-23 2025-11-07 --dry-run
+        odds copy from-prod 2025-08-01 2026-04-10
 
-        # Actually copy the data
-        odds copy from-prod 2025-10-23 2025-11-07
+        odds copy from-prod 2025-08-01 2026-04-10 --dry-run
 
-        # Copy with overwrite
-        odds copy from-prod 2025-10-23 2025-11-07 --overwrite
+        odds copy from-prod 2025-08-01 2026-04-10 --overwrite
     """
-    # Validate dates
     try:
         datetime.strptime(start, "%Y-%m-%d")
         datetime.strptime(end, "%Y-%m-%d")

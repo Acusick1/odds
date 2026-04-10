@@ -1,8 +1,7 @@
 """
-Copy completed games from production database to local database.
+Copy data from production database to local database.
 
-This script performs a selective merge, copying only completed games with results
-from the production database while preserving existing local data.
+Replicates events, snapshots, and predictions for a given sport and date range.
 """
 
 from __future__ import annotations
@@ -11,9 +10,11 @@ import os
 from datetime import UTC, datetime
 
 import structlog
-from odds_core.models import Event, EventStatus
+from odds_core.models import Event
+from odds_core.prediction_models import Prediction
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeElapsedColumn
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from odds_lambda.storage.readers import OddsReader
@@ -24,7 +25,7 @@ console = Console()
 
 
 class ProductionDataCopier:
-    """Handles copying data from production to local database."""
+    """Copies events, snapshots, and predictions from production to local."""
 
     def __init__(
         self,
@@ -53,22 +54,23 @@ class ProductionDataCopier:
             "events_copied": 0,
             "events_skipped": 0,
             "snapshots_copied": 0,
+            "predictions_copied": 0,
             "errors": 0,
         }
 
-    async def copy_completed_games(
+    async def copy_events(
         self,
         start_date: datetime,
         end_date: datetime,
-        sport_key: str = "basketball_nba",
+        sport_key: str,
     ) -> dict:
         """
-        Copy completed games from production to local.
+        Copy all events, snapshots, and predictions from production to local.
 
         Args:
             start_date: Start of date range
             end_date: End of date range
-            sport_key: Sport to copy (default: basketball_nba)
+            sport_key: Sport to copy
 
         Returns:
             Dictionary with copy statistics
@@ -80,7 +82,6 @@ class ProductionDataCopier:
         console.print(f"  Skip existing: {self.skip_existing}")
         console.print()
 
-        # Query production for completed games
         async with self.prod_session_maker() as prod_session:
             prod_reader = OddsReader(prod_session)
 
@@ -89,22 +90,14 @@ class ProductionDataCopier:
                 start_date=start_date,
                 end_date=end_date,
                 sport_key=sport_key,
-                status=EventStatus.FINAL,
             )
 
-            # Filter to only events with scores
-            events_with_scores = [
-                e for e in events if e.home_score is not None and e.away_score is not None
-            ]
+            self.stats["total_events"] = len(events)
 
-            self.stats["total_events"] = len(events_with_scores)
+            console.print(f"[green]Found {len(events)} events in production[/green]")
 
-            console.print(
-                f"[green]Found {len(events_with_scores)} completed games in production[/green]"
-            )
-
-            if not events_with_scores:
-                console.print("[yellow]No completed games found in date range[/yellow]")
+            if not events:
+                console.print("[yellow]No events found matching criteria[/yellow]")
                 return self.stats
 
             # Copy each event with progress tracking
@@ -116,11 +109,11 @@ class ProductionDataCopier:
                 console=console,
             ) as progress:
                 task = progress.add_task(
-                    description="Copying games...",
-                    total=len(events_with_scores),
+                    description="Copying events...",
+                    total=len(events),
                 )
 
-                for event in events_with_scores:
+                for event in events:
                     try:
                         await self._copy_event(event, prod_reader, progress, task)
                     except Exception as e:
@@ -212,6 +205,12 @@ class ProductionDataCopier:
                         )
                         self.stats["snapshots_copied"] += 1
 
+                # Copy predictions
+                pred_count = await self._copy_predictions(
+                    event.id, prod_session_snapshot, local_session
+                )
+                self.stats["predictions_copied"] += pred_count
+
                 await local_session.commit()
 
                 logger.info(
@@ -220,13 +219,54 @@ class ProductionDataCopier:
                     snapshot_count=len(snapshots),
                 )
 
-    def _print_summary(self):
+    async def _copy_predictions(
+        self,
+        event_id: str,
+        prod_session: AsyncSession,
+        local_session: AsyncSession,
+    ) -> int:
+        """Copy predictions for an event from prod to local.
+
+        Uses ON CONFLICT DO NOTHING to skip duplicates (matches the
+        uq_prediction_event_snap_model constraint).
+
+        Returns:
+            Number of predictions copied.
+        """
+        result = await prod_session.execute(
+            select(Prediction).where(Prediction.event_id == event_id)
+        )
+        predictions = list(result.scalars().all())
+
+        copied = 0
+        for pred in predictions:
+            new_pred = Prediction(
+                event_id=pred.event_id,
+                snapshot_id=pred.snapshot_id,
+                model_name=pred.model_name,
+                model_version=pred.model_version,
+                predicted_clv=pred.predicted_clv,
+                created_at=pred.created_at,
+            )
+            local_session.add(new_pred)
+            try:
+                await local_session.flush()
+                copied += 1
+            except Exception:
+                # Duplicate — unique constraint violation
+                await local_session.rollback()
+
+        return copied
+
+    def _print_summary(self) -> None:
         """Print summary statistics."""
         console.print("\n[bold]Copy Summary:[/bold]")
         console.print(f"  Total events found: {self.stats['total_events']}")
         console.print(f"  Events copied: [green]{self.stats['events_copied']}[/green]")
         console.print(f"  Events skipped: [yellow]{self.stats['events_skipped']}[/yellow]")
         console.print(f"  Snapshots copied: [green]{self.stats['snapshots_copied']}[/green]")
+
+        console.print(f"  Predictions copied: [green]{self.stats['predictions_copied']}[/green]")
 
         if self.stats["errors"] > 0:
             console.print(f"  Errors: [red]{self.stats['errors']}[/red]")
@@ -242,19 +282,19 @@ async def copy_from_prod(
     end_date: str,
     prod_url: str | None = None,
     local_url: str | None = None,
-    sport: str = "basketball_nba",
+    sport: str = "soccer_epl",
     dry_run: bool = False,
     skip_existing: bool = True,
 ):
     """
-    Copy completed games from production to local database.
+    Copy all events, snapshots, and predictions from production to local database.
 
     Args:
         start_date: Start date (YYYY-MM-DD)
         end_date: End date (YYYY-MM-DD)
-        prod_url: Production database URL (defaults to DATABASE_URL or PROD_DATABASE_URL)
+        prod_url: Production database URL (defaults to PROD_DATABASE_URL)
         local_url: Local database URL (defaults to LOCAL_DATABASE_URL)
-        sport: Sport key (default: basketball_nba)
+        sport: Sport key (default: soccer_epl)
         dry_run: If True, don't actually write to database
         skip_existing: If True, skip events that already exist locally
     """
@@ -295,7 +335,7 @@ async def copy_from_prod(
             skip_existing=skip_existing,
         )
 
-        await copier.copy_completed_games(
+        await copier.copy_events(
             start_date=start_dt,
             end_date=end_dt,
             sport_key=sport,
