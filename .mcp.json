@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "odds": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "fastmcp", "run", "packages/odds-mcp/odds_mcp/server.py"]
+    }
+  }
+}
