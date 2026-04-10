@@ -25,7 +25,7 @@ from odds_lambda.paper_trading import (
     settle_trades,
 )
 from odds_lambda.storage.readers import OddsReader
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 logger = structlog.get_logger()
 
@@ -289,18 +289,24 @@ async def refresh_scrape(
 
 
 @mcp.tool()
-async def get_predictions(event_id: str) -> dict[str, Any]:
-    """Get pre-scored CLV predictions for an event.
+async def get_predictions(
+    event_id: str,
+    limit: int = 5,
+    since_hours: float | None = None,
+) -> dict[str, Any]:
+    """Get pre-scored CLV predictions for an event (most recent first).
 
     Reads predictions stored by the scoring pipeline (not on-demand inference).
-    Returns all predictions (one per snapshot scored) for the given event,
-    ordered by creation time. If no predictions exist, returns an empty list.
+    Returns up to `limit` predictions, newest first. Use `since_hours` to
+    restrict to recent predictions only.
 
     Args:
         event_id: Event identifier.
+        limit: Max predictions to return, newest first. Clamped to 1 minimum. Default 5.
+        since_hours: If set, only return predictions created in the last N hours.
 
     Returns:
-        Dict with event info and list of prediction records.
+        Dict with event info, total matching count, and the limited list.
     """
     async with async_session_maker() as session:
         reader = OddsReader(session)
@@ -308,16 +314,25 @@ async def get_predictions(event_id: str) -> dict[str, Any]:
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        pred_result = await session.execute(
-            select(Prediction)
-            .where(Prediction.event_id == event_id)
-            .order_by(Prediction.created_at)
-        )
+        query = select(Prediction).where(Prediction.event_id == event_id)
+
+        if since_hours is not None:
+            cutoff = datetime.now(UTC) - timedelta(hours=since_hours)
+            query = query.where(Prediction.created_at >= cutoff)
+
+        # Count matching rows (respects since_hours filter)
+        count_query = query.with_only_columns(func.count(Prediction.id))
+        count_result = await session.execute(count_query)
+        total_matching = count_result.scalar() or 0
+
+        query = query.order_by(Prediction.created_at.desc()).limit(max(1, limit))
+        pred_result = await session.execute(query)
         predictions = list(pred_result.scalars().all())
 
     return {
         "event": _event_to_dict(event),
-        "prediction_count": len(predictions),
+        "total_matching": total_matching,
+        "returned": len(predictions),
         "predictions": [
             {
                 "id": p.id,
@@ -562,3 +577,7 @@ async def settle_bets() -> dict[str, Any]:
         "total_pnl": total_pnl,
         "settled_trades": serialized,
     }
+
+
+if __name__ == "__main__":
+    mcp.run()
