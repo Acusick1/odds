@@ -20,7 +20,6 @@ Environment variables required:
 
 import asyncio
 import json
-import traceback
 
 import structlog
 from odds_core.config import get_settings
@@ -138,13 +137,11 @@ def lambda_handler(event: dict, context: object) -> dict:
         }
 
     except Exception as e:
-        tb = traceback.format_exc()
         error_msg = str(e) or repr(e)
         logger.error(
             "lambda_failed",
             error=error_msg,
             error_type=type(e).__name__,
-            traceback=tb,
             request_id=context.aws_request_id if context else None,
             exc_info=True,
         )
