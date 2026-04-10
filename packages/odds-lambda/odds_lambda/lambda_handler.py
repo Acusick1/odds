@@ -137,9 +137,10 @@ def lambda_handler(event: dict, context: object) -> dict:
         }
 
     except Exception as e:
+        error_msg = str(e) or repr(e)
         logger.error(
             "lambda_failed",
-            error=str(e),
+            error=error_msg,
             error_type=type(e).__name__,
             request_id=context.aws_request_id if context else None,
             exc_info=True,
@@ -150,7 +151,7 @@ def lambda_handler(event: dict, context: object) -> dict:
 
         asyncio.run(
             send_critical(
-                f"🚨 Lambda handler failed: {type(e).__name__}: {str(e)} "
+                f"🚨 Lambda handler failed: {type(e).__name__}: {error_msg} "
                 f"(job: {event.get('job', 'unknown')})"
             )
         )
