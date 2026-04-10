@@ -161,6 +161,39 @@ class TestSettleTrades:
         assert settled[0].pnl == -100.0
 
     @pytest.mark.asyncio
+    async def test_home_bet_on_draw_loses(self, test_session) -> None:
+        event = Event(
+            id="evt-settle-draw-loss",
+            sport_key="soccer_epl",
+            sport_title="EPL",
+            commence_time=datetime(2026, 4, 10, 15, 0, tzinfo=UTC),
+            home_team="Arsenal",
+            away_team="Chelsea",
+            status=EventStatus.FINAL,
+            home_score=1,
+            away_score=1,
+        )
+        test_session.add(event)
+
+        trade = PaperTrade(
+            event_id="evt-settle-draw-loss",
+            market="h2h",
+            selection="home",
+            bookmaker="bet365",
+            odds=-150,
+            stake=100.0,
+            bankroll_before=1000.0,
+        )
+        test_session.add(trade)
+        await test_session.flush()
+
+        settled = await settle_trades(test_session)
+
+        assert len(settled) == 1
+        assert settled[0].result == TradeResult.LOSS
+        assert settled[0].pnl == -100.0
+
+    @pytest.mark.asyncio
     async def test_idempotent_settlement(self, test_session) -> None:
         event = Event(
             id="evt-settle-3",
