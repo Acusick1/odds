@@ -219,6 +219,8 @@ class LocalSchedulerBackend(SchedulerBackend):
         self._ensure_started()
 
         try:
+            import inspect
+
             # Resolve compound job names (e.g. "fetch-oddsportal-epl" -> "fetch-oddsportal")
             # mirroring how the Lambda handler resolves them at invocation time.
             from odds_lambda.scheduling.jobs import get_job_function, resolve_job_name
@@ -230,6 +232,16 @@ class LocalSchedulerBackend(SchedulerBackend):
             job_kwargs: dict[str, object] = dict(payload) if payload else {}
             if resolved_sport and "sport" not in job_kwargs:
                 job_kwargs["sport"] = resolved_sport
+
+            # Filter kwargs to only those the job function accepts,
+            # mirroring the Lambda handler's inspect.signature filtering.
+            sig = inspect.signature(job_func)
+            accepted = set(sig.parameters.keys())
+            has_var_keyword = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+            )
+            if job_kwargs and not has_var_keyword:
+                job_kwargs = {k: v for k, v in job_kwargs.items() if k in accepted}
 
             # Remove existing job if present (replace with new schedule)
             if self.scheduler.get_job(job_name):
