@@ -89,6 +89,19 @@ def devig_probabilities(*probs: float) -> tuple[float, ...]:
     return tuple(p / total for p in probs)
 
 
+def determine_h2h_winner(home_score: int, away_score: int) -> str:
+    """Determine 3-way h2h result from final scores.
+
+    Returns:
+        "home", "away", or "draw"
+    """
+    if home_score > away_score:
+        return "home"
+    if away_score > home_score:
+        return "away"
+    return "draw"
+
+
 def calculate_ev(
     bet_probability: float,
     american_odds: int,

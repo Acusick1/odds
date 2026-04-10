@@ -13,7 +13,9 @@ from odds_analytics.utils import (
     american_to_decimal,
     calculate_ev,
     calculate_implied_probability,
+    calculate_profit_from_odds,
     decimal_to_american,
+    determine_h2h_winner,
 )
 
 
@@ -73,6 +75,8 @@ __all__ = [
     "decimal_to_american",
     "calculate_implied_probability",
     "calculate_ev",
+    "calculate_profit_from_odds",
+    "determine_h2h_winner",
     # Training Configuration
     "MLTrainingConfig",
     "TrainingConfig",

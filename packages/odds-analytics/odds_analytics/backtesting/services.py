@@ -21,6 +21,7 @@ from ..utils import (
     calculate_profit_from_odds,
     calculate_sharpe_ratio,
     calculate_sortino_ratio,
+    determine_h2h_winner,
 )
 from .config import BacktestConfig
 from .models import (
@@ -307,15 +308,13 @@ class BacktestEngine:
         wins, backing a team loses. For 2-way markets (basketball), a tie is
         a push (returns None).
         """
-        if event.home_score > event.away_score:
-            winner = event.home_team
-        elif event.away_score > event.home_score:
-            winner = event.away_team
-        else:
+        side = determine_h2h_winner(event.home_score, event.away_score)
+        if side == "draw":
             if is_three_way:
                 return outcome.lower() == "draw"
             return None
 
+        winner = event.home_team if side == "home" else event.away_team
         return outcome == winner
 
     def _evaluate_spread_outcome(
