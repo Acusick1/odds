@@ -4,17 +4,17 @@ Thin wrappers over existing DB queries, jobs, and paper trading logic.
 All tools are stateless and use async_session_maker() for DB access.
 """
 
-from __future__ import annotations
-
+import math
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 import structlog
 from fastmcp import FastMCP
 from odds_core.database import async_session_maker
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade
 from odds_core.prediction_models import Prediction
+from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPECS
 from odds_lambda.paper_trading import (
     get_open_trades,
     get_portfolio_summary,
@@ -34,32 +34,69 @@ mcp = FastMCP(
     ),
 )
 
+# Build league lookup from canonical LEAGUE_SPECS
+_LEAGUE_SPEC_BY_NAME: dict[str, Any] = {spec.league: spec for spec in LEAGUE_SPECS}
+
+# Hybrid sharp reference matching production defaults
+_DEFAULT_SHARP_BOOKMAKERS = ["pinnacle", "betfair_exchange"]
+_DEFAULT_RETAIL_BOOKMAKERS = ["fanduel", "draftkings", "betmgm"]
+
 
 def _event_to_dict(event: Event) -> dict[str, Any]:
     """Serialize an Event to a JSON-safe dict."""
     return {
         "id": event.id,
         "sport_key": event.sport_key,
+        "sport_title": event.sport_title,
         "home_team": event.home_team,
         "away_team": event.away_team,
         "commence_time": event.commence_time.isoformat(),
         "status": event.status.value,
         "home_score": event.home_score,
         "away_score": event.away_score,
+        "completed_at": event.completed_at.isoformat() if event.completed_at else None,
     }
 
 
-def _snapshot_to_dict(snapshot: OddsSnapshot) -> dict[str, Any]:
-    """Serialize an OddsSnapshot to a JSON-safe dict."""
+def _odds_to_dict(odds: Odds) -> dict[str, Any]:
+    """Serialize an Odds object to a JSON-safe dict."""
     return {
+        "bookmaker_key": odds.bookmaker_key,
+        "bookmaker_title": odds.bookmaker_title,
+        "market_key": odds.market_key,
+        "outcome_name": odds.outcome_name,
+        "price": odds.price,
+        "point": odds.point,
+    }
+
+
+def _snapshot_to_dict(
+    snapshot: OddsSnapshot,
+    *,
+    include_raw_data: bool = False,
+    extracted_odds: list[Odds] | None = None,
+) -> dict[str, Any]:
+    """Serialize an OddsSnapshot to a JSON-safe dict.
+
+    Args:
+        snapshot: The snapshot to serialize.
+        include_raw_data: If True, include the full raw_data blob (for single-snapshot views).
+        extracted_odds: If provided, include structured odds instead of raw_data.
+    """
+    result: dict[str, Any] = {
         "id": snapshot.id,
         "event_id": snapshot.event_id,
         "snapshot_time": snapshot.snapshot_time.isoformat(),
+        "created_at": snapshot.created_at.isoformat(),
         "bookmaker_count": snapshot.bookmaker_count,
         "fetch_tier": snapshot.fetch_tier,
         "hours_until_commence": snapshot.hours_until_commence,
-        "raw_data": snapshot.raw_data,
     }
+    if include_raw_data:
+        result["raw_data"] = snapshot.raw_data
+    if extracted_odds is not None:
+        result["odds"] = [_odds_to_dict(o) for o in extracted_odds]
+    return result
 
 
 def _trade_to_dict(trade: PaperTrade) -> dict[str, Any]:
@@ -83,9 +120,21 @@ def _trade_to_dict(trade: PaperTrade) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Tool 1: get_upcoming_fixtures
-# ---------------------------------------------------------------------------
+def _safe_float(val: Any) -> float | None:
+    """Convert numpy/float values, returning None for NaN."""
+    try:
+        f = float(val)
+        return None if math.isnan(f) else round(f, 6)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_sport_meta(league: str) -> tuple[str, str]:
+    """Map league name to pipeline sport_key and sport_title using LEAGUE_SPECS."""
+    spec = _LEAGUE_SPEC_BY_NAME.get(league)
+    if spec is not None:
+        return spec.sport_key, spec.sport_title
+    return f"football_{league.replace('-', '_')}", league.title()
 
 
 @mcp.tool()
@@ -118,11 +167,6 @@ async def get_upcoming_fixtures(
     return [_event_to_dict(e) for e in events]
 
 
-# ---------------------------------------------------------------------------
-# Tool 2: get_current_odds
-# ---------------------------------------------------------------------------
-
-
 @mcp.tool()
 async def get_current_odds(event_id: str) -> dict[str, Any]:
     """Get the latest odds snapshot for an event, showing current bookmaker prices.
@@ -131,7 +175,7 @@ async def get_current_odds(event_id: str) -> dict[str, Any]:
         event_id: Event identifier.
 
     Returns:
-        Dict with event info and the latest snapshot's raw bookmaker odds data.
+        Dict with event info and the latest snapshot including full raw bookmaker odds data.
     """
     async with async_session_maker() as session:
         reader = OddsReader(session)
@@ -149,18 +193,16 @@ async def get_current_odds(event_id: str) -> dict[str, Any]:
 
     return {
         "event": _event_to_dict(event),
-        "snapshot": _snapshot_to_dict(snapshot),
+        "snapshot": _snapshot_to_dict(snapshot, include_raw_data=True),
     }
-
-
-# ---------------------------------------------------------------------------
-# Tool 3: get_odds_history
-# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
 async def get_odds_history(event_id: str) -> dict[str, Any]:
     """Get the full odds movement timeline for an event (all snapshots).
+
+    Returns structured bookmaker odds per snapshot instead of raw JSON blobs
+    to keep response size manageable.
 
     Args:
         event_id: Event identifier.
@@ -168,6 +210,8 @@ async def get_odds_history(event_id: str) -> dict[str, Any]:
     Returns:
         Dict with event info and chronologically ordered list of snapshots.
     """
+    from odds_analytics.sequence_loader import extract_odds_from_snapshot
+
     async with async_session_maker() as session:
         reader = OddsReader(session)
         event = await reader.get_event_by_id(event_id)
@@ -176,16 +220,16 @@ async def get_odds_history(event_id: str) -> dict[str, Any]:
 
         snapshots = await reader.get_snapshots_for_event(event_id)
 
+    serialized = []
+    for s in snapshots:
+        odds = extract_odds_from_snapshot(s, event_id, market="h2h")
+        serialized.append(_snapshot_to_dict(s, extracted_odds=odds))
+
     return {
         "event": _event_to_dict(event),
         "snapshot_count": len(snapshots),
-        "snapshots": [_snapshot_to_dict(s) for s in snapshots],
+        "snapshots": serialized,
     }
-
-
-# ---------------------------------------------------------------------------
-# Tool 4: refresh_scrape
-# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
@@ -221,7 +265,7 @@ async def refresh_scrape(
         stats = await ingest_league(spec)
     except Exception as e:
         logger.error("refresh_scrape_failed", league=league, error=str(e), exc_info=True)
-        return {"error": str(e)}
+        return {"error": str(e), "error_type": type(e).__name__}
 
     return {
         "league": stats.league,
@@ -232,20 +276,6 @@ async def refresh_scrape(
         "snapshots_stored": stats.snapshots_stored,
         "errors": stats.errors,
     }
-
-
-def _resolve_sport_meta(league: str) -> tuple[str, str]:
-    """Map league name to pipeline sport_key and sport_title."""
-    mapping: dict[str, tuple[str, str]] = {
-        "england-premier-league": ("soccer_epl", "EPL"),
-        "nba": ("basketball_nba", "NBA"),
-    }
-    return mapping.get(league, (f"football_{league.replace('-', '_')}", league.title()))
-
-
-# ---------------------------------------------------------------------------
-# Tool 5: get_model_prediction
-# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
@@ -262,8 +292,8 @@ async def get_model_prediction(event_id: str) -> dict[str, Any]:
         Dict with event info and list of prediction records.
     """
     async with async_session_maker() as session:
-        event_result = await session.execute(select(Event).where(Event.id == event_id))
-        event = event_result.scalar_one_or_none()
+        reader = OddsReader(session)
+        event = await reader.get_event_by_id(event_id)
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
@@ -291,13 +321,13 @@ async def get_model_prediction(event_id: str) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Tool 6: get_event_features
-# ---------------------------------------------------------------------------
-
-
 @mcp.tool()
-async def get_event_features(event_id: str) -> dict[str, Any]:
+async def get_event_features(
+    event_id: str,
+    outcome: Literal["home", "away"] = "home",
+    sharp_bookmakers: list[str] | None = None,
+    retail_bookmakers: list[str] | None = None,
+) -> dict[str, Any]:
     """Get the feature vector for an event's latest snapshot.
 
     Extracts tabular features (bookmaker odds, implied probabilities,
@@ -306,6 +336,9 @@ async def get_event_features(event_id: str) -> dict[str, Any]:
 
     Args:
         event_id: Event identifier.
+        outcome: Which outcome to extract features for ("home" or "away").
+        sharp_bookmakers: Sharp bookmaker keys (default: ["pinnacle", "betfair_exchange"]).
+        retail_bookmakers: Retail bookmaker keys (default: ["fanduel", "draftkings", "betmgm"]).
 
     Returns:
         Dict with event info and feature name/value pairs.
@@ -324,9 +357,16 @@ async def get_event_features(event_id: str) -> dict[str, Any]:
                 "message": "No snapshots available for feature extraction",
             }
 
-    # Feature extraction is sync and doesn't need a session
+    outcome_name = event.home_team if outcome == "home" else event.away_team
+
     try:
-        features = _extract_features_for_event(event, snapshot)
+        features = _extract_features_for_event(
+            event,
+            snapshot,
+            outcome_name=outcome_name,
+            sharp_bookmakers=sharp_bookmakers or _DEFAULT_SHARP_BOOKMAKERS,
+            retail_bookmakers=retail_bookmakers or _DEFAULT_RETAIL_BOOKMAKERS,
+        )
     except Exception as e:
         logger.error("feature_extraction_failed", event_id=event_id, error=str(e), exc_info=True)
         return {
@@ -342,7 +382,14 @@ async def get_event_features(event_id: str) -> dict[str, Any]:
     }
 
 
-def _extract_features_for_event(event: Event, snapshot: OddsSnapshot) -> dict[str, float | None]:
+def _extract_features_for_event(
+    event: Event,
+    snapshot: OddsSnapshot,
+    *,
+    outcome_name: str,
+    sharp_bookmakers: list[str],
+    retail_bookmakers: list[str],
+) -> dict[str, float | None]:
     """Extract feature dict from an event and its latest snapshot."""
     from odds_analytics.backtesting import BacktestEvent
     from odds_analytics.feature_extraction import TabularFeatureExtractor
@@ -362,11 +409,14 @@ def _extract_features_for_event(event: Event, snapshot: OddsSnapshot) -> dict[st
         status=event.status,
     )
 
-    extractor = TabularFeatureExtractor()
+    extractor = TabularFeatureExtractor(
+        sharp_bookmakers=sharp_bookmakers,
+        retail_bookmakers=retail_bookmakers,
+    )
     tab_feats = extractor.extract_features(
         event=backtest_event,
         odds_data=odds,
-        outcome=event.home_team,
+        outcome=outcome_name,
         market="h2h",
     )
 
@@ -382,22 +432,6 @@ def _extract_features_for_event(event: Event, snapshot: OddsSnapshot) -> dict[st
     features["hours_until_event"] = round(hours_until, 2)
 
     return features
-
-
-def _safe_float(val: Any) -> float | None:
-    """Convert numpy/float values, returning None for NaN."""
-    import math
-
-    try:
-        f = float(val)
-        return None if math.isnan(f) else round(f, 6)
-    except (TypeError, ValueError):
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Tool 7: paper_bet
-# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
@@ -429,13 +463,14 @@ async def paper_bet(
         Dict with the placed trade details.
     """
     async with async_session_maker() as session:
-        # Validate event exists
         event_result = await session.execute(select(Event).where(Event.id == event_id))
         event = event_result.scalar_one_or_none()
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        # Compute bankroll from portfolio if not provided
+        if event.status != EventStatus.SCHEDULED:
+            return {"error": f"Event is '{event.status.value}', not 'scheduled'. Cannot place bet."}
+
         if bankroll is None:
             portfolio = await get_portfolio_summary(session)
             bankroll = portfolio.current_bankroll
@@ -454,18 +489,13 @@ async def paper_bet(
                 confidence=confidence,
             )
             await session.commit()
-        except ValueError as e:
-            return {"error": str(e)}
+        except Exception as e:
+            return {"error": str(e), "error_type": type(e).__name__}
 
     return {
         "status": "placed",
         "trade": _trade_to_dict(trade),
     }
-
-
-# ---------------------------------------------------------------------------
-# Tool 8: get_portfolio
-# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
@@ -499,11 +529,6 @@ async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Tool 9: settle_bets
-# ---------------------------------------------------------------------------
-
-
 @mcp.tool()
 async def settle_bets() -> dict[str, Any]:
     """Settle all paper trades whose events have final scores.
@@ -518,10 +543,11 @@ async def settle_bets() -> dict[str, Any]:
         settled = await settle_trades(session)
         await session.commit()
 
-    total_pnl = sum(t.pnl for t in settled if t.pnl is not None)
+        total_pnl = sum(t.pnl for t in settled if t.pnl is not None)
+        serialized = [_trade_to_dict(t) for t in settled]
 
     return {
         "settled_count": len(settled),
         "total_pnl": total_pnl,
-        "settled_trades": [_trade_to_dict(t) for t in settled],
+        "settled_trades": serialized,
     }
