@@ -4,6 +4,7 @@ members = [
     "packages/odds-lambda",
     "packages/odds-analytics",
     "packages/odds-cli",
+    "packages/odds-mcp",
 ]
 
 [project]
@@ -20,6 +21,7 @@ dependencies = [
     "odds-lambda",
     "odds-analytics[training]",
     "odds-cli",
+    "odds-mcp",
 ]
 
 [tool.uv.sources]
@@ -27,6 +29,7 @@ odds-core = { workspace = true }
 odds-lambda = { workspace = true }
 odds-analytics = { workspace = true }
 odds-cli = { workspace = true }
+odds-mcp = { workspace = true }
 oddsharvester = { git = "https://github.com/Acusick1/OddsHarvester.git", branch = "fix/fractional-odds-and-unknown-bookmaker" }
 
 [dependency-groups]
