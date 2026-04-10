@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 from odds_core.time import ensure_utc, parse_api_datetime
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.oddsportal_common import team_abbrev
 from odds_lambda.storage.validators import OddsValidator
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 
@@ -71,6 +72,74 @@ class OddsWriter:
             self.session.add(event)
             logger.info("event_created", event_id=event.id)
             return event
+
+    @staticmethod
+    def _build_event_id(home_team: str, away_team: str, match_date: datetime) -> str:
+        """Generate deterministic event ID for OddsPortal-sourced events."""
+        home_abbrev = team_abbrev(home_team)
+        away_abbrev = team_abbrev(away_team)
+        date_str = match_date.strftime("%Y-%m-%d")
+        return f"op_live_{home_abbrev}_{away_abbrev}_{date_str}"
+
+    async def find_or_create_event(
+        self,
+        home_team: str,
+        away_team: str,
+        match_date: datetime,
+        sport_key: str,
+        sport_title: str,
+    ) -> tuple[str, bool]:
+        """Find existing event by team+date or create a new one.
+
+        Returns:
+            (event_id, was_created)
+        """
+        window_start = match_date - timedelta(hours=24)
+        window_end = match_date + timedelta(hours=24)
+
+        query = select(Event.id).where(
+            and_(
+                Event.commence_time >= window_start,
+                Event.commence_time <= window_end,
+                Event.home_team == home_team,
+                Event.away_team == away_team,
+            )
+        )
+        result = await self.session.execute(query)
+        candidates = list(result.scalars().all())
+
+        if len(candidates) == 1:
+            return candidates[0], False
+
+        if len(candidates) > 1:
+            logger.warning(
+                "ambiguous_event_match",
+                home=home_team,
+                away=away_team,
+                date=match_date.isoformat(),
+                count=len(candidates),
+            )
+            return candidates[0], False
+
+        # Create new event
+        event_id = self._build_event_id(home_team, away_team, match_date)
+
+        # Check idempotency
+        existing = await self.session.get(Event, event_id)
+        if existing:
+            return event_id, False
+
+        event = Event(
+            id=event_id,
+            sport_key=sport_key,
+            sport_title=sport_title,
+            commence_time=match_date,
+            home_team=home_team,
+            away_team=away_team,
+            status=EventStatus.SCHEDULED,
+        )
+        self.session.add(event)
+        return event_id, True
 
     async def store_odds_snapshot(
         self,

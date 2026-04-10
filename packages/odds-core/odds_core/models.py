@@ -2,9 +2,12 @@
 
 from datetime import UTC, datetime
 from enum import Enum
+from typing import Any
 
 from sqlalchemy import JSON, Column, DateTime, Index
 from sqlmodel import Field, SQLModel
+
+from odds_core.team import normalize_team_name
 
 
 def utc_now() -> datetime:
@@ -44,6 +47,13 @@ class Event(SQLModel, table=True):
     home_team: str = Field(index=True, description="Home team name")
     away_team: str = Field(index=True, description="Away team name")
     status: EventStatus = Field(default=EventStatus.SCHEDULED, description="Event status")
+
+    def __init__(self, **data: Any) -> None:
+        if "home_team" in data:
+            data["home_team"] = normalize_team_name(data["home_team"])
+        if "away_team" in data:
+            data["away_team"] = normalize_team_name(data["away_team"])
+        super().__init__(**data)
 
     # Results (populated after game completion)
     home_score: int | None = Field(default=None, description="Final home team score")
