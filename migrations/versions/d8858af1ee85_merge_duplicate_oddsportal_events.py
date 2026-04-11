@@ -21,7 +21,7 @@ branch_labels = None
 depends_on = None
 
 # Tables with a foreign key referencing events.id that need event_id reassignment.
-_CHILD_TABLES = ["odds_snapshots", "odds", "predictions", "paper_trades"]
+_CHILD_TABLES = ["odds_snapshots", "odds", "predictions", "paper_trades", "data_quality_logs"]
 
 
 def upgrade() -> None:
@@ -64,6 +64,7 @@ def upgrade() -> None:
         api_id = api_match[0]
 
         # Reassign child rows from op_live event to the API event
+        # table names are from the hardcoded _CHILD_TABLES constant, not user input
         for table in _CHILD_TABLES:
             conn.execute(
                 sa.text(f"UPDATE {table} SET event_id = :new WHERE event_id = :old").bindparams(
