@@ -21,7 +21,16 @@ branch_labels = None
 depends_on = None
 
 # Tables with a foreign key referencing events.id that need event_id reassignment.
-_CHILD_TABLES = ["odds_snapshots", "odds", "predictions", "paper_trades", "data_quality_logs"]
+_CHILD_TABLES = [
+    "odds_snapshots",
+    "odds",
+    "predictions",
+    "paper_trades",
+    "data_quality_logs",
+    "polymarket_events",
+    "nba_team_game_logs",
+    "nba_injury_reports",
+]
 
 
 def upgrade() -> None:
@@ -110,6 +119,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Data migration only — cannot meaningfully reverse merged snapshots or
-    # restored statuses. Re-scraping would be needed.
-    print("Downgrade not implemented for data-only migration")
+    raise NotImplementedError(
+        "Data-only migration cannot be reversed — merged snapshots and "
+        "status changes require re-scraping to restore."
+    )
