@@ -69,7 +69,7 @@ REQUEST_DELAY = 0.3
 
 
 def _normalize_team(fpl_name: str) -> str:
-    return normalize_team(fpl_name, source="fpl")
+    return normalize_team(fpl_name)
 
 
 def _snapshot_time_from_path(year: int, month: int, day: int, filename: str) -> datetime:

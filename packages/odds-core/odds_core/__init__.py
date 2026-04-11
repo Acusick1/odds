@@ -33,6 +33,7 @@ from odds_core.polymarket_models import (
     PolymarketPriceSnapshot,
 )
 from odds_core.prediction_models import Prediction
+from odds_core.team import normalize_team_name
 
 __all__ = [
     # Models
@@ -60,6 +61,8 @@ __all__ = [
     # Config
     "Settings",
     "get_settings",
+    # Team normalization
+    "normalize_team_name",
     # API Models
     "OddsResponse",
     "ScoresResponse",

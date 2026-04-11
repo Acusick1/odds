@@ -28,15 +28,12 @@ from typing import Any
 
 import structlog
 from odds_core.database import async_session_maker
-from odds_core.models import Event, EventStatus
-from sqlalchemy import and_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.oddsportal_adapter import (
     MatchOdds,
     convert_upcoming_matches,
 )
-from odds_lambda.oddsportal_common import hours_to_tier, run_scraper_with_retry, team_abbrev
+from odds_lambda.oddsportal_common import hours_to_tier, run_scraper_with_retry
 from odds_lambda.scheduling.backends import get_scheduler_backend
 from odds_lambda.scheduling.jobs import make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
@@ -90,14 +87,6 @@ class IngestionStats:
     errors: list[str] = field(default_factory=list)
 
 
-def _build_event_id(home_team: str, away_team: str, match_date: datetime) -> str:
-    """Generate deterministic event ID for OddsPortal-sourced events."""
-    home_abbrev = team_abbrev(home_team)
-    away_abbrev = team_abbrev(away_team)
-    date_str = match_date.strftime("%Y-%m-%d")
-    return f"op_live_{home_abbrev}_{away_abbrev}_{date_str}"
-
-
 async def run_harvester_upcoming(spec: LeagueSpec) -> list[dict[str, Any]]:
     """Scrape upcoming matches for a league via ``run_scraper_with_retry``."""
     from oddsharvester.utils.command_enum import CommandEnum
@@ -110,64 +99,6 @@ async def run_harvester_upcoming(spec: LeagueSpec) -> list[dict[str, Any]]:
         headless=True,
     )
     return result.success
-
-
-async def find_or_create_event(
-    session: AsyncSession,
-    match: MatchOdds,
-    spec: LeagueSpec,
-) -> tuple[str, bool]:
-    """Find existing event or create a new one.
-
-    Returns:
-        (event_id, was_created)
-    """
-    window_start = match.match_date - timedelta(hours=24)
-    window_end = match.match_date + timedelta(hours=24)
-
-    query = select(Event.id).where(
-        and_(
-            Event.commence_time >= window_start,
-            Event.commence_time <= window_end,
-            Event.home_team == match.home_team,
-            Event.away_team == match.away_team,
-        )
-    )
-    result = await session.execute(query)
-    candidates = list(result.scalars().all())
-
-    if len(candidates) == 1:
-        return candidates[0], False
-
-    if len(candidates) > 1:
-        logger.warning(
-            "ambiguous_event_match",
-            home=match.home_team,
-            away=match.away_team,
-            date=match.match_date.isoformat(),
-            count=len(candidates),
-        )
-        return candidates[0], False
-
-    # Create new event
-    event_id = _build_event_id(match.home_team, match.away_team, match.match_date)
-
-    # Check idempotency
-    existing = await session.get(Event, event_id)
-    if existing:
-        return event_id, False
-
-    event = Event(
-        id=event_id,
-        sport_key=spec.sport_key,
-        sport_title=spec.sport_title,
-        commence_time=match.match_date,
-        home_team=match.home_team,
-        away_team=match.away_team,
-        status=EventStatus.SCHEDULED,
-    )
-    session.add(event)
-    return event_id, True
 
 
 async def ingest_league(
@@ -225,7 +156,13 @@ async def ingest_league(
 
         for market, match in all_converted:
             try:
-                event_id, created = await find_or_create_event(session, match, spec)
+                event_id, created = await writer.find_or_create_event(
+                    home_team=match.home_team,
+                    away_team=match.away_team,
+                    match_date=match.match_date,
+                    sport_key=spec.sport_key,
+                    sport_title=spec.sport_title,
+                )
 
                 if created:
                     stats.events_created += 1
