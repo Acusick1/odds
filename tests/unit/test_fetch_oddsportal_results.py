@@ -10,6 +10,7 @@ from odds_core.models import Event, EventStatus
 from odds_lambda.jobs.fetch_oddsportal_results import (
     _match_record_to_event,
     _parse_score,
+    get_pending_events,
     process_results,
 )
 
@@ -130,6 +131,49 @@ class TestMatchRecordToEvent:
         event = _make_event()
         record = {"home_team": "Arsenal", "away_team": "Chelsea", "match_date": ""}
         assert _match_record_to_event(record, [event]) is None
+
+
+class TestGetPendingEvents:
+    @pytest.mark.asyncio
+    async def test_includes_scheduled_events(self, test_session) -> None:
+        event = _make_event(status=EventStatus.SCHEDULED)
+        test_session.add(event)
+        await test_session.commit()
+
+        result = await get_pending_events(test_session)
+        assert len(result) == 1
+        assert result[0].id == event.id
+
+    @pytest.mark.asyncio
+    async def test_includes_live_events(self, test_session) -> None:
+        event = _make_event(status=EventStatus.LIVE)
+        test_session.add(event)
+        await test_session.commit()
+
+        result = await get_pending_events(test_session)
+        assert len(result) == 1
+        assert result[0].id == event.id
+
+    @pytest.mark.asyncio
+    async def test_excludes_final_events(self, test_session) -> None:
+        event = _make_event(status=EventStatus.FINAL)
+        test_session.add(event)
+        await test_session.commit()
+
+        result = await get_pending_events(test_session)
+        assert len(result) == 0
+
+    @pytest.mark.asyncio
+    async def test_excludes_future_events(self, test_session) -> None:
+        event = _make_event(
+            status=EventStatus.SCHEDULED,
+            commence_time=datetime(2099, 1, 1, 12, 0, 0, tzinfo=UTC),
+        )
+        test_session.add(event)
+        await test_session.commit()
+
+        result = await get_pending_events(test_session)
+        assert len(result) == 0
 
 
 class TestProcessResults:
