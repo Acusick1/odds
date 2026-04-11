@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from importlib import import_module
 
 
@@ -39,7 +39,7 @@ class JobContext:
         Known keys are mapped to dataclass fields; unknown keys are
         collected into ``extra``.
         """
-        known_fields = {f.name for f in cls.__dataclass_fields__.values()} - {"extra"}
+        known_fields = {f.name for f in fields(cls)} - {"extra"}
         known: dict[str, object] = {}
         extra: dict[str, object] = {}
         for k, v in payload.items():

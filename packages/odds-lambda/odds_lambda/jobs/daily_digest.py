@@ -19,6 +19,8 @@ from odds_core.prediction_models import Prediction
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.scheduling.jobs import JobContext
+
 logger = structlog.get_logger()
 
 DEFAULT_SPORT_KEY = "soccer_epl"
@@ -363,6 +365,4 @@ async def main(ctx: JobContext) -> None:
 
 
 if __name__ == "__main__":
-    from odds_lambda.scheduling.jobs import JobContext
-
     asyncio.run(main(JobContext()))

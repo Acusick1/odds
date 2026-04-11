@@ -10,6 +10,7 @@ from odds_lambda.scheduling.exceptions import (
     JobNotFoundError,
     SchedulingFailedError,
 )
+from odds_lambda.scheduling.jobs import JobContext
 
 
 class TestLocalSchedulerBackend:
@@ -241,7 +242,7 @@ class TestLocalSchedulerBackend:
         # Create a flag to track execution
         executed = asyncio.Event()
 
-        async def test_job(ctx):
+        async def test_job(ctx: JobContext) -> None:
             executed.set()
 
         with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=test_job):
@@ -264,10 +265,10 @@ class TestLocalSchedulerBackend:
         job1_executed = asyncio.Event()
         job2_executed = asyncio.Event()
 
-        async def job1(ctx):
+        async def job1(ctx: JobContext) -> None:
             job1_executed.set()
 
-        async def job2(ctx):
+        async def job2(ctx: JobContext) -> None:
             job2_executed.set()
 
         def get_job_func(job_name):
