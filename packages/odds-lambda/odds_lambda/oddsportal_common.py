@@ -96,19 +96,6 @@ def hours_to_tier(hours_before: float) -> str:
     return "opening"
 
 
-def team_abbrev(name: str) -> str:
-    """Derive a short abbreviation from a team name.
-
-    Single-word names get 3 chars (e.g. "Arsenal" -> "ARS").
-    Multi-word names use first 3 chars of first + last word
-    (e.g. "Manchester United" -> "MANUNI").
-    """
-    words = name.split()
-    if len(words) == 1:
-        return words[0][:3].upper()
-    return (words[0][:3] + words[-1][:3]).upper()
-
-
 def parse_odds_timestamp(ts_str: str) -> datetime:
     """Parse OddsPortal odds_history timestamp (naive, wrong year)."""
     return datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S")

@@ -6,13 +6,12 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
-from odds_core.team import normalize_team_name
+from odds_core.team import normalize_team_name, team_abbrev
 from odds_core.time import ensure_utc, parse_api_datetime
 from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.oddsportal_common import team_abbrev
 from odds_lambda.storage.validators import OddsValidator
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 

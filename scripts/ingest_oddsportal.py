@@ -38,13 +38,13 @@ from zoneinfo import ZoneInfo
 
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.team import team_abbrev
 from odds_lambda.oddsportal_common import (
     IngestionStats,
     build_raw_data,
     find_existing_event,
     hours_to_tier,
     parse_match_date,
-    team_abbrev,
 )
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
