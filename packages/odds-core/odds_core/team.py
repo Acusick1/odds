@@ -1,8 +1,8 @@
 """Centralized team name normalization.
 
-Maps source-specific team names to pipeline canonical names (Odds API forms
-stored in the events table). Whitespace/case cleanup applied before alias
-lookup. Passthrough for names that are already canonical.
+Maps source-specific team names to pipeline canonical names (short forms
+stored in the events table). Whitespace cleanup applied before alias lookup.
+Passthrough for names that are already canonical.
 """
 
 from __future__ import annotations
