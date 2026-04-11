@@ -3,8 +3,8 @@
 from datetime import UTC, datetime
 from enum import Enum
 
-from pydantic import field_validator
 from sqlalchemy import JSON, Column, DateTime, Index
+from sqlalchemy.orm import validates
 from sqlmodel import Field, SQLModel
 
 from odds_core.team import normalize_team_name
@@ -48,10 +48,13 @@ class Event(SQLModel, table=True):
     away_team: str = Field(index=True, description="Away team name")
     status: EventStatus = Field(default=EventStatus.SCHEDULED, description="Event status")
 
-    @field_validator("home_team", "away_team", mode="before")
-    @classmethod
-    def _normalize_team(cls, v: str) -> str:
-        return normalize_team_name(v)
+    @validates("home_team")
+    def _normalize_home_team(self, key: str, value: str) -> str:
+        return normalize_team_name(value)
+
+    @validates("away_team")
+    def _normalize_away_team(self, key: str, value: str) -> str:
+        return normalize_team_name(value)
 
     # Results (populated after game completion)
     home_score: int | None = Field(default=None, description="Final home team score")
