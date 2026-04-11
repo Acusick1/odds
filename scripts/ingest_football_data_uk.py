@@ -34,12 +34,12 @@ from urllib.request import urlopen
 
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.team import team_abbrev
 from odds_lambda.oddsportal_common import (
     IngestionStats,
     decimal_to_american,
     find_existing_event,
     hours_to_tier,
-    team_abbrev,
 )
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession

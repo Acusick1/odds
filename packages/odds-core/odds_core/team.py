@@ -67,3 +67,16 @@ def normalize_team_name(name: str) -> str:
     if canonical is not None:
         return canonical
     return cleaned
+
+
+def team_abbrev(name: str) -> str:
+    """Derive a short abbreviation from a team name.
+
+    Single-word names get 3 chars (e.g. "Arsenal" -> "ARS").
+    Multi-word names use first 3 chars of first + last word
+    (e.g. "Manchester United" -> "MANUNI").
+    """
+    words = name.split()
+    if len(words) == 1:
+        return words[0][:3].upper()
+    return (words[0][:3] + words[-1][:3]).upper()

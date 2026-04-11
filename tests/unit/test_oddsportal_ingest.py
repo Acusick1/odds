@@ -7,7 +7,8 @@ from datetime import UTC, datetime
 import pytest
 
 # Import directly from script (it's on sys.path via the repo root)
-from odds_lambda.oddsportal_common import build_raw_data, team_abbrev
+from odds_core.team import team_abbrev
+from odds_lambda.oddsportal_common import build_raw_data
 
 from scripts.ingest_oddsportal import build_event_id
 

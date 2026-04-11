@@ -33,7 +33,7 @@ from odds_core.polymarket_models import (
     PolymarketPriceSnapshot,
 )
 from odds_core.prediction_models import Prediction
-from odds_core.team import normalize_team_name
+from odds_core.team import normalize_team_name, team_abbrev
 
 __all__ = [
     # Models
@@ -63,6 +63,7 @@ __all__ = [
     "get_settings",
     # Team normalization
     "normalize_team_name",
+    "team_abbrev",
     # API Models
     "OddsResponse",
     "ScoresResponse",
