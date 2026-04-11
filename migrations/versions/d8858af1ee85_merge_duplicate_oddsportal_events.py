@@ -20,17 +20,43 @@ down_revision = "e7f2a1b3c4d5"
 branch_labels = None
 depends_on = None
 
-# Tables with a foreign key referencing events.id that need event_id reassignment.
-_CHILD_TABLES = [
+# Child tables WITHOUT unique constraints involving event_id — simple UPDATE is safe.
+_CHILD_TABLES_SIMPLE = [
     "odds_snapshots",
     "odds",
-    "predictions",
     "paper_trades",
     "data_quality_logs",
     "polymarket_events",
     "nba_team_game_logs",
     "nba_injury_reports",
 ]
+
+
+def _reassign_predictions(conn: sa.Connection, old_id: str, new_id: str) -> None:
+    """Reassign predictions from old event to new, handling unique constraint conflicts.
+
+    predictions has UniqueConstraint(event_id, snapshot_id, model_name). If the API event
+    already has a prediction for the same snapshot+model, the OP duplicate row is deleted
+    (API data is authoritative). Non-conflicting rows are moved via UPDATE.
+    """
+    conn.execute(
+        sa.text(
+            """
+            DELETE FROM predictions
+            WHERE event_id = :old
+              AND (snapshot_id, model_name) IN (
+                  SELECT snapshot_id, model_name
+                  FROM predictions
+                  WHERE event_id = :new
+              )
+            """
+        ).bindparams(old=old_id, new=new_id)
+    )
+    conn.execute(
+        sa.text("UPDATE predictions SET event_id = :new WHERE event_id = :old").bindparams(
+            new=new_id, old=old_id
+        )
+    )
 
 
 def upgrade() -> None:
@@ -72,14 +98,17 @@ def upgrade() -> None:
 
         api_id = api_match[0]
 
-        # Reassign child rows from op_live event to the API event
-        # table names are from the hardcoded _CHILD_TABLES constant, not user input
-        for table in _CHILD_TABLES:
+        # Reassign child rows from op_live event to the API event.
+        # Tables without unique constraints on event_id: simple UPDATE.
+        for table in _CHILD_TABLES_SIMPLE:
             conn.execute(
                 sa.text(f"UPDATE {table} SET event_id = :new WHERE event_id = :old").bindparams(
                     new=api_id, old=op_id
                 )
             )
+
+        # Tables with unique constraints involving event_id: delete conflicts first.
+        _reassign_predictions(conn, old_id=op_id, new_id=api_id)
 
         # Delete the duplicate op_live event
         conn.execute(sa.text("DELETE FROM events WHERE id = :id").bindparams(id=op_id))
