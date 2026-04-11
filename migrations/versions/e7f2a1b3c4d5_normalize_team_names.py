@@ -6,6 +6,7 @@ Create Date: 2026-04-10 12:00:00.000000
 
 """
 
+import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -44,7 +45,8 @@ def upgrade() -> None:
     for alias, canonical in _ALIAS_MAP.items():
         for col in ("home_team", "away_team"):
             op.execute(
-                f"UPDATE events SET {col} = '{canonical}' WHERE {col} = '{alias}'"  # noqa: S608
+                sa.text(f"UPDATE events SET {col} = :val WHERE {col} = :old"),
+                {"val": canonical, "old": alias},
             )
 
 
@@ -75,5 +77,6 @@ def downgrade() -> None:
     for canonical, alias in _REVERSE.items():
         for col in ("home_team", "away_team"):
             op.execute(
-                f"UPDATE events SET {col} = '{alias}' WHERE {col} = '{canonical}'"  # noqa: S608
+                sa.text(f"UPDATE events SET {col} = :val WHERE {col} = :old"),
+                {"val": alias, "old": canonical},
             )

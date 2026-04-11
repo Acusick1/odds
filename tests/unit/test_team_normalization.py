@@ -119,6 +119,40 @@ class TestEventFieldValidator:
         assert event.home_team == "Manchester City"
 
 
+class TestFindOrCreateEventNormalization:
+    """Test that find_or_create_event normalizes inputs before querying."""
+
+    @pytest.mark.asyncio
+    async def test_finds_existing_event_with_alias_input(self, test_session) -> None:
+        """Query with 'Wolverhampton Wanderers' matches DB row with 'Wolves'."""
+        from odds_lambda.storage.writers import OddsWriter
+
+        event = Event(
+            id="existing_wolves",
+            sport_key="soccer_epl",
+            sport_title="EPL",
+            commence_time=datetime(2026, 4, 15, 15, 0, tzinfo=UTC),
+            home_team="Wolves",
+            away_team="Arsenal",
+            status=EventStatus.SCHEDULED,
+        )
+        test_session.add(event)
+        await test_session.flush()
+
+        writer = OddsWriter(test_session)
+
+        event_id, created = await writer.find_or_create_event(
+            home_team="Wolverhampton Wanderers",
+            away_team="Arsenal",
+            match_date=datetime(2026, 4, 15, 16, 0, tzinfo=UTC),
+            sport_key="soccer_epl",
+            sport_title="EPL",
+        )
+
+        assert created is False
+        assert event_id == "existing_wolves"
+
+
 class TestFindOrCreateEventOnWriter:
     """Test that find_or_create_event lives on OddsWriter."""
 

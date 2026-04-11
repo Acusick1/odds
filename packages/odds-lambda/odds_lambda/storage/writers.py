@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
+from odds_core.team import normalize_team_name
 from odds_core.time import ensure_utc, parse_api_datetime
 from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert
@@ -94,6 +95,9 @@ class OddsWriter:
         Returns:
             (event_id, was_created)
         """
+        home_team = normalize_team_name(home_team)
+        away_team = normalize_team_name(away_team)
+
         window_start = match_date - timedelta(hours=24)
         window_end = match_date + timedelta(hours=24)
 
