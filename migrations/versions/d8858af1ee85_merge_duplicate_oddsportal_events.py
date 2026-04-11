@@ -122,9 +122,9 @@ def upgrade() -> None:
         sa.text(
             """
             UPDATE events
-            SET status = 'final'::eventstatus, updated_at = NOW()
+            SET status = 'FINAL'::eventstatus, updated_at = NOW()
             WHERE sport_key = 'soccer_epl'
-              AND status IN ('scheduled'::eventstatus, 'live'::eventstatus)
+              AND status IN ('SCHEDULED'::eventstatus, 'LIVE'::eventstatus)
               AND commence_time < NOW()
             """
         )
@@ -137,9 +137,9 @@ def upgrade() -> None:
         sa.text(
             """
             UPDATE events
-            SET status = 'final'::eventstatus, updated_at = NOW()
+            SET status = 'FINAL'::eventstatus, updated_at = NOW()
             WHERE sport_key LIKE 'basketball_nba%'
-              AND status IN ('scheduled'::eventstatus, 'live'::eventstatus)
+              AND status IN ('SCHEDULED'::eventstatus, 'LIVE'::eventstatus)
               AND commence_time < NOW()
             """
         )
