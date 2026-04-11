@@ -234,7 +234,7 @@ async def process_results(
 
 
 async def main(ctx: JobContext) -> None:
-    """Main job entry point -- runs results collection, then self-schedules for tomorrow."""
+    """Main job entry point — runs results collection, then self-schedules for tomorrow."""
     from odds_core.alerts import job_alert_context
     from odds_core.config import get_settings
 

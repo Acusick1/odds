@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 from importlib import import_module
+
+import structlog
+
+logger = structlog.get_logger()
 
 
 @dataclass
@@ -29,27 +33,21 @@ class JobContext:
     lookback_hours: float = 24
     lookahead_hours: float = 48
 
-    # Catch-all for forward-compatibility with new payload fields
-    extra: dict[str, object] = field(default_factory=dict)
-
     @classmethod
     def from_payload(cls, payload: dict[str, object]) -> JobContext:
         """Construct a ``JobContext`` from a raw event/scheduler payload.
 
         Known keys are mapped to dataclass fields; unknown keys are
-        collected into ``extra``.
+        logged and ignored.
         """
-        known_fields = {f.name for f in fields(cls)} - {"extra"}
+        known_fields = {f.name for f in fields(cls)}
         known: dict[str, object] = {}
-        extra: dict[str, object] = {}
         for k, v in payload.items():
             if k in known_fields:
                 known[k] = v
             else:
-                extra[k] = v
-        ctx = cls(**known)  # type: ignore[arg-type]
-        ctx.extra = extra
-        return ctx
+                logger.debug("job_context_unknown_key", key=k, value=v)
+        return cls(**known)  # type: ignore[arg-type]
 
 
 # Maps job name to (module_path, function_name).

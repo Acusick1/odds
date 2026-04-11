@@ -174,8 +174,6 @@ async def test_scheduler_end_to_end(
             execution_happened["fetch_odds"] = True
 
             # Execute the real job
-            from odds_lambda.scheduling.jobs import JobContext
-
             await original_main(JobContext())
 
     # Start the scheduler backend
@@ -323,8 +321,6 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
             mock_backend_getter.return_value = mock_backend
 
             # Execute job
-            from odds_lambda.scheduling.jobs import JobContext
-
             await fetch_odds.main(JobContext())
 
         # Verify self-scheduling

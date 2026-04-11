@@ -343,7 +343,7 @@ async def _self_schedule(
 
 
 async def main(ctx: JobContext) -> None:
-    """Main job execution -- scrapes configured league(s), then self-schedules.
+    """Main job execution — scrapes configured league(s), then self-schedules.
 
     Scheduling strategy: defensively pre-schedule at retry cadence (no DB
     needed) so the chain survives any failure including Lambda timeouts. On
