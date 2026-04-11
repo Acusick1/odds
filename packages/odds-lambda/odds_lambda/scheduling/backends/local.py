@@ -220,9 +220,18 @@ class LocalSchedulerBackend(SchedulerBackend):
 
         try:
             # Get job function from centralized registry
-            from odds_lambda.scheduling.jobs import get_job_function
+            from odds_lambda.scheduling.jobs import JobContext, get_job_function, resolve_job_name
 
             job_func = get_job_function(job_name)
+
+            # Build JobContext from compound name + payload
+            _, resolved_sport = resolve_job_name(job_name)
+            ctx_payload: dict[str, object] = {}
+            if resolved_sport:
+                ctx_payload["sport"] = resolved_sport
+            if payload:
+                ctx_payload.update(payload)
+            ctx = JobContext.from_payload(ctx_payload)
 
             # Remove existing job if present (replace with new schedule)
             if self.scheduler.get_job(job_name):
@@ -237,6 +246,7 @@ class LocalSchedulerBackend(SchedulerBackend):
                 id=job_name,
                 name=f"Odds {job_name}",
                 replace_existing=True,
+                args=[ctx],
             )
 
             logger.info(

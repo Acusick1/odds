@@ -1,8 +1,54 @@
 """Centralized job registry for scheduler backends."""
 
+from __future__ import annotations
+
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, fields
 from importlib import import_module
-from typing import Any
+
+import structlog
+
+logger = structlog.get_logger()
+
+
+@dataclass
+class JobContext:
+    """Typed context passed to every job ``main()`` function.
+
+    Scheduler backends construct this from the event payload. Jobs that
+    require specific fields (e.g. ``sport``) assert them at the top of
+    ``main()``. Adding new fields here is backward-compatible — all
+    fields have defaults.
+    """
+
+    sport: str | None = None
+    retry_count: int = 0
+
+    # backfill-polymarket manual invocation params
+    include_spreads: bool = False
+    include_totals: bool = False
+    dry_run: bool = False
+
+    # daily-digest configuration
+    lookback_hours: float = 24
+    lookahead_hours: float = 48
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, object]) -> JobContext:
+        """Construct a ``JobContext`` from a raw event/scheduler payload.
+
+        Known keys are mapped to dataclass fields; unknown keys are
+        logged and ignored.
+        """
+        known_fields = {f.name for f in fields(cls)}
+        known: dict[str, object] = {}
+        for k, v in payload.items():
+            if k in known_fields:
+                known[k] = v
+            else:
+                logger.debug("job_context_unknown_key", key=k, value=v)
+        return cls(**known)  # type: ignore[arg-type]
+
 
 # Maps job name to (module_path, function_name).
 # Modules are imported lazily when the job is first requested, so a Lambda
@@ -41,7 +87,7 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
 )
 
 # Cache of already-imported job functions.
-_loaded_jobs: dict[str, Callable[..., Awaitable[Any]]] = {}
+_loaded_jobs: dict[str, Callable[[JobContext], Awaitable[None]]] = {}
 
 
 def sport_key_to_suffix(sport_key: str) -> str | None:
@@ -95,7 +141,7 @@ def resolve_job_name(compound_name: str) -> tuple[str, str | None]:
     return compound_name, None
 
 
-def get_job_function(job_name: str) -> Callable[..., Awaitable[Any]]:
+def get_job_function(job_name: str) -> Callable[[JobContext], Awaitable[None]]:
     """Get job function by name, importing its module on first access.
 
     Uses the base job name (without sport suffix) for module lookup.

@@ -21,6 +21,7 @@ from odds_core.polymarket_models import PolymarketFetchLog
 from odds_lambda.polymarket_fetcher import PolymarketClient
 from odds_lambda.polymarket_ingestion import PolymarketIngestionResult, PolymarketIngestionService
 from odds_lambda.scheduling.backends import get_scheduler_backend
+from odds_lambda.scheduling.jobs import JobContext
 from odds_lambda.storage.polymarket_reader import PolymarketReader
 from odds_lambda.storage.polymarket_writer import PolymarketWriter
 from odds_lambda.tier_utils import calculate_tier
@@ -93,7 +94,7 @@ async def _log_fetch(
         await log_session.commit()
 
 
-async def main() -> None:
+async def main(ctx: JobContext) -> None:
     """Main job execution flow."""
     app_settings = get_settings()
 
@@ -197,4 +198,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(JobContext()))

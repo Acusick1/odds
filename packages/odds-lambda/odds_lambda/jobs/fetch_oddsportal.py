@@ -35,7 +35,7 @@ from odds_lambda.oddsportal_adapter import (
 )
 from odds_lambda.oddsportal_common import hours_to_tier, run_scraper_with_retry
 from odds_lambda.scheduling.backends import get_scheduler_backend
-from odds_lambda.scheduling.jobs import make_compound_job_name
+from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -279,27 +279,19 @@ async def _self_schedule(
     )
 
 
-async def main(
-    *,
-    sport: str | None = None,
-    retry_count: int = 0,
-    **_kwargs: object,
-) -> None:
+async def main(ctx: JobContext) -> None:
     """Main job execution — scrapes configured league(s), then self-schedules.
 
     Scheduling strategy: defensively pre-schedule at retry cadence (no DB
     needed) so the chain survives any failure including Lambda timeouts. On
     success, reschedule at normal cadence with overnight skip.
-
-    Args:
-        sport: Sport key (e.g. "soccer_epl"). When provided, only the matching
-            LeagueSpec is scraped. Falls back to all LEAGUE_SPECS.
-        retry_count: Current retry attempt (passed via self-scheduling payload).
     """
     from odds_core.alerts import job_alert_context, send_job_warning
     from odds_core.config import get_settings
 
     settings = get_settings()
+    sport = ctx.sport
+    retry_count = ctx.retry_count
 
     # Resolve which leagues to scrape
     if sport:
@@ -400,4 +392,4 @@ async def main(
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(JobContext()))

@@ -29,6 +29,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.model_loader import get_cached_version, load_model
+from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 
 logger = structlog.get_logger()
 
@@ -245,16 +246,11 @@ async def score_events(
     return stats
 
 
-async def main(sport: str | None = None, **_kwargs: object) -> None:
-    """Main job entry point.
-
-    Args:
-        sport: Sport key from event payload. Passed to ``score_events`` for
-            validation against the model's bundled sport_key.
-    """
+async def main(ctx: JobContext) -> None:
+    """Main job entry point."""
     from odds_core.alerts import job_alert_context
 
-    from odds_lambda.scheduling.jobs import make_compound_job_name
+    sport = ctx.sport
 
     async with job_alert_context(make_compound_job_name("score-predictions", sport)):
         logger.info("score_predictions_started", sport=sport)
@@ -262,4 +258,4 @@ async def main(sport: str | None = None, **_kwargs: object) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(JobContext()))

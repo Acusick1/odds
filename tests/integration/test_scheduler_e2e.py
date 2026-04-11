@@ -21,6 +21,7 @@ from odds_core.api_models import OddsResponse, api_dict_to_event
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.ingestion import OddsIngestionService
+from odds_lambda.scheduling.jobs import JobContext
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
@@ -158,7 +159,7 @@ async def test_scheduler_end_to_end(
             session_factory=mock_session_factory,
         )
 
-    async def wrapped_fetch_odds():
+    async def wrapped_fetch_odds(ctx: JobContext) -> None:
         """Wrapped job with mocked dependencies."""
         mock_event_sync = AsyncMock()
         mock_event_sync.sync_sports = AsyncMock(return_value=[])
@@ -173,7 +174,7 @@ async def test_scheduler_end_to_end(
             execution_happened["fetch_odds"] = True
 
             # Execute the real job
-            await original_main()
+            await original_main(JobContext())
 
     # Start the scheduler backend
     async with LocalSchedulerBackend(dry_run=False) as backend:
@@ -320,7 +321,7 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
             mock_backend_getter.return_value = mock_backend
 
             # Execute job
-            await fetch_odds.main()
+            await fetch_odds.main(JobContext())
 
         # Verify self-scheduling
         assert len(scheduled_calls) == 1, f"Expected 1 schedule call for {tier_name}"

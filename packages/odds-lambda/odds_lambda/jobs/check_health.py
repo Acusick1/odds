@@ -14,13 +14,13 @@ from odds_core.config import get_settings
 
 from odds_lambda.health_monitor import check_system_health
 from odds_lambda.scheduling.backends import get_scheduler_backend
+from odds_lambda.scheduling.jobs import JobContext
 
 logger = structlog.get_logger()
 
 
-async def main():
-    """
-    Main job execution flow.
+async def main(ctx: JobContext) -> None:
+    """Main job execution flow.
 
     Flow:
     1. Run health checks
@@ -81,4 +81,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(JobContext()))

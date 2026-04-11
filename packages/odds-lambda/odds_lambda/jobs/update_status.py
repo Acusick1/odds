@@ -18,15 +18,15 @@ from odds_core.models import EventStatus
 
 from odds_lambda.scheduling.backends import get_scheduler_backend
 from odds_lambda.scheduling.intelligence import SchedulingIntelligence
+from odds_lambda.scheduling.jobs import JobContext
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
 
-async def main():
-    """
-    Main job execution flow.
+async def main(ctx: JobContext) -> None:
+    """Main job execution flow.
 
     Flow:
     1. Check if we should execute (smart gating)
@@ -128,4 +128,4 @@ async def _update_event_statuses():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(JobContext()))

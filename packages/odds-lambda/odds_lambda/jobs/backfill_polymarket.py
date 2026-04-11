@@ -30,6 +30,7 @@ from odds_core.polymarket_models import (
 )
 
 from odds_lambda.polymarket_fetcher import PolymarketClient
+from odds_lambda.scheduling.jobs import JobContext
 from odds_lambda.storage.polymarket_reader import PolymarketReader
 from odds_lambda.storage.polymarket_writer import PolymarketWriter
 
@@ -39,18 +40,8 @@ logger = structlog.get_logger()
 CLOB_DELAY_MS = 100
 
 
-async def main(
-    include_spreads: bool = False,
-    include_totals: bool = False,
-    dry_run: bool = False,
-):
-    """
-    Main backfill execution flow.
-
-    Args:
-        include_spreads: Whether to backfill spread market histories
-        include_totals: Whether to backfill total market histories
-        dry_run: Simulate execution without storing data
+async def main(ctx: JobContext) -> None:
+    """Main backfill execution flow.
 
     Flow:
         1. Fetch all closed NBA events from Gamma API (with pagination)
@@ -59,6 +50,10 @@ async def main(
         4. Bulk store in database
         5. Log results
     """
+    include_spreads = ctx.include_spreads
+    include_totals = ctx.include_totals
+    dry_run = ctx.dry_run
+
     app_settings = get_settings()
 
     if not app_settings.polymarket.enabled:
@@ -350,4 +345,4 @@ async def _backfill_market_history(
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(JobContext()))
