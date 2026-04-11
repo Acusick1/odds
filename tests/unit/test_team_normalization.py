@@ -37,7 +37,7 @@ class TestNormalizeTeamName:
             ("  manchester   united ", "Manchester Utd"),
             ("\tArsenal\n", "Arsenal"),
             ("  Wolverhampton   Wanderers  ", "Wolves"),
-            # Case insensitivity (title-cased before lookup)
+            # Case insensitivity
             ("wolverhampton wanderers", "Wolves"),
             ("TOTTENHAM HOTSPUR", "Tottenham"),
             ("manchester united", "Manchester Utd"),
@@ -55,7 +55,7 @@ class TestNormalizeTeamName:
         assert normalize_team_name(raw) == expected
 
     def test_unknown_team_passthrough(self) -> None:
-        assert normalize_team_name("Some Random FC") == "Some Random Fc"
+        assert normalize_team_name("Some Random FC") == "Some Random FC"
 
 
 class TestEventFieldValidator:

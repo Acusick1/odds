@@ -14,44 +14,44 @@ from __future__ import annotations
 #   Middlesbrough, Newcastle, Norwich, Nottingham, Sheffield Utd, Southampton,
 #   Stoke, Sunderland, Swansea, Tottenham, Watford, West Brom, West Ham, Wolves
 
-# Alias -> canonical. Title-cased before lookup so each variant needs one entry.
+# Alias -> canonical. Keys are lowercased for case-insensitive lookup.
 _TEAM_ALIASES: dict[str, str] = {
     # OddsPortal / football-data.co.uk / ESPN / FBref variants
-    "Afc Bournemouth": "Bournemouth",
-    "Brighton & Hove Albion": "Brighton",
-    "Brighton And Hove Albion": "Brighton",
-    "Cardiff City": "Cardiff",
-    "Huddersfield Town": "Huddersfield",
-    "Hull City": "Hull",
-    "Ipswich Town": "Ipswich",
-    "Leicester City": "Leicester",
-    "Leeds United": "Leeds",
-    "Man City": "Manchester City",
-    "Man United": "Manchester Utd",
-    "Man Utd": "Manchester Utd",
-    "Manchester United": "Manchester Utd",
-    "Newcastle United": "Newcastle",
-    "Newcastle Utd": "Newcastle",
-    "Norwich City": "Norwich",
-    "Nott'M Forest": "Nottingham",
-    "Nott'Ham Forest": "Nottingham",
-    "Nottingham Forest": "Nottingham",
-    "Sheffield United": "Sheffield Utd",
-    "Stoke City": "Stoke",
-    "Swansea City": "Swansea",
-    "Tottenham Hotspur": "Tottenham",
-    "Spurs": "Tottenham",
-    "West Bromwich Albion": "West Brom",
-    "West Ham United": "West Ham",
-    "Wolverhampton Wanderers": "Wolves",
+    "afc bournemouth": "Bournemouth",
+    "brighton & hove albion": "Brighton",
+    "brighton and hove albion": "Brighton",
+    "cardiff city": "Cardiff",
+    "huddersfield town": "Huddersfield",
+    "hull city": "Hull",
+    "ipswich town": "Ipswich",
+    "leicester city": "Leicester",
+    "leeds united": "Leeds",
+    "man city": "Manchester City",
+    "man united": "Manchester Utd",
+    "man utd": "Manchester Utd",
+    "manchester united": "Manchester Utd",
+    "newcastle united": "Newcastle",
+    "newcastle utd": "Newcastle",
+    "norwich city": "Norwich",
+    "nott'm forest": "Nottingham",
+    "nott'ham forest": "Nottingham",
+    "nottingham forest": "Nottingham",
+    "sheffield united": "Sheffield Utd",
+    "stoke city": "Stoke",
+    "swansea city": "Swansea",
+    "tottenham hotspur": "Tottenham",
+    "spurs": "Tottenham",
+    "west bromwich albion": "West Brom",
+    "west ham united": "West Ham",
+    "wolverhampton wanderers": "Wolves",
 }
 
 
 def normalize_team_name(name: str) -> str:
     """Normalize a team name to pipeline canonical form.
 
-    Applies whitespace/case cleanup then explicit alias lookup.
-    Returns the canonical name, or the cleaned name if no alias matches.
+    Collapses whitespace then does case-insensitive alias lookup.
+    Returns the canonical name, or the cleaned name unchanged if no alias matches.
 
     >>> normalize_team_name("Wolves")
     'Wolves'
@@ -62,8 +62,8 @@ def normalize_team_name(name: str) -> str:
     >>> normalize_team_name("Arsenal")
     'Arsenal'
     """
-    # Collapse whitespace and strip
     cleaned = " ".join(name.split())
-    # Title-case for consistent lookup
-    titled = cleaned.title()
-    return _TEAM_ALIASES.get(titled, titled)
+    canonical = _TEAM_ALIASES.get(cleaned.lower())
+    if canonical is not None:
+        return canonical
+    return cleaned
