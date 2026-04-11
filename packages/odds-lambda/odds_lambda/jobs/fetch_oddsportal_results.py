@@ -4,7 +4,7 @@ Scrapes recent match results, updates SCHEDULED events to FINAL with scores,
 and stores one closing odds snapshot per event. Designed for daily Lambda
 execution on the scraper Lambda (requires Playwright/Chromium).
 
-Idempotency: only queries SCHEDULED events with commence_time in the past,
+Idempotency: only queries SCHEDULED/LIVE events with commence_time in the past,
 so re-runs after events are marked FINAL find nothing to process.
 """
 
@@ -67,11 +67,11 @@ async def run_harvester_historic() -> list[dict[str, Any]]:
 
 
 async def get_pending_events(session: AsyncSession, sport_key: str = SPORT_KEY) -> list[Event]:
-    """Get SCHEDULED events with commence_time in the past for the given sport."""
+    """Get SCHEDULED or LIVE events with commence_time in the past for the given sport."""
     query = select(Event).where(
         and_(
             Event.sport_key == sport_key,
-            Event.status == EventStatus.SCHEDULED,
+            Event.status.in_([EventStatus.SCHEDULED, EventStatus.LIVE]),
             Event.commence_time < datetime.now(UTC),
         )
     )
