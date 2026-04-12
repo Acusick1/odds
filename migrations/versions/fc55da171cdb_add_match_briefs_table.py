@@ -24,7 +24,7 @@ def upgrade() -> None:
         sa.Column("event_id", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column(
             "checkpoint",
-            sa.Enum("context", "decision", name="briefcheckpoint"),
+            sa.Enum("CONTEXT", "DECISION", name="briefcheckpoint"),
             nullable=False,
         ),
         sa.Column("brief_text", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
