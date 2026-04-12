@@ -139,7 +139,7 @@ Centralized mapping of job names to async entry points. Modules are lazy-importe
 | `fetch-odds` | `odds_lambda.jobs.fetch_odds` | Self-scheduling (tier-based) |
 | `fetch-scores` | `odds_lambda.jobs.fetch_scores` | Self-scheduling |
 | `update-status` | `odds_lambda.jobs.update_status` | Self-scheduling |
-| `check-health` | `odds_lambda.jobs.check_health` | Self-scheduling |
+| `check-health` | `odds_lambda.jobs.check_health` | Fixed: hourly, 06:00–21:00 UTC |
 | `fetch-polymarket` | `odds_lambda.jobs.fetch_polymarket` | Self-scheduling (deprioritized) |
 | `backfill-polymarket` | `odds_lambda.jobs.backfill_polymarket` | Fixed: every 3 days (deprioritized) |
 | `fetch-oddsportal` | `odds_lambda.jobs.fetch_oddsportal` | Fixed: hourly |
