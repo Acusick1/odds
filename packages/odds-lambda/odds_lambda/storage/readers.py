@@ -14,6 +14,16 @@ from odds_lambda.fetch_tier import FetchTier
 logger = structlog.get_logger()
 
 
+def _snapshot_has_market(snapshot: OddsSnapshot, market: str) -> bool:
+    """Check whether a snapshot's raw_data contains the given market key."""
+    raw = snapshot.raw_data or {}
+    for bookmaker in raw.get("bookmakers", []):
+        for m in bookmaker.get("markets", []):
+            if m.get("key") == market:
+                return True
+    return False
+
+
 class OddsReader:
     """Handles all read operations from the database."""
 
@@ -280,12 +290,16 @@ class OddsReader:
         result = await self.session.execute(query)
         return result.scalars().first()
 
-    async def get_latest_snapshot(self, event_id: str) -> OddsSnapshot | None:
+    async def get_latest_snapshot(
+        self, event_id: str, *, market: str | None = None
+    ) -> OddsSnapshot | None:
         """
         Get most recent odds snapshot for an event.
 
         Args:
             event_id: Event identifier
+            market: If provided, only return snapshots containing this market key
+                (e.g. "h2h", "totals") in raw_data->bookmakers->markets.
 
         Returns:
             Latest OddsSnapshot or None
@@ -294,11 +308,17 @@ class OddsReader:
             select(OddsSnapshot)
             .where(OddsSnapshot.event_id == event_id)
             .order_by(OddsSnapshot.snapshot_time.desc())
-            .limit(1)
         )
 
+        if market is None:
+            result = await self.session.execute(query.limit(1))
+            return result.scalar_one_or_none()
+
         result = await self.session.execute(query)
-        return result.scalar_one_or_none()
+        for snapshot in result.scalars():
+            if _snapshot_has_market(snapshot, market):
+                return snapshot
+        return None
 
     async def snapshot_exists(
         self, event_id: str, snapshot_time: datetime, tolerance_minutes: int = 5
