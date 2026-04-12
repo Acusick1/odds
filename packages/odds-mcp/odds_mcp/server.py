@@ -13,7 +13,9 @@ from fastmcp import FastMCP
 from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import TabularFeatureExtractor
 from odds_analytics.sequence_loader import extract_odds_from_snapshot
+from odds_analytics.utils import calculate_implied_probability
 from odds_core.database import async_session_maker
+from odds_core.match_brief_models import BriefCheckpoint, MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade
 from odds_core.prediction_models import Prediction
@@ -576,6 +578,230 @@ async def settle_bets() -> dict[str, Any]:
         "settled_count": len(settled),
         "total_pnl": total_pnl,
         "settled_trades": serialized,
+    }
+
+
+def _snapshot_sharp_prices(
+    odds_list: list[Odds],
+    sharp_bookmakers: list[str],
+) -> SharpPriceMap:
+    """Extract current sharp bookmaker prices from an odds list.
+
+    Uses per-outcome priority fallback: each outcome independently falls through
+    to the next sharp bookmaker if a higher-priority one lacks that outcome.
+
+    Returns a dict keyed by outcome name, each containing the sharp bookmaker key,
+    American odds price, and implied probability.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    for o in odds_list:
+        if o.outcome_name in result:
+            continue
+        # Find highest-priority sharp bookmaker that has this outcome
+        for bm_key in sharp_bookmakers:
+            bm_match = [
+                x
+                for x in odds_list
+                if x.bookmaker_key == bm_key and x.outcome_name == o.outcome_name
+            ]
+            if bm_match:
+                result[o.outcome_name] = {
+                    "bookmaker": bm_key,
+                    "price": bm_match[0].price,
+                    "implied_prob": round(calculate_implied_probability(bm_match[0].price), 6),
+                }
+                break
+    return result
+
+
+@mcp.tool()
+async def save_match_brief(
+    event_id: str,
+    brief_text: str,
+    checkpoint: Literal["context", "decision"],
+) -> dict[str, Any]:
+    """Save a structured analysis brief for an event at a workflow checkpoint.
+
+    Automatically snapshots current sharp bookmaker prices at save time.
+    Multiple briefs per event+checkpoint are allowed (agent may re-evaluate).
+
+    Args:
+        event_id: Event identifier.
+        brief_text: Freeform brief content (structure controlled by agent prompt).
+        checkpoint: Workflow checkpoint: "context" (day before) or "decision" (KO-90min).
+
+    Returns:
+        Dict with saved brief details including snapshotted sharp prices.
+    """
+    async with async_session_maker() as session:
+        reader = OddsReader(session)
+        event = await reader.get_event_by_id(event_id)
+        if event is None:
+            return {"error": f"Event '{event_id}' not found"}
+
+        # Snapshot sharp prices from the latest odds
+        sharp_prices: SharpPriceMap | None = None
+        snapshot = await reader.get_latest_snapshot(event_id)
+        if snapshot is not None:
+            odds = extract_odds_from_snapshot(snapshot, event_id, market="h2h")
+            if odds:
+                sharp_prices = _snapshot_sharp_prices(odds, _DEFAULT_SHARP_BOOKMAKERS)
+
+        brief = MatchBrief(
+            event_id=event_id,
+            checkpoint=BriefCheckpoint(checkpoint),
+            brief_text=brief_text,
+            sharp_price_at_brief=sharp_prices,
+        )
+        session.add(brief)
+        await session.commit()
+        await session.refresh(brief)
+
+    return {
+        "id": brief.id,
+        "event_id": brief.event_id,
+        "checkpoint": brief.checkpoint.value,
+        "brief_text": brief.brief_text,
+        "sharp_price_at_brief": brief.sharp_price_at_brief,
+        "created_at": brief.created_at.isoformat(),
+    }
+
+
+@mcp.tool()
+async def get_match_brief(
+    event_id: str,
+    checkpoint: Literal["context", "decision"] | None = None,
+) -> dict[str, Any]:
+    """Retrieve saved match briefs for an event.
+
+    Returns all briefs for the event, newest first. Optionally filtered by checkpoint.
+    Returns empty gracefully when no brief exists.
+
+    Args:
+        event_id: Event identifier.
+        checkpoint: If set, only return briefs for this checkpoint.
+
+    Returns:
+        Dict with event info and list of matching briefs (newest first).
+    """
+    async with async_session_maker() as session:
+        reader = OddsReader(session)
+        event = await reader.get_event_by_id(event_id)
+        if event is None:
+            return {"error": f"Event '{event_id}' not found"}
+
+        query = select(MatchBrief).where(MatchBrief.event_id == event_id)
+        if checkpoint is not None:
+            query = query.where(MatchBrief.checkpoint == BriefCheckpoint(checkpoint))
+        query = query.order_by(MatchBrief.created_at.desc())
+
+        result = await session.execute(query)
+        briefs = list(result.scalars().all())
+
+    return {
+        "event": _event_to_dict(event),
+        "brief_count": len(briefs),
+        "briefs": [
+            {
+                "id": b.id,
+                "checkpoint": b.checkpoint.value,
+                "brief_text": b.brief_text,
+                "sharp_price_at_brief": b.sharp_price_at_brief,
+                "created_at": b.created_at.isoformat(),
+            }
+            for b in briefs
+        ],
+    }
+
+
+@mcp.tool()
+async def get_sharp_soft_spread(
+    event_id: str,
+    sharp_bookmakers: list[str] | None = None,
+    retail_bookmakers: list[str] | None = None,
+) -> dict[str, Any]:
+    """Get sharp vs soft bookmaker price divergence for an event.
+
+    Returns the sharp reference price, per-bookmaker soft prices, and implied
+    probability divergence for each outcome (home/draw/away).
+
+    Args:
+        event_id: Event identifier.
+        sharp_bookmakers: Sharp bookmaker keys (default: ["pinnacle", "betfair_exchange"]).
+        retail_bookmakers: Retail bookmaker keys (default: ["bet365", "betway", "betfred"]).
+
+    Returns:
+        Dict with per-outcome sharp price, soft prices, and divergence values.
+    """
+    sharp_bms = sharp_bookmakers or _DEFAULT_SHARP_BOOKMAKERS
+    retail_bms = retail_bookmakers or _DEFAULT_RETAIL_BOOKMAKERS
+
+    async with async_session_maker() as session:
+        reader = OddsReader(session)
+        event = await reader.get_event_by_id(event_id)
+        if event is None:
+            return {"error": f"Event '{event_id}' not found"}
+
+        snapshot = await reader.get_latest_snapshot(event_id)
+        if snapshot is None:
+            return {
+                "event": _event_to_dict(event),
+                "spread": None,
+                "message": "No odds snapshots available for this event",
+            }
+
+        # Extract odds and snapshot metadata inside session while ORM objects are live
+        odds = extract_odds_from_snapshot(snapshot, event_id, market="h2h")
+        snapshot_time_iso = snapshot.snapshot_time.isoformat()
+        event_dict = _event_to_dict(event)
+
+    if not odds:
+        return {
+            "event": event_dict,
+            "spread": None,
+            "message": "No h2h odds in latest snapshot",
+        }
+
+    # Reuse shared sharp price extraction
+    sharp_by_outcome = _snapshot_sharp_prices(odds, sharp_bms)
+
+    # Group odds by outcome for retail lookup
+    outcomes: dict[str, list[Odds]] = {}
+    for o in odds:
+        outcomes.setdefault(o.outcome_name, []).append(o)
+
+    spread: dict[str, dict[str, Any]] = {}
+    for outcome_name, outcome_odds in outcomes.items():
+        sharp_entry = sharp_by_outcome.get(outcome_name)
+        sharp_prob = sharp_entry["implied_prob"] if sharp_entry else None
+
+        # Collect retail bookmaker prices
+        soft_prices: list[dict[str, Any]] = []
+        for bm_key in retail_bms:
+            bm_match = [o for o in outcome_odds if o.bookmaker_key == bm_key]
+            if not bm_match:
+                continue
+            retail_price = bm_match[0].price
+            retail_prob = round(calculate_implied_probability(retail_price), 6)
+            divergence = round(retail_prob - sharp_prob, 6) if sharp_prob is not None else None
+            soft_prices.append(
+                {
+                    "bookmaker": bm_key,
+                    "price": retail_price,
+                    "implied_prob": retail_prob,
+                    "divergence": divergence,
+                }
+            )
+
+        spread[outcome_name] = {
+            "sharp": sharp_entry or {"bookmaker": None, "price": None, "implied_prob": None},
+            "soft": soft_prices,
+        }
+
+    return {
+        "event": event_dict,
+        "snapshot_time": snapshot_time_iso,
+        "spread": spread,
     }
 
 
