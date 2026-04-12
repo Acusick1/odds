@@ -38,6 +38,12 @@ ENV/
 *.swo
 *~
 
+# Claude Code
+.claude/
+
+# Playwright MCP
+.playwright-mcp/
+
 # Testing
 .pytest_cache/
 .coverage
@@ -67,6 +73,7 @@ data/external/
 # Database
 *.db
 *.sqlite3
+*.dump
 
 # Developer-specific files
 local/
@@ -95,6 +102,10 @@ plans/
 .DS_Store
 Thumbs.db
 
+# Scratch files
+TODO.md
+/oddsportal-*.png
+
 # Alembic
 alembic/versions/*.py
 !alembic/versions/
@@ -110,5 +121,6 @@ deployment/aws/terraform/*.tfvars
 # Terraform Bootstrap (state is committed for bootstrap only)
 deployment/aws/bootstrap/.terraform/
 deployment/aws/bootstrap/.terraform.lock.hcl
+deployment/aws/bootstrap/terraform.tfstate.backup
 
 deployment/aws/build/

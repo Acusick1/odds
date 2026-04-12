@@ -2,7 +2,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - 'packages/**/*.py'
       - 'tests/**'
