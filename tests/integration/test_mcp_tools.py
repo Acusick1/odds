@@ -1,11 +1,25 @@
-"""Integration tests for Phase 2 MCP tools (match briefs + sharp/soft spread)."""
+"""Integration tests for Phase 2 MCP tools (match briefs + sharp/soft spread).
+
+Tests call the actual MCP tool handler functions end-to-end, with
+async_session_maker patched to use the PGlite test database.
+"""
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from odds_core.match_brief_models import BriefCheckpoint, MatchBrief
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+
+@pytest.fixture
+def patch_session_maker(pglite_async_engine):
+    """Patch async_session_maker in the server module to use the PGlite engine."""
+    factory = async_sessionmaker(pglite_async_engine, expire_on_commit=False)
+    with patch("odds_mcp.server.async_session_maker", factory):
+        yield factory
 
 
 @pytest.fixture
@@ -189,162 +203,178 @@ class TestSaveMatchBrief:
     """Tests for the save_match_brief MCP tool."""
 
     @pytest.mark.asyncio
-    async def test_save_and_retrieve_brief(self, pglite_async_session, epl_event_with_odds):
-        """save_match_brief persists a brief that get_match_brief can retrieve."""
+    async def test_happy_path(self, patch_session_maker, epl_event_with_odds):
+        """save_match_brief persists a brief with auto-captured sharp prices."""
+        from odds_mcp.server import save_match_brief
+
         event, _ = epl_event_with_odds
 
-        brief = MatchBrief(
+        result = await save_match_brief(
             event_id=event.id,
-            checkpoint=BriefCheckpoint.CONTEXT,
             brief_text="Arsenal looking strong at home, Chelsea missing key players.",
-            sharp_price_at_brief={"Arsenal": {"bookmaker": "pinnacle", "price": -120}},
+            checkpoint="context",
         )
-        pglite_async_session.add(brief)
-        await pglite_async_session.commit()
-        await pglite_async_session.refresh(brief)
 
-        assert brief.id is not None
-        assert brief.event_id == event.id
-        assert brief.checkpoint == BriefCheckpoint.CONTEXT
-        assert brief.created_at is not None
-
-        # Retrieve
-        result = await pglite_async_session.execute(
-            select(MatchBrief).where(MatchBrief.event_id == event.id)
-        )
-        briefs = list(result.scalars().all())
-        assert len(briefs) == 1
+        assert "error" not in result
+        assert result["id"] is not None
+        assert result["event_id"] == event.id
+        assert result["checkpoint"] == "context"
         assert (
-            briefs[0].brief_text == "Arsenal looking strong at home, Chelsea missing key players."
+            result["brief_text"] == "Arsenal looking strong at home, Chelsea missing key players."
         )
-        assert briefs[0].sharp_price_at_brief is not None
+        assert result["created_at"] is not None
+        # Sharp prices auto-captured from snapshot
+        sharp = result["sharp_price_at_brief"]
+        assert sharp is not None
+        for outcome_data in sharp.values():
+            assert outcome_data["bookmaker"] == "pinnacle"
+            assert "price" in outcome_data
+            assert "implied_prob" in outcome_data
 
     @pytest.mark.asyncio
-    async def test_multiple_briefs_per_checkpoint(self, pglite_async_session, epl_event_with_odds):
+    async def test_event_not_found(self, patch_session_maker):
+        """save_match_brief returns error for nonexistent event."""
+        from odds_mcp.server import save_match_brief
+
+        result = await save_match_brief(
+            event_id="nonexistent_event",
+            brief_text="Should fail",
+            checkpoint="context",
+        )
+
+        assert result == {"error": "Event 'nonexistent_event' not found"}
+
+    @pytest.mark.asyncio
+    async def test_no_snapshot_still_saves(self, patch_session_maker, epl_event_no_odds):
+        """save_match_brief works with no snapshot (sharp prices will be null)."""
+        from odds_mcp.server import save_match_brief
+
+        event = epl_event_no_odds
+
+        result = await save_match_brief(
+            event_id=event.id,
+            brief_text="No odds available yet for this fixture.",
+            checkpoint="decision",
+        )
+
+        assert "error" not in result
+        assert result["id"] is not None
+        assert result["sharp_price_at_brief"] is None
+        assert result["checkpoint"] == "decision"
+
+    @pytest.mark.asyncio
+    async def test_multiple_briefs_per_checkpoint(
+        self, patch_session_maker, epl_event_with_odds, pglite_async_session
+    ):
         """Multiple briefs for the same event+checkpoint are allowed."""
+        from odds_mcp.server import save_match_brief
+
         event, _ = epl_event_with_odds
 
+        ids = []
         for i in range(3):
-            brief = MatchBrief(
+            result = await save_match_brief(
                 event_id=event.id,
-                checkpoint=BriefCheckpoint.DECISION,
                 brief_text=f"Decision brief revision {i}",
+                checkpoint="decision",
             )
-            pglite_async_session.add(brief)
+            assert "error" not in result
+            ids.append(result["id"])
 
-        await pglite_async_session.commit()
+        # All have distinct IDs
+        assert len(set(ids)) == 3
 
-        result = await pglite_async_session.execute(
+        # Verify via DB
+        db_result = await pglite_async_session.execute(
             select(MatchBrief)
             .where(MatchBrief.event_id == event.id)
             .where(MatchBrief.checkpoint == BriefCheckpoint.DECISION)
         )
-        briefs = list(result.scalars().all())
-        assert len(briefs) == 3
-
-    @pytest.mark.asyncio
-    async def test_sharp_price_auto_capture(self, pglite_async_session, epl_event_with_odds):
-        """Sharp prices from the latest snapshot are captured in the brief."""
-        from odds_analytics.sequence_loader import extract_odds_from_snapshot
-        from odds_mcp.server import _snapshot_sharp_prices
-
-        event, snapshot = epl_event_with_odds
-        odds = extract_odds_from_snapshot(snapshot, event.id, market="h2h")
-        sharp_prices = _snapshot_sharp_prices(odds, ["pinnacle", "betfair_exchange"])
-
-        brief = MatchBrief(
-            event_id=event.id,
-            checkpoint=BriefCheckpoint.CONTEXT,
-            brief_text="Test brief with sharp prices",
-            sharp_price_at_brief=sharp_prices,
-        )
-        pglite_async_session.add(brief)
-        await pglite_async_session.commit()
-        await pglite_async_session.refresh(brief)
-
-        assert brief.sharp_price_at_brief is not None
-        # Pinnacle should be the sharp source for all outcomes
-        for outcome_data in brief.sharp_price_at_brief.values():
-            assert outcome_data["bookmaker"] == "pinnacle"
-            assert "price" in outcome_data
-            assert "implied_prob" in outcome_data
+        assert len(list(db_result.scalars().all())) == 3
 
 
 class TestGetMatchBrief:
     """Tests for the get_match_brief MCP tool."""
 
     @pytest.mark.asyncio
-    async def test_checkpoint_filtering(self, pglite_async_session, epl_event_with_odds):
-        """Filtering by checkpoint returns only matching briefs."""
+    async def test_retrieve_after_save(self, patch_session_maker, epl_event_with_odds):
+        """get_match_brief retrieves briefs saved by save_match_brief."""
+        from odds_mcp.server import get_match_brief, save_match_brief
+
         event, _ = epl_event_with_odds
 
-        context_brief = MatchBrief(
+        await save_match_brief(
             event_id=event.id,
-            checkpoint=BriefCheckpoint.CONTEXT,
-            brief_text="Context analysis",
+            brief_text="Context analysis for Arsenal vs Chelsea.",
+            checkpoint="context",
         )
-        decision_brief = MatchBrief(
-            event_id=event.id,
-            checkpoint=BriefCheckpoint.DECISION,
-            brief_text="Decision analysis",
-        )
-        pglite_async_session.add(context_brief)
-        pglite_async_session.add(decision_brief)
-        await pglite_async_session.commit()
 
-        # Filter by context
-        result = await pglite_async_session.execute(
-            select(MatchBrief)
-            .where(MatchBrief.event_id == event.id)
-            .where(MatchBrief.checkpoint == BriefCheckpoint.CONTEXT)
-        )
-        briefs = list(result.scalars().all())
-        assert len(briefs) == 1
-        assert briefs[0].brief_text == "Context analysis"
+        result = await get_match_brief(event_id=event.id)
 
-        # Filter by decision
-        result = await pglite_async_session.execute(
-            select(MatchBrief)
-            .where(MatchBrief.event_id == event.id)
-            .where(MatchBrief.checkpoint == BriefCheckpoint.DECISION)
-        )
-        briefs = list(result.scalars().all())
-        assert len(briefs) == 1
-        assert briefs[0].brief_text == "Decision analysis"
+        assert "error" not in result
+        assert result["brief_count"] == 1
+        assert result["briefs"][0]["brief_text"] == "Context analysis for Arsenal vs Chelsea."
+        assert result["event"]["id"] == event.id
 
     @pytest.mark.asyncio
-    async def test_graceful_empty_results(self, pglite_async_session, epl_event_no_odds):
+    async def test_checkpoint_filtering(self, patch_session_maker, epl_event_with_odds):
+        """Filtering by checkpoint returns only matching briefs."""
+        from odds_mcp.server import get_match_brief, save_match_brief
+
+        event, _ = epl_event_with_odds
+
+        await save_match_brief(
+            event_id=event.id, brief_text="Context analysis", checkpoint="context"
+        )
+        await save_match_brief(
+            event_id=event.id, brief_text="Decision analysis", checkpoint="decision"
+        )
+
+        context_result = await get_match_brief(event_id=event.id, checkpoint="context")
+        assert context_result["brief_count"] == 1
+        assert context_result["briefs"][0]["brief_text"] == "Context analysis"
+
+        decision_result = await get_match_brief(event_id=event.id, checkpoint="decision")
+        assert decision_result["brief_count"] == 1
+        assert decision_result["briefs"][0]["brief_text"] == "Decision analysis"
+
+    @pytest.mark.asyncio
+    async def test_empty_results(self, patch_session_maker, epl_event_no_odds):
         """Querying briefs for an event with none returns empty list."""
+        from odds_mcp.server import get_match_brief
+
         event = epl_event_no_odds
 
-        result = await pglite_async_session.execute(
-            select(MatchBrief).where(MatchBrief.event_id == event.id)
-        )
-        briefs = list(result.scalars().all())
-        assert len(briefs) == 0
+        result = await get_match_brief(event_id=event.id)
+
+        assert "error" not in result
+        assert result["brief_count"] == 0
+        assert result["briefs"] == []
 
     @pytest.mark.asyncio
-    async def test_returns_all_briefs_newest_first(self, pglite_async_session, epl_event_with_odds):
-        """All briefs are returned, ordered newest first."""
+    async def test_newest_first_ordering(self, patch_session_maker, epl_event_with_odds):
+        """Briefs are returned newest first."""
+        from odds_mcp.server import get_match_brief, save_match_brief
+
         event, _ = epl_event_with_odds
 
         for i in range(3):
-            brief = MatchBrief(
-                event_id=event.id,
-                checkpoint=BriefCheckpoint.CONTEXT,
-                brief_text=f"Brief {i}",
-            )
-            pglite_async_session.add(brief)
+            await save_match_brief(event_id=event.id, brief_text=f"Brief {i}", checkpoint="context")
 
-        await pglite_async_session.commit()
+        result = await get_match_brief(event_id=event.id)
 
-        result = await pglite_async_session.execute(
-            select(MatchBrief)
-            .where(MatchBrief.event_id == event.id)
-            .order_by(MatchBrief.created_at.desc())
-        )
-        briefs = list(result.scalars().all())
-        assert len(briefs) == 3
+        assert result["brief_count"] == 3
+        # Newest first: Brief 2 should be first
+        assert result["briefs"][0]["brief_text"] == "Brief 2"
+        assert result["briefs"][2]["brief_text"] == "Brief 0"
+
+    @pytest.mark.asyncio
+    async def test_event_not_found(self, patch_session_maker):
+        """get_match_brief returns error for nonexistent event."""
+        from odds_mcp.server import get_match_brief
+
+        result = await get_match_brief(event_id="nonexistent_event")
+        assert result == {"error": "Event 'nonexistent_event' not found"}
 
 
 class TestSnapshotSharpPrices:
@@ -386,39 +416,71 @@ class TestSnapshotSharpPrices:
 
 
 class TestGetSharpSoftSpread:
-    """Tests for spread computation logic used by get_sharp_soft_spread."""
+    """Tests for the get_sharp_soft_spread MCP tool."""
 
     @pytest.mark.asyncio
-    async def test_spread_computation(self, pglite_async_session, epl_event_with_odds):
+    async def test_happy_path(self, patch_session_maker, epl_event_with_odds):
         """Sharp vs soft spread is computed correctly with divergence values."""
-        from odds_analytics.sequence_loader import extract_odds_from_snapshot
-        from odds_analytics.utils import calculate_implied_probability
+        from odds_mcp.server import get_sharp_soft_spread
 
-        event, snapshot = epl_event_with_odds
-        odds = extract_odds_from_snapshot(snapshot, event.id, market="h2h")
+        event, _ = epl_event_with_odds
 
-        # Group by outcome
-        outcomes: dict[str, list] = {}
-        for o in odds:
-            outcomes.setdefault(o.outcome_name, []).append(o)
+        result = await get_sharp_soft_spread(event_id=event.id)
 
-        # Verify Arsenal outcome has expected sharp/soft prices
-        arsenal_odds = outcomes["Arsenal"]
-        pinnacle_price = next(o.price for o in arsenal_odds if o.bookmaker_key == "pinnacle")
-        bet365_price = next(o.price for o in arsenal_odds if o.bookmaker_key == "bet365")
+        assert "error" not in result
+        assert result["event"]["id"] == event.id
+        assert result["snapshot_time"] is not None
+        spread = result["spread"]
+        assert spread is not None
 
-        assert pinnacle_price == -120
-        assert bet365_price == -130
+        # Check Arsenal outcome
+        arsenal = spread["Arsenal"]
+        assert arsenal["sharp"]["bookmaker"] == "pinnacle"
+        assert arsenal["sharp"]["price"] == -120
+        assert arsenal["sharp"]["implied_prob"] is not None
 
-        sharp_prob = calculate_implied_probability(-120)
-        soft_prob = calculate_implied_probability(-130)
-        assert soft_prob > sharp_prob  # bet365 implies higher prob (wider margin)
+        # Check retail bookmakers present
+        soft_bms = {s["bookmaker"] for s in arsenal["soft"]}
+        assert "bet365" in soft_bms
+        assert "betway" in soft_bms
+
+        # Divergence should be computed
+        for soft_entry in arsenal["soft"]:
+            assert soft_entry["divergence"] is not None
 
     @pytest.mark.asyncio
-    async def test_no_snapshot_returns_gracefully(self, pglite_async_session, epl_event_no_odds):
+    async def test_no_snapshot_graceful(self, patch_session_maker, epl_event_no_odds):
         """Event with no snapshots returns None spread with message."""
-        from odds_lambda.storage.readers import OddsReader
+        from odds_mcp.server import get_sharp_soft_spread
 
-        reader = OddsReader(pglite_async_session)
-        snapshot = await reader.get_latest_snapshot("epl_test_002")
-        assert snapshot is None
+        event = epl_event_no_odds
+
+        result = await get_sharp_soft_spread(event_id=event.id)
+
+        assert "error" not in result
+        assert result["spread"] is None
+        assert "message" in result
+
+    @pytest.mark.asyncio
+    async def test_event_not_found(self, patch_session_maker):
+        """get_sharp_soft_spread returns error for nonexistent event."""
+        from odds_mcp.server import get_sharp_soft_spread
+
+        result = await get_sharp_soft_spread(event_id="nonexistent_event")
+        assert result == {"error": "Event 'nonexistent_event' not found"}
+
+    @pytest.mark.asyncio
+    async def test_per_outcome_sharp_fallback(self, patch_session_maker, partial_sharp_event):
+        """Sharp prices fall through per-outcome (reuses _snapshot_sharp_prices)."""
+        from odds_mcp.server import get_sharp_soft_spread
+
+        event, _ = partial_sharp_event
+
+        result = await get_sharp_soft_spread(event_id=event.id)
+
+        spread = result["spread"]
+        # Tottenham from pinnacle (higher priority)
+        assert spread["Tottenham"]["sharp"]["bookmaker"] == "pinnacle"
+        # Draw/Everton fall through to betfair_exchange
+        assert spread["Draw"]["sharp"]["bookmaker"] == "betfair_exchange"
+        assert spread["Everton"]["sharp"]["bookmaker"] == "betfair_exchange"

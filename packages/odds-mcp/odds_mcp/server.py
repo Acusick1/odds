@@ -15,7 +15,7 @@ from odds_analytics.feature_extraction import TabularFeatureExtractor
 from odds_analytics.sequence_loader import extract_odds_from_snapshot
 from odds_analytics.utils import calculate_implied_probability
 from odds_core.database import async_session_maker
-from odds_core.match_brief_models import BriefCheckpoint, MatchBrief
+from odds_core.match_brief_models import BriefCheckpoint, MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade
 from odds_core.prediction_models import Prediction
@@ -584,7 +584,7 @@ async def settle_bets() -> dict[str, Any]:
 def _snapshot_sharp_prices(
     odds_list: list[Odds],
     sharp_bookmakers: list[str],
-) -> dict[str, dict[str, Any]]:
+) -> SharpPriceMap:
     """Extract current sharp bookmaker prices from an odds list.
 
     Uses per-outcome priority fallback: each outcome independently falls through
@@ -640,7 +640,7 @@ async def save_match_brief(
             return {"error": f"Event '{event_id}' not found"}
 
         # Snapshot sharp prices from the latest odds
-        sharp_prices: dict[str, dict[str, Any]] | None = None
+        sharp_prices: SharpPriceMap | None = None
         snapshot = await reader.get_latest_snapshot(event_id)
         if snapshot is not None:
             odds = extract_odds_from_snapshot(snapshot, event_id, market="h2h")
@@ -762,28 +762,18 @@ async def get_sharp_soft_spread(
             "message": "No h2h odds in latest snapshot",
         }
 
-    # Group odds by outcome
+    # Reuse shared sharp price extraction
+    sharp_by_outcome = _snapshot_sharp_prices(odds, sharp_bms)
+
+    # Group odds by outcome for retail lookup
     outcomes: dict[str, list[Odds]] = {}
     for o in odds:
         outcomes.setdefault(o.outcome_name, []).append(o)
 
     spread: dict[str, dict[str, Any]] = {}
     for outcome_name, outcome_odds in outcomes.items():
-        # Find sharp price (priority-ordered fallback)
-        sharp_price: int | None = None
-        sharp_bm: str | None = None
-        for bm_key in sharp_bms:
-            bm_match = [o for o in outcome_odds if o.bookmaker_key == bm_key]
-            if bm_match:
-                sharp_price = bm_match[0].price
-                sharp_bm = bm_key
-                break
-
-        sharp_prob = (
-            round(calculate_implied_probability(sharp_price), 6)
-            if sharp_price is not None
-            else None
-        )
+        sharp_entry = sharp_by_outcome.get(outcome_name)
+        sharp_prob = sharp_entry["implied_prob"] if sharp_entry else None
 
         # Collect retail bookmaker prices
         soft_prices: list[dict[str, Any]] = []
@@ -804,11 +794,7 @@ async def get_sharp_soft_spread(
             )
 
         spread[outcome_name] = {
-            "sharp": {
-                "bookmaker": sharp_bm,
-                "price": sharp_price,
-                "implied_prob": sharp_prob,
-            },
+            "sharp": sharp_entry or {"bookmaker": None, "price": None, "implied_prob": None},
             "soft": soft_prices,
         }
 

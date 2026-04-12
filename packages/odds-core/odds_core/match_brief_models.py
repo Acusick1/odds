@@ -2,11 +2,17 @@
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from sqlalchemy import JSON, Column, DateTime, Index
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
+
+# Per-outcome sharp price entry: bookmaker key, American odds, implied probability.
+SharpPriceEntry = dict[str, Any]  # {"bookmaker": str, "price": int, "implied_prob": float}
+# Keyed by outcome name (e.g. "Arsenal", "Draw", "Chelsea").
+SharpPriceMap = dict[str, SharpPriceEntry]
 
 
 class BriefCheckpoint(str, Enum):
@@ -29,7 +35,7 @@ class MatchBrief(SQLModel, table=True):
     )
     brief_text: str = Field(description="Freeform agent brief content")
 
-    sharp_price_at_brief: dict | None = Field(
+    sharp_price_at_brief: SharpPriceMap | None = Field(
         sa_column=Column(JSON),
         default=None,
         description="Sharp bookmaker odds snapshot at time of brief creation",
