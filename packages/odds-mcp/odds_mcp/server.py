@@ -805,5 +805,125 @@ async def get_sharp_soft_spread(
     }
 
 
+@mcp.tool()
+async def get_confirmed_lineups(event_id: str) -> dict[str, Any]:
+    """Get confirmed lineups for an EPL match from API-Football.
+
+    Returns formation, starting XI (name, position, number), substitutes,
+    and coach for both teams. Lineups are typically available ~55-75 min
+    before kickoff.
+
+    Results are persisted to DB. If lineups were previously fetched for this
+    fixture, returns the cached version without hitting the API.
+
+    Args:
+        event_id: Event identifier (e.g. "op_live_ARS_CHE_2026-04-13").
+
+    Returns:
+        Dict with lineup data per team, or a message if lineups are not yet available.
+    """
+    from odds_core.epl_data_models import ApiFootballLineup
+    from odds_lambda.api_football_client import fetch_lineups_for_event
+
+    async with async_session_maker() as session:
+        # Look up the event
+        reader = OddsReader(session)
+        event = await reader.get_event_by_id(event_id)
+        if event is None:
+            return {"error": f"Event '{event_id}' not found"}
+
+        # Check for cached lineups first
+        cached_query = select(ApiFootballLineup).where(ApiFootballLineup.event_id == event_id)
+        cached_result = await session.execute(cached_query)
+        cached = list(cached_result.scalars().all())
+
+        if cached:
+            return {
+                "event": _event_to_dict(event),
+                "source": "cached",
+                "lineups": [_lineup_to_dict(row) for row in cached],
+            }
+
+    # Fetch from API-Football
+    try:
+        result = await fetch_lineups_for_event(
+            event_id=event_id,
+            home_team=event.home_team,
+            away_team=event.away_team,
+            commence_time=event.commence_time,
+        )
+    except ValueError as e:
+        return {
+            "event": _event_to_dict(event),
+            "error": str(e),
+            "message": "API_FOOTBALL_KEY is not configured. Set the environment variable.",
+        }
+    except Exception as e:
+        logger.error("get_confirmed_lineups_failed", event_id=event_id, error=str(e), exc_info=True)
+        return {
+            "event": _event_to_dict(event),
+            "error": str(e),
+            "error_type": type(e).__name__,
+        }
+
+    if not result.get("available"):
+        return {
+            "event": _event_to_dict(event),
+            **result,
+        }
+
+    # Persist to DB
+    fixture_id = result["fixture_id"]
+    lineups_data = result["lineups"]
+
+    async with async_session_maker() as session:
+        rows = []
+        for team in lineups_data:
+            row = ApiFootballLineup(
+                event_id=event_id,
+                fixture_id=fixture_id,
+                team_name=team["team_name"],
+                team_id=team["team_id"],
+                formation=team["formation"],
+                coach=team["coach"],
+                start_xi=team["start_xi"],
+                substitutes=team["substitutes"],
+            )
+            rows.append(row)
+
+        # Upsert: delete existing rows for this fixture, then insert fresh
+        from sqlalchemy import delete
+
+        await session.execute(
+            delete(ApiFootballLineup).where(ApiFootballLineup.fixture_id == fixture_id)
+        )
+        session.add_all(rows)
+        await session.commit()
+
+        # Re-read to get DB-assigned IDs
+        for row in rows:
+            await session.refresh(row)
+
+        return {
+            "event": _event_to_dict(event),
+            "source": "api_football",
+            "fixture_id": fixture_id,
+            "lineups": [_lineup_to_dict(row) for row in rows],
+        }
+
+
+def _lineup_to_dict(row: Any) -> dict[str, Any]:
+    """Serialize an ApiFootballLineup row to a JSON-safe dict."""
+    return {
+        "team_name": row.team_name,
+        "team_id": row.team_id,
+        "formation": row.formation,
+        "coach": row.coach,
+        "start_xi": row.start_xi,
+        "substitutes": row.substitutes,
+        "fetched_at": row.fetched_at.isoformat() if row.fetched_at else None,
+    }
+
+
 if __name__ == "__main__":
     mcp.run()

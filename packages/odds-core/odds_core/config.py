@@ -206,6 +206,21 @@ class PolymarketConfig(BaseSettings):
     )
 
 
+class ApiFootballConfig(BaseSettings):
+    """API-Football (api-sports.io) configuration."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="API_FOOTBALL_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+    key: str | None = Field(default=None, description="API-Football API key")
+    base_url: str = Field(
+        default="https://v3.football.api-sports.io",
+        description="API-Football v3 base URL",
+    )
+    epl_league_id: int = Field(default=39, description="API-Football EPL league ID")
+
+
 class LoggingConfig(BaseSettings):
     """Logging configuration."""
 
@@ -243,6 +258,7 @@ class Settings(BaseSettings):
     alerts: AlertConfig = Field(default_factory=AlertConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     polymarket: PolymarketConfig = Field(default_factory=PolymarketConfig)
+    api_football: ApiFootballConfig = Field(default_factory=ApiFootballConfig)
 
 
 @lru_cache

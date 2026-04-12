@@ -1,9 +1,10 @@
-"""EPL supplementary data tables: ESPN fixtures, ESPN lineups, FPL availability."""
+"""EPL supplementary data tables: ESPN fixtures, ESPN lineups, FPL availability, API-Football."""
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import Column, DateTime, Index, UniqueConstraint, func
+from sqlalchemy import JSON, Column, DateTime, Index, UniqueConstraint, func
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
@@ -168,4 +169,39 @@ class FplAvailability(SQLModel, table=True):
             name="uq_fpl_avail_snapshot_gw_player_season",
         ),
         Index("ix_fpl_avail_team_season", "team", "season"),
+    )
+
+
+class ApiFootballLineup(SQLModel, table=True):
+    """Confirmed lineup from API-Football for one team in a fixture.
+
+    One row per (fixture_id, team). Stores the full lineup response including
+    formation, starting XI, substitutes, and coach as structured JSON.
+    """
+
+    __tablename__ = "api_football_lineups"
+
+    id: int | None = Field(default=None, primary_key=True)
+
+    event_id: str = Field(index=True)
+    fixture_id: int = Field(index=True)
+    team_name: str = Field()
+    team_id: int = Field()
+    formation: str | None = Field(default=None)
+    coach: dict[str, Any] | None = Field(sa_column=Column(JSON), default=None)
+    start_xi: list[dict[str, Any]] = Field(sa_column=Column(JSON))
+    substitutes: list[dict[str, Any]] = Field(sa_column=Column(JSON))
+
+    fetched_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True)),
+        default_factory=utc_now,
+    )
+    created_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), server_default=func.now()),
+        default_factory=utc_now,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("fixture_id", "team_id", name="uq_api_football_lineup_fixture_team"),
+        Index("ix_api_football_lineup_event", "event_id"),
     )

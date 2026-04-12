@@ -5,7 +5,12 @@ from logging.config import fileConfig
 
 from alembic import context
 from odds_core.config import get_settings
-from odds_core.epl_data_models import EspnFixture, EspnLineup, FplAvailability  # noqa: F401
+from odds_core.epl_data_models import (  # noqa: F401
+    ApiFootballLineup,
+    EspnFixture,
+    EspnLineup,
+    FplAvailability,
+)
 from odds_core.game_log_models import NbaTeamGameLog  # noqa: F401
 from odds_core.injury_models import InjuryReport, InjuryStatus  # noqa: F401
 from odds_core.match_brief_models import MatchBrief  # noqa: F401
