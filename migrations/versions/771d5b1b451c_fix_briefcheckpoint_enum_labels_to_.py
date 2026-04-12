@@ -1,19 +1,15 @@
 """fix briefcheckpoint enum labels to uppercase
 
-SQLAlchemy sends the Python enum .name (CONTEXT, DECISION) not .value
-(context, decision). The initial migration created lowercase labels,
-causing InvalidTextRepresentationError on insert.
-
-Revision ID: a1b2c3d4e5f6
+Revision ID: 771d5b1b451c
 Revises: fc55da171cdb
-Create Date: 2026-04-12 21:00:00.000000
+Create Date: 2026-04-12 20:48:32.183640
 
 """
 
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "a1b2c3d4e5f6"
+revision = "771d5b1b451c"
 down_revision = "fc55da171cdb"
 branch_labels = None
 depends_on = None
