@@ -24,6 +24,7 @@ __all__ = [
     "TeamRecord",
     "load_season_events_cache",
     "get_prior_events_from_cache",
+    "epl_season_key",
 ]
 
 logger = structlog.get_logger()
@@ -132,11 +133,11 @@ class TeamRecord:
 def epl_season_key(dt: datetime) -> str:
     """Derive EPL season string from a datetime.
 
-    EPL season runs Aug-May. A match in Jan 2025 -> '2024-25'.
-    A match in Aug 2024 -> '2024-25'.
+    EPL season runs Aug-Jul. A match in Jan 2025 -> '2024-25'.
+    A match in Aug 2024 -> '2024-25'. A match in Jul 2025 -> '2024-25'.
     """
     year = dt.year
-    if dt.month >= 7:
+    if dt.month >= 8:
         return f"{year}-{str(year + 1)[-2:]}"
     return f"{year - 1}-{str(year)[-2:]}"
 
