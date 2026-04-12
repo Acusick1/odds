@@ -222,6 +222,7 @@ async def fetch_lineups_for_event(
     if fixture is None:
         return {
             "available": False,
+            "event_id": event_id,
             "message": f"No API-Football fixture found for {home_team} vs {away_team} "
             f"on {commence_time.strftime('%Y-%m-%d')}",
         }
@@ -233,6 +234,7 @@ async def fetch_lineups_for_event(
         hours_until = (commence_time - datetime.now(UTC)).total_seconds() / 3600
         return {
             "available": False,
+            "event_id": event_id,
             "fixture_id": fixture_id,
             "message": (
                 f"Lineups not yet available for fixture {fixture_id}. "
@@ -245,6 +247,7 @@ async def fetch_lineups_for_event(
 
     return {
         "available": True,
+        "event_id": event_id,
         "fixture_id": fixture_id,
         "lineups": parsed,
     }
