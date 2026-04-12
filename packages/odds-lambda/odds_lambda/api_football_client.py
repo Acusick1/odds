@@ -16,20 +16,16 @@ from odds_core.team import normalize_team_name
 
 logger = structlog.get_logger(__name__)
 
+
+class ApiFootballRateLimitError(RuntimeError):
+    """Raised when API-Football returns a 429 or rate-limit error message."""
+
+
 # API-Football team name -> pipeline canonical name.
+# Only entries that normalize_team_name() does NOT already handle.
 # Keys are lowercased for case-insensitive lookup.
 _API_FOOTBALL_ALIASES: dict[str, str] = {
-    "manchester united": "Manchester Utd",
-    "newcastle": "Newcastle",
-    "nottingham forest": "Nottingham",
-    "tottenham": "Tottenham",
     "wolverhampton": "Wolves",
-    "wolverhampton wanderers": "Wolves",
-    "west ham": "West Ham",
-    "afc bournemouth": "Bournemouth",
-    "brighton": "Brighton",
-    "leicester": "Leicester",
-    "ipswich": "Ipswich",
     "sheffield utd": "Sheffield Utd",
 }
 
@@ -52,12 +48,15 @@ class ApiFootballClient:
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
         settings = get_settings()
-        self.api_key = api_key or settings.api_football.key
+        resolved_key = api_key or settings.api_football.key
         self.base_url = base_url or settings.api_football.base_url
         self.league_id = settings.api_football.epl_league_id
 
-        if not self.api_key:
+        if not resolved_key:
             raise ValueError("API_FOOTBALL_KEY is not configured")
+
+        self.api_key: str = resolved_key
+        self._fixture_cache: dict[tuple[str, int], list[dict[str, Any]]] = {}
 
     async def _request(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
         """Make an authenticated GET request to API-Football."""
@@ -66,6 +65,16 @@ class ApiFootballClient:
 
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, params=params) as resp:
+                if resp.status == 429:
+                    body = await resp.text()
+                    logger.error(
+                        "api_football_rate_limited",
+                        endpoint=endpoint,
+                        body=body[:500],
+                    )
+                    raise ApiFootballRateLimitError(
+                        f"API-Football rate limited (429): {body[:200]}"
+                    )
                 if resp.status != 200:
                     body = await resp.text()
                     logger.error(
@@ -79,6 +88,12 @@ class ApiFootballClient:
 
         errors = data.get("errors")
         if errors:
+            # errors can be a dict like {"rateLimit": "...", "token": "..."}
+            rate_keywords = ("rate", "limit", "too many")
+            error_str = str(errors)
+            if any(kw in error_str.lower() for kw in rate_keywords):
+                logger.error("api_football_rate_limited", endpoint=endpoint, errors=errors)
+                raise ApiFootballRateLimitError(f"API-Football rate limit: {errors}")
             logger.error("api_football_api_error", endpoint=endpoint, errors=errors)
             raise RuntimeError(f"API-Football error: {errors}")
 
@@ -100,16 +115,21 @@ class ApiFootballClient:
         date_str = match_date.strftime("%Y-%m-%d")
         season = _infer_season(match_date)
 
-        data = await self._request(
-            "fixtures",
-            {
-                "league": self.league_id,
-                "season": season,
-                "date": date_str,
-            },
-        )
+        cache_key = (date_str, self.league_id)
+        if cache_key in self._fixture_cache:
+            fixtures = self._fixture_cache[cache_key]
+        else:
+            data = await self._request(
+                "fixtures",
+                {
+                    "league": self.league_id,
+                    "season": season,
+                    "date": date_str,
+                },
+            )
+            fixtures = data.get("response", [])
+            self._fixture_cache[cache_key] = fixtures
 
-        fixtures = data.get("response", [])
         if not fixtures:
             logger.info(
                 "api_football_no_fixtures",
@@ -154,6 +174,8 @@ def _infer_season(dt: datetime) -> int:
     """Infer the EPL season year from a match date.
 
     EPL seasons run Aug-May. A match in Jan 2026 belongs to season 2025.
+    Note: EPL can occasionally start in late July, but Aug is the safe cutoff
+    since API-Football season IDs align to Aug start.
     """
     if dt.month >= 8:
         return dt.year

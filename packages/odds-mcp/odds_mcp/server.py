@@ -15,6 +15,7 @@ from odds_analytics.feature_extraction import TabularFeatureExtractor
 from odds_analytics.sequence_loader import extract_odds_from_snapshot
 from odds_analytics.utils import calculate_implied_probability
 from odds_core.database import async_session_maker
+from odds_core.epl_data_models import ApiFootballLineup
 from odds_core.match_brief_models import BriefCheckpoint, MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade
@@ -28,6 +29,7 @@ from odds_lambda.paper_trading import (
 )
 from odds_lambda.storage.readers import OddsReader
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 
 logger = structlog.get_logger()
 
@@ -822,7 +824,6 @@ async def get_confirmed_lineups(event_id: str) -> dict[str, Any]:
     Returns:
         Dict with lineup data per team, or a message if lineups are not yet available.
     """
-    from odds_core.epl_data_models import ApiFootballLineup
     from odds_lambda.api_football_client import fetch_lineups_for_event
 
     async with async_session_maker() as session:
@@ -877,32 +878,46 @@ async def get_confirmed_lineups(event_id: str) -> dict[str, Any]:
     lineups_data = result["lineups"]
 
     async with async_session_maker() as session:
-        rows = []
         for team in lineups_data:
-            row = ApiFootballLineup(
-                event_id=event_id,
-                fixture_id=fixture_id,
-                team_name=team["team_name"],
-                team_id=team["team_id"],
-                formation=team["formation"],
-                coach=team["coach"],
-                start_xi=team["start_xi"],
-                substitutes=team["substitutes"],
+            values = {
+                "event_id": event_id,
+                "fixture_id": fixture_id,
+                "team_name": team["team_name"],
+                "team_id": team["team_id"],
+                "formation": team["formation"],
+                "coach": team["coach"],
+                "start_xi": team["start_xi"],
+                "substitutes": team["substitutes"],
+                "fetched_at": datetime.now(UTC),
+            }
+            set_ = {
+                col: values[col]
+                for col in (
+                    "event_id",
+                    "team_name",
+                    "formation",
+                    "coach",
+                    "start_xi",
+                    "substitutes",
+                    "fetched_at",
+                )
+            }
+            stmt = (
+                insert(ApiFootballLineup)
+                .values(**values)
+                .on_conflict_do_update(
+                    constraint="uq_api_football_lineup_fixture_team",
+                    set_=set_,
+                )
             )
-            rows.append(row)
+            await session.execute(stmt)
 
-        # Upsert: delete existing rows for this fixture, then insert fresh
-        from sqlalchemy import delete
-
-        await session.execute(
-            delete(ApiFootballLineup).where(ApiFootballLineup.fixture_id == fixture_id)
-        )
-        session.add_all(rows)
         await session.commit()
 
-        # Re-read to get DB-assigned IDs
-        for row in rows:
-            await session.refresh(row)
+        # Read back persisted rows
+        query = select(ApiFootballLineup).where(ApiFootballLineup.fixture_id == fixture_id)
+        result = await session.execute(query)
+        rows = list(result.scalars().all())
 
         return {
             "event": _event_to_dict(event),
@@ -912,7 +927,7 @@ async def get_confirmed_lineups(event_id: str) -> dict[str, Any]:
         }
 
 
-def _lineup_to_dict(row: Any) -> dict[str, Any]:
+def _lineup_to_dict(row: ApiFootballLineup) -> dict[str, Any]:
     """Serialize an ApiFootballLineup row to a JSON-safe dict."""
     return {
         "team_name": row.team_name,
