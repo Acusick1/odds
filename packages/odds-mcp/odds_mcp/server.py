@@ -587,24 +587,30 @@ def _snapshot_sharp_prices(
 ) -> dict[str, dict[str, Any]]:
     """Extract current sharp bookmaker prices from an odds list.
 
+    Uses per-outcome priority fallback: each outcome independently falls through
+    to the next sharp bookmaker if a higher-priority one lacks that outcome.
+
     Returns a dict keyed by outcome name, each containing the sharp bookmaker key,
     American odds price, and implied probability.
     """
     result: dict[str, dict[str, Any]] = {}
-    for bm_key in sharp_bookmakers:
-        bm_odds = [o for o in odds_list if o.bookmaker_key == bm_key]
-        if not bm_odds:
+    for o in odds_list:
+        if o.outcome_name in result:
             continue
-        for o in bm_odds:
-            if o.outcome_name in result:
-                continue
-            result[o.outcome_name] = {
-                "bookmaker": bm_key,
-                "price": o.price,
-                "implied_prob": round(calculate_implied_probability(o.price), 6),
-            }
-        if result:
-            break
+        # Find highest-priority sharp bookmaker that has this outcome
+        for bm_key in sharp_bookmakers:
+            bm_match = [
+                x
+                for x in odds_list
+                if x.bookmaker_key == bm_key and x.outcome_name == o.outcome_name
+            ]
+            if bm_match:
+                result[o.outcome_name] = {
+                    "bookmaker": bm_key,
+                    "price": bm_match[0].price,
+                    "implied_prob": round(calculate_implied_probability(bm_match[0].price), 6),
+                }
+                break
     return result
 
 
@@ -668,12 +674,12 @@ async def get_match_brief(
 ) -> dict[str, Any]:
     """Retrieve saved match briefs for an event.
 
-    Returns the most recent brief per checkpoint, or for a specific checkpoint.
+    Returns all briefs for the event, newest first. Optionally filtered by checkpoint.
     Returns empty gracefully when no brief exists.
 
     Args:
         event_id: Event identifier.
-        checkpoint: If set, only return briefs for this checkpoint. Otherwise return latest per checkpoint.
+        checkpoint: If set, only return briefs for this checkpoint.
 
     Returns:
         Dict with event info and list of matching briefs (newest first).
@@ -744,10 +750,14 @@ async def get_sharp_soft_spread(
                 "message": "No odds snapshots available for this event",
             }
 
-    odds = extract_odds_from_snapshot(snapshot, event_id, market="h2h")
+        # Extract odds and snapshot metadata inside session while ORM objects are live
+        odds = extract_odds_from_snapshot(snapshot, event_id, market="h2h")
+        snapshot_time_iso = snapshot.snapshot_time.isoformat()
+        event_dict = _event_to_dict(event)
+
     if not odds:
         return {
-            "event": _event_to_dict(event),
+            "event": event_dict,
             "spread": None,
             "message": "No h2h odds in latest snapshot",
         }
@@ -803,8 +813,8 @@ async def get_sharp_soft_spread(
         }
 
     return {
-        "event": _event_to_dict(event),
-        "snapshot_time": snapshot.snapshot_time.isoformat(),
+        "event": event_dict,
+        "snapshot_time": snapshot_time_iso,
         "spread": spread,
     }
 

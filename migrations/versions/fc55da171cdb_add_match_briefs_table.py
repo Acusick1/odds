@@ -1,6 +1,6 @@
 """add match_briefs table
 
-Revision ID: f1a2b3c4d5e6
+Revision ID: fc55da171cdb
 Revises: d8858af1ee85
 Create Date: 2026-04-12 12:20:52.679712
 
@@ -11,7 +11,7 @@ import sqlmodel
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "f1a2b3c4d5e6"
+revision = "fc55da171cdb"
 down_revision = "d8858af1ee85"
 branch_labels = None
 depends_on = None
@@ -24,12 +24,12 @@ def upgrade() -> None:
         sa.Column("event_id", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column(
             "checkpoint",
-            sa.Enum("CONTEXT", "DECISION", name="briefcheckpoint"),
+            sa.Enum("context", "decision", name="briefcheckpoint"),
             nullable=False,
         ),
         sa.Column("brief_text", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("sharp_price_at_brief", sa.JSON(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(
             ["event_id"],
             ["events.id"],
