@@ -6,22 +6,13 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
+from odds_core.utils import raw_data_has_market
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.fetch_tier import FetchTier
 
 logger = structlog.get_logger()
-
-
-def _snapshot_has_market(snapshot: OddsSnapshot, market: str) -> bool:
-    """Check whether a snapshot's raw_data contains the given market key."""
-    raw = snapshot.raw_data or {}
-    for bookmaker in raw.get("bookmakers", []):
-        for m in bookmaker.get("markets", []):
-            if m.get("key") == market:
-                return True
-    return False
 
 
 class OddsReader:
@@ -316,7 +307,7 @@ class OddsReader:
 
         result = await self.session.execute(query)
         for snapshot in result.scalars():
-            if _snapshot_has_market(snapshot, market):
+            if raw_data_has_market(snapshot.raw_data, market):
                 return snapshot
         return None
 
