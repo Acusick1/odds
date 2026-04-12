@@ -194,7 +194,7 @@ async def get_current_odds(
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        snapshot = await reader.get_latest_snapshot(event_id)
+        snapshot = await reader.get_latest_snapshot(event_id, market="h2h")
         if snapshot is None:
             return {
                 "event": _event_to_dict(event),
@@ -378,7 +378,7 @@ async def get_event_features(
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        snapshot = await reader.get_latest_snapshot(event_id)
+        snapshot = await reader.get_latest_snapshot(event_id, market="h2h")
         if snapshot is None:
             return {
                 "event": _event_to_dict(event),
@@ -641,7 +641,7 @@ async def save_match_brief(
 
         # Snapshot sharp prices from the latest odds
         sharp_prices: SharpPriceMap | None = None
-        snapshot = await reader.get_latest_snapshot(event_id)
+        snapshot = await reader.get_latest_snapshot(event_id, market="h2h")
         if snapshot is not None:
             odds = extract_odds_from_snapshot(snapshot, event_id, market="h2h")
             if odds:
@@ -742,7 +742,7 @@ async def get_sharp_soft_spread(
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        snapshot = await reader.get_latest_snapshot(event_id)
+        snapshot = await reader.get_latest_snapshot(event_id, market="h2h")
         if snapshot is None:
             return {
                 "event": _event_to_dict(event),

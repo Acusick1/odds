@@ -36,6 +36,7 @@ from odds_core.polymarket_models import (
     PolymarketOrderBookSnapshot,
     PolymarketPriceSnapshot,
 )
+from odds_core.utils import raw_data_has_market
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -117,18 +118,6 @@ class EventDataBundle:
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
-def _snapshot_has_market(snapshot: OddsSnapshot, market: str) -> bool:
-    """Check if a snapshot's raw_data contains data for the given market key."""
-    raw = snapshot.raw_data
-    if not raw or "bookmakers" not in raw:
-        return False
-    for bm in raw["bookmakers"]:
-        for mkt in bm.get("markets", []):
-            if mkt.get("key") == market:
-                return True
-    return False
-
-
 def snapshot_has_bookmaker(snapshot: OddsSnapshot, bookmaker_key: str, market: str) -> bool:
     """Check if a snapshot's raw_data contains odds from a specific bookmaker for a market."""
     raw = snapshot.raw_data
@@ -179,7 +168,7 @@ async def collect_event_data(
     # doesn't pick snapshots with data for a different market (e.g. h2h
     # snapshot when we need totals).
     market = config.primary_market
-    all_snapshots = [s for s in all_snapshots_raw if _snapshot_has_market(s, market)]
+    all_snapshots = [s for s in all_snapshots_raw if raw_data_has_market(s.raw_data, market)]
 
     # Derive closing snapshot from already-loaded snapshots (avoid extra DB query)
     closing_tier_value = config.closing_tier.value

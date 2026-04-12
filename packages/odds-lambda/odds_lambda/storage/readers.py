@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
+from odds_core.utils import raw_data_has_market
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -280,12 +281,16 @@ class OddsReader:
         result = await self.session.execute(query)
         return result.scalars().first()
 
-    async def get_latest_snapshot(self, event_id: str) -> OddsSnapshot | None:
+    async def get_latest_snapshot(
+        self, event_id: str, *, market: str | None = None
+    ) -> OddsSnapshot | None:
         """
         Get most recent odds snapshot for an event.
 
         Args:
             event_id: Event identifier
+            market: If provided, only return snapshots containing this market key
+                (e.g. "h2h", "totals") in raw_data->bookmakers->markets.
 
         Returns:
             Latest OddsSnapshot or None
@@ -294,11 +299,17 @@ class OddsReader:
             select(OddsSnapshot)
             .where(OddsSnapshot.event_id == event_id)
             .order_by(OddsSnapshot.snapshot_time.desc())
-            .limit(1)
         )
 
+        if market is None:
+            result = await self.session.execute(query.limit(1))
+            return result.scalar_one_or_none()
+
         result = await self.session.execute(query)
-        return result.scalar_one_or_none()
+        for snapshot in result.scalars():
+            if raw_data_has_market(snapshot.raw_data, market):
+                return snapshot
+        return None
 
     async def snapshot_exists(
         self, event_id: str, snapshot_time: datetime, tolerance_minutes: int = 5
