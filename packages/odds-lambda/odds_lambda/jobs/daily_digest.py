@@ -243,6 +243,7 @@ def _format_window(hours: float) -> str:
 _SPORT_DISPLAY_NAMES: dict[str, str] = {
     "soccer_epl": "EPL",
     "basketball_nba": "NBA",
+    "baseball_mlb": "MLB",
 }
 
 

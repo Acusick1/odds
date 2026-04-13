@@ -40,6 +40,16 @@ class TestResolveJobName:
         assert base == "fetch-oddsportal-results"
         assert sport == "soccer_epl"
 
+    def test_compound_name_mlb(self) -> None:
+        base, sport = resolve_job_name("fetch-oddsportal-mlb")
+        assert base == "fetch-oddsportal"
+        assert sport == "baseball_mlb"
+
+    def test_compound_name_mlb_results(self) -> None:
+        base, sport = resolve_job_name("fetch-oddsportal-results-mlb")
+        assert base == "fetch-oddsportal-results"
+        assert sport == "baseball_mlb"
+
     def test_unknown_suffix_returns_no_sport(self) -> None:
         base, sport = resolve_job_name("fetch-odds-nba")
         assert base == "fetch-odds-nba"
@@ -63,6 +73,9 @@ class TestSportKeyToSuffix:
     def test_known_sport(self) -> None:
         assert sport_key_to_suffix("soccer_epl") == "epl"
 
+    def test_known_sport_mlb(self) -> None:
+        assert sport_key_to_suffix("baseball_mlb") == "mlb"
+
     def test_unknown_sport(self) -> None:
         assert sport_key_to_suffix("basketball_nba") is None
 
@@ -72,6 +85,9 @@ class TestMakeCompoundJobName:
 
     def test_with_sport(self) -> None:
         assert make_compound_job_name("fetch-odds", "soccer_epl") == "fetch-odds-epl"
+
+    def test_with_sport_mlb(self) -> None:
+        assert make_compound_job_name("fetch-oddsportal", "baseball_mlb") == "fetch-oddsportal-mlb"
 
     def test_without_sport(self) -> None:
         assert make_compound_job_name("fetch-odds", None) == "fetch-odds"
@@ -88,3 +104,15 @@ class TestMakeCompoundJobName:
         base, sport = resolve_job_name(compound)
         assert base == "fetch-oddsportal-results"
         assert sport == "soccer_epl"
+
+    def test_roundtrip_mlb(self) -> None:
+        compound = make_compound_job_name("fetch-oddsportal", "baseball_mlb")
+        base, sport = resolve_job_name(compound)
+        assert base == "fetch-oddsportal"
+        assert sport == "baseball_mlb"
+
+    def test_roundtrip_mlb_results(self) -> None:
+        compound = make_compound_job_name("fetch-oddsportal-results", "baseball_mlb")
+        base, sport = resolve_job_name(compound)
+        assert base == "fetch-oddsportal-results"
+        assert sport == "baseball_mlb"

@@ -71,6 +71,7 @@ _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
 # e.g. "fetch-odds-epl" resolves to ("fetch-odds", "soccer_epl")
 _SPORT_SUFFIX_MAP: dict[str, str] = {
     "epl": "soccer_epl",
+    "mlb": "baseball_mlb",
 }
 
 # Jobs that accept a sport parameter. When invoked with a sport suffix

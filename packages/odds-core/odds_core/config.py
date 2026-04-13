@@ -157,6 +157,8 @@ class AlertConfig(BaseSettings):
             "fetch-oddsportal-results-epl": 26,
             "score-predictions-epl": 2,
             "daily-digest-epl": 26,
+            "fetch-oddsportal-mlb": 2,
+            "fetch-oddsportal-results-mlb": 26,
             "check-health": 2,
         },
         description="Max hours between job completions before alerting (job_name -> hours)",

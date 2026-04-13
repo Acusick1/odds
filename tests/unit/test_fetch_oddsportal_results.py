@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from odds_core.models import Event, EventStatus
+from odds_lambda.jobs.fetch_oddsportal import LeagueSpec
 from odds_lambda.jobs.fetch_oddsportal_results import (
+    DEFAULT_SPORT_KEY,
+    _db_market_for_spec,
+    _market_key_for_spec,
     _match_record_to_event,
     _parse_score,
     get_pending_events,
@@ -320,3 +324,64 @@ class TestProcessResults:
         assert snap.fetch_tier == "closing"
         assert snap.bookmaker_count == 1
         assert "bookmakers" in snap.raw_data
+
+
+class TestSportResolution:
+    """Tests for sport-aware spec lookup in the results job."""
+
+    def test_default_sport_key_is_epl(self) -> None:
+        assert DEFAULT_SPORT_KEY == "soccer_epl"
+
+    def test_market_key_epl(self) -> None:
+        from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
+
+        spec = _LEAGUE_SPEC_BY_SPORT["soccer_epl"]
+        assert _market_key_for_spec(spec) == "1x2_market"
+
+    def test_market_key_mlb(self) -> None:
+        from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
+
+        spec = _LEAGUE_SPEC_BY_SPORT["baseball_mlb"]
+        assert _market_key_for_spec(spec) == "home_away_market"
+
+    def test_db_market_epl(self) -> None:
+        from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
+
+        spec = _LEAGUE_SPEC_BY_SPORT["soccer_epl"]
+        assert _db_market_for_spec(spec) == "h2h"
+
+    def test_db_market_mlb(self) -> None:
+        from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
+
+        spec = _LEAGUE_SPEC_BY_SPORT["baseball_mlb"]
+        assert _db_market_for_spec(spec) == "h2h"
+
+    def test_num_outcomes_epl(self) -> None:
+        from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
+
+        spec = _LEAGUE_SPEC_BY_SPORT["soccer_epl"]
+        assert spec.num_outcomes == 3
+
+    def test_num_outcomes_mlb(self) -> None:
+        from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
+
+        spec = _LEAGUE_SPEC_BY_SPORT["baseball_mlb"]
+        assert spec.num_outcomes == 2
+
+    def test_db_market_unknown_raises(self) -> None:
+        spec = LeagueSpec(
+            sport="test",
+            league="test-league",
+            sport_key="test_sport",
+            sport_title="Test",
+            primary_market="unknown_market",
+            num_outcomes=2,
+        )
+        with pytest.raises(ValueError, match="Unrecognized primary_market"):
+            _db_market_for_spec(spec)
+
+    @pytest.mark.asyncio
+    async def test_unknown_sport_returns_empty_stats(self) -> None:
+        stats = await process_results(raw_matches=[], sport="unknown_sport")
+        assert stats.matches_scraped == 0
+        assert stats.events_updated == 0
