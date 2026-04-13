@@ -1,22 +1,24 @@
-# Betting Odds Data Pipeline
+# Betting Odds Pipeline & Agent
 
 IMPORTANT (LLM agents): This document is read-only. Do not create additional documentation files without user consent. Run `uv run ruff check --fix` and `uv run ruff format` immediately before committing — not during development while changes are still in progress.
 
 ## Strategic Goal
 
-Identify and exploit structural mispricing in EPL betting markets by synthesizing cross-venue volume data, public sentiment signals, and qualitative research to anticipate line movement driven by public money flow. Execute on whichever venue offers the best price relative to estimated fair value. An LLM agent handles the research and decision-making; the data pipeline provides the structured inputs. See [docs/BETTING_AGENT.md](docs/BETTING_AGENT.md) for the agent architecture.
+Identify and exploit structural mispricing in betting markets across multiple sports. The edge is **breadth and speed of information synthesis** — an LLM agent that simultaneously monitors bookmaker odds, exchange orderbooks, public sentiment signals, lineup announcements, press conferences, and fixture context can reason across all of it to identify mispricings that no individual bettor can. Structural biases (bookmaker liability shading, accumulator distortion, public money loading) and information gaps are both valid edge types. Execute on whichever venue offers the best price relative to estimated fair value. See [docs/BETTING_AGENT.md](docs/BETTING_AGENT.md) for the agent architecture.
 
 ## Project Overview
 
-Single-user betting odds data collection and analysis system. **Active focus is EPL football** — NBA support exists but is deprioritised (NBA CLV ~3.6% R² is insufficient to overcome vig, and cross-source execution isn't viable: Polymarket inaccessible from UK, Betfair has no NBA match odds liquidity. Football has deep Betfair liquidity, more data, and more bookmaker competition).
+Sport-agnostic betting data pipeline with sport-specific LLM agents. Infrastructure (odds collection, storage, paper trading, scheduling, alerting) is shared; each sport adds its own data sources, feature extractors, agent prompts, and MCP tools. The agent researches matches via web search and Playwright, consumes pipeline data through MCP tools, and places paper trades with explicit reasoning.
 
-Data sources: The Odds API (US bookmakers, live polling — currently disabled), OddsPortal (UK bookmakers, headless scraper — active, hourly EPL collection), and football-data.co.uk (historical EPL with Pinnacle + Betfair Exchange closing odds). A scoring pipeline produces CLV predictions per snapshot, delivered via daily Discord digest. An LLM betting agent uses these data sources plus web research to identify mispriced markets and place paper trades. See [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) for the full data source inventory.
+**Target sports:** EPL (active — agent in interactive evaluation), MLB and NBA (planned).
+
+**Shared data sources:** The Odds API (US bookmakers — currently disabled), OddsPortal (UK bookmakers, headless scraper). **Sport-specific sources:** football-data.co.uk (historical EPL with Pinnacle + Betfair Exchange closing odds). An XGBoost CLV model produces supplementary predictions, but the agent's primary edge comes from information synthesis, not the model. See [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) for the full data source inventory.
 
 ## Package Structure
 
 ```
 packages/
-├── odds-core/      # Models, config, database (odds_core/)
+├── odds-core/      # Shared models, config, database (odds_core/)
 │   ├── models.py              # Event, OddsSnapshot, Odds, FetchLog, DataQualityLog
 │   ├── prediction_models.py   # Prediction table (CLV scoring output)
 │   └── config.py              # Pydantic Settings (API, DB, scheduler, alerts)
@@ -29,6 +31,8 @@ packages/
 │   ├── scheduling/            # Multi-backend scheduler (AWS/Railway/local)
 │   └── jobs/                  # All scheduled job entry points (see ARCHITECTURE.md)
 ├── odds-analytics/ # Backtesting, strategies, ML (odds_analytics/)
+├── odds-mcp/       # MCP server — agent tool interface (odds_mcp/)
+│   └── AGENT.md               # Sport-specific agent system prompts
 └── odds-cli/       # CLI commands (odds_cli/)
     ├── commands/              # 16 command groups (see CLI.md)
     └── alerts/base.py         # AlertManager + DiscordAlert (webhook delivery)
@@ -88,7 +92,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system architectur
 
 ## Polymarket Integration (deprioritized)
 
-Full pipeline built (API client, 5 DB tables, storage, ingestion, feature extractors) but deprioritized. EPL match-level volume is thin ($10K-$100K per match) and AMM-driven — the orderbook reflects automated market maker parameters, not genuine public sentiment. Not accessible from UK for trading. Pipeline code exists if liquidity improves. See [docs/POLYMARKET.md](docs/POLYMARKET.md) for technical details.
+Full pipeline built (API client, 5 DB tables, storage, ingestion, feature extractors) but deprioritized. EPL match-level volume is thin ($10K-$100K per match) and AMM-driven — the orderbook reflects automated market maker parameters, not genuine public sentiment. Not accessible from UK for trading. NBA and MLB volume may differ — revisit per sport. Pipeline code exists if liquidity improves. See [docs/POLYMARKET.md](docs/POLYMARKET.md) for technical details.
 
 ## Code Style
 
@@ -183,5 +187,7 @@ uv run odds scheduler start
 | [docs/POLYMARKET.md](docs/POLYMARKET.md) | Polymarket data model, pipeline (deprioritized) |
 | [docs/BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md) | Backtesting strategies, bet sizing, custom strategies |
 | [docs/INJURIES.md](docs/INJURIES.md) | Injury report pipeline (no predictive value for CLV) |
+| [docs/BETTING_AGENT.md](docs/BETTING_AGENT.md) | Agent architecture, matchday workflow, phased rollout |
+| [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) | Agent data source inventory and evaluation |
 | [docs/BOOKMAKER_LINE_RELEASE.md](docs/BOOKMAKER_LINE_RELEASE.md) | Bookmaker line timing analysis |
 | [.env.example](.env.example) | Environment variable template |
