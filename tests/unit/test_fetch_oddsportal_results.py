@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from odds_core.models import Event, EventStatus
+from odds_lambda.jobs.fetch_oddsportal import LeagueSpec
 from odds_lambda.jobs.fetch_oddsportal_results import (
     DEFAULT_SPORT_KEY,
     _db_market_for_spec,
@@ -366,6 +367,18 @@ class TestSportResolution:
 
         spec = _LEAGUE_SPEC_BY_SPORT["baseball_mlb"]
         assert spec.num_outcomes == 2
+
+    def test_db_market_unknown_raises(self) -> None:
+        spec = LeagueSpec(
+            sport="test",
+            league="test-league",
+            sport_key="test_sport",
+            sport_title="Test",
+            primary_market="unknown_market",
+            num_outcomes=2,
+        )
+        with pytest.raises(ValueError, match="Unrecognized primary_market"):
+            _db_market_for_spec(spec)
 
     @pytest.mark.asyncio
     async def test_unknown_sport_returns_empty_stats(self) -> None:
