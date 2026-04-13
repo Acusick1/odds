@@ -6,6 +6,7 @@ import pytest
 from odds_lambda.oddsportal_adapter import (
     MatchOdds,
     _convert_1x2_match,
+    _convert_home_away_match,
     _convert_over_under_match,
     convert_upcoming_matches,
     fractional_to_decimal,
@@ -316,3 +317,116 @@ class TestConvertUpcomingMatches:
     def test_skips_incomplete_match(self) -> None:
         matches = [{"home_team": "Leeds", "away_team": "", "match_date": ""}]
         assert convert_upcoming_matches(matches, "1x2") == []
+
+    def test_home_away_market_converts(self) -> None:
+        matches = [
+            {
+                "scraped_date": "2026-06-15 20:00:00 UTC",
+                "match_date": "2026-06-16 23:10:00 UTC",
+                "match_link": "https://www.oddsportal.com/baseball/usa/mlb/yankees-red-sox-abc123/",
+                "home_team": "New York Yankees",
+                "away_team": "Boston Red Sox",
+                "league_name": "MLB",
+                "home_away_market": [
+                    {
+                        "1": "5/6",
+                        "2": "EVS",
+                        "bookmaker_name": "bet365",
+                        "period": "FullTime",
+                    },
+                ],
+            }
+        ]
+        results = convert_upcoming_matches(matches, "home_away")
+        assert len(results) == 1
+        outcomes = results[0].raw_data["bookmakers"][0]["markets"][0]["outcomes"]
+        assert len(outcomes) == 2
+        assert outcomes[0]["name"] == "New York Yankees"
+        assert outcomes[1]["name"] == "Boston Red Sox"
+
+
+class TestConvertHomeAwayMatch:
+    @pytest.fixture()
+    def sample_ha_bookmakers(self) -> list[dict]:
+        return [
+            {
+                "1": "5/6",
+                "2": "EVS",
+                "bookmaker_name": "bet365",
+                "period": "FullTime",
+            },
+            {
+                "1": "4/5",
+                "2": "11/10",
+                "bookmaker_name": "10bet",
+                "period": "FullTime",
+            },
+            {
+                "1": "9/109/10(500)",
+                "2": "11/1011/10(400)",
+                "bookmaker_name": "Betfair Exchange",
+                "period": "FullTime",
+            },
+        ]
+
+    def test_basic_conversion(self, sample_ha_bookmakers: list[dict]) -> None:
+        result = _convert_home_away_match(sample_ha_bookmakers, "Yankees", "Red Sox")
+        assert result is not None
+        assert "bookmakers" in result
+        assert len(result["bookmakers"]) == 3
+
+    def test_outcome_names(self, sample_ha_bookmakers: list[dict]) -> None:
+        result = _convert_home_away_match(sample_ha_bookmakers, "Yankees", "Red Sox")
+        assert result is not None
+        outcomes = result["bookmakers"][0]["markets"][0]["outcomes"]
+        assert len(outcomes) == 2
+        assert outcomes[0]["name"] == "Yankees"
+        assert outcomes[1]["name"] == "Red Sox"
+
+    def test_no_draw_outcome(self, sample_ha_bookmakers: list[dict]) -> None:
+        result = _convert_home_away_match(sample_ha_bookmakers, "Yankees", "Red Sox")
+        assert result is not None
+        for bk in result["bookmakers"]:
+            names = [o["name"] for o in bk["markets"][0]["outcomes"]]
+            assert DRAW_OUTCOME not in names
+
+    def test_odds_conversion(self, sample_ha_bookmakers: list[dict]) -> None:
+        result = _convert_home_away_match(sample_ha_bookmakers, "Yankees", "Red Sox")
+        assert result is not None
+        # bet365: home 5/6 = 1.833... decimal
+        home_price = result["bookmakers"][0]["markets"][0]["outcomes"][0]["price"]
+        assert home_price == decimal_to_american(5 / 6 + 1)
+
+    def test_betfair_parsed(self, sample_ha_bookmakers: list[dict]) -> None:
+        result = _convert_home_away_match(sample_ha_bookmakers, "Yankees", "Red Sox")
+        assert result is not None
+        betfair = next(b for b in result["bookmakers"] if b["key"] == "betfair_exchange")
+        # 9/10 = 1.9 decimal
+        home_price = betfair["markets"][0]["outcomes"][0]["price"]
+        assert home_price == decimal_to_american(1.9)
+
+    def test_betfair_liquidity_stored(self, sample_ha_bookmakers: list[dict]) -> None:
+        result = _convert_home_away_match(sample_ha_bookmakers, "Yankees", "Red Sox")
+        assert result is not None
+        betfair = next(b for b in result["bookmakers"] if b["key"] == "betfair_exchange")
+        assert "betfair_matched" in betfair
+        assert betfair["betfair_matched"]["home"] == 500
+        assert betfair["betfair_matched"]["away"] == 400
+        assert "draw" not in betfair["betfair_matched"]
+
+    def test_market_key_is_h2h(self, sample_ha_bookmakers: list[dict]) -> None:
+        result = _convert_home_away_match(sample_ha_bookmakers, "Yankees", "Red Sox")
+        assert result is not None
+        assert result["bookmakers"][0]["markets"][0]["key"] == "h2h"
+
+    def test_source_tag(self, sample_ha_bookmakers: list[dict]) -> None:
+        result = _convert_home_away_match(sample_ha_bookmakers, "Yankees", "Red Sox")
+        assert result is not None
+        assert result["source"] == "oddsportal_live"
+
+    def test_empty_returns_none(self) -> None:
+        assert _convert_home_away_match([], "A", "B") is None
+
+    def test_missing_odds_skipped(self) -> None:
+        data = [{"bookmaker_name": "bet365", "1": "5/6", "2": ""}]
+        assert _convert_home_away_match(data, "A", "B") is None

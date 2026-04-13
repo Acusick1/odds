@@ -264,7 +264,65 @@ def _convert_over_under_match(
     return {"bookmakers": bookmakers, "source": "oddsportal_live"}
 
 
+def _convert_home_away_match(
+    bookmaker_odds: list[dict[str, Any]],
+    home_team: str,
+    away_team: str,
+) -> dict[str, Any] | None:
+    """Convert home/away (moneyline) market bookmaker list to raw_data format."""
+    bookmakers: list[dict[str, Any]] = []
+
+    for bk in bookmaker_odds:
+        bk_name = bk.get("bookmaker_name", "")
+        if not bk_name:
+            continue
+
+        home_raw = bk.get("1", "")
+        away_raw = bk.get("2", "")
+
+        if not home_raw or not away_raw:
+            continue
+
+        bk_key = normalize_bookmaker_key(bk_name)
+        is_betfair = bk_name == "Betfair Exchange"
+
+        if is_betfair:
+            home_frac, home_liq = parse_betfair_odds(home_raw)
+            away_frac, away_liq = parse_betfair_odds(away_raw)
+        else:
+            home_frac, away_frac = home_raw, away_raw
+
+        try:
+            home_dec = fractional_to_decimal(home_frac)
+            away_dec = fractional_to_decimal(away_frac)
+        except (ValueError, ZeroDivisionError):
+            continue
+
+        outcomes = [
+            {"name": home_team, "price": decimal_to_american(home_dec)},
+            {"name": away_team, "price": decimal_to_american(away_dec)},
+        ]
+
+        liquidity: dict[str, int] | None = None
+        if is_betfair:
+            liquidity = {}
+            if home_liq is not None:
+                liquidity["home"] = home_liq
+            if away_liq is not None:
+                liquidity["away"] = away_liq
+
+        bookmakers.append(
+            _build_bookmaker_entry(bk_key, bk_name, "h2h", outcomes, betfair_matched=liquidity)
+        )
+
+    if not bookmakers:
+        return None
+
+    return {"bookmakers": bookmakers, "source": "oddsportal_live"}
+
+
 _MARKET_CONVERTERS: dict[str, MarketConverter] = {
     "1x2": _convert_1x2_match,
     "over_under_2_5": _convert_over_under_match,
+    "home_away": _convert_home_away_match,
 }
