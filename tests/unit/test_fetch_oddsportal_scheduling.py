@@ -11,10 +11,8 @@ import pytest
 from odds_lambda.jobs.fetch_oddsportal import (
     MAX_FAST_RETRIES,
     NORMAL_INTERVAL_HOURS,
-    OVERNIGHT_RESUME_HOUR_UTC,
     RETRY_DELAY_MINUTES_MAX,
     RETRY_DELAY_MINUTES_MIN,
-    _apply_overnight_skip,
     _calculate_next_execution,
     main,
 )
@@ -64,33 +62,6 @@ class TestCalculateNextExecution:
         )
         assert next_time == now + timedelta(hours=NORMAL_INTERVAL_HOURS)
         assert retry_count == 0
-
-
-class TestApplyOvernightSkip:
-    """Tests for _apply_overnight_skip logic."""
-
-    def test_overnight_skips_to_morning(self) -> None:
-        next_time = datetime(2026, 4, 7, 23, 0, tzinfo=UTC)
-        result = _apply_overnight_skip(next_time)
-        assert result.hour == OVERNIGHT_RESUME_HOUR_UTC
-        assert result.minute == 0
-        assert result > next_time
-
-    def test_afternoon_no_skip(self) -> None:
-        next_time = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
-        result = _apply_overnight_skip(next_time)
-        assert result == next_time
-
-    def test_early_morning_skips_to_morning(self) -> None:
-        next_time = datetime(2026, 4, 7, 3, 0, tzinfo=UTC)
-        result = _apply_overnight_skip(next_time)
-        assert result.hour == OVERNIGHT_RESUME_HOUR_UTC
-        assert result.day == next_time.day
-
-    def test_exactly_at_resume_hour_no_skip(self) -> None:
-        next_time = datetime(2026, 4, 7, OVERNIGHT_RESUME_HOUR_UTC, 0, tzinfo=UTC)
-        result = _apply_overnight_skip(next_time)
-        assert result == next_time
 
 
 class TestDefensivePreScheduling:

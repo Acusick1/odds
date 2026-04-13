@@ -45,8 +45,6 @@ NORMAL_INTERVAL_HOURS = 1.0
 RETRY_DELAY_MINUTES_MIN = 10
 RETRY_DELAY_MINUTES_MAX = 15
 MAX_FAST_RETRIES = 2
-OVERNIGHT_RESUME_HOUR_UTC = 6
-OVERNIGHT_START_HOUR_UTC = 22
 
 
 @dataclass
@@ -58,6 +56,10 @@ class LeagueSpec:
     sport_key: str  # Pipeline sport key (e.g. "soccer_epl")
     sport_title: str  # Display name (e.g. "EPL")
     markets: list[str] = field(default_factory=lambda: ["1x2"])
+    primary_market: str = "1x2"
+    num_outcomes: int = 3
+    overnight_start_utc: int = 22
+    overnight_resume_utc: int = 6
 
 
 LEAGUE_SPECS: list[LeagueSpec] = [
@@ -67,6 +69,17 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         sport_key="soccer_epl",
         sport_title="EPL",
         markets=["1x2", "over_under_2_5"],
+    ),
+    LeagueSpec(
+        sport="baseball",
+        league="mlb",
+        sport_key="baseball_mlb",
+        sport_title="MLB",
+        markets=["home_away"],
+        primary_market="home_away",
+        num_outcomes=2,
+        overnight_start_utc=5,
+        overnight_resume_utc=14,
     ),
 ]
 
@@ -227,20 +240,24 @@ def _calculate_next_execution(
     return now + timedelta(hours=NORMAL_INTERVAL_HOURS), 0
 
 
-def _apply_overnight_skip(next_time: datetime) -> datetime:
-    """Push next_time to morning if overnight.
-
-    EPL games never kick off during the overnight window (22:00-06:00 UTC),
-    so no game-proximity check is needed.
-    """
-    is_overnight = (
-        next_time.hour >= OVERNIGHT_START_HOUR_UTC or next_time.hour < OVERNIGHT_RESUME_HOUR_UTC
-    )
+def _apply_overnight_skip(
+    next_time: datetime,
+    *,
+    overnight_start_utc: int = 22,
+    overnight_resume_utc: int = 6,
+) -> datetime:
+    """Push next_time to resume hour if it falls in the overnight window."""
+    if overnight_start_utc > overnight_resume_utc:
+        # Window wraps midnight (e.g. 22:00-06:00)
+        is_overnight = (
+            next_time.hour >= overnight_start_utc or next_time.hour < overnight_resume_utc
+        )
+    else:
+        # Window within same day (e.g. 05:00-14:00)
+        is_overnight = overnight_start_utc <= next_time.hour < overnight_resume_utc
 
     if is_overnight:
-        resume = next_time.replace(
-            hour=OVERNIGHT_RESUME_HOUR_UTC, minute=0, second=0, microsecond=0
-        )
+        resume = next_time.replace(hour=overnight_resume_utc, minute=0, second=0, microsecond=0)
         if resume <= next_time:
             resume += timedelta(days=1)
         return resume
@@ -304,6 +321,9 @@ async def main(ctx: JobContext) -> None:
         specs = LEAGUE_SPECS
 
     compound_job_name = make_compound_job_name("fetch-oddsportal", sport)
+    # Combined job (no --sport) uses first spec's overnight window.
+    # Production invokes per-sport; only relevant for local multi-league runs.
+    primary_spec = specs[0]
 
     # Defensive pre-schedule at retry cadence BEFORE any DB or browser work.
     # No DB query needed — just now + retry delay. If anything fails (DB down,
@@ -313,7 +333,11 @@ async def main(ctx: JobContext) -> None:
         retry_count=retry_count,
         now=datetime.now(UTC),
     )
-    defensive_next_time = _apply_overnight_skip(defensive_next_time)
+    defensive_next_time = _apply_overnight_skip(
+        defensive_next_time,
+        overnight_start_utc=primary_spec.overnight_start_utc,
+        overnight_resume_utc=primary_spec.overnight_resume_utc,
+    )
     try:
         await _self_schedule(
             job_name=compound_job_name,
@@ -378,6 +402,8 @@ async def main(ctx: JobContext) -> None:
     if total_scraped > 0:
         success_next_time = _apply_overnight_skip(
             datetime.now(UTC) + timedelta(hours=NORMAL_INTERVAL_HOURS),
+            overnight_start_utc=primary_spec.overnight_start_utc,
+            overnight_resume_utc=primary_spec.overnight_resume_utc,
         )
         try:
             await _self_schedule(

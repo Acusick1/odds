@@ -13,25 +13,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from odds_lambda.oddsportal_common import (
-    BOOKMAKER_KEY_MAP,
     DRAW_OUTCOME,
     decimal_to_american,
+    normalize_bookmaker_key,
     parse_match_date,
-    slugify,
 )
-
-# Upcoming-only bookmakers not seen in historical scrapes.
-UPCOMING_BOOKMAKER_MAP: dict[str, str] = {
-    **BOOKMAKER_KEY_MAP,
-    "7Bet": "7bet",
-    "Paddy Power": "paddypower",
-    "Skybet": "skybet",
-    "Ladbrokes": "ladbrokes",
-    "Coral": "coral",
-    "William Hill": "williamhill",
-    "888sport": "888sport",
-    "BoyleSports": "boylesports",
-}
 
 # Regex: Betfair format is "FRAC_REPEAT(LIQUIDITY)" e.g. "99/10099/100(300)"
 # The fraction is repeated (concatenated), followed by optional (liquidity).
@@ -87,17 +73,12 @@ def parse_betfair_odds(raw: str) -> tuple[str, int | None]:
     return raw, None
 
 
-def _normalize_upcoming_key(name: str) -> str:
-    """Map bookmaker name to pipeline key, including upcoming-only bookmakers."""
-    return UPCOMING_BOOKMAKER_MAP.get(name, slugify(name))
-
-
 def convert_upcoming_matches(matches: list[dict[str, Any]], market: str) -> list[MatchOdds]:
     """Convert OddsHarvester upcoming output to pipeline format.
 
     Args:
         matches: Raw match dicts from OddsHarvester upcoming command.
-        market: Market key — "1x2" or "over_under_2_5".
+        market: Market key — "1x2", "over_under_2_5", or "home_away".
 
     Returns:
         List of MatchOdds with raw_data matching OddsWriter contract.
@@ -183,7 +164,7 @@ def _convert_1x2_match(
         if not home_raw or not draw_raw or not away_raw:
             continue
 
-        bk_key = _normalize_upcoming_key(bk_name)
+        bk_key = normalize_bookmaker_key(bk_name)
         is_betfair = bk_name == "Betfair Exchange"
 
         if is_betfair:
@@ -245,7 +226,7 @@ def _convert_over_under_match(
         if not over_raw or not under_raw:
             continue
 
-        bk_key = _normalize_upcoming_key(bk_name)
+        bk_key = normalize_bookmaker_key(bk_name)
         is_betfair = bk_name == "Betfair Exchange"
 
         if is_betfair:
@@ -283,7 +264,65 @@ def _convert_over_under_match(
     return {"bookmakers": bookmakers, "source": "oddsportal_live"}
 
 
+def _convert_home_away_match(
+    bookmaker_odds: list[dict[str, Any]],
+    home_team: str,
+    away_team: str,
+) -> dict[str, Any] | None:
+    """Convert home/away (moneyline) market bookmaker list to raw_data format."""
+    bookmakers: list[dict[str, Any]] = []
+
+    for bk in bookmaker_odds:
+        bk_name = bk.get("bookmaker_name", "")
+        if not bk_name:
+            continue
+
+        home_raw = bk.get("1", "")
+        away_raw = bk.get("2", "")
+
+        if not home_raw or not away_raw:
+            continue
+
+        bk_key = normalize_bookmaker_key(bk_name)
+        is_betfair = bk_name == "Betfair Exchange"
+
+        if is_betfair:
+            home_frac, home_liq = parse_betfair_odds(home_raw)
+            away_frac, away_liq = parse_betfair_odds(away_raw)
+        else:
+            home_frac, away_frac = home_raw, away_raw
+
+        try:
+            home_dec = fractional_to_decimal(home_frac)
+            away_dec = fractional_to_decimal(away_frac)
+        except (ValueError, ZeroDivisionError):
+            continue
+
+        outcomes = [
+            {"name": home_team, "price": decimal_to_american(home_dec)},
+            {"name": away_team, "price": decimal_to_american(away_dec)},
+        ]
+
+        liquidity: dict[str, int] | None = None
+        if is_betfair:
+            liquidity = {}
+            if home_liq is not None:
+                liquidity["home"] = home_liq
+            if away_liq is not None:
+                liquidity["away"] = away_liq
+
+        bookmakers.append(
+            _build_bookmaker_entry(bk_key, bk_name, "h2h", outcomes, betfair_matched=liquidity)
+        )
+
+    if not bookmakers:
+        return None
+
+    return {"bookmakers": bookmakers, "source": "oddsportal_live"}
+
+
 _MARKET_CONVERTERS: dict[str, MarketConverter] = {
     "1x2": _convert_1x2_match,
     "over_under_2_5": _convert_over_under_match,
+    "home_away": _convert_home_away_match,
 }
