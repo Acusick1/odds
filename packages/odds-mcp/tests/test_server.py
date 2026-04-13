@@ -189,19 +189,66 @@ class TestSafeFloat:
 
 
 class TestResolveSportMeta:
-    def test_known_league(self) -> None:
+    def test_known_epl_league(self) -> None:
         from odds_mcp.server import _resolve_sport_meta
 
         sport_key, sport_title = _resolve_sport_meta("england-premier-league")
         assert sport_key == "soccer_epl"
         assert sport_title == "EPL"
 
-    def test_unknown_league_fallback(self) -> None:
+    def test_known_mlb_league(self) -> None:
+        from odds_mcp.server import _resolve_sport_meta
+
+        sport_key, sport_title = _resolve_sport_meta("mlb")
+        assert sport_key == "baseball_mlb"
+        assert sport_title == "MLB"
+
+    def test_unknown_league_fallback_no_sport_prefix(self) -> None:
         from odds_mcp.server import _resolve_sport_meta
 
         sport_key, sport_title = _resolve_sport_meta("spain-la-liga")
-        assert sport_key == "football_spain_la_liga"
+        # Should slugify without assuming "football_" prefix
+        assert sport_key == "spain_la_liga"
         assert sport_title == "Spain-La-Liga"
+
+
+class TestRefreshScrapeUnknownLeague:
+    @pytest.mark.asyncio
+    async def test_unknown_league_returns_error(self) -> None:
+        from odds_mcp.server import refresh_scrape
+
+        result = await refresh_scrape(league="unknown-league", market="1x2")
+        assert "error" in result
+        assert "Unknown league" in result["error"]
+        assert result["error_type"] == "ValueError"
+
+    @pytest.mark.asyncio
+    async def test_known_league_uses_correct_sport(self) -> None:
+        from odds_mcp.server import refresh_scrape
+
+        with patch(
+            "odds_lambda.jobs.fetch_oddsportal.ingest_league", new_callable=AsyncMock
+        ) as mock_ingest:
+            mock_stats = MagicMock()
+            mock_stats.league = "mlb"
+            mock_stats.matches_scraped = 10
+            mock_stats.matches_converted = 10
+            mock_stats.events_matched = 8
+            mock_stats.events_created = 2
+            mock_stats.snapshots_stored = 10
+            mock_stats.errors = []
+            mock_ingest.return_value = mock_stats
+
+            result = await refresh_scrape(league="mlb", market="home_away")
+
+            assert result["league"] == "mlb"
+            assert result["matches_scraped"] == 10
+
+            # Verify the spec passed to ingest_league has sport="baseball"
+            call_args = mock_ingest.call_args
+            spec = call_args[0][0]
+            assert spec.sport == "baseball"
+            assert spec.sport_key == "baseball_mlb"
 
 
 class TestGetUpcomingFixtures:

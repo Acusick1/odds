@@ -35,7 +35,8 @@ mcp = FastMCP(
     "odds-mcp",
     instructions=(
         "Betting odds pipeline tools. Use these to inspect fixtures, odds, predictions, "
-        "and manage paper trades for EPL football. All times are UTC."
+        "and manage paper trades across sports (EPL football, MLB baseball). "
+        "All times are UTC."
     ),
 )
 
@@ -141,7 +142,8 @@ def _resolve_sport_meta(league: str) -> tuple[str, str]:
     spec = _LEAGUE_SPEC_BY_NAME.get(league)
     if spec is not None:
         return spec.sport_key, spec.sport_title
-    return f"football_{league.replace('-', '_')}", league.title()
+    # Generic fallback: slugify league name as sport_key (no sport prefix assumption)
+    return league.replace("-", "_"), league.title()
 
 
 @mcp.tool()
@@ -263,14 +265,23 @@ async def refresh_scrape(
     """
     from odds_lambda.jobs.fetch_oddsportal import LeagueSpec, ingest_league
 
-    sport_key, sport_title = _resolve_sport_meta(league)
+    known_spec = _LEAGUE_SPEC_BY_NAME.get(league)
+    if known_spec is None:
+        return {
+            "error": f"Unknown league '{league}'. Known leagues: {sorted(_LEAGUE_SPEC_BY_NAME.keys())}",
+            "error_type": "ValueError",
+        }
 
     spec = LeagueSpec(
-        sport="football",
+        sport=known_spec.sport,
         league=league,
-        sport_key=sport_key,
-        sport_title=sport_title,
+        sport_key=known_spec.sport_key,
+        sport_title=known_spec.sport_title,
         markets=[market],
+        primary_market=known_spec.primary_market,
+        num_outcomes=known_spec.num_outcomes,
+        overnight_start_utc=known_spec.overnight_start_utc,
+        overnight_resume_utc=known_spec.overnight_resume_utc,
     )
 
     try:
