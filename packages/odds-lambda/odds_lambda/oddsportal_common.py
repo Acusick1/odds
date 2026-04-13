@@ -53,6 +53,9 @@ BOOKMAKER_KEY_MAP: dict[str, str] = {
     "Marathon Bet": "marathonbet",
     "1xBet": "onexbet",
     "Betfair Exchange": "betfair_exchange",
+    "7Bet": "7bet",
+    "Paddy Power": "paddypower",
+    "SpreadEX": "spreadex",
 }
 
 
