@@ -56,6 +56,7 @@ BOOKMAKER_KEY_MAP: dict[str, str] = {
     "7Bet": "7bet",
     "Paddy Power": "paddypower",
     "SpreadEX": "spreadex",
+    "William Hill": "williamhill",
 }
 
 

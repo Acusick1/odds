@@ -26,7 +26,7 @@ Before building anything, verify via Playwright:
 **Games listed**: Yes. Full MLB slate displayed with correct times, team names, and fractional odds columns ("1" home, "2" away). 10+ games visible across today and tomorrow.
 
 **Market tabs available** (on match detail page):
-- 1X2 (draw possible in baseball? likely vestigial/regulation-only)
+- 1X2 (regulation-time result — draw possible if tied after 9 innings before extras)
 - **Home/Away** (primary moneyline market — this is what we use)
 - Over/Under
 - Asian Handicap

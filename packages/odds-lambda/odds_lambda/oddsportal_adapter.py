@@ -23,12 +23,9 @@ from odds_lambda.oddsportal_common import (
 # Upcoming-only bookmakers not seen in historical scrapes.
 UPCOMING_BOOKMAKER_MAP: dict[str, str] = {
     **BOOKMAKER_KEY_MAP,
-    "7Bet": "7bet",
-    "Paddy Power": "paddypower",
     "Skybet": "skybet",
     "Ladbrokes": "ladbrokes",
     "Coral": "coral",
-    "William Hill": "williamhill",
     "888sport": "888sport",
     "BoyleSports": "boylesports",
 }
