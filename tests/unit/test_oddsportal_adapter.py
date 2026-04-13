@@ -94,18 +94,6 @@ class TestNormalizeBookmakerKey:
         assert key == "somenewbook"
 
 
-class TestNormalizeUpcomingKey:
-    def test_known_from_base_map(self) -> None:
-        assert normalize_bookmaker_key("bet365") == "bet365"
-
-    def test_upcoming_only_bookmaker(self) -> None:
-        assert normalize_bookmaker_key("Paddy Power") == "paddypower"
-        assert normalize_bookmaker_key("Skybet") == "skybet"
-
-    def test_unknown_slugified(self) -> None:
-        assert normalize_bookmaker_key("Brand New Book") == "brandnewbook"
-
-
 class TestDecimalToAmerican:
     def test_plus_odds(self) -> None:
         assert decimal_to_american(3.0) == 200

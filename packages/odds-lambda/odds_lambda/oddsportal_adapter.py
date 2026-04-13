@@ -78,7 +78,7 @@ def convert_upcoming_matches(matches: list[dict[str, Any]], market: str) -> list
 
     Args:
         matches: Raw match dicts from OddsHarvester upcoming command.
-        market: Market key — "1x2" or "over_under_2_5".
+        market: Market key — "1x2", "over_under_2_5", or "home_away".
 
     Returns:
         List of MatchOdds with raw_data matching OddsWriter contract.

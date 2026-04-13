@@ -321,6 +321,8 @@ async def main(ctx: JobContext) -> None:
         specs = LEAGUE_SPECS
 
     compound_job_name = make_compound_job_name("fetch-oddsportal", sport)
+    # Combined job (no --sport) uses first spec's overnight window.
+    # Production invokes per-sport; only relevant for local multi-league runs.
     primary_spec = specs[0]
 
     # Defensive pre-schedule at retry cadence BEFORE any DB or browser work.
