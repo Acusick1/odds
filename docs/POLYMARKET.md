@@ -1,6 +1,6 @@
 # Polymarket Integration
 
-> **Status: Deprioritized indefinitely.** Not accessible from UK, data likely collinear with sportsbook odds, 30-day CLOB retention creates ongoing maintenance burden. Pipeline code exists but is inactive.
+> **Status: Deprioritized.** EPL match-level volume is thin ($10K-$100K per match) and AMM-driven — orderbook data reflects automated market maker parameters, not genuine public sentiment. Not accessible from UK for trading. Prices collinear with sportsbooks. Pipeline code is complete but inactive. EPL technical details: series ID `10188`, tag IDs `82`/`306`, ticker format `epl-{away3}-{home3}-YYYY-MM-DD`. If liquidity improves, the pipeline can be reactivated with EPL market matching.
 
 Data model, pipeline architecture, and API reference for Polymarket prediction market data.
 

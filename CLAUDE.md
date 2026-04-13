@@ -4,13 +4,13 @@ IMPORTANT (LLM agents): This document is read-only. Do not create additional doc
 
 ## Strategic Goal
 
-Predict line movement (closing line value) using cross-source market data. The model targets the delta between current and closing fair prices, identifying when current prices are mispriced relative to where they'll close. Execute on whichever venue (sportsbook or Betfair exchange) offers the best price relative to the predicted close. Line movement prediction, not outcome prediction.
+Identify and exploit structural mispricing in EPL betting markets by synthesizing cross-venue volume data, public sentiment signals, and qualitative research to anticipate line movement driven by public money flow. Execute on whichever venue offers the best price relative to estimated fair value. An LLM agent handles the research and decision-making; the data pipeline provides the structured inputs. See [docs/BETTING_AGENT.md](docs/BETTING_AGENT.md) for the agent architecture.
 
 ## Project Overview
 
 Single-user betting odds data collection and analysis system. **Active focus is EPL football** — NBA support exists but is deprioritised (NBA CLV ~3.6% R² is insufficient to overcome vig, and cross-source execution isn't viable: Polymarket inaccessible from UK, Betfair has no NBA match odds liquidity. Football has deep Betfair liquidity, more data, and more bookmaker competition).
 
-Three primary data sources: The Odds API (US bookmakers, live polling — currently disabled), OddsPortal (UK bookmakers, headless scraper — active, hourly EPL collection), and football-data.co.uk (historical EPL with Pinnacle + Betfair Exchange closing odds). A scoring pipeline produces CLV predictions per snapshot, delivered via daily Discord digest. Supports backtesting strategies against historical data.
+Data sources: The Odds API (US bookmakers, live polling — currently disabled), OddsPortal (UK bookmakers, headless scraper — active, hourly EPL collection), and football-data.co.uk (historical EPL with Pinnacle + Betfair Exchange closing odds). A scoring pipeline produces CLV predictions per snapshot, delivered via daily Discord digest. An LLM betting agent uses these data sources plus web research to identify mispriced markets and place paper trades. See [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) for the full data source inventory.
 
 ## Package Structure
 
@@ -88,7 +88,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system architectur
 
 ## Polymarket Integration (deprioritized)
 
-Pipeline exists but is inactive. Not accessible from UK, data likely collinear with sportsbook odds, 30-day CLOB retention creates ongoing maintenance burden. See [docs/POLYMARKET.md](docs/POLYMARKET.md) for technical details if needed.
+Full pipeline built (API client, 5 DB tables, storage, ingestion, feature extractors) but deprioritized. EPL match-level volume is thin ($10K-$100K per match) and AMM-driven — the orderbook reflects automated market maker parameters, not genuine public sentiment. Not accessible from UK for trading. Pipeline code exists if liquidity improves. See [docs/POLYMARKET.md](docs/POLYMARKET.md) for technical details.
 
 ## Code Style
 
