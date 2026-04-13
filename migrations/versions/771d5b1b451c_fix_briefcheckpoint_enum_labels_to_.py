@@ -16,8 +16,25 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TYPE briefcheckpoint RENAME VALUE 'context' TO 'CONTEXT'")
-    op.execute("ALTER TYPE briefcheckpoint RENAME VALUE 'decision' TO 'DECISION'")
+    op.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM pg_enum
+                WHERE enumlabel = 'context'
+                AND enumtypid = 'briefcheckpoint'::regtype
+            ) THEN
+                ALTER TYPE briefcheckpoint RENAME VALUE 'context' TO 'CONTEXT';
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM pg_enum
+                WHERE enumlabel = 'decision'
+                AND enumtypid = 'briefcheckpoint'::regtype
+            ) THEN
+                ALTER TYPE briefcheckpoint RENAME VALUE 'decision' TO 'DECISION';
+            END IF;
+        END $$;
+    """)
 
 
 def downgrade() -> None:
