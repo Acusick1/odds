@@ -88,7 +88,7 @@ PRELIMINARY VIEW: [interesting / not interesting / watching]
 WATCH-FOR AT CHECKPOINT 2: [specific items — e.g. "Confirm SP not scratched", "Check if bullpen arm available"]
 ```
 
-### Checkpoint 2: Pre-Game Decision (~17:30 UTC / 1:30 PM ET, ~1h before typical 7 PM ET first pitch)
+### Checkpoint 2: Pre-Game Decision (~22:00 UTC / 6:00 PM ET, ~1h before typical 7 PM ET first pitch)
 
 Load your Checkpoint 1 briefs, verify starters are confirmed, check for late changes, and make bet/skip decisions. Note: lineups typically drop 1-3 hours before first pitch. Check but do not block on them.
 

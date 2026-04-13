@@ -137,15 +137,6 @@ def _safe_float(val: Any) -> float | None:
         return None
 
 
-def _resolve_sport_meta(league: str) -> tuple[str, str]:
-    """Map league name to pipeline sport_key and sport_title using LEAGUE_SPECS."""
-    spec = _LEAGUE_SPEC_BY_NAME.get(league)
-    if spec is not None:
-        return spec.sport_key, spec.sport_title
-    # Generic fallback: slugify league name as sport_key (no sport prefix assumption)
-    return league.replace("-", "_"), league.title()
-
-
 @mcp.tool()
 async def get_upcoming_fixtures(
     league: str = "soccer_epl",

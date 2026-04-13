@@ -188,30 +188,6 @@ class TestSafeFloat:
         assert _safe_float("not a number") is None
 
 
-class TestResolveSportMeta:
-    def test_known_epl_league(self) -> None:
-        from odds_mcp.server import _resolve_sport_meta
-
-        sport_key, sport_title = _resolve_sport_meta("england-premier-league")
-        assert sport_key == "soccer_epl"
-        assert sport_title == "EPL"
-
-    def test_known_mlb_league(self) -> None:
-        from odds_mcp.server import _resolve_sport_meta
-
-        sport_key, sport_title = _resolve_sport_meta("mlb")
-        assert sport_key == "baseball_mlb"
-        assert sport_title == "MLB"
-
-    def test_unknown_league_fallback_no_sport_prefix(self) -> None:
-        from odds_mcp.server import _resolve_sport_meta
-
-        sport_key, sport_title = _resolve_sport_meta("spain-la-liga")
-        # Should slugify without assuming "football_" prefix
-        assert sport_key == "spain_la_liga"
-        assert sport_title == "Spain-La-Liga"
-
-
 class TestRefreshScrapeUnknownLeague:
     @pytest.mark.asyncio
     async def test_unknown_league_returns_error(self) -> None:
