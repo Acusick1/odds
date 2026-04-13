@@ -1,8 +1,12 @@
-"""Fetch EPL results and closing odds from OddsPortal historical pages.
+"""Fetch results and closing odds from OddsPortal historical pages.
 
 Scrapes recent match results, updates SCHEDULED events to FINAL with scores,
 and stores one closing odds snapshot per event. Designed for daily Lambda
 execution on the scraper Lambda (requires Playwright/Chromium).
+
+Sport-aware: resolves league configuration from the shared ``LeagueSpec``
+registry in ``fetch_oddsportal``. Derives market key, num_outcomes, and
+harvester params from the spec.
 
 Idempotency: only queries SCHEDULED/LIVE events with commence_time in the past,
 so re-runs after events are marked FINAL find nothing to process.
@@ -21,6 +25,7 @@ from odds_core.models import Event, EventStatus
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT, LeagueSpec
 from odds_lambda.oddsportal_common import (
     build_raw_data,
     parse_match_date,
@@ -31,12 +36,31 @@ from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-SPORT_KEY = "soccer_epl"
-SPORT_TITLE = "EPL"
-HARVESTER_SPORT = "football"
-HARVESTER_LEAGUE = "england-premier-league"
-MARKET_KEY = "1x2_market"
+# Default sport key when no --sport is provided (backward-compatible)
+DEFAULT_SPORT_KEY = "soccer_epl"
 API_REQUEST_ID = "oddsportal_closing"
+
+
+def _market_key_for_spec(spec: LeagueSpec) -> str:
+    """Derive the OddsHarvester record key for the spec's primary market.
+
+    OddsHarvester stores market data under ``{market}_market`` keys, e.g.
+    ``"1x2_market"`` or ``"home_away_market"``.
+    """
+    return f"{spec.primary_market}_market"
+
+
+def _db_market_for_spec(spec: LeagueSpec) -> str:
+    """Derive the pipeline ``db_market`` value from the spec's primary market.
+
+    Maps OddsPortal market names to the pipeline's canonical market key used
+    in ``raw_data["bookmakers"][*]["markets"][*]["key"]``.
+    """
+    if spec.primary_market == "home_away":
+        return "h2h"
+    if spec.primary_market == "1x2":
+        return "h2h"
+    return spec.primary_market
 
 
 @dataclass
@@ -50,23 +74,25 @@ class ResultsStats:
     errors: list[str] = field(default_factory=list)
 
 
-async def run_harvester_historic() -> list[dict[str, Any]]:
-    """Scrape historical results for the current EPL season via ``run_scraper_with_retry``."""
+async def run_harvester_historic(spec: LeagueSpec) -> list[dict[str, Any]]:
+    """Scrape historical results for the given league via ``run_scraper_with_retry``."""
     from oddsharvester.utils.command_enum import CommandEnum
 
     result = await run_scraper_with_retry(
         command=CommandEnum.HISTORIC,
-        sport=HARVESTER_SPORT,
-        leagues=[HARVESTER_LEAGUE],
+        sport=spec.sport,
+        leagues=[spec.league],
         season=None,
         max_pages=1,
-        markets=["1x2"],
+        markets=[spec.primary_market],
         headless=True,
     )
     return result.success
 
 
-async def get_pending_events(session: AsyncSession, sport_key: str = SPORT_KEY) -> list[Event]:
+async def get_pending_events(
+    session: AsyncSession, sport_key: str = DEFAULT_SPORT_KEY
+) -> list[Event]:
     """Get SCHEDULED or LIVE events with commence_time in the past for the given sport."""
     query = select(Event).where(
         and_(
@@ -125,10 +151,22 @@ async def process_results(
 
     Args:
         raw_matches: Pre-scraped data (skips harvester call). For testing.
-        sport: Sport key to filter (e.g. "soccer_epl"). Defaults to SPORT_KEY.
+        sport: Sport key to filter (e.g. "soccer_epl"). Defaults to DEFAULT_SPORT_KEY.
     """
     stats = ResultsStats()
-    sport_key = sport or SPORT_KEY
+    sport_key = sport or DEFAULT_SPORT_KEY
+
+    spec = _LEAGUE_SPEC_BY_SPORT.get(sport_key)
+    if spec is None:
+        logger.error(
+            "unknown_sport_key",
+            sport_key=sport_key,
+            available=list(_LEAGUE_SPEC_BY_SPORT),
+        )
+        return stats
+
+    market_key = _market_key_for_spec(spec)
+    db_market = _db_market_for_spec(spec)
 
     async with async_session_maker() as session:
         pending_events = await get_pending_events(session, sport_key=sport_key)
@@ -140,7 +178,7 @@ async def process_results(
         logger.info("pending_events_found", count=len(pending_events))
 
         if raw_matches is None:
-            raw_matches = await run_harvester_historic()
+            raw_matches = await run_harvester_historic(spec)
 
         stats.matches_scraped = len(raw_matches)
 
@@ -183,7 +221,7 @@ async def process_results(
                 pending_events.remove(event)
 
                 # Store closing odds snapshot
-                market_data = record.get(MARKET_KEY, [])
+                market_data = record.get(market_key, [])
                 if not market_data:
                     continue
 
@@ -194,8 +232,8 @@ async def process_results(
                     event.away_team,
                     use_opening=False,
                     match_dt=match_dt,
-                    num_outcomes=3,
-                    db_market="h2h",
+                    num_outcomes=spec.num_outcomes,
+                    db_market=db_market,
                 )
                 if raw_data is None:
                     continue
