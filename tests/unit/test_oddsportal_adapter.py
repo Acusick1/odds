@@ -7,7 +7,6 @@ from odds_lambda.oddsportal_adapter import (
     MatchOdds,
     _convert_1x2_match,
     _convert_over_under_match,
-    _normalize_upcoming_key,
     convert_upcoming_matches,
     fractional_to_decimal,
     parse_betfair_odds,
@@ -96,14 +95,14 @@ class TestNormalizeBookmakerKey:
 
 class TestNormalizeUpcomingKey:
     def test_known_from_base_map(self) -> None:
-        assert _normalize_upcoming_key("bet365") == "bet365"
+        assert normalize_bookmaker_key("bet365") == "bet365"
 
     def test_upcoming_only_bookmaker(self) -> None:
-        assert _normalize_upcoming_key("Paddy Power") == "paddypower"
-        assert _normalize_upcoming_key("Skybet") == "skybet"
+        assert normalize_bookmaker_key("Paddy Power") == "paddypower"
+        assert normalize_bookmaker_key("Skybet") == "skybet"
 
     def test_unknown_slugified(self) -> None:
-        assert _normalize_upcoming_key("Brand New Book") == "brandnewbook"
+        assert normalize_bookmaker_key("Brand New Book") == "brandnewbook"
 
 
 class TestDecimalToAmerican:

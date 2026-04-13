@@ -13,25 +13,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from odds_lambda.oddsportal_common import (
-    BOOKMAKER_KEY_MAP,
     DRAW_OUTCOME,
     decimal_to_american,
+    normalize_bookmaker_key,
     parse_match_date,
-    slugify,
 )
-
-# Upcoming-only bookmakers not seen in historical scrapes.
-UPCOMING_BOOKMAKER_MAP: dict[str, str] = {
-    **BOOKMAKER_KEY_MAP,
-    "7Bet": "7bet",
-    "Paddy Power": "paddypower",
-    "Skybet": "skybet",
-    "Ladbrokes": "ladbrokes",
-    "Coral": "coral",
-    "William Hill": "williamhill",
-    "888sport": "888sport",
-    "BoyleSports": "boylesports",
-}
 
 # Regex: Betfair format is "FRAC_REPEAT(LIQUIDITY)" e.g. "99/10099/100(300)"
 # The fraction is repeated (concatenated), followed by optional (liquidity).
@@ -85,11 +71,6 @@ def parse_betfair_odds(raw: str) -> tuple[str, int | None]:
     if m:
         return m.group(1), int(m.group(2))
     return raw, None
-
-
-def _normalize_upcoming_key(name: str) -> str:
-    """Map bookmaker name to pipeline key, including upcoming-only bookmakers."""
-    return UPCOMING_BOOKMAKER_MAP.get(name, slugify(name))
 
 
 def convert_upcoming_matches(matches: list[dict[str, Any]], market: str) -> list[MatchOdds]:
@@ -183,7 +164,7 @@ def _convert_1x2_match(
         if not home_raw or not draw_raw or not away_raw:
             continue
 
-        bk_key = _normalize_upcoming_key(bk_name)
+        bk_key = normalize_bookmaker_key(bk_name)
         is_betfair = bk_name == "Betfair Exchange"
 
         if is_betfair:
@@ -245,7 +226,7 @@ def _convert_over_under_match(
         if not over_raw or not under_raw:
             continue
 
-        bk_key = _normalize_upcoming_key(bk_name)
+        bk_key = normalize_bookmaker_key(bk_name)
         is_betfair = bk_name == "Betfair Exchange"
 
         if is_betfair:
