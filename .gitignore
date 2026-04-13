@@ -105,6 +105,7 @@ Thumbs.db
 # Scratch files
 TODO.md
 /oddsportal-*.png
+/oddsportal_*.md
 
 # Alembic
 alembic/versions/*.py
