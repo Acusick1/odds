@@ -26,6 +26,24 @@ class FetchTier(Enum):
     OPENING = "opening"  # 3+ days before: every 48 hours
 
     @property
+    def max_hours(self) -> float:
+        """Upper boundary (hours before kickoff) for this tier.
+
+        A game falls into a tier when hours_before < tier.max_hours (and
+        >= the next-lower tier's max_hours).  OPENING has no upper bound
+        so returns inf.
+        """
+        bounds: dict[FetchTier, float] = {
+            FetchTier.IN_PLAY: 0.0,
+            FetchTier.CLOSING: 3.0,
+            FetchTier.PREGAME: 12.0,
+            FetchTier.SHARP: 24.0,
+            FetchTier.EARLY: 72.0,
+            FetchTier.OPENING: float("inf"),
+        }
+        return bounds[self]
+
+    @property
     def interval_hours(self) -> float:
         """Get interval in hours for this tier."""
         intervals = {
