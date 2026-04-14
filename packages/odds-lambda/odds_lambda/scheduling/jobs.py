@@ -22,7 +22,6 @@ class JobContext:
     """
 
     sport: str | None = None
-    retry_count: int = 0
 
     # backfill-polymarket manual invocation params
     include_spreads: bool = False

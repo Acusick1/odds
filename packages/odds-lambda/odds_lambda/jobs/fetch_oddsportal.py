@@ -1,33 +1,31 @@
 """Fetch upcoming odds from OddsPortal via OddsHarvester.
 
 Scrapes pre-match odds for configured leagues, converts to pipeline format,
-and stores via OddsWriter. Self-schedules next execution based on scrape
-outcome.
+and stores via OddsWriter. Self-schedules based on proximity to next kickoff.
 
-Self-scheduling strategy: defensively schedule at retry cadence before any
-work (no DB needed), then reschedule at normal cadence on success. If
-anything fails — DB, browser, Lambda timeout — the retry schedule is already
-set and the chain survives.
+Scheduling strategy: query DB for next kickoff, compute interval from game
+proximity, pre-schedule before any browser work so the chain survives Lambda
+timeouts. After a successful scrape, re-query (scrape may have created new
+events) and reschedule at the updated interval.
 
-This job:
-1. Pre-schedules next run at retry cadence (no DB, survives any failure)
-2. Scrapes upcoming matches from OddsPortal (via OddsHarvester)
-3. Converts fractional odds to pipeline raw_data format
-4. Matches or creates Event records
-5. Stores snapshots via OddsWriter.store_odds_snapshot()
-6. On success, reschedules at normal cadence (1h) with overnight skip
+Interval table:
+  < 3h  (CLOSING)   → 30 min
+  3–12h (PREGAME)   → 1h
+  12h+  or no games → 2h
+  DB unreachable    → 1h (fallback)
 """
 
 from __future__ import annotations
 
 import asyncio
-import random
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
 from odds_core.database import async_session_maker
+from sqlalchemy import select
+from sqlmodel import col
 
 from odds_lambda.oddsportal_adapter import (
     MatchOdds,
@@ -40,11 +38,15 @@ from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-# Self-scheduling constants
-NORMAL_INTERVAL_HOURS = 1.0
-RETRY_DELAY_MINUTES_MIN = 10
-RETRY_DELAY_MINUTES_MAX = 15
-MAX_FAST_RETRIES = 2
+# Proximity-based scheduling intervals (hours)
+CLOSING_INTERVAL_HOURS = 0.5  # < 3h to kickoff
+PREGAME_INTERVAL_HOURS = 1.0  # 3–12h to kickoff
+FAR_INTERVAL_HOURS = 2.0  # 12h+ or no upcoming games
+DB_FALLBACK_INTERVAL_HOURS = 1.0  # DB unreachable
+
+# Proximity thresholds (hours until kickoff)
+CLOSING_THRESHOLD_HOURS = 3.0
+PREGAME_THRESHOLD_HOURS = 12.0
 
 
 @dataclass
@@ -214,30 +216,44 @@ async def ingest_league(
     return stats
 
 
-def _calculate_next_execution(
-    *,
-    success: bool,
-    retry_count: int,
-    now: datetime | None = None,
-) -> tuple[datetime, int]:
-    """Determine next execution time and updated retry_count.
+async def _get_next_kickoff(sport_key: str) -> datetime | None:
+    """Query DB for the earliest upcoming event commence_time for a sport."""
+    from odds_core.models import Event, EventStatus
 
-    Returns:
-        (next_time, next_retry_count)
-    """
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(Event.commence_time)
+            .where(
+                col(Event.sport_key) == sport_key,
+                col(Event.commence_time) > datetime.now(UTC),
+                col(Event.status) == EventStatus.SCHEDULED,
+            )
+            .order_by(col(Event.commence_time))
+            .limit(1)
+        )
+        row = result.scalar_one_or_none()
+    return row
+
+
+def _interval_for_kickoff(
+    next_kickoff: datetime | None,
+    *,
+    now: datetime | None = None,
+) -> float:
+    """Compute scheduling interval (hours) based on proximity to next kickoff."""
+    if next_kickoff is None:
+        return FAR_INTERVAL_HOURS
+
     if now is None:
         now = datetime.now(UTC)
 
-    if success:
-        return now + timedelta(hours=NORMAL_INTERVAL_HOURS), 0
+    hours_until = (next_kickoff - now).total_seconds() / 3600
 
-    # Fast failure path
-    if retry_count < MAX_FAST_RETRIES:
-        jitter_minutes = random.randint(RETRY_DELAY_MINUTES_MIN, RETRY_DELAY_MINUTES_MAX)
-        return now + timedelta(minutes=jitter_minutes), retry_count + 1
-
-    # Exhausted retries — back to normal cadence
-    return now + timedelta(hours=NORMAL_INTERVAL_HOURS), 0
+    if hours_until < CLOSING_THRESHOLD_HOURS:
+        return CLOSING_INTERVAL_HOURS
+    if hours_until < PREGAME_THRESHOLD_HOURS:
+        return PREGAME_INTERVAL_HOURS
+    return FAR_INTERVAL_HOURS
 
 
 def _apply_overnight_skip(
@@ -269,16 +285,14 @@ async def _self_schedule(
     *,
     job_name: str,
     next_time: datetime,
-    next_retry_count: int,
     dry_run: bool,
     sport: str | None = None,
+    interval_hours: float | None = None,
 ) -> None:
     """Schedule the next execution via the scheduler backend."""
     backend = get_scheduler_backend(dry_run=dry_run)
 
     payload: dict[str, object] = {}
-    if next_retry_count > 0:
-        payload["retry_count"] = next_retry_count
     if sport:
         payload["sport"] = sport
 
@@ -291,7 +305,7 @@ async def _self_schedule(
     logger.info(
         "fetch_oddsportal_next_scheduled",
         next_time=next_time.isoformat(),
-        retry_count=next_retry_count,
+        interval_hours=interval_hours,
         backend=backend.get_backend_name(),
     )
 
@@ -299,16 +313,15 @@ async def _self_schedule(
 async def main(ctx: JobContext) -> None:
     """Main job execution — scrapes configured league(s), then self-schedules.
 
-    Scheduling strategy: defensively pre-schedule at retry cadence (no DB
-    needed) so the chain survives any failure including Lambda timeouts. On
-    success, reschedule at normal cadence with overnight skip.
+    Scheduling strategy: query DB for next kickoff, compute proximity-based
+    interval, pre-schedule before browser work. After successful scrape,
+    re-query (new events may have appeared) and reschedule.
     """
     from odds_core.alerts import job_alert_context, send_job_warning
     from odds_core.config import get_settings
 
     settings = get_settings()
     sport = ctx.sport
-    retry_count = ctx.retry_count
 
     # Resolve which leagues to scrape
     if sport:
@@ -325,26 +338,34 @@ async def main(ctx: JobContext) -> None:
     # Production invokes per-sport; only relevant for local multi-league runs.
     primary_spec = specs[0]
 
-    # Defensive pre-schedule at retry cadence BEFORE any DB or browser work.
-    # No DB query needed — just now + retry delay. If anything fails (DB down,
-    # browser crash, Lambda timeout), this schedule is already set.
-    defensive_next_time, defensive_retry_count = _calculate_next_execution(
-        success=False,
-        retry_count=retry_count,
-        now=datetime.now(UTC),
-    )
-    defensive_next_time = _apply_overnight_skip(
-        defensive_next_time,
+    # Query DB for next kickoff to determine scheduling interval.
+    # On failure, fall back to 1h so we don't block on DB availability.
+    pre_interval = DB_FALLBACK_INTERVAL_HOURS
+    try:
+        next_kickoff = await _get_next_kickoff(primary_spec.sport_key)
+        pre_interval = _interval_for_kickoff(next_kickoff)
+        logger.info(
+            "proximity_schedule",
+            next_kickoff=next_kickoff.isoformat() if next_kickoff else None,
+            interval_hours=pre_interval,
+        )
+    except Exception as e:
+        logger.warning("next_kickoff_query_failed", error=str(e), exc_info=True)
+
+    # Pre-schedule before any browser work so the chain survives Lambda
+    # timeouts or browser crashes.
+    pre_next_time = _apply_overnight_skip(
+        datetime.now(UTC) + timedelta(hours=pre_interval),
         overnight_start_utc=primary_spec.overnight_start_utc,
         overnight_resume_utc=primary_spec.overnight_resume_utc,
     )
     try:
         await _self_schedule(
             job_name=compound_job_name,
-            next_time=defensive_next_time,
-            next_retry_count=defensive_retry_count,
+            next_time=pre_next_time,
             dry_run=settings.scheduler.dry_run,
             sport=sport,
+            interval_hours=pre_interval,
         )
     except Exception as e:
         logger.error("fetch_oddsportal_scheduling_failed", error=str(e), exc_info=True)
@@ -355,7 +376,6 @@ async def main(ctx: JobContext) -> None:
             "fetch_oddsportal_started",
             sport=sport,
             leagues=len(specs),
-            retry_count=retry_count,
         )
 
         all_stats: list[IngestionStats] = []
@@ -395,13 +415,21 @@ async def main(ctx: JobContext) -> None:
             )
             await send_job_warning(
                 alert_type=f"scrape_empty:{compound_job_name}",
-                message=f"⚠️ OddsPortal scrape empty ({detail}), retry #{retry_count}",
+                message=f"⚠️ OddsPortal scrape empty ({detail})",
             )
 
-    # On success, push schedule out to normal cadence
+    # On success, re-query next kickoff (scrape may have created new events)
+    # and reschedule at the updated interval.
     if total_scraped > 0:
+        post_interval = DB_FALLBACK_INTERVAL_HOURS
+        try:
+            post_kickoff = await _get_next_kickoff(primary_spec.sport_key)
+            post_interval = _interval_for_kickoff(post_kickoff)
+        except Exception as e:
+            logger.warning("post_scrape_kickoff_query_failed", error=str(e), exc_info=True)
+
         success_next_time = _apply_overnight_skip(
-            datetime.now(UTC) + timedelta(hours=NORMAL_INTERVAL_HOURS),
+            datetime.now(UTC) + timedelta(hours=post_interval),
             overnight_start_utc=primary_spec.overnight_start_utc,
             overnight_resume_utc=primary_spec.overnight_resume_utc,
         )
@@ -409,9 +437,9 @@ async def main(ctx: JobContext) -> None:
             await _self_schedule(
                 job_name=compound_job_name,
                 next_time=success_next_time,
-                next_retry_count=0,
                 dry_run=settings.scheduler.dry_run,
                 sport=sport,
+                interval_hours=post_interval,
             )
         except Exception as e:
             logger.error("fetch_oddsportal_success_scheduling_failed", error=str(e), exc_info=True)
