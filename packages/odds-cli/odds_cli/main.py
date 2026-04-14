@@ -23,6 +23,7 @@ from odds_cli.commands import (
     status,
     train,
     validate,
+    worker,
 )
 
 app = typer.Typer(
@@ -49,6 +50,7 @@ app.add_typer(pbpstats.app, name="pbpstats", help="PBPStats player season statis
 app.add_typer(scrape.app, name="scrape", help="Scrape odds from OddsPortal")
 app.add_typer(model.app, name="model", help="Model artifact management")
 app.add_typer(paper.app, name="paper", help="Paper trade management")
+app.add_typer(worker.app, name="worker", help="Background scrape job worker")
 
 console = Console()
 
