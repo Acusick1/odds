@@ -57,11 +57,13 @@ MLB has 5-15 games per day. You cannot research all deeply. The workflow include
 
 ### Checkpoint 1: Morning Research (~14:00 UTC / 10 AM ET)
 
-Probable pitchers are typically confirmed by this time. Build briefs for selected games. No bets at this checkpoint.
+Probable pitchers are typically confirmed by this time. Build briefs for selected games.
+
+**Adaptive rule:** After identifying today's slate, partition selected games by start time relative to now. Games starting **within 6 hours** are "early games" — run both context and decision steps inline (there will be no CP2 opportunity before first pitch). Games starting **more than 6 hours out** are "evening games" — build context briefs only, decisions deferred to CP2.
 
 **Steps:**
 
-1. Call `get_upcoming_fixtures(league="baseball_mlb")` — identify today's full slate.
+1. Run `date -u '+%Y-%m-%d %H:%M UTC'` and call `get_upcoming_fixtures(league="baseball_mlb")` — identify today's full slate and note each game's start time.
 2. **Triage**: Scan the full slate and select 3-5 games for deep research. Selection criteria:
    - Pitching mismatches (ace vs. back-end starter, or two aces)
    - Teams on hot/cold streaks
@@ -69,13 +71,14 @@ Probable pitchers are typically confirmed by this time. Build briefs for selecte
    - Weather conditions at outdoor parks (wind blowing out, extreme heat)
    - Known public betting tendencies (popular teams, nationally televised games)
    - Any games where you already suspect a market inefficiency
-3. For each selected game, call `get_match_brief` with checkpoint="context" to check for an existing brief. Skip if recent and still current.
-4. For each game that needs a brief:
+3. **Partition**: Split selected games into **early** (start time ≤ 6h from now) and **evening** (start time > 6h from now). Log which games fall into each bucket.
+4. For each selected game, call `get_match_brief` with checkpoint="context" to check for an existing brief. Skip if recent and still current.
+5. For each game that needs a brief:
    a. Call `get_sharp_soft_spread(sharp_bookmakers=["betfair_exchange"], retail_bookmakers=["bet365", "betway", "betfred", "betmgm"])` — note the current sharp price, any retail divergence.
    b. Call `get_current_odds` — scan bookmaker prices across outcomes.
    c. Web search for probable pitchers, recent form, relevant injury news. Keep searches targeted: "[Team] probable pitcher today", "[Pitcher] recent stats 2026", "[Stadium] weather today". Do 2-4 searches per game, not more.
    d. Assess: is there anything here that could create an edge by game time? Flag specific items to revisit.
-5. For each researched game, call `save_match_brief` with checkpoint="context". Structure the brief:
+6. **Evening games** — save context brief only (no bets). Call `save_match_brief` with checkpoint="context":
 
 ```
 TRIAGE REASON: [why this game was selected for deep research]
@@ -86,6 +89,26 @@ TEAM NEWS: [injuries, bullpen availability, lineup changes]
 WEATHER: [if outdoor park — wind, temp, relevance to totals]
 PRELIMINARY VIEW: [interesting / not interesting / watching]
 WATCH-FOR AT CHECKPOINT 2: [specific items — e.g. "Confirm SP not scratched", "Check if bullpen arm available"]
+```
+
+7. **Early games** — run the full decision flow inline since CP2 will be too late:
+   a. Save the context brief as above (checkpoint="context").
+   b. Search for confirmed lineups and any late pitching changes (MLB.com, RotoWire, ESPN). Lineups may not be posted yet for early games — note if missing but do not block on them.
+   c. Check weather update if relevant.
+   d. Assess whether an edge exists (see Edge Types below).
+   e. If betting: call `get_portfolio` to check bankroll, then `paper_bet`.
+   f. Call `save_match_brief` with checkpoint="decision":
+
+```
+CONTEXT RECAP: [one-line summary of what you found above]
+STARTER CONFIRMED: [yes/no, any late changes]
+LINEUP NEWS: [notable lineup changes, absences, or "not yet posted"]
+WEATHER UPDATE: [if relevant]
+EDGE ASSESSMENT: [specific edge identified, or "no edge"]
+DECISION: [BET / SKIP]
+If BET: [selection, odds, bookmaker, stake, conviction tier, full reasoning]
+If SKIP: [one-line reason]
+NOTE: Early game — full analysis at CP1 (no CP2 before first pitch).
 ```
 
 ### Checkpoint 2: Pre-Game Decision (~22:00 UTC / 6:00 PM ET, ~1h before typical 7 PM ET first pitch)

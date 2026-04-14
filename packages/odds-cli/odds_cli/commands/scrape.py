@@ -16,7 +16,6 @@ console = Console()
 
 @app.command("upcoming")
 def scrape_upcoming(
-    sport: str = typer.Option("football", "--sport", "-s", help="OddsHarvester sport name"),
     league: str = typer.Option(
         "england-premier-league", "--league", "-l", help="OddsHarvester league name"
     ),
@@ -29,49 +28,60 @@ def scrape_upcoming(
     ),
 ) -> None:
     """Scrape upcoming match odds from OddsPortal and ingest into the pipeline."""
-    asyncio.run(_scrape_upcoming(sport, league, market or ["1x2"], dry_run, from_file))
+    asyncio.run(_scrape_upcoming(league, market, dry_run, from_file))
 
 
 async def _scrape_upcoming(
-    sport: str,
     league: str,
-    markets: list[str],
+    markets: list[str] | None,
     dry_run: bool,
     from_file: str | None,
 ) -> None:
     from odds_lambda.jobs.fetch_oddsportal import (
+        LEAGUE_SPECS,
         LeagueSpec,
         ingest_league,
     )
     from odds_lambda.oddsportal_adapter import convert_upcoming_matches
 
-    # Resolve sport_key/title from league
-    sport_key, sport_title = _resolve_sport_meta(sport, league)
+    # Look up known league spec
+    known = {s.league: s for s in LEAGUE_SPECS}
+    if league not in known:
+        known_names = sorted(known.keys())
+        console.print(f"[red]Unknown league '{league}'. Known leagues: {known_names}[/red]")
+        raise typer.Exit(code=1)
 
-    spec = LeagueSpec(
-        sport=sport,
-        league=league,
-        sport_key=sport_key,
-        sport_title=sport_title,
-        markets=markets,
-    )
+    spec = known[league]
+    if markets:
+        spec = LeagueSpec(
+            sport=spec.sport,
+            league=spec.league,
+            sport_key=spec.sport_key,
+            sport_title=spec.sport_title,
+            markets=markets,
+            primary_market=spec.primary_market,
+            num_outcomes=spec.num_outcomes,
+            overnight_start_utc=spec.overnight_start_utc,
+            overnight_resume_utc=spec.overnight_resume_utc,
+        )
 
     raw_matches: list[dict[str, Any]] | None = None
     if from_file:
         console.print(f"Loading matches from [cyan]{from_file}[/cyan]")
         with open(from_file) as f:
-            raw_matches = json.load(f)
-        console.print(f"  Loaded {len(raw_matches)} matches")
+            loaded: list[dict[str, Any]] = json.load(f)
+        raw_matches = loaded
+        console.print(f"  Loaded {len(loaded)} matches")
 
     if dry_run:
         if raw_matches is None:
             from odds_lambda.jobs.fetch_oddsportal import run_harvester_upcoming
 
-            console.print(f"Scraping [bold]{league}[/bold] ({sport})...")
+            console.print(f"Scraping [bold]{spec.league}[/bold] ({spec.sport})...")
             raw_matches = await run_harvester_upcoming(spec)
             console.print(f"  Scraped {len(raw_matches)} matches")
 
-        for mkt in markets:
+        for mkt in spec.markets:
             converted = convert_upcoming_matches(raw_matches, mkt)
             console.print(f"\n[bold]{mkt}[/bold]: {len(converted)} matches converted")
 
@@ -91,7 +101,7 @@ async def _scrape_upcoming(
                 console.print(table)
         return
 
-    console.print(f"Scraping and ingesting [bold]{league}[/bold] ({sport})...")
+    console.print(f"Scraping and ingesting [bold]{spec.league}[/bold] ({spec.sport})...")
     stats = await ingest_league(spec, raw_matches=raw_matches, dry_run=False)
 
     console.print("\n[bold green]Done[/bold green]")
@@ -104,15 +114,3 @@ async def _scrape_upcoming(
         console.print(f"  [yellow]Errors: {len(stats.errors)}[/yellow]")
         for err in stats.errors[:5]:
             console.print(f"    {err}")
-
-
-def _resolve_sport_meta(sport: str, league: str) -> tuple[str, str]:
-    """Map sport/league to pipeline sport_key and sport_title."""
-    mapping: dict[str, tuple[str, str]] = {
-        "england-premier-league": ("soccer_epl", "EPL"),
-        "nba": ("basketball_nba", "NBA"),
-    }
-    if league in mapping:
-        return mapping[league]
-    # Generic fallback
-    return f"{sport}_{league.replace('-', '_')}", league.title()
