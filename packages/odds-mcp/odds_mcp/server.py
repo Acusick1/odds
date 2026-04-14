@@ -20,7 +20,7 @@ from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade
 from odds_core.prediction_models import Prediction
 from odds_core.scrape_job_models import ScrapeJob, ScrapeJobStatus
-from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPECS
+from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME
 from odds_lambda.paper_trading import (
     get_open_trades,
     get_portfolio_summary,
@@ -41,8 +41,8 @@ mcp = FastMCP(
     ),
 )
 
-# Build league lookup from canonical LEAGUE_SPECS
-_LEAGUE_SPEC_BY_NAME: dict[str, Any] = {spec.league: spec for spec in LEAGUE_SPECS}
+# Re-export canonical lookup built where LEAGUE_SPECS is defined
+_LEAGUE_SPEC_BY_NAME = LEAGUE_SPEC_BY_NAME
 
 # Hybrid sharp reference matching production defaults.
 # Duplicated from feature_extraction.py DEFAULT_SHARP_BOOKMAKERS / DEFAULT_RETAIL_BOOKMAKERS

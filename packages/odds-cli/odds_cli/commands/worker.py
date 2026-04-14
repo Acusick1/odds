@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import structlog
 import typer
+from odds_core.database import async_session_maker
+from odds_core.scrape_job_models import ScrapeJob, ScrapeJobStatus
+from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME, ingest_league
 from rich.console import Console
+from sqlalchemy import select, update
 
 app = typer.Typer()
 console = Console()
@@ -28,10 +32,6 @@ def start(
 
 
 async def _run_worker(*, once: bool, poll_interval: float) -> None:
-    from odds_core.database import async_session_maker
-    from odds_core.scrape_job_models import ScrapeJob, ScrapeJobStatus
-    from sqlalchemy import select, update
-
     console.print("[bold]Scrape worker started[/bold]")
     if once:
         console.print("  Mode: single job (--once)")
@@ -81,10 +81,6 @@ async def _run_worker(*, once: bool, poll_interval: float) -> None:
 
 async def _expire_stale_jobs() -> None:
     """Mark running jobs older than the stale timeout as failed."""
-    from odds_core.database import async_session_maker
-    from odds_core.scrape_job_models import ScrapeJob, ScrapeJobStatus
-    from sqlalchemy import update
-
     cutoff = datetime.now(UTC) - _STALE_TIMEOUT
     async with async_session_maker() as session:
         result = await session.execute(
@@ -109,11 +105,6 @@ async def _expire_stale_jobs() -> None:
 
 async def _process_job(job_id: int) -> None:
     """Execute a single scrape job and write results back."""
-    from odds_core.database import async_session_maker
-    from odds_core.scrape_job_models import ScrapeJob, ScrapeJobStatus
-    from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPECS, LeagueSpec, ingest_league
-    from sqlalchemy import select
-
     # Load the job
     async with async_session_maker() as session:
         result = await session.execute(select(ScrapeJob).where(ScrapeJob.id == job_id))
@@ -124,29 +115,18 @@ async def _process_job(job_id: int) -> None:
     console.print(f"Processing job {job_id}: {league} / {market}")
 
     # Build LeagueSpec
-    spec_by_name: dict[str, Any] = {s.league: s for s in LEAGUE_SPECS}
-    known_spec = spec_by_name.get(league)
+    known_spec = LEAGUE_SPEC_BY_NAME.get(league)
     if known_spec is None:
         await _fail_job(job_id, f"Unknown league '{league}'")
         return
 
-    spec = LeagueSpec(
-        sport=known_spec.sport,
-        league=league,
-        sport_key=known_spec.sport_key,
-        sport_title=known_spec.sport_title,
-        markets=[market],
-        primary_market=known_spec.primary_market,
-        num_outcomes=known_spec.num_outcomes,
-        overnight_start_utc=known_spec.overnight_start_utc,
-        overnight_resume_utc=known_spec.overnight_resume_utc,
-    )
+    spec = dataclasses.replace(known_spec, markets=[market])
 
     try:
         stats = await ingest_league(spec)
     except Exception as e:
         logger.error("worker_job_failed", job_id=job_id, error=str(e), exc_info=True)
-        await _fail_job(job_id, str(e))
+        await _fail_job(job_id, str(e)[:2000])
         return
 
     # Write results
@@ -172,16 +152,12 @@ async def _process_job(job_id: int) -> None:
 
 async def _fail_job(job_id: int, error_message: str) -> None:
     """Mark a job as failed with an error message."""
-    from odds_core.database import async_session_maker
-    from odds_core.scrape_job_models import ScrapeJob, ScrapeJobStatus
-    from sqlalchemy import select
-
     async with async_session_maker() as session:
         result = await session.execute(select(ScrapeJob).where(ScrapeJob.id == job_id))
         job = result.scalar_one()
         job.status = ScrapeJobStatus.FAILED
         job.completed_at = datetime.now(UTC)
-        job.error_message = error_message
+        job.error_message = error_message[:2000]
         session.add(job)
         await session.commit()
 
