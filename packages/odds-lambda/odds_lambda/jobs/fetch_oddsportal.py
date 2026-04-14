@@ -27,6 +27,7 @@ from odds_core.database import async_session_maker
 from sqlalchemy import select
 from sqlmodel import col
 
+from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.oddsportal_adapter import (
     MatchOdds,
     convert_upcoming_matches,
@@ -43,10 +44,6 @@ CLOSING_INTERVAL_HOURS = 0.5  # < 3h to kickoff
 PREGAME_INTERVAL_HOURS = 1.0  # 3–12h to kickoff
 FAR_INTERVAL_HOURS = 2.0  # 12h+ or no upcoming games
 DB_FALLBACK_INTERVAL_HOURS = 1.0  # DB unreachable
-
-# Proximity thresholds (hours until kickoff)
-CLOSING_THRESHOLD_HOURS = 3.0
-PREGAME_THRESHOLD_HOURS = 12.0
 
 
 @dataclass
@@ -249,9 +246,9 @@ def _interval_for_kickoff(
 
     hours_until = (next_kickoff - now).total_seconds() / 3600
 
-    if hours_until < CLOSING_THRESHOLD_HOURS:
+    if hours_until < FetchTier.CLOSING.max_hours:
         return CLOSING_INTERVAL_HOURS
-    if hours_until < PREGAME_THRESHOLD_HOURS:
+    if hours_until < FetchTier.PREGAME.max_hours:
         return PREGAME_INTERVAL_HOURS
     return FAR_INTERVAL_HOURS
 

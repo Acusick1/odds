@@ -8,13 +8,12 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.jobs.fetch_oddsportal import (
     CLOSING_INTERVAL_HOURS,
-    CLOSING_THRESHOLD_HOURS,
     DB_FALLBACK_INTERVAL_HOURS,
     FAR_INTERVAL_HOURS,
     PREGAME_INTERVAL_HOURS,
-    PREGAME_THRESHOLD_HOURS,
     _interval_for_kickoff,
     main,
 )
@@ -35,7 +34,7 @@ class TestIntervalForKickoff:
     def test_game_at_closing_boundary(self) -> None:
         now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
         # Exactly at 3h boundary — should be closing (< 3h is false, so pregame)
-        kickoff = now + timedelta(hours=CLOSING_THRESHOLD_HOURS)
+        kickoff = now + timedelta(hours=FetchTier.CLOSING.max_hours)
         assert _interval_for_kickoff(kickoff, now=now) == PREGAME_INTERVAL_HOURS
 
     def test_game_just_under_closing_threshold(self) -> None:
@@ -50,7 +49,7 @@ class TestIntervalForKickoff:
 
     def test_game_at_pregame_boundary(self) -> None:
         now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
-        kickoff = now + timedelta(hours=PREGAME_THRESHOLD_HOURS)
+        kickoff = now + timedelta(hours=FetchTier.PREGAME.max_hours)
         assert _interval_for_kickoff(kickoff, now=now) == FAR_INTERVAL_HOURS
 
     def test_game_far_away(self) -> None:
