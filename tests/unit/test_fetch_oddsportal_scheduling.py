@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from odds_lambda.jobs.fetch_oddsportal import (
@@ -88,7 +88,7 @@ class TestProximityScheduling:
             call_order.append("schedule")
 
         mock_backend = AsyncMock()
-        mock_backend.get_backend_name.return_value = "test"
+        mock_backend.get_backend_name = Mock(return_value="test")
         mock_backend.schedule_next_execution = AsyncMock(side_effect=fake_schedule)
 
         with (
@@ -117,7 +117,7 @@ class TestProximityScheduling:
     async def test_success_reschedules_with_updated_interval(self) -> None:
         """On success, a second schedule call fires with re-queried interval."""
         mock_backend = AsyncMock()
-        mock_backend.get_backend_name.return_value = "test"
+        mock_backend.get_backend_name = Mock(return_value="test")
 
         with (
             patch(
@@ -156,7 +156,7 @@ class TestProximityScheduling:
     async def test_failure_keeps_prescheduled(self) -> None:
         """On failure, no second schedule call — the pre-scheduled one stands."""
         mock_backend = AsyncMock()
-        mock_backend.get_backend_name.return_value = "test"
+        mock_backend.get_backend_name = Mock(return_value="test")
 
         with (
             patch(
@@ -189,7 +189,7 @@ class TestProximityScheduling:
     async def test_chain_survives_ingest_exception(self) -> None:
         """If ingest_league raises, the pre-schedule is already set."""
         mock_backend = AsyncMock()
-        mock_backend.get_backend_name.return_value = "test"
+        mock_backend.get_backend_name = Mock(return_value="test")
 
         with (
             patch(
@@ -220,7 +220,7 @@ class TestProximityScheduling:
     async def test_db_failure_falls_back_to_1h(self) -> None:
         """If DB query fails, pre-schedule uses DB_FALLBACK_INTERVAL_HOURS."""
         mock_backend = AsyncMock()
-        mock_backend.get_backend_name.return_value = "test"
+        mock_backend.get_backend_name = Mock(return_value="test")
 
         with (
             patch(
@@ -258,7 +258,7 @@ class TestProximityScheduling:
     async def test_closing_game_schedules_30min(self) -> None:
         """Game within 3h should produce a 30-min interval."""
         mock_backend = AsyncMock()
-        mock_backend.get_backend_name.return_value = "test"
+        mock_backend.get_backend_name = Mock(return_value="test")
 
         kickoff = datetime.now(UTC) + timedelta(hours=1)
 
@@ -298,7 +298,7 @@ class TestProximityScheduling:
     async def test_far_game_schedules_2h(self) -> None:
         """Game 24h+ away should produce a 2h interval."""
         mock_backend = AsyncMock()
-        mock_backend.get_backend_name.return_value = "test"
+        mock_backend.get_backend_name = Mock(return_value="test")
 
         kickoff = datetime.now(UTC) + timedelta(hours=24)
 
