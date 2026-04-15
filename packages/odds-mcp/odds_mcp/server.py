@@ -649,39 +649,6 @@ async def settle_bets() -> dict[str, Any]:
     }
 
 
-def _snapshot_sharp_prices(
-    odds_list: list[Odds],
-    sharp_bookmakers: list[str],
-) -> SharpPriceMap:
-    """Extract current sharp bookmaker prices from an odds list.
-
-    Uses per-outcome priority fallback: each outcome independently falls through
-    to the next sharp bookmaker if a higher-priority one lacks that outcome.
-
-    Returns a dict keyed by outcome name, each containing the sharp bookmaker key,
-    American odds price, and implied probability.
-    """
-    result: dict[str, dict[str, Any]] = {}
-    for o in odds_list:
-        if o.outcome_name in result:
-            continue
-        # Find highest-priority sharp bookmaker that has this outcome
-        for bm_key in sharp_bookmakers:
-            bm_match = [
-                x
-                for x in odds_list
-                if x.bookmaker_key == bm_key and x.outcome_name == o.outcome_name
-            ]
-            if bm_match:
-                result[o.outcome_name] = {
-                    "bookmaker": bm_key,
-                    "price": bm_match[0].price,
-                    "implied_prob": round(calculate_implied_probability(bm_match[0].price), 6),
-                }
-                break
-    return result
-
-
 @mcp.tool()
 async def save_match_brief(
     event_id: str,
@@ -709,13 +676,21 @@ async def save_match_brief(
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        # Snapshot sharp prices from the latest odds
-        sharp_prices: SharpPriceMap | None = None
-        snapshot = await reader.get_latest_snapshot(event_id, market=market)
-        if snapshot is not None:
-            odds = extract_odds_from_snapshot(snapshot, event_id, market=market)
-            if odds:
-                sharp_prices = _snapshot_sharp_prices(odds, _DEFAULT_SHARP_BOOKMAKERS)
+        # Snapshot sharp prices via lookback across recent snapshots.
+        # Anchor on the latest snapshot and use a generous window — we just
+        # want the best available price for stamping the brief.
+        latest_snapshot = await reader.get_latest_snapshot(event_id, market=market)
+        if latest_snapshot is not None:
+            sharp_result = await reader.get_sharp_prices(
+                event_id,
+                market=market,
+                sharp_bookmakers=_DEFAULT_SHARP_BOOKMAKERS,
+                lookback_hours=24.0,
+                now=latest_snapshot.snapshot_time,
+            )
+            sharp_prices: SharpPriceMap | None = sharp_result.prices or None
+        else:
+            sharp_prices = None
 
         brief = MatchBrief(
             event_id=event_id,
@@ -790,20 +765,25 @@ async def get_sharp_soft_spread(
     market: MarketKey,
     sharp_bookmakers: list[str] | None = None,
     retail_bookmakers: list[str] | None = None,
+    sharp_lookback_hours: float = 2.0,
 ) -> dict[str, Any]:
     """Get sharp vs soft bookmaker price divergence for an event.
 
-    Returns the sharp reference price, per-bookmaker soft prices, and implied
-    probability divergence for each outcome (home/draw/away).
+    Sharp prices are resolved via a time-windowed lookback across recent
+    snapshots so that a missing sharp bookmaker in the latest scrape does not
+    discard a perfectly good price from a nearby snapshot.  Retail prices
+    always come from the single latest snapshot.
 
     Args:
         event_id: Event identifier.
         market: Market type — "h2h", "1x2", "totals", or "spreads".
         sharp_bookmakers: Sharp bookmaker keys (default: ["pinnacle", "betfair_exchange"]).
         retail_bookmakers: Retail bookmaker keys (default: ["bet365", "betway", "betfred"]).
+        sharp_lookback_hours: How far back to search for sharp prices (default 2.0 h).
 
     Returns:
-        Dict with per-outcome sharp price, soft prices, and divergence values.
+        Dict with per-outcome sharp price (with source snapshot time),
+        soft prices, and divergence values.
     """
     sharp_bms = sharp_bookmakers or _DEFAULT_SHARP_BOOKMAKERS
     retail_bms = retail_bookmakers or _DEFAULT_RETAIL_BOOKMAKERS
@@ -814,6 +794,7 @@ async def get_sharp_soft_spread(
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
+        # Retail prices: latest snapshot only
         snapshot = await reader.get_latest_snapshot(event_id, market=market)
         if snapshot is None:
             return {
@@ -822,7 +803,17 @@ async def get_sharp_soft_spread(
                 "message": "No odds snapshots available for this event",
             }
 
-        # Extract odds and snapshot metadata inside session while ORM objects are live
+        # Sharp prices: lookback across recent snapshots, anchored on the
+        # latest snapshot time so the window is data-relative, not clock-relative.
+        sharp_result = await reader.get_sharp_prices(
+            event_id,
+            market=market,
+            sharp_bookmakers=sharp_bms,
+            lookback_hours=sharp_lookback_hours,
+            now=snapshot.snapshot_time,
+        )
+
+        # Extract retail odds and metadata while ORM objects are live
         odds = extract_odds_from_snapshot(snapshot, event_id, market=market)
         snapshot_time_iso = snapshot.snapshot_time.isoformat()
         event_dict = _event_to_dict(event)
@@ -834,8 +825,7 @@ async def get_sharp_soft_spread(
             "message": f"No {market} odds in latest snapshot",
         }
 
-    # Reuse shared sharp price extraction
-    sharp_by_outcome = _snapshot_sharp_prices(odds, sharp_bms)
+    sharp_by_outcome = sharp_result.prices
 
     # Group odds by outcome for retail lookup
     outcomes: dict[str, list[Odds]] = {}
@@ -846,6 +836,23 @@ async def get_sharp_soft_spread(
     for outcome_name, outcome_odds in outcomes.items():
         sharp_entry = sharp_by_outcome.get(outcome_name)
         sharp_prob = sharp_entry["implied_prob"] if sharp_entry else None
+
+        # Build sharp block with source snapshot metadata
+        if sharp_entry:
+            meta = sharp_result.meta.get(outcome_name)
+            sharp_block: dict[str, Any] = {
+                **sharp_entry,
+                "snapshot_time": meta.snapshot_time.isoformat() if meta else None,
+                "age_seconds": meta.age_seconds if meta else None,
+            }
+        else:
+            sharp_block = {
+                "bookmaker": None,
+                "price": None,
+                "implied_prob": None,
+                "snapshot_time": None,
+                "age_seconds": None,
+            }
 
         # Collect retail bookmaker prices
         soft_prices: list[dict[str, Any]] = []
@@ -866,7 +873,7 @@ async def get_sharp_soft_spread(
             )
 
         spread[outcome_name] = {
-            "sharp": sharp_entry or {"bookmaker": None, "price": None, "implied_prob": None},
+            "sharp": sharp_block,
             "soft": soft_prices,
         }
 
