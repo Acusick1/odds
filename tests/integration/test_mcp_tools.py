@@ -297,6 +297,29 @@ class TestSaveMatchBrief:
         )
         assert len(list(db_result.scalars().all())) == 3
 
+    @pytest.mark.asyncio
+    async def test_sharp_prices_via_lookback(self, patch_session_maker, sharp_lookback_event):
+        """save_match_brief stamps sharp prices found via lookback when the
+        latest snapshot lacks sharp bookmaker prices."""
+        from odds_mcp.server import save_match_brief
+
+        event, _snap_old, _snap_new = sharp_lookback_event
+
+        result = await save_match_brief(
+            event_id=event.id,
+            brief_text="Brighton should dominate at home.",
+            checkpoint="context",
+        )
+
+        assert "error" not in result
+        sharp = result["sharp_price_at_brief"]
+        assert sharp is not None
+        # Pinnacle is only in the older snapshot — lookback should find it
+        for outcome in ("Brighton", "Draw", "Wolves"):
+            assert sharp[outcome]["bookmaker"] == "pinnacle"
+            assert "price" in sharp[outcome]
+            assert "implied_prob" in sharp[outcome]
+
 
 class TestGetMatchBrief:
     """Tests for the get_match_brief MCP tool."""
@@ -628,13 +651,16 @@ class TestGetSharpPrices:
         assert result.meta == {}
 
     @pytest.mark.asyncio
-    async def test_priority_order_respected(self, pglite_async_session, sharp_lookback_event):
-        """Higher-priority sharp bookmaker wins when both are present."""
+    async def test_recency_takes_precedence_over_priority(
+        self, pglite_async_session, sharp_lookback_event
+    ):
+        """Recency wins: once an outcome is resolved from a newer snapshot,
+        older snapshots are skipped even if they contain a higher-priority bookmaker."""
         event, snap_old, snap_new = sharp_lookback_event
         reader = OddsReader(pglite_async_session)
 
-        # bet365 is in the newest snapshot, pinnacle in older — but pinnacle
-        # has higher priority so should be preferred even from older snapshot
+        # pinnacle is higher priority but only in the older snapshot;
+        # bet365 in the newer snapshot resolves first.
         result = await reader.get_sharp_prices(
             event.id,
             market="1x2",
@@ -643,15 +669,6 @@ class TestGetSharpPrices:
             now=snap_new.snapshot_time,
         )
 
-        # bet365 is in the newest snapshot, so it is found first per-outcome.
-        # But pinnacle has higher priority — the reader checks priority within
-        # each snapshot, not across snapshots.  Since bet365 is found in the
-        # newer snapshot (with higher priority than pinnacle? No — pinnacle is
-        # listed first).  Actually the logic is: for each outcome not yet
-        # resolved, iterate sharp_bookmakers in order within the snapshot.
-        # The newest snapshot has bet365 but NOT pinnacle, so bet365 wins
-        # from the newest snapshot (it's the first match in priority for that
-        # snapshot).
         assert result.prices["Brighton"]["bookmaker"] == "bet365"
         assert result.prices["Brighton"]["price"] == -155
 
