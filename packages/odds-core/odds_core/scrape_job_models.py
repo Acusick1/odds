@@ -5,8 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Column, DateTime, Index, text
-from sqlalchemy import Enum as SAEnum
+from sqlalchemy import Column, DateTime, Index
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
@@ -32,15 +31,8 @@ class ScrapeJob(SQLModel, table=True):
     league: str = Field(index=True, description="OddsHarvester league name")
     market: str = Field(description="Market to scrape (e.g. 1x2, over_under_2_5)")
 
-    # Status — VARCHAR (not native enum) so partial-index WHERE clause works portably
-    status: ScrapeJobStatus = Field(
-        sa_column=Column(
-            SAEnum(ScrapeJobStatus, native_enum=False, length=20),
-            nullable=False,
-            default=ScrapeJobStatus.PENDING,
-        ),
-        default=ScrapeJobStatus.PENDING,
-    )
+    # Status
+    status: ScrapeJobStatus = Field(default=ScrapeJobStatus.PENDING)
 
     # Timestamps
     created_at: datetime = Field(
@@ -66,12 +58,4 @@ class ScrapeJob(SQLModel, table=True):
     # Error info (populated on failure)
     error_message: str | None = Field(default=None)
 
-    __table_args__ = (
-        Index(
-            "ix_scrape_jobs_pending",
-            "status",
-            "created_at",
-            postgresql_where=text("status = 'pending'"),
-        ),
-        Index("ix_scrape_jobs_league_status", "league", "market", "status"),
-    )
+    __table_args__ = (Index("ix_scrape_jobs_league_status", "league", "market", "status"),)
