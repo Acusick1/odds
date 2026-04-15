@@ -16,7 +16,7 @@ from odds_analytics.sequence_loader import extract_odds_from_snapshot
 from odds_analytics.utils import calculate_implied_probability
 from odds_core.agent_wakeup_models import AgentWakeup
 from odds_core.database import async_session_maker
-from odds_core.match_brief_models import BriefCheckpoint, MatchBrief, SharpPriceMap
+from odds_core.match_brief_models import MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade
 from odds_core.prediction_models import Prediction
@@ -657,18 +657,17 @@ async def save_match_brief(
     event_id: str,
     market: MarketKey,
     brief_text: str,
-    checkpoint: Literal["context", "decision"],
 ) -> dict[str, Any]:
-    """Save a structured analysis brief for an event at a workflow checkpoint.
+    """Save a structured analysis brief for an event.
 
     Automatically snapshots current sharp bookmaker prices at save time.
-    Multiple briefs per event+checkpoint are allowed (agent may re-evaluate).
+    Briefs are append-only — each call creates a new row. The agent loads
+    all previous briefs for a match (newest first) and builds on them.
 
     Args:
         event_id: Event identifier.
         market: Market type — "h2h", "1x2", "totals", or "spreads".
         brief_text: Freeform brief content (structure controlled by agent prompt).
-        checkpoint: Workflow checkpoint: "context" (day before) or "decision" (KO-90min).
 
     Returns:
         Dict with saved brief details including snapshotted sharp prices.
@@ -697,7 +696,6 @@ async def save_match_brief(
 
         brief = MatchBrief(
             event_id=event_id,
-            checkpoint=BriefCheckpoint(checkpoint),
             brief_text=brief_text,
             sharp_price_at_brief=sharp_prices,
         )
@@ -708,7 +706,6 @@ async def save_match_brief(
     return {
         "id": brief.id,
         "event_id": brief.event_id,
-        "checkpoint": brief.checkpoint.value,
         "brief_text": brief.brief_text,
         "sharp_price_at_brief": brief.sharp_price_at_brief,
         "created_at": brief.created_at.isoformat(),
@@ -718,16 +715,14 @@ async def save_match_brief(
 @mcp.tool()
 async def get_match_brief(
     event_id: str,
-    checkpoint: Literal["context", "decision"] | None = None,
 ) -> dict[str, Any]:
     """Retrieve saved match briefs for an event.
 
-    Returns all briefs for the event, newest first. Optionally filtered by checkpoint.
+    Returns all briefs for the event, newest first (append-only history).
     Returns empty gracefully when no brief exists.
 
     Args:
         event_id: Event identifier.
-        checkpoint: If set, only return briefs for this checkpoint.
 
     Returns:
         Dict with event info and list of matching briefs (newest first).
@@ -738,10 +733,11 @@ async def get_match_brief(
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        query = select(MatchBrief).where(MatchBrief.event_id == event_id)
-        if checkpoint is not None:
-            query = query.where(MatchBrief.checkpoint == BriefCheckpoint(checkpoint))
-        query = query.order_by(MatchBrief.created_at.desc())
+        query = (
+            select(MatchBrief)
+            .where(MatchBrief.event_id == event_id)
+            .order_by(MatchBrief.created_at.desc())
+        )
 
         result = await session.execute(query)
         briefs = list(result.scalars().all())
@@ -752,7 +748,6 @@ async def get_match_brief(
         "briefs": [
             {
                 "id": b.id,
-                "checkpoint": b.checkpoint.value,
                 "brief_text": b.brief_text,
                 "sharp_price_at_brief": b.sharp_price_at_brief,
                 "created_at": b.created_at.isoformat(),

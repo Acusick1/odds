@@ -52,36 +52,29 @@ The thesis: an LLM agent with the right tools can process more information, from
 | Window | Market activity | Agent action |
 |--------|----------------|--------------|
 | Mon-Thu | Lines open, early sharp money | — |
-| Fri evening | Press conferences, market firms up | **Checkpoint 1**: context building |
-| Sat morning | Team news leaks, odds move | Scraper increases frequency |
-| Sat ~13:30 | Confirmed lineups drop (T-90) | **Checkpoint 2**: decision |
+| Fri evening | Press conferences, market firms up | Wake-up: research, build briefs |
+| Sat morning | Team news leaks, odds move | Wake-up: update briefs, early bets if edge found |
+| Sat ~13:30 | Confirmed lineups drop (T-90) | Wake-up: deep research, final decisions |
 | Sat 13:30-15:00 | Final adjustments, late money | Bets placed (if any) |
+| Sat evening | Matches complete | Wake-up: settle bets, report P&L |
 
-### Checkpoint 1: Context Building (day before)
+### Unified Wake-Up Workflow
 
-Triggered by scheduler. Agent reads fixtures and odds from DB, researches press conferences and injury news via web search, writes a structured brief per match.
+The agent follows the same workflow on every wake-up. Depth of research scales with KO proximity — far-out wake-ups are lighter, close-to-KO wake-ups go deeper. Bets can be placed at any time if there is a clear edge.
 
-**Output per match** (saved to `match_briefs` table):
-- Current sharp price (Pinnacle/Betfair Exchange)
-- Sharp-soft spread per bookmaker
-- Key news items found (injuries, suspensions, manager quotes)
-- Preliminary view: interesting / not interesting
-- Watch-for items for Checkpoint 2 (e.g. "Saka fitness test tomorrow")
+Each wake-up:
+1. **Orient** — check date/time, load upcoming fixtures
+2. **Settle** — settle any completed bets, report P&L
+3. **Triage** — load existing briefs for each match. Decide which matches need work based on brief freshness, watch-for items, and KO proximity.
+4. **Research** — web search, check odds/spreads, check lineups for triaged matches
+5. **Brief** — save a new brief per researched match (append-only). Previous briefs are preserved.
+6. **Decide** — bet or skip with full reasoning. WATCHING is valid for far-out matches.
 
-**No bets placed.** This checkpoint is context-building only.
-
-### Checkpoint 2: Decision (KO -90 minutes)
-
-Triggered by scheduler after lineup announcements. Agent loads its Checkpoint 1 brief, checks for confirmed lineups (web search/Playwright), compares current sharp price to brief-time price.
-
-**Decision tree (draft — will evolve during interactive evaluation):**
-1. Load Checkpoint 1 brief — what did I flag yesterday?
-2. Get current prices across bookmakers and exchanges — what moved, what didn't?
-3. Search for confirmed lineups — any surprises vs. expected XI?
-4. Assess the landscape: is there an information gap, a structural bias, or a liability-driven mispricing?
-5. If yes: which venue offers the best price to exploit it?
-6. Decide: bet / skip, with full reasoning
-7. If betting: place via `paper_bet` with conviction tier and reasoning
+**Output per match** (saved to `match_briefs` table, append-only):
+- Current sharp price (Betfair Exchange)
+- Assessment of what was found and what it means
+- Watch-for items for next wake-up (if not making a final decision)
+- Decision: BET / SKIP / WATCHING with reasoning
 
 ### Conviction Framework
 
@@ -133,8 +126,8 @@ Implemented via the existing `LocalSchedulerBackend` with proximity-aware schedu
 
 | Tool | Purpose |
 |------|---------|
-| `save_match_brief` | Persist checkpoint analysis to DB |
-| `get_match_brief` | Load prior checkpoint brief (cross-session memory) |
+| `save_match_brief` | Persist analysis brief to DB (append-only) |
+| `get_match_brief` | Load prior briefs for cross-session memory |
 | `get_sharp_soft_spread` | Dedicated sharp vs soft divergence view |
 
 ## Data Model Additions
@@ -144,11 +137,12 @@ Implemented via the existing `LocalSchedulerBackend` with proximity-aware schedu
 ```
 id:                  int PK
 event_id:            str FK -> events.id
-checkpoint:          str ("context" | "decision")
 brief_text:          str
 sharp_price_at_brief: JSON  (sharp odds snapshot for later comparison)
 created_at:          datetime (UTC)
 ```
+
+Briefs are append-only — each agent wake-up creates a new row. The agent loads all previous briefs for a match (newest first) to build on prior analysis.
 
 ## Phased Rollout
 
@@ -158,22 +152,23 @@ created_at:          datetime (UTC)
 
 ### Phase 2: Agent prompting and interactive evaluation
 
-Build the two-checkpoint workflow and iterate interactively.
+Build the unified wake-up workflow and iterate interactively.
 
-- Rewrite AGENT.md system prompt with information-edge thesis and conviction framework
+- Rewrite agent prompts with information-edge thesis and conviction framework
 - Add `match_briefs` table + migration
 - Add `save_match_brief`, `get_match_brief`, `get_sharp_soft_spread` MCP tools
-- Run Checkpoint 1 + 2 interactively for 2-3 matchdays
+- Run wake-up workflow interactively for 2-3 matchdays
 - Iterate on prompt: which research patterns surface actionable info? Where does the agent waste time?
 - Identify reliable lineup/team news data sources (API-Football free tier insufficient — see `docs/AGENT_DATA_SOURCES.md`)
 
 ### Phase 3: Autonomous scheduled evaluation
 
-Automate the checkpoint workflow and run it without manual intervention.
+Automate the wake-up workflow and run it without manual intervention.
 
-- Build `agent_scheduler.py` — queries DB for next matchday, computes checkpoint times, invokes `claude -p`
+- Agent jobs self-schedule via existing APScheduler backend with fixture-proximity intervals
+- Agent can override wake-up timing via `schedule_next_wakeup` MCP tool
 - Set up local scraper on adaptive frequency schedule
-- Discord notifications for checkpoint completion and bets placed
+- Discord notifications for wake-up completion and bets placed
 - Daily P&L digest after settlement
 - Run autonomously for multiple full matchday slates
 - Monitor: token costs, scraper reliability, reasoning quality
@@ -231,7 +226,7 @@ If the information-edge approach proves viable, the model may be retrained to in
 ### Tactical
 
 - **Lineup data source reliability**: BBC Sport, ESPN, club Twitter — which is fastest and most parseable for the agent?
-- **Agent memory depth**: Is one brief per checkpoint per match enough, or does the agent need to reference briefs from previous matchdays (e.g. "last time this team played after CL midweek")?
-- **Cost at scale**: 10 matches × 2 checkpoints × 38 matchdays = ~760 agent sessions/season. Estimate $0.50-1.00/session = $380-760/season. Monitor actual usage.
+- **Agent memory depth**: Are per-match append-only briefs enough, or does the agent need to reference briefs from previous matchdays (e.g. "last time this team played after CL midweek")?
+- **Cost at scale**: ~3-4 wake-ups per match × 10 matches × 38 matchdays = ~1,140-1,520 agent sessions/season. Estimate $0.50-1.00/session. Monitor actual usage.
 - **Reactive trigger threshold**: 3% implied probability is a starting point. Too sensitive = noise, too conservative = missed moves. Calibrate from data.
 - **Betfair API tier**: Basic free API (delayed) vs Exchange Streaming (real-time). Delayed is likely sufficient for pre-match betting.

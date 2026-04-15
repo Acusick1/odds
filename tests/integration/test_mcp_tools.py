@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
-from odds_core.match_brief_models import BriefCheckpoint, MatchBrief, SharpPriceResult
+from odds_core.match_brief_models import MatchBrief, SharpPriceResult
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.storage.readers import OddsReader
 from sqlalchemy import select
@@ -214,13 +214,11 @@ class TestSaveMatchBrief:
             event_id=event.id,
             market="1x2",
             brief_text="Arsenal looking strong at home, Chelsea missing key players.",
-            checkpoint="context",
         )
 
         assert "error" not in result
         assert result["id"] is not None
         assert result["event_id"] == event.id
-        assert result["checkpoint"] == "context"
         assert (
             result["brief_text"] == "Arsenal looking strong at home, Chelsea missing key players."
         )
@@ -242,7 +240,6 @@ class TestSaveMatchBrief:
             event_id="nonexistent_event",
             market="1x2",
             brief_text="Should fail",
-            checkpoint="context",
         )
 
         assert result == {"error": "Event 'nonexistent_event' not found"}
@@ -258,19 +255,17 @@ class TestSaveMatchBrief:
             event_id=event.id,
             market="1x2",
             brief_text="No odds available yet for this fixture.",
-            checkpoint="decision",
         )
 
         assert "error" not in result
         assert result["id"] is not None
         assert result["sharp_price_at_brief"] is None
-        assert result["checkpoint"] == "decision"
 
     @pytest.mark.asyncio
-    async def test_multiple_briefs_per_checkpoint(
+    async def test_multiple_briefs_append_only(
         self, patch_session_maker, epl_event_with_odds, pglite_async_session
     ):
-        """Multiple briefs for the same event+checkpoint are allowed."""
+        """Multiple briefs for the same event are allowed (append-only)."""
         from odds_mcp.server import save_match_brief
 
         event, _ = epl_event_with_odds
@@ -280,8 +275,7 @@ class TestSaveMatchBrief:
             result = await save_match_brief(
                 event_id=event.id,
                 market="1x2",
-                brief_text=f"Decision brief revision {i}",
-                checkpoint="decision",
+                brief_text=f"Brief revision {i}",
             )
             assert "error" not in result
             ids.append(result["id"])
@@ -291,9 +285,7 @@ class TestSaveMatchBrief:
 
         # Verify via DB
         db_result = await pglite_async_session.execute(
-            select(MatchBrief)
-            .where(MatchBrief.event_id == event.id)
-            .where(MatchBrief.checkpoint == BriefCheckpoint.DECISION)
+            select(MatchBrief).where(MatchBrief.event_id == event.id)
         )
         assert len(list(db_result.scalars().all())) == 3
 
@@ -309,7 +301,6 @@ class TestSaveMatchBrief:
             event_id=event.id,
             market="1x2",
             brief_text="Brighton should dominate at home.",
-            checkpoint="context",
         )
 
         assert "error" not in result
@@ -336,7 +327,6 @@ class TestGetMatchBrief:
             event_id=event.id,
             market="1x2",
             brief_text="Context analysis for Arsenal vs Chelsea.",
-            checkpoint="context",
         )
 
         result = await get_match_brief(event_id=event.id)
@@ -347,26 +337,17 @@ class TestGetMatchBrief:
         assert result["event"]["id"] == event.id
 
     @pytest.mark.asyncio
-    async def test_checkpoint_filtering(self, patch_session_maker, epl_event_with_odds):
-        """Filtering by checkpoint returns only matching briefs."""
+    async def test_returns_all_briefs(self, patch_session_maker, epl_event_with_odds):
+        """All briefs for an event are returned (append-only model)."""
         from odds_mcp.server import get_match_brief, save_match_brief
 
         event, _ = epl_event_with_odds
 
-        await save_match_brief(
-            event_id=event.id, market="1x2", brief_text="Context analysis", checkpoint="context"
-        )
-        await save_match_brief(
-            event_id=event.id, market="1x2", brief_text="Decision analysis", checkpoint="decision"
-        )
+        await save_match_brief(event_id=event.id, market="1x2", brief_text="First analysis")
+        await save_match_brief(event_id=event.id, market="1x2", brief_text="Updated analysis")
 
-        context_result = await get_match_brief(event_id=event.id, checkpoint="context")
-        assert context_result["brief_count"] == 1
-        assert context_result["briefs"][0]["brief_text"] == "Context analysis"
-
-        decision_result = await get_match_brief(event_id=event.id, checkpoint="decision")
-        assert decision_result["brief_count"] == 1
-        assert decision_result["briefs"][0]["brief_text"] == "Decision analysis"
+        result = await get_match_brief(event_id=event.id)
+        assert result["brief_count"] == 2
 
     @pytest.mark.asyncio
     async def test_empty_results(self, patch_session_maker, epl_event_no_odds):
@@ -389,9 +370,7 @@ class TestGetMatchBrief:
         event, _ = epl_event_with_odds
 
         for i in range(3):
-            await save_match_brief(
-                event_id=event.id, market="1x2", brief_text=f"Brief {i}", checkpoint="context"
-            )
+            await save_match_brief(event_id=event.id, market="1x2", brief_text=f"Brief {i}")
 
         result = await get_match_brief(event_id=event.id)
 
