@@ -19,7 +19,8 @@ from odds_core.match_brief_models import BriefCheckpoint, MatchBrief, SharpPrice
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade
 from odds_core.prediction_models import Prediction
-from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPECS
+from odds_core.scrape_job_models import ScrapeJob, ScrapeJobStatus
+from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME
 from odds_lambda.paper_trading import (
     get_open_trades,
     get_portfolio_summary,
@@ -40,8 +41,8 @@ mcp = FastMCP(
     ),
 )
 
-# Build league lookup from canonical LEAGUE_SPECS
-_LEAGUE_SPEC_BY_NAME: dict[str, Any] = {spec.league: spec for spec in LEAGUE_SPECS}
+# Re-export canonical lookup built where LEAGUE_SPECS is defined
+_LEAGUE_SPEC_BY_NAME = LEAGUE_SPEC_BY_NAME
 
 # Hybrid sharp reference matching production defaults.
 # Duplicated from feature_extraction.py DEFAULT_SHARP_BOOKMAKERS / DEFAULT_RETAIL_BOOKMAKERS
@@ -242,20 +243,22 @@ async def refresh_scrape(
     league: str = "england-premier-league",
     market: str = "1x2",
 ) -> dict[str, Any]:
-    """Trigger an on-demand OddsPortal scrape for a league and market.
+    """Enqueue an on-demand OddsPortal scrape for a league and market.
 
-    This runs the full scrape-and-ingest pipeline: scrapes OddsPortal,
-    converts odds, matches/creates events, and stores snapshots.
+    Creates a job that will be picked up by the background worker process
+    (``odds worker start``). Returns the job ID immediately without
+    launching Playwright in the MCP server process.
+
+    If a pending or running job already exists for the same league+market,
+    returns that existing job instead of creating a duplicate.
 
     Args:
         league: OddsHarvester league name (e.g. "england-premier-league").
         market: Market to scrape (e.g. "1x2", "over_under_2_5").
 
     Returns:
-        Dict with ingestion statistics (matches scraped, events matched, etc).
+        Dict with job ID and status. Use ``get_scrape_status`` to poll for results.
     """
-    from odds_lambda.jobs.fetch_oddsportal import LeagueSpec, ingest_league
-
     known_spec = _LEAGUE_SPEC_BY_NAME.get(league)
     if known_spec is None:
         return {
@@ -263,33 +266,86 @@ async def refresh_scrape(
             "error_type": "ValueError",
         }
 
-    spec = LeagueSpec(
-        sport=known_spec.sport,
-        league=league,
-        sport_key=known_spec.sport_key,
-        sport_title=known_spec.sport_title,
-        markets=[market],
-        primary_market=known_spec.primary_market,
-        num_outcomes=known_spec.num_outcomes,
-        overnight_start_utc=known_spec.overnight_start_utc,
-        overnight_resume_utc=known_spec.overnight_resume_utc,
-    )
+    async with async_session_maker() as session:
+        # Check for existing pending/running job for same league+market
+        existing_query = (
+            select(ScrapeJob)
+            .where(
+                ScrapeJob.league == league,
+                ScrapeJob.market == market,
+                ScrapeJob.status.in_([ScrapeJobStatus.PENDING, ScrapeJobStatus.RUNNING]),
+            )
+            .order_by(ScrapeJob.created_at.desc())
+            .limit(1)
+        )
+        result = await session.execute(existing_query)
+        existing = result.scalar_one_or_none()
 
-    try:
-        stats = await ingest_league(spec)
-    except Exception as e:
-        logger.error("refresh_scrape_failed", league=league, error=str(e), exc_info=True)
-        return {"error": str(e), "error_type": type(e).__name__}
+        if existing is not None:
+            return {
+                "job_id": existing.id,
+                "status": existing.status.value,
+                "league": existing.league,
+                "market": existing.market,
+                "created_at": existing.created_at.isoformat(),
+                "message": "Existing job found for this league+market",
+            }
+
+        job = ScrapeJob(league=league, market=market)
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
 
     return {
-        "league": stats.league,
-        "matches_scraped": stats.matches_scraped,
-        "matches_converted": stats.matches_converted,
-        "events_matched": stats.events_matched,
-        "events_created": stats.events_created,
-        "snapshots_stored": stats.snapshots_stored,
-        "errors": stats.errors,
+        "job_id": job.id,
+        "status": job.status.value,
+        "league": job.league,
+        "market": job.market,
+        "created_at": job.created_at.isoformat(),
+        "message": "Job enqueued. Run 'odds worker start' to process.",
     }
+
+
+@mcp.tool()
+async def get_scrape_status(job_id: int) -> dict[str, Any]:
+    """Check the status and results of a scrape job.
+
+    Args:
+        job_id: Scrape job ID returned by ``refresh_scrape``.
+
+    Returns:
+        Dict with job status, timestamps, and ingestion stats (when completed).
+    """
+    async with async_session_maker() as session:
+        result = await session.execute(select(ScrapeJob).where(ScrapeJob.id == job_id))
+        job = result.scalar_one_or_none()
+
+    if job is None:
+        return {"error": f"Scrape job {job_id} not found"}
+
+    response: dict[str, Any] = {
+        "job_id": job.id,
+        "league": job.league,
+        "market": job.market,
+        "status": job.status.value,
+        "created_at": job.created_at.isoformat(),
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
+
+    if job.status == ScrapeJobStatus.COMPLETED:
+        response["results"] = {
+            "matches_scraped": job.matches_scraped,
+            "matches_converted": job.matches_converted,
+            "events_matched": job.events_matched,
+            "events_created": job.events_created,
+            "snapshots_stored": job.snapshots_stored,
+        }
+
+    if job.status == ScrapeJobStatus.FAILED:
+        response["error_message"] = job.error_message
+
+    return response
 
 
 @mcp.tool()

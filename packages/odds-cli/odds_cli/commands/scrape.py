@@ -37,33 +37,23 @@ async def _scrape_upcoming(
     dry_run: bool,
     from_file: str | None,
 ) -> None:
+    import dataclasses
+
     from odds_lambda.jobs.fetch_oddsportal import (
-        LEAGUE_SPECS,
-        LeagueSpec,
+        LEAGUE_SPEC_BY_NAME,
         ingest_league,
     )
     from odds_lambda.oddsportal_adapter import convert_upcoming_matches
 
     # Look up known league spec
-    known = {s.league: s for s in LEAGUE_SPECS}
-    if league not in known:
-        known_names = sorted(known.keys())
+    if league not in LEAGUE_SPEC_BY_NAME:
+        known_names = sorted(LEAGUE_SPEC_BY_NAME.keys())
         console.print(f"[red]Unknown league '{league}'. Known leagues: {known_names}[/red]")
         raise typer.Exit(code=1)
 
-    spec = known[league]
+    spec = LEAGUE_SPEC_BY_NAME[league]
     if markets:
-        spec = LeagueSpec(
-            sport=spec.sport,
-            league=spec.league,
-            sport_key=spec.sport_key,
-            sport_title=spec.sport_title,
-            markets=markets,
-            primary_market=spec.primary_market,
-            num_outcomes=spec.num_outcomes,
-            overnight_start_utc=spec.overnight_start_utc,
-            overnight_resume_utc=spec.overnight_resume_utc,
-        )
+        spec = dataclasses.replace(spec, markets=markets)
 
     raw_matches: list[dict[str, Any]] | None = None
     if from_file:

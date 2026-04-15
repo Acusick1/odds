@@ -85,6 +85,9 @@ LEAGUE_SPECS: list[LeagueSpec] = [
 # Index by sport_key for fast lookup from event payload
 _LEAGUE_SPEC_BY_SPORT: dict[str, LeagueSpec] = {spec.sport_key: spec for spec in LEAGUE_SPECS}
 
+# Index by league name for fast lookup from scrape commands / MCP tools
+LEAGUE_SPEC_BY_NAME: dict[str, LeagueSpec] = {spec.league: spec for spec in LEAGUE_SPECS}
+
 
 @dataclass
 class IngestionStats:
