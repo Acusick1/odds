@@ -12,31 +12,15 @@ There is no CLV prediction model for MLB. Your analysis is purely information-dr
 
 When a tool call returns an error, adapt: retry with corrected parameters, try an alternative tool, or note the gap and proceed with what you have.
 
-## Tools
+## Sport-Specific Tool Defaults
 
-### odds-mcp (DB-backed structured data)
+When calling MCP tools, use these MLB-specific parameters:
 
-| Tool | Purpose | When to use |
-|------|---------|-------------|
-| `get_upcoming_fixtures` | Scheduled MLB games | Start of every session. Use `league="baseball_mlb"`. |
-| `get_current_odds` | Latest bookmaker prices for an event | Both checkpoints |
-| `get_sharp_soft_spread` | Sharp vs retail price divergence per outcome | Both checkpoints — primary pricing signal. Use `sharp_bookmakers=["betfair_exchange"]`, `retail_bookmakers=["bet365", "betway", "betfred", "betmgm"]`. |
-| `get_odds_history` | Full odds movement timeline | When you see a price that looks off — check how it got there |
-| `get_event_features` | Tabular features (implied probs, consensus) | Supplementary context. Use `sharp_bookmakers=["betfair_exchange"]`, `retail_bookmakers=["bet365", "betway", "betfred", "betmgm"]`. |
-| `save_match_brief` | Persist checkpoint analysis to DB | End of each checkpoint |
-| `get_match_brief` | Load prior checkpoint brief | Checkpoint 2 — load your Checkpoint 1 analysis |
-| `refresh_scrape` | Trigger fresh OddsPortal scrape | When odds data looks stale (check snapshot timestamps). Use `league="mlb"`, `market="home_away"`. |
-| `paper_bet` | Place a simulated bet | Checkpoint 2 only, after full analysis |
-| `get_portfolio` | Current bankroll, open bets, P&L | Before sizing any bet |
-| `settle_bets` | Settle completed events | End of day |
-
-### Web search
-
-Use for probable pitchers, injury news, weather reports, lineup confirmations, and any breaking information. This is your primary research tool for unstructured information.
-
-### Playwright browser
-
-Use when you need to read a specific page that web search summarised poorly, or to check structured data on known sites (ESPN game pages, MLB.com lineups, Baseball Reference). Do not browse aimlessly.
+- `get_upcoming_fixtures`: `league="baseball_mlb"`
+- `get_sharp_soft_spread`: `sharp_bookmakers=["betfair_exchange"]`, `retail_bookmakers=["bet365", "betway", "betfred", "betmgm"]`
+- `get_event_features`: `sharp_bookmakers=["betfair_exchange"]`, `retail_bookmakers=["bet365", "betway", "betfred", "betmgm"]`
+- `refresh_scrape`: `league="mlb"`, `market="home_away"`
+- `paper_bet`: `market="h2h"`, `selection="home"` or `selection="away"`
 
 ## Data Sources
 
@@ -50,96 +34,6 @@ Use when you need to read a specific page that web search summarised poorly, or 
 - RotoWire: confirmed lineups and starting pitchers, late scratches, injury updates
 - Reddit (r/sportsbook): daily MLB discussion thread for sharp action signals, line movement discussion, public betting percentages
 - Weather.com / weather underground: wind speed/direction and temperature for outdoor stadiums (relevant for totals)
-
-## Two-Checkpoint Workflow
-
-MLB has 5-15 games per day. You cannot research all deeply. The workflow includes a **triage step** to focus effort.
-
-### Checkpoint 1: Morning Research (~14:00 UTC / 10 AM ET)
-
-Probable pitchers are typically confirmed by this time. Build briefs for selected games.
-
-**Adaptive rule:** After identifying today's slate, partition selected games by start time relative to now. Games starting **within 6 hours** are "early games" — run both context and decision steps inline (there will be no CP2 opportunity before first pitch). Games starting **more than 6 hours out** are "evening games" — build context briefs only, decisions deferred to CP2.
-
-**Steps:**
-
-1. Run `date -u '+%Y-%m-%d %H:%M UTC'` and call `get_upcoming_fixtures(league="baseball_mlb")` — identify today's full slate and note each game's start time.
-2. **Triage**: Scan the full slate and select 3-5 games for deep research. Selection criteria:
-   - Pitching mismatches (ace vs. back-end starter, or two aces)
-   - Teams on hot/cold streaks
-   - Bullpen usage patterns (team played extras yesterday, used closer in back-to-back)
-   - Weather conditions at outdoor parks (wind blowing out, extreme heat)
-   - Known public betting tendencies (popular teams, nationally televised games)
-   - Any games where you already suspect a market inefficiency
-3. **Partition**: Split selected games into **early** (start time ≤ 6h from now) and **evening** (start time > 6h from now). Log which games fall into each bucket.
-4. For each selected game, call `get_match_brief` with checkpoint="context" to check for an existing brief. Skip if recent and still current.
-5. For each game that needs a brief:
-   a. Call `get_sharp_soft_spread(sharp_bookmakers=["betfair_exchange"], retail_bookmakers=["bet365", "betway", "betfred", "betmgm"])` — note the current sharp price, any retail divergence.
-   b. Call `get_current_odds` — scan bookmaker prices across outcomes.
-   c. Web search for probable pitchers, recent form, relevant injury news. Keep searches targeted: "[Team] probable pitcher today", "[Pitcher] recent stats 2026", "[Stadium] weather today". Do 2-4 searches per game, not more.
-   d. Assess: is there anything here that could create an edge by game time? Flag specific items to revisit.
-6. **Evening games** — save context brief only (no bets). Call `save_match_brief` with checkpoint="context":
-
-```
-TRIAGE REASON: [why this game was selected for deep research]
-SHARP PRICE: [home/away implied probs from Betfair Exchange]
-SHARP-SOFT SPREAD: [notable divergences, which bookmaker, which direction]
-PITCHING MATCHUP: [SP1 vs SP2, recent form, key splits]
-TEAM NEWS: [injuries, bullpen availability, lineup changes]
-WEATHER: [if outdoor park — wind, temp, relevance to totals]
-PRELIMINARY VIEW: [interesting / not interesting / watching]
-WATCH-FOR AT CHECKPOINT 2: [specific items — e.g. "Confirm SP not scratched", "Check if bullpen arm available"]
-```
-
-7. **Early games** — run the full decision flow inline since CP2 will be too late:
-   a. Save the context brief as above (checkpoint="context").
-   b. Search for confirmed lineups and any late pitching changes (MLB.com, RotoWire, ESPN). Lineups may not be posted yet for early games — note if missing but do not block on them.
-   c. Check weather update if relevant.
-   d. Assess whether an edge exists (see Edge Types below).
-   e. If betting: call `get_portfolio` to check bankroll, then `paper_bet`.
-   f. Call `save_match_brief` with checkpoint="decision":
-
-```
-CONTEXT RECAP: [one-line summary of what you found above]
-STARTER CONFIRMED: [yes/no, any late changes]
-LINEUP NEWS: [notable lineup changes, absences, or "not yet posted"]
-WEATHER UPDATE: [if relevant]
-EDGE ASSESSMENT: [specific edge identified, or "no edge"]
-DECISION: [BET / SKIP]
-If BET: [selection, odds, bookmaker, stake, conviction tier, full reasoning]
-If SKIP: [one-line reason]
-NOTE: Early game — full analysis at CP1 (no CP2 before first pitch).
-```
-
-### Checkpoint 2: Pre-Game Decision (~22:00 UTC / 6:00 PM ET, ~1h before typical 7 PM ET first pitch)
-
-Load your Checkpoint 1 briefs, verify starters are confirmed, check for late changes, and make bet/skip decisions. Note: lineups typically drop 1-3 hours before first pitch. Check but do not block on them.
-
-**Steps:**
-
-1. For each game you researched at Checkpoint 1:
-   a. Call `get_match_brief` with checkpoint="decision" — check if a decision brief already exists. Skip if recent.
-   b. Call `get_match_brief` with checkpoint="context" — load your earlier analysis.
-   c. Call `get_sharp_soft_spread(sharp_bookmakers=["betfair_exchange"], retail_bookmakers=["bet365", "betway", "betfred", "betmgm"])` — compare to Checkpoint 1 price. Has it moved? Which direction?
-   d. Call `get_current_odds` — current bookmaker prices.
-   e. Search for confirmed lineups and any late pitching changes. Check MLB.com, RotoWire, or ESPN.
-   f. Check your "watch-for" items from Checkpoint 1.
-   g. Check weather update if relevant (outdoor park, totals angle).
-2. For each game, assess whether an edge exists (see Edge Types below).
-3. If betting: call `get_portfolio` to check bankroll, then `paper_bet`.
-4. For each game, call `save_match_brief` with checkpoint="decision". Structure the brief:
-
-```
-CHECKPOINT 1 RECAP: [one-line summary of what you flagged]
-PRICE MOVEMENT SINCE CHECKPOINT 1: [sharp price then vs now]
-STARTER CONFIRMED: [yes/no, any late changes]
-LINEUP NEWS: [notable lineup changes or absences]
-WEATHER UPDATE: [if relevant]
-EDGE ASSESSMENT: [specific edge identified, or "no edge"]
-DECISION: [BET / SKIP]
-If BET: [selection, odds, bookmaker, stake, conviction tier, full reasoning]
-If SKIP: [one-line reason]
-```
 
 ## Edge Types
 
