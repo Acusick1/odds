@@ -175,7 +175,11 @@ async def main(ctx: JobContext) -> None:
     skip_run = _should_skip_run(hours_until_ko)
 
     # --- Pre-schedule before work (crash-safe) ---
-    default_next_time = apply_overnight_skip(datetime.now(UTC) + timedelta(hours=default_interval))
+    default_next_time = apply_overnight_skip(
+        datetime.now(UTC) + timedelta(hours=default_interval),
+        overnight_start_utc=OVERNIGHT_START_UTC,
+        overnight_resume_utc=OVERNIGHT_RESUME_UTC,
+    )
     try:
         await self_schedule(
             job_name=compound_job_name,
@@ -219,7 +223,11 @@ async def main(ctx: JobContext) -> None:
         requested_time = None
 
     if requested_time is not None and requested_time < default_next_time:
-        override_next_time = apply_overnight_skip(requested_time)
+        override_next_time = apply_overnight_skip(
+            requested_time,
+            overnight_start_utc=OVERNIGHT_START_UTC,
+            overnight_resume_utc=OVERNIGHT_RESUME_UTC,
+        )
         try:
             await self_schedule(
                 job_name=compound_job_name,

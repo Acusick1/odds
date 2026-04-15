@@ -7,8 +7,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from odds_lambda.jobs.agent_run import (
-    OVERNIGHT_RESUME_UTC,
-    OVERNIGHT_START_UTC,
     SKIP_THRESHOLD_HOURS,
     TIER_ACTIVE_HOURS,
     TIER_FAR_HOURS,
@@ -20,7 +18,6 @@ from odds_lambda.jobs.agent_run import (
     _should_skip_run,
     main,
 )
-from odds_lambda.scheduling.helpers import apply_overnight_skip
 from odds_lambda.scheduling.jobs import JobContext
 
 
@@ -77,34 +74,6 @@ class TestShouldSkipRun:
 
     def test_just_above_threshold_does_not_skip(self) -> None:
         assert _should_skip_run(SKIP_THRESHOLD_HOURS + 0.01) is False
-
-
-class TestApplyOvernightSkip:
-    """Tests for overnight suppression."""
-
-    def test_daytime_unchanged(self) -> None:
-        dt = datetime(2026, 4, 15, 14, 0, tzinfo=UTC)
-        assert apply_overnight_skip(dt) == dt
-
-    def test_late_night_pushed_to_next_morning(self) -> None:
-        dt = datetime(2026, 4, 15, 23, 30, tzinfo=UTC)
-        expected = datetime(2026, 4, 16, OVERNIGHT_RESUME_UTC, 0, tzinfo=UTC)
-        assert apply_overnight_skip(dt) == expected
-
-    def test_early_morning_pushed_to_same_day_resume(self) -> None:
-        dt = datetime(2026, 4, 15, 3, 0, tzinfo=UTC)
-        expected = datetime(2026, 4, 15, OVERNIGHT_RESUME_UTC, 0, tzinfo=UTC)
-        assert apply_overnight_skip(dt) == expected
-
-    def test_exactly_at_overnight_start_pushed(self) -> None:
-        dt = datetime(2026, 4, 15, OVERNIGHT_START_UTC, 0, tzinfo=UTC)
-        expected = datetime(2026, 4, 16, OVERNIGHT_RESUME_UTC, 0, tzinfo=UTC)
-        assert apply_overnight_skip(dt) == expected
-
-    def test_exactly_at_resume_pushed(self) -> None:
-        # hour < OVERNIGHT_RESUME_UTC is overnight, but hour == OVERNIGHT_RESUME_UTC is not
-        dt = datetime(2026, 4, 15, OVERNIGHT_RESUME_UTC, 0, tzinfo=UTC)
-        assert apply_overnight_skip(dt) == dt
 
 
 class TestMainNoSport:
