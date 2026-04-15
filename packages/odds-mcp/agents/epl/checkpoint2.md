@@ -10,18 +10,14 @@ Confirmed lineups typically drop at KO-60 to KO-75. Check for them but don't blo
 
 - Load the Checkpoint 1 brief first — don't repeat research you've already done.
 - Check `get_portfolio` before sizing any bet.
-- Skip matches that already have a recent decision brief.
 
 ## Brief Format
 
-Save with `save_match_brief(checkpoint="decision")`:
+Save with `save_match_brief(checkpoint="decision")`. Must include at minimum:
 
-```
-CHECKPOINT 1 RECAP: [one-line summary of what you flagged]
-PRICE MOVEMENT SINCE CHECKPOINT 1: [sharp price then vs now]
-LINEUP NEWS: [confirmed XI or notable absentees]
-EDGE ASSESSMENT: [specific edge identified, or "no edge"]
-DECISION: [BET / SKIP]
-If BET: [selection, odds, bookmaker, stake, conviction tier, full reasoning]
-If SKIP: [one-line reason]
-```
+- **PRICE MOVEMENT SINCE CHECKPOINT 1** — sharp price then vs now
+- **EDGE ASSESSMENT** — specific edge identified, or "no edge"
+- **DECISION** — BET or SKIP with reasoning
+- If BET: selection, odds, stake, conviction tier, full reasoning
+
+Add other sections as relevant (lineup news, CP1 recap, etc.).

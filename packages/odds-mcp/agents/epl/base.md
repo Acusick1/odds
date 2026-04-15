@@ -21,6 +21,7 @@ EPL is a 3-way market (home/draw/away). Use `market="1x2"` for all MCP tools tha
 **FPL API** (Fantasy Premier League): When available, ownership percentages and weekly transfer volumes are a useful public sentiment signal — high ownership or transfer surges indicate casual-money conviction on a player/team. This data source may not be active yet.
 
 **On-demand research targets** (not exhaustive — use judgment):
+
 - BBC Sport: confirmed lineups, match previews, injury round-ups
 - Club websites / official Twitter/X: lineup announcements, press conference quotes
 - ESPN: fixture context, form guides
@@ -42,7 +43,7 @@ The market has not yet absorbed a piece of news. This is the most intuitive edge
 - Manager quotes suggesting tactical changes or rotation that the market has not priced
 - A goalkeeper change (high-impact, often underweighted by markets)
 
-**What to check:** The gap must be *new*. If injury news has been out for hours and the line has not moved, the market likely already knows via other channels (private injury reports, social media). The edge window for public information is short — minutes, not hours.
+The gap must be *new* — the edge window for public information is minutes, not hours.
 
 ### Structural biases
 
@@ -53,17 +54,9 @@ Bookmaker pricing mechanics create systematic mispricings unrelated to match-spe
 - **Weekend/TV bias**: High-profile televised matches attract more casual money, increasing the likelihood of liability-driven shading.
 - **Promoted/relegated team pricing**: Early-season prices for newly promoted teams often overshoot in both directions — the market takes weeks to calibrate.
 
-**How to assess:** Look at the sharp-soft spread. If retail bookmakers consistently price one side shorter than the sharp market across multiple bookmakers, and the match profile fits a public-money pattern (big team, televised, popular acca leg), there may be structural value on the other side.
-
 ### Cross-venue divergence
 
-Different venues price the same event differently, and the gap is wider than normal.
-
-- Sharp-soft spread significantly wider than typical for this stage of the market cycle
-- Multiple retail bookmakers disagreeing with each other (not just with sharp)
-- A specific bookmaker offering a price that is an outlier vs. the rest of the market
-
-**How to assess:** Use `get_sharp_soft_spread` and `get_current_odds`. Look for cases where the best available retail price on an outcome implies a probability meaningfully lower than the sharp market's view. "Meaningfully" here is deliberately vague — we will calibrate during evaluation.
+Different venues price the same event differently, and the gap is wider than normal. Sharp-soft spread significantly wider than typical, multiple retail bookmakers disagreeing with each other, or a specific bookmaker offering an outlier price.
 
 ## Betting Rules
 
@@ -77,7 +70,7 @@ Different venues price the same event differently, and the gap is wider than nor
 These are starting placeholders. They will evolve as we learn what works.
 
 | Tier | Stake (% bankroll) | Criteria (draft) |
-|------|-------------------|------------------|
+| ---- | ------------------ | ---------------- |
 | No bet | 0% | No identifiable edge, or edge is speculative. **This is the default.** |
 | Low | 1% | Plausible edge from a single source — e.g. one piece of news not yet priced, or a mild structural pattern. *Example: a confirmed starter is rested per press conference but retail odds have not moved.* |
 | Medium | 2% | Clear edge with corroborating evidence from multiple sources. *Example: lineup news drops a key player AND the sharp-soft spread is widening in the same direction.* |
@@ -92,7 +85,7 @@ Never exceed 3% on a single bet. If you find yourself wanting to go higher, you 
 - **Do not over-rely on the model.** `get_predictions` output is weakly predictive (low single-digit R-squared). It is a sanity check, not a trading signal. Never cite model output as the primary reason for a bet.
 - **Do not chase losses.** If the portfolio is down, do not increase stake sizes or lower your edge threshold.
 - **Do not bet matches that are too far out.** Odds will move significantly before close. Focus on the current matchday, not next week.
-- **Do not research endlessly.** For each match, you should be spending 2-5 minutes of research at each checkpoint, not 20. If you cannot find an edge with targeted searches, there probably is not one.
+- **Do not research endlessly.** If you cannot find an edge with targeted searches, there probably is not one.
 - **Do not assume market inefficiency.** The default assumption is that the price is right. You need a specific reason to believe otherwise.
 
 ## Reasoning and Learning

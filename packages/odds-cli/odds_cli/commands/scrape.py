@@ -14,6 +14,40 @@ app = typer.Typer()
 console = Console()
 
 
+@app.command("job-status")
+def job_status(
+    job_id: int = typer.Argument(..., help="Scrape job ID to check"),
+    wait: bool = typer.Option(False, "--wait", "-w", help="Poll until job completes"),
+    poll_interval: float = typer.Option(30.0, "--poll-interval", help="Seconds between polls"),
+) -> None:
+    """Check the status of a scrape job."""
+    asyncio.run(_job_status(job_id, wait=wait, poll_interval=poll_interval))
+
+
+async def _job_status(job_id: int, *, wait: bool, poll_interval: float) -> None:
+    from odds_core.database import async_session_maker
+    from odds_core.scrape_job_models import ScrapeJob, ScrapeJobStatus
+    from sqlalchemy import select
+
+    terminal = {ScrapeJobStatus.COMPLETED, ScrapeJobStatus.FAILED}
+
+    while True:
+        async with async_session_maker() as session:
+            result = await session.execute(select(ScrapeJob).where(ScrapeJob.id == job_id))
+            job = result.scalar_one_or_none()
+
+        if job is None:
+            console.print(f"[red]Job {job_id} not found[/red]")
+            raise typer.Exit(code=1)
+
+        console.print(job.status.value)
+
+        if not wait or job.status in terminal:
+            break
+
+        await asyncio.sleep(poll_interval)
+
+
 @app.command("upcoming")
 def scrape_upcoming(
     league: str = typer.Option(

@@ -102,6 +102,9 @@ plans/
 .DS_Store
 Thumbs.db
 
+# Agent observations (local, accumulated per-machine)
+**/agents/*/observations.md
+
 # Scratch files
 TODO.md
 /oddsportal-*.png
