@@ -64,6 +64,7 @@ _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
     "fetch-oddsportal-results": ("odds_lambda.jobs.fetch_oddsportal_results", "main"),
     "score-predictions": ("odds_lambda.jobs.score_predictions", "main"),
     "daily-digest": ("odds_lambda.jobs.daily_digest", "main"),
+    "agent-run": ("odds_lambda.jobs.agent_run", "main"),
 }
 
 # Maps sport suffix to sport_key for per-sport job routing.
@@ -83,6 +84,7 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
         "fetch-oddsportal-results",
         "score-predictions",
         "daily-digest",
+        "agent-run",
     }
 )
 
