@@ -24,8 +24,6 @@ from typing import Any
 
 import structlog
 from odds_core.database import async_session_maker
-from sqlalchemy import select
-from sqlmodel import col
 
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.oddsportal_adapter import (
@@ -33,7 +31,7 @@ from odds_lambda.oddsportal_adapter import (
     convert_upcoming_matches,
 )
 from odds_lambda.oddsportal_common import hours_to_tier, run_scraper_with_retry
-from odds_lambda.scheduling.backends import get_scheduler_backend
+from odds_lambda.scheduling.helpers import apply_overnight_skip, get_next_kickoff, self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
@@ -216,25 +214,6 @@ async def ingest_league(
     return stats
 
 
-async def _get_next_kickoff(sport_key: str) -> datetime | None:
-    """Query DB for the earliest upcoming event commence_time for a sport."""
-    from odds_core.models import Event, EventStatus
-
-    async with async_session_maker() as session:
-        result = await session.execute(
-            select(Event.commence_time)
-            .where(
-                col(Event.sport_key) == sport_key,
-                col(Event.commence_time) > datetime.now(UTC),
-                col(Event.status) == EventStatus.SCHEDULED,
-            )
-            .order_by(col(Event.commence_time))
-            .limit(1)
-        )
-        row = result.scalar_one_or_none()
-    return row
-
-
 def _interval_for_kickoff(
     next_kickoff: datetime | None,
     *,
@@ -254,60 +233,6 @@ def _interval_for_kickoff(
     if hours_until < FetchTier.PREGAME.max_hours:
         return PREGAME_INTERVAL_HOURS
     return FAR_INTERVAL_HOURS
-
-
-def _apply_overnight_skip(
-    next_time: datetime,
-    *,
-    overnight_start_utc: int = 22,
-    overnight_resume_utc: int = 6,
-) -> datetime:
-    """Push next_time to resume hour if it falls in the overnight window."""
-    if overnight_start_utc > overnight_resume_utc:
-        # Window wraps midnight (e.g. 22:00-06:00)
-        is_overnight = (
-            next_time.hour >= overnight_start_utc or next_time.hour < overnight_resume_utc
-        )
-    else:
-        # Window within same day (e.g. 05:00-14:00)
-        is_overnight = overnight_start_utc <= next_time.hour < overnight_resume_utc
-
-    if is_overnight:
-        resume = next_time.replace(hour=overnight_resume_utc, minute=0, second=0, microsecond=0)
-        if resume <= next_time:
-            resume += timedelta(days=1)
-        return resume
-
-    return next_time
-
-
-async def _self_schedule(
-    *,
-    job_name: str,
-    next_time: datetime,
-    dry_run: bool,
-    sport: str | None = None,
-    interval_hours: float | None = None,
-) -> None:
-    """Schedule the next execution via the scheduler backend."""
-    backend = get_scheduler_backend(dry_run=dry_run)
-
-    payload: dict[str, object] = {}
-    if sport:
-        payload["sport"] = sport
-
-    await backend.schedule_next_execution(
-        job_name=job_name,
-        next_time=next_time,
-        payload=payload or None,
-    )
-
-    logger.info(
-        "fetch_oddsportal_next_scheduled",
-        next_time=next_time.isoformat(),
-        interval_hours=interval_hours,
-        backend=backend.get_backend_name(),
-    )
 
 
 async def main(ctx: JobContext) -> None:
@@ -342,7 +267,7 @@ async def main(ctx: JobContext) -> None:
     # On failure, fall back to 1h so we don't block on DB availability.
     pre_interval = DB_FALLBACK_INTERVAL_HOURS
     try:
-        next_kickoff = await _get_next_kickoff(primary_spec.sport_key)
+        next_kickoff = await get_next_kickoff(primary_spec.sport_key)
         pre_interval = _interval_for_kickoff(next_kickoff)
         logger.info(
             "proximity_schedule",
@@ -354,13 +279,13 @@ async def main(ctx: JobContext) -> None:
 
     # Pre-schedule before any browser work so the chain survives Lambda
     # timeouts or browser crashes.
-    pre_next_time = _apply_overnight_skip(
+    pre_next_time = apply_overnight_skip(
         datetime.now(UTC) + timedelta(hours=pre_interval),
         overnight_start_utc=primary_spec.overnight_start_utc,
         overnight_resume_utc=primary_spec.overnight_resume_utc,
     )
     try:
-        await _self_schedule(
+        await self_schedule(
             job_name=compound_job_name,
             next_time=pre_next_time,
             dry_run=settings.scheduler.dry_run,
@@ -423,18 +348,18 @@ async def main(ctx: JobContext) -> None:
     if total_scraped > 0:
         post_interval = DB_FALLBACK_INTERVAL_HOURS
         try:
-            post_kickoff = await _get_next_kickoff(primary_spec.sport_key)
+            post_kickoff = await get_next_kickoff(primary_spec.sport_key)
             post_interval = _interval_for_kickoff(post_kickoff)
         except Exception as e:
             logger.warning("post_scrape_kickoff_query_failed", error=str(e), exc_info=True)
 
-        success_next_time = _apply_overnight_skip(
+        success_next_time = apply_overnight_skip(
             datetime.now(UTC) + timedelta(hours=post_interval),
             overnight_start_utc=primary_spec.overnight_start_utc,
             overnight_resume_utc=primary_spec.overnight_resume_utc,
         )
         try:
-            await _self_schedule(
+            await self_schedule(
                 job_name=compound_job_name,
                 next_time=success_next_time,
                 dry_run=settings.scheduler.dry_run,

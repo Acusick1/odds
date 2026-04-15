@@ -18,14 +18,11 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import structlog
-from odds_core.database import async_session_maker
-from sqlalchemy import select
-from sqlmodel import col
+from odds_core.config import get_settings
 
-from odds_lambda.scheduling.backends import get_scheduler_backend
+from odds_lambda.scheduling.helpers import apply_overnight_skip, get_next_kickoff, self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 
 logger = structlog.get_logger()
@@ -51,27 +48,6 @@ TIER_TOO_CLOSE_HOURS = 3.0
 # Horizon for "no fixtures" classification
 FIXTURE_HORIZON_DAYS = 7
 
-# Project root (walk up from packages/odds-lambda/odds_lambda/jobs/)
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
-
-
-async def _get_next_kickoff(sport_key: str) -> datetime | None:
-    """Earliest scheduled event commence_time for a sport."""
-    from odds_core.models import Event, EventStatus
-
-    async with async_session_maker() as session:
-        result = await session.execute(
-            select(Event.commence_time)
-            .where(
-                col(Event.sport_key) == sport_key,
-                col(Event.commence_time) > datetime.now(UTC),
-                col(Event.status) == EventStatus.SCHEDULED,
-            )
-            .order_by(col(Event.commence_time))
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
-
 
 def _compute_wake_interval(hours_until_ko: float | None) -> float:
     """Return wake interval in hours based on fixture proximity tier."""
@@ -94,16 +70,6 @@ def _should_skip_run(hours_until_ko: float | None) -> bool:
     return hours_until_ko is not None and hours_until_ko <= SKIP_THRESHOLD_HOURS
 
 
-def _apply_overnight_skip(next_time: datetime) -> datetime:
-    """Push next_time to resume hour if it falls in the overnight window."""
-    if next_time.hour >= OVERNIGHT_START_UTC or next_time.hour < OVERNIGHT_RESUME_UTC:
-        resume = next_time.replace(hour=OVERNIGHT_RESUME_UTC, minute=0, second=0, microsecond=0)
-        if resume <= next_time:
-            resume += timedelta(days=1)
-        return resume
-    return next_time
-
-
 async def _run_claude_agent(sport: str) -> int:
     """Spawn ``claude -p`` subprocess and return exit code.
 
@@ -112,13 +78,14 @@ async def _run_claude_agent(sport: str) -> int:
     """
     cmd = ["claude", "-p", f"/agent {sport}", "--dangerously-skip-permissions"]
 
+    settings = get_settings()
     logger.info("agent_subprocess_starting", sport=sport, cmd=cmd)
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
-        cwd=str(_PROJECT_ROOT),
+        cwd=str(settings.project_root),
     )
 
     try:
@@ -148,6 +115,9 @@ async def _check_agent_requested_wakeup(sport_key: str) -> datetime | None:
     consumed. Returns None if no pending request.
     """
     from odds_core.agent_wakeup_models import AgentWakeup
+    from odds_core.database import async_session_maker
+    from sqlalchemy import select
+    from sqlmodel import col
 
     async with async_session_maker() as session:
         result = await session.execute(
@@ -176,41 +146,8 @@ async def _check_agent_requested_wakeup(sport_key: str) -> datetime | None:
     return requested_time
 
 
-async def _self_schedule(
-    *,
-    job_name: str,
-    next_time: datetime,
-    dry_run: bool,
-    sport: str | None = None,
-    interval_hours: float | None = None,
-    reason: str = "",
-) -> None:
-    """Schedule the next execution via the scheduler backend."""
-    backend = get_scheduler_backend(dry_run=dry_run)
-
-    payload: dict[str, object] = {}
-    if sport:
-        payload["sport"] = sport
-
-    await backend.schedule_next_execution(
-        job_name=job_name,
-        next_time=next_time,
-        payload=payload or None,
-    )
-
-    logger.info(
-        "agent_run_scheduled",
-        next_time=next_time.isoformat(),
-        interval_hours=interval_hours,
-        reason=reason,
-        backend=backend.get_backend_name(),
-    )
-
-
 async def main(ctx: JobContext) -> None:
     """Orchestrate agent wake-up: schedule, run, check override."""
-    from odds_core.config import get_settings
-
     settings = get_settings()
     sport = ctx.sport
 
@@ -223,7 +160,7 @@ async def main(ctx: JobContext) -> None:
     # --- Determine default wake interval from fixture proximity ---
     hours_until_ko: float | None = None
     try:
-        next_kickoff = await _get_next_kickoff(sport)
+        next_kickoff = await get_next_kickoff(sport)
         if next_kickoff is not None:
             hours_until_ko = (next_kickoff - datetime.now(UTC)).total_seconds() / 3600
         logger.info(
@@ -238,9 +175,9 @@ async def main(ctx: JobContext) -> None:
     skip_run = _should_skip_run(hours_until_ko)
 
     # --- Pre-schedule before work (crash-safe) ---
-    default_next_time = _apply_overnight_skip(datetime.now(UTC) + timedelta(hours=default_interval))
+    default_next_time = apply_overnight_skip(datetime.now(UTC) + timedelta(hours=default_interval))
     try:
-        await _self_schedule(
+        await self_schedule(
             job_name=compound_job_name,
             next_time=default_next_time,
             dry_run=settings.scheduler.dry_run,
@@ -282,9 +219,9 @@ async def main(ctx: JobContext) -> None:
         requested_time = None
 
     if requested_time is not None and requested_time < default_next_time:
-        override_next_time = _apply_overnight_skip(requested_time)
+        override_next_time = apply_overnight_skip(requested_time)
         try:
-            await _self_schedule(
+            await self_schedule(
                 job_name=compound_job_name,
                 next_time=override_next_time,
                 dry_run=settings.scheduler.dry_run,

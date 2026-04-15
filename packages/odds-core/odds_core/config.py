@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -234,6 +235,9 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    # Repository root (walk up from packages/odds-core/odds_core/config.py)
+    project_root: Path = Field(default=Path(__file__).resolve().parents[3])
 
     # Composed configuration sections
     api: APIConfig = Field(default_factory=APIConfig)

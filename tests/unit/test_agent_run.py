@@ -16,11 +16,11 @@ from odds_lambda.jobs.agent_run import (
     TIER_NO_FIXTURES_HOURS,
     TIER_RESEARCH_HOURS,
     TIER_TOO_CLOSE_HOURS,
-    _apply_overnight_skip,
     _compute_wake_interval,
     _should_skip_run,
     main,
 )
+from odds_lambda.scheduling.helpers import apply_overnight_skip
 from odds_lambda.scheduling.jobs import JobContext
 
 
@@ -84,27 +84,27 @@ class TestApplyOvernightSkip:
 
     def test_daytime_unchanged(self) -> None:
         dt = datetime(2026, 4, 15, 14, 0, tzinfo=UTC)
-        assert _apply_overnight_skip(dt) == dt
+        assert apply_overnight_skip(dt) == dt
 
     def test_late_night_pushed_to_next_morning(self) -> None:
         dt = datetime(2026, 4, 15, 23, 30, tzinfo=UTC)
         expected = datetime(2026, 4, 16, OVERNIGHT_RESUME_UTC, 0, tzinfo=UTC)
-        assert _apply_overnight_skip(dt) == expected
+        assert apply_overnight_skip(dt) == expected
 
     def test_early_morning_pushed_to_same_day_resume(self) -> None:
         dt = datetime(2026, 4, 15, 3, 0, tzinfo=UTC)
         expected = datetime(2026, 4, 15, OVERNIGHT_RESUME_UTC, 0, tzinfo=UTC)
-        assert _apply_overnight_skip(dt) == expected
+        assert apply_overnight_skip(dt) == expected
 
     def test_exactly_at_overnight_start_pushed(self) -> None:
         dt = datetime(2026, 4, 15, OVERNIGHT_START_UTC, 0, tzinfo=UTC)
         expected = datetime(2026, 4, 16, OVERNIGHT_RESUME_UTC, 0, tzinfo=UTC)
-        assert _apply_overnight_skip(dt) == expected
+        assert apply_overnight_skip(dt) == expected
 
     def test_exactly_at_resume_pushed(self) -> None:
         # hour < OVERNIGHT_RESUME_UTC is overnight, but hour == OVERNIGHT_RESUME_UTC is not
         dt = datetime(2026, 4, 15, OVERNIGHT_RESUME_UTC, 0, tzinfo=UTC)
-        assert _apply_overnight_skip(dt) == dt
+        assert apply_overnight_skip(dt) == dt
 
 
 class TestMainNoSport:
@@ -114,7 +114,7 @@ class TestMainNoSport:
     async def test_no_sport_returns_early(self) -> None:
         ctx = JobContext(sport=None)
         # Should not raise, just log error and return
-        with patch("odds_lambda.jobs.agent_run._get_next_kickoff") as mock_kickoff:
+        with patch("odds_lambda.jobs.agent_run.get_next_kickoff") as mock_kickoff:
             await main(ctx)
             mock_kickoff.assert_not_called()
 
@@ -135,8 +135,8 @@ class TestMainOrchestration:
             return 0
 
         with (
-            patch("odds_lambda.jobs.agent_run._get_next_kickoff", new_callable=AsyncMock) as mk,
-            patch("odds_lambda.jobs.agent_run._self_schedule", side_effect=mock_schedule),
+            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=mock_schedule),
             patch("odds_lambda.jobs.agent_run._run_claude_agent", side_effect=mock_run),
             patch(
                 "odds_lambda.jobs.agent_run._check_agent_requested_wakeup",
@@ -154,8 +154,8 @@ class TestMainOrchestration:
     async def test_skip_run_when_too_close(self) -> None:
         """Agent subprocess should not run when too close to kickoff."""
         with (
-            patch("odds_lambda.jobs.agent_run._get_next_kickoff", new_callable=AsyncMock) as mk,
-            patch("odds_lambda.jobs.agent_run._self_schedule", new_callable=AsyncMock),
+            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch("odds_lambda.jobs.agent_run.self_schedule", new_callable=AsyncMock),
             patch("odds_lambda.jobs.agent_run._run_claude_agent", new_callable=AsyncMock) as run,
             patch("odds_core.config.get_settings"),
         ):
@@ -174,8 +174,8 @@ class TestMainOrchestration:
         override_time = datetime.now(UTC) + timedelta(hours=2)
 
         with (
-            patch("odds_lambda.jobs.agent_run._get_next_kickoff", new_callable=AsyncMock) as mk,
-            patch("odds_lambda.jobs.agent_run._self_schedule", side_effect=track_schedule),
+            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
             patch(
                 "odds_lambda.jobs.agent_run._run_claude_agent",
                 new_callable=AsyncMock,
@@ -206,8 +206,8 @@ class TestMainOrchestration:
         past_time = datetime.now(UTC) - timedelta(hours=1)
 
         with (
-            patch("odds_lambda.jobs.agent_run._get_next_kickoff", new_callable=AsyncMock) as mk,
-            patch("odds_lambda.jobs.agent_run._self_schedule", side_effect=track_schedule),
+            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
             patch(
                 "odds_lambda.jobs.agent_run._run_claude_agent",
                 new_callable=AsyncMock,
@@ -239,8 +239,8 @@ class TestMainOrchestration:
         override_time = datetime.now(UTC) + timedelta(hours=20)
 
         with (
-            patch("odds_lambda.jobs.agent_run._get_next_kickoff", new_callable=AsyncMock) as mk,
-            patch("odds_lambda.jobs.agent_run._self_schedule", side_effect=track_schedule),
+            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
             patch(
                 "odds_lambda.jobs.agent_run._run_claude_agent",
                 new_callable=AsyncMock,
