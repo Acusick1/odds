@@ -4,6 +4,7 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
+from odds_core.agent_wakeup_models import AgentWakeup  # noqa: F401
 from odds_core.config import get_settings
 from odds_core.epl_data_models import EspnFixture, EspnLineup, FplAvailability  # noqa: F401
 from odds_core.game_log_models import NbaTeamGameLog  # noqa: F401
