@@ -236,6 +236,10 @@ class TestProximityScheduling:
                 new_callable=AsyncMock,
                 side_effect=Exception("DB connection refused"),
             ),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal._apply_overnight_skip",
+                side_effect=lambda t, **kw: t,
+            ),
         ):
             from odds_lambda.jobs.fetch_oddsportal import IngestionStats
 
@@ -276,6 +280,10 @@ class TestProximityScheduling:
                 new_callable=AsyncMock,
                 return_value=kickoff,
             ),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal._apply_overnight_skip",
+                side_effect=lambda t, **kw: t,
+            ),
         ):
             from odds_lambda.jobs.fetch_oddsportal import IngestionStats
 
@@ -315,6 +323,10 @@ class TestProximityScheduling:
                 "odds_lambda.jobs.fetch_oddsportal._get_next_kickoff",
                 new_callable=AsyncMock,
                 return_value=kickoff,
+            ),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal._apply_overnight_skip",
+                side_effect=lambda t, **kw: t,
             ),
         ):
             from odds_lambda.jobs.fetch_oddsportal import IngestionStats
