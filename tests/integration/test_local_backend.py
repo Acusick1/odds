@@ -263,33 +263,24 @@ class TestLocalSchedulerBackend:
     async def test_schedule_compound_job_name(self):
         """Test that compound job names (e.g. fetch-oddsportal-epl) resolve correctly.
 
-        The compound name should be resolved to a base name for get_job_function,
-        and the sport should be extracted into JobContext.
+        Real resolve_job_name runs to exercise actual compound name parsing.
+        Only get_job_function is mocked (to avoid importing real job modules).
         """
         captured_ctx: list[JobContext] = []
 
         async def capturing_job(ctx: JobContext) -> None:
             captured_ctx.append(ctx)
 
-        with (
-            patch(
-                "odds_lambda.scheduling.jobs.resolve_job_name",
-                return_value=("fetch-oddsportal", "soccer_epl"),
-            ) as mock_resolve,
-            patch(
-                "odds_lambda.scheduling.jobs.get_job_function",
-                return_value=capturing_job,
-            ) as mock_get_job,
-        ):
+        with patch(
+            "odds_lambda.scheduling.jobs.get_job_function",
+            return_value=capturing_job,
+        ) as mock_get_job:
             async with LocalSchedulerBackend() as backend:
                 next_time = datetime.now(UTC) + timedelta(milliseconds=100)
 
                 await backend.schedule_next_execution(
                     job_name="fetch-oddsportal-epl", next_time=next_time
                 )
-
-                # resolve_job_name should be called with the compound name
-                mock_resolve.assert_called_once_with("fetch-oddsportal-epl")
 
                 # get_job_function should receive the base name, not compound
                 mock_get_job.assert_called_once_with("fetch-oddsportal")
@@ -313,30 +304,43 @@ class TestLocalSchedulerBackend:
 
     @pytest.mark.asyncio
     async def test_schedule_non_compound_job_name(self):
-        """Test that non-compound job names still work correctly."""
-        mock_job = AsyncMock()
+        """Test that non-compound job names still work correctly.
 
-        with (
-            patch(
-                "odds_lambda.scheduling.jobs.resolve_job_name",
-                return_value=("check-health", None),
-            ),
-            patch(
-                "odds_lambda.scheduling.jobs.get_job_function",
-                return_value=mock_job,
-            ) as mock_get_job,
-        ):
+        Real resolve_job_name runs — for a non-compound name it should
+        return the name unchanged with sport=None.
+        """
+        captured_ctx: list[JobContext] = []
+
+        async def capturing_job(ctx: JobContext) -> None:
+            captured_ctx.append(ctx)
+
+        with patch(
+            "odds_lambda.scheduling.jobs.get_job_function",
+            return_value=capturing_job,
+        ) as mock_get_job:
             async with LocalSchedulerBackend() as backend:
-                next_time = datetime.now(UTC) + timedelta(hours=1)
+                next_time = datetime.now(UTC) + timedelta(milliseconds=100)
 
                 await backend.schedule_next_execution(job_name="check-health", next_time=next_time)
 
-                # get_job_function should receive the same name
+                # get_job_function should receive the same name (no suffix to strip)
                 mock_get_job.assert_called_once_with("check-health")
 
                 jobs = await backend.get_scheduled_jobs()
                 assert len(jobs) == 1
                 assert jobs[0].job_name == "check-health"
+
+                # Wait for job to execute and verify context has no sport
+                try:
+                    await asyncio.wait_for(
+                        asyncio.sleep(0.5),
+                        timeout=2.0,
+                    )
+                except TimeoutError:
+                    pass
+
+                assert len(captured_ctx) == 1
+                assert captured_ctx[0].sport is None
 
     @pytest.mark.asyncio
     async def test_multiple_jobs_execute_independently(self):
