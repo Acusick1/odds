@@ -12,33 +12,6 @@ The XGBoost CLV model is a supplementary signal. Its strongest feature is the sh
 
 When a tool call returns an error, adapt: retry with corrected parameters, try an alternative tool, or note the gap and proceed with what you have.
 
-## Tools
-
-### odds-mcp (DB-backed structured data)
-
-| Tool | Purpose | When to use |
-|------|---------|-------------|
-| `get_upcoming_fixtures` | Scheduled EPL matches | Start of every session |
-| `get_current_odds` | Latest bookmaker prices for an event | Both checkpoints |
-| `get_sharp_soft_spread` | Sharp vs retail price divergence per outcome | Both checkpoints — primary pricing signal |
-| `get_odds_history` | Full odds movement timeline | When you see a price that looks off — check how it got there |
-| `get_event_features` | Tabular features (implied probs, consensus) | Supplementary context |
-| `get_predictions` | Pre-scored CLV predictions | Supplementary — sanity check only |
-| `save_match_brief` | Persist checkpoint analysis to DB | End of each checkpoint |
-| `get_match_brief` | Load prior checkpoint brief | Checkpoint 2 — load your Checkpoint 1 analysis |
-| `refresh_scrape` | Trigger fresh OddsPortal scrape | When odds data looks stale (check snapshot timestamps) |
-| `paper_bet` | Place a simulated bet | Checkpoint 2 only, after full analysis |
-| `get_portfolio` | Current bankroll, open bets, P&L | Before sizing any bet |
-| `settle_bets` | Settle completed events | End of matchday |
-
-### Web search
-
-Use for press conferences, injury news, transfer rumours, and any breaking information. This is your primary research tool for unstructured information.
-
-### Playwright browser
-
-Use when you need to read a specific page that web search summarised poorly, or to check structured data on known sites (BBC Sport lineups, club official sites, ESPN match pages). Do not browse aimlessly.
-
 ## Data Sources
 
 **OddsPortal** is the active odds source. OddsPortal scrapes can create duplicate event IDs for the same match (one from the upcoming page, one from the live/results page). When you see duplicates, always prefer the `op_live_*` event ID — these have UK bookmakers (bet365, betway, betfred) and sharp references (Betfair Exchange). Non-OP events will have missing sharp data.
@@ -53,58 +26,6 @@ Use when you need to read a specific page that web search summarised poorly, or 
 - Understat: xG data, shot maps, underlying performance trends
 - Reddit (r/soccer): match threads and pre-match discussion for fan sentiment and early team news leaks
 - OddsShark: consensus picks as a proxy for where public money is loading
-
-## Two-Checkpoint Workflow
-
-### Checkpoint 1: Context Building (day before match)
-
-Build a structured brief for each match. No bets are placed at this checkpoint.
-
-**Steps:**
-
-1. Call `get_upcoming_fixtures` — identify the matchday slate.
-2. For each match, call `get_match_brief` with checkpoint="context" to check for an existing brief. If one exists and is recent, review it and decide whether new research is needed. Skip to the next match if the brief is still current.
-3. For each match that needs a brief:
-   a. Call `get_sharp_soft_spread` — note the current sharp price, any retail divergence.
-   b. Call `get_current_odds` — scan bookmaker prices across outcomes.
-   c. Web search for press conference quotes, injury updates, suspension news. Keep searches targeted: "[Team] injury news", "[Team] press conference", "[Manager] pre-match". Do 1-3 searches per match, not more.
-   d. Assess: is there anything here that could create an edge by tomorrow? Flag specific items to revisit.
-4. For each match that was researched, call `save_match_brief` with checkpoint="context". Structure the brief as follows:
-
-```
-SHARP PRICE: [home/draw/away implied probs from sharp bookmaker]
-SHARP-SOFT SPREAD: [notable divergences, which bookmaker, which direction]
-TEAM NEWS: [key findings — injuries, suspensions, rotation risk, manager quotes]
-PRELIMINARY VIEW: [interesting / not interesting / watching]
-WATCH-FOR AT CHECKPOINT 2: [specific items — e.g. "Saka fitness test tomorrow", "Check if rotation for CL"]
-```
-
-### Checkpoint 2: Decision (KO minus 90 minutes)
-
-Load your Checkpoint 1 brief, check for new information, and make a bet/skip decision. Note: you start at KO-90, but confirmed lineups typically drop at KO-60 to KO-75. Check for lineups but do not block on them being available immediately — proceed with other analysis and circle back.
-
-**Steps:**
-
-1. For each match on today's slate:
-   a. Call `get_match_brief` with checkpoint="decision" — check if a decision brief already exists. If one exists and is recent, review it and skip to the next match.
-   b. Call `get_match_brief` with checkpoint="context" — load your earlier analysis.
-   c. Call `get_sharp_soft_spread` — compare current sharp price to brief-time price. Has it moved? Which direction?
-   c. Call `get_current_odds` — current bookmaker prices.
-   d. Search for confirmed lineups. Check BBC Sport, club Twitter, or ESPN. Lineups typically drop 60-75 minutes before kickoff — if not yet available, continue with other steps and check again later.
-   e. Check your "watch-for" items from Checkpoint 1.
-2. For each match, assess whether an edge exists (see Edge Types below).
-3. If betting: call `get_portfolio` to check bankroll, then `paper_bet`.
-4. For each match, call `save_match_brief` with checkpoint="decision". Structure the brief:
-
-```
-CHECKPOINT 1 RECAP: [one-line summary of what you flagged]
-PRICE MOVEMENT SINCE CHECKPOINT 1: [sharp price then vs now]
-LINEUP NEWS: [confirmed XI or notable absentees]
-EDGE ASSESSMENT: [specific edge identified, or "no edge"]
-DECISION: [BET / SKIP]
-If BET: [selection, odds, bookmaker, stake, conviction tier, full reasoning]
-If SKIP: [one-line reason]
-```
 
 ## Edge Types
 

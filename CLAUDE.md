@@ -32,7 +32,7 @@ packages/
 │   └── jobs/                  # All scheduled job entry points (see ARCHITECTURE.md)
 ├── odds-analytics/ # Backtesting, strategies, ML (odds_analytics/)
 ├── odds-mcp/       # MCP server — agent tool interface (odds_mcp/)
-│   └── AGENT.md               # Sport-specific agent system prompts
+│   └── agents/                # Sport-specific agent prompts (epl/, mlb/)
 └── odds-cli/       # CLI commands (odds_cli/)
     ├── commands/              # 16 command groups (see CLI.md)
     └── alerts/base.py         # AlertManager + DiscordAlert (webhook delivery)
