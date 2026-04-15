@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from odds_lambda.jobs.agent_run import (
+    OVERNIGHT_WINDOWS,
     SKIP_THRESHOLD_HOURS,
     TIER_ACTIVE_HOURS,
     TIER_FAR_HOURS,
@@ -227,3 +228,99 @@ class TestMainOrchestration:
 
         # Only the pre-schedule call, no override
         assert len(schedule_calls) == 1
+
+
+class TestOvernightWindowPerSport:
+    """Tests for sport-aware overnight suppression windows."""
+
+    @pytest.mark.asyncio
+    async def test_unknown_sport_raises_valueerror(self) -> None:
+        ctx = JobContext(sport="basketball_nba")
+        with (
+            patch("odds_core.config.get_settings"),
+            pytest.raises(ValueError, match="No overnight window configured for basketball_nba"),
+        ):
+            await main(ctx)
+
+    @pytest.mark.asyncio
+    async def test_mlb_uses_mlb_overnight_window(self) -> None:
+        """MLB at 08:00 UTC (inside 06:00-14:00 window) should be pushed to 14:00."""
+        schedule_calls: list[dict] = []
+
+        async def track_schedule(**kwargs: object) -> None:
+            schedule_calls.append(dict(kwargs))
+
+        # Set now to a time where default interval lands at 08:00 UTC
+        fake_now = datetime(2026, 7, 15, 4, 0, tzinfo=UTC)
+        # 4h active tier -> wake at 08:00 UTC, inside MLB window (06-14)
+        next_ko = fake_now + timedelta(hours=10)
+
+        with (
+            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
+            patch(
+                "odds_lambda.jobs.agent_run._run_claude_agent",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "odds_lambda.jobs.agent_run._check_agent_requested_wakeup",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch("odds_core.config.get_settings"),
+            patch("odds_lambda.jobs.agent_run.datetime") as mock_dt,
+        ):
+            mock_dt.now.return_value = fake_now
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            mk.return_value = next_ko
+            await main(JobContext(sport="baseball_mlb"))
+
+        assert len(schedule_calls) == 1
+        scheduled_time = schedule_calls[0]["next_time"]
+        # Should be pushed to 14:00 UTC
+        assert scheduled_time.hour == 14
+
+    @pytest.mark.asyncio
+    async def test_epl_uses_epl_overnight_window(self) -> None:
+        """EPL at 23:00 UTC (inside 22:00-06:00 window) should be pushed to 06:00."""
+        schedule_calls: list[dict] = []
+
+        async def track_schedule(**kwargs: object) -> None:
+            schedule_calls.append(dict(kwargs))
+
+        # Set now to 19:00 UTC; 4h active tier -> wake at 23:00 UTC, inside EPL window (22-06)
+        fake_now = datetime(2026, 4, 18, 19, 0, tzinfo=UTC)
+        next_ko = fake_now + timedelta(hours=10)
+
+        with (
+            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
+            patch(
+                "odds_lambda.jobs.agent_run._run_claude_agent",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "odds_lambda.jobs.agent_run._check_agent_requested_wakeup",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch("odds_core.config.get_settings"),
+            patch("odds_lambda.jobs.agent_run.datetime") as mock_dt,
+        ):
+            mock_dt.now.return_value = fake_now
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            mk.return_value = next_ko
+            await main(JobContext(sport="soccer_epl"))
+
+        assert len(schedule_calls) == 1
+        scheduled_time = schedule_calls[0]["next_time"]
+        # Should be pushed to 06:00 UTC next day
+        assert scheduled_time.hour == 6
+
+    def test_overnight_windows_has_no_default(self) -> None:
+        """OVERNIGHT_WINDOWS should be an explicit dict with no fallback."""
+        assert isinstance(OVERNIGHT_WINDOWS, dict)
+        assert "soccer_epl" in OVERNIGHT_WINDOWS
+        assert "baseball_mlb" in OVERNIGHT_WINDOWS

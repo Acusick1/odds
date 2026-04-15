@@ -35,9 +35,13 @@ TIER_LINEUP_HOURS = 1.0  # 1.5-6h to KO
 TIER_NO_FIXTURES_HOURS = 12.0  # no fixtures within 7 days
 SKIP_THRESHOLD_HOURS = 1.5  # too close to KO — don't wake
 
-# Overnight suppression window (UTC)
-OVERNIGHT_START_UTC = 22
-OVERNIGHT_RESUME_UTC = 6
+# Overnight suppression windows (start_utc, resume_utc) per sport
+# EPL: last KO ~20:00 UTC, suppress 22:00-06:00
+# MLB: last pitch ~04:00 UTC, suppress 06:00-14:00
+OVERNIGHT_WINDOWS: dict[str, tuple[int, int]] = {
+    "soccer_epl": (22, 6),
+    "baseball_mlb": (6, 14),
+}
 
 # Agent subprocess limits
 AGENT_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
@@ -157,6 +161,13 @@ async def main(ctx: JobContext) -> None:
 
     compound_job_name = make_compound_job_name("agent-run", sport)
 
+    # --- Resolve overnight window for this sport ---
+    if sport not in OVERNIGHT_WINDOWS:
+        raise ValueError(
+            f"No overnight window configured for {sport} — add it to OVERNIGHT_WINDOWS"
+        )
+    overnight_start_utc, overnight_resume_utc = OVERNIGHT_WINDOWS[sport]
+
     # --- Determine default wake interval from fixture proximity ---
     hours_until_ko: float | None = None
     try:
@@ -177,8 +188,8 @@ async def main(ctx: JobContext) -> None:
     # --- Pre-schedule before work (crash-safe) ---
     default_next_time = apply_overnight_skip(
         datetime.now(UTC) + timedelta(hours=default_interval),
-        overnight_start_utc=OVERNIGHT_START_UTC,
-        overnight_resume_utc=OVERNIGHT_RESUME_UTC,
+        overnight_start_utc=overnight_start_utc,
+        overnight_resume_utc=overnight_resume_utc,
     )
     try:
         await self_schedule(
@@ -225,8 +236,8 @@ async def main(ctx: JobContext) -> None:
     if requested_time is not None and requested_time < default_next_time:
         override_next_time = apply_overnight_skip(
             requested_time,
-            overnight_start_utc=OVERNIGHT_START_UTC,
-            overnight_resume_utc=OVERNIGHT_RESUME_UTC,
+            overnight_start_utc=overnight_start_utc,
+            overnight_resume_utc=overnight_resume_utc,
         )
         try:
             await self_schedule(
