@@ -6,6 +6,7 @@ authors = [{name = "Andrew"}]
 requires-python = ">=3.12"
 dependencies = [
     "odds-core",
+    "odds-analytics",
     "aiohttp>=3.9.0",
     "apscheduler>=3.10.4",
     "tenacity>=8.2.3",
@@ -20,6 +21,7 @@ dependencies = [
 
 [tool.uv.sources]
 odds-core = { workspace = true }
+odds-analytics = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

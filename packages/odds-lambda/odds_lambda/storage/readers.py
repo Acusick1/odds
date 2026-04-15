@@ -5,6 +5,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from odds_analytics.sequence_loader import extract_odds_from_snapshot
+from odds_analytics.utils import calculate_implied_probability
+from odds_core.match_brief_models import SharpPriceMeta, SharpPriceResult
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 from odds_core.utils import raw_data_has_market
 from sqlalchemy import and_, func, select
@@ -630,6 +633,99 @@ class OddsReader:
 
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def get_sharp_prices(
+        self,
+        event_id: str,
+        market: str,
+        sharp_bookmakers: list[str],
+        lookback_hours: float = 2.0,
+        *,
+        now: datetime | None = None,
+    ) -> SharpPriceResult:
+        """Find the best available sharp price per outcome across recent snapshots.
+
+        Scans snapshots within ``[now - lookback_hours, now]`` newest-first.
+        For each outcome, stops at the first snapshot that contains a sharp
+        bookmaker price (respecting the priority order of *sharp_bookmakers*).
+
+        Args:
+            event_id: Event identifier.
+            market: Market key (e.g. ``"h2h"``).
+            sharp_bookmakers: Ordered list of sharp bookmaker keys (highest
+                priority first).
+            lookback_hours: How far back to search (default 2 h).
+            now: Reference time for the lookback window.  Defaults to
+                ``datetime.now(UTC)``.  Exposed for testing.
+
+        Returns:
+            A :class:`SharpPriceResult` with per-outcome prices and metadata.
+        """
+        ref_time = now or datetime.now(UTC)
+        window_start = ref_time - timedelta(hours=lookback_hours)
+
+        query = (
+            select(OddsSnapshot)
+            .where(
+                and_(
+                    OddsSnapshot.event_id == event_id,
+                    OddsSnapshot.snapshot_time >= window_start,
+                    OddsSnapshot.snapshot_time <= ref_time,
+                )
+            )
+            .order_by(OddsSnapshot.snapshot_time.desc())
+        )
+
+        result = await self.session.execute(query)
+        snapshots = list(result.scalars().all())
+
+        sharp_result = SharpPriceResult()
+        all_outcomes_seen: set[str] = set()
+
+        for snapshot in snapshots:
+            if not raw_data_has_market(snapshot.raw_data, market):
+                continue
+
+            odds = extract_odds_from_snapshot(snapshot, event_id, market=market)
+            if not odds:
+                continue
+
+            # Collect unique outcome names from this snapshot
+            outcome_names = {o.outcome_name for o in odds}
+            all_outcomes_seen.update(outcome_names)
+
+            for outcome_name in outcome_names:
+                if outcome_name in sharp_result.prices:
+                    continue  # already resolved from a newer snapshot
+
+                # Try each sharp bookmaker in priority order
+                for bm_key in sharp_bookmakers:
+                    bm_match = [
+                        o
+                        for o in odds
+                        if o.bookmaker_key == bm_key and o.outcome_name == outcome_name
+                    ]
+                    if bm_match:
+                        price = bm_match[0].price
+                        sharp_result.prices[outcome_name] = {
+                            "bookmaker": bm_key,
+                            "price": price,
+                            "implied_prob": round(calculate_implied_probability(price), 6),
+                        }
+                        sharp_result.meta[outcome_name] = SharpPriceMeta(
+                            snapshot_id=snapshot.id,
+                            snapshot_time=snapshot.snapshot_time,
+                            age_seconds=round(
+                                (ref_time - snapshot.snapshot_time).total_seconds(), 1
+                            ),
+                        )
+                        break
+
+            # All discovered outcomes resolved — no need to scan older snapshots
+            if all_outcomes_seen and all_outcomes_seen <= sharp_result.prices.keys():
+                break
+
+        return sharp_result
 
     async def get_games_by_date(
         self, target_date: datetime, status: EventStatus | None = EventStatus.FINAL

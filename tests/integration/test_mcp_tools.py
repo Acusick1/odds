@@ -8,8 +8,9 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
-from odds_core.match_brief_models import BriefCheckpoint, MatchBrief
+from odds_core.match_brief_models import BriefCheckpoint, MatchBrief, SharpPriceResult
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_lambda.storage.readers import OddsReader
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -47,7 +48,7 @@ async def epl_event_with_odds(pglite_async_session):
                 "last_update": snapshot_time.isoformat(),
                 "markets": [
                     {
-                        "key": "h2h",
+                        "key": "1x2",
                         "outcomes": [
                             {"name": "Arsenal", "price": -120},
                             {"name": "Draw", "price": 280},
@@ -62,7 +63,7 @@ async def epl_event_with_odds(pglite_async_session):
                 "last_update": snapshot_time.isoformat(),
                 "markets": [
                     {
-                        "key": "h2h",
+                        "key": "1x2",
                         "outcomes": [
                             {"name": "Arsenal", "price": -130},
                             {"name": "Draw", "price": 260},
@@ -77,7 +78,7 @@ async def epl_event_with_odds(pglite_async_session):
                 "last_update": snapshot_time.isoformat(),
                 "markets": [
                     {
-                        "key": "h2h",
+                        "key": "1x2",
                         "outcomes": [
                             {"name": "Arsenal", "price": -125},
                             {"name": "Draw", "price": 270},
@@ -145,7 +146,7 @@ async def partial_sharp_event(pglite_async_session):
                 "last_update": snapshot_time.isoformat(),
                 "markets": [
                     {
-                        "key": "h2h",
+                        "key": "1x2",
                         "outcomes": [
                             {"name": "Tottenham", "price": -150},
                         ],
@@ -158,7 +159,7 @@ async def partial_sharp_event(pglite_async_session):
                 "last_update": snapshot_time.isoformat(),
                 "markets": [
                     {
-                        "key": "h2h",
+                        "key": "1x2",
                         "outcomes": [
                             {"name": "Tottenham", "price": -145},
                             {"name": "Draw", "price": 260},
@@ -173,7 +174,7 @@ async def partial_sharp_event(pglite_async_session):
                 "last_update": snapshot_time.isoformat(),
                 "markets": [
                     {
-                        "key": "h2h",
+                        "key": "1x2",
                         "outcomes": [
                             {"name": "Tottenham", "price": -160},
                             {"name": "Draw", "price": 250},
@@ -211,6 +212,7 @@ class TestSaveMatchBrief:
 
         result = await save_match_brief(
             event_id=event.id,
+            market="1x2",
             brief_text="Arsenal looking strong at home, Chelsea missing key players.",
             checkpoint="context",
         )
@@ -238,6 +240,7 @@ class TestSaveMatchBrief:
 
         result = await save_match_brief(
             event_id="nonexistent_event",
+            market="1x2",
             brief_text="Should fail",
             checkpoint="context",
         )
@@ -253,6 +256,7 @@ class TestSaveMatchBrief:
 
         result = await save_match_brief(
             event_id=event.id,
+            market="1x2",
             brief_text="No odds available yet for this fixture.",
             checkpoint="decision",
         )
@@ -275,6 +279,7 @@ class TestSaveMatchBrief:
         for i in range(3):
             result = await save_match_brief(
                 event_id=event.id,
+                market="1x2",
                 brief_text=f"Decision brief revision {i}",
                 checkpoint="decision",
             )
@@ -292,6 +297,30 @@ class TestSaveMatchBrief:
         )
         assert len(list(db_result.scalars().all())) == 3
 
+    @pytest.mark.asyncio
+    async def test_sharp_prices_via_lookback(self, patch_session_maker, sharp_lookback_event):
+        """save_match_brief stamps sharp prices found via lookback when the
+        latest snapshot lacks sharp bookmaker prices."""
+        from odds_mcp.server import save_match_brief
+
+        event, _snap_old, _snap_new = sharp_lookback_event
+
+        result = await save_match_brief(
+            event_id=event.id,
+            market="1x2",
+            brief_text="Brighton should dominate at home.",
+            checkpoint="context",
+        )
+
+        assert "error" not in result
+        sharp = result["sharp_price_at_brief"]
+        assert sharp is not None
+        # Pinnacle is only in the older snapshot — lookback should find it
+        for outcome in ("Brighton", "Draw", "Wolves"):
+            assert sharp[outcome]["bookmaker"] == "pinnacle"
+            assert "price" in sharp[outcome]
+            assert "implied_prob" in sharp[outcome]
+
 
 class TestGetMatchBrief:
     """Tests for the get_match_brief MCP tool."""
@@ -305,6 +334,7 @@ class TestGetMatchBrief:
 
         await save_match_brief(
             event_id=event.id,
+            market="1x2",
             brief_text="Context analysis for Arsenal vs Chelsea.",
             checkpoint="context",
         )
@@ -324,10 +354,10 @@ class TestGetMatchBrief:
         event, _ = epl_event_with_odds
 
         await save_match_brief(
-            event_id=event.id, brief_text="Context analysis", checkpoint="context"
+            event_id=event.id, market="1x2", brief_text="Context analysis", checkpoint="context"
         )
         await save_match_brief(
-            event_id=event.id, brief_text="Decision analysis", checkpoint="decision"
+            event_id=event.id, market="1x2", brief_text="Decision analysis", checkpoint="decision"
         )
 
         context_result = await get_match_brief(event_id=event.id, checkpoint="context")
@@ -359,7 +389,9 @@ class TestGetMatchBrief:
         event, _ = epl_event_with_odds
 
         for i in range(3):
-            await save_match_brief(event_id=event.id, brief_text=f"Brief {i}", checkpoint="context")
+            await save_match_brief(
+                event_id=event.id, market="1x2", brief_text=f"Brief {i}", checkpoint="context"
+            )
 
         result = await get_match_brief(event_id=event.id)
 
@@ -377,44 +409,6 @@ class TestGetMatchBrief:
         assert result == {"error": "Event 'nonexistent_event' not found"}
 
 
-class TestSnapshotSharpPrices:
-    """Tests for _snapshot_sharp_prices helper."""
-
-    def test_per_outcome_fallback(self, partial_sharp_event):
-        """Each outcome independently falls through to next sharp bookmaker."""
-        from odds_analytics.sequence_loader import extract_odds_from_snapshot
-        from odds_mcp.server import _snapshot_sharp_prices
-
-        event, snapshot = partial_sharp_event
-        odds = extract_odds_from_snapshot(snapshot, event.id, market="h2h")
-        result = _snapshot_sharp_prices(odds, ["pinnacle", "betfair_exchange"])
-
-        # Pinnacle only has Tottenham, so home should come from pinnacle
-        assert result["Tottenham"]["bookmaker"] == "pinnacle"
-        # Draw and Everton should fall through to betfair_exchange
-        assert result["Draw"]["bookmaker"] == "betfair_exchange"
-        assert result["Everton"]["bookmaker"] == "betfair_exchange"
-
-    def test_all_outcomes_from_primary(self, epl_event_with_odds):
-        """When primary sharp has all outcomes, all come from it."""
-        from odds_analytics.sequence_loader import extract_odds_from_snapshot
-        from odds_mcp.server import _snapshot_sharp_prices
-
-        event, snapshot = epl_event_with_odds
-        odds = extract_odds_from_snapshot(snapshot, event.id, market="h2h")
-        result = _snapshot_sharp_prices(odds, ["pinnacle", "betfair_exchange"])
-
-        for outcome_data in result.values():
-            assert outcome_data["bookmaker"] == "pinnacle"
-
-    def test_empty_odds_list(self):
-        """Empty odds list returns empty dict."""
-        from odds_mcp.server import _snapshot_sharp_prices
-
-        result = _snapshot_sharp_prices([], ["pinnacle"])
-        assert result == {}
-
-
 class TestGetSharpSoftSpread:
     """Tests for the get_sharp_soft_spread MCP tool."""
 
@@ -425,7 +419,7 @@ class TestGetSharpSoftSpread:
 
         event, _ = epl_event_with_odds
 
-        result = await get_sharp_soft_spread(event_id=event.id)
+        result = await get_sharp_soft_spread(event_id=event.id, market="1x2")
 
         assert "error" not in result
         assert result["event"]["id"] == event.id
@@ -438,6 +432,9 @@ class TestGetSharpSoftSpread:
         assert arsenal["sharp"]["bookmaker"] == "pinnacle"
         assert arsenal["sharp"]["price"] == -120
         assert arsenal["sharp"]["implied_prob"] is not None
+        # Source snapshot metadata
+        assert arsenal["sharp"]["snapshot_time"] is not None
+        assert arsenal["sharp"]["age_seconds"] is not None
 
         # Check retail bookmakers present
         soft_bms = {s["bookmaker"] for s in arsenal["soft"]}
@@ -455,7 +452,7 @@ class TestGetSharpSoftSpread:
 
         event = epl_event_no_odds
 
-        result = await get_sharp_soft_spread(event_id=event.id)
+        result = await get_sharp_soft_spread(event_id=event.id, market="1x2")
 
         assert "error" not in result
         assert result["spread"] is None
@@ -466,17 +463,17 @@ class TestGetSharpSoftSpread:
         """get_sharp_soft_spread returns error for nonexistent event."""
         from odds_mcp.server import get_sharp_soft_spread
 
-        result = await get_sharp_soft_spread(event_id="nonexistent_event")
+        result = await get_sharp_soft_spread(event_id="nonexistent_event", market="1x2")
         assert result == {"error": "Event 'nonexistent_event' not found"}
 
     @pytest.mark.asyncio
     async def test_per_outcome_sharp_fallback(self, patch_session_maker, partial_sharp_event):
-        """Sharp prices fall through per-outcome (reuses _snapshot_sharp_prices)."""
+        """Sharp prices fall through per-outcome via lookback reader."""
         from odds_mcp.server import get_sharp_soft_spread
 
         event, _ = partial_sharp_event
 
-        result = await get_sharp_soft_spread(event_id=event.id)
+        result = await get_sharp_soft_spread(event_id=event.id, market="1x2")
 
         spread = result["spread"]
         # Tottenham from pinnacle (higher priority)
@@ -484,3 +481,248 @@ class TestGetSharpSoftSpread:
         # Draw/Everton fall through to betfair_exchange
         assert spread["Draw"]["sharp"]["bookmaker"] == "betfair_exchange"
         assert spread["Everton"]["sharp"]["bookmaker"] == "betfair_exchange"
+
+
+def _make_snapshot_raw_data(bookmakers: list[dict[str, object]], snapshot_time: datetime) -> dict:
+    """Build raw_data blob for a snapshot from a compact bookmaker spec.
+
+    Each entry in *bookmakers* is ``{"key": str, "outcomes": list[dict]}``.
+    """
+    return {
+        "bookmakers": [
+            {
+                "key": bm["key"],
+                "title": str(bm["key"]).title(),
+                "last_update": snapshot_time.isoformat(),
+                "markets": [{"key": "1x2", "outcomes": bm["outcomes"]}],
+            }
+            for bm in bookmakers
+        ]
+    }
+
+
+@pytest.fixture
+async def sharp_lookback_event(pglite_async_session):
+    """Event with two snapshots: newest has retail only, older has sharp + retail.
+
+    Timeline (relative to KO at T):
+        T-3h  snapshot_old  — pinnacle + bet365
+        T-2h  snapshot_new  — bet365 only (sharp missing)
+    """
+    commence_time = datetime(2026, 4, 20, 15, 0, tzinfo=UTC)
+    event = Event(
+        id="epl_lookback_001",
+        sport_key="soccer_epl",
+        sport_title="EPL",
+        commence_time=commence_time,
+        home_team="Brighton",
+        away_team="Wolves",
+        status=EventStatus.SCHEDULED,
+    )
+    pglite_async_session.add(event)
+
+    # Older snapshot WITH sharp bookmaker
+    old_time = commence_time - timedelta(hours=3)
+    old_raw = _make_snapshot_raw_data(
+        [
+            {
+                "key": "pinnacle",
+                "outcomes": [
+                    {"name": "Brighton", "price": -140},
+                    {"name": "Draw", "price": 270},
+                    {"name": "Wolves", "price": 350},
+                ],
+            },
+            {
+                "key": "bet365",
+                "outcomes": [
+                    {"name": "Brighton", "price": -150},
+                    {"name": "Draw", "price": 260},
+                    {"name": "Wolves", "price": 330},
+                ],
+            },
+        ],
+        old_time,
+    )
+    snap_old = OddsSnapshot(
+        event_id=event.id,
+        snapshot_time=old_time,
+        raw_data=old_raw,
+        bookmaker_count=2,
+        fetch_tier="pregame",
+        hours_until_commence=3.0,
+    )
+    pglite_async_session.add(snap_old)
+
+    # Newer snapshot WITHOUT sharp bookmaker
+    new_time = commence_time - timedelta(hours=2)
+    new_raw = _make_snapshot_raw_data(
+        [
+            {
+                "key": "bet365",
+                "outcomes": [
+                    {"name": "Brighton", "price": -155},
+                    {"name": "Draw", "price": 255},
+                    {"name": "Wolves", "price": 325},
+                ],
+            },
+        ],
+        new_time,
+    )
+    snap_new = OddsSnapshot(
+        event_id=event.id,
+        snapshot_time=new_time,
+        raw_data=new_raw,
+        bookmaker_count=1,
+        fetch_tier="pregame",
+        hours_until_commence=2.0,
+    )
+    pglite_async_session.add(snap_new)
+
+    await pglite_async_session.commit()
+    await pglite_async_session.refresh(event)
+    await pglite_async_session.refresh(snap_old)
+    await pglite_async_session.refresh(snap_new)
+    return event, snap_old, snap_new
+
+
+class TestGetSharpPrices:
+    """Tests for OddsReader.get_sharp_prices lookback method."""
+
+    @pytest.mark.asyncio
+    async def test_sharp_found_in_older_snapshot(self, pglite_async_session, sharp_lookback_event):
+        """Sharp price is resolved from an older snapshot when newest lacks it."""
+        event, snap_old, snap_new = sharp_lookback_event
+        reader = OddsReader(pglite_async_session)
+
+        # Use now=snap_new.snapshot_time so both snapshots are in the 2h window
+        result = await reader.get_sharp_prices(
+            event.id,
+            market="1x2",
+            sharp_bookmakers=["pinnacle", "betfair_exchange"],
+            lookback_hours=2.0,
+            now=snap_new.snapshot_time,
+        )
+
+        assert isinstance(result, SharpPriceResult)
+        assert "Brighton" in result.prices
+        assert result.prices["Brighton"]["bookmaker"] == "pinnacle"
+        assert result.prices["Brighton"]["price"] == -140
+        assert result.prices["Draw"]["bookmaker"] == "pinnacle"
+        assert result.prices["Wolves"]["bookmaker"] == "pinnacle"
+
+        # Metadata points to the older snapshot
+        assert result.meta["Brighton"].snapshot_id == snap_old.id
+        assert result.meta["Brighton"].age_seconds > 0
+
+    @pytest.mark.asyncio
+    async def test_no_sharp_in_window(self, pglite_async_session, sharp_lookback_event):
+        """When no snapshot in the window has a sharp bookmaker, result is empty."""
+        event, snap_old, snap_new = sharp_lookback_event
+        reader = OddsReader(pglite_async_session)
+
+        # Set window so only the newest (retail-only) snapshot is included
+        result = await reader.get_sharp_prices(
+            event.id,
+            market="1x2",
+            sharp_bookmakers=["pinnacle"],
+            lookback_hours=0.5,
+            now=snap_new.snapshot_time,
+        )
+
+        assert result.prices == {}
+        assert result.meta == {}
+
+    @pytest.mark.asyncio
+    async def test_expired_window(self, pglite_async_session, sharp_lookback_event):
+        """When now is far in the future, no snapshots are in the lookback window."""
+        event, _snap_old, _snap_new = sharp_lookback_event
+        reader = OddsReader(pglite_async_session)
+
+        far_future = datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
+        result = await reader.get_sharp_prices(
+            event.id,
+            market="1x2",
+            sharp_bookmakers=["pinnacle"],
+            lookback_hours=2.0,
+            now=far_future,
+        )
+
+        assert result.prices == {}
+        assert result.meta == {}
+
+    @pytest.mark.asyncio
+    async def test_recency_takes_precedence_over_priority(
+        self, pglite_async_session, sharp_lookback_event
+    ):
+        """Recency wins: once an outcome is resolved from a newer snapshot,
+        older snapshots are skipped even if they contain a higher-priority bookmaker."""
+        event, snap_old, snap_new = sharp_lookback_event
+        reader = OddsReader(pglite_async_session)
+
+        # pinnacle is higher priority but only in the older snapshot;
+        # bet365 in the newer snapshot resolves first.
+        result = await reader.get_sharp_prices(
+            event.id,
+            market="1x2",
+            sharp_bookmakers=["pinnacle", "bet365"],
+            lookback_hours=2.0,
+            now=snap_new.snapshot_time,
+        )
+
+        assert result.prices["Brighton"]["bookmaker"] == "bet365"
+        assert result.prices["Brighton"]["price"] == -155
+
+
+class TestSharpLookbackSpread:
+    """Tests for get_sharp_soft_spread using sharp lookback."""
+
+    @pytest.mark.asyncio
+    async def test_lookback_finds_sharp_from_older_snapshot(
+        self, patch_session_maker, sharp_lookback_event
+    ):
+        """get_sharp_soft_spread resolves sharp from older snapshot via lookback."""
+        from odds_mcp.server import get_sharp_soft_spread
+
+        event, snap_old, snap_new = sharp_lookback_event
+
+        result = await get_sharp_soft_spread(
+            event_id=event.id,
+            market="1x2",
+            sharp_lookback_hours=4.0,
+        )
+
+        assert "error" not in result
+        spread = result["spread"]
+        assert spread is not None
+
+        # Sharp price should come from the older snapshot (pinnacle)
+        brighton = spread["Brighton"]
+        assert brighton["sharp"]["bookmaker"] == "pinnacle"
+        assert brighton["sharp"]["price"] == -140
+        assert brighton["sharp"]["snapshot_time"] is not None
+
+        # Retail prices should come from the latest snapshot (bet365)
+        assert len(brighton["soft"]) >= 1
+        bet365_soft = [s for s in brighton["soft"] if s["bookmaker"] == "bet365"]
+        assert bet365_soft[0]["price"] == -155
+
+    @pytest.mark.asyncio
+    async def test_no_sharp_returns_null_sharp(self, patch_session_maker, sharp_lookback_event):
+        """When lookback is too short to find sharp, sharp fields are null."""
+        from odds_mcp.server import get_sharp_soft_spread
+
+        event, _snap_old, _snap_new = sharp_lookback_event
+
+        # Very short lookback — only latest snapshot in window, no pinnacle
+        result = await get_sharp_soft_spread(
+            event_id=event.id,
+            market="1x2",
+            sharp_lookback_hours=0.01,
+        )
+
+        spread = result["spread"]
+        assert spread is not None
+        for outcome_data in spread.values():
+            assert outcome_data["sharp"]["bookmaker"] is None
+            assert outcome_data["sharp"]["snapshot_time"] is None

@@ -1,5 +1,6 @@
 """Match brief model for cross-session agent memory."""
 
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -13,6 +14,27 @@ from odds_core.models import utc_now
 SharpPriceEntry = dict[str, Any]  # {"bookmaker": str, "price": int, "implied_prob": float}
 # Keyed by outcome name (e.g. "Arsenal", "Draw", "Chelsea").
 SharpPriceMap = dict[str, SharpPriceEntry]
+
+
+@dataclass
+class SharpPriceMeta:
+    """Metadata about a sharp price found via lookback search."""
+
+    snapshot_id: int
+    snapshot_time: datetime
+    age_seconds: float
+
+
+@dataclass
+class SharpPriceResult:
+    """Sharp prices resolved across a time window of snapshots.
+
+    ``prices`` is a standard SharpPriceMap. ``meta`` carries per-outcome
+    provenance so callers can judge staleness.
+    """
+
+    prices: SharpPriceMap = field(default_factory=dict)
+    meta: dict[str, SharpPriceMeta] = field(default_factory=dict)
 
 
 class BriefCheckpoint(str, Enum):
