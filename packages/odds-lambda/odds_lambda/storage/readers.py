@@ -680,6 +680,7 @@ class OddsReader:
         snapshots = list(result.scalars().all())
 
         sharp_result = SharpPriceResult()
+        all_outcomes_seen: set[str] = set()
 
         for snapshot in snapshots:
             if not raw_data_has_market(snapshot.raw_data, market):
@@ -691,6 +692,7 @@ class OddsReader:
 
             # Collect unique outcome names from this snapshot
             outcome_names = {o.outcome_name for o in odds}
+            all_outcomes_seen.update(outcome_names)
 
             for outcome_name in outcome_names:
                 if outcome_name in sharp_result.prices:
@@ -718,6 +720,10 @@ class OddsReader:
                             ),
                         )
                         break
+
+            # All discovered outcomes resolved — no need to scan older snapshots
+            if all_outcomes_seen and all_outcomes_seen <= sharp_result.prices.keys():
+                break
 
         return sharp_result
 

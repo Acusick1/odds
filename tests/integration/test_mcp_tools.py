@@ -307,6 +307,7 @@ class TestSaveMatchBrief:
 
         result = await save_match_brief(
             event_id=event.id,
+            market="1x2",
             brief_text="Brighton should dominate at home.",
             checkpoint="context",
         )
@@ -721,9 +722,7 @@ class TestSharpLookbackSpread:
         )
 
         spread = result["spread"]
-        # With such a short window, no snapshot may be included at all.
-        # If the spread exists, sharp should be null.
-        if spread is not None:
-            for outcome_data in spread.values():
-                assert outcome_data["sharp"]["bookmaker"] is None
-                assert outcome_data["sharp"]["snapshot_time"] is None
+        assert spread is not None
+        for outcome_data in spread.values():
+            assert outcome_data["sharp"]["bookmaker"] is None
+            assert outcome_data["sharp"]["snapshot_time"] is None
