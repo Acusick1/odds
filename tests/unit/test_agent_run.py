@@ -15,9 +15,11 @@ from odds_lambda.jobs.agent_run import (
     TIER_NO_FIXTURES_HOURS,
     TIER_RESEARCH_HOURS,
     TIER_TOO_CLOSE_HOURS,
+    ScheduleResult,
     _compute_wake_interval,
     _should_skip_run,
     main,
+    schedule_next,
 )
 from odds_lambda.scheduling.jobs import JobContext
 
@@ -324,3 +326,45 @@ class TestOvernightWindowPerSport:
         assert isinstance(OVERNIGHT_WINDOWS, dict)
         assert "soccer_epl" in OVERNIGHT_WINDOWS
         assert "baseball_mlb" in OVERNIGHT_WINDOWS
+
+
+class TestScheduleNext:
+    """Tests for schedule_next() called standalone (bootstrap use case)."""
+
+    @pytest.mark.asyncio
+    async def test_returns_schedule_result_with_kickoff(self) -> None:
+        """schedule_next() returns ScheduleResult with correct hours_until_ko."""
+        next_ko = datetime.now(UTC) + timedelta(hours=30)
+
+        with (
+            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch("odds_lambda.jobs.agent_run.self_schedule", new_callable=AsyncMock) as sched,
+            patch("odds_core.config.get_settings"),
+        ):
+            mk.return_value = next_ko
+            result = await schedule_next("soccer_epl")
+
+        assert isinstance(result, ScheduleResult)
+        assert result.hours_until_ko is not None
+        assert 29.9 < result.hours_until_ko < 30.1
+        assert result.compound_job_name == "agent-run-epl"
+        assert result.overnight_start_utc == 22
+        assert result.overnight_resume_utc == 6
+        sched.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_none_hours_when_no_fixtures(self) -> None:
+        with (
+            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch("odds_lambda.jobs.agent_run.self_schedule", new_callable=AsyncMock),
+            patch("odds_core.config.get_settings"),
+        ):
+            mk.return_value = None
+            result = await schedule_next("soccer_epl")
+
+        assert result.hours_until_ko is None
+
+    @pytest.mark.asyncio
+    async def test_unknown_sport_raises_valueerror(self) -> None:
+        with pytest.raises(ValueError, match="No overnight window configured for basketball_nba"):
+            await schedule_next("basketball_nba")

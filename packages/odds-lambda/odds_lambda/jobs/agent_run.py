@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 
 import structlog
 from odds_core.config import get_settings
@@ -51,6 +52,16 @@ TIER_TOO_CLOSE_HOURS = 3.0
 
 # Horizon for "no fixtures" classification
 FIXTURE_HORIZON_DAYS = 7
+
+
+class ScheduleResult(NamedTuple):
+    """Values computed by schedule_next(), reused by main() for overrides."""
+
+    next_time: datetime
+    hours_until_ko: float | None
+    compound_job_name: str
+    overnight_start_utc: int
+    overnight_resume_utc: int
 
 
 def _compute_wake_interval(hours_until_ko: float | None) -> float:
@@ -150,22 +161,24 @@ async def _check_agent_requested_wakeup(sport_key: str) -> datetime | None:
     return requested_time
 
 
-async def main(ctx: JobContext) -> None:
-    """Orchestrate agent wake-up: schedule, run, check override."""
-    settings = get_settings()
-    sport = ctx.sport
+async def schedule_next(sport: str) -> ScheduleResult:
+    """Compute and schedule the next agent wake-up for a sport.
 
-    if not sport:
-        logger.error("agent_run_no_sport", msg="sport is required for agent-run job")
-        return
+    Queries the DB for the next kickoff, computes the wake interval from
+    proximity tiers, and schedules via self_schedule.
 
-    compound_job_name = make_compound_job_name("agent-run", sport)
+    This is the crash-safe pre-scheduling step — called both during bootstrap
+    (without launching the agent) and at the start of a full agent run.
 
-    # --- Resolve overnight window for this sport ---
+    Raises ValueError if the sport has no configured overnight window.
+    """
     if sport not in OVERNIGHT_WINDOWS:
         raise ValueError(
             f"No overnight window configured for {sport} — add it to OVERNIGHT_WINDOWS"
         )
+
+    settings = get_settings()
+    compound_job_name = make_compound_job_name("agent-run", sport)
     overnight_start_utc, overnight_resume_utc = OVERNIGHT_WINDOWS[sport]
 
     # --- Determine default wake interval from fixture proximity ---
@@ -176,6 +189,7 @@ async def main(ctx: JobContext) -> None:
             hours_until_ko = (next_kickoff - datetime.now(UTC)).total_seconds() / 3600
         logger.info(
             "agent_proximity",
+            sport=sport,
             next_kickoff=next_kickoff.isoformat() if next_kickoff else None,
             hours_until_ko=round(hours_until_ko, 2) if hours_until_ko is not None else None,
         )
@@ -183,9 +197,8 @@ async def main(ctx: JobContext) -> None:
         logger.warning("agent_kickoff_query_failed", error=str(e), exc_info=True)
 
     default_interval = _compute_wake_interval(hours_until_ko)
-    skip_run = _should_skip_run(hours_until_ko)
 
-    # --- Pre-schedule before work (crash-safe) ---
+    # --- Schedule next wake-up ---
     default_next_time = apply_overnight_skip(
         datetime.now(UTC) + timedelta(hours=default_interval),
         overnight_start_utc=overnight_start_utc,
@@ -204,11 +217,35 @@ async def main(ctx: JobContext) -> None:
         logger.error("agent_run_preschedule_failed", error=str(e), exc_info=True)
         raise
 
+    return ScheduleResult(
+        next_time=default_next_time,
+        hours_until_ko=hours_until_ko,
+        compound_job_name=compound_job_name,
+        overnight_start_utc=overnight_start_utc,
+        overnight_resume_utc=overnight_resume_utc,
+    )
+
+
+async def main(ctx: JobContext) -> None:
+    """Orchestrate agent wake-up: schedule, run, check override."""
+    settings = get_settings()
+    sport = ctx.sport
+
+    if not sport:
+        logger.error("agent_run_no_sport", msg="sport is required for agent-run job")
+        return
+
+    # --- Pre-schedule before work (crash-safe) ---
+    result = await schedule_next(sport)
+    skip_run = _should_skip_run(result.hours_until_ko)
+
     # --- Run the agent (unless too close to KO) ---
     if skip_run:
         logger.info(
             "agent_run_skipped",
-            hours_until_ko=round(hours_until_ko, 2) if hours_until_ko is not None else None,
+            hours_until_ko=(
+                round(result.hours_until_ko, 2) if result.hours_until_ko is not None else None
+            ),
             reason="too close to kickoff",
         )
         return
@@ -233,15 +270,15 @@ async def main(ctx: JobContext) -> None:
         )
         requested_time = None
 
-    if requested_time is not None and requested_time < default_next_time:
+    if requested_time is not None and requested_time < result.next_time:
         override_next_time = apply_overnight_skip(
             requested_time,
-            overnight_start_utc=overnight_start_utc,
-            overnight_resume_utc=overnight_resume_utc,
+            overnight_start_utc=result.overnight_start_utc,
+            overnight_resume_utc=result.overnight_resume_utc,
         )
         try:
             await self_schedule(
-                job_name=compound_job_name,
+                job_name=result.compound_job_name,
                 next_time=override_next_time,
                 dry_run=settings.scheduler.dry_run,
                 sport=sport,
@@ -249,7 +286,7 @@ async def main(ctx: JobContext) -> None:
             )
             logger.info(
                 "agent_run_rescheduled",
-                default_time=default_next_time.isoformat(),
+                default_time=result.next_time.isoformat(),
                 override_time=override_next_time.isoformat(),
             )
         except Exception as e:
