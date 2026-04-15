@@ -10,7 +10,7 @@ Wake interval tiers:
   24-48h        -> 12h  (research window opening)
   6-24h         ->  4h  (active research)
   1.5-6h        ->  1h  (lineups dropping)
-  < 1.5h        -> skip (too close)
+  < 1.5h        ->  3h  (too close — check back post-match)
   no fixtures   -> 12h  (off-season check-in)
 """
 
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import structlog
 from odds_core.database import async_session_maker
@@ -44,8 +45,14 @@ OVERNIGHT_RESUME_UTC = 6
 # Agent subprocess limits
 AGENT_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
 
+# Post-match check-in (too close to KO — match about to start / in progress)
+TIER_TOO_CLOSE_HOURS = 3.0
+
 # Horizon for "no fixtures" classification
 FIXTURE_HORIZON_DAYS = 7
+
+# Project root (walk up from packages/odds-lambda/odds_lambda/jobs/)
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
 async def _get_next_kickoff(sport_key: str) -> datetime | None:
@@ -78,8 +85,8 @@ def _compute_wake_interval(hours_until_ko: float | None) -> float:
         return TIER_ACTIVE_HOURS
     if hours_until_ko > SKIP_THRESHOLD_HOURS:
         return TIER_LINEUP_HOURS
-    # Too close — skip this cycle, check again later
-    return TIER_NO_FIXTURES_HOURS
+    # Too close — match is about to start; check back after it ends
+    return TIER_TOO_CLOSE_HOURS
 
 
 def _should_skip_run(hours_until_ko: float | None) -> bool:
@@ -111,19 +118,20 @@ async def _run_claude_agent(sport: str) -> int:
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
-        cwd="/home/andrew/code/odds",
+        cwd=str(_PROJECT_ROOT),
     )
 
     try:
-        assert proc.stdout is not None  # noqa: S101
-        async for line in proc.stdout:
-            text = line.decode("utf-8", errors="replace").rstrip()
-            if text:
-                logger.info("agent_output", line=text)
+        async with asyncio.timeout(AGENT_TIMEOUT_SECONDS):
+            assert proc.stdout is not None  # noqa: S101
+            async for line in proc.stdout:
+                text = line.decode("utf-8", errors="replace").rstrip()
+                if text:
+                    logger.info("agent_output", line=text)
 
-        await asyncio.wait_for(proc.wait(), timeout=AGENT_TIMEOUT_SECONDS)
+            await proc.wait()
     except TimeoutError:
-        logger.error("agent_subprocess_timeout", sport=sport, timeout=AGENT_TIMEOUT_SECONDS)
+        logger.warning("agent_subprocess_timeout", sport=sport, timeout=AGENT_TIMEOUT_SECONDS)
         proc.kill()
         await proc.wait()
         return -1
@@ -263,6 +271,14 @@ async def main(ctx: JobContext) -> None:
         requested_time = await _check_agent_requested_wakeup(sport)
     except Exception as e:
         logger.warning("agent_wakeup_check_failed", error=str(e), exc_info=True)
+        requested_time = None
+
+    if requested_time is not None and requested_time <= datetime.now(UTC):
+        logger.warning(
+            "agent_wakeup_in_past",
+            requested_time=requested_time.isoformat(),
+            msg="ignoring agent-requested wakeup that is in the past",
+        )
         requested_time = None
 
     if requested_time is not None and requested_time < default_next_time:

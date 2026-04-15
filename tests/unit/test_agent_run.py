@@ -15,6 +15,7 @@ from odds_lambda.jobs.agent_run import (
     TIER_LINEUP_HOURS,
     TIER_NO_FIXTURES_HOURS,
     TIER_RESEARCH_HOURS,
+    TIER_TOO_CLOSE_HOURS,
     _apply_overnight_skip,
     _compute_wake_interval,
     _should_skip_run,
@@ -51,12 +52,12 @@ class TestComputeWakeInterval:
     def test_lineup_window_1_5_to_6h(self) -> None:
         assert _compute_wake_interval(3.0) == TIER_LINEUP_HOURS
 
-    def test_too_close_returns_no_fixtures_tier(self) -> None:
-        assert _compute_wake_interval(1.0) == TIER_NO_FIXTURES_HOURS
+    def test_too_close_returns_post_match_tier(self) -> None:
+        assert _compute_wake_interval(1.0) == TIER_TOO_CLOSE_HOURS
 
     def test_boundary_exactly_1_5h(self) -> None:
-        # <= 1.5 is the skip zone, returns no-fixtures tier
-        assert _compute_wake_interval(SKIP_THRESHOLD_HOURS) == TIER_NO_FIXTURES_HOURS
+        # <= 1.5 is the skip zone, returns post-match check-in tier
+        assert _compute_wake_interval(SKIP_THRESHOLD_HOURS) == TIER_TOO_CLOSE_HOURS
 
 
 class TestShouldSkipRun:
@@ -193,3 +194,67 @@ class TestMainOrchestration:
         # Two schedule calls: pre-schedule + override
         assert len(schedule_calls) == 2
         assert schedule_calls[1]["reason"] == "agent-requested override"
+
+    @pytest.mark.asyncio
+    async def test_agent_override_in_past_ignored(self) -> None:
+        """Agent-requested wakeup in the past should be ignored."""
+        schedule_calls: list[dict] = []
+
+        async def track_schedule(**kwargs: object) -> None:
+            schedule_calls.append(dict(kwargs))
+
+        past_time = datetime.now(UTC) - timedelta(hours=1)
+
+        with (
+            patch("odds_lambda.jobs.agent_run._get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch("odds_lambda.jobs.agent_run._self_schedule", side_effect=track_schedule),
+            patch(
+                "odds_lambda.jobs.agent_run._run_claude_agent",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "odds_lambda.jobs.agent_run._check_agent_requested_wakeup",
+                new_callable=AsyncMock,
+                return_value=past_time,
+            ),
+            patch("odds_core.config.get_settings"),
+        ):
+            mk.return_value = datetime.now(UTC) + timedelta(hours=30)
+            await main(JobContext(sport="soccer_epl"))
+
+        # Only the pre-schedule call, no override
+        assert len(schedule_calls) == 1
+        assert schedule_calls[0]["reason"] == "pre-schedule (default tier)"
+
+    @pytest.mark.asyncio
+    async def test_agent_override_later_than_default_ignored(self) -> None:
+        """Agent-requested wakeup later than default should not trigger reschedule."""
+        schedule_calls: list[dict] = []
+
+        async def track_schedule(**kwargs: object) -> None:
+            schedule_calls.append(dict(kwargs))
+
+        # Default for 30h away is TIER_RESEARCH_HOURS (12h), so override at +20h is later
+        override_time = datetime.now(UTC) + timedelta(hours=20)
+
+        with (
+            patch("odds_lambda.jobs.agent_run._get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch("odds_lambda.jobs.agent_run._self_schedule", side_effect=track_schedule),
+            patch(
+                "odds_lambda.jobs.agent_run._run_claude_agent",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "odds_lambda.jobs.agent_run._check_agent_requested_wakeup",
+                new_callable=AsyncMock,
+                return_value=override_time,
+            ),
+            patch("odds_core.config.get_settings"),
+        ):
+            mk.return_value = datetime.now(UTC) + timedelta(hours=30)
+            await main(JobContext(sport="soccer_epl"))
+
+        # Only the pre-schedule call, no override
+        assert len(schedule_calls) == 1
