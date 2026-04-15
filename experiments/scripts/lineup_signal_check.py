@@ -879,19 +879,20 @@ async def analyze_closing_tier_target_variance(early_targets: np.ndarray) -> Non
         # Sort by snapshot_time descending — first is the actual close
         snap_event_pairs.sort(key=lambda x: x[0].snapshot_time, reverse=True)
         closing_snapshot, event = snap_event_pairs[0]
-        closing_odds = extract_odds_from_snapshot(closing_snapshot, event_id, market="h2h")
+        closing_odds = extract_odds_from_snapshot(closing_snapshot, event_id, market="1x2")
 
         # Compute target for every snapshot in this event (including close vs itself = 0)
         for snapshot, _ in snap_event_pairs:
             if snapshot.id == closing_snapshot.id:
                 continue  # skip close vs itself
-            snapshot_odds = extract_odds_from_snapshot(snapshot, event_id, market="h2h")
+            snapshot_odds = extract_odds_from_snapshot(snapshot, event_id, market="1x2")
             target = calculate_devigged_bookmaker_target(
                 snapshot_odds,
                 closing_odds,
                 event.home_team,
                 event.away_team,
                 bookmaker_key="bet365",
+                market_key="1x2",
             )
             if target is not None:
                 closing_targets.append(target)

@@ -616,13 +616,13 @@ class TestExtractDeviggedH2hProbs:
         assert extract_devigged_h2h_probs([], "Lakers", "Celtics") is None
 
     def test_three_way_soccer_market(self, timestamp):
-        """3-way soccer h2h returns DeviggedProbs with draw populated."""
+        """3-way soccer 1x2 returns DeviggedProbs with draw populated."""
         odds = [
-            self._make_odds("pinnacle", "Arsenal", -120, timestamp),
-            self._make_odds("pinnacle", "Draw", 250, timestamp),
-            self._make_odds("pinnacle", "Chelsea", 300, timestamp),
+            self._make_odds("pinnacle", "Arsenal", -120, timestamp, market="1x2"),
+            self._make_odds("pinnacle", "Draw", 250, timestamp, market="1x2"),
+            self._make_odds("pinnacle", "Chelsea", 300, timestamp, market="1x2"),
         ]
-        result = extract_devigged_h2h_probs(odds, "Arsenal", "Chelsea")
+        result = extract_devigged_h2h_probs(odds, "Arsenal", "Chelsea", market_key="1x2")
         assert result is not None
         assert result.draw is not None
         assert result.home + result.draw + result.away == pytest.approx(1.0)
@@ -643,18 +643,18 @@ class TestExtractDeviggedH2hProbs:
     def test_three_way_missing_home_returns_none(self, timestamp):
         """3-way market missing home team returns None."""
         odds = [
-            self._make_odds("pinnacle", "Draw", 250, timestamp),
-            self._make_odds("pinnacle", "Chelsea", 300, timestamp),
+            self._make_odds("pinnacle", "Draw", 250, timestamp, market="1x2"),
+            self._make_odds("pinnacle", "Chelsea", 300, timestamp, market="1x2"),
         ]
-        assert extract_devigged_h2h_probs(odds, "Arsenal", "Chelsea") is None
+        assert extract_devigged_h2h_probs(odds, "Arsenal", "Chelsea", market_key="1x2") is None
 
     def test_three_way_missing_away_returns_none(self, timestamp):
         """3-way market missing away team returns None."""
         odds = [
-            self._make_odds("pinnacle", "Arsenal", -120, timestamp),
-            self._make_odds("pinnacle", "Draw", 250, timestamp),
+            self._make_odds("pinnacle", "Arsenal", -120, timestamp, market="1x2"),
+            self._make_odds("pinnacle", "Draw", 250, timestamp, market="1x2"),
         ]
-        assert extract_devigged_h2h_probs(odds, "Arsenal", "Chelsea") is None
+        assert extract_devigged_h2h_probs(odds, "Arsenal", "Chelsea", market_key="1x2") is None
 
 
 class TestCalculateDeviggedBookmakerTarget:
@@ -664,12 +664,14 @@ class TestCalculateDeviggedBookmakerTarget:
     def timestamp(self):
         return datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
 
-    def _make_odds(self, outcome: str, price: int, timestamp: datetime) -> Odds:
+    def _make_odds(
+        self, outcome: str, price: int, timestamp: datetime, market: str = "h2h"
+    ) -> Odds:
         return Odds(
             event_id="test",
             bookmaker_key="pinnacle",
             bookmaker_title="Pinnacle",
-            market_key="h2h",
+            market_key=market,
             outcome_name=outcome,
             price=price,
             point=None,
@@ -749,41 +751,21 @@ class TestCalculateDeviggedBookmakerTarget:
     def test_three_way_target_uses_home_prob(self, timestamp):
         """3-way market target is close.home - snapshot.home."""
         snapshot_odds = [
-            self._make_odds("Arsenal", -120, timestamp),
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="h2h",
-                outcome_name="Draw",
-                price=250,
-                point=None,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-            self._make_odds("Chelsea", 300, timestamp),
+            self._make_odds("Arsenal", -120, timestamp, market="1x2"),
+            self._make_odds("Draw", 250, timestamp, market="1x2"),
+            self._make_odds("Chelsea", 300, timestamp, market="1x2"),
         ]
         closing_odds = [
-            self._make_odds("Arsenal", -150, timestamp),
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="h2h",
-                outcome_name="Draw",
-                price=280,
-                point=None,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-            self._make_odds("Chelsea", 350, timestamp),
+            self._make_odds("Arsenal", -150, timestamp, market="1x2"),
+            self._make_odds("Draw", 280, timestamp, market="1x2"),
+            self._make_odds("Chelsea", 350, timestamp, market="1x2"),
         ]
         result = calculate_devigged_bookmaker_target(
-            snapshot_odds, closing_odds, "Arsenal", "Chelsea"
+            snapshot_odds, closing_odds, "Arsenal", "Chelsea", market_key="1x2"
         )
         assert result is not None
-        snap = extract_devigged_h2h_probs(snapshot_odds, "Arsenal", "Chelsea")
-        close = extract_devigged_h2h_probs(closing_odds, "Arsenal", "Chelsea")
+        snap = extract_devigged_h2h_probs(snapshot_odds, "Arsenal", "Chelsea", market_key="1x2")
+        close = extract_devigged_h2h_probs(closing_odds, "Arsenal", "Chelsea", market_key="1x2")
         assert snap is not None and close is not None
         assert snap.draw is not None
         assert close.draw is not None
