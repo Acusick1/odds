@@ -150,6 +150,65 @@ async def _check_agent_requested_wakeup(sport_key: str) -> datetime | None:
     return requested_time
 
 
+async def schedule_next(sport: str) -> tuple[datetime, float | None]:
+    """Compute and schedule the next agent wake-up for a sport.
+
+    Queries the DB for the next kickoff, computes the wake interval from
+    proximity tiers, and schedules via self_schedule. Returns a tuple of
+    (scheduled_next_time, hours_until_ko).
+
+    This is the crash-safe pre-scheduling step — called both during bootstrap
+    (without launching the agent) and at the start of a full agent run.
+    """
+    settings = get_settings()
+    compound_job_name = make_compound_job_name("agent-run", sport)
+
+    # --- Resolve overnight window for this sport ---
+    if sport not in OVERNIGHT_WINDOWS:
+        raise ValueError(
+            f"No overnight window configured for {sport} — add it to OVERNIGHT_WINDOWS"
+        )
+    overnight_start_utc, overnight_resume_utc = OVERNIGHT_WINDOWS[sport]
+
+    # --- Determine default wake interval from fixture proximity ---
+    hours_until_ko: float | None = None
+    try:
+        next_kickoff = await get_next_kickoff(sport)
+        if next_kickoff is not None:
+            hours_until_ko = (next_kickoff - datetime.now(UTC)).total_seconds() / 3600
+        logger.info(
+            "agent_proximity",
+            sport=sport,
+            next_kickoff=next_kickoff.isoformat() if next_kickoff else None,
+            hours_until_ko=round(hours_until_ko, 2) if hours_until_ko is not None else None,
+        )
+    except Exception as e:
+        logger.warning("agent_kickoff_query_failed", error=str(e), exc_info=True)
+
+    default_interval = _compute_wake_interval(hours_until_ko)
+
+    # --- Schedule next wake-up ---
+    default_next_time = apply_overnight_skip(
+        datetime.now(UTC) + timedelta(hours=default_interval),
+        overnight_start_utc=overnight_start_utc,
+        overnight_resume_utc=overnight_resume_utc,
+    )
+    try:
+        await self_schedule(
+            job_name=compound_job_name,
+            next_time=default_next_time,
+            dry_run=settings.scheduler.dry_run,
+            sport=sport,
+            interval_hours=default_interval,
+            reason="pre-schedule (default tier)",
+        )
+    except Exception as e:
+        logger.error("agent_run_preschedule_failed", error=str(e), exc_info=True)
+        raise
+
+    return default_next_time, hours_until_ko
+
+
 async def main(ctx: JobContext) -> None:
     """Orchestrate agent wake-up: schedule, run, check override."""
     settings = get_settings()
@@ -168,41 +227,9 @@ async def main(ctx: JobContext) -> None:
         )
     overnight_start_utc, overnight_resume_utc = OVERNIGHT_WINDOWS[sport]
 
-    # --- Determine default wake interval from fixture proximity ---
-    hours_until_ko: float | None = None
-    try:
-        next_kickoff = await get_next_kickoff(sport)
-        if next_kickoff is not None:
-            hours_until_ko = (next_kickoff - datetime.now(UTC)).total_seconds() / 3600
-        logger.info(
-            "agent_proximity",
-            next_kickoff=next_kickoff.isoformat() if next_kickoff else None,
-            hours_until_ko=round(hours_until_ko, 2) if hours_until_ko is not None else None,
-        )
-    except Exception as e:
-        logger.warning("agent_kickoff_query_failed", error=str(e), exc_info=True)
-
-    default_interval = _compute_wake_interval(hours_until_ko)
-    skip_run = _should_skip_run(hours_until_ko)
-
     # --- Pre-schedule before work (crash-safe) ---
-    default_next_time = apply_overnight_skip(
-        datetime.now(UTC) + timedelta(hours=default_interval),
-        overnight_start_utc=overnight_start_utc,
-        overnight_resume_utc=overnight_resume_utc,
-    )
-    try:
-        await self_schedule(
-            job_name=compound_job_name,
-            next_time=default_next_time,
-            dry_run=settings.scheduler.dry_run,
-            sport=sport,
-            interval_hours=default_interval,
-            reason="pre-schedule (default tier)",
-        )
-    except Exception as e:
-        logger.error("agent_run_preschedule_failed", error=str(e), exc_info=True)
-        raise
+    default_next_time, hours_until_ko = await schedule_next(sport)
+    skip_run = _should_skip_run(hours_until_ko)
 
     # --- Run the agent (unless too close to KO) ---
     if skip_run:

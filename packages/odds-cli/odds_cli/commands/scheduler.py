@@ -58,9 +58,10 @@ def start_local():
         # Bootstrap by running initial fetch to start self-scheduling
         console.print("[green]Running initial fetch to bootstrap scheduler...[/green]")
 
+        from odds_lambda.scheduling.jobs import JobContext
+
         try:
             from odds_lambda.jobs import fetch_odds
-            from odds_lambda.scheduling.jobs import JobContext
 
             await fetch_odds.main(JobContext())
             console.print("[green]  fetch-odds bootstrapped[/green]")
@@ -73,9 +74,10 @@ def start_local():
         # Bootstrap agent jobs for each configured sport
         from odds_lambda.jobs import agent_run
 
-        for sport_key, suffix in [("soccer_epl", "epl"), ("baseball_mlb", "mlb")]:
+        for sport_key in app_settings.data_collection.sports:
+            suffix = sport_key.split("_")[-1]
             try:
-                await agent_run.main(JobContext(sport=sport_key))
+                await agent_run.schedule_next(sport_key)
                 console.print(f"[green]  agent-run-{suffix} bootstrapped[/green]")
             except Exception as e:
                 console.print(f"[yellow]  agent-run-{suffix} bootstrap failed: {e}[/yellow]")
