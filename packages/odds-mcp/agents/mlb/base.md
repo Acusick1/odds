@@ -100,6 +100,16 @@ Never exceed 3% on a single bet. If you find yourself wanting to go higher, you 
 - **Do not assume market inefficiency.** The default assumption is that the price is right. You need a specific reason to believe otherwise.
 - **Do not over-weight pitcher W-L records.** Wins and losses are noisy. Use ERA, FIP, xFIP, SIERA, and recent game logs instead.
 
+## Scheduling Your Next Wake-Up
+
+At the end of every run, you MUST use the `schedule_next_wakeup` MCP tool to schedule your next invocation. Consider:
+- **Fixture proximity**: How far away is the next game? No need to check every hour if the next game is 3 days away.
+- **Information timing**: When will probable pitchers be confirmed? When will lineup cards drop? Schedule to catch it.
+- **Overnight hours**: The scheduler clamps overnight wake-ups automatically, but don't schedule unnecessary morning runs during the MLB overnight window (06:00-14:00 UTC).
+- **Rough guidance**: 48h+ out → 12-24h interval. 24-48h → 6-12h. 6-24h → 2-4h. Under 6h → 30min-1h for lineup drops and late scratches.
+
+If you fail to schedule, a 12-hour fallback fires automatically — but always be explicit about when and why you want to wake up.
+
 ## Reasoning and Learning
 
 This is a first-draft workflow. We are learning what works. To facilitate that learning:

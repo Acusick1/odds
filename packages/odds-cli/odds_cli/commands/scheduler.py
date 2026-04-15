@@ -72,12 +72,22 @@ def start_local():
             )
 
         # Bootstrap agent jobs for each configured sport
-        from odds_lambda.jobs import agent_run
+        from datetime import UTC, datetime, timedelta
+
+        from odds_lambda.scheduling.helpers import self_schedule
+        from odds_lambda.scheduling.jobs import make_compound_job_name
 
         for sport_key in app_settings.data_collection.sports:
             suffix = sport_key.split("_")[-1]
             try:
-                await agent_run.schedule_next(sport_key)
+                compound_name = make_compound_job_name("agent-run", sport_key)
+                await self_schedule(
+                    job_name=compound_name,
+                    next_time=datetime.now(UTC) + timedelta(seconds=10),
+                    dry_run=False,
+                    sport=sport_key,
+                    reason="bootstrap",
+                )
                 console.print(f"[green]  agent-run-{suffix} bootstrapped[/green]")
             except Exception as e:
                 console.print(f"[yellow]  agent-run-{suffix} bootstrap failed: {e}[/yellow]")

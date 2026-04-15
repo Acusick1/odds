@@ -951,7 +951,7 @@ async def schedule_next_wakeup(
 
     Writes an upsert to the agent_wakeups table (one active row per sport).
     The agent_run job module reads this after the agent subprocess exits and
-    reschedules if the requested time is sooner than the default.
+    overrides the fallback schedule with the requested time.
 
     Args:
         sport: Sport key (e.g. "soccer_epl", "baseball_mlb").

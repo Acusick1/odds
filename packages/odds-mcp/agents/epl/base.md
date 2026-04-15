@@ -88,6 +88,16 @@ Never exceed 3% on a single bet. If you find yourself wanting to go higher, you 
 - **Do not research endlessly.** If you cannot find an edge with targeted searches, there probably is not one.
 - **Do not assume market inefficiency.** The default assumption is that the price is right. You need a specific reason to believe otherwise.
 
+## Scheduling Your Next Wake-Up
+
+At the end of every run, you MUST use the `schedule_next_wakeup` MCP tool to schedule your next invocation. Consider:
+- **Fixture proximity**: How far away is the next match? No need to check every hour if the next match is 3 days away.
+- **Information timing**: When will lineups drop? When will key news emerge? Schedule to catch it.
+- **Overnight hours**: The scheduler clamps overnight wake-ups automatically, but don't schedule unnecessary 3am runs.
+- **Rough guidance**: 48h+ out → 12-24h interval. 24-48h → 6-12h. 6-24h → 2-4h. Under 6h → 30min-1h for lineup drops.
+
+If you fail to schedule, a 12-hour fallback fires automatically — but always be explicit about when and why you want to wake up.
+
 ## Reasoning and Learning
 
 This is a first-draft workflow. We are learning what works. To facilitate that learning:
