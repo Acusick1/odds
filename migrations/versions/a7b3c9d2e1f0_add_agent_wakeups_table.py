@@ -25,17 +25,11 @@ def upgrade() -> None:
         sa.Column("requested_time", sa.DateTime(timezone=True), nullable=False),
         sa.Column("reason", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("sport_key", name="uq_agent_wakeup_sport_key"),
-    )
-    op.create_index(
-        op.f("ix_agent_wakeups_sport_key"),
-        "agent_wakeups",
-        ["sport_key"],
-        unique=False,
     )
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_agent_wakeups_sport_key"), table_name="agent_wakeups")
     op.drop_table("agent_wakeups")

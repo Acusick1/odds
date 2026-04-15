@@ -28,6 +28,7 @@ from odds_lambda.paper_trading import (
     place_trade,
     settle_trades,
 )
+from odds_lambda.scheduling.backends import BackendUnavailableError, get_scheduler_backend
 from odds_lambda.storage.readers import OddsReader
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -906,11 +907,6 @@ async def get_scheduled_jobs(
         Dict with list of scheduled jobs or an informative message.
     """
     try:
-        from odds_lambda.scheduling.backends import (
-            BackendUnavailableError,
-            get_scheduler_backend,
-        )
-
         backend = get_scheduler_backend()
         jobs = await backend.get_scheduled_jobs()
     except BackendUnavailableError as e:
@@ -965,8 +961,9 @@ async def schedule_next_wakeup(
     Returns:
         Dict confirming the scheduled wake-up with the requested UTC time.
     """
+    now = datetime.now(UTC)
     delay_hours = max(0.5, min(delay_hours, 168.0))
-    requested_time = datetime.now(UTC) + timedelta(hours=delay_hours)
+    requested_time = now + timedelta(hours=delay_hours)
 
     async with async_session_maker() as session:
         stmt = (
@@ -975,14 +972,14 @@ async def schedule_next_wakeup(
                 sport_key=sport,
                 requested_time=requested_time,
                 reason=reason,
-                created_at=datetime.now(UTC),
+                created_at=now,
             )
             .on_conflict_do_update(
                 constraint="uq_agent_wakeup_sport_key",
                 set_={
                     "requested_time": requested_time,
                     "reason": reason,
-                    "created_at": datetime.now(UTC),
+                    "created_at": now,
                 },
             )
         )

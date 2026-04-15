@@ -18,7 +18,7 @@ class AgentWakeup(SQLModel, table=True):
     __tablename__ = "agent_wakeups"
 
     id: int | None = Field(default=None, primary_key=True)
-    sport_key: str = Field(index=True)
+    sport_key: str = Field()
     requested_time: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
@@ -26,6 +26,10 @@ class AgentWakeup(SQLModel, table=True):
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False),
         default_factory=utc_now,
+    )
+    consumed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
     )
 
     __table_args__ = (UniqueConstraint("sport_key", name="uq_agent_wakeup_sport_key"),)
