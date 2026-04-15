@@ -348,7 +348,7 @@ class TestSportResolution:
         from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
 
         spec = _LEAGUE_SPEC_BY_SPORT["soccer_epl"]
-        assert _db_market_for_spec(spec) == "h2h"
+        assert _db_market_for_spec(spec) == "1x2"
 
     def test_db_market_mlb(self) -> None:
         from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT

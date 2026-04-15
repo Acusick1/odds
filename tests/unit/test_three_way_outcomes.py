@@ -167,7 +167,7 @@ class TestBetResultThreeWay:
     def test_draw_bet_wins_in_three_way(self, engine, football_draw_event):
         opp = BetOpportunity(
             event_id="football_draw_1",
-            market="h2h",
+            market="1x2",
             outcome="Draw",
             bookmaker="bet365",
             odds=250,
@@ -184,7 +184,7 @@ class TestBetResultThreeWay:
     def test_team_bet_loses_on_draw_in_three_way(self, engine, football_draw_event):
         opp = BetOpportunity(
             event_id="football_draw_1",
-            market="h2h",
+            market="1x2",
             outcome="Liverpool",
             bookmaker="bet365",
             odds=-120,
@@ -251,16 +251,16 @@ class TestFlatBettingDrawPattern:
     def three_way_odds(self) -> list[Odds]:
         eid = "football_draw_1"
         return [
-            _make_odds(eid, "bet365", "h2h", "Liverpool", -150),
-            _make_odds(eid, "bet365", "h2h", "Manchester City", 200),
-            _make_odds(eid, "bet365", "h2h", "Draw", 250),
+            _make_odds(eid, "bet365", "1x2", "Liverpool", -150),
+            _make_odds(eid, "bet365", "1x2", "Manchester City", 200),
+            _make_odds(eid, "bet365", "1x2", "Draw", 250),
         ]
 
     @pytest.mark.asyncio
     async def test_draw_pattern_selects_draw_odds(
         self, football_draw_event, three_way_odds, backtest_config
     ):
-        strategy = FlatBettingStrategy(market="h2h", outcome_pattern="draw", bookmaker="bet365")
+        strategy = FlatBettingStrategy(market="1x2", outcome_pattern="draw", bookmaker="bet365")
         opps = await strategy.evaluate_opportunity(
             football_draw_event, three_way_odds, backtest_config
         )
@@ -273,10 +273,10 @@ class TestFlatBettingDrawPattern:
         self, football_draw_event, backtest_config
     ):
         two_way_odds = [
-            _make_odds("football_draw_1", "bet365", "h2h", "Liverpool", -150),
-            _make_odds("football_draw_1", "bet365", "h2h", "Manchester City", 200),
+            _make_odds("football_draw_1", "bet365", "1x2", "Liverpool", -150),
+            _make_odds("football_draw_1", "bet365", "1x2", "Manchester City", 200),
         ]
-        strategy = FlatBettingStrategy(market="h2h", outcome_pattern="draw", bookmaker="bet365")
+        strategy = FlatBettingStrategy(market="1x2", outcome_pattern="draw", bookmaker="bet365")
         opps = await strategy.evaluate_opportunity(
             football_draw_event, two_way_odds, backtest_config
         )
@@ -292,13 +292,13 @@ class TestBasicEVThreeWay:
         eid = "football_home_1"
         return [
             # Sharp book (pinnacle)
-            _make_odds(eid, "pinnacle", "h2h", "Liverpool", -130),
-            _make_odds(eid, "pinnacle", "h2h", "Manchester City", 200),
-            _make_odds(eid, "pinnacle", "h2h", "Draw", 260),
+            _make_odds(eid, "pinnacle", "1x2", "Liverpool", -130),
+            _make_odds(eid, "pinnacle", "1x2", "Manchester City", 200),
+            _make_odds(eid, "pinnacle", "1x2", "Draw", 260),
             # Retail book (bet365) with inflated draw odds
-            _make_odds(eid, "bet365", "h2h", "Liverpool", -125),
-            _make_odds(eid, "bet365", "h2h", "Manchester City", 210),
-            _make_odds(eid, "bet365", "h2h", "Draw", 350),
+            _make_odds(eid, "bet365", "1x2", "Liverpool", -125),
+            _make_odds(eid, "bet365", "1x2", "Manchester City", 210),
+            _make_odds(eid, "bet365", "1x2", "Draw", 350),
         ]
 
     @pytest.mark.asyncio
@@ -309,7 +309,7 @@ class TestBasicEVThreeWay:
             sharp_book="pinnacle",
             retail_books=["bet365"],
             min_ev_threshold=0.01,
-            markets=["h2h"],
+            markets=["1x2"],
         )
         opps = await strategy.evaluate_opportunity(
             football_home_win_event, three_way_sharp_and_retail, backtest_config
@@ -330,14 +330,14 @@ class TestArbitrageThreeWay:
         eid = "football_home_1"
         return [
             # Best home odds at bookA
-            _make_odds(eid, "bookA", "h2h", "Liverpool", 300),
-            _make_odds(eid, "bookB", "h2h", "Liverpool", 250),
+            _make_odds(eid, "bookA", "1x2", "Liverpool", 300),
+            _make_odds(eid, "bookB", "1x2", "Liverpool", 250),
             # Best away odds at bookB
-            _make_odds(eid, "bookA", "h2h", "Manchester City", 350),
-            _make_odds(eid, "bookB", "h2h", "Manchester City", 400),
+            _make_odds(eid, "bookA", "1x2", "Manchester City", 350),
+            _make_odds(eid, "bookB", "1x2", "Manchester City", 400),
             # Best draw odds at bookA
-            _make_odds(eid, "bookA", "h2h", "Draw", 500),
-            _make_odds(eid, "bookB", "h2h", "Draw", 350),
+            _make_odds(eid, "bookA", "1x2", "Draw", 500),
+            _make_odds(eid, "bookB", "1x2", "Draw", 350),
         ]
 
     @pytest.fixture
@@ -363,7 +363,7 @@ class TestArbitrageThreeWay:
         opps = await strategy.evaluate_opportunity(
             football_home_win_event, three_way_arb_odds, backtest_config
         )
-        h2h_opps = [o for o in opps if o.market == "h2h"]
+        h2h_opps = [o for o in opps if o.market == "1x2"]
         outcomes = {o.outcome for o in h2h_opps}
         assert outcomes == {"Liverpool", "Manchester City", "Draw"}
         assert all("3-way arb" in o.rationale for o in h2h_opps)
@@ -395,7 +395,7 @@ class TestArbitrageThreeWay:
         opps = await strategy.evaluate_opportunity(
             football_home_win_event, three_way_arb_odds, backtest_config
         )
-        h2h_opps = {o.outcome: o for o in opps if o.market == "h2h"}
+        h2h_opps = {o.outcome: o for o in opps if o.market == "1x2"}
         assert h2h_opps["Liverpool"].odds == 300  # bookA best
         assert h2h_opps["Liverpool"].bookmaker == "bookA"
         assert h2h_opps["Manchester City"].odds == 400  # bookB best

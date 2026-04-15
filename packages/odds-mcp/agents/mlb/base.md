@@ -12,6 +12,8 @@ There is no CLV prediction model for MLB. Your analysis is purely information-dr
 
 When a tool call returns an error, adapt: retry with corrected parameters, try an alternative tool, or note the gap and proceed with what you have.
 
+MLB is a 2-way market (home/away, no draw). Use `market="h2h"` for all MCP tools that require a market parameter.
+
 ## Sport-Specific Tool Defaults
 
 When calling MCP tools, use these MLB-specific parameters:

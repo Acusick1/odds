@@ -56,8 +56,10 @@ def _db_market_for_spec(spec: LeagueSpec) -> str:
     Maps OddsPortal market names to the pipeline's canonical market key used
     in ``raw_data["bookmakers"][*]["markets"][*]["key"]``.
     """
-    if spec.primary_market in ("home_away", "1x2"):
+    if spec.primary_market == "home_away":
         return "h2h"
+    if spec.primary_market == "1x2":
+        return "1x2"
     raise ValueError(f"Unrecognized primary_market: {spec.primary_market!r}")
 
 

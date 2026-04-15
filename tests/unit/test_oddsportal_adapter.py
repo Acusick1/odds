@@ -182,10 +182,10 @@ class TestConvert1x2Match:
         bet365 = next(b for b in result["bookmakers"] if b["key"] == "bet365")
         assert "betfair_matched" not in bet365
 
-    def test_market_key_is_h2h(self, sample_1x2_bookmakers: list[dict]) -> None:
+    def test_market_key_is_1x2(self, sample_1x2_bookmakers: list[dict]) -> None:
         result = _convert_1x2_match(sample_1x2_bookmakers, "Leeds", "Sunderland")
         assert result is not None
-        assert result["bookmakers"][0]["markets"][0]["key"] == "h2h"
+        assert result["bookmakers"][0]["markets"][0]["key"] == "1x2"
 
     def test_source_tag(self, sample_1x2_bookmakers: list[dict]) -> None:
         result = _convert_1x2_match(sample_1x2_bookmakers, "Leeds", "Sunderland")

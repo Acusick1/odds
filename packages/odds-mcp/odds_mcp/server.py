@@ -32,6 +32,8 @@ from sqlalchemy import func, select
 
 logger = structlog.get_logger()
 
+MarketKey = Literal["h2h", "1x2", "totals", "spreads"]
+
 mcp = FastMCP(
     "odds-mcp",
     instructions=(
@@ -171,12 +173,15 @@ async def get_upcoming_fixtures(
 @mcp.tool()
 async def get_current_odds(
     event_id: str,
+    market: MarketKey,
     include_raw_data: bool = False,
 ) -> dict[str, Any]:
     """Get the latest odds snapshot for an event, showing current bookmaker prices.
 
     Args:
         event_id: Event identifier.
+        market: Market type — "h2h" (2-way moneyline), "1x2" (3-way with
+            draw), "totals", or "spreads".
         include_raw_data: If True, also include the full raw_data JSON blob.
 
     Returns:
@@ -188,7 +193,7 @@ async def get_current_odds(
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        snapshot = await reader.get_latest_snapshot(event_id, market="h2h")
+        snapshot = await reader.get_latest_snapshot(event_id, market=market)
         if snapshot is None:
             return {
                 "event": _event_to_dict(event),
@@ -196,7 +201,7 @@ async def get_current_odds(
                 "message": "No odds snapshots available for this event",
             }
 
-    odds = extract_odds_from_snapshot(snapshot, event_id, market="h2h")
+    odds = extract_odds_from_snapshot(snapshot, event_id, market=market)
     return {
         "event": _event_to_dict(event),
         "snapshot": _snapshot_to_dict(
@@ -206,7 +211,7 @@ async def get_current_odds(
 
 
 @mcp.tool()
-async def get_odds_history(event_id: str) -> dict[str, Any]:
+async def get_odds_history(event_id: str, market: MarketKey) -> dict[str, Any]:
     """Get the full odds movement timeline for an event (all snapshots).
 
     Returns structured bookmaker odds per snapshot instead of raw JSON blobs
@@ -214,6 +219,7 @@ async def get_odds_history(event_id: str) -> dict[str, Any]:
 
     Args:
         event_id: Event identifier.
+        market: Market type — "h2h", "1x2", "totals", or "spreads".
 
     Returns:
         Dict with event info and chronologically ordered list of snapshots.
@@ -228,7 +234,7 @@ async def get_odds_history(event_id: str) -> dict[str, Any]:
 
     serialized = []
     for s in snapshots:
-        odds = extract_odds_from_snapshot(s, event_id, market="h2h")
+        odds = extract_odds_from_snapshot(s, event_id, market=market)
         serialized.append(_snapshot_to_dict(s, extracted_odds=odds))
 
     return {
@@ -410,6 +416,7 @@ async def get_predictions(
 @mcp.tool()
 async def get_event_features(
     event_id: str,
+    market: MarketKey,
     outcome: Literal["home", "away"] = "home",
     sharp_bookmakers: list[str] | None = None,
     retail_bookmakers: list[str] | None = None,
@@ -423,6 +430,7 @@ async def get_event_features(
 
     Args:
         event_id: Event identifier.
+        market: Market type — "h2h", "1x2", "totals", or "spreads".
         outcome: Which outcome to extract features for ("home" or "away").
         sharp_bookmakers: Sharp bookmaker keys (default: ["pinnacle", "betfair_exchange"]).
         retail_bookmakers: Retail bookmaker keys (default: ["bet365", "betway", "betfred"]).
@@ -436,7 +444,7 @@ async def get_event_features(
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        snapshot = await reader.get_latest_snapshot(event_id, market="h2h")
+        snapshot = await reader.get_latest_snapshot(event_id, market=market)
         if snapshot is None:
             return {
                 "event": _event_to_dict(event),
@@ -450,6 +458,7 @@ async def get_event_features(
         features = _extract_features_for_event(
             event,
             snapshot,
+            market=market,
             outcome_name=outcome_name,
             sharp_bookmakers=sharp_bookmakers or _DEFAULT_SHARP_BOOKMAKERS,
             retail_bookmakers=retail_bookmakers or _DEFAULT_RETAIL_BOOKMAKERS,
@@ -473,14 +482,15 @@ def _extract_features_for_event(
     event: Event,
     snapshot: OddsSnapshot,
     *,
+    market: MarketKey,
     outcome_name: str,
     sharp_bookmakers: list[str],
     retail_bookmakers: list[str],
 ) -> dict[str, float | None]:
     """Extract feature dict from an event and its latest snapshot."""
-    odds = extract_odds_from_snapshot(snapshot, event.id, market="h2h")
+    odds = extract_odds_from_snapshot(snapshot, event.id, market=market)
     if not odds:
-        return {"error": "No h2h odds data in snapshot"}
+        return {"error": f"No {market} odds data in snapshot"}
 
     backtest_event = BacktestEvent(
         id=event.id,
@@ -500,7 +510,7 @@ def _extract_features_for_event(
         event=backtest_event,
         odds_data=odds,
         outcome=outcome_name,
-        market="h2h",
+        market=market,
     )
 
     feature_names = extractor.get_feature_names()
@@ -675,6 +685,7 @@ def _snapshot_sharp_prices(
 @mcp.tool()
 async def save_match_brief(
     event_id: str,
+    market: MarketKey,
     brief_text: str,
     checkpoint: Literal["context", "decision"],
 ) -> dict[str, Any]:
@@ -685,6 +696,7 @@ async def save_match_brief(
 
     Args:
         event_id: Event identifier.
+        market: Market type — "h2h", "1x2", "totals", or "spreads".
         brief_text: Freeform brief content (structure controlled by agent prompt).
         checkpoint: Workflow checkpoint: "context" (day before) or "decision" (KO-90min).
 
@@ -699,9 +711,9 @@ async def save_match_brief(
 
         # Snapshot sharp prices from the latest odds
         sharp_prices: SharpPriceMap | None = None
-        snapshot = await reader.get_latest_snapshot(event_id, market="h2h")
+        snapshot = await reader.get_latest_snapshot(event_id, market=market)
         if snapshot is not None:
-            odds = extract_odds_from_snapshot(snapshot, event_id, market="h2h")
+            odds = extract_odds_from_snapshot(snapshot, event_id, market=market)
             if odds:
                 sharp_prices = _snapshot_sharp_prices(odds, _DEFAULT_SHARP_BOOKMAKERS)
 
@@ -775,6 +787,7 @@ async def get_match_brief(
 @mcp.tool()
 async def get_sharp_soft_spread(
     event_id: str,
+    market: MarketKey,
     sharp_bookmakers: list[str] | None = None,
     retail_bookmakers: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -785,6 +798,7 @@ async def get_sharp_soft_spread(
 
     Args:
         event_id: Event identifier.
+        market: Market type — "h2h", "1x2", "totals", or "spreads".
         sharp_bookmakers: Sharp bookmaker keys (default: ["pinnacle", "betfair_exchange"]).
         retail_bookmakers: Retail bookmaker keys (default: ["bet365", "betway", "betfred"]).
 
@@ -800,7 +814,7 @@ async def get_sharp_soft_spread(
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        snapshot = await reader.get_latest_snapshot(event_id, market="h2h")
+        snapshot = await reader.get_latest_snapshot(event_id, market=market)
         if snapshot is None:
             return {
                 "event": _event_to_dict(event),
@@ -809,7 +823,7 @@ async def get_sharp_soft_spread(
             }
 
         # Extract odds and snapshot metadata inside session while ORM objects are live
-        odds = extract_odds_from_snapshot(snapshot, event_id, market="h2h")
+        odds = extract_odds_from_snapshot(snapshot, event_id, market=market)
         snapshot_time_iso = snapshot.snapshot_time.isoformat()
         event_dict = _event_to_dict(event)
 
@@ -817,7 +831,7 @@ async def get_sharp_soft_spread(
         return {
             "event": event_dict,
             "spread": None,
-            "message": "No h2h odds in latest snapshot",
+            "message": f"No {market} odds in latest snapshot",
         }
 
     # Reuse shared sharp price extraction

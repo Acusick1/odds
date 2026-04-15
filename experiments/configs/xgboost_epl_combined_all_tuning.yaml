@@ -59,7 +59,7 @@ training:
     - betfred
     - bwin
     markets:
-    - h2h
+    - 1x2
     outcome: home
     closing_tier: closing
     closing_source_priority:

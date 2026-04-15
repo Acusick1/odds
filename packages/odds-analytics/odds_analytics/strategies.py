@@ -278,7 +278,7 @@ class ArbitrageStrategy(BettingStrategy):
         bookmakers = self.params["bookmakers"]
 
         # Check each market type
-        for market in ["h2h", "spreads", "totals"]:
+        for market in ["h2h", "1x2", "spreads", "totals"]:
             market_odds = [
                 o for o in odds_snapshot if o.market_key == market and o.bookmaker_key in bookmakers
             ]
@@ -286,7 +286,7 @@ class ArbitrageStrategy(BettingStrategy):
             if not market_odds:
                 continue
 
-            if market == "h2h":
+            if market in ("h2h", "1x2"):
                 home_odds = [o for o in market_odds if o.outcome_name == event.home_team]
                 away_odds = [o for o in market_odds if o.outcome_name == event.away_team]
                 draw_odds = [o for o in market_odds if o.outcome_name.lower() == "draw"]

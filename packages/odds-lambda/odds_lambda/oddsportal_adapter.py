@@ -198,7 +198,7 @@ def _convert_1x2_match(
                 liquidity["away"] = away_liq
 
         bookmakers.append(
-            _build_bookmaker_entry(bk_key, bk_name, "h2h", outcomes, betfair_matched=liquidity)
+            _build_bookmaker_entry(bk_key, bk_name, "1x2", outcomes, betfair_matched=liquidity)
         )
 
     if not bookmakers:

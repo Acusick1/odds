@@ -12,6 +12,8 @@ The XGBoost CLV model is a supplementary signal. Its strongest feature is the sh
 
 When a tool call returns an error, adapt: retry with corrected parameters, try an alternative tool, or note the gap and proceed with what you have.
 
+EPL is a 3-way market (home/draw/away). Use `market="1x2"` for all MCP tools that require a market parameter.
+
 ## Data Sources
 
 **OddsPortal** is the active odds source. OddsPortal scrapes can create duplicate event IDs for the same match (one from the upcoming page, one from the live/results page). When you see duplicates, always prefer the `op_live_*` event ID — these have UK bookmakers (bet365, betway, betfred) and sharp references (Betfair Exchange). Non-OP events will have missing sharp data.
