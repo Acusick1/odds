@@ -260,6 +260,85 @@ class TestLocalSchedulerBackend:
                     pytest.fail("Job did not execute within timeout")
 
     @pytest.mark.asyncio
+    async def test_schedule_compound_job_name(self):
+        """Test that compound job names (e.g. fetch-oddsportal-epl) resolve correctly.
+
+        The compound name should be resolved to a base name for get_job_function,
+        and the sport should be extracted into JobContext.
+        """
+        captured_ctx: list[JobContext] = []
+
+        async def capturing_job(ctx: JobContext) -> None:
+            captured_ctx.append(ctx)
+
+        with (
+            patch(
+                "odds_lambda.scheduling.jobs.resolve_job_name",
+                return_value=("fetch-oddsportal", "soccer_epl"),
+            ) as mock_resolve,
+            patch(
+                "odds_lambda.scheduling.jobs.get_job_function",
+                return_value=capturing_job,
+            ) as mock_get_job,
+        ):
+            async with LocalSchedulerBackend() as backend:
+                next_time = datetime.now(UTC) + timedelta(milliseconds=100)
+
+                await backend.schedule_next_execution(
+                    job_name="fetch-oddsportal-epl", next_time=next_time
+                )
+
+                # resolve_job_name should be called with the compound name
+                mock_resolve.assert_called_once_with("fetch-oddsportal-epl")
+
+                # get_job_function should receive the base name, not compound
+                mock_get_job.assert_called_once_with("fetch-oddsportal")
+
+                # Verify job was scheduled with compound name as ID
+                jobs = await backend.get_scheduled_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].job_name == "fetch-oddsportal-epl"
+
+                # Wait for job to execute and verify context has sport
+                try:
+                    await asyncio.wait_for(
+                        asyncio.sleep(0.5),
+                        timeout=2.0,
+                    )
+                except TimeoutError:
+                    pass
+
+                assert len(captured_ctx) == 1
+                assert captured_ctx[0].sport == "soccer_epl"
+
+    @pytest.mark.asyncio
+    async def test_schedule_non_compound_job_name(self):
+        """Test that non-compound job names still work correctly."""
+        mock_job = AsyncMock()
+
+        with (
+            patch(
+                "odds_lambda.scheduling.jobs.resolve_job_name",
+                return_value=("check-health", None),
+            ),
+            patch(
+                "odds_lambda.scheduling.jobs.get_job_function",
+                return_value=mock_job,
+            ) as mock_get_job,
+        ):
+            async with LocalSchedulerBackend() as backend:
+                next_time = datetime.now(UTC) + timedelta(hours=1)
+
+                await backend.schedule_next_execution(job_name="check-health", next_time=next_time)
+
+                # get_job_function should receive the same name
+                mock_get_job.assert_called_once_with("check-health")
+
+                jobs = await backend.get_scheduled_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].job_name == "check-health"
+
+    @pytest.mark.asyncio
     async def test_multiple_jobs_execute_independently(self):
         """Test that multiple jobs execute independently."""
         job1_executed = asyncio.Event()
