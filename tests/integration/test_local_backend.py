@@ -267,9 +267,11 @@ class TestLocalSchedulerBackend:
         Only get_job_function is mocked (to avoid importing real job modules).
         """
         captured_ctx: list[JobContext] = []
+        executed = asyncio.Event()
 
         async def capturing_job(ctx: JobContext) -> None:
             captured_ctx.append(ctx)
+            executed.set()
 
         with patch(
             "odds_lambda.scheduling.jobs.get_job_function",
@@ -292,12 +294,9 @@ class TestLocalSchedulerBackend:
 
                 # Wait for job to execute and verify context has sport
                 try:
-                    await asyncio.wait_for(
-                        asyncio.sleep(0.5),
-                        timeout=2.0,
-                    )
+                    await asyncio.wait_for(executed.wait(), timeout=2.0)
                 except TimeoutError:
-                    pass
+                    pytest.fail("Compound job did not execute within timeout")
 
                 assert len(captured_ctx) == 1
                 assert captured_ctx[0].sport == "soccer_epl"
@@ -310,9 +309,11 @@ class TestLocalSchedulerBackend:
         return the name unchanged with sport=None.
         """
         captured_ctx: list[JobContext] = []
+        executed = asyncio.Event()
 
         async def capturing_job(ctx: JobContext) -> None:
             captured_ctx.append(ctx)
+            executed.set()
 
         with patch(
             "odds_lambda.scheduling.jobs.get_job_function",
@@ -332,12 +333,9 @@ class TestLocalSchedulerBackend:
 
                 # Wait for job to execute and verify context has no sport
                 try:
-                    await asyncio.wait_for(
-                        asyncio.sleep(0.5),
-                        timeout=2.0,
-                    )
+                    await asyncio.wait_for(executed.wait(), timeout=2.0)
                 except TimeoutError:
-                    pass
+                    pytest.fail("Non-compound job did not execute within timeout")
 
                 assert len(captured_ctx) == 1
                 assert captured_ctx[0].sport is None
