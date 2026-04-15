@@ -25,7 +25,7 @@ def upgrade() -> None:
         sa.Column("market", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column(
             "status",
-            sa.Enum("pending", "running", "completed", "failed", name="scrapejobstatus"),
+            sa.String(20),
             nullable=False,
         ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -61,4 +61,3 @@ def downgrade() -> None:
     op.drop_index("ix_scrape_jobs_league_status", table_name="scrape_jobs")
     op.drop_index(op.f("ix_scrape_jobs_league"), table_name="scrape_jobs")
     op.drop_table("scrape_jobs")
-    sa.Enum("pending", "running", "completed", "failed", name="scrapejobstatus").drop(op.get_bind())
