@@ -63,12 +63,24 @@ def start_local():
             from odds_lambda.scheduling.jobs import JobContext
 
             await fetch_odds.main(JobContext())
-            console.print("[green]✓ Bootstrap complete[/green]\n")
+            console.print("[green]  fetch-odds bootstrapped[/green]")
         except Exception as e:
-            console.print(f"[bold red]✗ Bootstrap failed:[/bold red] {e}\n")
+            console.print(f"[bold red]  fetch-odds bootstrap failed:[/bold red] {e}")
             console.print(
-                "[yellow]Scheduler will still run, but jobs may not be scheduled[/yellow]\n"
+                "[yellow]Scheduler will still run, but jobs may not be scheduled[/yellow]"
             )
+
+        # Bootstrap agent jobs for each configured sport
+        from odds_lambda.jobs import agent_run
+
+        for sport_key, suffix in [("soccer_epl", "epl"), ("baseball_mlb", "mlb")]:
+            try:
+                await agent_run.main(JobContext(sport=sport_key))
+                console.print(f"[green]  agent-run-{suffix} bootstrapped[/green]")
+            except Exception as e:
+                console.print(f"[yellow]  agent-run-{suffix} bootstrap failed: {e}[/yellow]")
+
+        console.print()
 
         # Display status
         console.print("[bold green]Scheduler started![/bold green]")
