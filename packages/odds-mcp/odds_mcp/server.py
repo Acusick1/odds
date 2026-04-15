@@ -980,6 +980,7 @@ async def schedule_next_wakeup(
                     "requested_time": requested_time,
                     "reason": reason,
                     "created_at": now,
+                    "consumed_at": None,
                 },
             )
         )

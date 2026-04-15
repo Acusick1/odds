@@ -103,6 +103,35 @@ class TestScheduleNextWakeup:
         sports = {w.sport_key for w in wakeups}
         assert sports == {"soccer_epl", "baseball_mlb"}
 
+    @pytest.mark.asyncio
+    async def test_upsert_resets_consumed_at(self, test_session) -> None:
+        from odds_mcp.server import schedule_next_wakeup
+
+        # 1. Insert a wakeup
+        with _patch_session(test_session):
+            await schedule_next_wakeup(sport="soccer_epl", delay_hours=6.0, reason="Initial")
+
+        # 2. Simulate the consumer marking it consumed
+        row = await test_session.execute(
+            select(AgentWakeup).where(AgentWakeup.sport_key == "soccer_epl")
+        )
+        wakeup = row.scalar_one()
+        wakeup.consumed_at = datetime.now(UTC)
+        await test_session.commit()
+
+        # 3. Upsert again for the same sport
+        with _patch_session(test_session):
+            await schedule_next_wakeup(sport="soccer_epl", delay_hours=12.0, reason="Rescheduled")
+
+        # 4. Assert consumed_at was reset to None
+        test_session.expire_all()
+        row = await test_session.execute(
+            select(AgentWakeup).where(AgentWakeup.sport_key == "soccer_epl")
+        )
+        wakeup = row.scalar_one()
+        assert wakeup.consumed_at is None
+        assert wakeup.reason == "Rescheduled"
+
 
 class TestGetScheduledJobs:
     """Tests for the get_scheduled_jobs MCP tool."""
