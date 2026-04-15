@@ -14,6 +14,7 @@ from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import TabularFeatureExtractor
 from odds_analytics.sequence_loader import extract_odds_from_snapshot
 from odds_analytics.utils import calculate_implied_probability
+from odds_core.agent_wakeup_models import AgentWakeup
 from odds_core.database import async_session_maker
 from odds_core.match_brief_models import BriefCheckpoint, MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
@@ -27,8 +28,10 @@ from odds_lambda.paper_trading import (
     place_trade,
     settle_trades,
 )
+from odds_lambda.scheduling.backends import BackendUnavailableError, get_scheduler_backend
 from odds_lambda.storage.readers import OddsReader
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 logger = structlog.get_logger()
 
@@ -881,6 +884,114 @@ async def get_sharp_soft_spread(
         "event": event_dict,
         "snapshot_time": snapshot_time_iso,
         "spread": spread,
+    }
+
+
+@mcp.tool()
+async def get_scheduled_jobs(
+    sport: str | None = None,
+) -> dict[str, Any]:
+    """List all currently scheduled jobs from the scheduler backend.
+
+    Returns job name, next run time, and status for each job. Optionally
+    filter by sport key (substring match on job name).
+
+    If the scheduler backend is not running (e.g. local APScheduler not
+    started), returns an informative message rather than an error.
+
+    Args:
+        sport: Optional sport key to filter jobs (e.g. "soccer_epl").
+               Matches as substring against job names.
+
+    Returns:
+        Dict with list of scheduled jobs or an informative message.
+    """
+    try:
+        backend = get_scheduler_backend()
+        jobs = await backend.get_scheduled_jobs()
+    except BackendUnavailableError as e:
+        return {
+            "jobs": [],
+            "message": f"Scheduler backend unavailable: {e}",
+        }
+    except Exception as e:
+        logger.warning("get_scheduled_jobs_failed", error=str(e))
+        return {
+            "jobs": [],
+            "message": (
+                f"Could not query scheduler: {e}. "
+                "The local APScheduler backend requires the scheduler to be "
+                "running in a separate process (odds scheduler start)."
+            ),
+        }
+
+    if sport:
+        jobs = [j for j in jobs if sport in j.job_name]
+
+    return {
+        "job_count": len(jobs),
+        "jobs": [
+            {
+                "job_name": j.job_name,
+                "next_run_time": j.next_run_time.isoformat() if j.next_run_time else None,
+                "status": j.status.value,
+            }
+            for j in jobs
+        ],
+    }
+
+
+@mcp.tool()
+async def schedule_next_wakeup(
+    sport: str,
+    delay_hours: float,
+    reason: str,
+) -> dict[str, Any]:
+    """Request the agent's next wake-up at now + delay_hours.
+
+    Writes an upsert to the agent_wakeups table (one active row per sport).
+    The agent_run job module reads this after the agent subprocess exits and
+    reschedules if the requested time is sooner than the default.
+
+    Args:
+        sport: Sport key (e.g. "soccer_epl", "baseball_mlb").
+        delay_hours: Hours from now until the next wake-up (0.5 to 168).
+        reason: Why this wake-up is being scheduled (shown in logs).
+
+    Returns:
+        Dict confirming the scheduled wake-up with the requested UTC time.
+    """
+    now = datetime.now(UTC)
+    delay_hours = max(0.5, min(delay_hours, 168.0))
+    requested_time = now + timedelta(hours=delay_hours)
+
+    async with async_session_maker() as session:
+        stmt = (
+            pg_insert(AgentWakeup)
+            .values(
+                sport_key=sport,
+                requested_time=requested_time,
+                reason=reason,
+                created_at=now,
+            )
+            .on_conflict_do_update(
+                constraint="uq_agent_wakeup_sport_key",
+                set_={
+                    "requested_time": requested_time,
+                    "reason": reason,
+                    "created_at": now,
+                    "consumed_at": None,
+                },
+            )
+        )
+        await session.execute(stmt)
+        await session.commit()
+
+    return {
+        "sport": sport,
+        "requested_time": requested_time.isoformat(),
+        "delay_hours": delay_hours,
+        "reason": reason,
     }
 
 
