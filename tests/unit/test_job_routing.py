@@ -50,6 +50,16 @@ class TestResolveJobName:
         assert base == "fetch-oddsportal-results"
         assert sport == "baseball_mlb"
 
+    def test_compound_name_agent_run_epl(self) -> None:
+        base, sport = resolve_job_name("agent-run-epl")
+        assert base == "agent-run"
+        assert sport == "soccer_epl"
+
+    def test_compound_name_agent_run_mlb(self) -> None:
+        base, sport = resolve_job_name("agent-run-mlb")
+        assert base == "agent-run"
+        assert sport == "baseball_mlb"
+
     def test_unknown_suffix_returns_no_sport(self) -> None:
         base, sport = resolve_job_name("fetch-odds-nba")
         assert base == "fetch-odds-nba"
@@ -115,4 +125,16 @@ class TestMakeCompoundJobName:
         compound = make_compound_job_name("fetch-oddsportal-results", "baseball_mlb")
         base, sport = resolve_job_name(compound)
         assert base == "fetch-oddsportal-results"
+        assert sport == "baseball_mlb"
+
+    def test_roundtrip_agent_run_epl(self) -> None:
+        compound = make_compound_job_name("agent-run", "soccer_epl")
+        base, sport = resolve_job_name(compound)
+        assert base == "agent-run"
+        assert sport == "soccer_epl"
+
+    def test_roundtrip_agent_run_mlb(self) -> None:
+        compound = make_compound_job_name("agent-run", "baseball_mlb")
+        base, sport = resolve_job_name(compound)
+        assert base == "agent-run"
         assert sport == "baseball_mlb"
