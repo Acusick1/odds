@@ -917,6 +917,7 @@ def _compute_target(
             event.home_team,
             event.away_team,
             bookmaker_key=config.target_bookmaker,
+            market_key=market,
         )
     else:
         # "raw": avg implied prob delta (snapshot → closing)
@@ -939,10 +940,10 @@ def _has_bookmaker_closing(
     closing_odds_all = extract_odds_from_snapshot(closing_snapshot, event.id, market=market)
     if market == "totals":
         return extract_devigged_totals_probs(closing_odds_all, bookmaker_key) is not None
-    if market == "h2h":
+    if market in ("h2h", "1x2"):
         return (
             extract_devigged_h2h_probs(
-                closing_odds_all, event.home_team, event.away_team, bookmaker_key
+                closing_odds_all, event.home_team, event.away_team, bookmaker_key, market
             )
             is not None
         )

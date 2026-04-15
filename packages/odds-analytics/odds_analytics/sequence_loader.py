@@ -134,18 +134,19 @@ def extract_devigged_h2h_probs(
     home_team: str,
     away_team: str,
     bookmaker_key: str = "pinnacle",
+    market_key: str = "h2h",
 ) -> DeviggedProbs | None:
-    """Extract devigged h2h probabilities from a specific bookmaker.
+    """Extract devigged moneyline probabilities from a specific bookmaker.
 
-    Supports both 2-way (NBA: home/away) and 3-way (soccer: home/draw/away) markets.
-    Filters odds to the given bookmaker's h2h market, finds all outcomes,
+    Supports both 2-way (h2h: home/away) and 3-way (1x2: home/draw/away) markets.
+    Filters odds to the given bookmaker and market, finds all outcomes,
     converts to implied probabilities, and applies proportional devigging.
 
     Returns:
         DeviggedProbs with home, draw (None for 2-way), and away fields.
         None if home or away outcome is missing for the bookmaker.
     """
-    bm_h2h = [o for o in odds if o.bookmaker_key == bookmaker_key and o.market_key == "h2h"]
+    bm_h2h = [o for o in odds if o.bookmaker_key == bookmaker_key and o.market_key == market_key]
     if not bm_h2h:
         return None
 
@@ -181,6 +182,7 @@ def calculate_devigged_bookmaker_target(
     home_team: str,
     away_team: str,
     bookmaker_key: str = "pinnacle",
+    market_key: str = "h2h",
 ) -> float | None:
     """Calculate target as devigged bookmaker close minus devigged bookmaker at snapshot.
 
@@ -188,8 +190,12 @@ def calculate_devigged_bookmaker_target(
         fair_close_home - fair_snapshot_home, or None if bookmaker data missing
         on either side.
     """
-    snapshot_probs = extract_devigged_h2h_probs(snapshot_odds, home_team, away_team, bookmaker_key)
-    closing_probs = extract_devigged_h2h_probs(closing_odds, home_team, away_team, bookmaker_key)
+    snapshot_probs = extract_devigged_h2h_probs(
+        snapshot_odds, home_team, away_team, bookmaker_key, market_key
+    )
+    closing_probs = extract_devigged_h2h_probs(
+        closing_odds, home_team, away_team, bookmaker_key, market_key
+    )
 
     if snapshot_probs is None or closing_probs is None:
         return None

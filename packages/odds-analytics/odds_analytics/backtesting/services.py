@@ -162,10 +162,7 @@ class BacktestEngine:
                     event, odds_snapshot, self.config, self.reader.session
                 )
 
-                is_three_way_h2h = any(
-                    o.market_key == "h2h" and o.outcome_name.lower() == "draw"
-                    for o in odds_snapshot
-                )
+                is_three_way_h2h = any(o.market_key == "1x2" for o in odds_snapshot)
 
                 for opportunity in opportunities:
                     stake = self._calculate_stake(opportunity, bankroll)
@@ -279,7 +276,7 @@ class BacktestEngine:
         is_three_way: bool = False,
     ) -> tuple[str, float]:
         """Evaluate bet result using opportunity details and event outcome."""
-        if opportunity.market == "h2h":
+        if opportunity.market in ("h2h", "1x2"):
             won = self._evaluate_moneyline_outcome(
                 opportunity.outcome, event, is_three_way=is_three_way
             )

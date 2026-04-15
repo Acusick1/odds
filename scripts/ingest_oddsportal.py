@@ -89,7 +89,7 @@ MARKET_CONFIGS: dict[str, dict[str, Any]] = {
     },
     "1x2": {
         "num_outcomes": 3,
-        "db_market": "h2h",
+        "db_market": "1x2",
         "outcome_names": None,  # Home, Draw, Away
         "line": None,
     },
