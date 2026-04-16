@@ -1,6 +1,11 @@
-"""Tests for job name resolution and compound name construction."""
+"""Tests for job name resolution, compound name construction, and bootstrap functions."""
 
+from unittest.mock import AsyncMock, patch
+
+import pytest
 from odds_lambda.scheduling.jobs import (
+    JobContext,
+    get_bootstrap_function,
     make_compound_job_name,
     resolve_job_name,
     sport_key_to_suffix,
@@ -138,3 +143,48 @@ class TestMakeCompoundJobName:
         base, sport = resolve_job_name(compound)
         assert base == "agent-run"
         assert sport == "baseball_mlb"
+
+
+class TestGetBootstrapFunction:
+    """Tests for get_bootstrap_function()."""
+
+    def test_agent_run_returns_wrapper_calling_schedule_next(self) -> None:
+        mock_schedule_next = AsyncMock()
+        with patch("odds_lambda.scheduling.jobs.import_module") as mock_import:
+            mock_module = mock_import.return_value
+            mock_module.schedule_next = mock_schedule_next
+
+            # Clear cached jobs to force fresh import
+            from odds_lambda.scheduling.jobs import _loaded_jobs
+
+            _loaded_jobs.pop("agent-run", None)
+
+            fn = get_bootstrap_function("agent-run")
+
+        # Should accept JobContext and forward sport to schedule_next
+        import asyncio
+
+        asyncio.run(fn(JobContext(sport="soccer_epl")))
+        mock_schedule_next.assert_called_once_with("soccer_epl")
+
+    def test_regular_job_falls_back_to_main(self) -> None:
+        mock_main = AsyncMock()
+        with patch("odds_lambda.scheduling.jobs.import_module") as mock_import:
+            mock_module = mock_import.return_value
+            mock_module.main = mock_main
+
+            from odds_lambda.scheduling.jobs import _loaded_jobs
+
+            _loaded_jobs.pop("fetch-odds", None)
+
+            fn = get_bootstrap_function("fetch-odds")
+
+        import asyncio
+
+        ctx = JobContext(sport="soccer_epl")
+        asyncio.run(fn(ctx))
+        mock_main.assert_called_once_with(ctx)
+
+    def test_unknown_job_raises_key_error(self) -> None:
+        with pytest.raises(KeyError, match="Unknown job"):
+            get_bootstrap_function("nonexistent-job")
