@@ -185,11 +185,6 @@ def is_per_sport_job(job_name: str) -> bool:
     return job_name in _PER_SPORT_JOBS
 
 
-def has_custom_bootstrap(job_name: str) -> bool:
-    """Check whether a job has a custom bootstrap entry point."""
-    return job_name in _JOB_BOOTSTRAP_MAP
-
-
 def get_bootstrap_function(job_name: str) -> Callable[[JobContext], Awaitable[None]]:
     """Get the bootstrap entry point for a job.
 
