@@ -20,7 +20,6 @@ from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMa
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade
 from odds_core.prediction_models import Prediction
-from odds_core.scrape_job_models import ScrapeJob, ScrapeJobStatus
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME
 from odds_lambda.paper_trading import (
     get_open_trades,
@@ -252,22 +251,21 @@ async def refresh_scrape(
     league: str = "england-premier-league",
     market: str = "1x2",
 ) -> dict[str, Any]:
-    """Enqueue an on-demand OddsPortal scrape for a league and market.
+    """Trigger an on-demand OddsPortal scrape for a league and market.
 
-    Creates a job that will be picked up by the background worker process
-    (``odds worker start``). Returns the job ID immediately without
-    launching Playwright in the MCP server process.
-
-    If a pending or running job already exists for the same league+market,
-    returns that existing job instead of creating a duplicate.
+    Adds a job to the shared APScheduler data store. If the scheduler
+    process is running (``odds scheduler start``), it picks the job up
+    immediately via Postgres LISTEN/NOTIFY.
 
     Args:
         league: OddsHarvester league name (e.g. "england-premier-league").
         market: Market to scrape (e.g. "1x2", "over_under_2_5").
 
     Returns:
-        Dict with job ID and status. Use ``get_scrape_status`` to poll for results.
+        Dict confirming the job was submitted, or an error.
     """
+    import dataclasses
+
     known_spec = _LEAGUE_SPEC_BY_NAME.get(league)
     if known_spec is None:
         return {
@@ -275,86 +273,102 @@ async def refresh_scrape(
             "error_type": "ValueError",
         }
 
-    async with async_session_maker() as session:
-        # Check for existing pending/running job for same league+market
-        existing_query = (
-            select(ScrapeJob)
-            .where(
-                ScrapeJob.league == league,
-                ScrapeJob.market == market,
-                ScrapeJob.status.in_([ScrapeJobStatus.PENDING, ScrapeJobStatus.RUNNING]),
-            )
-            .order_by(ScrapeJob.created_at.desc())
-            .limit(1)
+    spec = dataclasses.replace(known_spec, markets=[market])
+
+    try:
+        from apscheduler import AsyncScheduler, SchedulerRole
+        from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
+        from apscheduler.eventbrokers.asyncpg import AsyncpgEventBroker
+        from odds_core.config import get_settings
+        from odds_lambda.jobs.fetch_oddsportal import ingest_league
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        settings = get_settings()
+        engine = create_async_engine(settings.database.url)
+        data_store = SQLAlchemyDataStore(engine)
+        event_broker = AsyncpgEventBroker.from_async_sqla_engine(engine)
+
+        async with AsyncScheduler(
+            data_store=data_store,
+            event_broker=event_broker,
+            role=SchedulerRole.scheduler,
+        ) as scheduler:
+            job_id = await scheduler.add_job(ingest_league, args=[spec])
+
+        await engine.dispose()
+
+    except Exception as e:
+        logger.error(
+            "refresh_scrape_failed", league=league, market=market, error=str(e), exc_info=True
         )
-        result = await session.execute(existing_query)
-        existing = result.scalar_one_or_none()
-
-        if existing is not None:
-            return {
-                "job_id": existing.id,
-                "status": existing.status.value,
-                "league": existing.league,
-                "market": existing.market,
-                "created_at": existing.created_at.isoformat(),
-                "message": "Existing job found for this league+market",
-            }
-
-        job = ScrapeJob(league=league, market=market)
-        session.add(job)
-        await session.commit()
-        await session.refresh(job)
+        return {
+            "error": f"Failed to submit scrape job: {e}",
+            "error_type": type(e).__name__,
+        }
 
     return {
-        "job_id": job.id,
-        "status": job.status.value,
-        "league": job.league,
-        "market": job.market,
-        "created_at": job.created_at.isoformat(),
-        "message": "Job enqueued. Run 'odds worker start' to process.",
+        "job_id": str(job_id),
+        "league": league,
+        "market": market,
+        "message": "Job submitted to scheduler via LISTEN/NOTIFY.",
     }
 
 
 @mcp.tool()
-async def get_scrape_status(job_id: int) -> dict[str, Any]:
-    """Check the status and results of a scrape job.
+async def get_scrape_status() -> dict[str, Any]:
+    """Check whether the scheduler is running and list pending scrape jobs.
 
-    Args:
-        job_id: Scrape job ID returned by ``refresh_scrape``.
+    Queries the APScheduler data store for jobs whose task matches
+    ``ingest_league``. Useful after ``refresh_scrape`` to confirm the
+    scheduler picked up the job.
 
     Returns:
-        Dict with job status, timestamps, and ingestion stats (when completed).
+        Dict with scheduler status and list of pending scrape jobs.
     """
-    async with async_session_maker() as session:
-        result = await session.execute(select(ScrapeJob).where(ScrapeJob.id == job_id))
-        job = result.scalar_one_or_none()
+    try:
+        from apscheduler import AsyncScheduler, SchedulerRole
+        from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
+        from apscheduler.eventbrokers.asyncpg import AsyncpgEventBroker
+        from odds_core.config import get_settings
+        from sqlalchemy.ext.asyncio import create_async_engine
 
-    if job is None:
-        return {"error": f"Scrape job {job_id} not found"}
+        settings = get_settings()
+        engine = create_async_engine(settings.database.url)
+        data_store = SQLAlchemyDataStore(engine)
+        event_broker = AsyncpgEventBroker.from_async_sqla_engine(engine)
 
-    response: dict[str, Any] = {
-        "job_id": job.id,
-        "league": job.league,
-        "market": job.market,
-        "status": job.status.value,
-        "created_at": job.created_at.isoformat(),
-        "started_at": job.started_at.isoformat() if job.started_at else None,
-        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-    }
+        async with AsyncScheduler(
+            data_store=data_store,
+            event_broker=event_broker,
+            role=SchedulerRole.scheduler,
+        ) as scheduler:
+            jobs = await scheduler.get_jobs()
 
-    if job.status == ScrapeJobStatus.COMPLETED:
-        response["results"] = {
-            "matches_scraped": job.matches_scraped,
-            "matches_converted": job.matches_converted,
-            "events_matched": job.events_matched,
-            "events_created": job.events_created,
-            "snapshots_stored": job.snapshots_stored,
+        await engine.dispose()
+
+        scrape_jobs = [
+            {
+                "job_id": str(j.id),
+                "task_id": j.task_id,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+            }
+            for j in jobs
+            if "ingest_league" in j.task_id
+        ]
+
+    except Exception as e:
+        logger.warning("get_scrape_status_failed", error=str(e))
+        return {
+            "status": "unavailable",
+            "message": f"Could not query scheduler: {e}",
+            "jobs": [],
         }
 
-    if job.status == ScrapeJobStatus.FAILED:
-        response["error_message"] = job.error_message
-
-    return response
+    return {
+        "status": "ok",
+        "pending_scrape_jobs": len(scrape_jobs),
+        "jobs": scrape_jobs,
+    }
 
 
 @mcp.tool()

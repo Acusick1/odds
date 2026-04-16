@@ -1,10 +1,11 @@
-"""Integration tests for local scheduler backend."""
+"""Integration tests for local scheduler backend (APScheduler 4)."""
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
+from apscheduler import AsyncScheduler
 from odds_lambda.scheduling.backends.local import LocalSchedulerBackend
 from odds_lambda.scheduling.exceptions import (
     JobNotFoundError,
@@ -13,11 +14,64 @@ from odds_lambda.scheduling.exceptions import (
 from odds_lambda.scheduling.jobs import JobContext
 
 
+def _in_memory_scheduler(**kwargs) -> AsyncScheduler:
+    """Build an in-memory AsyncScheduler for tests (no Postgres needed)."""
+    return AsyncScheduler(**kwargs)
+
+
+_BUILD_PATCH = "odds_lambda.scheduling.backends.local._build_scheduler"
+
+# Module-level state for execution tracking (APScheduler 4 requires
+# serializable references — nested functions are rejected). Events
+# are recreated per test to avoid cross-event-loop binding.
+_execution_event: asyncio.Event | None = None
+_captured_contexts: list[JobContext] = []
+_job1_event: asyncio.Event | None = None
+_job2_event: asyncio.Event | None = None
+
+
+def _reset_events() -> None:
+    """Recreate events on the current event loop."""
+    global _execution_event, _job1_event, _job2_event
+    _execution_event = asyncio.Event()
+    _captured_contexts.clear()
+    _job1_event = asyncio.Event()
+    _job2_event = asyncio.Event()
+
+
+async def _noop_job(ctx: JobContext) -> None:
+    """Stub job function for scheduling tests."""
+
+
+async def _tracking_job(ctx: JobContext) -> None:
+    """Job that signals execution."""
+    assert _execution_event is not None
+    _execution_event.set()
+
+
+async def _capturing_job(ctx: JobContext) -> None:
+    """Job that captures context and signals execution."""
+    assert _execution_event is not None
+    _captured_contexts.append(ctx)
+    _execution_event.set()
+
+
+async def _multi_job1(ctx: JobContext) -> None:
+    """First job in multi-execution test."""
+    assert _job1_event is not None
+    _job1_event.set()
+
+
+async def _multi_job2(ctx: JobContext) -> None:
+    """Second job in multi-execution test."""
+    assert _job2_event is not None
+    _job2_event.set()
+
+
 class TestLocalSchedulerBackend:
-    """Tests for local APScheduler backend."""
+    """Tests for local APScheduler 4 backend."""
 
     def test_validate_configuration_success(self):
-        """Test that configuration validation passes with all requirements."""
         backend = LocalSchedulerBackend()
         validation = backend.validate_configuration()
 
@@ -25,13 +79,11 @@ class TestLocalSchedulerBackend:
         assert len(validation.errors) == 0
 
     def test_get_backend_name(self):
-        """Test backend name identifier."""
         backend = LocalSchedulerBackend()
         assert backend.get_backend_name() == "local_apscheduler"
 
     @pytest.mark.asyncio
     async def test_health_check_not_started(self):
-        """Test health check when scheduler is not started."""
         backend = LocalSchedulerBackend()
         health = await backend.health_check()
 
@@ -42,42 +94,38 @@ class TestLocalSchedulerBackend:
 
     @pytest.mark.asyncio
     async def test_health_check_running(self):
-        """Test health check when scheduler is running."""
-        async with LocalSchedulerBackend() as backend:
-            health = await backend.health_check()
+        with patch(_BUILD_PATCH, side_effect=_in_memory_scheduler):
+            async with LocalSchedulerBackend() as backend:
+                health = await backend.health_check()
 
-            assert health.is_healthy is True
-            assert "Scheduler running" in health.checks_passed
-            assert health.details is not None
-            assert health.details["scheduler_state"] == "running"
+                assert health.is_healthy is True
+                assert "Scheduler running" in health.checks_passed
+                assert health.details is not None
+                assert health.details["scheduler_state"] == "running"
 
     @pytest.mark.asyncio
     async def test_context_manager_starts_scheduler(self):
-        """Test that async context manager starts the scheduler."""
         backend = LocalSchedulerBackend()
 
-        assert backend._started is False
+        assert backend._scheduler is None
 
-        async with backend:
-            assert backend._started is True
+        with patch(_BUILD_PATCH, side_effect=_in_memory_scheduler):
+            async with backend:
+                assert backend._scheduler is not None
 
-        # Scheduler should be stopped after exit
-        assert backend._started is False
+        assert backend._scheduler is None
 
     @pytest.mark.asyncio
     async def test_schedule_next_execution(self):
-        """Test scheduling a job at a specific time."""
-        # Create mock job function
-        mock_job = AsyncMock()
-
-        # Patch job registry to return our mock
-        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=mock_job):
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch("odds_lambda.scheduling.jobs.get_job_function", return_value=_noop_job),
+        ):
             async with LocalSchedulerBackend() as backend:
                 next_time = datetime.now(UTC) + timedelta(hours=1)
 
                 await backend.schedule_next_execution(job_name="test-job", next_time=next_time)
 
-                # Verify job was scheduled
                 jobs = await backend.get_scheduled_jobs()
                 assert len(jobs) == 1
                 assert jobs[0].job_name == "test-job"
@@ -85,67 +133,58 @@ class TestLocalSchedulerBackend:
 
     @pytest.mark.asyncio
     async def test_schedule_replaces_existing(self):
-        """Test that scheduling replaces existing job with same name."""
-        mock_job = AsyncMock()
-
-        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=mock_job):
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch("odds_lambda.scheduling.jobs.get_job_function", return_value=_noop_job),
+        ):
             async with LocalSchedulerBackend() as backend:
                 time1 = datetime.now(UTC) + timedelta(hours=1)
                 time2 = datetime.now(UTC) + timedelta(hours=2)
 
-                # Schedule first time
                 await backend.schedule_next_execution(job_name="test-job", next_time=time1)
-
-                # Schedule again with different time (should replace)
                 await backend.schedule_next_execution(job_name="test-job", next_time=time2)
 
-                # Should only have one job
                 jobs = await backend.get_scheduled_jobs()
                 assert len(jobs) == 1
                 assert jobs[0].job_name == "test-job"
 
     @pytest.mark.asyncio
     async def test_cancel_scheduled_execution(self):
-        """Test cancelling a scheduled job."""
-        mock_job = AsyncMock()
-
-        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=mock_job):
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch("odds_lambda.scheduling.jobs.get_job_function", return_value=_noop_job),
+        ):
             async with LocalSchedulerBackend() as backend:
                 next_time = datetime.now(UTC) + timedelta(hours=1)
 
-                # Schedule job
                 await backend.schedule_next_execution(job_name="test-job", next_time=next_time)
 
-                # Verify it's scheduled
                 jobs = await backend.get_scheduled_jobs()
                 assert len(jobs) == 1
 
-                # Cancel it
                 await backend.cancel_scheduled_execution(job_name="test-job")
 
-                # Should be gone
                 jobs = await backend.get_scheduled_jobs()
                 assert len(jobs) == 0
 
     @pytest.mark.asyncio
     async def test_cancel_nonexistent_job_raises(self):
-        """Test that cancelling non-existent job raises error."""
-        async with LocalSchedulerBackend() as backend:
-            with pytest.raises(JobNotFoundError):
-                await backend.cancel_scheduled_execution(job_name="nonexistent-job")
+        with patch(_BUILD_PATCH, side_effect=_in_memory_scheduler):
+            async with LocalSchedulerBackend() as backend:
+                with pytest.raises(JobNotFoundError):
+                    await backend.cancel_scheduled_execution(job_name="nonexistent-job")
 
     @pytest.mark.asyncio
     async def test_get_job_status_exists(self):
-        """Test getting status of an existing job."""
-        mock_job = AsyncMock()
-
-        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=mock_job):
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch("odds_lambda.scheduling.jobs.get_job_function", return_value=_noop_job),
+        ):
             async with LocalSchedulerBackend() as backend:
                 next_time = datetime.now(UTC) + timedelta(hours=1)
 
                 await backend.schedule_next_execution(job_name="test-job", next_time=next_time)
 
-                # Get status
                 status = await backend.get_job_status(job_name="test-job")
 
                 assert status is not None
@@ -154,26 +193,25 @@ class TestLocalSchedulerBackend:
 
     @pytest.mark.asyncio
     async def test_get_job_status_not_found(self):
-        """Test getting status of non-existent job returns None."""
-        async with LocalSchedulerBackend() as backend:
-            status = await backend.get_job_status(job_name="nonexistent")
-            assert status is None
+        with patch(_BUILD_PATCH, side_effect=_in_memory_scheduler):
+            async with LocalSchedulerBackend() as backend:
+                status = await backend.get_job_status(job_name="nonexistent")
+                assert status is None
 
     @pytest.mark.asyncio
     async def test_get_scheduled_jobs_empty(self):
-        """Test getting jobs when none are scheduled."""
-        async with LocalSchedulerBackend() as backend:
-            jobs = await backend.get_scheduled_jobs()
-            assert jobs == []
+        with patch(_BUILD_PATCH, side_effect=_in_memory_scheduler):
+            async with LocalSchedulerBackend() as backend:
+                jobs = await backend.get_scheduled_jobs()
+                assert jobs == []
 
     @pytest.mark.asyncio
     async def test_get_scheduled_jobs_multiple(self):
-        """Test getting multiple scheduled jobs."""
-        mock_job = AsyncMock()
-
-        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=mock_job):
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch("odds_lambda.scheduling.jobs.get_job_function", return_value=_noop_job),
+        ):
             async with LocalSchedulerBackend() as backend:
-                # Schedule multiple jobs
                 await backend.schedule_next_execution(
                     job_name="job1", next_time=datetime.now(UTC) + timedelta(hours=1)
                 )
@@ -192,29 +230,18 @@ class TestLocalSchedulerBackend:
 
     @pytest.mark.asyncio
     async def test_dry_run_mode_schedule(self):
-        """Test that dry-run mode logs but doesn't actually schedule."""
         backend = LocalSchedulerBackend(dry_run=True)
 
-        # Don't need to start backend in dry-run
         next_time = datetime.now(UTC) + timedelta(hours=1)
-
-        # Should not raise error and should log
         await backend.schedule_next_execution(job_name="test-job", next_time=next_time)
-
-        # Verify nothing was actually scheduled (can't check jobs since not started)
-        # Just verify no errors occurred
 
     @pytest.mark.asyncio
     async def test_dry_run_mode_cancel(self):
-        """Test that dry-run mode logs cancel but doesn't actually cancel."""
         backend = LocalSchedulerBackend(dry_run=True)
-
-        # Should not raise error
         await backend.cancel_scheduled_execution(job_name="test-job")
 
     @pytest.mark.asyncio
     async def test_dry_run_mode_get_jobs(self):
-        """Test that dry-run mode returns empty list for get_jobs."""
         backend = LocalSchedulerBackend(dry_run=True)
 
         jobs = await backend.get_scheduled_jobs()
@@ -222,11 +249,12 @@ class TestLocalSchedulerBackend:
 
     @pytest.mark.asyncio
     async def test_schedule_unknown_job_raises(self):
-        """Test that scheduling unknown job raises SchedulingFailedError."""
-        # Patch to raise KeyError (job not in registry)
-        with patch(
-            "odds_lambda.scheduling.jobs.get_job_function",
-            side_effect=KeyError("Unknown job 'invalid-job'"),
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch(
+                "odds_lambda.scheduling.jobs.get_job_function",
+                side_effect=KeyError("Unknown job 'invalid-job'"),
+            ),
         ):
             async with LocalSchedulerBackend() as backend:
                 next_time = datetime.now(UTC) + timedelta(hours=1)
@@ -238,45 +266,34 @@ class TestLocalSchedulerBackend:
 
     @pytest.mark.asyncio
     async def test_job_execution_happens(self):
-        """Test that scheduled job actually executes at the right time."""
-        # Create a flag to track execution
-        executed = asyncio.Event()
+        _reset_events()
 
-        async def test_job(ctx: JobContext) -> None:
-            executed.set()
-
-        with patch("odds_lambda.scheduling.jobs.get_job_function", return_value=test_job):
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch("odds_lambda.scheduling.jobs.get_job_function", return_value=_tracking_job),
+        ):
             async with LocalSchedulerBackend() as backend:
-                # Schedule job to run very soon (100ms)
                 next_time = datetime.now(UTC) + timedelta(milliseconds=100)
 
                 await backend.schedule_next_execution(job_name="test-job", next_time=next_time)
 
-                # Wait for job to execute (with timeout)
                 try:
-                    await asyncio.wait_for(executed.wait(), timeout=2.0)
-                    assert executed.is_set()
+                    await asyncio.wait_for(_execution_event.wait(), timeout=3.0)
+                    assert _execution_event.is_set()
                 except TimeoutError:
                     pytest.fail("Job did not execute within timeout")
 
     @pytest.mark.asyncio
     async def test_schedule_compound_job_name(self):
-        """Test that compound job names (e.g. fetch-oddsportal-epl) resolve correctly.
+        _reset_events()
 
-        Real resolve_job_name runs to exercise actual compound name parsing.
-        Only get_job_function is mocked (to avoid importing real job modules).
-        """
-        captured_ctx: list[JobContext] = []
-        executed = asyncio.Event()
-
-        async def capturing_job(ctx: JobContext) -> None:
-            captured_ctx.append(ctx)
-            executed.set()
-
-        with patch(
-            "odds_lambda.scheduling.jobs.get_job_function",
-            return_value=capturing_job,
-        ) as mock_get_job:
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch(
+                "odds_lambda.scheduling.jobs.get_job_function",
+                return_value=_capturing_job,
+            ) as mock_get_job,
+        ):
             async with LocalSchedulerBackend() as backend:
                 next_time = datetime.now(UTC) + timedelta(milliseconds=100)
 
@@ -284,80 +301,62 @@ class TestLocalSchedulerBackend:
                     job_name="fetch-oddsportal-epl", next_time=next_time
                 )
 
-                # get_job_function should receive the base name, not compound
                 mock_get_job.assert_called_once_with("fetch-oddsportal")
 
-                # Verify job was scheduled with compound name as ID
                 jobs = await backend.get_scheduled_jobs()
                 assert len(jobs) == 1
                 assert jobs[0].job_name == "fetch-oddsportal-epl"
 
-                # Wait for job to execute and verify context has sport
                 try:
-                    await asyncio.wait_for(executed.wait(), timeout=2.0)
+                    await asyncio.wait_for(_execution_event.wait(), timeout=3.0)
                 except TimeoutError:
                     pytest.fail("Compound job did not execute within timeout")
 
-                assert len(captured_ctx) == 1
-                assert captured_ctx[0].sport == "soccer_epl"
+                assert len(_captured_contexts) == 1
+                assert _captured_contexts[0].sport == "soccer_epl"
 
     @pytest.mark.asyncio
     async def test_schedule_non_compound_job_name(self):
-        """Test that non-compound job names still work correctly.
+        _reset_events()
 
-        Real resolve_job_name runs — for a non-compound name it should
-        return the name unchanged with sport=None.
-        """
-        captured_ctx: list[JobContext] = []
-        executed = asyncio.Event()
-
-        async def capturing_job(ctx: JobContext) -> None:
-            captured_ctx.append(ctx)
-            executed.set()
-
-        with patch(
-            "odds_lambda.scheduling.jobs.get_job_function",
-            return_value=capturing_job,
-        ) as mock_get_job:
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch(
+                "odds_lambda.scheduling.jobs.get_job_function",
+                return_value=_capturing_job,
+            ) as mock_get_job,
+        ):
             async with LocalSchedulerBackend() as backend:
                 next_time = datetime.now(UTC) + timedelta(milliseconds=100)
 
                 await backend.schedule_next_execution(job_name="check-health", next_time=next_time)
 
-                # get_job_function should receive the same name (no suffix to strip)
                 mock_get_job.assert_called_once_with("check-health")
 
                 jobs = await backend.get_scheduled_jobs()
                 assert len(jobs) == 1
                 assert jobs[0].job_name == "check-health"
 
-                # Wait for job to execute and verify context has no sport
                 try:
-                    await asyncio.wait_for(executed.wait(), timeout=2.0)
+                    await asyncio.wait_for(_execution_event.wait(), timeout=3.0)
                 except TimeoutError:
                     pytest.fail("Non-compound job did not execute within timeout")
 
-                assert len(captured_ctx) == 1
-                assert captured_ctx[0].sport is None
+                assert len(_captured_contexts) == 1
+                assert _captured_contexts[0].sport is None
 
     @pytest.mark.asyncio
     async def test_multiple_jobs_execute_independently(self):
-        """Test that multiple jobs execute independently."""
-        job1_executed = asyncio.Event()
-        job2_executed = asyncio.Event()
+        _reset_events()
 
-        async def job1(ctx: JobContext) -> None:
-            job1_executed.set()
+        def get_job_func(job_name: str):
+            return _multi_job1 if job_name == "job1" else _multi_job2
 
-        async def job2(ctx: JobContext) -> None:
-            job2_executed.set()
-
-        def get_job_func(job_name):
-            return job1 if job_name == "job1" else job2
-
-        with patch("odds_lambda.scheduling.jobs.get_job_function", side_effect=get_job_func):
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch("odds_lambda.scheduling.jobs.get_job_function", side_effect=get_job_func),
+        ):
             async with LocalSchedulerBackend() as backend:
-                # Schedule both jobs
                 await backend.schedule_next_execution(
                     job_name="job1", next_time=datetime.now(UTC) + timedelta(milliseconds=100)
                 )
@@ -365,13 +364,12 @@ class TestLocalSchedulerBackend:
                     job_name="job2", next_time=datetime.now(UTC) + timedelta(milliseconds=150)
                 )
 
-                # Wait for both to execute
                 try:
                     await asyncio.wait_for(
-                        asyncio.gather(job1_executed.wait(), job2_executed.wait()),
-                        timeout=2.0,
+                        asyncio.gather(_job1_event.wait(), _job2_event.wait()),
+                        timeout=3.0,
                     )
-                    assert job1_executed.is_set()
-                    assert job2_executed.is_set()
+                    assert _job1_event.is_set()
+                    assert _job2_event.is_set()
                 except TimeoutError:
                     pytest.fail("Jobs did not execute within timeout")

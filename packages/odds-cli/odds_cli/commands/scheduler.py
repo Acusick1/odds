@@ -62,41 +62,39 @@ def start_local():
             make_compound_job_name,
         )
 
-        console.print("[green]Bootstrapping jobs...[/green]")
+        # Start scheduler first so bootstrap jobs can schedule via the backend
+        async with LocalSchedulerBackend() as _backend:
+            console.print("[green]Bootstrapping jobs...[/green]")
 
-        for job_name in app_settings.scheduler.bootstrap_jobs:
-            bootstrap_fn = get_bootstrap_function(job_name)
+            for job_name in app_settings.scheduler.bootstrap_jobs:
+                bootstrap_fn = get_bootstrap_function(job_name)
 
-            if is_per_sport_job(job_name):
-                for sport_key in app_settings.data_collection.sports:
-                    compound = make_compound_job_name(job_name, sport_key)
+                if is_per_sport_job(job_name):
+                    for sport_key in app_settings.data_collection.sports:
+                        compound = make_compound_job_name(job_name, sport_key)
+                        try:
+                            await bootstrap_fn(JobContext(sport=sport_key))
+                            console.print(f"[green]  {compound} bootstrapped[/green]")
+                        except Exception as e:
+                            console.print(f"[yellow]  {compound} bootstrap failed: {e}[/yellow]")
+                else:
                     try:
-                        await bootstrap_fn(JobContext(sport=sport_key))
-                        console.print(f"[green]  {compound} bootstrapped[/green]")
+                        await bootstrap_fn(JobContext())
+                        console.print(f"[green]  {job_name} bootstrapped[/green]")
                     except Exception as e:
-                        console.print(f"[yellow]  {compound} bootstrap failed: {e}[/yellow]")
-            else:
-                try:
-                    await bootstrap_fn(JobContext())
-                    console.print(f"[green]  {job_name} bootstrapped[/green]")
-                except Exception as e:
-                    console.print(f"[yellow]  {job_name} bootstrap failed: {e}[/yellow]")
+                        console.print(f"[yellow]  {job_name} bootstrap failed: {e}[/yellow]")
 
-        console.print()
+            console.print()
 
-        # Display status
-        console.print("[bold green]Scheduler started![/bold green]")
-        console.print("[dim]Jobs will self-schedule based on game proximity[/dim]")
-        console.print("[dim]Press Ctrl+C to stop[/dim]\n")
+            # Display status
+            console.print("[bold green]Scheduler started![/bold green]")
+            console.print("[dim]Jobs will self-schedule based on game proximity[/dim]")
+            console.print("[dim]Press Ctrl+C to stop[/dim]\n")
 
-        # Start scheduler and keep it running
-        async with LocalSchedulerBackend():
             try:
-                # Keep scheduler alive until interrupted
                 logger.info("local_scheduler_running", message="Press Ctrl+C to stop")
-                await asyncio.Event().wait()  # Wait forever until interrupted
+                await asyncio.Event().wait()
             except asyncio.CancelledError:
-                # Clean shutdown on cancellation
                 pass
 
     # Run async scheduler
