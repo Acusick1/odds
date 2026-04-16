@@ -44,10 +44,8 @@ _e2e_session_factory = None
 _e2e_original_main = None
 
 
-def _in_memory_scheduler(**kwargs) -> tuple[AsyncScheduler, AsyncMock]:
-    mock_engine = AsyncMock()
-    mock_engine.dispose = AsyncMock()
-    return AsyncScheduler(**kwargs), mock_engine
+def _in_memory_scheduler(**kwargs) -> AsyncScheduler:
+    return AsyncScheduler(**kwargs)
 
 
 async def _wrapped_fetch_odds(ctx: JobContext) -> None:

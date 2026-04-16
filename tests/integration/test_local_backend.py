@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from apscheduler import AsyncScheduler
@@ -14,11 +14,9 @@ from odds_lambda.scheduling.exceptions import (
 from odds_lambda.scheduling.jobs import JobContext
 
 
-def _in_memory_scheduler(**kwargs) -> tuple[AsyncScheduler, AsyncMock]:
+def _in_memory_scheduler(**kwargs) -> AsyncScheduler:
     """Build an in-memory AsyncScheduler for tests (no Postgres needed)."""
-    mock_engine = AsyncMock()
-    mock_engine.dispose = AsyncMock()
-    return AsyncScheduler(**kwargs), mock_engine
+    return AsyncScheduler(**kwargs)
 
 
 _BUILD_PATCH = "odds_lambda.scheduling.backends.local.build_scheduler"

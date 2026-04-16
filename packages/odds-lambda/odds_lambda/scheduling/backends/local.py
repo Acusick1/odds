@@ -30,30 +30,37 @@ from odds_lambda.scheduling.exceptions import (
 logger = structlog.get_logger()
 
 
+_shared_engine: AsyncEngine | None = None
+
+
+def _get_shared_engine() -> AsyncEngine:
+    """Return a module-level engine, created once on first use."""
+    global _shared_engine
+    if _shared_engine is None:
+        from odds_core.config import get_settings
+
+        settings = get_settings()
+        _shared_engine = create_async_engine(settings.database.url)
+    return _shared_engine
+
+
 def build_scheduler(
     *,
     role: SchedulerRole = SchedulerRole.both,
-) -> tuple[AsyncScheduler, AsyncEngine]:
-    """Construct an ``AsyncScheduler`` backed by the project Postgres database.
-
-    Returns the scheduler and the engine so callers can dispose the engine
-    when they are done (important for short-lived scheduler-only contexts
-    like the MCP server tools).
-    """
-    from odds_core.config import get_settings
-
-    settings = get_settings()
-    engine = create_async_engine(settings.database.url)
+    engine: AsyncEngine | None = None,
+) -> AsyncScheduler:
+    """Construct an ``AsyncScheduler`` backed by the project Postgres database."""
+    if engine is None:
+        engine = _get_shared_engine()
 
     data_store = SQLAlchemyDataStore(engine)
     event_broker = AsyncpgEventBroker.from_async_sqla_engine(engine)
 
-    scheduler = AsyncScheduler(
+    return AsyncScheduler(
         data_store=data_store,
         event_broker=event_broker,
         role=role,
     )
-    return scheduler, engine
 
 
 class LocalSchedulerBackend(SchedulerBackend):
@@ -73,7 +80,6 @@ class LocalSchedulerBackend(SchedulerBackend):
     def __init__(self, dry_run: bool = False, retry_config: RetryConfig | None = None) -> None:
         super().__init__(dry_run=dry_run, retry_config=retry_config)
         self._scheduler: AsyncScheduler | None = None
-        self._engine: AsyncEngine | None = None
         self._configured_tasks: set[str] = set()
         logger.info("local_scheduler_initialized", dry_run=self.dry_run)
 
@@ -154,8 +160,10 @@ class LocalSchedulerBackend(SchedulerBackend):
             return None
 
         try:
+            from apscheduler import ScheduleLookupError
+
             sched = await self._scheduler.get_schedule(job_name)
-        except Exception:
+        except ScheduleLookupError:
             return None
 
         return ScheduledJob(
@@ -179,9 +187,6 @@ class LocalSchedulerBackend(SchedulerBackend):
             )
             return
 
-        self._ensure_started()
-        assert self._scheduler is not None
-
         try:
             from odds_lambda.scheduling.jobs import JobContext, get_job_function, resolve_job_name
 
@@ -194,21 +199,7 @@ class LocalSchedulerBackend(SchedulerBackend):
                 ctx_payload.update(payload)
             ctx = JobContext.from_payload(ctx_payload)
 
-            # Register the task once so the scheduler knows how to run it
-            task_key = f"{job_func.__module__}.{job_func.__qualname__}"
-            if task_key not in self._configured_tasks:
-                await self._scheduler.configure_task(job_func)
-                self._configured_tasks.add(task_key)
-
-            # add_schedule with ConflictPolicy.replace removes any existing
-            # schedule with the same id before creating the new one.
-            await self._scheduler.add_schedule(
-                job_func,
-                trigger=DateTrigger(run_time=next_time),
-                id=job_name,
-                args=[ctx],
-                conflict_policy=ConflictPolicy.replace,
-            )
+            await self._add_schedule(job_func, job_name, next_time, ctx)
 
             logger.info(
                 "local_job_scheduled",
@@ -227,6 +218,44 @@ class LocalSchedulerBackend(SchedulerBackend):
                 exc_info=True,
             )
             raise SchedulingFailedError(f"Failed to schedule {job_name}: {e}") from e
+
+    async def _add_schedule(
+        self,
+        job_func: object,
+        job_name: str,
+        next_time: datetime,
+        ctx: object,
+    ) -> None:
+        """Write a schedule to the data store.
+
+        If this backend is running as a context manager the existing
+        scheduler is reused.  Otherwise a short-lived scheduler is
+        created to write to the shared Postgres data store — the
+        running scheduler process picks it up via LISTEN/NOTIFY.
+        """
+        if self._scheduler is not None:
+            task_key = f"{job_func.__module__}.{job_func.__qualname__}"  # type: ignore[union-attr]
+            if task_key not in self._configured_tasks:
+                await self._scheduler.configure_task(job_func)
+                self._configured_tasks.add(task_key)
+
+            await self._scheduler.add_schedule(
+                job_func,
+                trigger=DateTrigger(run_time=next_time),
+                id=job_name,
+                args=[ctx],
+                conflict_policy=ConflictPolicy.replace,
+            )
+        else:
+            async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
+                await scheduler.configure_task(job_func)
+                await scheduler.add_schedule(
+                    job_func,
+                    trigger=DateTrigger(run_time=next_time),
+                    id=job_name,
+                    args=[ctx],
+                    conflict_policy=ConflictPolicy.replace,
+                )
 
     async def cancel_scheduled_execution(self, job_name: str) -> None:
         if self.dry_run:
@@ -261,15 +290,8 @@ class LocalSchedulerBackend(SchedulerBackend):
     def get_backend_name(self) -> str:
         return "local_apscheduler"
 
-    def _ensure_started(self) -> None:
-        if self._scheduler is None:
-            raise BackendUnavailableError(
-                "Scheduler not started. Use LocalSchedulerBackend as an async context manager."
-            )
-
     async def __aenter__(self) -> LocalSchedulerBackend:
-        scheduler, self._engine = build_scheduler()
-        self._scheduler = scheduler
+        self._scheduler = build_scheduler()
         await self._scheduler.__aenter__()
         await self._scheduler.start_in_background()
         logger.info("local_scheduler_started")
@@ -285,8 +307,5 @@ class LocalSchedulerBackend(SchedulerBackend):
             await self._scheduler.__aexit__(exc_type, exc_val, exc_tb)
             self._scheduler = None
             self._configured_tasks.clear()
-        if self._engine is not None:
-            await self._engine.dispose()
-            self._engine = None
         logger.info("local_scheduler_shutdown")
         return False

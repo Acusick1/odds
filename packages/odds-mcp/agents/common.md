@@ -12,7 +12,7 @@ Maximise parallel tool calls and sub-agent research. Once games are selected for
 
 ## Scrape Freshness
 
-`refresh_scrape` enqueues a background job that takes up to 5 minutes. After kicking off a scrape, start a Monitor on `uv run odds scrape job-status <id> --wait` to be notified on completion, then continue with other work. Do not pull spread data for decision-making until the monitor reports completion.
+`refresh_scrape` submits a background job to the scheduler that takes up to 5 minutes. After kicking off a scrape, use `get_scrape_status` to check whether the job is still pending. Continue with other work while waiting. Do not pull spread data for decision-making until the job has completed.
 
 ## Scheduling
 

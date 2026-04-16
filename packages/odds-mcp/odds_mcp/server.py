@@ -27,7 +27,6 @@ from odds_lambda.paper_trading import (
     place_trade,
     settle_trades,
 )
-from odds_lambda.scheduling.backends import BackendUnavailableError, get_scheduler_backend
 from odds_lambda.storage.readers import OddsReader
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -280,32 +279,8 @@ async def refresh_scrape(
         from odds_lambda.jobs.fetch_oddsportal import ingest_league
         from odds_lambda.scheduling.backends.local import build_scheduler
 
-        scheduler, engine = build_scheduler(role=SchedulerRole.scheduler)
-        try:
-            async with scheduler:
-                # Check for duplicate: same league/market already pending
-                existing_jobs = await scheduler.get_jobs()
-                for j in existing_jobs:
-                    if "ingest_league" in j.task_id and j.args:
-                        existing_spec = j.args[0]
-                        if (
-                            hasattr(existing_spec, "league")
-                            and hasattr(existing_spec, "markets")
-                            and existing_spec.league == spec.league
-                            and spec.markets
-                            and spec.markets[0] in existing_spec.markets
-                        ):
-                            return {
-                                "job_id": str(j.id),
-                                "league": league,
-                                "market": market,
-                                "message": "A scrape job for this league/market is already queued.",
-                                "duplicate": True,
-                            }
-
-                job_id = await scheduler.add_job(ingest_league, args=[spec])
-        finally:
-            await engine.dispose()
+        async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
+            job_id = await scheduler.add_job(ingest_league, args=[spec])
 
     except Exception as e:
         logger.error(
@@ -345,12 +320,8 @@ async def get_scrape_status(
         from apscheduler import SchedulerRole
         from odds_lambda.scheduling.backends.local import build_scheduler
 
-        scheduler, engine = build_scheduler(role=SchedulerRole.scheduler)
-        try:
-            async with scheduler:
-                jobs = await scheduler.get_jobs()
-        finally:
-            await engine.dispose()
+        async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
+            jobs = await scheduler.get_jobs()
 
         scrape_jobs = [
             {
@@ -1003,37 +974,33 @@ async def get_scheduled_jobs(
         Dict with list of scheduled jobs or an informative message.
     """
     try:
-        backend = get_scheduler_backend()
-        jobs = await backend.get_scheduled_jobs()
-    except BackendUnavailableError as e:
-        return {
-            "jobs": [],
-            "message": f"Scheduler backend unavailable: {e}",
-        }
+        from apscheduler import SchedulerRole
+        from odds_lambda.scheduling.backends.local import build_scheduler
+
+        async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
+            schedules = await scheduler.get_schedules()
     except Exception as e:
         logger.warning("get_scheduled_jobs_failed", error=str(e))
         return {
             "jobs": [],
-            "message": (
-                f"Could not query scheduler: {e}. "
-                "The local APScheduler backend requires the scheduler to be "
-                "running in a separate process (odds scheduler start)."
-            ),
+            "message": f"Could not query scheduler: {e}",
         }
 
+    jobs = [
+        {
+            "job_name": s.id,
+            "next_run_time": s.next_fire_time.isoformat() if s.next_fire_time else None,
+            "status": "scheduled",
+        }
+        for s in schedules
+    ]
+
     if sport:
-        jobs = [j for j in jobs if sport in j.job_name]
+        jobs = [j for j in jobs if sport in j["job_name"]]
 
     return {
         "job_count": len(jobs),
-        "jobs": [
-            {
-                "job_name": j.job_name,
-                "next_run_time": j.next_run_time.isoformat() if j.next_run_time else None,
-                "status": j.status.value,
-            }
-            for j in jobs
-        ],
+        "jobs": jobs,
     }
 
 
