@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
-from odds_core.match_brief_models import MatchBrief, SharpPriceResult
+from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceResult
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.storage.readers import OddsReader
 from sqlalchemy import select
@@ -442,6 +442,136 @@ class TestGetMatchBrief:
 
         result = await get_match_brief(event_id="nonexistent_event")
         assert result == {"error": "Event 'nonexistent_event' not found"}
+
+
+class TestGetSlateBriefs:
+    """Tests for the get_slate_briefs MCP tool."""
+
+    @pytest.fixture
+    async def future_epl_events(self, pglite_async_session):
+        """Two future EPL events for slate testing."""
+        future = datetime.now(UTC) + timedelta(days=2)
+        event_a = Event(
+            id="slate_test_001",
+            sport_key="soccer_epl",
+            sport_title="EPL",
+            commence_time=future,
+            home_team="Arsenal",
+            away_team="Chelsea",
+            status=EventStatus.SCHEDULED,
+        )
+        event_b = Event(
+            id="slate_test_002",
+            sport_key="soccer_epl",
+            sport_title="EPL",
+            commence_time=future + timedelta(hours=3),
+            home_team="Liverpool",
+            away_team="Man City",
+            status=EventStatus.SCHEDULED,
+        )
+        pglite_async_session.add_all([event_a, event_b])
+        await pglite_async_session.commit()
+        await pglite_async_session.refresh(event_a)
+        await pglite_async_session.refresh(event_b)
+        return event_a, event_b
+
+    @pytest.mark.asyncio
+    async def test_happy_path_with_and_without_briefs(
+        self, patch_session_maker, future_epl_events, pglite_async_session
+    ):
+        """Returns latest brief for events that have one, None for those without."""
+        from odds_mcp.server import get_slate_briefs
+
+        event_with, event_without = future_epl_events
+
+        # Insert brief directly (no snapshot needed for this test)
+        brief = MatchBrief(
+            event_id=event_with.id,
+            decision=BriefDecision.WATCHING,
+            summary="Looks interesting",
+            brief_text="Full analysis here.",
+        )
+        pglite_async_session.add(brief)
+        await pglite_async_session.commit()
+
+        result = await get_slate_briefs(league="soccer_epl", days_ahead=7)
+
+        assert result["fixture_count"] == 2
+        by_event = {f["event"]["id"]: f for f in result["fixtures"]}
+
+        assert by_event[event_with.id]["latest_brief"] is not None
+        assert by_event[event_with.id]["latest_brief"]["decision"] == "watching"
+        assert by_event[event_with.id]["latest_brief"]["summary"] == "Looks interesting"
+
+        assert by_event[event_without.id]["latest_brief"] is None
+
+    @pytest.mark.asyncio
+    async def test_empty_slate(self, patch_session_maker):
+        """No upcoming fixtures returns empty list."""
+        from odds_mcp.server import get_slate_briefs
+
+        result = await get_slate_briefs(league="soccer_epl", days_ahead=1)
+
+        assert result["fixture_count"] == 0
+        assert result["fixtures"] == []
+
+    @pytest.mark.asyncio
+    async def test_returns_latest_brief(
+        self, patch_session_maker, future_epl_events, pglite_async_session
+    ):
+        """When multiple briefs exist, returns the most recent one."""
+        from odds_mcp.server import get_slate_briefs
+
+        event, _ = future_epl_events
+
+        brief_old = MatchBrief(
+            event_id=event.id,
+            decision=BriefDecision.WATCHING,
+            summary="First look",
+            brief_text="Initial analysis.",
+        )
+        pglite_async_session.add(brief_old)
+        await pglite_async_session.commit()
+
+        brief_new = MatchBrief(
+            event_id=event.id,
+            decision=BriefDecision.BET,
+            summary="Edge found on Arsenal",
+            brief_text="Updated analysis with bet.",
+        )
+        pglite_async_session.add(brief_new)
+        await pglite_async_session.commit()
+
+        result = await get_slate_briefs(league="soccer_epl", days_ahead=7)
+
+        by_event = {f["event"]["id"]: f for f in result["fixtures"]}
+        brief = by_event[event.id]["latest_brief"]
+        assert brief["decision"] == "bet"
+        assert brief["summary"] == "Edge found on Arsenal"
+
+    @pytest.mark.asyncio
+    async def test_does_not_include_full_brief_text(
+        self, patch_session_maker, future_epl_events, pglite_async_session
+    ):
+        """Slate briefs should not include full brief_text."""
+        from odds_mcp.server import get_slate_briefs
+
+        event, _ = future_epl_events
+
+        brief = MatchBrief(
+            event_id=event.id,
+            decision=BriefDecision.SKIP,
+            summary="No edge",
+            brief_text="Detailed analysis that should not appear in slate view.",
+        )
+        pglite_async_session.add(brief)
+        await pglite_async_session.commit()
+
+        result = await get_slate_briefs(league="soccer_epl", days_ahead=7)
+
+        by_event = {f["event"]["id"]: f for f in result["fixtures"]}
+        latest = by_event[event.id]["latest_brief"]
+        assert "brief_text" not in latest
 
 
 class TestGetSharpSoftSpread:

@@ -30,6 +30,11 @@ def upgrade() -> None:
         "match_briefs",
         sa.Column("summary", sa.String(), nullable=True),
     )
+    # Backfill existing rows before adding NOT NULL constraints
+    op.execute("UPDATE match_briefs SET decision = 'WATCHING' WHERE decision IS NULL")
+    op.execute("UPDATE match_briefs SET summary = '' WHERE summary IS NULL")
+    op.alter_column("match_briefs", "decision", nullable=False)
+    op.alter_column("match_briefs", "summary", nullable=False)
 
 
 def downgrade() -> None:

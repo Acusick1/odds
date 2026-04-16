@@ -802,7 +802,8 @@ async def get_slate_briefs(
             status=EventStatus.SCHEDULED,
         )
 
-        # Fetch latest brief per event
+        # Fetch latest brief per event using DISTINCT ON
+        latest_by_event: dict[str, Any] = {}
         if events:
             event_ids = [e.id for e in events]
             result = await session.execute(
@@ -811,26 +812,22 @@ async def get_slate_briefs(
                 .distinct(MatchBrief.event_id)
                 .order_by(MatchBrief.event_id, MatchBrief.created_at.desc())
             )
-            latest_by_event: dict[str, Any] = {
+            latest_by_event = {
                 b.event_id: {
-                    "decision": b.decision.value if b.decision else None,
+                    "decision": b.decision.value,
                     "summary": b.summary,
-                    "created_at": b.created_at.isoformat() if b.created_at else None,
+                    "created_at": b.created_at.isoformat(),
                 }
                 for b in result.scalars()
             }
-        else:
-            latest_by_event = {}
 
-    entries = []
-    for e in events:
-        brief_info = latest_by_event.get(e.id)
-        entries.append(
+        entries = [
             {
                 "event": _event_to_dict(e),
-                "latest_brief": brief_info,
+                "latest_brief": latest_by_event.get(e.id),
             }
-        )
+            for e in events
+        ]
 
     return {
         "fixture_count": len(entries),
