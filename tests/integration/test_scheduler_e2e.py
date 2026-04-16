@@ -173,8 +173,8 @@ async def test_scheduler_end_to_end(
             # Track execution
             execution_happened["fetch_odds"] = True
 
-            # Execute the real job
-            await original_main(JobContext())
+            # Execute the real job with explicit sport to avoid multi-sport default
+            await original_main(JobContext(sport="basketball_nba"))
 
     # Start the scheduler backend
     async with LocalSchedulerBackend(dry_run=False) as backend:
@@ -320,8 +320,8 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
             mock_backend.get_backend_name = lambda: "mock_backend"
             mock_backend_getter.return_value = mock_backend
 
-            # Execute job
-            await fetch_odds.main(JobContext())
+            # Execute job with explicit sport to avoid multi-sport default
+            await fetch_odds.main(JobContext(sport="basketball_nba"))
 
         # Verify self-scheduling
         assert len(scheduled_calls) == 1, f"Expected 1 schedule call for {tier_name}"
