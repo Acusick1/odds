@@ -380,6 +380,24 @@ class TestGetMatchBrief:
         assert result["briefs"][2]["brief_text"] == "Brief 0"
 
     @pytest.mark.asyncio
+    async def test_limit_parameter(self, patch_session_maker, epl_event_with_odds):
+        """Limit parameter restricts number of briefs returned."""
+        from odds_mcp.server import get_match_brief, save_match_brief
+
+        event, _ = epl_event_with_odds
+
+        for i in range(4):
+            await save_match_brief(event_id=event.id, market="1x2", brief_text=f"Brief {i}")
+
+        result = await get_match_brief(event_id=event.id, limit=2)
+
+        assert result["brief_count"] == 2
+        assert len(result["briefs"]) == 2
+        # Newest first
+        assert result["briefs"][0]["brief_text"] == "Brief 3"
+        assert result["briefs"][1]["brief_text"] == "Brief 2"
+
+    @pytest.mark.asyncio
     async def test_event_not_found(self, patch_session_maker):
         """get_match_brief returns error for nonexistent event."""
         from odds_mcp.server import get_match_brief

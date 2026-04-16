@@ -715,14 +715,16 @@ async def save_match_brief(
 @mcp.tool()
 async def get_match_brief(
     event_id: str,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Retrieve saved match briefs for an event.
 
-    Returns all briefs for the event, newest first (append-only history).
+    Returns briefs for the event, newest first (append-only history).
     Returns empty gracefully when no brief exists.
 
     Args:
         event_id: Event identifier.
+        limit: Max number of briefs to return (newest first). Returns all if omitted.
 
     Returns:
         Dict with event info and list of matching briefs (newest first).
@@ -738,6 +740,8 @@ async def get_match_brief(
             .where(MatchBrief.event_id == event_id)
             .order_by(MatchBrief.created_at.desc())
         )
+        if limit is not None:
+            query = query.limit(limit)
 
         result = await session.execute(query)
         briefs = list(result.scalars().all())

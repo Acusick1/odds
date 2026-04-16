@@ -24,7 +24,7 @@ These feed the agent's DB-backed context. Collected on a schedule, available via
 
 ## On-Demand Agent Research (browse at evaluation time)
 
-These are not collected on a schedule. The agent searches/browses them during checkpoint evaluation using web search and Playwright.
+These are not collected on a schedule. The agent searches/browses them during each wake-up using web search and Playwright.
 
 | Source | What it provides | How the agent uses it |
 |--------|-----------------|----------------------|

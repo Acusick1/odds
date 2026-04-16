@@ -9,8 +9,7 @@ Wake interval tiers:
   > 48h to KO   -> 24h  (far out)
   24-48h        -> 12h  (research window opening)
   6-24h         ->  4h  (active research)
-  1.5-6h        ->  1h  (lineups dropping)
-  < 1.5h        ->  3h  (too close — check back post-match)
+  < 6h          ->  1h  (lineups dropping, final decisions)
   no fixtures   -> 12h  (off-season check-in)
 """
 
@@ -32,9 +31,8 @@ logger = structlog.get_logger()
 TIER_FAR_HOURS = 24.0  # > 48h to KO
 TIER_RESEARCH_HOURS = 12.0  # 24-48h to KO
 TIER_ACTIVE_HOURS = 4.0  # 6-24h to KO
-TIER_LINEUP_HOURS = 1.0  # 1.5-6h to KO
+TIER_LINEUP_HOURS = 1.0  # < 6h to KO
 TIER_NO_FIXTURES_HOURS = 12.0  # no fixtures within 7 days
-SKIP_THRESHOLD_HOURS = 1.5  # too close to KO — don't wake
 
 # Overnight suppression windows (start_utc, resume_utc) per sport
 # EPL: last KO ~20:00 UTC, suppress 22:00-06:00
@@ -46,9 +44,6 @@ OVERNIGHT_WINDOWS: dict[str, tuple[int, int]] = {
 
 # Agent subprocess limits
 AGENT_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
-
-# Post-match check-in (too close to KO — match about to start / in progress)
-TIER_TOO_CLOSE_HOURS = 3.0
 
 # Horizon for "no fixtures" classification
 FIXTURE_HORIZON_DAYS = 7
@@ -74,15 +69,7 @@ def _compute_wake_interval(hours_until_ko: float | None) -> float:
         return TIER_RESEARCH_HOURS
     if hours_until_ko > 6:
         return TIER_ACTIVE_HOURS
-    if hours_until_ko > SKIP_THRESHOLD_HOURS:
-        return TIER_LINEUP_HOURS
-    # Too close — match is about to start; check back after it ends
-    return TIER_TOO_CLOSE_HOURS
-
-
-def _should_skip_run(hours_until_ko: float | None) -> bool:
-    """Return True if too close to kickoff to justify a wake-up."""
-    return hours_until_ko is not None and hours_until_ko <= SKIP_THRESHOLD_HOURS
+    return TIER_LINEUP_HOURS
 
 
 async def _run_claude_agent(sport: str) -> int:
@@ -237,19 +224,8 @@ async def main(ctx: JobContext) -> None:
 
     # --- Pre-schedule before work (crash-safe) ---
     result = await schedule_next(sport)
-    skip_run = _should_skip_run(result.hours_until_ko)
 
-    # --- Run the agent (unless too close to KO) ---
-    if skip_run:
-        logger.info(
-            "agent_run_skipped",
-            hours_until_ko=(
-                round(result.hours_until_ko, 2) if result.hours_until_ko is not None else None
-            ),
-            reason="too close to kickoff",
-        )
-        return
-
+    # --- Run the agent ---
     exit_code = await _run_claude_agent(sport)
 
     if exit_code != 0:
