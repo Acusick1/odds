@@ -126,8 +126,9 @@ Implemented via the existing `LocalSchedulerBackend` with proximity-aware schedu
 
 | Tool | Purpose |
 |------|---------|
-| `save_match_brief` | Persist analysis brief to DB (append-only) |
-| `get_match_brief` | Load prior briefs for cross-session memory |
+| `save_match_brief` | Persist analysis brief with decision + summary (append-only) |
+| `get_match_brief` | Load full briefs for a single event |
+| `get_slate_briefs` | Latest decision/summary per event for slate triage |
 | `get_sharp_soft_spread` | Dedicated sharp vs soft divergence view |
 
 ## Data Model Additions
@@ -137,6 +138,8 @@ Implemented via the existing `LocalSchedulerBackend` with proximity-aware schedu
 ```
 id:                  int PK
 event_id:            str FK -> events.id
+decision:            enum (watching | bet | skip)
+summary:             str (one-line for triage views)
 brief_text:          str
 sharp_price_at_brief: JSON  (sharp odds snapshot for later comparison)
 created_at:          datetime (UTC)

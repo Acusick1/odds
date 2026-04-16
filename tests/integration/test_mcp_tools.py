@@ -213,12 +213,16 @@ class TestSaveMatchBrief:
         result = await save_match_brief(
             event_id=event.id,
             market="1x2",
+            decision="watching",
+            summary="Arsenal strong at home, Chelsea missing players",
             brief_text="Arsenal looking strong at home, Chelsea missing key players.",
         )
 
         assert "error" not in result
         assert result["id"] is not None
         assert result["event_id"] == event.id
+        assert result["decision"] == "watching"
+        assert result["summary"] == "Arsenal strong at home, Chelsea missing players"
         assert (
             result["brief_text"] == "Arsenal looking strong at home, Chelsea missing key players."
         )
@@ -239,6 +243,8 @@ class TestSaveMatchBrief:
         result = await save_match_brief(
             event_id="nonexistent_event",
             market="1x2",
+            decision="watching",
+            summary="Test",
             brief_text="Should fail",
         )
 
@@ -254,6 +260,8 @@ class TestSaveMatchBrief:
         result = await save_match_brief(
             event_id=event.id,
             market="1x2",
+            decision="watching",
+            summary="No odds yet",
             brief_text="No odds available yet for this fixture.",
         )
 
@@ -275,6 +283,8 @@ class TestSaveMatchBrief:
             result = await save_match_brief(
                 event_id=event.id,
                 market="1x2",
+                decision="watching",
+                summary=f"Revision {i}",
                 brief_text=f"Brief revision {i}",
             )
             assert "error" not in result
@@ -300,6 +310,8 @@ class TestSaveMatchBrief:
         result = await save_match_brief(
             event_id=event.id,
             market="1x2",
+            decision="watching",
+            summary="Brighton favoured at home",
             brief_text="Brighton should dominate at home.",
         )
 
@@ -326,6 +338,8 @@ class TestGetMatchBrief:
         await save_match_brief(
             event_id=event.id,
             market="1x2",
+            decision="watching",
+            summary="Arsenal vs Chelsea context",
             brief_text="Context analysis for Arsenal vs Chelsea.",
         )
 
@@ -343,8 +357,20 @@ class TestGetMatchBrief:
 
         event, _ = epl_event_with_odds
 
-        await save_match_brief(event_id=event.id, market="1x2", brief_text="First analysis")
-        await save_match_brief(event_id=event.id, market="1x2", brief_text="Updated analysis")
+        await save_match_brief(
+            event_id=event.id,
+            market="1x2",
+            decision="watching",
+            summary="First",
+            brief_text="First analysis",
+        )
+        await save_match_brief(
+            event_id=event.id,
+            market="1x2",
+            decision="bet",
+            summary="Updated",
+            brief_text="Updated analysis",
+        )
 
         result = await get_match_brief(event_id=event.id)
         assert result["brief_count"] == 2
@@ -370,7 +396,13 @@ class TestGetMatchBrief:
         event, _ = epl_event_with_odds
 
         for i in range(3):
-            await save_match_brief(event_id=event.id, market="1x2", brief_text=f"Brief {i}")
+            await save_match_brief(
+                event_id=event.id,
+                market="1x2",
+                decision="watching",
+                summary=f"Summary {i}",
+                brief_text=f"Brief {i}",
+            )
 
         result = await get_match_brief(event_id=event.id)
 
@@ -387,7 +419,13 @@ class TestGetMatchBrief:
         event, _ = epl_event_with_odds
 
         for i in range(4):
-            await save_match_brief(event_id=event.id, market="1x2", brief_text=f"Brief {i}")
+            await save_match_brief(
+                event_id=event.id,
+                market="1x2",
+                decision="watching",
+                summary=f"Summary {i}",
+                brief_text=f"Brief {i}",
+            )
 
         result = await get_match_brief(event_id=event.id, limit=2)
 

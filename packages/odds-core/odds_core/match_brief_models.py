@@ -2,12 +2,22 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from sqlalchemy import JSON, Column, DateTime
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
+
+
+class BriefDecision(str, Enum):
+    """Agent's decision at the time of writing a brief."""
+
+    WATCHING = "watching"
+    BET = "bet"
+    SKIP = "skip"
+
 
 # Per-outcome sharp price entry: bookmaker key, American odds, implied probability.
 SharpPriceEntry = dict[str, Any]  # {"bookmaker": str, "price": int, "implied_prob": float}
@@ -44,6 +54,8 @@ class MatchBrief(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     event_id: str = Field(foreign_key="events.id", index=True)
 
+    decision: BriefDecision = Field(description="Agent decision: watching, bet, or skip")
+    summary: str = Field(description="One-line summary of the brief for triage views")
     brief_text: str = Field(description="Freeform agent brief content")
 
     sharp_price_at_brief: SharpPriceMap | None = Field(

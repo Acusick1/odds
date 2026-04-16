@@ -109,13 +109,15 @@ Call `settle_bets`. If any bets were settled, report the P&L. This runs first on
 
 ### 3. Triage
 
-For every event on the slate, call `get_match_brief` to load existing briefs. Then decide which matches need work:
+Call `get_slate_briefs` to see the latest decision status for all upcoming fixtures in one call. Then decide which matches need work:
 
 - **No brief yet** — needs research.
-- **Brief exists but has watch-for items** — check those items.
-- **Brief exists, match approaching KO (< 6h out)** — go deeper: check lineups, price movement, latest news.
-- **Brief exists, match is far out, nothing new expected** — skip.
+- **WATCHING with watch-for items** — check those items. Call `get_match_brief` to load full brief.
+- **WATCHING/SKIP, match approaching KO (< 6h out)** — go deeper: check lineups, price movement, latest news.
+- **BET or SKIP, match is far out, nothing new expected** — skip.
 - **Match already started** — skip.
+
+Only call `get_match_brief` for matches you decide to research — avoid loading full brief text for the entire slate.
 
 ### 4. Research
 
@@ -131,15 +133,14 @@ If you can't find anything interesting with targeted searches, move on.
 
 ### 5. Brief
 
-Save a new brief for each researched match via `save_match_brief`. Briefs are append-only — each wake-up adds a new row. Previous briefs are preserved.
+Save a new brief for each researched match via `save_match_brief`. Pass a `decision` ("watching", "bet", or "skip") and a short `summary` (under ~100 chars) — these power the slate triage view so future wake-ups can assess the slate without loading full briefs. Briefs are append-only — each wake-up adds a new row.
 
-**Minimum fields (every brief):**
+**Brief text structure (minimum):**
 - **SHARP PRICE** — home/draw/away implied probs from sharp bookmaker
 - **ASSESSMENT** — what you found, what it means. Include price movement since last brief if applicable.
 - **WATCH-FOR** — specific items to revisit on next wake-up (omit if making a final decision)
-- **DECISION** — BET / SKIP / WATCHING, with full reasoning if BET
 
-If BET: include selection, odds, stake, conviction tier, edge type, and full reasoning.
+If BET: include selection, odds, stake, conviction tier, edge type, and full reasoning in the brief text.
 
 Add other sections as relevant (sharp-soft spread, team news, injuries, rotation risk, manager quotes, lineup news, etc.).
 

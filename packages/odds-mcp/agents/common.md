@@ -4,7 +4,7 @@ Cross-sport workflow rules that apply to every wake-up and every sport. Loaded a
 
 ## Existing Briefs
 
-Before triaging or researching any fixture, call `get_match_brief` for every event on the slate. Skip games that already have a recent brief unless new information is likely (approaching KO, significant time elapsed since last brief, watch-for items to check). This avoids duplicate research and wasted web searches.
+Before triaging or researching any fixture, call `get_slate_briefs` to see the latest decision and summary for every event on the slate. Only call `get_match_brief` for specific events you decide to research further. This avoids loading full brief text for the entire slate.
 
 ## Parallelism
 

@@ -121,13 +121,15 @@ Call `settle_bets`. If any bets were settled, report the P&L. This runs first on
 
 ### 3. Triage
 
-For every event on the slate, call `get_match_brief` to load existing briefs. Then decide which games need work:
+Call `get_slate_briefs` to see the latest decision status for all upcoming games in one call. Then decide which games need work:
 
 - **No brief yet** — triage for research. Select games based on: pitching mismatches, team streaks, bullpen fatigue patterns, weather at outdoor parks, public betting tendencies, or anything suggesting a potential market inefficiency. Skip the rest.
-- **Brief exists but has watch-for items** — check those items.
-- **Brief exists, game approaching first pitch (< 4h out)** — go deeper: verify confirmed starters, check for late scratches, check price movement.
-- **Brief exists, game is far out, nothing new expected** — skip.
+- **WATCHING with watch-for items** — check those items. Call `get_match_brief` to load full brief.
+- **WATCHING/SKIP, game approaching first pitch (< 4h out)** — go deeper: verify confirmed starters, check for late scratches, check price movement.
+- **BET or SKIP, game is far out, nothing new expected** — skip.
 - **Game already started** — skip.
+
+Only call `get_match_brief` for games you decide to research — avoid loading full brief text for the entire slate.
 
 ### 4. Research
 
@@ -144,16 +146,15 @@ If you can't find anything interesting with targeted searches, move on.
 
 ### 5. Brief
 
-Save a new brief for each researched game via `save_match_brief`. Briefs are append-only — each wake-up adds a new row. Previous briefs are preserved.
+Save a new brief for each researched game via `save_match_brief`. Pass a `decision` ("watching", "bet", or "skip") and a short `summary` (under ~100 chars) — these power the slate triage view so future wake-ups can assess the slate without loading full briefs. Briefs are append-only — each wake-up adds a new row.
 
-**Minimum fields (every brief):**
+**Brief text structure (minimum):**
 - **SHARP PRICE** — home/away implied probs from Betfair Exchange
 - **PITCHING MATCHUP** — confirmed or probable starters, recent form
 - **ASSESSMENT** — what you found, what it means. Include price movement since last brief if applicable.
 - **WATCH-FOR** — specific items to revisit on next wake-up (omit if making a final decision)
-- **DECISION** — BET / SKIP / WATCHING, with full reasoning if BET
 
-If BET: include selection, odds, stake, conviction tier, edge type, and full reasoning.
+If BET: include selection, odds, stake, conviction tier, edge type, and full reasoning in the brief text.
 
 Add other sections as relevant (sharp-soft spread, bullpen status, weather, lineup news, etc.).
 
