@@ -42,7 +42,7 @@ class DataCollectionConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    sports: list[str] = Field(default=["basketball_nba"], description="Sports to track")
+    sports: list[str] = Field(default=["soccer_epl", "baseball_mlb"], description="Sports to track")
     bookmakers: list[str] = Field(
         default=[
             "pinnacle",
@@ -80,6 +80,10 @@ class SchedulerConfig(BaseSettings):
     lookahead_days: int = Field(
         default=7,
         description="How many days ahead to check for games when scheduling",
+    )
+    bootstrap_jobs: list[str] = Field(
+        default=["agent-run"],
+        description="Jobs to bootstrap when starting the local scheduler",
     )
 
 

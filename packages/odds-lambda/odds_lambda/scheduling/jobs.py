@@ -67,6 +67,15 @@ _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
     "agent-run": ("odds_lambda.jobs.agent_run", "main"),
 }
 
+# Bootstrap entry-point overrides: jobs listed here use a different function
+# for bootstrap (scheduler start) than for normal execution. The function
+# receives a single ``sport: str`` argument for per-sport jobs, or no args
+# for global jobs.  Jobs not listed here use their regular ``main(JobContext)``
+# for bootstrap.
+_JOB_BOOTSTRAP_MAP: dict[str, tuple[str, str]] = {
+    "agent-run": ("odds_lambda.jobs.agent_run", "schedule_next"),
+}
+
 # Maps sport suffix to sport_key for per-sport job routing.
 # e.g. "fetch-odds-epl" resolves to ("fetch-odds", "soccer_epl")
 _SPORT_SUFFIX_MAP: dict[str, str] = {
@@ -169,6 +178,23 @@ def get_job_function(job_name: str) -> Callable[[JobContext], Awaitable[None]]:
     fn = getattr(module, func_name)
     _loaded_jobs[job_name] = fn
     return fn
+
+
+def get_bootstrap_function(job_name: str) -> Callable[..., Awaitable[None]]:
+    """Get the bootstrap entry point for a job.
+
+    Jobs with an entry in ``_JOB_BOOTSTRAP_MAP`` use that function for
+    bootstrap (e.g. ``agent-run`` uses ``schedule_next`` instead of ``main``).
+    All other jobs fall back to their regular ``main(JobContext)`` function.
+
+    Raises:
+        KeyError: If job name not found in registry
+    """
+    if job_name in _JOB_BOOTSTRAP_MAP:
+        module_path, func_name = _JOB_BOOTSTRAP_MAP[job_name]
+        module = import_module(module_path)
+        return getattr(module, func_name)
+    return get_job_function(job_name)
 
 
 def list_available_jobs() -> list[str]:

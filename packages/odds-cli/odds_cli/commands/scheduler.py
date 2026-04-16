@@ -55,32 +55,41 @@ def start_local():
 
     async def run_scheduler():
         """Run scheduler using async context manager."""
-        # Bootstrap by running initial fetch to start self-scheduling
-        console.print("[green]Running initial fetch to bootstrap scheduler...[/green]")
+        from odds_lambda.scheduling.jobs import (
+            _JOB_BOOTSTRAP_MAP,
+            _PER_SPORT_JOBS,
+            JobContext,
+            get_bootstrap_function,
+            make_compound_job_name,
+        )
 
-        from odds_lambda.scheduling.jobs import JobContext
+        console.print("[green]Bootstrapping jobs...[/green]")
 
-        try:
-            from odds_lambda.jobs import fetch_odds
+        for job_name in app_settings.scheduler.bootstrap_jobs:
+            bootstrap_fn = get_bootstrap_function(job_name)
+            has_custom_bootstrap = job_name in _JOB_BOOTSTRAP_MAP
+            is_per_sport = job_name in _PER_SPORT_JOBS
 
-            await fetch_odds.main(JobContext())
-            console.print("[green]  fetch-odds bootstrapped[/green]")
-        except Exception as e:
-            console.print(f"[bold red]  fetch-odds bootstrap failed:[/bold red] {e}")
-            console.print(
-                "[yellow]Scheduler will still run, but jobs may not be scheduled[/yellow]"
-            )
-
-        # Bootstrap agent jobs for each configured sport
-        from odds_lambda.jobs import agent_run
-
-        for sport_key in app_settings.data_collection.sports:
-            suffix = sport_key.split("_")[-1]
-            try:
-                await agent_run.schedule_next(sport_key)
-                console.print(f"[green]  agent-run-{suffix} bootstrapped[/green]")
-            except Exception as e:
-                console.print(f"[yellow]  agent-run-{suffix} bootstrap failed: {e}[/yellow]")
+            if is_per_sport:
+                for sport_key in app_settings.data_collection.sports:
+                    compound = make_compound_job_name(job_name, sport_key)
+                    try:
+                        if has_custom_bootstrap:
+                            await bootstrap_fn(sport_key)
+                        else:
+                            await bootstrap_fn(JobContext(sport=sport_key))
+                        console.print(f"[green]  {compound} bootstrapped[/green]")
+                    except Exception as e:
+                        console.print(f"[yellow]  {compound} bootstrap failed: {e}[/yellow]")
+            else:
+                try:
+                    if has_custom_bootstrap:
+                        await bootstrap_fn()
+                    else:
+                        await bootstrap_fn(JobContext())
+                    console.print(f"[green]  {job_name} bootstrapped[/green]")
+                except Exception as e:
+                    console.print(f"[yellow]  {job_name} bootstrap failed: {e}[/yellow]")
 
         console.print()
 

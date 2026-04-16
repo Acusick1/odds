@@ -29,13 +29,14 @@ class TestSettings:
             assert settings.api.quota == 500
             assert settings.api.keys is None
             assert settings.database.pool_size == 5
-            assert settings.data_collection.sports == ["basketball_nba"]
+            assert settings.data_collection.sports == ["soccer_epl", "baseball_mlb"]
             assert len(settings.data_collection.bookmakers) == 8
             assert settings.data_collection.markets == ["h2h", "spreads", "totals"]
             assert settings.data_collection.regions == ["us"]
             assert settings.scheduler.backend == "local"
             assert settings.scheduler.dry_run is False
             assert settings.scheduler.lookahead_days == 7
+            assert settings.scheduler.bootstrap_jobs == ["agent-run"]
             assert settings.data_quality.enable_validation is True
             assert settings.data_quality.reject_invalid_odds is False
             assert settings.alerts.alert_enabled is False
