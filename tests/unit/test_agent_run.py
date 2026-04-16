@@ -8,16 +8,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from odds_lambda.jobs.agent_run import (
     OVERNIGHT_WINDOWS,
-    SKIP_THRESHOLD_HOURS,
     TIER_ACTIVE_HOURS,
     TIER_FAR_HOURS,
     TIER_LINEUP_HOURS,
     TIER_NO_FIXTURES_HOURS,
     TIER_RESEARCH_HOURS,
-    TIER_TOO_CLOSE_HOURS,
     ScheduleResult,
     _compute_wake_interval,
-    _should_skip_run,
     main,
     schedule_next,
 )
@@ -49,34 +46,11 @@ class TestComputeWakeInterval:
     def test_boundary_exactly_6h(self) -> None:
         assert _compute_wake_interval(6.0) == TIER_LINEUP_HOURS
 
-    def test_lineup_window_1_5_to_6h(self) -> None:
+    def test_lineup_window_under_6h(self) -> None:
         assert _compute_wake_interval(3.0) == TIER_LINEUP_HOURS
 
-    def test_too_close_returns_post_match_tier(self) -> None:
-        assert _compute_wake_interval(1.0) == TIER_TOO_CLOSE_HOURS
-
-    def test_boundary_exactly_1_5h(self) -> None:
-        # <= 1.5 is the skip zone, returns post-match check-in tier
-        assert _compute_wake_interval(SKIP_THRESHOLD_HOURS) == TIER_TOO_CLOSE_HOURS
-
-
-class TestShouldSkipRun:
-    """Tests for skip-run logic."""
-
-    def test_no_fixtures_does_not_skip(self) -> None:
-        assert _should_skip_run(None) is False
-
-    def test_far_fixture_does_not_skip(self) -> None:
-        assert _should_skip_run(10.0) is False
-
-    def test_close_fixture_skips(self) -> None:
-        assert _should_skip_run(1.0) is True
-
-    def test_boundary_at_threshold_skips(self) -> None:
-        assert _should_skip_run(SKIP_THRESHOLD_HOURS) is True
-
-    def test_just_above_threshold_does_not_skip(self) -> None:
-        assert _should_skip_run(SKIP_THRESHOLD_HOURS + 0.01) is False
+    def test_very_close_to_ko_still_runs(self) -> None:
+        assert _compute_wake_interval(0.5) == TIER_LINEUP_HOURS
 
 
 class TestMainNoSport:
@@ -121,19 +95,6 @@ class TestMainOrchestration:
             await main(JobContext(sport="soccer_epl"))
 
         assert call_order == ["schedule", "run"]
-
-    @pytest.mark.asyncio
-    async def test_skip_run_when_too_close(self) -> None:
-        """Agent subprocess should not run when too close to kickoff."""
-        with (
-            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
-            patch("odds_lambda.jobs.agent_run.self_schedule", new_callable=AsyncMock),
-            patch("odds_lambda.jobs.agent_run._run_claude_agent", new_callable=AsyncMock) as run,
-            patch("odds_core.config.get_settings"),
-        ):
-            mk.return_value = datetime.now(UTC) + timedelta(hours=0.5)
-            await main(JobContext(sport="soccer_epl"))
-            run.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_agent_override_reschedules(self) -> None:

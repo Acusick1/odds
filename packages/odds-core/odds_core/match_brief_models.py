@@ -5,10 +5,19 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime, Index
+from sqlalchemy import JSON, Column, DateTime
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
+
+
+class BriefDecision(str, Enum):
+    """Agent's decision at the time of writing a brief."""
+
+    WATCHING = "watching"
+    BET = "bet"
+    SKIP = "skip"
+
 
 # Per-outcome sharp price entry: bookmaker key, American odds, implied probability.
 SharpPriceEntry = dict[str, Any]  # {"bookmaker": str, "price": int, "implied_prob": float}
@@ -37,24 +46,16 @@ class SharpPriceResult:
     meta: dict[str, SharpPriceMeta] = field(default_factory=dict)
 
 
-class BriefCheckpoint(str, Enum):
-    """Checkpoint at which a brief is written."""
-
-    CONTEXT = "context"
-    DECISION = "decision"
-
-
 class MatchBrief(SQLModel, table=True):
-    """Agent-authored match analysis brief, written at a workflow checkpoint."""
+    """Agent-authored match analysis brief, one per wake-up per event (append-only)."""
 
     __tablename__ = "match_briefs"
 
     id: int | None = Field(default=None, primary_key=True)
     event_id: str = Field(foreign_key="events.id", index=True)
 
-    checkpoint: BriefCheckpoint = Field(
-        description="Workflow checkpoint: context (day before) or decision (KO-90min)"
-    )
+    decision: BriefDecision = Field(description="Agent decision: watching, bet, or skip")
+    summary: str = Field(description="One-line summary of the brief for triage views")
     brief_text: str = Field(description="Freeform agent brief content")
 
     sharp_price_at_brief: SharpPriceMap | None = Field(
@@ -67,5 +68,3 @@ class MatchBrief(SQLModel, table=True):
         sa_column=Column(DateTime(timezone=True)),
         default_factory=utc_now,
     )
-
-    __table_args__ = (Index("ix_match_briefs_event_checkpoint", "event_id", "checkpoint"),)

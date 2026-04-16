@@ -16,7 +16,7 @@ from odds_analytics.sequence_loader import extract_odds_from_snapshot
 from odds_analytics.utils import calculate_implied_probability
 from odds_core.agent_wakeup_models import AgentWakeup
 from odds_core.database import async_session_maker
-from odds_core.match_brief_models import BriefCheckpoint, MatchBrief, SharpPriceMap
+from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade
 from odds_core.prediction_models import Prediction
@@ -656,19 +656,22 @@ async def settle_bets() -> dict[str, Any]:
 async def save_match_brief(
     event_id: str,
     market: MarketKey,
+    decision: Literal["watching", "bet", "skip"],
+    summary: str,
     brief_text: str,
-    checkpoint: Literal["context", "decision"],
 ) -> dict[str, Any]:
-    """Save a structured analysis brief for an event at a workflow checkpoint.
+    """Save a structured analysis brief for an event.
 
     Automatically snapshots current sharp bookmaker prices at save time.
-    Multiple briefs per event+checkpoint are allowed (agent may re-evaluate).
+    Briefs are append-only — each call creates a new row. The agent loads
+    all previous briefs for a match (newest first) and builds on them.
 
     Args:
         event_id: Event identifier.
         market: Market type — "h2h", "1x2", "totals", or "spreads".
+        decision: Agent decision — "watching", "bet", or "skip".
+        summary: One-line summary for triage views (keep under ~100 chars).
         brief_text: Freeform brief content (structure controlled by agent prompt).
-        checkpoint: Workflow checkpoint: "context" (day before) or "decision" (KO-90min).
 
     Returns:
         Dict with saved brief details including snapshotted sharp prices.
@@ -697,7 +700,8 @@ async def save_match_brief(
 
         brief = MatchBrief(
             event_id=event_id,
-            checkpoint=BriefCheckpoint(checkpoint),
+            decision=BriefDecision(decision),
+            summary=summary,
             brief_text=brief_text,
             sharp_price_at_brief=sharp_prices,
         )
@@ -708,7 +712,8 @@ async def save_match_brief(
     return {
         "id": brief.id,
         "event_id": brief.event_id,
-        "checkpoint": brief.checkpoint.value,
+        "decision": brief.decision.value,
+        "summary": brief.summary,
         "brief_text": brief.brief_text,
         "sharp_price_at_brief": brief.sharp_price_at_brief,
         "created_at": brief.created_at.isoformat(),
@@ -718,16 +723,16 @@ async def save_match_brief(
 @mcp.tool()
 async def get_match_brief(
     event_id: str,
-    checkpoint: Literal["context", "decision"] | None = None,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Retrieve saved match briefs for an event.
 
-    Returns all briefs for the event, newest first. Optionally filtered by checkpoint.
+    Returns briefs for the event, newest first (append-only history).
     Returns empty gracefully when no brief exists.
 
     Args:
         event_id: Event identifier.
-        checkpoint: If set, only return briefs for this checkpoint.
+        limit: Max number of briefs to return (newest first). Returns all if omitted.
 
     Returns:
         Dict with event info and list of matching briefs (newest first).
@@ -738,10 +743,13 @@ async def get_match_brief(
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        query = select(MatchBrief).where(MatchBrief.event_id == event_id)
-        if checkpoint is not None:
-            query = query.where(MatchBrief.checkpoint == BriefCheckpoint(checkpoint))
-        query = query.order_by(MatchBrief.created_at.desc())
+        query = (
+            select(MatchBrief)
+            .where(MatchBrief.event_id == event_id)
+            .order_by(MatchBrief.created_at.desc())
+        )
+        if limit is not None:
+            query = query.limit(limit)
 
         result = await session.execute(query)
         briefs = list(result.scalars().all())
@@ -752,13 +760,78 @@ async def get_match_brief(
         "briefs": [
             {
                 "id": b.id,
-                "checkpoint": b.checkpoint.value,
+                "decision": b.decision.value,
+                "summary": b.summary,
                 "brief_text": b.brief_text,
                 "sharp_price_at_brief": b.sharp_price_at_brief,
                 "created_at": b.created_at.isoformat(),
             }
             for b in briefs
         ],
+    }
+
+
+@mcp.tool()
+async def get_slate_briefs(
+    league: str = "soccer_epl",
+    days_ahead: int = 7,
+) -> dict[str, Any]:
+    """Get latest brief status for all upcoming fixtures in a league.
+
+    Returns one entry per event with the most recent brief's decision,
+    summary, and timestamp. Events with no brief are included with
+    decision=None. Use this for slate triage before pulling full briefs.
+
+    Args:
+        league: Sport key (e.g. "soccer_epl").
+        days_ahead: How many days ahead to look (1-30).
+
+    Returns:
+        Dict with list of events and their latest brief status.
+    """
+    days_ahead = max(1, min(days_ahead, 30))
+    now = datetime.now(UTC)
+    end = now + timedelta(days=days_ahead)
+
+    async with async_session_maker() as session:
+        reader = OddsReader(session)
+        events = await reader.get_events_by_date_range(
+            start_date=now,
+            end_date=end,
+            sport_key=league,
+            status=EventStatus.SCHEDULED,
+        )
+
+        # Fetch latest brief per event using DISTINCT ON
+        latest_by_event: dict[str, Any] = {}
+        if events:
+            event_ids = [e.id for e in events]
+            result = await session.execute(
+                select(MatchBrief)
+                .where(MatchBrief.event_id.in_(event_ids))  # type: ignore[union-attr]
+                .distinct(MatchBrief.event_id)
+                .order_by(MatchBrief.event_id, MatchBrief.created_at.desc())
+            )
+            latest_by_event = {
+                b.event_id: {
+                    "decision": b.decision.value,
+                    "summary": b.summary,
+                    "created_at": b.created_at.isoformat(),
+                }
+                for b in result.scalars()
+            }
+
+        entries = [
+            {
+                "event": _event_to_dict(e),
+                "latest_brief": latest_by_event.get(e.id),
+            }
+            for e in events
+        ]
+
+    return {
+        "fixture_count": len(entries),
+        "fixtures": entries,
     }
 
 

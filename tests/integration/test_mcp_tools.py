@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
-from odds_core.match_brief_models import BriefCheckpoint, MatchBrief, SharpPriceResult
+from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceResult
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.storage.readers import OddsReader
 from sqlalchemy import select
@@ -213,14 +213,16 @@ class TestSaveMatchBrief:
         result = await save_match_brief(
             event_id=event.id,
             market="1x2",
+            decision="watching",
+            summary="Arsenal strong at home, Chelsea missing players",
             brief_text="Arsenal looking strong at home, Chelsea missing key players.",
-            checkpoint="context",
         )
 
         assert "error" not in result
         assert result["id"] is not None
         assert result["event_id"] == event.id
-        assert result["checkpoint"] == "context"
+        assert result["decision"] == "watching"
+        assert result["summary"] == "Arsenal strong at home, Chelsea missing players"
         assert (
             result["brief_text"] == "Arsenal looking strong at home, Chelsea missing key players."
         )
@@ -241,8 +243,9 @@ class TestSaveMatchBrief:
         result = await save_match_brief(
             event_id="nonexistent_event",
             market="1x2",
+            decision="watching",
+            summary="Test",
             brief_text="Should fail",
-            checkpoint="context",
         )
 
         assert result == {"error": "Event 'nonexistent_event' not found"}
@@ -257,20 +260,20 @@ class TestSaveMatchBrief:
         result = await save_match_brief(
             event_id=event.id,
             market="1x2",
+            decision="watching",
+            summary="No odds yet",
             brief_text="No odds available yet for this fixture.",
-            checkpoint="decision",
         )
 
         assert "error" not in result
         assert result["id"] is not None
         assert result["sharp_price_at_brief"] is None
-        assert result["checkpoint"] == "decision"
 
     @pytest.mark.asyncio
-    async def test_multiple_briefs_per_checkpoint(
+    async def test_multiple_briefs_append_only(
         self, patch_session_maker, epl_event_with_odds, pglite_async_session
     ):
-        """Multiple briefs for the same event+checkpoint are allowed."""
+        """Multiple briefs for the same event are allowed (append-only)."""
         from odds_mcp.server import save_match_brief
 
         event, _ = epl_event_with_odds
@@ -280,8 +283,9 @@ class TestSaveMatchBrief:
             result = await save_match_brief(
                 event_id=event.id,
                 market="1x2",
-                brief_text=f"Decision brief revision {i}",
-                checkpoint="decision",
+                decision="watching",
+                summary=f"Revision {i}",
+                brief_text=f"Brief revision {i}",
             )
             assert "error" not in result
             ids.append(result["id"])
@@ -291,9 +295,7 @@ class TestSaveMatchBrief:
 
         # Verify via DB
         db_result = await pglite_async_session.execute(
-            select(MatchBrief)
-            .where(MatchBrief.event_id == event.id)
-            .where(MatchBrief.checkpoint == BriefCheckpoint.DECISION)
+            select(MatchBrief).where(MatchBrief.event_id == event.id)
         )
         assert len(list(db_result.scalars().all())) == 3
 
@@ -308,8 +310,9 @@ class TestSaveMatchBrief:
         result = await save_match_brief(
             event_id=event.id,
             market="1x2",
+            decision="watching",
+            summary="Brighton favoured at home",
             brief_text="Brighton should dominate at home.",
-            checkpoint="context",
         )
 
         assert "error" not in result
@@ -335,8 +338,9 @@ class TestGetMatchBrief:
         await save_match_brief(
             event_id=event.id,
             market="1x2",
+            decision="watching",
+            summary="Arsenal vs Chelsea context",
             brief_text="Context analysis for Arsenal vs Chelsea.",
-            checkpoint="context",
         )
 
         result = await get_match_brief(event_id=event.id)
@@ -347,26 +351,29 @@ class TestGetMatchBrief:
         assert result["event"]["id"] == event.id
 
     @pytest.mark.asyncio
-    async def test_checkpoint_filtering(self, patch_session_maker, epl_event_with_odds):
-        """Filtering by checkpoint returns only matching briefs."""
+    async def test_returns_all_briefs(self, patch_session_maker, epl_event_with_odds):
+        """All briefs for an event are returned (append-only model)."""
         from odds_mcp.server import get_match_brief, save_match_brief
 
         event, _ = epl_event_with_odds
 
         await save_match_brief(
-            event_id=event.id, market="1x2", brief_text="Context analysis", checkpoint="context"
+            event_id=event.id,
+            market="1x2",
+            decision="watching",
+            summary="First",
+            brief_text="First analysis",
         )
         await save_match_brief(
-            event_id=event.id, market="1x2", brief_text="Decision analysis", checkpoint="decision"
+            event_id=event.id,
+            market="1x2",
+            decision="bet",
+            summary="Updated",
+            brief_text="Updated analysis",
         )
 
-        context_result = await get_match_brief(event_id=event.id, checkpoint="context")
-        assert context_result["brief_count"] == 1
-        assert context_result["briefs"][0]["brief_text"] == "Context analysis"
-
-        decision_result = await get_match_brief(event_id=event.id, checkpoint="decision")
-        assert decision_result["brief_count"] == 1
-        assert decision_result["briefs"][0]["brief_text"] == "Decision analysis"
+        result = await get_match_brief(event_id=event.id)
+        assert result["brief_count"] == 2
 
     @pytest.mark.asyncio
     async def test_empty_results(self, patch_session_maker, epl_event_no_odds):
@@ -390,7 +397,11 @@ class TestGetMatchBrief:
 
         for i in range(3):
             await save_match_brief(
-                event_id=event.id, market="1x2", brief_text=f"Brief {i}", checkpoint="context"
+                event_id=event.id,
+                market="1x2",
+                decision="watching",
+                summary=f"Summary {i}",
+                brief_text=f"Brief {i}",
             )
 
         result = await get_match_brief(event_id=event.id)
@@ -401,12 +412,166 @@ class TestGetMatchBrief:
         assert result["briefs"][2]["brief_text"] == "Brief 0"
 
     @pytest.mark.asyncio
+    async def test_limit_parameter(self, patch_session_maker, epl_event_with_odds):
+        """Limit parameter restricts number of briefs returned."""
+        from odds_mcp.server import get_match_brief, save_match_brief
+
+        event, _ = epl_event_with_odds
+
+        for i in range(4):
+            await save_match_brief(
+                event_id=event.id,
+                market="1x2",
+                decision="watching",
+                summary=f"Summary {i}",
+                brief_text=f"Brief {i}",
+            )
+
+        result = await get_match_brief(event_id=event.id, limit=2)
+
+        assert result["brief_count"] == 2
+        assert len(result["briefs"]) == 2
+        # Newest first
+        assert result["briefs"][0]["brief_text"] == "Brief 3"
+        assert result["briefs"][1]["brief_text"] == "Brief 2"
+
+    @pytest.mark.asyncio
     async def test_event_not_found(self, patch_session_maker):
         """get_match_brief returns error for nonexistent event."""
         from odds_mcp.server import get_match_brief
 
         result = await get_match_brief(event_id="nonexistent_event")
         assert result == {"error": "Event 'nonexistent_event' not found"}
+
+
+class TestGetSlateBriefs:
+    """Tests for the get_slate_briefs MCP tool."""
+
+    @pytest.fixture
+    async def future_epl_events(self, pglite_async_session):
+        """Two future EPL events for slate testing."""
+        future = datetime.now(UTC) + timedelta(days=2)
+        event_a = Event(
+            id="slate_test_001",
+            sport_key="soccer_epl",
+            sport_title="EPL",
+            commence_time=future,
+            home_team="Arsenal",
+            away_team="Chelsea",
+            status=EventStatus.SCHEDULED,
+        )
+        event_b = Event(
+            id="slate_test_002",
+            sport_key="soccer_epl",
+            sport_title="EPL",
+            commence_time=future + timedelta(hours=3),
+            home_team="Liverpool",
+            away_team="Man City",
+            status=EventStatus.SCHEDULED,
+        )
+        pglite_async_session.add_all([event_a, event_b])
+        await pglite_async_session.commit()
+        await pglite_async_session.refresh(event_a)
+        await pglite_async_session.refresh(event_b)
+        return event_a, event_b
+
+    @pytest.mark.asyncio
+    async def test_happy_path_with_and_without_briefs(
+        self, patch_session_maker, future_epl_events, pglite_async_session
+    ):
+        """Returns latest brief for events that have one, None for those without."""
+        from odds_mcp.server import get_slate_briefs
+
+        event_with, event_without = future_epl_events
+
+        # Insert brief directly (no snapshot needed for this test)
+        brief = MatchBrief(
+            event_id=event_with.id,
+            decision=BriefDecision.WATCHING,
+            summary="Looks interesting",
+            brief_text="Full analysis here.",
+        )
+        pglite_async_session.add(brief)
+        await pglite_async_session.commit()
+
+        result = await get_slate_briefs(league="soccer_epl", days_ahead=7)
+
+        assert result["fixture_count"] == 2
+        by_event = {f["event"]["id"]: f for f in result["fixtures"]}
+
+        assert by_event[event_with.id]["latest_brief"] is not None
+        assert by_event[event_with.id]["latest_brief"]["decision"] == "watching"
+        assert by_event[event_with.id]["latest_brief"]["summary"] == "Looks interesting"
+
+        assert by_event[event_without.id]["latest_brief"] is None
+
+    @pytest.mark.asyncio
+    async def test_empty_slate(self, patch_session_maker):
+        """No upcoming fixtures returns empty list."""
+        from odds_mcp.server import get_slate_briefs
+
+        result = await get_slate_briefs(league="soccer_epl", days_ahead=1)
+
+        assert result["fixture_count"] == 0
+        assert result["fixtures"] == []
+
+    @pytest.mark.asyncio
+    async def test_returns_latest_brief(
+        self, patch_session_maker, future_epl_events, pglite_async_session
+    ):
+        """When multiple briefs exist, returns the most recent one."""
+        from odds_mcp.server import get_slate_briefs
+
+        event, _ = future_epl_events
+
+        brief_old = MatchBrief(
+            event_id=event.id,
+            decision=BriefDecision.WATCHING,
+            summary="First look",
+            brief_text="Initial analysis.",
+        )
+        pglite_async_session.add(brief_old)
+        await pglite_async_session.commit()
+
+        brief_new = MatchBrief(
+            event_id=event.id,
+            decision=BriefDecision.BET,
+            summary="Edge found on Arsenal",
+            brief_text="Updated analysis with bet.",
+        )
+        pglite_async_session.add(brief_new)
+        await pglite_async_session.commit()
+
+        result = await get_slate_briefs(league="soccer_epl", days_ahead=7)
+
+        by_event = {f["event"]["id"]: f for f in result["fixtures"]}
+        brief = by_event[event.id]["latest_brief"]
+        assert brief["decision"] == "bet"
+        assert brief["summary"] == "Edge found on Arsenal"
+
+    @pytest.mark.asyncio
+    async def test_does_not_include_full_brief_text(
+        self, patch_session_maker, future_epl_events, pglite_async_session
+    ):
+        """Slate briefs should not include full brief_text."""
+        from odds_mcp.server import get_slate_briefs
+
+        event, _ = future_epl_events
+
+        brief = MatchBrief(
+            event_id=event.id,
+            decision=BriefDecision.SKIP,
+            summary="No edge",
+            brief_text="Detailed analysis that should not appear in slate view.",
+        )
+        pglite_async_session.add(brief)
+        await pglite_async_session.commit()
+
+        result = await get_slate_briefs(league="soccer_epl", days_ahead=7)
+
+        by_event = {f["event"]["id"]: f for f in result["fixtures"]}
+        latest = by_event[event.id]["latest_brief"]
+        assert "brief_text" not in latest
 
 
 class TestGetSharpSoftSpread:
