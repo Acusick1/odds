@@ -56,10 +56,9 @@ def start_local():
     async def run_scheduler():
         """Run scheduler using async context manager."""
         from odds_lambda.scheduling.jobs import (
-            _JOB_BOOTSTRAP_MAP,
-            _PER_SPORT_JOBS,
             JobContext,
             get_bootstrap_function,
+            is_per_sport_job,
             make_compound_job_name,
         )
 
@@ -67,26 +66,18 @@ def start_local():
 
         for job_name in app_settings.scheduler.bootstrap_jobs:
             bootstrap_fn = get_bootstrap_function(job_name)
-            has_custom_bootstrap = job_name in _JOB_BOOTSTRAP_MAP
-            is_per_sport = job_name in _PER_SPORT_JOBS
 
-            if is_per_sport:
+            if is_per_sport_job(job_name):
                 for sport_key in app_settings.data_collection.sports:
                     compound = make_compound_job_name(job_name, sport_key)
                     try:
-                        if has_custom_bootstrap:
-                            await bootstrap_fn(sport_key)
-                        else:
-                            await bootstrap_fn(JobContext(sport=sport_key))
+                        await bootstrap_fn(JobContext(sport=sport_key))
                         console.print(f"[green]  {compound} bootstrapped[/green]")
                     except Exception as e:
                         console.print(f"[yellow]  {compound} bootstrap failed: {e}[/yellow]")
             else:
                 try:
-                    if has_custom_bootstrap:
-                        await bootstrap_fn()
-                    else:
-                        await bootstrap_fn(JobContext())
+                    await bootstrap_fn(JobContext())
                     console.print(f"[green]  {job_name} bootstrapped[/green]")
                 except Exception as e:
                     console.print(f"[yellow]  {job_name} bootstrap failed: {e}[/yellow]")

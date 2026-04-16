@@ -180,12 +180,23 @@ def get_job_function(job_name: str) -> Callable[[JobContext], Awaitable[None]]:
     return fn
 
 
-def get_bootstrap_function(job_name: str) -> Callable[..., Awaitable[None]]:
+def is_per_sport_job(job_name: str) -> bool:
+    """Check whether a job accepts a sport parameter."""
+    return job_name in _PER_SPORT_JOBS
+
+
+def has_custom_bootstrap(job_name: str) -> bool:
+    """Check whether a job has a custom bootstrap entry point."""
+    return job_name in _JOB_BOOTSTRAP_MAP
+
+
+def get_bootstrap_function(job_name: str) -> Callable[[JobContext], Awaitable[None]]:
     """Get the bootstrap entry point for a job.
 
-    Jobs with an entry in ``_JOB_BOOTSTRAP_MAP`` use that function for
-    bootstrap (e.g. ``agent-run`` uses ``schedule_next`` instead of ``main``).
-    All other jobs fall back to their regular ``main(JobContext)`` function.
+    Returns a callable with the same ``(JobContext) -> Awaitable[None]``
+    signature as regular job functions. Jobs with a custom bootstrap
+    (e.g. ``agent-run`` uses ``schedule_next(sport)`` instead of ``main``)
+    are wrapped so the caller doesn't need to know about the difference.
 
     Raises:
         KeyError: If job name not found in registry
@@ -193,7 +204,24 @@ def get_bootstrap_function(job_name: str) -> Callable[..., Awaitable[None]]:
     if job_name in _JOB_BOOTSTRAP_MAP:
         module_path, func_name = _JOB_BOOTSTRAP_MAP[job_name]
         module = import_module(module_path)
-        return getattr(module, func_name)
+        raw_fn = getattr(module, func_name)
+
+        # Wrap custom bootstrap functions to accept JobContext uniformly.
+        # Per-sport custom bootstraps expect (sport: str); global ones expect ().
+        if job_name in _PER_SPORT_JOBS:
+
+            async def _per_sport_wrapper(ctx: JobContext) -> None:
+                assert ctx.sport, f"Job '{job_name}' requires a sport in JobContext"
+                await raw_fn(ctx.sport)
+
+            return _per_sport_wrapper
+        else:
+
+            async def _global_wrapper(ctx: JobContext) -> None:
+                await raw_fn()
+
+            return _global_wrapper
+
     return get_job_function(job_name)
 
 
