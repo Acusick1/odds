@@ -802,33 +802,22 @@ async def get_slate_briefs(
             status=EventStatus.SCHEDULED,
         )
 
-        # Batch-fetch latest brief per event using a window function
+        # Fetch latest brief per event
         if events:
-            from sqlalchemy import func
-
             event_ids = [e.id for e in events]
-            # Subquery: rank briefs per event by created_at desc
-            ranked = (
-                select(
-                    MatchBrief,
-                    func.row_number()
-                    .over(
-                        partition_by=MatchBrief.event_id,
-                        order_by=MatchBrief.created_at.desc(),
-                    )
-                    .label("rn"),
-                )
+            result = await session.execute(
+                select(MatchBrief)
                 .where(MatchBrief.event_id.in_(event_ids))  # type: ignore[union-attr]
-                .subquery()
+                .distinct(MatchBrief.event_id)
+                .order_by(MatchBrief.event_id, MatchBrief.created_at.desc())
             )
-            result = await session.execute(select(ranked).where(ranked.c.rn == 1))
             latest_by_event: dict[str, Any] = {
-                row.event_id: {
-                    "decision": row.decision,
-                    "summary": row.summary,
-                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                b.event_id: {
+                    "decision": b.decision.value if b.decision else None,
+                    "summary": b.summary,
+                    "created_at": b.created_at.isoformat() if b.created_at else None,
                 }
-                for row in result
+                for b in result.scalars()
             }
         else:
             latest_by_event = {}
