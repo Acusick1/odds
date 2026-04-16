@@ -1,17 +1,16 @@
 """drop scrape_jobs table
 
-Revision ID: b4f1a2c3d5e6
+Revision ID: 917adbe0576d
 Revises: adf05780c7c1
-Create Date: 2026-04-16 12:00:00.000000
+Create Date: 2026-04-16 14:54:49.924126
 
 """
 
 import sqlalchemy as sa
-import sqlmodel
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "b4f1a2c3d5e6"
+revision = "917adbe0576d"
 down_revision = "adf05780c7c1"
 branch_labels = None
 depends_on = None
@@ -31,8 +30,8 @@ def downgrade() -> None:
     op.create_table(
         "scrape_jobs",
         sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("league", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-        sa.Column("market", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+        sa.Column("league", sa.String(), nullable=False),
+        sa.Column("market", sa.String(), nullable=False),
         sa.Column(
             "status",
             sa.Enum("PENDING", "RUNNING", "COMPLETED", "FAILED", name="scrapejobstatus"),
@@ -46,7 +45,7 @@ def downgrade() -> None:
         sa.Column("events_matched", sa.Integer(), nullable=True),
         sa.Column("events_created", sa.Integer(), nullable=True),
         sa.Column("snapshots_stored", sa.Integer(), nullable=True),
-        sa.Column("error_message", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+        sa.Column("error_message", sa.String(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_scrape_jobs_league"), "scrape_jobs", ["league"], unique=False)

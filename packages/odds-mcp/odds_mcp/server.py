@@ -276,26 +276,36 @@ async def refresh_scrape(
     spec = dataclasses.replace(known_spec, markets=[market])
 
     try:
-        from apscheduler import AsyncScheduler, SchedulerRole
-        from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
-        from apscheduler.eventbrokers.asyncpg import AsyncpgEventBroker
-        from odds_core.config import get_settings
+        from apscheduler import SchedulerRole
         from odds_lambda.jobs.fetch_oddsportal import ingest_league
-        from sqlalchemy.ext.asyncio import create_async_engine
+        from odds_lambda.scheduling.backends.local import build_scheduler
 
-        settings = get_settings()
-        engine = create_async_engine(settings.database.url)
-        data_store = SQLAlchemyDataStore(engine)
-        event_broker = AsyncpgEventBroker.from_async_sqla_engine(engine)
+        scheduler, engine = build_scheduler(role=SchedulerRole.scheduler)
+        try:
+            async with scheduler:
+                # Check for duplicate: same league/market already pending
+                existing_jobs = await scheduler.get_jobs()
+                for j in existing_jobs:
+                    if "ingest_league" in j.task_id and j.args:
+                        existing_spec = j.args[0]
+                        if (
+                            hasattr(existing_spec, "league")
+                            and hasattr(existing_spec, "markets")
+                            and existing_spec.league == spec.league
+                            and spec.markets
+                            and spec.markets[0] in existing_spec.markets
+                        ):
+                            return {
+                                "job_id": str(j.id),
+                                "league": league,
+                                "market": market,
+                                "message": "A scrape job for this league/market is already queued.",
+                                "duplicate": True,
+                            }
 
-        async with AsyncScheduler(
-            data_store=data_store,
-            event_broker=event_broker,
-            role=SchedulerRole.scheduler,
-        ) as scheduler:
-            job_id = await scheduler.add_job(ingest_league, args=[spec])
-
-        await engine.dispose()
+                job_id = await scheduler.add_job(ingest_league, args=[spec])
+        finally:
+            await engine.dispose()
 
     except Exception as e:
         logger.error(
@@ -315,36 +325,32 @@ async def refresh_scrape(
 
 
 @mcp.tool()
-async def get_scrape_status() -> dict[str, Any]:
+async def get_scrape_status(
+    job_id: str | None = None,
+) -> dict[str, Any]:
     """Check whether the scheduler is running and list pending scrape jobs.
 
     Queries the APScheduler data store for jobs whose task matches
     ``ingest_league``. Useful after ``refresh_scrape`` to confirm the
     scheduler picked up the job.
 
+    Args:
+        job_id: Optional UUID string to filter for a specific job.
+               If provided, only that job is returned (if still pending).
+
     Returns:
         Dict with scheduler status and list of pending scrape jobs.
     """
     try:
-        from apscheduler import AsyncScheduler, SchedulerRole
-        from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
-        from apscheduler.eventbrokers.asyncpg import AsyncpgEventBroker
-        from odds_core.config import get_settings
-        from sqlalchemy.ext.asyncio import create_async_engine
+        from apscheduler import SchedulerRole
+        from odds_lambda.scheduling.backends.local import build_scheduler
 
-        settings = get_settings()
-        engine = create_async_engine(settings.database.url)
-        data_store = SQLAlchemyDataStore(engine)
-        event_broker = AsyncpgEventBroker.from_async_sqla_engine(engine)
-
-        async with AsyncScheduler(
-            data_store=data_store,
-            event_broker=event_broker,
-            role=SchedulerRole.scheduler,
-        ) as scheduler:
-            jobs = await scheduler.get_jobs()
-
-        await engine.dispose()
+        scheduler, engine = build_scheduler(role=SchedulerRole.scheduler)
+        try:
+            async with scheduler:
+                jobs = await scheduler.get_jobs()
+        finally:
+            await engine.dispose()
 
         scrape_jobs = [
             {
@@ -355,6 +361,9 @@ async def get_scrape_status() -> dict[str, Any]:
             for j in jobs
             if "ingest_league" in j.task_id
         ]
+
+        if job_id is not None:
+            scrape_jobs = [j for j in scrape_jobs if j["job_id"] == job_id]
 
     except Exception as e:
         logger.warning("get_scrape_status_failed", error=str(e))

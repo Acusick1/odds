@@ -35,7 +35,7 @@ EVENT_ID = "e2e_test_game"
 HOME_TEAM = "Los Angeles Lakers"
 AWAY_TEAM = "Boston Celtics"
 
-_BUILD_PATCH = "odds_lambda.scheduling.backends.local._build_scheduler"
+_BUILD_PATCH = "odds_lambda.scheduling.backends.local.build_scheduler"
 
 # Module-level state shared with the e2e job function.
 _e2e_execution_happened: dict[str, bool] = {}
@@ -44,8 +44,10 @@ _e2e_session_factory = None
 _e2e_original_main = None
 
 
-def _in_memory_scheduler(**kwargs) -> AsyncScheduler:
-    return AsyncScheduler(**kwargs)
+def _in_memory_scheduler(**kwargs) -> tuple[AsyncScheduler, AsyncMock]:
+    mock_engine = AsyncMock()
+    mock_engine.dispose = AsyncMock()
+    return AsyncScheduler(**kwargs), mock_engine
 
 
 async def _wrapped_fetch_odds(ctx: JobContext) -> None:
