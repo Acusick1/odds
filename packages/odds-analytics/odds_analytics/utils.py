@@ -10,7 +10,7 @@ import math
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from odds_core.odds_math import calculate_implied_probability
+from odds_core.odds_math import american_to_decimal, calculate_implied_probability
 
 if TYPE_CHECKING:
     from rich.table import Table
@@ -27,8 +27,6 @@ def calculate_ev(
         >>> calculate_ev(0.55, -110, 100)
         4.09
     """
-    from odds_core.odds_math import american_to_decimal
-
     decimal_odds = american_to_decimal(american_odds)
     net_win = stake * (decimal_odds - 1)
 
@@ -45,8 +43,6 @@ def calculate_kelly_stake(
     max_stake_percentage: float = 0.05,
 ) -> float:
     """Optimal stake via Kelly Criterion with an optional fractional-Kelly cap."""
-    from odds_core.odds_math import american_to_decimal
-
     decimal_odds = american_to_decimal(american_odds)
     b = decimal_odds - 1
     p = bet_probability

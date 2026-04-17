@@ -8,14 +8,6 @@ install with ``pip install odds-analytics[training]`` for full functionality.
 Modules that require training extras raise ImportError at import time if missing.
 """
 
-from odds_core.odds_math import (
-    american_to_decimal,
-    calculate_implied_probability,
-    calculate_profit_from_odds,
-    decimal_to_american,
-    determine_h2h_winner,
-)
-
 from odds_analytics.sequence_loader import load_sequences_for_event
 from odds_analytics.utils import calculate_ev
 
@@ -72,12 +64,7 @@ __all__ = [
     # Sequence Loading
     "load_sequences_for_event",
     # Utils
-    "american_to_decimal",
-    "decimal_to_american",
-    "calculate_implied_probability",
     "calculate_ev",
-    "calculate_profit_from_odds",
-    "determine_h2h_winner",
     # Training Configuration
     "MLTrainingConfig",
     "TrainingConfig",
