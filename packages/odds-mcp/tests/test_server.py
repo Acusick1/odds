@@ -227,6 +227,103 @@ class TestRefreshScrapeUnknownLeague:
             assert spec.sport_key == "baseball_mlb"
 
 
+class TestGetScrapeStatus:
+    @pytest.mark.asyncio
+    async def test_surfaces_completed_job_result(self) -> None:
+        from dataclasses import dataclass, field
+        from uuid import uuid4
+
+        from odds_mcp.server import get_scrape_status
+
+        @dataclass
+        class FakeStats:
+            league: str = "england-premier-league"
+            matches_scraped: int = 12
+            matches_converted: int = 12
+            events_matched: int = 10
+            events_created: int = 2
+            snapshots_stored: int = 12
+            errors: list[str] = field(default_factory=list)
+
+        job_id = uuid4()
+        mock_outcome = MagicMock()
+        mock_outcome.name = "success"
+        mock_result = MagicMock()
+        mock_result.outcome = mock_outcome
+        mock_result.return_value = FakeStats()
+        mock_result.started_at = datetime(2026, 4, 17, 10, 0, tzinfo=UTC)
+        mock_result.finished_at = datetime(2026, 4, 17, 10, 5, tzinfo=UTC)
+        mock_result.exception = None
+
+        mock_scheduler = AsyncMock()
+        mock_scheduler.get_jobs = AsyncMock(return_value=[])
+        mock_scheduler.get_job_result = AsyncMock(return_value=mock_result)
+
+        mock_cm = AsyncMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_scheduler)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("odds_lambda.scheduling.backends.local.build_scheduler", return_value=mock_cm):
+            response = await get_scrape_status(job_id=str(job_id))
+
+        assert response["status"] == "ok"
+        assert response["pending_scrape_jobs"] == 0
+        assert response["result"]["state"] == "completed"
+        assert response["result"]["outcome"] == "success"
+        assert response["result"]["stats"]["matches_scraped"] == 12
+        assert response["result"]["stats"]["events_matched"] == 10
+        assert response["result"]["exception"] is None
+
+    @pytest.mark.asyncio
+    async def test_pending_job_reports_state(self) -> None:
+        from uuid import uuid4
+
+        from odds_mcp.server import get_scrape_status
+
+        job_id = uuid4()
+        mock_job = MagicMock()
+        mock_job.id = job_id
+        mock_job.task_id = "odds_lambda.jobs.fetch_oddsportal.ingest_league"
+        mock_job.created_at = datetime(2026, 4, 17, 10, 0, tzinfo=UTC)
+        mock_job.acquired_by = None
+
+        mock_scheduler = AsyncMock()
+        mock_scheduler.get_jobs = AsyncMock(return_value=[mock_job])
+        mock_scheduler.get_job_result = AsyncMock()
+
+        mock_cm = AsyncMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_scheduler)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("odds_lambda.scheduling.backends.local.build_scheduler", return_value=mock_cm):
+            response = await get_scrape_status(job_id=str(job_id))
+
+        assert response["pending_scrape_jobs"] == 1
+        assert response["jobs"][0]["state"] == "pending"
+        assert "result" not in response
+        mock_scheduler.get_job_result.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unknown_job_id_reports_unknown(self) -> None:
+        from uuid import uuid4
+
+        from odds_mcp.server import get_scrape_status
+
+        job_id = uuid4()
+        mock_scheduler = AsyncMock()
+        mock_scheduler.get_jobs = AsyncMock(return_value=[])
+        mock_scheduler.get_job_result = AsyncMock(return_value=None)
+
+        mock_cm = AsyncMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_scheduler)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("odds_lambda.scheduling.backends.local.build_scheduler", return_value=mock_cm):
+            response = await get_scrape_status(job_id=str(job_id))
+
+        assert response["result"]["state"] == "unknown"
+
+
 class TestGetUpcomingFixtures:
     @pytest.mark.asyncio
     async def test_returns_fixtures(self) -> None:

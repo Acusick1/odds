@@ -303,19 +303,28 @@ async def refresh_scrape(
 async def get_scrape_status(
     job_id: str | None = None,
 ) -> dict[str, Any]:
-    """Check whether the scheduler is running and list pending scrape jobs.
+    """Check scheduler status, list pending scrape jobs, and surface results.
 
-    Queries the APScheduler data store for jobs whose task matches
-    ``ingest_league``. Useful after ``refresh_scrape`` to confirm the
-    scheduler picked up the job.
+    Without ``job_id``: returns the current list of pending/running scrape
+    jobs in the APScheduler data store.
+
+    With ``job_id`` (returned from ``refresh_scrape``): also looks up the
+    completed result and returns ``matches_scraped``, ``events_matched``,
+    ``snapshots_stored``, ``errors``, and job outcome. Results are retained
+    by APScheduler for a bounded window after completion.
 
     Args:
-        job_id: Optional UUID string to filter for a specific job.
-               If provided, only that job is returned (if still pending).
+        job_id: Optional UUID string. When provided, the tool reports the
+                job's lifecycle state (pending, running, completed, failed)
+                and, for completed jobs, the ingestion stats.
 
     Returns:
-        Dict with scheduler status and list of pending scrape jobs.
+        Dict with scheduler status, pending jobs, and (if job_id is given)
+        the specific job's outcome.
     """
+    import dataclasses
+    from uuid import UUID
+
     try:
         from apscheduler import SchedulerRole
         from odds_lambda.scheduling.backends.local import build_scheduler
@@ -323,18 +332,38 @@ async def get_scrape_status(
         async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
             jobs = await scheduler.get_jobs()
 
-        scrape_jobs = [
-            {
-                "job_id": str(j.id),
-                "task_id": j.task_id,
-                "created_at": j.created_at.isoformat() if j.created_at else None,
-            }
-            for j in jobs
-            if "ingest_league" in j.task_id
-        ]
+            pending = [j for j in jobs if "ingest_league" in j.task_id]
+            if job_id is not None:
+                pending = [j for j in pending if str(j.id) == job_id]
 
-        if job_id is not None:
-            scrape_jobs = [j for j in scrape_jobs if j["job_id"] == job_id]
+            pending_jobs = [
+                {
+                    "job_id": str(j.id),
+                    "task_id": j.task_id,
+                    "created_at": j.created_at.isoformat() if j.created_at else None,
+                    "state": "running" if j.acquired_by else "pending",
+                }
+                for j in pending
+            ]
+
+            job_result: dict[str, Any] | None = None
+            if job_id is not None and not pending_jobs:
+                result = await scheduler.get_job_result(UUID(job_id), wait=False)
+                if result is not None:
+                    stats = result.return_value
+                    job_result = {
+                        "job_id": job_id,
+                        "state": "completed",
+                        "outcome": result.outcome.name,
+                        "started_at": result.started_at.isoformat() if result.started_at else None,
+                        "finished_at": result.finished_at.isoformat(),
+                        "stats": dataclasses.asdict(stats)
+                        if dataclasses.is_dataclass(stats)
+                        else None,
+                        "exception": repr(result.exception) if result.exception else None,
+                    }
+                else:
+                    job_result = {"job_id": job_id, "state": "unknown"}
 
     except Exception as e:
         logger.warning("get_scrape_status_failed", error=str(e))
@@ -344,11 +373,14 @@ async def get_scrape_status(
             "jobs": [],
         }
 
-    return {
+    response: dict[str, Any] = {
         "status": "ok",
-        "pending_scrape_jobs": len(scrape_jobs),
-        "jobs": scrape_jobs,
+        "pending_scrape_jobs": len(pending_jobs),
+        "jobs": pending_jobs,
     }
+    if job_result is not None:
+        response["result"] = job_result
+    return response
 
 
 @mcp.tool()
