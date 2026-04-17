@@ -4,6 +4,7 @@ Thin wrappers over existing DB queries, jobs, and paper trading logic.
 All tools are stateless and use async_session_maker() for DB access.
 """
 
+import json
 import math
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -12,6 +13,7 @@ import structlog
 from fastmcp import FastMCP
 from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import TabularFeatureExtractor
+from odds_analytics.utils import calculate_market_hold
 from odds_core.agent_wakeup_models import AgentWakeup
 from odds_core.database import async_session_maker
 from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMap
@@ -48,10 +50,31 @@ mcp = FastMCP(
 _LEAGUE_SPEC_BY_NAME = LEAGUE_SPEC_BY_NAME
 
 # Hybrid sharp reference matching production defaults.
-# Duplicated from feature_extraction.py DEFAULT_SHARP_BOOKMAKERS / DEFAULT_RETAIL_BOOKMAKERS
-# with EPL-specific overrides — keep in sync.
+# Duplicated from feature_extraction.py DEFAULT_SHARP_BOOKMAKERS with EPL-specific overrides — keep in sync.
 _DEFAULT_SHARP_BOOKMAKERS = ["pinnacle", "betfair_exchange"]
-_DEFAULT_RETAIL_BOOKMAKERS = ["bet365", "betway", "betfred"]
+# Used only by get_event_features for TabularFeatureExtractor. Must match whatever
+# retail set the deployed EPL model was trained on — today there is no deployed EPL
+# model, so this is a placeholder pending resolution of the "EPL predictions empty" TODO.
+_DEFAULT_RETAIL_BOOKMAKERS = ["bet365", "betway", "betfred", "betvictor", "bwin"]
+
+
+def _coerce_bookmaker_list(value: str | list[str] | None) -> list[str] | None:
+    # Claude Code's MCP client stringifies array params (anthropics/claude-code#22394).
+    # Accept JSON-array strings and comma-separated strings so tools stay callable.
+    # Remove once the upstream client is fixed.
+    if value is None or isinstance(value, list):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        return None
+    if stripped.startswith("["):
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed]
+    return [item.strip() for item in stripped.split(",") if item.strip()]
 
 
 def _event_to_dict(event: Event) -> dict[str, Any]:
@@ -447,8 +470,7 @@ async def get_event_features(
     event_id: str,
     market: MarketKey,
     outcome: Literal["home", "away"] = "home",
-    sharp_bookmakers: list[str] | None = None,
-    retail_bookmakers: list[str] | None = None,
+    sharp_bookmakers: str | list[str] | None = None,
 ) -> dict[str, Any]:
     """Get tabular features for an event's latest snapshot.
 
@@ -462,7 +484,6 @@ async def get_event_features(
         market: Market type — "h2h", "1x2", "totals", or "spreads".
         outcome: Which outcome to extract features for ("home" or "away").
         sharp_bookmakers: Sharp bookmaker keys (default: ["pinnacle", "betfair_exchange"]).
-        retail_bookmakers: Retail bookmaker keys (default: ["bet365", "betway", "betfred"]).
 
     Returns:
         Dict with event info and feature name/value pairs.
@@ -489,8 +510,8 @@ async def get_event_features(
             snapshot,
             market=market,
             outcome_name=outcome_name,
-            sharp_bookmakers=sharp_bookmakers or _DEFAULT_SHARP_BOOKMAKERS,
-            retail_bookmakers=retail_bookmakers or _DEFAULT_RETAIL_BOOKMAKERS,
+            sharp_bookmakers=_coerce_bookmaker_list(sharp_bookmakers) or _DEFAULT_SHARP_BOOKMAKERS,
+            retail_bookmakers=_DEFAULT_RETAIL_BOOKMAKERS,
         )
     except Exception as e:
         logger.error("feature_extraction_failed", event_id=event_id, error=str(e), exc_info=True)
@@ -865,30 +886,30 @@ async def get_slate_briefs(
 async def get_sharp_soft_spread(
     event_id: str,
     market: MarketKey,
-    sharp_bookmakers: list[str] | None = None,
-    retail_bookmakers: list[str] | None = None,
+    sharp_bookmakers: str | list[str] | None = None,
     sharp_lookback_hours: float = 2.0,
 ) -> dict[str, Any]:
     """Get sharp vs soft bookmaker price divergence for an event.
 
     Sharp prices are resolved via a time-windowed lookback across recent
     snapshots so that a missing sharp bookmaker in the latest scrape does not
-    discard a perfectly good price from a nearby snapshot.  Retail prices
-    always come from the single latest snapshot.
+    discard a perfectly good price from a nearby snapshot. Retail prices
+    always come from the single latest snapshot and cover every non-sharp
+    bookmaker in it. For h2h / 1x2 markets each retail entry also reports
+    that book's market hold, so callers can filter high-margin books.
 
     Args:
         event_id: Event identifier.
         market: Market type — "h2h", "1x2", "totals", or "spreads".
         sharp_bookmakers: Sharp bookmaker keys (default: ["pinnacle", "betfair_exchange"]).
-        retail_bookmakers: Retail bookmaker keys (default: ["bet365", "betway", "betfred"]).
         sharp_lookback_hours: How far back to search for sharp prices (default 2.0 h).
 
     Returns:
         Dict with per-outcome sharp price (with source snapshot time),
-        soft prices, and divergence values.
+        soft prices, and divergence values. Each soft entry includes
+        ``market_hold`` (h2h / 1x2 only; null for multi-line markets).
     """
-    sharp_bms = sharp_bookmakers or _DEFAULT_SHARP_BOOKMAKERS
-    retail_bms = retail_bookmakers or _DEFAULT_RETAIL_BOOKMAKERS
+    sharp_bms = _coerce_bookmaker_list(sharp_bookmakers) or _DEFAULT_SHARP_BOOKMAKERS
 
     async with async_session_maker() as session:
         reader = OddsReader(session)
@@ -934,6 +955,19 @@ async def get_sharp_soft_spread(
     for o in odds:
         outcomes.setdefault(o.outcome_name, []).append(o)
 
+    # Retail set is every non-sharp book in the snapshot.
+    sharp_set = set(sharp_bms)
+    retail_bms = sorted({o.bookmaker_key for o in odds if o.bookmaker_key not in sharp_set})
+
+    # Per-book market hold is only meaningful for single-line markets; totals / spreads
+    # span multiple lines, so computing it event-wide would conflate them.
+    book_hold: dict[str, float] | None = None
+    if market in ("h2h", "1x2"):
+        book_prices: dict[str, list[int]] = {}
+        for o in odds:
+            book_prices.setdefault(o.bookmaker_key, []).append(o.price)
+        book_hold = {bm: calculate_market_hold(prices) for bm, prices in book_prices.items()}
+
     spread: dict[str, dict[str, Any]] = {}
     for outcome_name, outcome_odds in outcomes.items():
         sharp_entry = sharp_by_outcome.get(outcome_name)
@@ -965,12 +999,18 @@ async def get_sharp_soft_spread(
             retail_price = bm_match[0].price
             retail_prob = round(calculate_implied_probability(retail_price), 6)
             divergence = round(retail_prob - sharp_prob, 6) if sharp_prob is not None else None
+            market_hold = (
+                round(book_hold[bm_key], 6)
+                if book_hold is not None and bm_key in book_hold
+                else None
+            )
             soft_prices.append(
                 {
                     "bookmaker": bm_key,
                     "price": retail_price,
                     "implied_prob": retail_prob,
                     "divergence": divergence,
+                    "market_hold": market_hold,
                 }
             )
 

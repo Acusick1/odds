@@ -8,6 +8,61 @@ from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 
 
+class TestCoerceBookmakerList:
+    def test_none_passthrough(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list(None) is None
+
+    def test_list_passthrough(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list(["bet365", "betway"]) == ["bet365", "betway"]
+
+    def test_empty_string_becomes_none(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list("") is None
+        assert _coerce_bookmaker_list("   ") is None
+
+    def test_json_array_string(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list('["bet365", "betway"]') == ["bet365", "betway"]
+
+    def test_json_array_with_whitespace(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list('  ["pinnacle", "betfair_exchange"]  ') == [
+            "pinnacle",
+            "betfair_exchange",
+        ]
+
+    def test_comma_separated_string(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list("bet365,betway,betfred") == ["bet365", "betway", "betfred"]
+
+    def test_comma_separated_with_whitespace(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list("bet365, betway , betfred") == [
+            "bet365",
+            "betway",
+            "betfred",
+        ]
+
+    def test_single_value_string(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list("pinnacle") == ["pinnacle"]
+
+    def test_malformed_json_falls_back_to_comma_split(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list("[bet365, betway") == ["[bet365", "betway"]
+
+
 class TestEventToDict:
     def _make_event(self, **overrides: object) -> Event:
         defaults = {

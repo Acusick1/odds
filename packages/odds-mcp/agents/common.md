@@ -8,7 +8,9 @@ Before triaging or researching any fixture, call `get_slate_briefs` to see the l
 
 ## Parallelism
 
-Maximise parallel tool calls and sub-agent research. Once games are selected for deep research, research them concurrently — do not work through games sequentially.
+Maximise parallel tool calls. Once games are selected for deep research, research them concurrently — do not work through games sequentially.
+
+For web research, dispatch the `web-research` subagent (via the `Agent` tool with `subagent_type: web-research`). That subagent has `WebSearch` and `WebFetch` available; the default `general-purpose` subagent does not, so dispatching it for web research will fail. Dispatch multiple `web-research` subagents in a single turn — one per fixture or topic — to parallelise. Keep MCP odds tool calls in the main context.
 
 ## Scrape Freshness
 
