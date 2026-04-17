@@ -1,6 +1,12 @@
 # Polymarket Integration
 
-> **Status: Deprioritized.** EPL match-level volume is thin ($10K-$100K per match) and AMM-driven — orderbook data reflects automated market maker parameters, not genuine public sentiment. Not accessible from UK for trading. Prices collinear with sportsbooks. Pipeline code is complete but inactive. EPL technical details: series ID `10188`, tag IDs `82`/`306`, ticker format `epl-{away3}-{home3}-YYYY-MM-DD`. If liquidity improves, the pipeline can be reactivated with EPL market matching.
+> **Status: Deprioritized for trading, viable as sharp reference (MLB).** UK retail access is blocked for trading across all sports. Characterization varies by sport:
+>
+> - **EPL**: thin ($10K-$100K/match), AMM-driven — orderbook reflects automated market maker parameters, not public sentiment. Series ID `10188`, tag IDs `82`/`306`, ticker `epl-{away3}-{home3}-YYYY-MM-DD`.
+> - **NBA**: deep ($178K-$2.5M/match moneyline, ~1¢ spreads, 25-28 levels) — pipeline currently targets NBA via `polymarket_fetcher.get_nba_events()`.
+> - **MLB**: deep ($152K median, up to $5.8M for playoff games), 1¢ spreads, 32-44 levels per side, median $567K total depth. Prices are collinear with bet365 devigged (mean delta ≈1¢ on games with real volume) — this is arbitrage collinearity, not AMM seeding. Discrete orderbook trading (89% of 5-min ticks show zero movement, remainder jump in ≥1¢ increments). Series ID `3`, game tag ID `100639`, ticker `mlb-{away3}-{home3}-YYYY-MM-DD`. Viable as sharp reference / alternate to Pinnacle, not as a mispricing venue.
+>
+> Existing pipeline code is NBA-targeted (`get_nba_events`, `NBA_ABBREV_MAP`). To activate for another sport, swap series/tag IDs and ticker parser; core client (`PolymarketClient`) is sport-agnostic.
 
 Data model, pipeline architecture, and API reference for Polymarket prediction market data.
 

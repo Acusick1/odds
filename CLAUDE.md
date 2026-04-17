@@ -12,7 +12,7 @@ Sport-agnostic betting data pipeline with sport-specific LLM agents. Infrastruct
 
 **Target sports:** EPL (active — agent in interactive evaluation), MLB and NBA (planned).
 
-**Shared data sources:** The Odds API (US bookmakers — currently disabled), OddsPortal (UK bookmakers, headless scraper). **Sport-specific sources:** football-data.co.uk (historical EPL with Pinnacle + Betfair Exchange closing odds). An XGBoost CLV model produces supplementary predictions, but the agent's primary edge comes from information synthesis, not the model. See [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) for the full data source inventory.
+**Shared data sources:** The Odds API (US bookmakers), OddsPortal (UK bookmakers, headless scraper). **Sport-specific sources:** football-data.co.uk (historical EPL with Pinnacle + Betfair Exchange closing odds). An XGBoost CLV model produces supplementary predictions, but the agent's primary edge comes from information synthesis, not the model. See [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) for the full data source inventory.
 
 ## Package Structure
 
@@ -90,9 +90,14 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system architectur
 - Set `REJECT_INVALID_ODDS=true` for strict validation
 - Review `DataQualityLog` table for patterns
 
-## Polymarket Integration (deprioritized)
+## Polymarket Integration (deprioritized for trading; sharp reference candidate)
 
-Full pipeline built (API client, 5 DB tables, storage, ingestion, feature extractors) but deprioritized. EPL match-level volume is thin ($10K-$100K per match) and AMM-driven — the orderbook reflects automated market maker parameters, not genuine public sentiment. Not accessible from UK for trading. NBA and MLB volume may differ — revisit per sport. Pipeline code exists if liquidity improves. See [docs/POLYMARKET.md](docs/POLYMARKET.md) for technical details.
+Full pipeline built (API client, 5 DB tables, storage, ingestion, feature extractors). UK trading access is blocked across all sports. Liquidity varies sharply by sport:
+
+- **EPL**: thin ($10K-$100K/match), AMM-driven — orderbook reflects market maker params, not public sentiment.
+- **NBA** / **MLB**: deep real orderbook (median $152K/MLB game, 1¢ spreads, 30+ levels, $500K+ total depth). MLB prices are collinear with bet365 devigged via arbitrage — viable as sharp reference / alternate to Pinnacle, not a mispricing venue.
+
+Pipeline code currently targets NBA via `polymarket_fetcher.get_nba_events()`. See [docs/POLYMARKET.md](docs/POLYMARKET.md) for technical details (series/tag IDs per sport, ticker formats, market richness).
 
 ## Code Style
 
