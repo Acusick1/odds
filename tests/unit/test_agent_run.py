@@ -161,8 +161,8 @@ class TestMainOrchestration:
         assert schedule_calls[0]["reason"] == "pre-schedule (default tier)"
 
     @pytest.mark.asyncio
-    async def test_agent_override_later_than_default_ignored(self) -> None:
-        """Agent-requested wakeup later than default should not trigger reschedule."""
+    async def test_agent_override_later_than_default_applied(self) -> None:
+        """Agent-requested wakeup later than default should still be applied."""
         schedule_calls: list[dict] = []
 
         async def track_schedule(**kwargs: object) -> None:
@@ -189,8 +189,10 @@ class TestMainOrchestration:
             mk.return_value = datetime.now(UTC) + timedelta(hours=30)
             await main(JobContext(sport="soccer_epl"))
 
-        # Only the pre-schedule call, no override
-        assert len(schedule_calls) == 1
+        # Pre-schedule + agent override
+        assert len(schedule_calls) == 2
+        assert schedule_calls[1]["reason"] == "agent-requested override"
+        assert schedule_calls[1]["next_time"] == override_time
 
 
 class TestOvernightWindowPerSport:
