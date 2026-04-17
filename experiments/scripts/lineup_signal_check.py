@@ -39,14 +39,12 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from odds_analytics.feature_groups import prepare_training_data
-from odds_analytics.sequence_loader import (
-    calculate_devigged_bookmaker_target,
-    extract_odds_from_snapshot,
-)
+from odds_analytics.sequence_loader import calculate_devigged_bookmaker_target
 from odds_analytics.training.config import MLTrainingConfig
 from odds_analytics.training.data_preparation import filter_events_by_date_range
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.snapshot_utils import extract_odds_from_snapshot
 from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import cross_val_score

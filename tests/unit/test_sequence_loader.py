@@ -14,8 +14,8 @@ from odds_analytics.sequence_loader import (
     extract_devigged_totals_probs,
     load_sequences_for_event,
 )
-from odds_analytics.utils import devig_probabilities
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.odds_math import devig_probabilities
 
 
 @pytest.fixture

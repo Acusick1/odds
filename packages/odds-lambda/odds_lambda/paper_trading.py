@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from odds_analytics.utils import calculate_profit_from_odds, determine_h2h_winner
 from odds_core.models import Event, EventStatus
+from odds_core.odds_math import calculate_profit_from_odds, determine_h2h_winner
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession

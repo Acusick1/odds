@@ -200,31 +200,31 @@ class TestRefreshScrapeUnknownLeague:
 
     @pytest.mark.asyncio
     async def test_known_league_uses_correct_sport(self) -> None:
+        from uuid import uuid4
+
         from odds_mcp.server import refresh_scrape
 
-        with patch(
-            "odds_lambda.jobs.fetch_oddsportal.ingest_league", new_callable=AsyncMock
-        ) as mock_ingest:
-            mock_stats = MagicMock()
-            mock_stats.league = "mlb"
-            mock_stats.matches_scraped = 10
-            mock_stats.matches_converted = 10
-            mock_stats.events_matched = 8
-            mock_stats.events_created = 2
-            mock_stats.snapshots_stored = 10
-            mock_stats.errors = []
-            mock_ingest.return_value = mock_stats
+        job_id = uuid4()
+        mock_scheduler = AsyncMock()
+        mock_scheduler.add_job = AsyncMock(return_value=job_id)
 
+        mock_cm = AsyncMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_scheduler)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("odds_lambda.scheduling.backends.local.build_scheduler", return_value=mock_cm):
             result = await refresh_scrape(league="mlb", market="home_away")
 
-            assert result["league"] == "mlb"
-            assert result["matches_scraped"] == 10
+        assert result["league"] == "mlb"
+        assert result["market"] == "home_away"
+        assert result["job_id"] == str(job_id)
 
-            # Verify the spec passed to ingest_league has sport="baseball"
-            call_args = mock_ingest.call_args
-            spec = call_args[0][0]
-            assert spec.sport == "baseball"
-            assert spec.sport_key == "baseball_mlb"
+        # Verify the LeagueSpec passed to the scheduler has the MLB sport identifiers
+        call_kwargs = mock_scheduler.add_job.call_args.kwargs
+        spec = call_kwargs["args"][0]
+        assert spec.sport == "baseball"
+        assert spec.sport_key == "baseball_mlb"
+        assert spec.markets == ["home_away"]
 
 
 class TestGetScrapeStatus:
@@ -371,7 +371,7 @@ class TestGetCurrentOddsMissingEvent:
             mock_session_maker.return_value.__aenter__ = AsyncMock()
             mock_session_maker.return_value.__aexit__ = AsyncMock()
 
-            result = await get_current_odds("nonexistent")
+            result = await get_current_odds("nonexistent", market="h2h")
             assert "error" in result
             assert "nonexistent" in result["error"]
 

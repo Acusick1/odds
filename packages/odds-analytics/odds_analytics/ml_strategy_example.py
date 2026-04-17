@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import structlog
 from odds_core.models import Odds
+from odds_core.odds_math import calculate_implied_probability
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backtesting import (
@@ -38,7 +39,6 @@ from odds_analytics.backtesting import (
     BettingStrategy,
 )
 from odds_analytics.feature_extraction import FeatureExtractor, TabularFeatureExtractor
-from odds_analytics.utils import calculate_implied_probability
 
 if TYPE_CHECKING:
     from odds_analytics.training.config import MLTrainingConfig

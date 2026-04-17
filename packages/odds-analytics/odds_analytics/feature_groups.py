@@ -36,6 +36,7 @@ from odds_core.polymarket_models import (
     PolymarketOrderBookSnapshot,
     PolymarketPriceSnapshot,
 )
+from odds_core.snapshot_utils import extract_odds_from_snapshot
 from odds_core.utils import raw_data_has_market
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,7 +56,6 @@ from odds_analytics.sequence_loader import (
     calculate_regression_target,
     extract_devigged_h2h_probs,
     extract_devigged_totals_probs,
-    extract_odds_from_snapshot,
     load_sequences_for_event,
 )
 

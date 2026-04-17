@@ -19,11 +19,11 @@ import structlog
 from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import TabularFeatureExtractor
 from odds_analytics.feature_groups import resolve_outcome_name
-from odds_analytics.sequence_loader import extract_odds_from_snapshot
 from odds_analytics.training.config import FeatureConfig
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.prediction_models import Prediction
+from odds_core.snapshot_utils import extract_odds_from_snapshot
 from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
