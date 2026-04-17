@@ -6,6 +6,7 @@ from odds_core.logging_setup import configure_logging
 from rich.console import Console
 
 from odds_cli.commands import (
+    agent,
     backfill,
     backtest,
     copy_from_prod,
@@ -49,6 +50,7 @@ app.add_typer(pbpstats.app, name="pbpstats", help="PBPStats player season statis
 app.add_typer(scrape.app, name="scrape", help="Scrape odds from OddsPortal")
 app.add_typer(model.app, name="model", help="Model artifact management")
 app.add_typer(paper.app, name="paper", help="Paper trade management")
+app.add_typer(agent.app, name="agent", help="Run the sport agent subprocess directly")
 
 console = Console()
 

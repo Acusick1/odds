@@ -98,6 +98,9 @@ logs/
 plans/
 *.log
 
+# Local dev helpers
+scripts/snapshot_to_dev.sh
+
 # OS
 .DS_Store
 Thumbs.db
