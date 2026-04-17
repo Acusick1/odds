@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -49,6 +50,11 @@ AGENT_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
 
 # Retain this many per-run JSONL logs per sport; older ones are pruned on write.
 AGENT_RUN_LOG_KEEP = 50
+
+# Upper bound on any single stream-json line. The asyncio default (64 KiB) is
+# too small — a single ``tool_result`` block (e.g. a large Read or WebFetch
+# payload) routinely exceeds it and would raise ``LimitOverrunError``.
+AGENT_STREAM_LINE_LIMIT = 8 * 1024 * 1024
 
 # Horizon for "no fixtures" classification
 FIXTURE_HORIZON_DAYS = 7
@@ -83,7 +89,7 @@ def _preview_tool_input(d: dict[str, Any] | None, *, max_value_chars: int = 60) 
         return None
     parts: list[str] = []
     for k, v in d.items():
-        s = str(v)
+        s = str(v).replace("\n", " ").replace("\r", " ")
         if len(s) > max_value_chars:
             s = s[:max_value_chars] + "..."
         parts.append(f"{k}={s}")
@@ -154,7 +160,8 @@ async def _run_claude_agent(sport: str) -> int:
     _prune_agent_run_logs(log_dir, sport, keep=AGENT_RUN_LOG_KEEP)
 
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    log_path = log_dir / f"{sport}_{timestamp}.jsonl"
+    # PID suffix avoids collisions when two invocations start in the same second.
+    log_path = log_dir / f"{sport}_{timestamp}_{os.getpid()}.jsonl"
 
     logger.info("agent_subprocess_starting", sport=sport, cmd=cmd, log_file=str(log_path))
 
@@ -163,6 +170,7 @@ async def _run_claude_agent(sport: str) -> int:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         cwd=str(settings.project_root),
+        limit=AGENT_STREAM_LINE_LIMIT,
     )
 
     with log_path.open("ab") as log_file:

@@ -7,7 +7,13 @@ from urllib.parse import urlsplit, urlunsplit
 
 
 def swap_dbname(url: str, new_db: str) -> str:
-    """Return ``url`` with its dbname component replaced by ``new_db``."""
+    """Return ``url`` with its dbname component replaced by ``new_db``.
+
+    Rejects dbnames containing ``/`` or ``?`` so an injected query string or
+    path separator can't smuggle extra URL components past the swap.
+    """
+    if "/" in new_db or "?" in new_db:
+        raise ValueError(f"invalid dbname: {new_db!r} (must not contain '/' or '?')")
     parts = urlsplit(url)
     return urlunsplit(parts._replace(path=f"/{new_db}"))
 

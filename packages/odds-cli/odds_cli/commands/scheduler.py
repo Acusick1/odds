@@ -30,7 +30,7 @@ def start_local(
             "driving manually)."
         ),
     ),
-):
+) -> None:
     """
     Start local scheduler for testing (APScheduler backend).
 

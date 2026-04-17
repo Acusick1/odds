@@ -361,6 +361,11 @@ class TestPreviewToolInput:
     def test_non_string_values_stringified(self) -> None:
         assert _preview_tool_input({"count": 42, "flag": True}) == "count=42 flag=True"
 
+    def test_newlines_collapsed_to_spaces(self) -> None:
+        # Multi-line command or file_text shouldn't break the single-line log format.
+        preview = _preview_tool_input({"command": "line1\nline2\r\nline3"})
+        assert preview == "command=line1 line2  line3"
+
 
 class TestLogStreamMessage:
     """Tests for the stream-json message classifier that drives tee logging."""

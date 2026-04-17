@@ -42,6 +42,14 @@ class TestSwapDbname:
         original = "postgresql://u:p@h:5432/olddb/extra"
         assert swap_dbname(original, "newdb") == "postgresql://u:p@h:5432/newdb"
 
+    def test_rejects_dbname_with_slash(self) -> None:
+        with pytest.raises(ValueError, match="invalid dbname"):
+            swap_dbname("postgresql://u:p@h/a", "bad/name")
+
+    def test_rejects_dbname_with_query_marker(self) -> None:
+        with pytest.raises(ValueError, match="invalid dbname"):
+            swap_dbname("postgresql://u:p@h/a", "bad?x=1")
+
 
 class TestOverrideDatabaseUrl:
     """Tests that the env override reads current settings and clears the cache."""
