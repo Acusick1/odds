@@ -15,6 +15,8 @@ from odds_lambda.jobs.agent_run import (
     TIER_RESEARCH_HOURS,
     ScheduleResult,
     _compute_wake_interval,
+    _log_stream_message,
+    _preview_tool_input,
     main,
     schedule_next,
 )
@@ -331,3 +333,98 @@ class TestScheduleNext:
     async def test_unknown_sport_raises_valueerror(self) -> None:
         with pytest.raises(ValueError, match="No overnight window configured for basketball_nba"):
             await schedule_next("basketball_nba")
+
+
+class TestPreviewToolInput:
+    """Tests for the tool-input formatter used in live main-log events."""
+
+    def test_none_input_returns_none(self) -> None:
+        assert _preview_tool_input(None) is None
+
+    def test_empty_dict_returns_none(self) -> None:
+        assert _preview_tool_input({}) is None
+
+    def test_single_key_renders_as_key_value(self) -> None:
+        assert _preview_tool_input({"file_path": "/tmp/x.md"}) == "file_path=/tmp/x.md"
+
+    def test_multiple_keys_all_rendered_space_separated(self) -> None:
+        preview = _preview_tool_input({"command": "ls", "description": "list files"})
+        assert preview == "command=ls description=list files"
+
+    def test_long_values_truncated_with_ellipsis(self) -> None:
+        long_value = "x" * 200
+        preview = _preview_tool_input({"payload": long_value}, max_value_chars=20)
+        assert preview is not None
+        assert preview.startswith("payload=" + "x" * 20)
+        assert preview.endswith("...")
+
+    def test_non_string_values_stringified(self) -> None:
+        assert _preview_tool_input({"count": 42, "flag": True}) == "count=42 flag=True"
+
+
+class TestLogStreamMessage:
+    """Tests for the stream-json message classifier that drives tee logging."""
+
+    def test_tool_use_emits_agent_tool_use(self) -> None:
+        msg = {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "Bash",
+                        "input": {"command": "ls"},
+                    }
+                ]
+            },
+        }
+        with patch("odds_lambda.jobs.agent_run.logger") as mock_logger:
+            _log_stream_message(msg)
+
+        mock_logger.info.assert_called_once_with(
+            "agent_tool_use",
+            tool="Bash",
+            input_preview="command=ls",
+        )
+
+    def test_result_emits_agent_run_summary_with_fields(self) -> None:
+        msg = {
+            "type": "result",
+            "result": "done",
+            "num_turns": 7,
+            "duration_ms": 12345,
+            "total_cost_usd": 0.5,
+        }
+        with patch("odds_lambda.jobs.agent_run.logger") as mock_logger:
+            _log_stream_message(msg)
+
+        mock_logger.info.assert_called_once_with(
+            "agent_run_summary",
+            text="done",
+            num_turns=7,
+            duration_ms=12345,
+            cost_usd=0.5,
+        )
+
+    def test_assistant_text_block_is_ignored(self) -> None:
+        msg = {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "hello"}]},
+        }
+        with patch("odds_lambda.jobs.agent_run.logger") as mock_logger:
+            _log_stream_message(msg)
+
+        mock_logger.info.assert_not_called()
+
+    def test_assistant_with_non_dict_message_is_silent(self) -> None:
+        msg = {"type": "assistant", "message": None}
+        with patch("odds_lambda.jobs.agent_run.logger") as mock_logger:
+            _log_stream_message(msg)
+
+        mock_logger.info.assert_not_called()
+
+    def test_unknown_type_is_silent(self) -> None:
+        with patch("odds_lambda.jobs.agent_run.logger") as mock_logger:
+            _log_stream_message({"type": "system", "subtype": "init"})
+
+        mock_logger.info.assert_not_called()
