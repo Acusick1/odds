@@ -1,6 +1,7 @@
 """Example betting strategies for backtesting."""
 
 from odds_core.models import Odds
+from odds_core.odds_math import calculate_implied_probability
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backtesting import (
@@ -9,12 +10,7 @@ from odds_analytics.backtesting import (
     BetOpportunity,
     BettingStrategy,
 )
-from odds_analytics.utils import (
-    calculate_ev,
-    calculate_implied_probability,
-    calculate_market_hold,
-    detect_arbitrage,
-)
+from odds_analytics.utils import calculate_ev, calculate_market_hold, detect_arbitrage
 
 
 class FlatBettingStrategy(BettingStrategy):

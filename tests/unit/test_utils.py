@@ -2,18 +2,20 @@
 
 import pytest
 from odds_analytics.utils import (
-    american_to_decimal,
     calculate_ev,
-    calculate_implied_probability,
     calculate_kelly_stake,
     calculate_market_hold,
     calculate_max_drawdown,
     calculate_profit_factor,
-    calculate_profit_from_odds,
     calculate_sharpe_ratio,
     calculate_sortino_ratio,
-    decimal_to_american,
     detect_arbitrage,
+)
+from odds_core.odds_math import (
+    american_to_decimal,
+    calculate_implied_probability,
+    calculate_profit_from_odds,
+    decimal_to_american,
 )
 
 

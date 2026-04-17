@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from odds_analytics.sequence_loader import extract_odds_from_snapshot
-from odds_analytics.utils import calculate_implied_probability
 from odds_core.match_brief_models import SharpPriceMeta, SharpPriceResult
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
+from odds_core.odds_math import calculate_implied_probability
+from odds_core.snapshot_utils import extract_odds_from_snapshot
 from odds_core.utils import raw_data_has_market
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession

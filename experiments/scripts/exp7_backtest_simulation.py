@@ -32,13 +32,13 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from odds_analytics.feature_groups import prepare_training_data
-from odds_analytics.sequence_loader import extract_odds_from_snapshot
 from odds_analytics.training.config import MLTrainingConfig
 from odds_analytics.training.cross_validation import make_walk_forward_splits
 from odds_analytics.training.data_preparation import filter_events_by_date_range
-from odds_analytics.utils import american_to_decimal
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.odds_math import american_to_decimal
+from odds_core.snapshot_utils import extract_odds_from_snapshot
 from sqlalchemy import select
 from xgboost import XGBRegressor
 

@@ -33,13 +33,10 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from odds_core.models import Odds
+from odds_core.odds_math import american_to_decimal, calculate_implied_probability
 from odds_core.time import to_eastern
 
 from odds_analytics.backtesting import BacktestEvent
-from odds_analytics.utils import (
-    american_to_decimal,
-    calculate_implied_probability,
-)
 
 if TYPE_CHECKING:
     from odds_analytics.training.config import FeatureConfig

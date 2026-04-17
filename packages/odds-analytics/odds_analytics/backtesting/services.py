@@ -10,6 +10,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import structlog
 from odds_core.models import EventStatus, Odds
+from odds_core.odds_math import calculate_profit_from_odds, determine_h2h_winner
 from odds_lambda.storage.readers import OddsReader
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,10 +19,8 @@ from ..utils import (
     calculate_kelly_stake,
     calculate_max_drawdown,
     calculate_profit_factor,
-    calculate_profit_from_odds,
     calculate_sharpe_ratio,
     calculate_sortino_ratio,
-    determine_h2h_winner,
 )
 from .config import BacktestConfig
 from .models import (

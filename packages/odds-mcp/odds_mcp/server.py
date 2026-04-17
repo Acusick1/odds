@@ -12,14 +12,14 @@ import structlog
 from fastmcp import FastMCP
 from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import TabularFeatureExtractor
-from odds_analytics.sequence_loader import extract_odds_from_snapshot
-from odds_analytics.utils import calculate_implied_probability
 from odds_core.agent_wakeup_models import AgentWakeup
 from odds_core.database import async_session_maker
 from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.odds_math import calculate_implied_probability
 from odds_core.paper_trade_models import PaperTrade
 from odds_core.prediction_models import Prediction
+from odds_core.snapshot_utils import extract_odds_from_snapshot
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME
 from odds_lambda.paper_trading import (
     get_open_trades,

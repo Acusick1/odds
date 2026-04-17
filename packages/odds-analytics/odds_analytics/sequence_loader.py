@@ -3,7 +3,6 @@ Sequence Data Loader and Odds Utilities.
 
 Key Functions:
 - load_sequences_for_event(): Query odds snapshots and organize chronologically
-- extract_odds_from_snapshot(): Parse Odds from OddsSnapshot.raw_data
 - calculate_regression_target(): Calculate line movement for regression
 - extract_devigged_h2h_probs(): Extract devigged bookmaker probabilities (h2h)
 - extract_devigged_totals_probs(): Extract devigged bookmaker probabilities (totals)
@@ -20,10 +19,9 @@ from typing import Literal, NamedTuple
 
 import numpy as np
 import structlog
-from odds_core.models import Odds, OddsSnapshot
+from odds_core.models import Odds
+from odds_core.odds_math import calculate_implied_probability, devig_probabilities
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from odds_analytics.utils import calculate_implied_probability, devig_probabilities
 
 # Outcome name used by the Odds API for draw results in 3-way markets
 DRAW_OUTCOME = "Draw"
@@ -68,7 +66,6 @@ __all__ = [
     "extract_devigged_totals_probs",
     "calculate_devigged_bookmaker_target",
     "calculate_devigged_totals_target",
-    "extract_odds_from_snapshot",
 ]
 
 
@@ -258,79 +255,6 @@ def calculate_devigged_totals_target(
     if outcome == "Over":
         return closing_probs.over - snapshot_probs.over
     return closing_probs.under - snapshot_probs.under
-
-
-def extract_odds_from_snapshot(
-    snapshot: OddsSnapshot,
-    event_id: str,
-    market: str | None = None,
-    outcome: str | None = None,
-) -> list[Odds]:
-    """
-    Extract Odds objects from a snapshot's raw_data.
-
-    Args:
-        snapshot: OddsSnapshot with raw_data JSON
-        event_id: Event identifier
-        market: Market type to filter (h2h, spreads, totals). If None, includes all markets.
-        outcome: Outcome name to filter (team name or Over/Under). If None, includes all outcomes.
-
-    Returns:
-        List of Odds objects, optionally filtered by market and/or outcome
-    """
-    raw_data = snapshot.raw_data
-    if not raw_data or "bookmakers" not in raw_data:
-        return []
-
-    odds_list: list[Odds] = []
-    bookmakers = raw_data.get("bookmakers", [])
-
-    for bookmaker_data in bookmakers:
-        bookmaker_key = bookmaker_data.get("key")
-        bookmaker_title = bookmaker_data.get("title")
-        last_update_str = bookmaker_data.get("last_update")
-
-        # Parse last_update timestamp
-        if last_update_str:
-            try:
-                last_update = datetime.fromisoformat(last_update_str.replace("Z", "+00:00"))
-            except (ValueError, AttributeError):
-                last_update = snapshot.snapshot_time
-        else:
-            last_update = snapshot.snapshot_time
-
-        # Process each market for this bookmaker
-        markets = bookmaker_data.get("markets", [])
-        for market_data in markets:
-            market_key = market_data.get("key")
-            if market is not None and market_key != market:
-                continue
-
-            # Process each outcome in the market
-            outcomes = market_data.get("outcomes", [])
-            for outcome_data in outcomes:
-                outcome_name = outcome_data.get("name")
-                if outcome is not None and outcome_name != outcome:
-                    continue
-
-                price = outcome_data.get("price")
-                point = outcome_data.get("point")
-
-                odds = Odds(
-                    event_id=event_id,
-                    bookmaker_key=bookmaker_key,
-                    bookmaker_title=bookmaker_title,
-                    market_key=market_key,
-                    outcome_name=outcome_name,
-                    price=price,
-                    point=point,
-                    odds_timestamp=snapshot.snapshot_time,
-                    last_update=last_update,
-                    is_valid=True,
-                )
-                odds_list.append(odds)
-
-    return odds_list
 
 
 async def load_sequences_for_event(
