@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_core.agent_wakeup_models import AgentWakeup
@@ -19,6 +20,26 @@ def _patch_session(session):
         yield session
 
     return patch("odds_mcp.server.async_session_maker", _fake_session_maker)
+
+
+def _patch_build_scheduler(*, schedules=None, error=None):
+    """Patch build_scheduler to return a mock AsyncScheduler context manager."""
+    mock_scheduler = AsyncMock()
+    mock_scheduler.__aenter__ = AsyncMock(return_value=mock_scheduler)
+    mock_scheduler.__aexit__ = AsyncMock(return_value=False)
+    if error is not None:
+        mock_scheduler.get_schedules = AsyncMock(side_effect=error)
+    else:
+        mock_scheduler.get_schedules = AsyncMock(return_value=list(schedules or []))
+
+    return patch(
+        "odds_lambda.scheduling.backends.local.build_scheduler",
+        MagicMock(return_value=mock_scheduler),
+    )
+
+
+def _make_schedule(job_id: str, next_fire_time: datetime | None):
+    return SimpleNamespace(id=job_id, next_fire_time=next_fire_time)
 
 
 class TestScheduleNextWakeup:
@@ -137,41 +158,28 @@ class TestGetScheduledJobs:
     """Tests for the get_scheduled_jobs MCP tool."""
 
     @pytest.mark.asyncio
-    async def test_backend_unavailable_returns_message(self) -> None:
-        from odds_lambda.scheduling.backends import BackendUnavailableError
+    async def test_scheduler_unavailable_returns_message(self) -> None:
         from odds_mcp.server import get_scheduled_jobs
 
-        mock_backend = AsyncMock()
-        mock_backend.get_scheduled_jobs = AsyncMock(
-            side_effect=BackendUnavailableError("Scheduler not running")
-        )
-        with patch("odds_mcp.server.get_scheduler_backend", return_value=mock_backend):
+        with _patch_build_scheduler(error=RuntimeError("Scheduler not running")):
             result = await get_scheduled_jobs()
 
         assert result["jobs"] == []
-        assert "unavailable" in result["message"].lower()
+        assert "Scheduler not running" in result["message"]
+        assert "Could not query scheduler" in result["message"]
 
     @pytest.mark.asyncio
     async def test_sport_filtering(self) -> None:
-        from odds_lambda.scheduling.backends.base import JobStatus, ScheduledJob
         from odds_mcp.server import get_scheduled_jobs
 
         now = datetime.now(UTC)
-        mock_jobs = [
-            ScheduledJob(
-                job_name="fetch_odds_soccer_epl", next_run_time=now, status=JobStatus.SCHEDULED
-            ),
-            ScheduledJob(
-                job_name="fetch_odds_baseball_mlb", next_run_time=now, status=JobStatus.SCHEDULED
-            ),
-            ScheduledJob(
-                job_name="agent_run_soccer_epl", next_run_time=now, status=JobStatus.SCHEDULED
-            ),
+        schedules = [
+            _make_schedule("fetch_odds_soccer_epl", now),
+            _make_schedule("fetch_odds_baseball_mlb", now),
+            _make_schedule("agent_run_soccer_epl", now),
         ]
-        mock_backend = AsyncMock()
-        mock_backend.get_scheduled_jobs = AsyncMock(return_value=mock_jobs)
 
-        with patch("odds_mcp.server.get_scheduler_backend", return_value=mock_backend):
+        with _patch_build_scheduler(schedules=schedules):
             result = await get_scheduled_jobs(sport="soccer_epl")
 
         assert result["job_count"] == 2
@@ -182,22 +190,15 @@ class TestGetScheduledJobs:
 
     @pytest.mark.asyncio
     async def test_no_filter_returns_all(self) -> None:
-        from odds_lambda.scheduling.backends.base import JobStatus, ScheduledJob
         from odds_mcp.server import get_scheduled_jobs
 
         now = datetime.now(UTC)
-        mock_jobs = [
-            ScheduledJob(
-                job_name="fetch_odds_soccer_epl", next_run_time=now, status=JobStatus.SCHEDULED
-            ),
-            ScheduledJob(
-                job_name="fetch_odds_baseball_mlb", next_run_time=now, status=JobStatus.SCHEDULED
-            ),
+        schedules = [
+            _make_schedule("fetch_odds_soccer_epl", now),
+            _make_schedule("fetch_odds_baseball_mlb", now),
         ]
-        mock_backend = AsyncMock()
-        mock_backend.get_scheduled_jobs = AsyncMock(return_value=mock_jobs)
 
-        with patch("odds_mcp.server.get_scheduler_backend", return_value=mock_backend):
+        with _patch_build_scheduler(schedules=schedules):
             result = await get_scheduled_jobs()
 
         assert result["job_count"] == 2
@@ -206,9 +207,7 @@ class TestGetScheduledJobs:
     async def test_generic_exception_returns_message(self) -> None:
         from odds_mcp.server import get_scheduled_jobs
 
-        mock_backend = AsyncMock()
-        mock_backend.get_scheduled_jobs = AsyncMock(side_effect=RuntimeError("Connection refused"))
-        with patch("odds_mcp.server.get_scheduler_backend", return_value=mock_backend):
+        with _patch_build_scheduler(error=RuntimeError("Connection refused")):
             result = await get_scheduled_jobs()
 
         assert result["jobs"] == []

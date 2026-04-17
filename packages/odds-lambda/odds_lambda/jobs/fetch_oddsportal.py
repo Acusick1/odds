@@ -101,16 +101,22 @@ class IngestionStats:
 
 
 async def run_harvester_upcoming(spec: LeagueSpec) -> list[dict[str, Any]]:
-    """Scrape upcoming matches for a league via ``run_scraper_with_retry``."""
+    """Scrape upcoming matches for a league via ``run_scraper_with_retry``.
+
+    Acquires the Playwright semaphore so only one browser instance runs at a time.
+    """
     from oddsharvester.utils.command_enum import CommandEnum
 
-    result = await run_scraper_with_retry(
-        command=CommandEnum.UPCOMING_MATCHES,
-        sport=spec.sport,
-        leagues=[spec.league],
-        markets=spec.markets,
-        headless=True,
-    )
+    from odds_lambda.browser_lock import playwright_semaphore
+
+    async with playwright_semaphore:
+        result = await run_scraper_with_retry(
+            command=CommandEnum.UPCOMING_MATCHES,
+            sport=spec.sport,
+            leagues=[spec.league],
+            markets=spec.markets,
+            headless=True,
+        )
     return result.success
 
 

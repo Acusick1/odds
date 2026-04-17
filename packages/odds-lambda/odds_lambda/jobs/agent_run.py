@@ -246,16 +246,11 @@ async def main(ctx: JobContext) -> None:
         )
         requested_time = None
 
-    if requested_time is not None and requested_time < result.next_time:
-        override_next_time = apply_overnight_skip(
-            requested_time,
-            overnight_start_utc=result.overnight_start_utc,
-            overnight_resume_utc=result.overnight_resume_utc,
-        )
+    if requested_time is not None:
         try:
             await self_schedule(
                 job_name=result.compound_job_name,
-                next_time=override_next_time,
+                next_time=requested_time,
                 dry_run=settings.scheduler.dry_run,
                 sport=sport,
                 reason="agent-requested override",
@@ -263,7 +258,7 @@ async def main(ctx: JobContext) -> None:
             logger.info(
                 "agent_run_rescheduled",
                 default_time=result.next_time.isoformat(),
-                override_time=override_next_time.isoformat(),
+                override_time=requested_time.isoformat(),
             )
         except Exception as e:
             logger.error("agent_run_override_schedule_failed", error=str(e), exc_info=True)
