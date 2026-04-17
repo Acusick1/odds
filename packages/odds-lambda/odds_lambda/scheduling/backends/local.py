@@ -134,35 +134,41 @@ class LocalSchedulerBackend(SchedulerBackend):
             logger.info("dry_run_get_scheduled_jobs")
             return []
 
-        if self._scheduler is None:
-            logger.warning("local_scheduler_not_started")
-            return []
+        if self._scheduler is not None:
+            return await self._fetch_schedules(self._scheduler)
 
-        schedules = await self._scheduler.get_schedules()
-        jobs: list[ScheduledJob] = []
-        for sched in schedules:
-            jobs.append(
-                ScheduledJob(
-                    job_name=sched.id,
-                    next_run_time=sched.next_fire_time,
-                    status=JobStatus.SCHEDULED,
-                )
+        async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
+            return await self._fetch_schedules(scheduler)
+
+    @staticmethod
+    async def _fetch_schedules(scheduler: AsyncScheduler) -> list[ScheduledJob]:
+        schedules = await scheduler.get_schedules()
+        return [
+            ScheduledJob(
+                job_name=sched.id,
+                next_run_time=sched.next_fire_time,
+                status=JobStatus.SCHEDULED,
             )
-        return jobs
+            for sched in schedules
+        ]
 
     async def get_job_status(self, job_name: str) -> ScheduledJob | None:
         if self.dry_run:
             logger.info("dry_run_get_job_status", job=job_name)
             return None
 
-        if self._scheduler is None:
-            logger.warning("local_scheduler_not_started")
-            return None
+        if self._scheduler is not None:
+            return await self._fetch_schedule(self._scheduler, job_name)
+
+        async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
+            return await self._fetch_schedule(scheduler, job_name)
+
+    @staticmethod
+    async def _fetch_schedule(scheduler: AsyncScheduler, job_name: str) -> ScheduledJob | None:
+        from apscheduler import ScheduleLookupError
 
         try:
-            from apscheduler import ScheduleLookupError
-
-            sched = await self._scheduler.get_schedule(job_name)
+            sched = await scheduler.get_schedule(job_name)
         except ScheduleLookupError:
             return None
 
@@ -228,34 +234,42 @@ class LocalSchedulerBackend(SchedulerBackend):
     ) -> None:
         """Write a schedule to the data store.
 
-        If this backend is running as a context manager the existing
-        scheduler is reused.  Otherwise a short-lived scheduler is
-        created to write to the shared Postgres data store — the
-        running scheduler process picks it up via LISTEN/NOTIFY.
+        Reuses a live scheduler when one is available — either this backend's
+        own (when used as a context manager) or the one APScheduler sets in
+        ``current_async_scheduler`` while a job is executing. Falls back to a
+        short-lived scheduler that writes to the shared Postgres data store —
+        the running scheduler process picks it up via LISTEN/NOTIFY.
         """
-        if self._scheduler is not None:
-            task_key = f"{job_func.__module__}.{job_func.__qualname__}"  # type: ignore[union-attr]
-            if task_key not in self._configured_tasks:
-                await self._scheduler.configure_task(job_func)
-                self._configured_tasks.add(task_key)
+        from apscheduler import current_async_scheduler
 
-            await self._scheduler.add_schedule(
-                job_func,
-                trigger=DateTrigger(run_time=next_time),
-                id=job_name,
-                args=[ctx],
-                conflict_policy=ConflictPolicy.replace,
-            )
-        else:
-            async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
-                await scheduler.configure_task(job_func)
-                await scheduler.add_schedule(
-                    job_func,
-                    trigger=DateTrigger(run_time=next_time),
-                    id=job_name,
-                    args=[ctx],
-                    conflict_policy=ConflictPolicy.replace,
-                )
+        scheduler = self._scheduler or current_async_scheduler.get(None)
+        if scheduler is not None:
+            await self._write_schedule(scheduler, job_func, job_name, next_time, ctx)
+            return
+
+        async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
+            await self._write_schedule(scheduler, job_func, job_name, next_time, ctx)
+
+    async def _write_schedule(
+        self,
+        scheduler: AsyncScheduler,
+        job_func: object,
+        job_name: str,
+        next_time: datetime,
+        ctx: object,
+    ) -> None:
+        task_key = f"{job_func.__module__}.{job_func.__qualname__}"  # type: ignore[union-attr]
+        if task_key not in self._configured_tasks:
+            await scheduler.configure_task(job_func)
+            self._configured_tasks.add(task_key)
+
+        await scheduler.add_schedule(
+            job_func,
+            trigger=DateTrigger(run_time=next_time),
+            id=job_name,
+            args=[ctx],
+            conflict_policy=ConflictPolicy.replace,
+        )
 
     async def cancel_scheduled_execution(self, job_name: str) -> None:
         if self.dry_run:
