@@ -54,10 +54,10 @@ resource "aws_cloudwatch_event_target" "fixed_scheduler_target" {
   target_id = "1"
   arn       = aws_lambda_function.odds_scheduler.arn
 
-  input = jsonencode({
-    job   = each.value.job
-    sport = each.value.sport_key
-  })
+  input = jsonencode(merge(
+    { job = each.value.job },
+    each.value.sport_key != null ? { sport = each.value.sport_key } : {}
+  ))
 }
 
 resource "aws_lambda_permission" "allow_fixed_scheduler" {
@@ -94,7 +94,7 @@ locals {
   per_sport_scraper_jobs = ["fetch-oddsportal", "fetch-oddsportal-results"]
 
   # Jobs that run once globally (no sport param)
-  global_jobs = ["update-status", "check-health"]
+  global_jobs = ["update-status"]
 
   polymarket_jobs = var.enable_polymarket ? ["fetch-polymarket"] : []
 
@@ -138,6 +138,7 @@ locals {
   fixed_schedule_expressions = {
     "daily-digest"      = "cron(0 8 * * ? *)"
     "score-predictions" = "cron(30 * * * ? *)"
+    "check-health"      = "cron(0 6-21 * * ? *)"  # Hourly, skip overnight (22:00-06:00 UTC)
   }
 
   # Per-sport fixed-schedule jobs (daily-digest, score-predictions)
@@ -151,7 +152,19 @@ locals {
     ]
   ])
 
-  fixed_scheduler_rules_map = { for r in local.sport_fixed_scheduler_rules : r.key => r }
+  # Global fixed-schedule jobs (no sport param)
+  global_fixed_scheduler_rules = [
+    for job in ["check-health"] : {
+      key       = job
+      job       = job
+      sport_key = null
+    }
+  ]
+
+  fixed_scheduler_rules_map = merge(
+    { for r in local.sport_fixed_scheduler_rules : r.key => r },
+    { for r in local.global_fixed_scheduler_rules : r.key => r },
+  )
 }
 
 resource "aws_cloudwatch_event_rule" "dynamic" {
