@@ -14,7 +14,23 @@ logger = structlog.get_logger()
 
 
 @app.command("start")
-def start_local():
+def start_local(
+    db: str | None = typer.Option(
+        None,
+        "--db",
+        help="Override DATABASE_URL's dbname (e.g. 'odds_test' for a sandbox scheduler).",
+    ),
+    bootstrap: bool | None = typer.Option(
+        None,
+        "--bootstrap/--no-bootstrap",
+        help=(
+            "Bootstrap scheduled jobs on start. Defaults to on when --db is unset "
+            "(prod-like) and off when --db is set (sidecar mode — prevents a "
+            "concurrent agent-run from clashing with an `odds agent run` you're "
+            "driving manually)."
+        ),
+    ),
+) -> None:
     """
     Start local scheduler for testing (APScheduler backend).
 
@@ -26,12 +42,25 @@ def start_local():
     - Database running and accessible
 
     Usage:
-        odds scheduler start
+        odds scheduler start                          # prod-like (bootstrap on)
+        odds scheduler start --db odds_test           # dev sidecar (bootstrap off)
+        odds scheduler start --db odds_test --bootstrap   # dev full-loop smoke test
 
     Press Ctrl+C to stop the scheduler.
     """
+    if db is not None:
+        from odds_cli.db_override import override_database_url
+
+        override_database_url(db)
+
+    effective_bootstrap = (db is None) if bootstrap is None else bootstrap
+
     console.print("[bold blue]Starting local scheduler...[/bold blue]")
-    console.print("[dim]Backend: APScheduler (local testing mode)[/dim]\n")
+    console.print("[dim]Backend: APScheduler (local testing mode)[/dim]")
+    if db is not None:
+        console.print(f"[dim]Database override: {db}[/dim]")
+    console.print(f"[dim]Bootstrap: {'enabled' if effective_bootstrap else 'disabled'}[/dim]")
+    console.print()
 
     app_settings = get_settings()
 
@@ -62,11 +91,18 @@ def start_local():
             make_compound_job_name,
         )
 
+        bootstrap_jobs = app_settings.scheduler.bootstrap_jobs if effective_bootstrap else []
+
         # Start scheduler first so bootstrap jobs can schedule via the backend
         async with LocalSchedulerBackend() as _backend:
-            console.print("[green]Bootstrapping jobs...[/green]")
+            if bootstrap_jobs:
+                console.print("[green]Bootstrapping jobs...[/green]")
+            else:
+                console.print(
+                    "[dim]Skipping bootstrap — scheduler will idle until jobs arrive[/dim]"
+                )
 
-            for job_name in app_settings.scheduler.bootstrap_jobs:
+            for job_name in bootstrap_jobs:
                 bootstrap_fn = get_bootstrap_function(job_name)
 
                 if is_per_sport_job(job_name):
