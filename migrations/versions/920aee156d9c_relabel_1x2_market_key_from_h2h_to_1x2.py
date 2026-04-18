@@ -37,11 +37,14 @@ def upgrade() -> None:
     # Step 2: Update raw_data JSON in odds_snapshots — replace "h2h" with
     # "1x2" in any bookmaker market entry that contains a Draw outcome.
     # Uses jsonb_set on each matching market object.
+    # raw_data is stored as json (not jsonb); cast to jsonb at entry so
+    # jsonb_array_elements / jsonb_set work. Assignment back to the json
+    # column is implicit (Postgres converts via text).
     op.execute("""
         UPDATE odds_snapshots
         SET raw_data = (
             SELECT jsonb_set(
-                raw_data,
+                raw_data::jsonb,
                 '{bookmakers}',
                 (
                     SELECT jsonb_agg(
@@ -72,14 +75,14 @@ def upgrade() -> None:
                             ELSE bk
                         END
                     )
-                    FROM jsonb_array_elements(raw_data->'bookmakers') AS bk
+                    FROM jsonb_array_elements(raw_data::jsonb->'bookmakers') AS bk
                 )
             )
         )
         WHERE id IN (
             SELECT s.id
             FROM odds_snapshots s,
-                 jsonb_array_elements(s.raw_data->'bookmakers') AS bk,
+                 jsonb_array_elements(s.raw_data::jsonb->'bookmakers') AS bk,
                  jsonb_array_elements(bk->'markets') AS m,
                  jsonb_array_elements(m->'outcomes') AS outcome
             WHERE m->>'key' = 'h2h'
@@ -97,11 +100,14 @@ def downgrade() -> None:
     """)
 
     # Reverse: patch raw_data JSON back
+    # raw_data is stored as json (not jsonb); cast to jsonb at entry so
+    # jsonb_array_elements / jsonb_set work. Assignment back to the json
+    # column is implicit (Postgres converts via text).
     op.execute("""
         UPDATE odds_snapshots
         SET raw_data = (
             SELECT jsonb_set(
-                raw_data,
+                raw_data::jsonb,
                 '{bookmakers}',
                 (
                     SELECT jsonb_agg(
@@ -120,14 +126,14 @@ def downgrade() -> None:
                             )
                         )
                     )
-                    FROM jsonb_array_elements(raw_data->'bookmakers') AS bk
+                    FROM jsonb_array_elements(raw_data::jsonb->'bookmakers') AS bk
                 )
             )
         )
         WHERE id IN (
             SELECT s.id
             FROM odds_snapshots s,
-                 jsonb_array_elements(s.raw_data->'bookmakers') AS bk,
+                 jsonb_array_elements(s.raw_data::jsonb->'bookmakers') AS bk,
                  jsonb_array_elements(bk->'markets') AS m
             WHERE m->>'key' = '1x2'
         )
