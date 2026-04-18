@@ -22,6 +22,7 @@ from odds_core.odds_math import calculate_implied_probability
 from odds_core.paper_trade_models import PaperTrade
 from odds_core.prediction_models import Prediction
 from odds_core.snapshot_utils import extract_odds_from_snapshot
+from odds_core.sports import SportKey
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME
 from odds_lambda.paper_trading import (
     get_open_trades,
@@ -166,7 +167,7 @@ def _safe_float(val: Any) -> float | None:
 
 @mcp.tool()
 async def get_upcoming_fixtures(
-    league: str = "soccer_epl",
+    league: SportKey = "soccer_epl",
     days_ahead: int = 7,
 ) -> list[dict[str, Any]]:
     """Get upcoming scheduled fixtures for a league.
@@ -820,7 +821,7 @@ async def get_match_brief(
 
 @mcp.tool()
 async def get_slate_briefs(
-    league: str = "soccer_epl",
+    league: SportKey = "soccer_epl",
     days_ahead: int = 7,
 ) -> dict[str, Any]:
     """Get latest brief status for all upcoming fixtures in a league.
@@ -1028,7 +1029,7 @@ async def get_sharp_soft_spread(
 
 @mcp.tool()
 async def get_scheduled_jobs(
-    sport: str | None = None,
+    sport: SportKey | None = None,
 ) -> dict[str, Any]:
     """List all currently scheduled jobs from the scheduler backend.
 
@@ -1078,7 +1079,7 @@ async def get_scheduled_jobs(
 
 @mcp.tool()
 async def schedule_next_wakeup(
-    sport: str,
+    sport: SportKey,
     delay_hours: float,
     reason: str,
 ) -> dict[str, Any]:
