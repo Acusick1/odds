@@ -12,6 +12,7 @@ from odds_lambda.espn_mlb_odds import (
     MlbGameTotal,
     distinct_market_keys,
     get_mlb_main_totals,
+    group_match_links_by_line,
     line_to_market_key,
 )
 
@@ -297,3 +298,76 @@ class TestGetMlbMainTotals:
 
             assert result == []
             instance.close.assert_awaited_once()
+
+
+class TestGroupMatchLinksByLine:
+    def _total(self, home: str, away: str, line: float) -> MlbGameTotal:
+        return MlbGameTotal(
+            event_id=f"{home}-{away}",
+            home_team=home,
+            away_team=away,
+            commence_time=datetime(2026, 4, 18, 20, 0, tzinfo=UTC),
+            line=line,
+        )
+
+    def _raw(self, home: str, away: str, link: str) -> dict[str, Any]:
+        return {"home_team": home, "away_team": away, "match_link": link}
+
+    def test_groups_by_featured_line(self) -> None:
+        totals = [
+            self._total("New York Yankees", "Boston Red Sox", 8.5),
+            self._total("Los Angeles Dodgers", "San Francisco Giants", 9.0),
+            self._total("Chicago Cubs", "Milwaukee Brewers", 8.5),
+        ]
+        raw = [
+            self._raw("New York Yankees", "Boston Red Sox", "url-nyy-bos"),
+            self._raw("Los Angeles Dodgers", "San Francisco Giants", "url-lad-sf"),
+            self._raw("Chicago Cubs", "Milwaukee Brewers", "url-cubs-mil"),
+        ]
+        groups = group_match_links_by_line(totals, raw)
+        assert groups == {
+            "over_under_8_5": ["url-nyy-bos", "url-cubs-mil"],
+            "over_under_9_0": ["url-lad-sf"],
+        }
+
+    def test_case_insensitive_team_match(self) -> None:
+        """OddsPortal and ESPN casing may differ slightly."""
+        totals = [self._total("New York Yankees", "Boston Red Sox", 8.5)]
+        raw = [self._raw("new york yankees", "boston red sox", "url-nyy-bos")]
+        groups = group_match_links_by_line(totals, raw)
+        assert groups == {"over_under_8_5": ["url-nyy-bos"]}
+
+    def test_drops_espn_games_without_oddsportal_match(self) -> None:
+        """Games on ESPN's schedule but missing from OddsPortal are skipped."""
+        totals = [
+            self._total("New York Yankees", "Boston Red Sox", 8.5),
+            self._total("Tampa Bay Rays", "Baltimore Orioles", 9.0),
+        ]
+        raw = [self._raw("New York Yankees", "Boston Red Sox", "url-nyy-bos")]
+        groups = group_match_links_by_line(totals, raw)
+        assert groups == {"over_under_8_5": ["url-nyy-bos"]}
+
+    def test_drops_oddsportal_games_without_espn_line(self) -> None:
+        """Extra OddsPortal games (e.g. tomorrow's early slate) are skipped."""
+        totals = [self._total("New York Yankees", "Boston Red Sox", 8.5)]
+        raw = [
+            self._raw("New York Yankees", "Boston Red Sox", "url-nyy-bos"),
+            self._raw("Houston Astros", "Texas Rangers", "url-hou-tex"),
+        ]
+        groups = group_match_links_by_line(totals, raw)
+        assert groups == {"over_under_8_5": ["url-nyy-bos"]}
+
+    def test_empty_inputs(self) -> None:
+        assert group_match_links_by_line([], []) == {}
+        totals = [self._total("A", "B", 8.5)]
+        assert group_match_links_by_line(totals, []) == {}
+        raw = [self._raw("A", "B", "url")]
+        assert group_match_links_by_line([], raw) == {}
+
+    def test_skips_raw_matches_with_missing_fields(self) -> None:
+        totals = [self._total("A", "B", 8.5)]
+        raw = [
+            {"home_team": "A", "away_team": "B", "match_link": ""},
+            {"home_team": "", "away_team": "B", "match_link": "url"},
+        ]
+        assert group_match_links_by_line(totals, raw) == {}

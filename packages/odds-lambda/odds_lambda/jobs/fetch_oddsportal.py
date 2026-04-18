@@ -18,6 +18,7 @@ Interval table:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -120,6 +121,91 @@ async def run_harvester_upcoming(spec: LeagueSpec) -> list[dict[str, Any]]:
     return result.success
 
 
+async def run_harvester_targeted(
+    sport: str,
+    match_links: list[str],
+    markets: list[str],
+) -> list[dict[str, Any]]:
+    """Scrape a specific set of OddsPortal match URLs for the given markets.
+
+    Dispatches to ``scraper.scrape_matches`` inside OddsHarvester (triggered by
+    passing ``match_links`` + ``sport``). The caller pre-computes which URLs
+    should be scraped for which markets so each match only opens the submarket
+    tabs it actually has.
+    """
+    from oddsharvester.utils.command_enum import CommandEnum
+
+    from odds_lambda.browser_lock import playwright_semaphore
+
+    async with playwright_semaphore:
+        result = await run_scraper_with_retry(
+            command=CommandEnum.UPCOMING_MATCHES,
+            sport=sport,
+            match_links=match_links,
+            markets=markets,
+            headless=True,
+        )
+    return result.success
+
+
+async def ingest_mlb_with_espn_totals(
+    *,
+    dry_run: bool = False,
+) -> IngestionStats:
+    """MLB scrape + ingest with per-game Over/Under targeting via ESPN.
+
+    Two phases:
+
+    1. *Discovery* — a single ``home_away``-only UPCOMING_MATCHES scrape to
+       enumerate the slate's match URLs alongside their team names.
+    2. *Targeted totals* — group discovered matches by each game's
+       ESPN-featured line, then run one ``scrape_matches`` call per line group
+       with just that ``over_under_X_Y`` market. Each match opens a single O/U
+       submarket instead of the slate's superset, dropping ~70% of dead
+       submarket-tab clicks.
+
+    Falls back to plain ``home_away`` scrape-and-ingest when ESPN returns
+    nothing (offseason, outage, schedule not yet populated).
+    """
+    from odds_lambda.espn_mlb_odds import (
+        get_mlb_main_totals,
+        group_match_links_by_line,
+    )
+
+    spec = LEAGUE_SPEC_BY_NAME["mlb"]
+    base_spec = dataclasses.replace(spec, markets=["home_away"])
+
+    totals = await get_mlb_main_totals()
+    if not totals:
+        logger.warning("espn_totals_empty_falling_back_to_home_away")
+        return await ingest_league(base_spec, dry_run=dry_run)
+
+    logger.info(
+        "mlb_targeted_discovery_starting",
+        espn_games=len(totals),
+    )
+    base_matches = await run_harvester_upcoming(base_spec)
+    if not base_matches:
+        logger.warning("mlb_discovery_empty", espn_games=len(totals))
+        return IngestionStats(league=spec.league)
+
+    groups = group_match_links_by_line(totals, base_matches)
+    logger.info(
+        "mlb_targeted_groups",
+        group_sizes={market: len(links) for market, links in groups.items()},
+    )
+
+    bundles: list[tuple[str, list[dict[str, Any]]]] = [("home_away", base_matches)]
+    for market, links in groups.items():
+        if not links:
+            continue
+        logger.info("mlb_targeted_scrape", market=market, count=len(links))
+        raw = await run_harvester_targeted(spec.sport, links, [market])
+        bundles.append((market, raw))
+
+    return await _ingest_bundles(spec, bundles, dry_run=dry_run)
+
+
 async def ingest_league(
     spec: LeagueSpec,
     *,
@@ -136,26 +222,45 @@ async def ingest_league(
     Returns:
         Ingestion statistics.
     """
-    stats = IngestionStats(league=spec.league)
-
     if raw_matches is None:
         logger.info("scraping_league", league=spec.league, sport=spec.sport)
         raw_matches = await run_harvester_upcoming(spec)
 
-    stats.matches_scraped = len(raw_matches)
-
     if not raw_matches:
         logger.warning("no_matches_scraped", league=spec.league)
-        return stats
+        return IngestionStats(league=spec.league)
 
     logger.info("matches_scraped", league=spec.league, count=len(raw_matches))
+    bundles = [(market, raw_matches) for market in spec.markets]
+    return await _ingest_bundles(spec, bundles, dry_run=dry_run)
 
-    # Convert all markets
+
+async def _ingest_bundles(
+    spec: LeagueSpec,
+    bundles: list[tuple[str, list[dict[str, Any]]]],
+    *,
+    dry_run: bool = False,
+) -> IngestionStats:
+    """Convert and ingest a list of (market, raw_matches) pairs.
+
+    Each bundle is a separate OddsHarvester scrape result (or slice thereof).
+    Using bundles lets callers fan out per-market or per-game without
+    committing to a single superset scrape.
+    """
+    stats = IngestionStats(league=spec.league)
+    seen_links: set[str] = set()
+
     all_converted: list[tuple[str, MatchOdds]] = []
-    for market in spec.markets:
-        converted = convert_upcoming_matches(raw_matches, market)
+    for market, raw in bundles:
+        for m in raw:
+            link = m.get("match_link", "")
+            if link:
+                seen_links.add(link)
+        converted = convert_upcoming_matches(raw, market)
         all_converted.extend((market, m) for m in converted)
         stats.matches_converted += len(converted)
+
+    stats.matches_scraped = len(seen_links)
 
     if dry_run:
         logger.info(
@@ -166,7 +271,6 @@ async def ingest_league(
         )
         return stats
 
-    # Ingest to database
     scraped_date = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M")
     api_request_id = f"oddsportal_live_{scraped_date}"
 

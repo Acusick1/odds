@@ -205,3 +205,43 @@ def distinct_market_keys(totals: list[MlbGameTotal]) -> list[str]:
     """
     distinct_lines = sorted({round(t.line * 2) / 2 for t in totals})
     return [line_to_market_key(line) for line in distinct_lines]
+
+
+def _team_key(home: str, away: str) -> str:
+    """Normalise a team-pair into a case-insensitive matching key."""
+    return f"{home.strip().lower()}|{away.strip().lower()}"
+
+
+def group_match_links_by_line(
+    totals: list[MlbGameTotal],
+    raw_matches: list[dict[str, Any]],
+) -> dict[str, list[str]]:
+    """Group OddsPortal match URLs by their ESPN-discovered main Over/Under line.
+
+    Args:
+        totals: Per-game featured totals from ESPN.
+        raw_matches: OddsHarvester output (typically a home_away discovery
+            scrape) containing ``home_team`` / ``away_team`` / ``match_link``.
+
+    Returns:
+        Mapping of ``over_under_X_Y`` → ``[match_link, ...]``. Matches whose
+        teams don't appear in ``totals`` are silently omitted — no main-line
+        data means nothing to target for them.
+    """
+    link_by_teams: dict[str, str] = {}
+    for m in raw_matches:
+        home = (m.get("home_team") or "").strip()
+        away = (m.get("away_team") or "").strip()
+        link = (m.get("match_link") or "").strip()
+        if not home or not away or not link:
+            continue
+        link_by_teams[_team_key(home, away)] = link
+
+    groups: dict[str, list[str]] = {}
+    for total in totals:
+        link = link_by_teams.get(_team_key(total.home_team, total.away_team))
+        if link is None:
+            continue
+        market = line_to_market_key(total.line)
+        groups.setdefault(market, []).append(link)
+    return groups
