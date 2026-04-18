@@ -342,6 +342,11 @@ class TestConvertUpcomingMatches:
         with pytest.raises(ValueError, match="Unsupported market"):
             convert_upcoming_matches(sample_match, "asian_handicap")
 
+    def test_malformed_over_under_falls_through_to_raise(self, sample_match: list[dict]) -> None:
+        """Market starting with 'over_under_' but not numeric falls through to the map."""
+        with pytest.raises(ValueError, match="Unsupported market"):
+            convert_upcoming_matches(sample_match, "over_under_bad")
+
     def test_skips_incomplete_match(self) -> None:
         matches = [{"home_team": "Leeds", "away_team": "", "match_date": ""}]
         assert convert_upcoming_matches(matches, "1x2") == []

@@ -137,7 +137,8 @@ async def _fetch_event_total(
     if not items:
         return None
     line = items[0].get("overUnder")
-    if not isinstance(line, int | float):
+    # bool is a subclass of int in Python; exclude it explicitly.
+    if isinstance(line, bool) or not isinstance(line, int | float) or line <= 0:
         return None
 
     return MlbGameTotal(
@@ -197,5 +198,10 @@ def line_to_market_key(line: float) -> str:
 
 
 def distinct_market_keys(totals: list[MlbGameTotal]) -> list[str]:
-    """Sorted, de-duplicated ``over_under_X_Y`` keys for a slate's main lines."""
-    return sorted({line_to_market_key(t.line) for t in totals})
+    """De-duplicated ``over_under_X_Y`` keys for a slate, sorted by numeric line.
+
+    Sorting on the parsed float avoids the lexicographic ordering surprise
+    where ``over_under_10_5`` would precede ``over_under_9_5``.
+    """
+    distinct_lines = sorted({round(t.line * 2) / 2 for t in totals})
+    return [line_to_market_key(line) for line in distinct_lines]

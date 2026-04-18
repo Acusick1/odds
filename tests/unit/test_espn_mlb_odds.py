@@ -55,13 +55,21 @@ class TestDistinctMarketKeys:
         totals = [self._total(8.5), self._total(8.5), self._total(9.0)]
         assert distinct_market_keys(totals) == ["over_under_8_5", "over_under_9_0"]
 
-    def test_sorted(self) -> None:
+    def test_sorted_numerically(self) -> None:
         totals = [self._total(9.5), self._total(7.0), self._total(8.5)]
-        # Lexicographic sort on "over_under_7_0" < "over_under_8_5" < "over_under_9_5"
         assert distinct_market_keys(totals) == [
             "over_under_7_0",
             "over_under_8_5",
             "over_under_9_5",
+        ]
+
+    def test_two_digit_lines_sort_by_number_not_string(self) -> None:
+        """Regression: lexicographic sort would put 10_5 / 11_5 before 9_5."""
+        totals = [self._total(11.5), self._total(9.5), self._total(10.5)]
+        assert distinct_market_keys(totals) == [
+            "over_under_9_5",
+            "over_under_10_5",
+            "over_under_11_5",
         ]
 
     def test_empty(self) -> None:
@@ -225,6 +233,56 @@ class TestGetMlbMainTotals:
 
         result = await get_mlb_main_totals(session=session)
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_zero_over_under_drops_event(self) -> None:
+        """ESPN sometimes returns overUnder=0.0 for pre-release games; filter it."""
+        routes = _ResponseMap(
+            {
+                "scoreboard": _make_scoreboard_payload([_make_event()]),
+                "odds": _make_odds_payload(over_under=0.0),
+            }
+        )
+        session = MagicMock(spec=aiohttp.ClientSession)
+        session.get = routes.get
+
+        result = await get_mlb_main_totals(session=session)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_bool_over_under_drops_event(self) -> None:
+        """bool is a subclass of int; exclude it from the numeric check."""
+        routes = _ResponseMap(
+            {
+                "scoreboard": _make_scoreboard_payload([_make_event()]),
+                "odds": {"items": [{"overUnder": True}]},
+            }
+        )
+        session = MagicMock(spec=aiohttp.ClientSession)
+        session.get = routes.get
+
+        result = await get_mlb_main_totals(session=session)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_target_date_serialized_as_yyyymmdd(self) -> None:
+        """target_date must hit ESPN as dates=YYYYMMDD on the scoreboard call."""
+        from datetime import date
+
+        captured: dict[str, Any] = {}
+
+        def _get(url: str, **kwargs: Any) -> _MockResponse:
+            if "scoreboard" in url:
+                captured["params"] = kwargs.get("params")
+                return _MockResponse(_make_scoreboard_payload([]))
+            raise AssertionError(url)
+
+        session = MagicMock(spec=aiohttp.ClientSession)
+        session.get = _get
+
+        await get_mlb_main_totals(target_date=date(2026, 4, 18), session=session)
+
+        assert captured["params"] == {"dates": "20260418"}
 
     @pytest.mark.asyncio
     async def test_creates_and_closes_session_when_not_provided(self) -> None:
