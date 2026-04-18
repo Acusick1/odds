@@ -3118,7 +3118,7 @@ requires-dist = [
 [[package]]
 name = "oddsharvester"
 version = "0.1.0"
-source = { git = "https://github.com/Acusick1/OddsHarvester.git?branch=fix%2Ffractional-odds-and-unknown-bookmaker#ffb64c47c4b389fbfda3b0e8b2fbb2c740e7fbf3" }
+source = { git = "https://github.com/Acusick1/OddsHarvester.git?branch=fix%2Ffractional-odds-and-unknown-bookmaker#7bff30193afd49fe896f6ae365de309e1ffd64d0" }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "boto3" },
