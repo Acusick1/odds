@@ -57,10 +57,11 @@ class TestCoerceBookmakerList:
 
         assert _coerce_bookmaker_list("pinnacle") == ["pinnacle"]
 
-    def test_malformed_json_falls_back_to_comma_split(self) -> None:
+    def test_malformed_json_raises(self) -> None:
         from odds_mcp.server import _coerce_bookmaker_list
 
-        assert _coerce_bookmaker_list("[bet365, betway") == ["[bet365", "betway"]
+        with pytest.raises(ValueError, match="Malformed JSON array"):
+            _coerce_bookmaker_list("[bet365, betway")
 
 
 class TestEventToDict:

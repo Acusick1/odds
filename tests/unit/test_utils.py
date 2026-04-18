@@ -10,6 +10,7 @@ from odds_analytics.utils import (
     calculate_sharpe_ratio,
     calculate_sortino_ratio,
     detect_arbitrage,
+    per_book_market_holds,
 )
 from odds_core.odds_math import (
     american_to_decimal,
@@ -266,6 +267,34 @@ class TestMarketHold:
         hold = calculate_market_hold([+120, +200, +350])
         # Should have positive hold
         assert hold > 0
+
+
+class TestPerBookMarketHolds:
+    def test_complete_books_included(self):
+        prices = [
+            ("bet365", "home", -110),
+            ("bet365", "away", -110),
+            ("betfred", "home", -105),
+            ("betfred", "away", -115),
+        ]
+        holds = per_book_market_holds(prices, required_outcomes={"home", "away"})
+        assert set(holds) == {"bet365", "betfred"}
+        assert holds["bet365"] == pytest.approx(0.048, rel=0.01)
+
+    def test_book_missing_outcome_skipped(self):
+        prices = [
+            ("bet365", "home", -110),
+            ("bet365", "draw", +250),
+            ("bet365", "away", +280),
+            ("partial", "home", -110),
+            ("partial", "draw", +250),
+        ]
+        holds = per_book_market_holds(prices, required_outcomes={"home", "draw", "away"})
+        assert "partial" not in holds
+        assert "bet365" in holds
+
+    def test_empty_input(self):
+        assert per_book_market_holds([], required_outcomes={"home", "away"}) == {}
 
 
 class TestArbitrageDetection:

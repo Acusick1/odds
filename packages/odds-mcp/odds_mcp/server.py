@@ -13,7 +13,7 @@ import structlog
 from fastmcp import FastMCP
 from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import TabularFeatureExtractor
-from odds_analytics.utils import calculate_market_hold
+from odds_analytics.utils import per_book_market_holds
 from odds_core.agent_wakeup_models import AgentWakeup
 from odds_core.database import async_session_maker
 from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMap
@@ -71,10 +71,13 @@ def _coerce_bookmaker_list(value: str | list[str] | None) -> list[str] | None:
     if stripped.startswith("["):
         try:
             parsed = json.loads(stripped)
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, list):
-            return [str(item) for item in parsed]
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Malformed JSON array in bookmaker list: {stripped!r}") from e
+        if not isinstance(parsed, list):
+            raise ValueError(
+                f"Expected JSON array for bookmaker list, got {type(parsed).__name__}: {stripped!r}"
+            )
+        return [str(item) for item in parsed]
     return [item.strip() for item in stripped.split(",") if item.strip()]
 
 
@@ -964,10 +967,10 @@ async def get_sharp_soft_spread(
     # span multiple lines, so computing it event-wide would conflate them.
     book_hold: dict[str, float] | None = None
     if market in ("h2h", "1x2"):
-        book_prices: dict[str, list[int]] = {}
-        for o in odds:
-            book_prices.setdefault(o.bookmaker_key, []).append(o.price)
-        book_hold = {bm: calculate_market_hold(prices) for bm, prices in book_prices.items()}
+        book_hold = per_book_market_holds(
+            ((o.bookmaker_key, o.outcome_name, o.price) for o in odds),
+            required_outcomes=outcomes.keys(),
+        )
 
     spread: dict[str, dict[str, Any]] = {}
     for outcome_name, outcome_odds in outcomes.items():

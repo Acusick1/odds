@@ -7,7 +7,7 @@ devigging, h2h winner, profit-from-odds) lives in ``odds_core.odds_math``.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Collection, Iterable, Sequence
 from typing import TYPE_CHECKING
 
 from odds_core.odds_math import american_to_decimal, calculate_implied_probability
@@ -135,6 +135,27 @@ def calculate_market_hold(odds_list: list[int]) -> float:
     """Market hold (bookmaker's edge/vig) from a list of odds for all outcomes."""
     implied_probs = [calculate_implied_probability(odds) for odds in odds_list]
     return sum(implied_probs) - 1.0
+
+
+def per_book_market_holds(
+    prices: Iterable[tuple[str, str, int]],
+    required_outcomes: Collection[str],
+) -> dict[str, float]:
+    """Market hold per bookmaker from ``(bookmaker, outcome, price)`` tuples.
+
+    Books missing any of ``required_outcomes`` are dropped — a partial-market
+    sum would understate the hold (possibly negative) with no signal to the
+    caller. Duplicate ``(bookmaker, outcome)`` entries keep the last price.
+    """
+    required = set(required_outcomes)
+    by_book: dict[str, dict[str, int]] = {}
+    for bookmaker, outcome, price in prices:
+        by_book.setdefault(bookmaker, {})[outcome] = price
+    return {
+        bm: calculate_market_hold(list(outcome_prices.values()))
+        for bm, outcome_prices in by_book.items()
+        if set(outcome_prices) >= required
+    }
 
 
 def detect_arbitrage(odds_list: list[tuple[str, int]]) -> tuple[bool, float, dict]:
