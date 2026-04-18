@@ -55,6 +55,11 @@ def _build_event_id(home_team: str, away_team: str, commence_time: datetime) -> 
 
 # Snapshots where the event row's commence_time is more than 2h away from
 # the true match time implied by (snapshot_time + hours_until_commence).
+#
+# Intentionally sport-agnostic: the >2h divergence signature is valid across
+# sports, and the correctness of the repoint does not depend on sport_key.
+# The upgrade() function logs a per-sport breakdown so the blast radius is
+# explicit when the migration runs.
 _DIVERGENCE_QUERY = sa.text(
     """
     SELECT
@@ -62,7 +67,7 @@ _DIVERGENCE_QUERY = sa.text(
         os.event_id AS old_event_id,
         os.snapshot_time,
         os.hours_until_commence,
-        os.snapshot_time + make_interval(secs => os.hours_until_commence * 3600)
+        os.snapshot_time + make_interval(hours => os.hours_until_commence)
             AS true_commence,
         e.home_team,
         e.away_team,
@@ -76,11 +81,63 @@ _DIVERGENCE_QUERY = sa.text(
           EXTRACT(
               EPOCH FROM (
                   e.commence_time
-                  - (os.snapshot_time + make_interval(secs => os.hours_until_commence * 3600))
+                  - (os.snapshot_time + make_interval(hours => os.hours_until_commence))
               )
           ) / 3600
       ) > 2
     ORDER BY os.snapshot_time
+    """
+)
+
+
+# Per-sport breakdown of the divergence set, logged before repointing runs so
+# the blast radius is explicit in migration output.
+_DIVERGENCE_BREAKDOWN_QUERY = sa.text(
+    """
+    SELECT e.sport_key, COUNT(*) AS n
+    FROM odds_snapshots os
+    JOIN events e ON e.id = os.event_id
+    WHERE os.hours_until_commence IS NOT NULL
+      AND os.hours_until_commence > 0
+      AND ABS(
+          EXTRACT(
+              EPOCH FROM (
+                  e.commence_time
+                  - (os.snapshot_time + make_interval(hours => os.hours_until_commence))
+              )
+          ) / 3600
+      ) > 2
+    GROUP BY e.sport_key
+    ORDER BY n DESC
+    """
+)
+
+
+# Sanity check for the uniqueness assumption embedded in _REPOINT_ODDS: that
+# (event_id, odds_timestamp) uniquely identifies the odds rows belonging to
+# one snapshot, so UPDATE needs no snapshot_id tiebreaker. This holds because
+# each scrape run writes exactly one snapshot per event with a single
+# snapshot_time value shared by all its odds rows. The query below flags any
+# event where two or more snapshots share the same snapshot_time within the
+# divergent set — that would indicate overlapping scrapes and mean the UPDATE
+# could drag unrelated odds rows along with the one we intend to move.
+_ODDS_TIMESTAMP_SANITY_QUERY = sa.text(
+    """
+    SELECT os.event_id, os.snapshot_time, COUNT(*) AS n
+    FROM odds_snapshots os
+    JOIN events e ON e.id = os.event_id
+    WHERE os.hours_until_commence IS NOT NULL
+      AND os.hours_until_commence > 0
+      AND ABS(
+          EXTRACT(
+              EPOCH FROM (
+                  e.commence_time
+                  - (os.snapshot_time + make_interval(hours => os.hours_until_commence))
+              )
+          ) / 3600
+      ) > 2
+    GROUP BY os.event_id, os.snapshot_time
+    HAVING COUNT(*) > 1
     """
 )
 
@@ -137,14 +194,52 @@ _REPOINT_PREDICTIONS = sa.text(
 )
 
 
+# paper_trades and match_briefs both have plain (non-unique) event_id FK
+# columns with no unique constraint involving event_id — simple UPDATE is
+# safe. Re-pointed per (old_event_id -> new_event_id) pair so trades and
+# briefs follow their event's snapshots to the corrected row.
+_REPOINT_PAPER_TRADES = sa.text(
+    "UPDATE paper_trades SET event_id = :new_id WHERE event_id = :old_id"
+)
+_REPOINT_MATCH_BRIEFS = sa.text(
+    "UPDATE match_briefs SET event_id = :new_id WHERE event_id = :old_id"
+)
+
+
 def upgrade() -> None:
     conn = op.get_bind()
+
+    # Log the per-sport breakdown of the divergent set before touching
+    # anything, so the migration output makes the blast radius explicit.
+    breakdown = conn.execute(_DIVERGENCE_BREAKDOWN_QUERY).fetchall()
+    if breakdown:
+        summary = ", ".join(f"{r.sport_key}={r.n}" for r in breakdown)
+        total = sum(r.n for r in breakdown)
+        print(f"Repointing {total} snapshots: {summary}")
+    else:
+        print("Repointing 0 snapshots: no divergent rows found")
+
+    # Sanity-check the uniqueness assumption behind _REPOINT_ODDS. If this
+    # fires, review manually before applying — the UPDATE could drag odds
+    # rows from an unrelated overlapping snapshot.
+    dup_snapshots = conn.execute(_ODDS_TIMESTAMP_SANITY_QUERY).fetchall()
+    if dup_snapshots:
+        print(
+            f"WARNING: {len(dup_snapshots)} (event_id, snapshot_time) pairs in the "
+            "divergent set have multiple odds_snapshots rows — _REPOINT_ODDS may "
+            "move unintended rows. Sample: "
+            f"{[(r.event_id, r.snapshot_time.isoformat(), r.n) for r in dup_snapshots[:5]]}"
+        )
 
     rows = conn.execute(_DIVERGENCE_QUERY).fetchall()
 
     repointed = 0
     events_created = 0
     odds_rows_repointed = 0
+    # Map of old_event_id -> new_event_id; populated as we re-point snapshots
+    # so we can propagate the same re-point to paper_trades and match_briefs
+    # exactly once per (old, new) pair after the loop.
+    event_remap: dict[str, str] = {}
 
     for row in rows:
         true_commence = row.true_commence
@@ -203,11 +298,27 @@ def upgrade() -> None:
             _REPOINT_PREDICTIONS,
             {"new_id": new_event_id, "snapshot_id": row.snapshot_id},
         )
+        event_remap[row.old_event_id] = new_event_id
         repointed += 1
+
+    # Re-point paper_trades and match_briefs once per (old, new) pair. These
+    # tables are not keyed by snapshot, so the move follows the event as a
+    # whole. Skip self-remaps defensively (already filtered above, but cheap).
+    paper_trades_repointed = 0
+    match_briefs_repointed = 0
+    for old_id, new_id in event_remap.items():
+        if old_id == new_id:
+            continue
+        pt_result = conn.execute(_REPOINT_PAPER_TRADES, {"new_id": new_id, "old_id": old_id})
+        paper_trades_repointed += pt_result.rowcount or 0
+        mb_result = conn.execute(_REPOINT_MATCH_BRIEFS, {"new_id": new_id, "old_id": old_id})
+        match_briefs_repointed += mb_result.rowcount or 0
 
     print(
         f"Repointed {repointed} conflated snapshots "
-        f"({odds_rows_repointed} odds rows), created {events_created} event rows"
+        f"({odds_rows_repointed} odds rows), created {events_created} event rows, "
+        f"repointed {paper_trades_repointed} paper_trades and "
+        f"{match_briefs_repointed} match_briefs rows"
     )
 
 
