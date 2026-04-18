@@ -24,6 +24,7 @@ from typing import Any, NamedTuple
 
 import structlog
 from odds_core.config import get_settings
+from odds_core.sports import SportKey
 
 from odds_lambda.scheduling.helpers import apply_overnight_skip, get_next_kickoff, self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
@@ -40,7 +41,7 @@ TIER_NO_FIXTURES_HOURS = 12.0  # no fixtures within 7 days
 # Overnight suppression windows (start_utc, resume_utc) per sport
 # EPL: last KO ~20:00 UTC, suppress 22:00-06:00
 # MLB: last pitch ~04:00 UTC, suppress 06:00-14:00
-OVERNIGHT_WINDOWS: dict[str, tuple[int, int]] = {
+OVERNIGHT_WINDOWS: dict[SportKey, tuple[int, int]] = {
     "soccer_epl": (22, 6),
     "baseball_mlb": (6, 14),
 }
@@ -96,7 +97,7 @@ def _preview_tool_input(d: dict[str, Any] | None, *, max_value_chars: int = 60) 
     return " ".join(parts)
 
 
-def _prune_agent_run_logs(log_dir: Path, sport: str, keep: int) -> None:
+def _prune_agent_run_logs(log_dir: Path, sport: SportKey, keep: int) -> None:
     """Delete all but the newest ``keep`` JSONL files for ``sport``."""
     files = sorted(log_dir.glob(f"{sport}_*.jsonl"), reverse=True)
     for stale in files[keep:]:
@@ -135,7 +136,7 @@ def _log_stream_message(msg: dict[str, Any]) -> None:
         )
 
 
-async def _run_claude_agent(sport: str) -> int:
+async def _run_claude_agent(sport: SportKey) -> int:
     """Spawn ``claude -p`` subprocess and return exit code.
 
     Full stream-json trace is written to
@@ -206,7 +207,7 @@ async def _run_claude_agent(sport: str) -> int:
     return exit_code
 
 
-async def _check_agent_requested_wakeup(sport_key: str) -> datetime | None:
+async def _check_agent_requested_wakeup(sport_key: SportKey) -> datetime | None:
     """Read and consume any agent-requested wake-up from the agent_wakeups table.
 
     Returns the requested time if a row exists for this sport, then marks it
@@ -244,7 +245,7 @@ async def _check_agent_requested_wakeup(sport_key: str) -> datetime | None:
     return requested_time
 
 
-async def schedule_next(sport: str) -> ScheduleResult:
+async def schedule_next(sport: SportKey) -> ScheduleResult:
     """Compute and schedule the next agent wake-up for a sport.
 
     Queries the DB for the next kickoff, computes the wake interval from

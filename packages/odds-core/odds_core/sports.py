@@ -7,6 +7,6 @@ scheduler jobs, MCP tools, and CLI commands.
 
 from typing import Literal, get_args
 
-SportKey = Literal["soccer_epl", "baseball_mlb"]
+SportKey = Literal["soccer_epl", "baseball_mlb", "basketball_nba"]
 
 SUPPORTED_SPORTS: tuple[SportKey, ...] = get_args(SportKey)
