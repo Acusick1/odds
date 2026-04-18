@@ -75,10 +75,15 @@ class OddsWriter:
 
     @staticmethod
     def _build_event_id(home_team: str, away_team: str, match_date: datetime) -> str:
-        """Generate deterministic event ID for OddsPortal-sourced events."""
+        """Generate deterministic event ID for OddsPortal-sourced events.
+
+        Includes the match start time down to the minute so same-day
+        doubleheaders produce distinct ids. The ±2h match window in
+        find_or_create_event handles minor jitter across re-scrapes.
+        """
         home_abbrev = team_abbrev(home_team)
         away_abbrev = team_abbrev(away_team)
-        date_str = match_date.strftime("%Y-%m-%d")
+        date_str = match_date.strftime("%Y-%m-%dT%H%M")
         return f"op_live_{home_abbrev}_{away_abbrev}_{date_str}"
 
     async def find_or_create_event(
@@ -97,8 +102,8 @@ class OddsWriter:
         home_team = normalize_team_name(home_team)
         away_team = normalize_team_name(away_team)
 
-        window_start = match_date - timedelta(hours=24)
-        window_end = match_date + timedelta(hours=24)
+        window_start = match_date - timedelta(hours=2)
+        window_end = match_date + timedelta(hours=2)
 
         query = select(Event.id).where(
             and_(
@@ -106,6 +111,7 @@ class OddsWriter:
                 Event.commence_time <= window_end,
                 Event.home_team == home_team,
                 Event.away_team == away_team,
+                Event.sport_key == sport_key,
             )
         )
         result = await self.session.execute(query)
