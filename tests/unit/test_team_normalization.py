@@ -232,3 +232,105 @@ class TestFindOrCreateEventOnWriter:
         assert event_id_1 == event_id_2
         assert created_1 is True
         assert created_2 is False
+
+
+class TestFindOrCreateEventMatchWindow:
+    """Regression tests for the ±2h team+date match window.
+
+    The prior ±24h window silently merged back-to-back same-matchup games
+    (MLB series pattern) and same-day doubleheaders into a single event row.
+    """
+
+    @pytest.mark.asyncio
+    async def test_same_teams_consecutive_days_are_distinct_events(self, test_session) -> None:
+        """Team A vs B on day N and day N+1 must create two event rows."""
+        from odds_lambda.storage.writers import OddsWriter
+
+        writer = OddsWriter(test_session)
+
+        day_one = datetime(2026, 6, 10, 23, 10, tzinfo=UTC)
+        day_two = datetime(2026, 6, 11, 23, 10, tzinfo=UTC)
+
+        event_id_1, created_1 = await writer.find_or_create_event(
+            home_team="New York Yankees",
+            away_team="Boston Red Sox",
+            match_date=day_one,
+            sport_key="baseball_mlb",
+            sport_title="MLB",
+        )
+        await test_session.flush()
+
+        event_id_2, created_2 = await writer.find_or_create_event(
+            home_team="New York Yankees",
+            away_team="Boston Red Sox",
+            match_date=day_two,
+            sport_key="baseball_mlb",
+            sport_title="MLB",
+        )
+
+        assert created_1 is True
+        assert created_2 is True
+        assert event_id_1 != event_id_2
+
+    @pytest.mark.asyncio
+    async def test_same_day_doubleheader_games_are_distinct_events(self, test_session) -> None:
+        """Team A vs B at 13:00 and 18:00 same day must create two event rows."""
+        from odds_lambda.storage.writers import OddsWriter
+
+        writer = OddsWriter(test_session)
+
+        game_one = datetime(2026, 7, 4, 13, 0, tzinfo=UTC)
+        game_two = datetime(2026, 7, 4, 18, 0, tzinfo=UTC)
+
+        event_id_1, created_1 = await writer.find_or_create_event(
+            home_team="Chicago Cubs",
+            away_team="St. Louis Cardinals",
+            match_date=game_one,
+            sport_key="baseball_mlb",
+            sport_title="MLB",
+        )
+        await test_session.flush()
+
+        event_id_2, created_2 = await writer.find_or_create_event(
+            home_team="Chicago Cubs",
+            away_team="St. Louis Cardinals",
+            match_date=game_two,
+            sport_key="baseball_mlb",
+            sport_title="MLB",
+        )
+
+        assert created_1 is True
+        assert created_2 is True
+        assert event_id_1 != event_id_2
+
+    @pytest.mark.asyncio
+    async def test_re_scrape_same_match_is_idempotent(self, test_session) -> None:
+        """Re-scraping the same match (match_date jittered within ±2h) reuses the row."""
+        from odds_lambda.storage.writers import OddsWriter
+
+        writer = OddsWriter(test_session)
+
+        first_scrape = datetime(2026, 6, 10, 23, 10, tzinfo=UTC)
+        # Source occasionally re-reports commence_time within a small window.
+        second_scrape = datetime(2026, 6, 10, 23, 45, tzinfo=UTC)
+
+        event_id_1, created_1 = await writer.find_or_create_event(
+            home_team="New York Yankees",
+            away_team="Boston Red Sox",
+            match_date=first_scrape,
+            sport_key="baseball_mlb",
+            sport_title="MLB",
+        )
+        await test_session.flush()
+
+        event_id_2, created_2 = await writer.find_or_create_event(
+            home_team="New York Yankees",
+            away_team="Boston Red Sox",
+            match_date=second_scrape,
+            sport_key="baseball_mlb",
+            sport_title="MLB",
+        )
+
+        assert created_1 is True
+        assert created_2 is False
+        assert event_id_1 == event_id_2
