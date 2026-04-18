@@ -286,7 +286,8 @@ async def refresh_scrape(
 
     Args:
         league: OddsHarvester league name (e.g. "england-premier-league").
-        market: Market to scrape (e.g. "1x2", "over_under_2_5").
+        market: Market to scrape (e.g. "1x2", "home_away", "over_under_8_5").
+            Any ``over_under_X_Y`` line is accepted.
 
     Returns:
         Dict confirming the job was submitted, or an error.

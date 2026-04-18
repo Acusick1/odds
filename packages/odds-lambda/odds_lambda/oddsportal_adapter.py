@@ -17,6 +17,7 @@ from odds_lambda.oddsportal_common import (
     decimal_to_american,
     normalize_bookmaker_key,
     parse_match_date,
+    parse_over_under_line,
 )
 
 # Regex: Betfair format is "FRAC_REPEAT(LIQUIDITY)" e.g. "99/10099/100(300)"
@@ -78,14 +79,22 @@ def convert_upcoming_matches(matches: list[dict[str, Any]], market: str) -> list
 
     Args:
         matches: Raw match dicts from OddsHarvester upcoming command.
-        market: Market key — "1x2", "over_under_2_5", or "home_away".
+        market: Market key — "1x2", "home_away", or any ``over_under_X_Y``
+            (e.g. "over_under_2_5", "over_under_8_5").
 
     Returns:
         List of MatchOdds with raw_data matching OddsWriter contract.
     """
-    converter = _MARKET_CONVERTERS.get(market)
-    if converter is None:
-        raise ValueError(f"Unsupported market: {market}")
+    ou_line = parse_over_under_line(market)
+    if ou_line is not None:
+
+        def converter(bk_odds: list[dict[str, Any]], home: str, away: str) -> dict[str, Any] | None:
+            return _convert_over_under_match(bk_odds, home, away, line=ou_line)
+    else:
+        base_converter = _MARKET_CONVERTERS.get(market)
+        if base_converter is None:
+            raise ValueError(f"Unsupported market: {market}")
+        converter = base_converter
 
     results: list[MatchOdds] = []
     json_key = market + "_market"
@@ -211,8 +220,13 @@ def _convert_over_under_match(
     bookmaker_odds: list[dict[str, Any]],
     home_team: str,
     away_team: str,
+    *,
+    line: float = 2.5,
 ) -> dict[str, Any] | None:
-    """Convert over/under 2.5 market bookmaker list to raw_data format."""
+    """Convert over/under market bookmaker list to raw_data format.
+
+    ``line`` is the numeric total (e.g. 2.5 for football, 8.5 for baseball).
+    """
     bookmakers: list[dict[str, Any]] = []
 
     for bk in bookmaker_odds:
@@ -242,8 +256,8 @@ def _convert_over_under_match(
             continue
 
         outcomes = [
-            {"name": "Over", "price": decimal_to_american(over_dec), "point": 2.5},
-            {"name": "Under", "price": decimal_to_american(under_dec), "point": 2.5},
+            {"name": "Over", "price": decimal_to_american(over_dec), "point": line},
+            {"name": "Under", "price": decimal_to_american(under_dec), "point": line},
         ]
 
         liquidity: dict[str, int] | None = None
@@ -323,6 +337,5 @@ def _convert_home_away_match(
 
 _MARKET_CONVERTERS: dict[str, MarketConverter] = {
     "1x2": _convert_1x2_match,
-    "over_under_2_5": _convert_over_under_match,
     "home_away": _convert_home_away_match,
 }
