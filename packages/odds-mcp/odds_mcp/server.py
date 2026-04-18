@@ -53,9 +53,10 @@ _LEAGUE_SPEC_BY_NAME = LEAGUE_SPEC_BY_NAME
 # Hybrid sharp reference matching production defaults.
 # Duplicated from feature_extraction.py DEFAULT_SHARP_BOOKMAKERS with EPL-specific overrides — keep in sync.
 _DEFAULT_SHARP_BOOKMAKERS = ["pinnacle", "betfair_exchange"]
-# Used only by get_event_features for TabularFeatureExtractor. Must match whatever
-# retail set the deployed EPL model was trained on — today there is no deployed EPL
-# model, so this is a placeholder pending resolution of the "EPL predictions empty" TODO.
+# Used only by get_event_features for TabularFeatureExtractor. Distinct from
+# feature_extraction.DEFAULT_RETAIL_BOOKMAKERS (US books for the NBA model) — these are
+# UK books chosen to match the not-yet-deployed EPL model. When an EPL model ships, this
+# default must match whatever retail set it was trained on or features will silently drift.
 _DEFAULT_RETAIL_BOOKMAKERS = ["bet365", "betway", "betfred", "betvictor", "bwin"]
 
 
