@@ -53,15 +53,61 @@ def _build_event_id(home_team: str, away_team: str, commence_time: datetime) -> 
     return f"op_live_{home_abbrev}_{away_abbrev}_{date_str}"
 
 
+# Divergence predicate shared by every query below: a snapshot whose parent
+# event's commence_time is >2h away from the true match time implied by
+# (snapshot_time + hours_until_commence). Kept as a string so it can be
+# composed into each query without duplicating the condition.
+_DIVERGENCE_PREDICATE = """
+    os.hours_until_commence IS NOT NULL
+    AND os.hours_until_commence > 0
+    AND ABS(
+        EXTRACT(
+            EPOCH FROM (
+                e.commence_time
+                - (os.snapshot_time + (os.hours_until_commence || ' hours')::interval)
+            )
+        ) / 3600
+    ) > 2
+"""
+
+
+# (event_id, snapshot_time) pairs inside the divergent set that are backed by
+# more than one odds_snapshots row. These cannot be repointed safely because
+# _REPOINT_ODDS keys on (old_event_id, odds_timestamp) and cannot tell which
+# odds rows belong to which snapshot when multiple snapshots share the same
+# timestamp. The upgrade() function logs these for manual review and excludes
+# them from the divergent set it actually processes.
+_OFFENDING_PAIRS_QUERY = sa.text(
+    f"""
+    SELECT os.event_id, os.snapshot_time, COUNT(*) AS n
+    FROM odds_snapshots os
+    JOIN events e ON e.id = os.event_id
+    WHERE {_DIVERGENCE_PREDICATE}
+    GROUP BY os.event_id, os.snapshot_time
+    HAVING COUNT(*) > 1
+    """
+)
+
+
 # Snapshots where the event row's commence_time is more than 2h away from
 # the true match time implied by (snapshot_time + hours_until_commence).
+# Excludes rows whose (event_id, snapshot_time) appears more than once in the
+# divergent set — see _OFFENDING_PAIRS_QUERY for why.
 #
 # Intentionally sport-agnostic: the >2h divergence signature is valid across
 # sports, and the correctness of the repoint does not depend on sport_key.
 # The upgrade() function logs a per-sport breakdown so the blast radius is
 # explicit when the migration runs.
 _DIVERGENCE_QUERY = sa.text(
-    """
+    f"""
+    WITH offending_pairs AS (
+        SELECT os.event_id, os.snapshot_time
+        FROM odds_snapshots os
+        JOIN events e ON e.id = os.event_id
+        WHERE {_DIVERGENCE_PREDICATE}
+        GROUP BY os.event_id, os.snapshot_time
+        HAVING COUNT(*) > 1
+    )
     SELECT
         os.id AS snapshot_id,
         os.event_id AS old_event_id,
@@ -75,69 +121,41 @@ _DIVERGENCE_QUERY = sa.text(
         e.sport_title
     FROM odds_snapshots os
     JOIN events e ON e.id = os.event_id
-    WHERE os.hours_until_commence IS NOT NULL
-      AND os.hours_until_commence > 0
-      AND ABS(
-          EXTRACT(
-              EPOCH FROM (
-                  e.commence_time
-                  - (os.snapshot_time + (os.hours_until_commence || ' hours')::interval)
-              )
-          ) / 3600
-      ) > 2
+    WHERE {_DIVERGENCE_PREDICATE}
+      AND NOT EXISTS (
+          SELECT 1 FROM offending_pairs op
+          WHERE op.event_id = os.event_id
+            AND op.snapshot_time = os.snapshot_time
+      )
     ORDER BY os.snapshot_time
     """
 )
 
 
-# Per-sport breakdown of the divergence set, logged before repointing runs so
-# the blast radius is explicit in migration output.
+# Per-sport breakdown of the divergence set (excluding offending pairs),
+# logged before repointing runs so the blast radius is explicit in migration
+# output and matches the set actually processed.
 _DIVERGENCE_BREAKDOWN_QUERY = sa.text(
-    """
+    f"""
+    WITH offending_pairs AS (
+        SELECT os.event_id, os.snapshot_time
+        FROM odds_snapshots os
+        JOIN events e ON e.id = os.event_id
+        WHERE {_DIVERGENCE_PREDICATE}
+        GROUP BY os.event_id, os.snapshot_time
+        HAVING COUNT(*) > 1
+    )
     SELECT e.sport_key, COUNT(*) AS n
     FROM odds_snapshots os
     JOIN events e ON e.id = os.event_id
-    WHERE os.hours_until_commence IS NOT NULL
-      AND os.hours_until_commence > 0
-      AND ABS(
-          EXTRACT(
-              EPOCH FROM (
-                  e.commence_time
-                  - (os.snapshot_time + (os.hours_until_commence || ' hours')::interval)
-              )
-          ) / 3600
-      ) > 2
+    WHERE {_DIVERGENCE_PREDICATE}
+      AND NOT EXISTS (
+          SELECT 1 FROM offending_pairs op
+          WHERE op.event_id = os.event_id
+            AND op.snapshot_time = os.snapshot_time
+      )
     GROUP BY e.sport_key
     ORDER BY n DESC
-    """
-)
-
-
-# Sanity check for the uniqueness assumption embedded in _REPOINT_ODDS: that
-# (event_id, odds_timestamp) uniquely identifies the odds rows belonging to
-# one snapshot, so UPDATE needs no snapshot_id tiebreaker. This holds because
-# each scrape run writes exactly one snapshot per event with a single
-# snapshot_time value shared by all its odds rows. The query below flags any
-# event where two or more snapshots share the same snapshot_time within the
-# divergent set — that would indicate overlapping scrapes and mean the UPDATE
-# could drag unrelated odds rows along with the one we intend to move.
-_ODDS_TIMESTAMP_SANITY_QUERY = sa.text(
-    """
-    SELECT os.event_id, os.snapshot_time, COUNT(*) AS n
-    FROM odds_snapshots os
-    JOIN events e ON e.id = os.event_id
-    WHERE os.hours_until_commence IS NOT NULL
-      AND os.hours_until_commence > 0
-      AND ABS(
-          EXTRACT(
-              EPOCH FROM (
-                  e.commence_time
-                  - (os.snapshot_time + (os.hours_until_commence || ' hours')::interval)
-              )
-          ) / 3600
-      ) > 2
-    GROUP BY os.event_id, os.snapshot_time
-    HAVING COUNT(*) > 1
     """
 )
 
@@ -231,28 +249,30 @@ _REPOINT_MATCH_BRIEFS = sa.text(
 def upgrade() -> None:
     conn = op.get_bind()
 
-    # Log the per-sport breakdown of the divergent set before touching
-    # anything, so the migration output makes the blast radius explicit.
+    # (event_id, snapshot_time) pairs with multiple divergent odds_snapshots
+    # rows cannot be repointed safely — _REPOINT_ODDS keys on
+    # (old_event_id, odds_timestamp) and has no way to attribute odds to the
+    # correct snapshot when two share a timestamp. Log these for later manual
+    # review and continue with the safe remainder.
+    offending = conn.execute(_OFFENDING_PAIRS_QUERY).fetchall()
+    if offending:
+        sample = [(r.event_id, r.snapshot_time.isoformat()) for r in offending[:5]]
+        print(
+            f"Skipping {len(offending)} (event_id, snapshot_time) pairs with "
+            "multiple divergent snapshots — these need manual review. "
+            f"Sample: {sample}."
+        )
+
+    # Log the per-sport breakdown of the divergent set that WILL be processed
+    # (offending pairs excluded), so the migration output makes the blast
+    # radius explicit and matches the rows actually moved.
     breakdown = conn.execute(_DIVERGENCE_BREAKDOWN_QUERY).fetchall()
     if breakdown:
         summary = ", ".join(f"{r.sport_key}={r.n}" for r in breakdown)
         total = sum(r.n for r in breakdown)
         print(f"Repointing {total} snapshots: {summary}")
     else:
-        print("Repointing 0 snapshots: no divergent rows found")
-
-    # Sanity-check the uniqueness assumption behind _REPOINT_ODDS. If this
-    # fires, fail loudly — the UPDATE could drag odds rows from an unrelated
-    # overlapping snapshot, so require human review before applying.
-    dup_snapshots = conn.execute(_ODDS_TIMESTAMP_SANITY_QUERY).fetchall()
-    if dup_snapshots:
-        sample = [(r.event_id, r.snapshot_time.isoformat()) for r in dup_snapshots[:5]]
-        raise RuntimeError(
-            f"{len(dup_snapshots)} (event_id, snapshot_time) pairs in the "
-            "divergent set have multiple odds_snapshots rows — _REPOINT_ODDS may "
-            "move unintended rows. Review manually before applying. "
-            f"Sample offending pairs: {sample}"
-        )
+        print("Repointing 0 snapshots: no safely-repointable divergent rows found")
 
     rows = conn.execute(_DIVERGENCE_QUERY).fetchall()
 
