@@ -111,6 +111,7 @@ class OddsWriter:
                 Event.commence_time <= window_end,
                 Event.home_team == home_team,
                 Event.away_team == away_team,
+                Event.sport_key == sport_key,
             )
         )
         result = await self.session.execute(query)

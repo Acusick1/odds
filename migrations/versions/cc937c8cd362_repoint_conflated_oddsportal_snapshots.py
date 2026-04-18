@@ -67,7 +67,7 @@ _DIVERGENCE_QUERY = sa.text(
         os.event_id AS old_event_id,
         os.snapshot_time,
         os.hours_until_commence,
-        os.snapshot_time + make_interval(hours => os.hours_until_commence)
+        os.snapshot_time + (os.hours_until_commence || ' hours')::interval
             AS true_commence,
         e.home_team,
         e.away_team,
@@ -81,7 +81,7 @@ _DIVERGENCE_QUERY = sa.text(
           EXTRACT(
               EPOCH FROM (
                   e.commence_time
-                  - (os.snapshot_time + make_interval(hours => os.hours_until_commence))
+                  - (os.snapshot_time + (os.hours_until_commence || ' hours')::interval)
               )
           ) / 3600
       ) > 2
@@ -103,7 +103,7 @@ _DIVERGENCE_BREAKDOWN_QUERY = sa.text(
           EXTRACT(
               EPOCH FROM (
                   e.commence_time
-                  - (os.snapshot_time + make_interval(hours => os.hours_until_commence))
+                  - (os.snapshot_time + (os.hours_until_commence || ' hours')::interval)
               )
           ) / 3600
       ) > 2
@@ -132,7 +132,7 @@ _ODDS_TIMESTAMP_SANITY_QUERY = sa.text(
           EXTRACT(
               EPOCH FROM (
                   e.commence_time
-                  - (os.snapshot_time + make_interval(hours => os.hours_until_commence))
+                  - (os.snapshot_time + (os.hours_until_commence || ' hours')::interval)
               )
           ) / 3600
       ) > 2
@@ -157,7 +157,29 @@ _FIND_EVENT_QUERY = sa.text(
 )
 
 
-_EVENT_EXISTS_QUERY = sa.text("SELECT 1 FROM events WHERE id = :id")
+_EVENT_EXISTS_QUERY = sa.text(
+    """
+    SELECT home_team, away_team, sport_key, commence_time
+    FROM events
+    WHERE id = :id
+    """
+)
+
+
+# Pre-flight counts of paper_trades / match_briefs rows that will be
+# repointed, so the migration logs the blast radius before issuing UPDATEs.
+_PAPER_TRADES_COUNT_QUERY = sa.text(
+    "SELECT COUNT(*) FROM paper_trades WHERE event_id = ANY(:old_ids)"
+)
+_PAPER_TRADES_SAMPLE_QUERY = sa.text(
+    "SELECT id, event_id FROM paper_trades WHERE event_id = ANY(:old_ids) LIMIT 5"
+)
+_MATCH_BRIEFS_COUNT_QUERY = sa.text(
+    "SELECT COUNT(*) FROM match_briefs WHERE event_id = ANY(:old_ids)"
+)
+_MATCH_BRIEFS_SAMPLE_QUERY = sa.text(
+    "SELECT id, event_id FROM match_briefs WHERE event_id = ANY(:old_ids) LIMIT 5"
+)
 
 
 _INSERT_EVENT = sa.text(
@@ -220,15 +242,16 @@ def upgrade() -> None:
         print("Repointing 0 snapshots: no divergent rows found")
 
     # Sanity-check the uniqueness assumption behind _REPOINT_ODDS. If this
-    # fires, review manually before applying — the UPDATE could drag odds
-    # rows from an unrelated overlapping snapshot.
+    # fires, fail loudly — the UPDATE could drag odds rows from an unrelated
+    # overlapping snapshot, so require human review before applying.
     dup_snapshots = conn.execute(_ODDS_TIMESTAMP_SANITY_QUERY).fetchall()
     if dup_snapshots:
-        print(
-            f"WARNING: {len(dup_snapshots)} (event_id, snapshot_time) pairs in the "
+        sample = [(r.event_id, r.snapshot_time.isoformat()) for r in dup_snapshots[:5]]
+        raise RuntimeError(
+            f"{len(dup_snapshots)} (event_id, snapshot_time) pairs in the "
             "divergent set have multiple odds_snapshots rows — _REPOINT_ODDS may "
-            "move unintended rows. Sample: "
-            f"{[(r.event_id, r.snapshot_time.isoformat(), r.n) for r in dup_snapshots[:5]]}"
+            "move unintended rows. Review manually before applying. "
+            f"Sample offending pairs: {sample}"
         )
 
     rows = conn.execute(_DIVERGENCE_QUERY).fetchall()
@@ -274,6 +297,29 @@ def upgrade() -> None:
                     },
                 )
                 events_created += 1
+            else:
+                # The minted id already exists but wasn't picked up by
+                # _FIND_EVENT_QUERY's ±2h window. Verify it actually
+                # describes the same match before reusing — a collision on
+                # a different matchup would silently corrupt data.
+                existing_commence = already_there.commence_time
+                delta_seconds = abs((existing_commence - true_commence).total_seconds())
+                if (
+                    already_there.home_team != row.home_team
+                    or already_there.away_team != row.away_team
+                    or already_there.sport_key != row.sport_key
+                    or delta_seconds > 7200
+                ):
+                    raise RuntimeError(
+                        f"Minted event id {new_event_id!r} already exists but "
+                        f"does not match expected values. Expected "
+                        f"(home={row.home_team!r}, away={row.away_team!r}, "
+                        f"sport={row.sport_key!r}, commence={true_commence.isoformat()}); "
+                        f"found (home={already_there.home_team!r}, "
+                        f"away={already_there.away_team!r}, "
+                        f"sport={already_there.sport_key!r}, "
+                        f"commence={existing_commence.isoformat()})."
+                    )
 
         if new_event_id == row.old_event_id:
             # Defensive: should not happen — divergence query guarantees the
@@ -306,13 +352,39 @@ def upgrade() -> None:
     # whole. Skip self-remaps defensively (already filtered above, but cheap).
     paper_trades_repointed = 0
     match_briefs_repointed = 0
+    old_ids = [old_id for old_id, new_id in event_remap.items() if old_id != new_id]
+
+    # Pre-flight: log blast radius per table before issuing UPDATEs so
+    # Alembic output makes the change auditable.
+    pt_total = 0
+    if old_ids:
+        pt_total = conn.execute(_PAPER_TRADES_COUNT_QUERY, {"old_ids": old_ids}).scalar() or 0
+    if pt_total == 0:
+        print("paper_trades: 0 rows to repoint")
+    else:
+        pt_sample = conn.execute(_PAPER_TRADES_SAMPLE_QUERY, {"old_ids": old_ids}).fetchall()
+        sample_pairs = [(r.id, r.event_id) for r in pt_sample]
+        print(f"paper_trades: {pt_total} rows to repoint. Sample: {sample_pairs}")
+
+    mb_total = 0
+    if old_ids:
+        mb_total = conn.execute(_MATCH_BRIEFS_COUNT_QUERY, {"old_ids": old_ids}).scalar() or 0
+    if mb_total == 0:
+        print("match_briefs: 0 rows to repoint")
+    else:
+        mb_sample = conn.execute(_MATCH_BRIEFS_SAMPLE_QUERY, {"old_ids": old_ids}).fetchall()
+        sample_pairs = [(r.id, r.event_id) for r in mb_sample]
+        print(f"match_briefs: {mb_total} rows to repoint. Sample: {sample_pairs}")
+
     for old_id, new_id in event_remap.items():
         if old_id == new_id:
             continue
-        pt_result = conn.execute(_REPOINT_PAPER_TRADES, {"new_id": new_id, "old_id": old_id})
-        paper_trades_repointed += pt_result.rowcount or 0
-        mb_result = conn.execute(_REPOINT_MATCH_BRIEFS, {"new_id": new_id, "old_id": old_id})
-        match_briefs_repointed += mb_result.rowcount or 0
+        if pt_total > 0:
+            pt_result = conn.execute(_REPOINT_PAPER_TRADES, {"new_id": new_id, "old_id": old_id})
+            paper_trades_repointed += pt_result.rowcount or 0
+        if mb_total > 0:
+            mb_result = conn.execute(_REPOINT_MATCH_BRIEFS, {"new_id": new_id, "old_id": old_id})
+            match_briefs_repointed += mb_result.rowcount or 0
 
     print(
         f"Repointed {repointed} conflated snapshots "
