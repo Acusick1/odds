@@ -16,6 +16,7 @@ from odds_lambda.oddsportal_common import (
     DRAW_OUTCOME,
     decimal_to_american,
     normalize_bookmaker_key,
+    parse_over_under_line,
 )
 
 
@@ -255,6 +256,45 @@ class TestConvertOverUnderMatch:
     def test_empty_returns_none(self) -> None:
         assert _convert_over_under_match([], "A", "B") is None
 
+    def test_custom_line_mlb(self, sample_ou_bookmakers: list[dict]) -> None:
+        result = _convert_over_under_match(sample_ou_bookmakers, "Yankees", "Red Sox", line=8.5)
+        assert result is not None
+        outcomes = result["bookmakers"][0]["markets"][0]["outcomes"]
+        assert outcomes[0]["point"] == 8.5
+        assert outcomes[1]["point"] == 8.5
+
+    def test_custom_line_whole_number(self, sample_ou_bookmakers: list[dict]) -> None:
+        result = _convert_over_under_match(sample_ou_bookmakers, "Yankees", "Red Sox", line=9.0)
+        assert result is not None
+        outcomes = result["bookmakers"][0]["markets"][0]["outcomes"]
+        assert outcomes[0]["point"] == 9.0
+
+
+class TestParseOverUnderLine:
+    def test_football_half_line(self) -> None:
+        assert parse_over_under_line("over_under_2_5") == 2.5
+
+    def test_mlb_half_line(self) -> None:
+        assert parse_over_under_line("over_under_8_5") == 8.5
+
+    def test_whole_number_short(self) -> None:
+        assert parse_over_under_line("over_under_3") == 3.0
+
+    def test_whole_number_with_zero(self) -> None:
+        assert parse_over_under_line("over_under_8_0") == 8.0
+
+    def test_quarter_line(self) -> None:
+        assert parse_over_under_line("over_under_1_25") == 1.25
+
+    def test_non_over_under_market(self) -> None:
+        assert parse_over_under_line("1x2") is None
+
+    def test_home_away(self) -> None:
+        assert parse_over_under_line("home_away") is None
+
+    def test_malformed(self) -> None:
+        assert parse_over_under_line("over_under_abc") is None
+
 
 class TestConvertUpcomingMatches:
     @pytest.fixture()
@@ -302,9 +342,66 @@ class TestConvertUpcomingMatches:
         with pytest.raises(ValueError, match="Unsupported market"):
             convert_upcoming_matches(sample_match, "asian_handicap")
 
+    def test_malformed_over_under_falls_through_to_raise(self, sample_match: list[dict]) -> None:
+        """Market starting with 'over_under_' but not numeric falls through to the map."""
+        with pytest.raises(ValueError, match="Unsupported market"):
+            convert_upcoming_matches(sample_match, "over_under_bad")
+
     def test_skips_incomplete_match(self) -> None:
         matches = [{"home_team": "Leeds", "away_team": "", "match_date": ""}]
         assert convert_upcoming_matches(matches, "1x2") == []
+
+    def test_over_under_variable_line(self) -> None:
+        """MLB-style over/under scraped at a non-2.5 line propagates the line."""
+        matches = [
+            {
+                "scraped_date": "2026-06-15 20:00:00 UTC",
+                "match_date": "2026-06-16 23:10:00 UTC",
+                "match_link": "https://www.oddsportal.com/baseball/usa/mlb/yankees-red-sox-abc123/",
+                "home_team": "New York Yankees",
+                "away_team": "Boston Red Sox",
+                "league_name": "MLB",
+                "over_under_8_5_market": [
+                    {
+                        "odds_over": "11/10",
+                        "odds_under": "73/100",
+                        "bookmaker_name": "bet365",
+                        "period": "FullTime",
+                    },
+                ],
+            }
+        ]
+        results = convert_upcoming_matches(matches, "over_under_8_5")
+        assert len(results) == 1
+        outcomes = results[0].raw_data["bookmakers"][0]["markets"][0]["outcomes"]
+        assert outcomes[0]["point"] == 8.5
+        assert outcomes[1]["point"] == 8.5
+        assert results[0].raw_data["bookmakers"][0]["markets"][0]["key"] == "totals"
+
+    def test_over_under_2_5_still_supported(self) -> None:
+        """Existing EPL totals keep working via the dynamic dispatch path."""
+        matches = [
+            {
+                "scraped_date": "2026-03-02 18:50:32 UTC",
+                "match_date": "2026-03-03 19:30:00 UTC",
+                "match_link": "https://www.oddsportal.com/football/england/premier-league/leeds-sunderland-KYph380S/",
+                "home_team": "Leeds",
+                "away_team": "Sunderland",
+                "league_name": "Premier League",
+                "over_under_2_5_market": [
+                    {
+                        "odds_over": "11/10",
+                        "odds_under": "73/100",
+                        "bookmaker_name": "bet365",
+                        "period": "FullTime",
+                    },
+                ],
+            }
+        ]
+        results = convert_upcoming_matches(matches, "over_under_2_5")
+        assert len(results) == 1
+        outcomes = results[0].raw_data["bookmakers"][0]["markets"][0]["outcomes"]
+        assert outcomes[0]["point"] == 2.5
 
     def test_home_away_market_converts(self) -> None:
         matches = [

@@ -23,6 +23,25 @@ logger = structlog.get_logger()
 
 DRAW_OUTCOME = "Draw"
 
+_OVER_UNDER_RE = re.compile(r"^over_under_(\d+)(?:_(\d+))?$")
+
+
+def parse_over_under_line(market: str) -> float | None:
+    """Parse an over/under market key into its numeric line.
+
+    Examples: ``over_under_2_5`` → 2.5, ``over_under_8`` → 8.0,
+    ``over_under_1_25`` → 1.25. Returns ``None`` for non-matching inputs.
+    """
+    match = _OVER_UNDER_RE.match(market)
+    if match is None:
+        return None
+    whole = int(match.group(1))
+    frac_str = match.group(2)
+    if frac_str is None:
+        return float(whole)
+    return whole + int(frac_str) / (10 ** len(frac_str))
+
+
 MAX_SCRAPER_RETRIES = 1
 SCRAPER_RETRY_DELAY_SECONDS = 20
 MAX_FAILED_URL_RETRY_PASSES = 1

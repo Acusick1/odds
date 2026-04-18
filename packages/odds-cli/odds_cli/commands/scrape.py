@@ -26,9 +26,18 @@ def scrape_upcoming(
     from_file: str | None = typer.Option(
         None, "--from-file", help="Load matches from JSON file instead of scraping"
     ),
+    auto_totals: bool = typer.Option(
+        False,
+        "--auto-totals",
+        help=(
+            "MLB only: look up each game's featured Over/Under line on ESPN, "
+            "then run a targeted per-line scrape so each match only opens its "
+            "own O/U submarket."
+        ),
+    ),
 ) -> None:
     """Scrape upcoming match odds from OddsPortal and ingest into the pipeline."""
-    asyncio.run(_scrape_upcoming(league, market, dry_run, from_file))
+    asyncio.run(_scrape_upcoming(league, market, dry_run, from_file, auto_totals))
 
 
 async def _scrape_upcoming(
@@ -36,12 +45,14 @@ async def _scrape_upcoming(
     markets: list[str] | None,
     dry_run: bool,
     from_file: str | None,
+    auto_totals: bool,
 ) -> None:
     import dataclasses
 
     from odds_lambda.jobs.fetch_oddsportal import (
         LEAGUE_SPEC_BY_NAME,
         ingest_league,
+        ingest_mlb_with_espn_totals,
     )
     from odds_lambda.oddsportal_adapter import convert_upcoming_matches
 
@@ -54,6 +65,22 @@ async def _scrape_upcoming(
     spec = LEAGUE_SPEC_BY_NAME[league]
     if markets:
         spec = dataclasses.replace(spec, markets=markets)
+
+    if auto_totals:
+        if spec.sport_key != "baseball_mlb":
+            console.print(
+                f"[yellow]--auto-totals is MLB-only; ignored for sport '{spec.sport_key}'[/yellow]"
+            )
+        elif from_file:
+            console.print(
+                "[yellow]--auto-totals is incompatible with --from-file; "
+                "ignoring --auto-totals[/yellow]"
+            )
+        else:
+            console.print("Running MLB targeted scrape via ESPN main totals...")
+            stats = await ingest_mlb_with_espn_totals(dry_run=dry_run)
+            _print_stats(stats, dry_run=dry_run)
+            return
 
     raw_matches: list[dict[str, Any]] | None = None
     if from_file:
@@ -93,13 +120,17 @@ async def _scrape_upcoming(
 
     console.print(f"Scraping and ingesting [bold]{spec.league}[/bold] ({spec.sport})...")
     stats = await ingest_league(spec, raw_matches=raw_matches, dry_run=False)
+    _print_stats(stats, dry_run=False)
 
+
+def _print_stats(stats: Any, *, dry_run: bool) -> None:
     console.print("\n[bold green]Done[/bold green]")
-    console.print(f"  Matches scraped:  {stats.matches_scraped}")
-    console.print(f"  Events matched:   {stats.events_matched}")
-    console.print(f"  Events created:   {stats.events_created}")
-    console.print(f"  Snapshots stored: {stats.snapshots_stored}")
-
+    console.print(f"  Matches scraped:    {stats.matches_scraped}")
+    console.print(f"  Matches converted:  {stats.matches_converted}")
+    if not dry_run:
+        console.print(f"  Events matched:     {stats.events_matched}")
+        console.print(f"  Events created:     {stats.events_created}")
+        console.print(f"  Snapshots stored:   {stats.snapshots_stored}")
     if stats.errors:
         console.print(f"  [yellow]Errors: {len(stats.errors)}[/yellow]")
         for err in stats.errors[:5]:

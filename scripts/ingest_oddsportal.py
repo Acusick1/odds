@@ -29,7 +29,6 @@ import argparse
 import asyncio
 import json
 import logging
-import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -45,6 +44,7 @@ from odds_lambda.oddsportal_common import (
     find_existing_event,
     hours_to_tier,
     parse_match_date,
+    parse_over_under_line,
 )
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -96,30 +96,18 @@ MARKET_CONFIGS: dict[str, dict[str, Any]] = {
 }
 
 
-def _parse_over_under_market(market: str) -> dict[str, Any] | None:
-    """Parse over_under_X_Y market names into config."""
-    match = re.match(r"over_under_(\d+)(?:_(\d+))?$", market)
-    if not match:
-        return None
-    whole = int(match.group(1))
-    frac = int(match.group(2)) if match.group(2) else 0
-    # Convert: over_under_2_5 → 2.5, over_under_3 → 3.0, over_under_1_25 → 1.25
-    line = whole + frac / (10 ** len(match.group(2))) if match.group(2) else float(whole)
-    return {
-        "num_outcomes": 2,
-        "db_market": "totals",
-        "outcome_names": ("Over", "Under"),
-        "line": line,
-    }
-
-
 def get_market_config(market: str) -> dict[str, Any]:
     """Get ingestion config for a market, supporting static and parsed configs."""
     if market in MARKET_CONFIGS:
         return MARKET_CONFIGS[market]
-    parsed = _parse_over_under_market(market)
-    if parsed:
-        return parsed
+    line = parse_over_under_line(market)
+    if line is not None:
+        return {
+            "num_outcomes": 2,
+            "db_market": "totals",
+            "outcome_names": ("Over", "Under"),
+            "line": line,
+        }
     msg = f"Unknown market: {market}. Add it to MARKET_CONFIGS or use an over_under_* pattern."
     raise ValueError(msg)
 
