@@ -8,6 +8,62 @@ from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 
 
+class TestCoerceBookmakerList:
+    def test_none_passthrough(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list(None) is None
+
+    def test_list_passthrough(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list(["bet365", "betway"]) == ["bet365", "betway"]
+
+    def test_empty_string_becomes_none(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list("") is None
+        assert _coerce_bookmaker_list("   ") is None
+
+    def test_json_array_string(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list('["bet365", "betway"]') == ["bet365", "betway"]
+
+    def test_json_array_with_whitespace(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list('  ["pinnacle", "betfair_exchange"]  ') == [
+            "pinnacle",
+            "betfair_exchange",
+        ]
+
+    def test_comma_separated_string(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list("bet365,betway,betfred") == ["bet365", "betway", "betfred"]
+
+    def test_comma_separated_with_whitespace(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list("bet365, betway , betfred") == [
+            "bet365",
+            "betway",
+            "betfred",
+        ]
+
+    def test_single_value_string(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        assert _coerce_bookmaker_list("pinnacle") == ["pinnacle"]
+
+    def test_malformed_json_raises(self) -> None:
+        from odds_mcp.server import _coerce_bookmaker_list
+
+        with pytest.raises(ValueError, match="Malformed JSON array"):
+            _coerce_bookmaker_list("[bet365, betway")
+
+
 class TestEventToDict:
     def _make_event(self, **overrides: object) -> Event:
         defaults = {
@@ -560,3 +616,165 @@ class TestPaperBetValidation:
             )
             assert "error" in result
             assert "nonexistent" in result["error"]
+
+
+class TestGetSharpSoftSpreadMarketHold:
+    """Regression tests for per-book ``market_hold`` in ``get_sharp_soft_spread``."""
+
+    def _make_event(self) -> MagicMock:
+        event = MagicMock(spec=Event)
+        event.id = "evt-1"
+        event.sport_key = "soccer_epl"
+        event.sport_title = "EPL"
+        event.home_team = "Arsenal"
+        event.away_team = "Chelsea"
+        event.commence_time = datetime(2026, 4, 12, 15, 0, tzinfo=UTC)
+        event.status = EventStatus.SCHEDULED
+        event.home_score = None
+        event.away_score = None
+        event.completed_at = None
+        return event
+
+    def _make_odds(self, bookmaker: str, outcome: str, price: int) -> MagicMock:
+        o = MagicMock()
+        o.bookmaker_key = bookmaker
+        o.bookmaker_title = bookmaker
+        o.market_key = "h2h"
+        o.outcome_name = outcome
+        o.price = price
+        o.point = None
+        return o
+
+    def _make_snapshot(self) -> MagicMock:
+        snap = MagicMock()
+        snap.id = 1
+        snap.snapshot_time = datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
+        return snap
+
+    def _make_sharp_result(self) -> MagicMock:
+        from odds_core.match_brief_models import SharpPriceMeta
+
+        result = MagicMock()
+        result.prices = {
+            "Arsenal": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
+            "Chelsea": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
+        }
+        result.meta = {
+            "Arsenal": SharpPriceMeta(
+                snapshot_id=1,
+                snapshot_time=datetime(2026, 4, 12, 10, 0, tzinfo=UTC),
+                age_seconds=0.0,
+            ),
+            "Chelsea": SharpPriceMeta(
+                snapshot_id=1,
+                snapshot_time=datetime(2026, 4, 12, 10, 0, tzinfo=UTC),
+                age_seconds=0.0,
+            ),
+        }
+        return result
+
+    def _mock_reader(self) -> AsyncMock:
+        reader = AsyncMock()
+        reader.get_event_by_id = AsyncMock(return_value=self._make_event())
+        reader.get_latest_snapshot = AsyncMock(return_value=self._make_snapshot())
+        reader.get_sharp_prices = AsyncMock(return_value=self._make_sharp_result())
+        return reader
+
+    @pytest.mark.asyncio
+    async def test_h2h_populates_market_hold(self) -> None:
+        from odds_mcp.server import get_sharp_soft_spread
+
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -110),
+            self._make_odds("pinnacle", "Chelsea", -110),
+            self._make_odds("bet365", "Arsenal", -105),
+            self._make_odds("bet365", "Chelsea", -115),
+        ]
+        reader = self._mock_reader()
+
+        with (
+            patch("odds_mcp.server.async_session_maker") as mock_session_maker,
+            patch("odds_mcp.server.OddsReader", return_value=reader),
+            patch("odds_mcp.server.extract_odds_from_snapshot", return_value=odds),
+        ):
+            mock_session_maker.return_value.__aenter__ = AsyncMock()
+            mock_session_maker.return_value.__aexit__ = AsyncMock()
+
+            result = await get_sharp_soft_spread(event_id="evt-1", market="h2h")
+
+        bet365_entries = [
+            soft
+            for outcome in result["spread"].values()
+            for soft in outcome["soft"]
+            if soft["bookmaker"] == "bet365"
+        ]
+        assert len(bet365_entries) == 2
+        for entry in bet365_entries:
+            assert entry["market_hold"] is not None
+            assert isinstance(entry["market_hold"], float)
+
+    @pytest.mark.asyncio
+    async def test_partial_outcome_book_gets_no_market_hold(self) -> None:
+        from odds_mcp.server import get_sharp_soft_spread
+
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -110),
+            self._make_odds("pinnacle", "Chelsea", -110),
+            self._make_odds("bet365", "Arsenal", -105),
+            self._make_odds("bet365", "Chelsea", -115),
+            # partial book missing "Chelsea" — must not report a misleading hold
+            self._make_odds("partial_book", "Arsenal", -110),
+        ]
+        reader = self._mock_reader()
+
+        with (
+            patch("odds_mcp.server.async_session_maker") as mock_session_maker,
+            patch("odds_mcp.server.OddsReader", return_value=reader),
+            patch("odds_mcp.server.extract_odds_from_snapshot", return_value=odds),
+        ):
+            mock_session_maker.return_value.__aenter__ = AsyncMock()
+            mock_session_maker.return_value.__aexit__ = AsyncMock()
+
+            result = await get_sharp_soft_spread(event_id="evt-1", market="h2h")
+
+        for outcome in result["spread"].values():
+            for soft in outcome["soft"]:
+                if soft["bookmaker"] == "partial_book":
+                    assert soft["market_hold"] is None
+
+    @pytest.mark.asyncio
+    async def test_totals_market_hold_none(self) -> None:
+        from odds_mcp.server import get_sharp_soft_spread
+
+        odds = [
+            self._make_odds("pinnacle", "Over", -110),
+            self._make_odds("pinnacle", "Under", -110),
+            self._make_odds("bet365", "Over", -105),
+            self._make_odds("bet365", "Under", -115),
+        ]
+        for o in odds:
+            o.market_key = "totals"
+            o.point = 2.5
+
+        reader = self._mock_reader()
+        sharp_result = MagicMock()
+        sharp_result.prices = {
+            "Over": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
+            "Under": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
+        }
+        sharp_result.meta = {}
+        reader.get_sharp_prices = AsyncMock(return_value=sharp_result)
+
+        with (
+            patch("odds_mcp.server.async_session_maker") as mock_session_maker,
+            patch("odds_mcp.server.OddsReader", return_value=reader),
+            patch("odds_mcp.server.extract_odds_from_snapshot", return_value=odds),
+        ):
+            mock_session_maker.return_value.__aenter__ = AsyncMock()
+            mock_session_maker.return_value.__aexit__ = AsyncMock()
+
+            result = await get_sharp_soft_spread(event_id="evt-1", market="totals")
+
+        for outcome in result["spread"].values():
+            for soft in outcome["soft"]:
+                assert soft["market_hold"] is None

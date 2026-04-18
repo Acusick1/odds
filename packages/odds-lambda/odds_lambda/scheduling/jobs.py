@@ -7,6 +7,7 @@ from dataclasses import dataclass, fields
 from importlib import import_module
 
 import structlog
+from odds_core.sports import SportKey
 
 logger = structlog.get_logger()
 
@@ -21,7 +22,7 @@ class JobContext:
     fields have defaults.
     """
 
-    sport: str | None = None
+    sport: SportKey | None = None
 
     # backfill-polymarket manual invocation params
     include_spreads: bool = False

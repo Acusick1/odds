@@ -16,6 +16,7 @@ import structlog
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.prediction_models import Prediction
+from odds_core.sports import SportKey
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +24,7 @@ from odds_lambda.scheduling.jobs import JobContext
 
 logger = structlog.get_logger()
 
-DEFAULT_SPORT_KEY = "soccer_epl"
+DEFAULT_SPORT_KEY: SportKey = "soccer_epl"
 EMBED_COLOR = 3066993  # Green
 MAX_FIELD_CHARS = 1024
 
@@ -32,7 +33,7 @@ async def _get_completed_events_with_predictions(
     session: AsyncSession,
     since: datetime,
     model_name: str,
-    sport_key: str = DEFAULT_SPORT_KEY,
+    sport_key: SportKey = DEFAULT_SPORT_KEY,
 ) -> list[dict[str, Any]]:
     """Get events completed since `since` that have predictions.
 
@@ -101,7 +102,7 @@ async def _get_upcoming_events_with_predictions(
     session: AsyncSession,
     until: datetime,
     model_name: str,
-    sport_key: str = DEFAULT_SPORT_KEY,
+    sport_key: SportKey = DEFAULT_SPORT_KEY,
 ) -> list[dict[str, Any]]:
     """Get SCHEDULED events before `until` that have at least one prediction.
 
@@ -252,7 +253,7 @@ def build_digest_embed(
     upcoming: list[dict[str, Any]],
     lookback_hours: float = 24,
     lookahead_hours: float = 48,
-    sport_key: str = DEFAULT_SPORT_KEY,
+    sport_key: SportKey = DEFAULT_SPORT_KEY,
 ) -> dict[str, Any]:
     """Build a Discord embed dict for the daily digest."""
     now = datetime.now(UTC)
@@ -290,7 +291,7 @@ async def send_digest(
     model_name: str | None = None,
     lookback_hours: float = 24,
     lookahead_hours: float = 48,
-    sport_key: str = DEFAULT_SPORT_KEY,
+    sport_key: SportKey = DEFAULT_SPORT_KEY,
 ) -> dict[str, int]:
     """Query predictions and results, send Discord digest.
 

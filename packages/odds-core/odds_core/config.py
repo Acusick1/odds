@@ -8,6 +8,8 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from odds_core.sports import SportKey
+
 
 class APIConfig(BaseSettings):
     """The Odds API configuration."""
@@ -42,7 +44,9 @@ class DataCollectionConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    sports: list[str] = Field(default=["soccer_epl", "baseball_mlb"], description="Sports to track")
+    sports: list[SportKey] = Field(
+        default=["soccer_epl", "baseball_mlb"], description="Sports to track"
+    )
     bookmakers: list[str] = Field(
         default=[
             "pinnacle",
