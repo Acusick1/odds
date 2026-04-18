@@ -228,7 +228,20 @@ class TestRepointMigrationUpgrade:
         migration_module: ModuleType,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """upgrade() must log skipped pairs, repoint the safe snapshot, and not raise."""
+        """upgrade() must log skipped pairs, repoint the safe snapshot, and not raise.
+
+        Layout:
+        - event_safe_e2e: one safe divergent snapshot + Odds + PaperTrade; all
+          three should move to event_target.
+        - event_dup_e2e: two snapshots at the same snapshot_time (offending
+          pair) + Odds row on that pair + PaperTrade. The Odds and PaperTrade
+          must NOT move. Additionally hosts a sibling safe snapshot at a
+          different snapshot_time that DOES repoint to event_dup_target, but
+          the PaperTrade on event_dup_e2e must still NOT move (MUST-FIX:
+          event-level attribution ambiguous while offending pair unhealed).
+        """
+        from odds_core.match_brief_models import BriefDecision
+
         base = datetime(2026, 3, 15, 20, 0, tzinfo=UTC)
         true_commence = base + timedelta(hours=24)
 
@@ -260,6 +273,16 @@ class TestRepointMigrationUpgrade:
             odds_timestamp=snap_safe_time,
             last_update=snap_safe_time,
         )
+        # PaperTrade on the safe event: should follow the snapshot repoint.
+        trade_safe = PaperTrade(
+            event_id="event_safe_e2e",
+            market="h2h",
+            selection="home",
+            bookmaker="bet365",
+            odds=-110,
+            stake=10.0,
+            bankroll_before=1000.0,
+        )
 
         # Target event at the true commence: the safe snapshot should be repointed here.
         event_target = Event(
@@ -272,7 +295,8 @@ class TestRepointMigrationUpgrade:
             status=EventStatus.SCHEDULED,
         )
 
-        # Duplicate-pair event: must be skipped.
+        # Duplicate-pair event: must be skipped at the snapshot level AND
+        # held back from the paper_trades repoint.
         event_dup = Event(
             id="event_dup_e2e",
             sport_key="basketball_nba",
@@ -297,16 +321,76 @@ class TestRepointMigrationUpgrade:
             bookmaker_count=1,
             hours_until_commence=52.0,
         )
+        # Odds row tied to the offending (event, snapshot_time) pair: must NOT move.
+        odds_dup_offending = Odds(
+            event_id="event_dup_e2e",
+            bookmaker_key="bet365",
+            bookmaker_title="Bet365",
+            market_key="h2h",
+            outcome_name="Dup Home",
+            price=-120,
+            odds_timestamp=snap_dup_time,
+            last_update=snap_dup_time,
+        )
+        # PaperTrade on the offending event: must NOT move even though the
+        # sibling safe snapshot below causes a snapshot-level repoint.
+        trade_dup = PaperTrade(
+            event_id="event_dup_e2e",
+            market="h2h",
+            selection="home",
+            bookmaker="bet365",
+            odds=-120,
+            stake=15.0,
+            bankroll_before=1000.0,
+        )
+        # MatchBrief on the offending event: must also NOT move.
+        brief_dup = MatchBrief(
+            event_id="event_dup_e2e",
+            decision=BriefDecision.WATCHING,
+            summary="Dup event — awaiting manual review",
+            brief_text="Do not move me.",
+        )
 
+        # Sibling safe snapshot on the offending event: different snapshot_time,
+        # unique pair, so it is in the safe divergent set. Its repoint should
+        # succeed at the snapshot level but MUST NOT trigger a paper_trades
+        # move on event_dup_e2e (MUST-FIX).
+        snap_dup_sibling_time = base - timedelta(hours=10)
+        snap_dup_sibling = OddsSnapshot(
+            event_id="event_dup_e2e",
+            snapshot_time=snap_dup_sibling_time,
+            raw_data={},
+            bookmaker_count=1,
+            hours_until_commence=34.0,  # implies commence = base + 24h
+        )
+        # Target event for the sibling snapshot's implied true_commence.
+        event_dup_target = Event(
+            id="event_dup_target",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=true_commence,
+            home_team="Dup Home",
+            away_team="Dup Away",
+            status=EventStatus.SCHEDULED,
+        )
+
+        # Flush events first so FK checks on the child rows pass — SQLAlchemy's
+        # unit-of-work ordering can still produce a child INSERT before the
+        # parent if the objects are added in a single batch with cross-mapper
+        # cycles, so force the order explicitly.
+        pglite_async_session.add_all([event_safe, event_target, event_dup, event_dup_target])
+        await pglite_async_session.flush()
         pglite_async_session.add_all(
             [
-                event_safe,
-                event_target,
-                event_dup,
                 snap_safe,
                 snap_dup_1,
                 snap_dup_2,
+                snap_dup_sibling,
                 odds_safe,
+                odds_dup_offending,
+                trade_safe,
+                trade_dup,
+                brief_dup,
             ]
         )
         await pglite_async_session.commit()
@@ -316,11 +400,21 @@ class TestRepointMigrationUpgrade:
         safe_snap_id = snap_safe.id
         dup_snap_1_id = snap_dup_1.id
         dup_snap_2_id = snap_dup_2.id
+        dup_sibling_snap_id = snap_dup_sibling.id
         safe_odds_id = odds_safe.id
+        dup_odds_id = odds_dup_offending.id
+        safe_trade_id = trade_safe.id
+        dup_trade_id = trade_dup.id
+        dup_brief_id = brief_dup.id
         assert safe_snap_id is not None
         assert dup_snap_1_id is not None
         assert dup_snap_2_id is not None
+        assert dup_sibling_snap_id is not None
         assert safe_odds_id is not None
+        assert dup_odds_id is not None
+        assert safe_trade_id is not None
+        assert dup_trade_id is not None
+        assert dup_brief_id is not None
 
         # Drive upgrade() against a sync connection bridged from the async
         # pglite engine via run_sync — op.get_bind() is the only alembic
@@ -337,13 +431,17 @@ class TestRepointMigrationUpgrade:
 
         captured = capsys.readouterr().out
         assert "Skipping 1 (event_id, snapshot_time) pairs" in captured, captured
-        assert "Repointing 1 snapshots" in captured, captured
+        # Two safe rows now: event_safe_e2e's snapshot + event_dup_e2e's sibling.
+        assert "Repointing 2 snapshots" in captured, captured
+        # MUST-FIX log: event_dup_e2e was held back from paper_trades repoint.
+        assert "Skipping paper_trades/match_briefs repoint for 1 events" in captured, captured
 
         # Verify final state via raw SQL against a fresh connection — the
         # original session's ORM cache is stale after the sync UPDATE.
         from sqlalchemy import text as sql_text
 
         async with engine.connect() as verify_conn:
+            # Safe snapshot + odds + trade all follow to event_target.
             result = await verify_conn.execute(
                 sql_text("SELECT event_id FROM odds_snapshots WHERE id = :id"),
                 {"id": safe_snap_id},
@@ -357,7 +455,44 @@ class TestRepointMigrationUpgrade:
             assert result.scalar() == "event_target"
 
             result = await verify_conn.execute(
+                sql_text("SELECT event_id FROM paper_trades WHERE id = :id"),
+                {"id": safe_trade_id},
+            )
+            assert result.scalar() == "event_target"
+
+            # Offending snapshots stay on event_dup_e2e.
+            result = await verify_conn.execute(
                 sql_text("SELECT event_id FROM odds_snapshots WHERE id IN (:id1, :id2)"),
                 {"id1": dup_snap_1_id, "id2": dup_snap_2_id},
             )
             assert {row[0] for row in result.fetchall()} == {"event_dup_e2e"}
+
+            # Odds row tied to the offending pair stays on event_dup_e2e
+            # (unchanged — _REPOINT_ODDS never fires for this pair).
+            result = await verify_conn.execute(
+                sql_text("SELECT event_id FROM odds WHERE id = :id"),
+                {"id": dup_odds_id},
+            )
+            assert result.scalar() == "event_dup_e2e"
+
+            # Sibling safe snapshot on event_dup_e2e gets repointed.
+            result = await verify_conn.execute(
+                sql_text("SELECT event_id FROM odds_snapshots WHERE id = :id"),
+                {"id": dup_sibling_snap_id},
+            )
+            assert result.scalar() == "event_dup_target"
+
+            # MUST-FIX: PaperTrade on event_dup_e2e must NOT be moved, even
+            # though the sibling snapshot repointed off event_dup_e2e.
+            result = await verify_conn.execute(
+                sql_text("SELECT event_id FROM paper_trades WHERE id = :id"),
+                {"id": dup_trade_id},
+            )
+            assert result.scalar() == "event_dup_e2e"
+
+            # Same rule for MatchBrief.
+            result = await verify_conn.execute(
+                sql_text("SELECT event_id FROM match_briefs WHERE id = :id"),
+                {"id": dup_brief_id},
+            )
+            assert result.scalar() == "event_dup_e2e"

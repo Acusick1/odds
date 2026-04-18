@@ -255,6 +255,11 @@ def upgrade() -> None:
     # correct snapshot when two share a timestamp. Log these for later manual
     # review and continue with the safe remainder.
     offending = conn.execute(_OFFENDING_PAIRS_QUERY).fetchall()
+    # Set of old event ids that contain at least one offending pair. Their
+    # safe sibling snapshots still get repointed at the snapshot level, but
+    # paper_trades / match_briefs on those events must NOT be moved: the
+    # event's game-level attribution is ambiguous while unhealed pairs remain.
+    offending_event_ids: set[str] = {r.event_id for r in offending}
     if offending:
         sample = [(r.event_id, r.snapshot_time.isoformat()) for r in offending[:5]]
         print(
@@ -271,6 +276,14 @@ def upgrade() -> None:
         summary = ", ".join(f"{r.sport_key}={r.n}" for r in breakdown)
         total = sum(r.n for r in breakdown)
         print(f"Repointing {total} snapshots: {summary}")
+    elif offending:
+        # The filtered set is empty ONLY because every divergent row was in
+        # an offending pair. Make that explicit rather than implying the DB
+        # is clean.
+        print(
+            f"Repointing 0 snapshots: all {len(offending)} divergent pairs "
+            "were skipped as offending — manual review needed"
+        )
     else:
         print("Repointing 0 snapshots: no safely-repointable divergent rows found")
 
@@ -364,8 +377,24 @@ def upgrade() -> None:
             _REPOINT_PREDICTIONS,
             {"new_id": new_event_id, "snapshot_id": row.snapshot_id},
         )
-        event_remap[row.old_event_id] = new_event_id
+        # Only queue paper_trades/match_briefs repoint if the old event has
+        # NO offending pairs. When an event hosts both safe and unsafe
+        # divergent snapshots, the safe snapshot still moves but aggregate
+        # (event-FK) data stays put — we cannot tell which trades/briefs
+        # belong to the unhealed pair's game vs the safe one's.
+        if row.old_event_id not in offending_event_ids:
+            event_remap[row.old_event_id] = new_event_id
         repointed += 1
+
+    # Log how many events were held back from the paper_trades/match_briefs
+    # repoint because they still host offending pairs.
+    skipped_events = offending_event_ids & {r.old_event_id for r in rows}
+    if skipped_events:
+        sample = list(skipped_events)[:5]
+        print(
+            f"Skipping paper_trades/match_briefs repoint for {len(skipped_events)} "
+            f"events that also contain offending (event, snapshot_time) pairs: {sample}"
+        )
 
     # Re-point paper_trades and match_briefs once per (old, new) pair. These
     # tables are not keyed by snapshot, so the move follows the event as a
