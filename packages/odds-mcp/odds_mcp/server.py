@@ -1110,7 +1110,7 @@ async def find_retail_edges(
             math.inf if e["z_score"] is None else e["z_score"],
             e["book"],
             e["outcome"],
-            (e["point"] is None, e["point"] if e["point"] is not None else 0.0),
+            math.inf if e["point"] is None else e["point"],
         )
     )
 

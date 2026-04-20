@@ -886,9 +886,10 @@ class TestFindRetailEdges:
         # z_score on the rank-1 edge should be computed and negative
         assert edges[0]["z_score"] is not None
         assert edges[0]["z_score"] < 0
-        # midnite market_hold should be populated (1x2) and larger than the median of the pack
+        # midnite market_hold should be populated (1x2) and visibly larger than
+        # the retail pack's typical 4-6% hold — fixture prices put it around 18%.
         assert edges[0]["market_hold"] is not None
-        assert edges[0]["market_hold"] > 0.05
+        assert edges[0]["market_hold"] > 0.12
 
 
 def _make_snapshot_raw_data(bookmakers: list[dict[str, object]], snapshot_time: datetime) -> dict:
