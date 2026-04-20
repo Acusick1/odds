@@ -12,8 +12,6 @@ from typing import Any, Literal
 
 import structlog
 from fastmcp import FastMCP
-from odds_analytics.backtesting import BacktestEvent
-from odds_analytics.feature_extraction import TabularFeatureExtractor
 from odds_analytics.utils import per_book_market_holds
 from odds_core.agent_wakeup_models import AgentWakeup
 from odds_core.database import async_session_maker
@@ -54,11 +52,6 @@ _LEAGUE_SPEC_BY_NAME = LEAGUE_SPEC_BY_NAME
 # Hybrid sharp reference matching production defaults.
 # Duplicated from feature_extraction.py DEFAULT_SHARP_BOOKMAKERS with EPL-specific overrides — keep in sync.
 _DEFAULT_SHARP_BOOKMAKERS = ["pinnacle", "betfair_exchange"]
-# Used only by get_event_features for TabularFeatureExtractor. Distinct from
-# feature_extraction.DEFAULT_RETAIL_BOOKMAKERS (US books for the NBA model) — these are
-# UK books chosen to match the not-yet-deployed EPL model. When an EPL model ships, this
-# default must match whatever retail set it was trained on or features will silently drift.
-_DEFAULT_RETAIL_BOOKMAKERS = ["bet365", "betway", "betfred", "betvictor", "bwin"]
 
 
 def _coerce_bookmaker_list(value: str | list[str] | None) -> list[str] | None:
@@ -159,15 +152,6 @@ def _trade_to_dict(trade: PaperTrade) -> dict[str, Any]:
         "result": trade.result.value if trade.result else None,
         "pnl": trade.pnl,
     }
-
-
-def _safe_float(val: Any) -> float | None:
-    """Convert numpy/float values, returning None for NaN."""
-    try:
-        f = float(val)
-        return None if math.isnan(f) else round(f, 6)
-    except (TypeError, ValueError):
-        return None
 
 
 @mcp.tool()
@@ -469,118 +453,6 @@ async def get_predictions(
             for p in predictions
         ],
     }
-
-
-@mcp.tool()
-async def get_event_features(
-    event_id: str,
-    market: MarketKey,
-    outcome: Literal["home", "away"] = "home",
-    sharp_bookmakers: str | list[str] | None = None,
-) -> dict[str, Any]:
-    """Get tabular features for an event's latest snapshot.
-
-    Extracts tabular features only (bookmaker odds, implied probabilities,
-    market consensus) plus hours_until_event. Does not include other feature
-    groups (standings, schedule, match_stats) which require additional data
-    sources not available via this tool.
-
-    Args:
-        event_id: Event identifier.
-        market: Market type — "h2h", "1x2", "totals", or "spreads".
-        outcome: Which outcome to extract features for ("home" or "away").
-        sharp_bookmakers: Sharp bookmaker keys (default: ["pinnacle", "betfair_exchange"]).
-
-    Returns:
-        Dict with event info and feature name/value pairs.
-    """
-    async with async_session_maker() as session:
-        reader = OddsReader(session)
-        event = await reader.get_event_by_id(event_id)
-        if event is None:
-            return {"error": f"Event '{event_id}' not found"}
-
-        snapshot = await reader.get_latest_snapshot(event_id, market=market)
-        if snapshot is None:
-            return {
-                "event": _event_to_dict(event),
-                "features": None,
-                "message": "No snapshots available for feature extraction",
-            }
-
-    outcome_name = event.home_team if outcome == "home" else event.away_team
-
-    try:
-        features = _extract_features_for_event(
-            event,
-            snapshot,
-            market=market,
-            outcome_name=outcome_name,
-            sharp_bookmakers=_coerce_bookmaker_list(sharp_bookmakers) or _DEFAULT_SHARP_BOOKMAKERS,
-            retail_bookmakers=_DEFAULT_RETAIL_BOOKMAKERS,
-        )
-    except Exception as e:
-        logger.error("feature_extraction_failed", event_id=event_id, error=str(e), exc_info=True)
-        return {
-            "event": _event_to_dict(event),
-            "features": None,
-            "message": f"Feature extraction failed: {e}",
-        }
-
-    return {
-        "event": _event_to_dict(event),
-        "snapshot_time": snapshot.snapshot_time.isoformat(),
-        "features": features,
-    }
-
-
-def _extract_features_for_event(
-    event: Event,
-    snapshot: OddsSnapshot,
-    *,
-    market: MarketKey,
-    outcome_name: str,
-    sharp_bookmakers: list[str],
-    retail_bookmakers: list[str],
-) -> dict[str, float | None]:
-    """Extract feature dict from an event and its latest snapshot."""
-    odds = extract_odds_from_snapshot(snapshot, event.id, market=market)
-    if not odds:
-        return {"error": f"No {market} odds data in snapshot"}
-
-    backtest_event = BacktestEvent(
-        id=event.id,
-        commence_time=event.commence_time,
-        home_team=event.home_team,
-        away_team=event.away_team,
-        home_score=0,
-        away_score=0,
-        status=event.status,
-    )
-
-    extractor = TabularFeatureExtractor(
-        sharp_bookmakers=sharp_bookmakers,
-        retail_bookmakers=retail_bookmakers,
-    )
-    tab_feats = extractor.extract_features(
-        event=backtest_event,
-        odds_data=odds,
-        outcome=outcome_name,
-        market=market,
-    )
-
-    feature_names = extractor.get_feature_names()
-    feature_array = tab_feats.to_array()
-
-    features = {
-        f"tab_{name}": _safe_float(val)
-        for name, val in zip(feature_names, feature_array, strict=True)
-    }
-
-    hours_until = (event.commence_time - snapshot.snapshot_time).total_seconds() / 3600
-    features["hours_until_event"] = round(hours_until, 2)
-
-    return features
 
 
 @mcp.tool()

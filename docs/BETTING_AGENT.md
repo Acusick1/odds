@@ -115,7 +115,6 @@ Implemented via the existing `LocalSchedulerBackend` with proximity-aware schedu
 | `get_upcoming_fixtures` | Events from DB |
 | `get_current_odds` | Latest snapshots per bookmaker |
 | `get_odds_history` | Odds movement timeline |
-| `get_event_features` | Feature vector (standings, schedule, stats) |
 | `get_predictions` | CLV model inference (supplementary signal) |
 | `paper_bet` | Record a paper trade with reasoning |
 | `get_portfolio` | Open bets, P&L summary |

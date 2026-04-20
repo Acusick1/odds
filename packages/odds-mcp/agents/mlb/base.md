@@ -12,7 +12,6 @@ When calling MCP tools, use these MLB parameters:
 
 - `get_upcoming_fixtures`: `league="baseball_mlb"`
 - `find_retail_edges`: `sharp_bookmakers=["betfair_exchange"]` (Pinnacle is absent for MLB; Betfair Exchange is the sole sharp reference)
-- `get_event_features`: `sharp_bookmakers=["betfair_exchange"]` (retail set is fixed internally to the EPL-model default and is not relevant to MLB analysis — prefer `find_retail_edges` for retail dispersion)
 - `refresh_scrape`: `league="mlb"`, `market="home_away"`
 - `paper_bet`: `market="h2h"`, `selection="home"` or `selection="away"`
 

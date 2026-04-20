@@ -123,6 +123,7 @@ For any fixture without a prior brief, write your own probability estimate from 
 Concurrent where possible (see Parallelism):
 
 - Call `find_retail_edges` and inspect the `retail_edges` array. An empty array means no retail book is pricing any outcome longer than sharp — move on. A rank-1 entry with `z_score ≤ −1.5` against a tight `dispersion_stddev` is the signal to investigate — the pack agrees the price is out, and the outlier is materially out, not rounding noise. A negative divergence is necessary but not sufficient: size the edge against the retail odds and confirm EV flips at the offered price, not just at the implied probability.
+- **Verify the outlier book is live before betting it.** OddsPortal displays pulled / struck-through lines identically to live prices in the current scrape (known bug, 2026-04-20). Before acting on any rank-1 entry, confirm the outlier book's price has moved at least once across the last ≥3 snapshots via `get_odds_history` (or brief-to-brief comparison). A book whose decimal price is byte-identical across recent snapshots while the pack has drifted is frozen — either pulled or stale-cached. Skip it; it is not tradeable regardless of how strong the divergence looks. This check applies to every OddsPortal-sourced sport.
 - Refresh scrape if odds data is stale (`refresh_scrape`).
 - Web search for team news, injuries, lineups, tactical context.
 - Compare current sharp price against any previous brief's sharp price and against your pre-market read.

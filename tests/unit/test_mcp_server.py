@@ -222,28 +222,6 @@ class TestTradeToDict:
         assert result["pnl"] == 9.09
 
 
-class TestSafeFloat:
-    def test_normal_float(self) -> None:
-        from odds_mcp.server import _safe_float
-
-        assert _safe_float(1.23456789) == 1.234568
-
-    def test_nan(self) -> None:
-        from odds_mcp.server import _safe_float
-
-        assert _safe_float(float("nan")) is None
-
-    def test_none(self) -> None:
-        from odds_mcp.server import _safe_float
-
-        assert _safe_float(None) is None
-
-    def test_string(self) -> None:
-        from odds_mcp.server import _safe_float
-
-        assert _safe_float("not a number") is None
-
-
 class TestRefreshScrapeUnknownLeague:
     @pytest.mark.asyncio
     async def test_unknown_league_returns_error(self) -> None:
