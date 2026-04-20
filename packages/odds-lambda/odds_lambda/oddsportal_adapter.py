@@ -9,8 +9,10 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
+
+import structlog
 
 from odds_lambda.oddsportal_common import (
     DRAW_OUTCOME,
@@ -18,6 +20,16 @@ from odds_lambda.oddsportal_common import (
     normalize_bookmaker_key,
     parse_match_date,
 )
+
+logger = structlog.get_logger()
+
+# Reject upcoming-scrape matches whose claimed start time is already this far
+# in the past at scrape time. Guards against a known OddsPortal bug where the
+# H2H page's React event header occasionally hydrates with the most recent
+# PAST meeting between the two teams (stale `startDate` + swapped home/away),
+# producing frankenstein records — live odds pinned to a historical date. An
+# upcoming-scrape should never surface a genuinely finished game.
+STALE_MATCH_REJECT_THRESHOLD = timedelta(hours=2)
 
 # Regex: Betfair format is "FRAC_REPEAT(LIQUIDITY)" e.g. "99/10099/100(300)"
 # The fraction is repeated (concatenated), followed by optional (liquidity).
@@ -102,6 +114,18 @@ def convert_upcoming_matches(matches: list[dict[str, Any]], market: str) -> list
 
         match_dt = parse_match_date(date_str)
         scraped_dt = parse_match_date(scraped_str) if scraped_str else datetime.now(UTC)
+
+        if match_dt < scraped_dt - STALE_MATCH_REJECT_THRESHOLD:
+            logger.warning(
+                "stale_match_rejected",
+                home=home,
+                away=away,
+                match_date=match_dt.isoformat(),
+                scraped_date=scraped_dt.isoformat(),
+                hours_in_past=round((scraped_dt - match_dt).total_seconds() / 3600, 2),
+                match_link=match.get("match_link", ""),
+            )
+            continue
 
         raw_data = converter(market_data, home, away)
         if raw_data is None:
