@@ -28,7 +28,7 @@ Concrete examples that fit each `common.md` edge category in an EPL context:
 
 **1. Information gaps** — key player ruled out minutes before lineup release; unexpected starter or bench; manager quotes signalling rotation or tactical change; late goalkeeper change (high-impact, often underweighted).
 
-**2. Retail / cross-venue dispersion** — the OP UK-retail book set is homogeneous on 1x2. Genuine longer-than-sharp observations are rare; when they appear, usually indicate stale retail pricing or a catalyst still propagating.
+**2. Retail / cross-venue dispersion** — the OP UK-retail book set is homogeneous on 1x2. Genuine longer-than-sharp observations are rare; when `find_retail_edges` returns a rank-1 entry, it usually indicates stale retail pricing, a catalyst still propagating, or asymmetric liability shading on a high-hold book. Do not discard high-hold outliers — a book can load hold on two outcomes while leaving the third long, and that is exactly the pattern to investigate.
 
 **3. Structural biases** — public money loading on big-six teams (Arsenal, Liverpool, Man City, Man Utd, Chelsea, Tottenham); accumulator distortion on popular acca legs; weekend / televised-match liability shading; promoted-team prices often overshoot in both directions early-season and take weeks to calibrate.
 

@@ -129,7 +129,7 @@ Implemented via the existing `LocalSchedulerBackend` with proximity-aware schedu
 | `save_match_brief` | Persist analysis brief with decision + summary (append-only) |
 | `get_match_brief` | Load full briefs for a single event |
 | `get_slate_briefs` | Latest decision/summary per event for slate triage |
-| `get_sharp_soft_spread` | Dedicated sharp vs soft divergence view |
+| `find_retail_edges` | Ranked retail-vs-sharp divergence screener with per-outcome dispersion stats |
 
 ## Data Model Additions
 
@@ -159,7 +159,7 @@ Build the unified wake-up workflow and iterate interactively.
 
 - Rewrite agent prompts with information-edge thesis and conviction framework
 - Add `match_briefs` table + migration
-- Add `save_match_brief`, `get_match_brief`, `get_sharp_soft_spread` MCP tools
+- Add `save_match_brief`, `get_match_brief`, `find_retail_edges` MCP tools
 - Run wake-up workflow interactively for 2-3 matchdays
 - Iterate on prompt: which research patterns surface actionable info? Where does the agent waste time?
 - Identify reliable lineup/team news data sources (API-Football free tier insufficient — see `docs/AGENT_DATA_SOURCES.md`)
@@ -211,7 +211,7 @@ The agent must demonstrate it adds value beyond a simple mechanical rule. Track 
 
 ## Role of the XGBoost Model
 
-The CLV prediction model (R² = 3-6%, backtest ROI +3.4% at p = 0.26) is demoted to a supplementary signal. Its strongest feature (`retail_sharp_diff`) is the sharp-soft spread, which the agent can observe directly via `get_sharp_soft_spread`.
+The CLV prediction model (R² = 3-6%, backtest ROI +3.4% at p = 0.26) is demoted to a supplementary signal. Its strongest feature (`retail_sharp_diff`) is the sharp-soft spread, which the agent can observe directly via `find_retail_edges`.
 
 `get_predictions` remains available as a sanity check. The agent prompt says: "Model predictions are weakly predictive. Do not bet based on model output alone."
 

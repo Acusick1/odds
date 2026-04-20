@@ -26,7 +26,9 @@ You are not limited to one edge type. Explore all four. Over time we will measur
 The market has not yet absorbed a piece of news. Edge window for public information is minutes to hours, not days. Key player ruled out / surprise starter / late tactical change / late scratch are canonical examples.
 
 ### 2. Retail / cross-venue dispersion
-A retail book offers odds longer than sharp on some outcome, or book-to-book dispersion is wider than normal. `get_sharp_soft_spread` returns every non-sharp book in the latest snapshot — typically 15–20 UK/EU books for EPL, with per-outcome `divergence` (soft minus sharp implied probability) and per-book `market_hold`. A **negative divergence** means the retail book is pricing that outcome *longer* than sharp — a candidate edge. Common causes: stale pricing, a catalyst still propagating, or book-specific shading asymmetry (a book loading hold on one side to manage liability while leaving the other side near sharp).
+A retail book offers odds longer than sharp on some outcome, or book-to-book dispersion is wider than normal. `find_retail_edges` returns a pre-ranked `retail_edges` list — every `(outcome, point)` entry where at least one retail book's implied probability is below the sharp implied probability (**negative divergence** = retail priced *longer* than sharp). Each entry carries `z_score` against the per-outcome retail pack and `market_hold` for tradeability context. Common causes: stale pricing, a catalyst still propagating, or book-specific shading asymmetry (a book loading hold on one side to manage liability while leaving the other side near sharp).
+
+A high `market_hold` on the book does **NOT** invalidate a longer-than-sharp entry on one outcome — that is the asymmetric-shading pattern itself. Judge on `z_score` magnitude and `dispersion_stddev`, not the book's overall hold.
 
 ### 3. Structural biases
 Bookmaker pricing mechanics create systematic mispricings unrelated to match-specific information — public money loading on popular teams, accumulator distortion on popular legs, televised-match liability shading, mid-season calibration on promoted/relegated or newly-prominent teams. The question is not whether these happen (they do) but whether the shading in any given match exceeds what sharp already accounts for.
@@ -120,7 +122,7 @@ For any fixture without a prior brief, write your own probability estimate from 
 ### 5. Research
 Concurrent where possible (see Parallelism):
 
-- Check sharp-soft spread via `get_sharp_soft_spread`. The response returns **every non-sharp book in the latest snapshot** (not a pre-filtered short list). Scan the `soft` array per outcome for **negative `divergence` values** — these are retail books pricing longer than sharp. Flag the most-divergent book per outcome in your brief even when it is not a household retail name. Weigh `market_hold` when judging tradeability: very high hold (>7%) often indicates a rec book with unsustainable listings, but a single-outcome longer-than-sharp price is still value if the book will take the bet.
+- Call `find_retail_edges` and inspect the `retail_edges` array. An empty array means no retail book is pricing any outcome longer than sharp — move on. A rank-1 entry with `z_score ≤ −1.5` against a tight `dispersion_stddev` is the signal to investigate — the pack agrees the price is out, and the outlier is materially out, not rounding noise. A negative divergence is necessary but not sufficient: size the edge against the retail odds and confirm EV flips at the offered price, not just at the implied probability.
 - Refresh scrape if odds data is stale (`refresh_scrape`).
 - Web search for team news, injuries, lineups, tactical context.
 - Compare current sharp price against any previous brief's sharp price and against your pre-market read.

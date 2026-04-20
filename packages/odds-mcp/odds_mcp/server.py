@@ -6,6 +6,7 @@ All tools are stateless and use async_session_maker() for DB access.
 
 import json
 import math
+import statistics
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -888,20 +889,31 @@ async def get_slate_briefs(
 
 
 @mcp.tool()
-async def get_sharp_soft_spread(
+async def find_retail_edges(
     event_id: str,
     market: MarketKey,
     sharp_bookmakers: str | list[str] | None = None,
     sharp_lookback_hours: float = 2.0,
 ) -> dict[str, Any]:
-    """Get sharp vs soft bookmaker price divergence for an event.
+    """Surface retail books pricing longer than sharp, with dispersion stats.
+
+    Returns a per-(outcome, point) screening view: sharp reference, the most-
+    and least-generous retail books, dispersion baseline, and a flat
+    ``retail_edges`` list ranked by divergence (most negative first). Signs
+    follow the convention ``divergence = retail_implied_prob - sharp_implied_prob``
+    — **negative means the retail book is pricing that outcome longer than
+    sharp**, and that is what ``retail_edges`` contains.
 
     Sharp prices are resolved via a time-windowed lookback across recent
-    snapshots so that a missing sharp bookmaker in the latest scrape does not
-    discard a perfectly good price from a nearby snapshot. Retail prices
-    always come from the single latest snapshot and cover every non-sharp
-    bookmaker in it. For h2h / 1x2 markets each retail entry also reports
-    that book's market hold, so callers can filter high-margin books.
+    snapshots so a missing sharp book in the latest scrape does not discard
+    a nearby valid price. Retail prices come from the single latest snapshot.
+
+    ``z_score`` per retail entry is ``(divergence - median_divergence) /
+    dispersion_stddev`` computed across that outcome's retail books; ``null``
+    when ``n_books < 3`` or ``dispersion_stddev == 0``. ``market_hold`` is
+    the book's single-market hold and is populated on h2h / 1x2 only — it
+    is ``null`` on totals / spreads and ``null`` for books missing any
+    required outcome in a single-line market.
 
     Args:
         event_id: Event identifier.
@@ -910,9 +922,10 @@ async def get_sharp_soft_spread(
         sharp_lookback_hours: How far back to search for sharp prices (default 2.0 h).
 
     Returns:
-        Dict with per-outcome sharp price (with source snapshot time),
-        soft prices, and divergence values. Each soft entry includes
-        ``market_hold`` (h2h / 1x2 only; null for multi-line markets).
+        Dict with ``event``, ``snapshot_time``, ``sharp_source``,
+        ``per_outcome`` (flat array keyed by ``(outcome, point)``), and
+        ``retail_edges`` (flat array of negative-divergence entries,
+        sorted ascending by divergence).
     """
     sharp_bms = _coerce_bookmaker_list(sharp_bookmakers) or _DEFAULT_SHARP_BOOKMAKERS
 
@@ -927,7 +940,10 @@ async def get_sharp_soft_spread(
         if snapshot is None:
             return {
                 "event": _event_to_dict(event),
-                "spread": None,
+                "snapshot_time": None,
+                "sharp_source": sharp_bms,
+                "per_outcome": [],
+                "retail_edges": [],
                 "message": "No odds snapshots available for this event",
             }
 
@@ -949,85 +965,154 @@ async def get_sharp_soft_spread(
     if not odds:
         return {
             "event": event_dict,
-            "spread": None,
+            "snapshot_time": snapshot_time_iso,
+            "sharp_source": sharp_bms,
+            "per_outcome": [],
+            "retail_edges": [],
             "message": f"No {market} odds in latest snapshot",
         }
 
     sharp_by_outcome = sharp_result.prices
-
-    # Group odds by outcome for retail lookup
-    outcomes: dict[str, list[Odds]] = {}
-    for o in odds:
-        outcomes.setdefault(o.outcome_name, []).append(o)
-
-    # Retail set is every non-sharp book in the snapshot.
     sharp_set = set(sharp_bms)
-    retail_bms = sorted({o.bookmaker_key for o in odds if o.bookmaker_key not in sharp_set})
 
-    # Per-book market hold is only meaningful for single-line markets; totals / spreads
-    # span multiple lines, so computing it event-wide would conflate them.
+    # Group retail odds by (outcome_name, point). Totals with multiple point
+    # values produce one bucket per (outcome, point); h2h / 1x2 have point=None.
+    buckets: dict[tuple[str, float | None], list[Odds]] = {}
+    for o in odds:
+        if o.bookmaker_key in sharp_set:
+            continue
+        buckets.setdefault((o.outcome_name, o.point), []).append(o)
+
+    # Per-book market hold is only meaningful for single-line markets; totals /
+    # spreads span multiple lines, so computing it event-wide would conflate them.
+    # We include sharp books in the hold calc so the full per-book picture is
+    # correct, then only surface it for retail entries below.
     book_hold: dict[str, float] | None = None
     if market in ("h2h", "1x2"):
+        required_outcomes = {o.outcome_name for o in odds}
         book_hold = per_book_market_holds(
             ((o.bookmaker_key, o.outcome_name, o.price) for o in odds),
-            required_outcomes=outcomes.keys(),
+            required_outcomes=required_outcomes,
         )
 
-    spread: dict[str, dict[str, Any]] = {}
-    for outcome_name, outcome_odds in outcomes.items():
+    per_outcome: list[dict[str, Any]] = []
+    retail_edges: list[dict[str, Any]] = []
+
+    # Iterate in a deterministic order: outcome name asc, point asc (None last)
+    def _bucket_sort_key(key: tuple[str, float | None]) -> tuple[str, float]:
+        outcome_name, point = key
+        return (outcome_name, math.inf if point is None else point)
+
+    for (outcome_name, point), outcome_odds in sorted(buckets.items(), key=_bucket_sort_key):
         sharp_entry = sharp_by_outcome.get(outcome_name)
         sharp_prob = sharp_entry["implied_prob"] if sharp_entry else None
+        sharp_meta = sharp_result.meta.get(outcome_name) if sharp_entry else None
 
-        # Build sharp block with source snapshot metadata
-        if sharp_entry:
-            meta = sharp_result.meta.get(outcome_name)
-            sharp_block: dict[str, Any] = {
-                **sharp_entry,
-                "snapshot_time": meta.snapshot_time.isoformat() if meta else None,
-                "age_seconds": meta.age_seconds if meta else None,
-            }
-        else:
-            sharp_block = {
-                "bookmaker": None,
-                "price": None,
-                "implied_prob": None,
-                "snapshot_time": None,
-                "age_seconds": None,
-            }
+        # Build per-book retail rows for this (outcome, point) bucket.
+        # Deduplicate on bookmaker_key (last entry wins — matches per_book_market_holds).
+        by_book: dict[str, Odds] = {}
+        for o in outcome_odds:
+            by_book[o.bookmaker_key] = o
 
-        # Collect retail bookmaker prices
-        soft_prices: list[dict[str, Any]] = []
-        for bm_key in retail_bms:
-            bm_match = [o for o in outcome_odds if o.bookmaker_key == bm_key]
-            if not bm_match:
-                continue
-            retail_price = bm_match[0].price
-            retail_prob = round(calculate_implied_probability(retail_price), 6)
+        retail_rows: list[dict[str, Any]] = []
+        for bm_key in sorted(by_book):
+            o = by_book[bm_key]
+            retail_prob = round(calculate_implied_probability(o.price), 6)
             divergence = round(retail_prob - sharp_prob, 6) if sharp_prob is not None else None
             market_hold = (
                 round(book_hold[bm_key], 6)
                 if book_hold is not None and bm_key in book_hold
                 else None
             )
-            soft_prices.append(
+            retail_rows.append(
                 {
-                    "bookmaker": bm_key,
-                    "price": retail_price,
+                    "book": bm_key,
+                    "price": o.price,
                     "implied_prob": retail_prob,
                     "divergence": divergence,
+                    # z_score filled in below once dispersion is known
+                    "z_score": None,
                     "market_hold": market_hold,
                 }
             )
 
-        spread[outcome_name] = {
-            "sharp": sharp_block,
-            "soft": soft_prices,
-        }
+        n_books = len(retail_rows)
+
+        # Dispersion stats across retail books for this bucket
+        divergences = [r["divergence"] for r in retail_rows if r["divergence"] is not None]
+        median_divergence: float | None = None
+        dispersion_stddev: float | None = None
+        if divergences:
+            median_divergence = round(statistics.median(divergences), 6)
+            if len(divergences) >= 2:
+                dispersion_stddev = round(statistics.pstdev(divergences), 6)
+
+        # z_score per row: null when n_books < 3 or stddev is 0/null
+        can_zscore = (
+            n_books >= 3
+            and dispersion_stddev is not None
+            and dispersion_stddev > 0
+            and median_divergence is not None
+        )
+        if can_zscore:
+            for r in retail_rows:
+                if r["divergence"] is None:
+                    continue
+                r["z_score"] = round((r["divergence"] - median_divergence) / dispersion_stddev, 6)
+
+        # best_retail: smallest implied_prob (most generous / most-negative divergence).
+        # worst_retail: largest implied_prob. Tie-break alphabetical on book for determinism.
+        best_retail: dict[str, Any] | None = None
+        worst_retail: dict[str, Any] | None = None
+        if retail_rows:
+            best_retail = min(retail_rows, key=lambda r: (r["implied_prob"], r["book"]))
+            worst_retail = sorted(retail_rows, key=lambda r: (-r["implied_prob"], r["book"]))[0]
+
+        per_outcome.append(
+            {
+                "outcome": outcome_name,
+                "point": point,
+                "sharp_implied_prob": sharp_prob,
+                "sharp_snapshot_time": (
+                    sharp_meta.snapshot_time.isoformat() if sharp_meta else None
+                ),
+                "sharp_age_seconds": sharp_meta.age_seconds if sharp_meta else None,
+                "best_retail": best_retail,
+                "worst_retail": worst_retail,
+                "n_books": n_books,
+                "median_divergence": median_divergence,
+                "dispersion_stddev": dispersion_stddev,
+            }
+        )
+
+        # Contribute to retail_edges only where divergence is negative (longer than sharp).
+        if sharp_prob is not None:
+            for r in retail_rows:
+                if r["divergence"] is not None and r["divergence"] < 0:
+                    retail_edges.append(
+                        {
+                            "outcome": outcome_name,
+                            "point": point,
+                            **r,
+                        }
+                    )
+
+    # Rank: divergence ascending (most negative first), then z_score ascending
+    # (more negative first), then book alphabetical — deterministic tie-break.
+    retail_edges.sort(
+        key=lambda e: (
+            e["divergence"],
+            math.inf if e["z_score"] is None else e["z_score"],
+            e["book"],
+        )
+    )
 
     return {
         "event": event_dict,
         "snapshot_time": snapshot_time_iso,
-        "spread": spread,
+        "sharp_source": sharp_bms,
+        "per_outcome": per_outcome,
+        "retail_edges": retail_edges,
     }
 
 
