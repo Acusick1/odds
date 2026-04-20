@@ -618,8 +618,8 @@ class TestPaperBetValidation:
             assert "nonexistent" in result["error"]
 
 
-class TestGetSharpSoftSpreadMarketHold:
-    """Regression tests for per-book ``market_hold`` in ``get_sharp_soft_spread``."""
+class TestFindRetailEdges:
+    """Unit tests for the ``find_retail_edges`` MCP tool."""
 
     def _make_event(self) -> MagicMock:
         event = MagicMock(spec=Event)
@@ -635,14 +635,22 @@ class TestGetSharpSoftSpreadMarketHold:
         event.completed_at = None
         return event
 
-    def _make_odds(self, bookmaker: str, outcome: str, price: int) -> MagicMock:
+    def _make_odds(
+        self,
+        bookmaker: str,
+        outcome: str,
+        price: int,
+        *,
+        market: str = "h2h",
+        point: float | None = None,
+    ) -> MagicMock:
         o = MagicMock()
         o.bookmaker_key = bookmaker
         o.bookmaker_title = bookmaker
-        o.market_key = "h2h"
+        o.market_key = market
         o.outcome_name = outcome
         o.price = price
-        o.point = None
+        o.point = point
         return o
 
     def _make_snapshot(self) -> MagicMock:
@@ -651,46 +659,39 @@ class TestGetSharpSoftSpreadMarketHold:
         snap.snapshot_time = datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
         return snap
 
-    def _make_sharp_result(self) -> MagicMock:
+    def _make_sharp_result(
+        self,
+        prices: dict[str, dict[str, object]] | None = None,
+    ) -> MagicMock:
         from odds_core.match_brief_models import SharpPriceMeta
 
-        result = MagicMock()
-        result.prices = {
+        default_prices = {
             "Arsenal": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
             "Chelsea": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
         }
+        prices = prices if prices is not None else default_prices
+
+        result = MagicMock()
+        result.prices = prices
         result.meta = {
-            "Arsenal": SharpPriceMeta(
+            outcome: SharpPriceMeta(
                 snapshot_id=1,
                 snapshot_time=datetime(2026, 4, 12, 10, 0, tzinfo=UTC),
                 age_seconds=0.0,
-            ),
-            "Chelsea": SharpPriceMeta(
-                snapshot_id=1,
-                snapshot_time=datetime(2026, 4, 12, 10, 0, tzinfo=UTC),
-                age_seconds=0.0,
-            ),
+            )
+            for outcome in prices
         }
         return result
 
-    def _mock_reader(self) -> AsyncMock:
+    def _mock_reader(self, sharp_result: MagicMock | None = None) -> AsyncMock:
         reader = AsyncMock()
         reader.get_event_by_id = AsyncMock(return_value=self._make_event())
         reader.get_latest_snapshot = AsyncMock(return_value=self._make_snapshot())
-        reader.get_sharp_prices = AsyncMock(return_value=self._make_sharp_result())
+        reader.get_sharp_prices = AsyncMock(return_value=sharp_result or self._make_sharp_result())
         return reader
 
-    @pytest.mark.asyncio
-    async def test_h2h_populates_market_hold(self) -> None:
-        from odds_mcp.server import get_sharp_soft_spread
-
-        odds = [
-            self._make_odds("pinnacle", "Arsenal", -110),
-            self._make_odds("pinnacle", "Chelsea", -110),
-            self._make_odds("bet365", "Arsenal", -105),
-            self._make_odds("bet365", "Chelsea", -115),
-        ]
-        reader = self._mock_reader()
+    async def _call(self, odds: list, reader: AsyncMock, market: str = "h2h") -> dict:
+        from odds_mcp.server import find_retail_edges
 
         with (
             patch("odds_mcp.server.async_session_maker") as mock_session_maker,
@@ -700,81 +701,378 @@ class TestGetSharpSoftSpreadMarketHold:
             mock_session_maker.return_value.__aenter__ = AsyncMock()
             mock_session_maker.return_value.__aexit__ = AsyncMock()
 
-            result = await get_sharp_soft_spread(event_id="evt-1", market="h2h")
-
-        bet365_entries = [
-            soft
-            for outcome in result["spread"].values()
-            for soft in outcome["soft"]
-            if soft["bookmaker"] == "bet365"
-        ]
-        assert len(bet365_entries) == 2
-        for entry in bet365_entries:
-            assert entry["market_hold"] is not None
-            assert isinstance(entry["market_hold"], float)
+            return await find_retail_edges(event_id="evt-1", market=market)
 
     @pytest.mark.asyncio
-    async def test_partial_outcome_book_gets_no_market_hold(self) -> None:
-        from odds_mcp.server import get_sharp_soft_spread
-
+    async def test_response_shape(self) -> None:
         odds = [
             self._make_odds("pinnacle", "Arsenal", -110),
             self._make_odds("pinnacle", "Chelsea", -110),
             self._make_odds("bet365", "Arsenal", -105),
             self._make_odds("bet365", "Chelsea", -115),
-            # partial book missing "Chelsea" — must not report a misleading hold
-            self._make_odds("partial_book", "Arsenal", -110),
+            self._make_odds("betway", "Arsenal", -115),
+            self._make_odds("betway", "Chelsea", -105),
         ]
-        reader = self._mock_reader()
+        result = await self._call(odds, self._mock_reader())
 
-        with (
-            patch("odds_mcp.server.async_session_maker") as mock_session_maker,
-            patch("odds_mcp.server.OddsReader", return_value=reader),
-            patch("odds_mcp.server.extract_odds_from_snapshot", return_value=odds),
-        ):
-            mock_session_maker.return_value.__aenter__ = AsyncMock()
-            mock_session_maker.return_value.__aexit__ = AsyncMock()
+        assert "event" in result
+        assert "snapshot_time" in result
+        assert result["sharp_bookmakers"] == ["pinnacle", "betfair_exchange"]
+        assert isinstance(result["per_outcome"], list)
+        assert isinstance(result["retail_edges"], list)
 
-            result = await get_sharp_soft_spread(event_id="evt-1", market="h2h")
-
-        for outcome in result["spread"].values():
-            for soft in outcome["soft"]:
-                if soft["bookmaker"] == "partial_book":
-                    assert soft["market_hold"] is None
-
-    @pytest.mark.asyncio
-    async def test_totals_market_hold_none(self) -> None:
-        from odds_mcp.server import get_sharp_soft_spread
-
-        odds = [
-            self._make_odds("pinnacle", "Over", -110),
-            self._make_odds("pinnacle", "Under", -110),
-            self._make_odds("bet365", "Over", -105),
-            self._make_odds("bet365", "Under", -115),
-        ]
-        for o in odds:
-            o.market_key = "totals"
-            o.point = 2.5
-
-        reader = self._mock_reader()
-        sharp_result = MagicMock()
-        sharp_result.prices = {
-            "Over": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
-            "Under": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
+        # One entry per (outcome, point) — both with point=None
+        assert {(e["outcome"], e["point"]) for e in result["per_outcome"]} == {
+            ("Arsenal", None),
+            ("Chelsea", None),
         }
-        sharp_result.meta = {}
-        reader.get_sharp_prices = AsyncMock(return_value=sharp_result)
+        for entry in result["per_outcome"]:
+            assert set(entry.keys()) == {
+                "outcome",
+                "point",
+                "sharp_implied_prob",
+                "sharp_snapshot_time",
+                "sharp_age_seconds",
+                "best_retail",
+                "worst_retail",
+                "n_books",
+                "median_divergence",
+                "dispersion_stddev",
+            }
+            assert entry["n_books"] == 2
+            for side in ("best_retail", "worst_retail"):
+                row = entry[side]
+                assert set(row.keys()) == {
+                    "book",
+                    "price",
+                    "implied_prob",
+                    "divergence",
+                    "z_score",
+                    "market_hold",
+                }
 
-        with (
-            patch("odds_mcp.server.async_session_maker") as mock_session_maker,
-            patch("odds_mcp.server.OddsReader", return_value=reader),
-            patch("odds_mcp.server.extract_odds_from_snapshot", return_value=odds),
-        ):
-            mock_session_maker.return_value.__aenter__ = AsyncMock()
-            mock_session_maker.return_value.__aexit__ = AsyncMock()
+    @pytest.mark.asyncio
+    async def test_sign_convention_negative_divergence_longer_than_sharp(self) -> None:
+        # midnite prices Arsenal *longer* than sharp → negative divergence, lands in retail_edges.
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -110),
+            self._make_odds("pinnacle", "Chelsea", -110),
+            self._make_odds("bet365", "Arsenal", -115),  # shorter than sharp
+            self._make_odds("bet365", "Chelsea", -105),
+            self._make_odds("betway", "Arsenal", -120),  # shorter than sharp
+            self._make_odds("betway", "Chelsea", -100),
+            self._make_odds("midnite", "Arsenal", +110),  # longer than sharp
+            self._make_odds("midnite", "Chelsea", -140),
+        ]
+        result = await self._call(odds, self._mock_reader())
 
-            result = await get_sharp_soft_spread(event_id="evt-1", market="totals")
+        edges = result["retail_edges"]
+        assert len(edges) >= 1
+        # midnite on Arsenal should be in edges; divergence should be negative
+        midnite_arsenal = [e for e in edges if e["book"] == "midnite" and e["outcome"] == "Arsenal"]
+        assert len(midnite_arsenal) == 1
+        assert midnite_arsenal[0]["divergence"] < 0
 
-        for outcome in result["spread"].values():
-            for soft in outcome["soft"]:
-                assert soft["market_hold"] is None
+    @pytest.mark.asyncio
+    async def test_retail_edges_contains_only_negatives(self) -> None:
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -110),
+            self._make_odds("pinnacle", "Chelsea", -110),
+            self._make_odds("bet365", "Arsenal", -115),
+            self._make_odds("bet365", "Chelsea", -105),
+            self._make_odds("betway", "Arsenal", -120),
+            self._make_odds("betway", "Chelsea", -100),
+            self._make_odds("midnite", "Arsenal", +110),
+            self._make_odds("midnite", "Chelsea", -140),
+        ]
+        result = await self._call(odds, self._mock_reader())
+
+        for edge in result["retail_edges"]:
+            assert edge["divergence"] < 0
+
+    @pytest.mark.asyncio
+    async def test_empty_retail_edges_when_all_retail_shorter(self) -> None:
+        # Every retail book is shorter than sharp on every outcome.
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -110),
+            self._make_odds("pinnacle", "Chelsea", -110),
+            self._make_odds("bet365", "Arsenal", -130),
+            self._make_odds("bet365", "Chelsea", -130),
+            self._make_odds("betway", "Arsenal", -125),
+            self._make_odds("betway", "Chelsea", -125),
+        ]
+        result = await self._call(odds, self._mock_reader())
+
+        assert result["retail_edges"] == []
+
+    @pytest.mark.asyncio
+    async def test_tie_break_determinism_on_equal_divergence(self) -> None:
+        # Two books with identical divergence on the same outcome — tie-break
+        # must sort alphabetically by book name.
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -110),
+            self._make_odds("pinnacle", "Chelsea", -110),
+            # zeta_book and alpha_book: identical longer-than-sharp price on Arsenal
+            self._make_odds("zeta_book", "Arsenal", +110),
+            self._make_odds("zeta_book", "Chelsea", -140),
+            self._make_odds("alpha_book", "Arsenal", +110),
+            self._make_odds("alpha_book", "Chelsea", -140),
+            self._make_odds("bet365", "Arsenal", -115),
+            self._make_odds("bet365", "Chelsea", -105),
+        ]
+        result = await self._call(odds, self._mock_reader())
+
+        # Two Arsenal edges: alpha_book must come before zeta_book
+        arsenal_edges = [e for e in result["retail_edges"] if e["outcome"] == "Arsenal"]
+        arsenal_books = [e["book"] for e in arsenal_edges]
+        assert arsenal_books.index("alpha_book") < arsenal_books.index("zeta_book")
+
+        # best_retail tie-break on Arsenal: alphabetical
+        arsenal_bucket = next(e for e in result["per_outcome"] if e["outcome"] == "Arsenal")
+        assert arsenal_bucket["best_retail"]["book"] == "alpha_book"
+
+    @pytest.mark.asyncio
+    async def test_missing_sharp_nulls_divergence_and_zscore(self) -> None:
+        # Sharp has only Arsenal — Chelsea sharp is missing.
+        sharp_result = self._make_sharp_result(
+            {"Arsenal": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524}}
+        )
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -110),
+            self._make_odds("bet365", "Arsenal", -105),
+            self._make_odds("bet365", "Chelsea", -115),
+            self._make_odds("betway", "Arsenal", -120),
+            self._make_odds("betway", "Chelsea", -105),
+        ]
+        result = await self._call(odds, self._mock_reader(sharp_result=sharp_result))
+
+        chelsea = next(e for e in result["per_outcome"] if e["outcome"] == "Chelsea")
+        assert chelsea["sharp_implied_prob"] is None
+        # best_retail still populated, but divergence/z_score null
+        assert chelsea["best_retail"] is not None
+        assert chelsea["best_retail"]["divergence"] is None
+        assert chelsea["best_retail"]["z_score"] is None
+        assert chelsea["worst_retail"]["divergence"] is None
+        assert chelsea["worst_retail"]["z_score"] is None
+
+        # Chelsea produces no entries in retail_edges (no divergence to rank on)
+        assert not any(e["outcome"] == "Chelsea" for e in result["retail_edges"])
+
+    @pytest.mark.asyncio
+    async def test_market_hold_populated_on_h2h(self) -> None:
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -110),
+            self._make_odds("pinnacle", "Chelsea", -110),
+            self._make_odds("bet365", "Arsenal", -105),
+            self._make_odds("bet365", "Chelsea", -115),
+        ]
+        result = await self._call(odds, self._mock_reader())
+
+        for entry in result["per_outcome"]:
+            assert entry["best_retail"]["market_hold"] is not None
+            assert isinstance(entry["best_retail"]["market_hold"], float)
+
+    @pytest.mark.asyncio
+    async def test_market_hold_populated_on_1x2(self) -> None:
+        sharp_result = self._make_sharp_result(
+            {
+                "Arsenal": {"bookmaker": "pinnacle", "price": -120, "implied_prob": 0.545},
+                "Draw": {"bookmaker": "pinnacle", "price": 280, "implied_prob": 0.263},
+                "Chelsea": {"bookmaker": "pinnacle", "price": 310, "implied_prob": 0.244},
+            }
+        )
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -120, market="1x2"),
+            self._make_odds("pinnacle", "Draw", 280, market="1x2"),
+            self._make_odds("pinnacle", "Chelsea", 310, market="1x2"),
+            self._make_odds("bet365", "Arsenal", -130, market="1x2"),
+            self._make_odds("bet365", "Draw", 260, market="1x2"),
+            self._make_odds("bet365", "Chelsea", 290, market="1x2"),
+        ]
+        result = await self._call(odds, self._mock_reader(sharp_result=sharp_result), market="1x2")
+
+        for entry in result["per_outcome"]:
+            assert entry["best_retail"]["market_hold"] is not None
+
+    @pytest.mark.asyncio
+    async def test_market_hold_null_on_totals(self) -> None:
+        sharp_result = self._make_sharp_result(
+            {
+                "Over": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
+                "Under": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
+            }
+        )
+        odds = [
+            self._make_odds("pinnacle", "Over", -110, market="totals", point=2.5),
+            self._make_odds("pinnacle", "Under", -110, market="totals", point=2.5),
+            self._make_odds("bet365", "Over", -105, market="totals", point=2.5),
+            self._make_odds("bet365", "Under", -115, market="totals", point=2.5),
+        ]
+        result = await self._call(
+            odds, self._mock_reader(sharp_result=sharp_result), market="totals"
+        )
+
+        for entry in result["per_outcome"]:
+            assert entry["best_retail"]["market_hold"] is None
+            assert entry["worst_retail"]["market_hold"] is None
+
+    @pytest.mark.asyncio
+    async def test_market_hold_null_on_spreads(self) -> None:
+        sharp_result = self._make_sharp_result(
+            {
+                "Arsenal": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
+                "Chelsea": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
+            }
+        )
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -110, market="spreads", point=-1.5),
+            self._make_odds("pinnacle", "Chelsea", -110, market="spreads", point=1.5),
+            self._make_odds("bet365", "Arsenal", -105, market="spreads", point=-1.5),
+            self._make_odds("bet365", "Chelsea", -115, market="spreads", point=1.5),
+        ]
+        result = await self._call(
+            odds, self._mock_reader(sharp_result=sharp_result), market="spreads"
+        )
+
+        for entry in result["per_outcome"]:
+            assert entry["best_retail"]["market_hold"] is None
+
+    @pytest.mark.asyncio
+    async def test_partial_book_market_hold_none(self) -> None:
+        # partial_book only has Arsenal, priced LONGER than sharp so it wins
+        # best_retail on that outcome. It is dropped from per_book_market_holds
+        # (missing Chelsea), so its row must carry market_hold=None — and that
+        # null propagates into best_retail.
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -110),
+            self._make_odds("pinnacle", "Chelsea", -110),
+            self._make_odds("bet365", "Arsenal", -105),
+            self._make_odds("bet365", "Chelsea", -115),
+            self._make_odds("betway", "Arsenal", -115),
+            self._make_odds("betway", "Chelsea", -105),
+            # partial_book Arsenal at +120 → implied 0.4545 (longest on Arsenal)
+            self._make_odds("partial_book", "Arsenal", +120),
+        ]
+        result = await self._call(odds, self._mock_reader())
+
+        arsenal_bucket = next(e for e in result["per_outcome"] if e["outcome"] == "Arsenal")
+
+        # partial_book wins best_retail (lowest implied_prob / longest price)
+        assert arsenal_bucket["best_retail"]["book"] == "partial_book"
+        # and its market_hold must be None because partial_book is dropped
+        # from per_book_market_holds (it is missing the Chelsea outcome).
+        assert arsenal_bucket["best_retail"]["market_hold"] is None
+
+        # Its divergence is negative, so it surfaces in retail_edges — same null hold.
+        edges = [
+            e
+            for e in result["retail_edges"]
+            if e["book"] == "partial_book" and e["outcome"] == "Arsenal"
+        ]
+        assert len(edges) == 1
+        assert edges[0]["market_hold"] is None
+
+        # Full-book retail rows still report a float hold (sanity: bet365 on Chelsea).
+        chelsea_bucket = next(e for e in result["per_outcome"] if e["outcome"] == "Chelsea")
+        assert isinstance(chelsea_bucket["best_retail"]["market_hold"], float)
+
+    @pytest.mark.asyncio
+    async def test_zscore_hand_checked_fixture(self) -> None:
+        # Sharp implied = 0.524 on Arsenal. Retail divergences chosen so median and
+        # stddev are hand-computable.
+        # Sharp prob for -110 = 0.5238095... We use 0.524 for sharp_implied_prob.
+        #
+        # Retail divergences (d_i = retail_prob - 0.524) for 4 books:
+        #   A: retail_prob = 0.524  → d = 0.000
+        #   B: retail_prob = 0.540  → d = 0.016
+        #   C: retail_prob = 0.508  → d = -0.016
+        #   D: retail_prob = 0.532  → d = 0.008
+        # median = (0.000 + 0.008) / 2 = 0.004
+        # pstdev = sqrt(mean((d - mean)^2)); mean = 0.002
+        # devs^2 = (-.002)^2 + (.014)^2 + (-.018)^2 + (.006)^2
+        #        = .000004 + .000196 + .000324 + .000036 = .000560
+        # var = .000560 / 4 = .000140; stddev = sqrt(.000140) ~ 0.011832
+        # z for book C (-0.016): (-0.016 - 0.004) / 0.011832 ~ -1.6903
+
+        # To produce those retail_probs exactly we pick American odds that yield them.
+        # implied_prob = 100 / (price + 100) for positive; -price / (-price + 100) for negative.
+        # Solve for each:
+        #   0.524 → price -110.08 (use -110 → 0.523809 ≈ 0.524)
+        #   0.540 → price -117.39 (use -117 → 0.539171)
+        #   0.508 → price -103.25 (use -103 → 0.507389)
+        #   0.532 → price -113.67 (use -114 → 0.532710)
+        # These are approximations; we compute expected values programmatically below.
+        sharp_prob = round(1 / (1 + 100 / 110), 6)  # 0.523810
+        sharp_result = self._make_sharp_result(
+            {
+                "Arsenal": {"bookmaker": "pinnacle", "price": -110, "implied_prob": sharp_prob},
+                "Chelsea": {"bookmaker": "pinnacle", "price": -110, "implied_prob": sharp_prob},
+            }
+        )
+
+        # Four retail books with hand-picked Arsenal prices.
+        retail_prices = {"book_a": -110, "book_b": -130, "book_c": -104, "book_d": -117}
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -110),
+            self._make_odds("pinnacle", "Chelsea", -110),
+        ]
+        for book, price in retail_prices.items():
+            odds.append(self._make_odds(book, "Arsenal", price))
+            # Symmetric Chelsea price so per-book market hold is sensible
+            odds.append(self._make_odds(book, "Chelsea", -110))
+
+        result = await self._call(odds, self._mock_reader(sharp_result=sharp_result))
+
+        arsenal_bucket = next(e for e in result["per_outcome"] if e["outcome"] == "Arsenal")
+        assert arsenal_bucket["n_books"] == 4
+
+        # Expected divergences
+        from odds_core.odds_math import calculate_implied_probability
+
+        expected_divs = {
+            book: round(round(calculate_implied_probability(price), 6) - sharp_prob, 6)
+            for book, price in retail_prices.items()
+        }
+        divs_sorted = sorted(expected_divs.values())
+        import statistics as pystats
+
+        expected_median = round(pystats.median(divs_sorted), 6)
+        expected_stddev = round(pystats.pstdev(divs_sorted), 6)
+
+        assert arsenal_bucket["median_divergence"] == expected_median
+        assert arsenal_bucket["dispersion_stddev"] == expected_stddev
+
+        # z_score on the best_retail row should match formula
+        best = arsenal_bucket["best_retail"]
+        expected_best_z = round((best["divergence"] - expected_median) / expected_stddev, 6)
+        assert best["z_score"] == expected_best_z
+
+        # Check that at least one edge row has the same z_score (the one for best_retail
+        # if its divergence is negative)
+        if best["divergence"] < 0:
+            matching = [
+                e
+                for e in result["retail_edges"]
+                if e["outcome"] == "Arsenal" and e["book"] == best["book"]
+            ]
+            assert len(matching) == 1
+            assert matching[0]["z_score"] == expected_best_z
+
+    @pytest.mark.asyncio
+    async def test_no_retail_books_when_all_books_are_sharp(self) -> None:
+        # Every book in the snapshot is in the configured sharp set, so there
+        # is no retail row on any outcome. per_outcome / retail_edges are both
+        # empty, and the top-level response is still well-formed.
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -110),
+            self._make_odds("pinnacle", "Chelsea", -110),
+            self._make_odds("betfair_exchange", "Arsenal", -108),
+            self._make_odds("betfair_exchange", "Chelsea", -112),
+        ]
+        result = await self._call(odds, self._mock_reader())
+
+        assert "error" not in result
+        assert result["sharp_bookmakers"] == ["pinnacle", "betfair_exchange"]
+        assert result["snapshot_time"] is not None
+        assert result["per_outcome"] == []
+        assert result["retail_edges"] == []

@@ -1,4 +1,4 @@
-"""Integration tests for Phase 2 MCP tools (match briefs + sharp/soft spread).
+"""Integration tests for Phase 2 MCP tools (match briefs + find_retail_edges).
 
 Tests call the actual MCP tool handler functions end-to-end, with
 async_session_maker patched to use the PGlite test database.
@@ -574,78 +574,322 @@ class TestGetSlateBriefs:
         assert "brief_text" not in latest
 
 
-class TestGetSharpSoftSpread:
-    """Tests for the get_sharp_soft_spread MCP tool."""
+class TestFindRetailEdges:
+    """Integration tests for the find_retail_edges MCP tool."""
 
     @pytest.mark.asyncio
     async def test_happy_path(self, patch_session_maker, epl_event_with_odds):
-        """Sharp vs soft spread is computed correctly with divergence values."""
-        from odds_mcp.server import get_sharp_soft_spread
+        """Response has the documented shape with sharp_bookmakers, per_outcome, retail_edges."""
+        from odds_mcp.server import find_retail_edges
 
         event, _ = epl_event_with_odds
 
-        result = await get_sharp_soft_spread(event_id=event.id, market="1x2")
+        result = await find_retail_edges(event_id=event.id, market="1x2")
 
         assert "error" not in result
         assert result["event"]["id"] == event.id
         assert result["snapshot_time"] is not None
-        spread = result["spread"]
-        assert spread is not None
+        assert result["sharp_bookmakers"] == ["pinnacle", "betfair_exchange"]
+        assert isinstance(result["per_outcome"], list)
+        assert isinstance(result["retail_edges"], list)
 
-        # Check Arsenal outcome
-        arsenal = spread["Arsenal"]
-        assert arsenal["sharp"]["bookmaker"] == "pinnacle"
-        assert arsenal["sharp"]["price"] == -120
-        assert arsenal["sharp"]["implied_prob"] is not None
-        # Source snapshot metadata
-        assert arsenal["sharp"]["snapshot_time"] is not None
-        assert arsenal["sharp"]["age_seconds"] is not None
+        outcomes = {e["outcome"] for e in result["per_outcome"]}
+        assert outcomes == {"Arsenal", "Draw", "Chelsea"}
 
-        # Check retail bookmakers present
-        soft_bms = {s["bookmaker"] for s in arsenal["soft"]}
-        assert "bet365" in soft_bms
-        assert "betway" in soft_bms
-
-        # Divergence should be computed
-        for soft_entry in arsenal["soft"]:
-            assert soft_entry["divergence"] is not None
+        arsenal = next(e for e in result["per_outcome"] if e["outcome"] == "Arsenal")
+        assert arsenal["sharp_implied_prob"] is not None
+        assert arsenal["sharp_snapshot_time"] is not None
+        assert arsenal["sharp_age_seconds"] is not None
+        assert arsenal["n_books"] == 2  # bet365 + betway
+        # Required keys on best/worst
+        for side in ("best_retail", "worst_retail"):
+            assert set(arsenal[side].keys()) == {
+                "book",
+                "price",
+                "implied_prob",
+                "divergence",
+                "z_score",
+                "market_hold",
+            }
 
     @pytest.mark.asyncio
     async def test_no_snapshot_graceful(self, patch_session_maker, epl_event_no_odds):
-        """Event with no snapshots returns None spread with message."""
-        from odds_mcp.server import get_sharp_soft_spread
+        """Event with no snapshots returns empty per_outcome/retail_edges with message."""
+        from odds_mcp.server import find_retail_edges
 
         event = epl_event_no_odds
 
-        result = await get_sharp_soft_spread(event_id=event.id, market="1x2")
+        result = await find_retail_edges(event_id=event.id, market="1x2")
 
         assert "error" not in result
-        assert result["spread"] is None
+        assert result["per_outcome"] == []
+        assert result["retail_edges"] == []
         assert "message" in result
 
     @pytest.mark.asyncio
     async def test_event_not_found(self, patch_session_maker):
-        """get_sharp_soft_spread returns error for nonexistent event."""
-        from odds_mcp.server import get_sharp_soft_spread
+        """find_retail_edges returns error for nonexistent event."""
+        from odds_mcp.server import find_retail_edges
 
-        result = await get_sharp_soft_spread(event_id="nonexistent_event", market="1x2")
+        result = await find_retail_edges(event_id="nonexistent_event", market="1x2")
         assert result == {"error": "Event 'nonexistent_event' not found"}
 
     @pytest.mark.asyncio
     async def test_per_outcome_sharp_fallback(self, patch_session_maker, partial_sharp_event):
         """Sharp prices fall through per-outcome via lookback reader."""
-        from odds_mcp.server import get_sharp_soft_spread
+        from odds_mcp.server import find_retail_edges
 
         event, _ = partial_sharp_event
 
-        result = await get_sharp_soft_spread(event_id=event.id, market="1x2")
+        result = await find_retail_edges(event_id=event.id, market="1x2")
 
-        spread = result["spread"]
-        # Tottenham from pinnacle (higher priority)
-        assert spread["Tottenham"]["sharp"]["bookmaker"] == "pinnacle"
-        # Draw/Everton fall through to betfair_exchange
-        assert spread["Draw"]["sharp"]["bookmaker"] == "betfair_exchange"
-        assert spread["Everton"]["sharp"]["bookmaker"] == "betfair_exchange"
+        by_outcome = {e["outcome"]: e for e in result["per_outcome"]}
+        # All outcomes should have a sharp reference; bet365 divergence is computable
+        for name in ("Tottenham", "Draw", "Everton"):
+            assert by_outcome[name]["sharp_implied_prob"] is not None
+            assert by_outcome[name]["best_retail"]["divergence"] is not None
+
+    @pytest.mark.asyncio
+    async def test_multi_line_totals_produces_entries_per_point(
+        self, patch_session_maker, pglite_async_session
+    ):
+        """Totals with multiple point values produce one per_outcome entry per (outcome, point)."""
+        from odds_mcp.server import find_retail_edges
+
+        commence_time = datetime(2026, 4, 25, 15, 0, tzinfo=UTC)
+        event = Event(
+            id="totals_test_001",
+            sport_key="baseball_mlb",
+            sport_title="MLB",
+            commence_time=commence_time,
+            home_team="Yankees",
+            away_team="Red Sox",
+            status=EventStatus.SCHEDULED,
+        )
+        pglite_async_session.add(event)
+
+        snapshot_time = commence_time - timedelta(hours=3)
+        raw_data = {
+            "bookmakers": [
+                {
+                    "key": "betfair_exchange",
+                    "title": "Betfair Exchange",
+                    "last_update": snapshot_time.isoformat(),
+                    "markets": [
+                        {
+                            "key": "totals",
+                            "outcomes": [
+                                {"name": "Over", "price": -110, "point": 8.5},
+                                {"name": "Under", "price": -110, "point": 8.5},
+                                {"name": "Over", "price": +120, "point": 9.5},
+                                {"name": "Under", "price": -140, "point": 9.5},
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "key": "bet365",
+                    "title": "Bet365",
+                    "last_update": snapshot_time.isoformat(),
+                    "markets": [
+                        {
+                            "key": "totals",
+                            "outcomes": [
+                                {"name": "Over", "price": -105, "point": 8.5},
+                                {"name": "Under", "price": -115, "point": 8.5},
+                                {"name": "Over", "price": +115, "point": 9.5},
+                                {"name": "Under", "price": -135, "point": 9.5},
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "key": "betway",
+                    "title": "Betway",
+                    "last_update": snapshot_time.isoformat(),
+                    "markets": [
+                        {
+                            "key": "totals",
+                            "outcomes": [
+                                {"name": "Over", "price": -115, "point": 8.5},
+                                {"name": "Under", "price": -105, "point": 8.5},
+                                {"name": "Over", "price": +110, "point": 9.5},
+                                {"name": "Under", "price": -130, "point": 9.5},
+                            ],
+                        }
+                    ],
+                },
+            ]
+        }
+        snapshot = OddsSnapshot(
+            event_id=event.id,
+            snapshot_time=snapshot_time,
+            raw_data=raw_data,
+            bookmaker_count=3,
+            fetch_tier="pregame",
+            hours_until_commence=3.0,
+        )
+        pglite_async_session.add(snapshot)
+        await pglite_async_session.commit()
+        await pglite_async_session.refresh(event)
+
+        result = await find_retail_edges(
+            event_id=event.id,
+            market="totals",
+            sharp_bookmakers=["betfair_exchange"],
+        )
+
+        keys = {(e["outcome"], e["point"]) for e in result["per_outcome"]}
+        assert keys == {
+            ("Over", 8.5),
+            ("Under", 8.5),
+            ("Over", 9.5),
+            ("Under", 9.5),
+        }
+
+        # Every per_outcome entry is a totals bucket — market_hold must be null
+        for entry in result["per_outcome"]:
+            if entry["best_retail"] is not None:
+                assert entry["best_retail"]["market_hold"] is None
+                assert entry["worst_retail"]["market_hold"] is None
+
+        # retail_edges entries include point
+        for edge in result["retail_edges"]:
+            assert edge["point"] in {8.5, 9.5}
+
+    @pytest.mark.asyncio
+    async def test_cry_whu_shaped_fixture_outlier_ranks_first(
+        self, patch_session_maker, pglite_async_session
+    ):
+        """CRY-WHU-shaped fixture: a high-hold midnite book long on one outcome
+        surfaces at rank 1 of retail_edges despite its overall hold.
+        """
+        from odds_mcp.server import find_retail_edges
+
+        commence_time = datetime(2026, 4, 22, 15, 0, tzinfo=UTC)
+        event = Event(
+            id="cry_whu_test_001",
+            sport_key="soccer_epl",
+            sport_title="EPL",
+            commence_time=commence_time,
+            home_team="Crystal Palace",
+            away_team="West Ham",
+            status=EventStatus.SCHEDULED,
+        )
+        pglite_async_session.add(event)
+
+        snapshot_time = commence_time - timedelta(hours=6)
+
+        # Sharp (Betfair Exchange) West Ham +198 (33.6%)
+        # Retail books cluster around sharp with small positive divergence (SHORTER).
+        # midnite is *longer* on West Ham at +230 (30.3%, divergence ~-3.3%),
+        # with an asymmetrically-shorter Crystal Palace and Draw to load hold.
+        retail_entries = [
+            ("bet365", -115, 275, 175),
+            ("betway", -110, 270, 170),
+            ("betfred", -112, 272, 172),
+            ("betvictor", -114, 273, 173),
+            ("bwin", -113, 271, 174),
+            ("paddypower", -115, 270, 170),
+            ("skybet", -117, 275, 175),
+            ("williamhill", -115, 272, 171),
+            ("10bet", -110, 265, 165),
+            ("betmgm", -115, 273, 172),
+            ("888sport", -114, 275, 173),
+            ("betuk", -112, 270, 172),
+            ("spreadex", -114, 270, 170),
+            ("betano", -115, 272, 171),
+            ("unibet_uk", -113, 273, 174),
+            ("allbritishcasino", -112, 271, 173),
+            ("7bet", -115, 270, 170),
+        ]
+        bookmakers = [
+            {
+                "key": "betfair_exchange",
+                "title": "Betfair Exchange",
+                "last_update": snapshot_time.isoformat(),
+                "markets": [
+                    {
+                        "key": "1x2",
+                        "outcomes": [
+                            {"name": "Crystal Palace", "price": -105},
+                            {"name": "Draw", "price": 280},
+                            {"name": "West Ham", "price": 198},
+                        ],
+                    }
+                ],
+            }
+        ]
+        for key, cp_price, draw_price, wh_price in retail_entries:
+            bookmakers.append(
+                {
+                    "key": key,
+                    "title": key.title(),
+                    "last_update": snapshot_time.isoformat(),
+                    "markets": [
+                        {
+                            "key": "1x2",
+                            "outcomes": [
+                                {"name": "Crystal Palace", "price": cp_price},
+                                {"name": "Draw", "price": draw_price},
+                                {"name": "West Ham", "price": wh_price},
+                            ],
+                        }
+                    ],
+                }
+            )
+
+        # midnite: shorter on CP and Draw (loads hold), longer on West Ham at +230.
+        bookmakers.append(
+            {
+                "key": "midnite",
+                "title": "Midnite",
+                "last_update": snapshot_time.isoformat(),
+                "markets": [
+                    {
+                        "key": "1x2",
+                        "outcomes": [
+                            {"name": "Crystal Palace", "price": -140},
+                            {"name": "Draw", "price": 240},
+                            {"name": "West Ham", "price": 230},
+                        ],
+                    }
+                ],
+            }
+        )
+
+        snapshot = OddsSnapshot(
+            event_id=event.id,
+            snapshot_time=snapshot_time,
+            raw_data={"bookmakers": bookmakers},
+            bookmaker_count=len(bookmakers),
+            fetch_tier="pregame",
+            hours_until_commence=6.0,
+        )
+        pglite_async_session.add(snapshot)
+        await pglite_async_session.commit()
+        await pglite_async_session.refresh(event)
+
+        result = await find_retail_edges(event_id=event.id, market="1x2")
+
+        edges = result["retail_edges"]
+        assert len(edges) >= 1
+        # midnite West Ham is at rank 1
+        assert edges[0]["book"] == "midnite"
+        assert edges[0]["outcome"] == "West Ham"
+        assert edges[0]["divergence"] < 0
+        # midnite should have a higher (asymmetric) hold than the retail average
+        wh_bucket = next(e for e in result["per_outcome"] if e["outcome"] == "West Ham")
+        assert wh_bucket["n_books"] == 18  # 17 retail + midnite
+        assert wh_bucket["dispersion_stddev"] is not None
+        assert wh_bucket["dispersion_stddev"] > 0
+        # z_score on the rank-1 edge should be computed and negative
+        assert edges[0]["z_score"] is not None
+        assert edges[0]["z_score"] < 0
+        # midnite market_hold should be populated (1x2) and visibly larger than
+        # the retail pack's typical 4-6% hold — fixture prices put it around 18%.
+        assert edges[0]["market_hold"] is not None
+        assert edges[0]["market_hold"] > 0.12
 
 
 def _make_snapshot_raw_data(bookmakers: list[dict[str, object]], snapshot_time: datetime) -> dict:
@@ -839,55 +1083,52 @@ class TestGetSharpPrices:
         assert result.prices["Brighton"]["price"] == -155
 
 
-class TestSharpLookbackSpread:
-    """Tests for get_sharp_soft_spread using sharp lookback."""
+class TestFindRetailEdgesSharpLookback:
+    """Tests for find_retail_edges using sharp lookback resolution."""
 
     @pytest.mark.asyncio
     async def test_lookback_finds_sharp_from_older_snapshot(
         self, patch_session_maker, sharp_lookback_event
     ):
-        """get_sharp_soft_spread resolves sharp from older snapshot via lookback."""
-        from odds_mcp.server import get_sharp_soft_spread
+        """find_retail_edges resolves sharp from older snapshot via lookback."""
+        from odds_mcp.server import find_retail_edges
 
-        event, snap_old, snap_new = sharp_lookback_event
+        event, _snap_old, _snap_new = sharp_lookback_event
 
-        result = await get_sharp_soft_spread(
+        result = await find_retail_edges(
             event_id=event.id,
             market="1x2",
             sharp_lookback_hours=4.0,
         )
 
         assert "error" not in result
-        spread = result["spread"]
-        assert spread is not None
 
-        # Sharp price should come from the older snapshot (pinnacle)
-        brighton = spread["Brighton"]
-        assert brighton["sharp"]["bookmaker"] == "pinnacle"
-        assert brighton["sharp"]["price"] == -140
-        assert brighton["sharp"]["snapshot_time"] is not None
-
-        # Retail prices should come from the latest snapshot (bet365)
-        assert len(brighton["soft"]) >= 1
-        bet365_soft = [s for s in brighton["soft"] if s["bookmaker"] == "bet365"]
-        assert bet365_soft[0]["price"] == -155
+        # Sharp price for Brighton should come from the older snapshot (pinnacle)
+        brighton = next(e for e in result["per_outcome"] if e["outcome"] == "Brighton")
+        assert brighton["sharp_implied_prob"] is not None
+        assert brighton["sharp_snapshot_time"] is not None
+        # Divergence is computed off the lookback sharp price
+        assert brighton["best_retail"]["divergence"] is not None
 
     @pytest.mark.asyncio
     async def test_no_sharp_returns_null_sharp(self, patch_session_maker, sharp_lookback_event):
-        """When lookback is too short to find sharp, sharp fields are null."""
-        from odds_mcp.server import get_sharp_soft_spread
+        """When lookback is too short to find sharp, sharp fields are null and
+        no entries appear in retail_edges for those outcomes."""
+        from odds_mcp.server import find_retail_edges
 
         event, _snap_old, _snap_new = sharp_lookback_event
 
         # Very short lookback — only latest snapshot in window, no pinnacle
-        result = await get_sharp_soft_spread(
+        result = await find_retail_edges(
             event_id=event.id,
             market="1x2",
             sharp_lookback_hours=0.01,
         )
 
-        spread = result["spread"]
-        assert spread is not None
-        for outcome_data in spread.values():
-            assert outcome_data["sharp"]["bookmaker"] is None
-            assert outcome_data["sharp"]["snapshot_time"] is None
+        assert result["retail_edges"] == []
+        for entry in result["per_outcome"]:
+            assert entry["sharp_implied_prob"] is None
+            assert entry["sharp_snapshot_time"] is None
+            # best_retail/worst_retail still populated but with null divergence/z_score
+            assert entry["best_retail"]["divergence"] is None
+            assert entry["best_retail"]["z_score"] is None
