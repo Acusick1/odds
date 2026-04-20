@@ -10,6 +10,7 @@ from odds_core.models import Event, EventStatus
 from odds_lambda.jobs.fetch_oddsportal import LeagueSpec
 from odds_lambda.jobs.fetch_oddsportal_results import (
     DEFAULT_SPORT_KEY,
+    PendingEvent,
     _db_market_for_spec,
     _market_key_for_spec,
     _match_record_to_event,
@@ -35,6 +36,21 @@ def _make_event(
         home_team=home_team,
         away_team=away_team,
         status=status,
+    )
+
+
+def _make_pending(
+    *,
+    event_id: str = "test_event_1",
+    home_team: str = "Arsenal",
+    away_team: str = "Chelsea",
+    commence_time: datetime | None = None,
+) -> PendingEvent:
+    return PendingEvent(
+        id=event_id,
+        home_team=home_team,
+        away_team=away_team,
+        commence_time=commence_time or datetime(2026, 3, 1, 15, 0, 0, tzinfo=UTC),
     )
 
 
@@ -99,24 +115,24 @@ class TestParseScore:
 
 class TestMatchRecordToEvent:
     def test_matches_by_team_and_date(self) -> None:
-        event = _make_event()
+        event = _make_pending()
         record = _make_record()
         assert _match_record_to_event(record, [event]) is event
 
     def test_no_match_different_teams(self) -> None:
-        event = _make_event(home_team="Liverpool", away_team="Everton")
+        event = _make_pending(home_team="Liverpool", away_team="Everton")
         record = _make_record()
         assert _match_record_to_event(record, [event]) is None
 
     def test_no_match_outside_24h_window(self) -> None:
-        event = _make_event(
+        event = _make_pending(
             commence_time=datetime(2026, 3, 5, 15, 0, 0, tzinfo=UTC),
         )
         record = _make_record(match_date="2026-03-01 15:00:00 UTC")
         assert _match_record_to_event(record, [event]) is None
 
     def test_matches_within_24h_window(self) -> None:
-        event = _make_event(
+        event = _make_pending(
             commence_time=datetime(2026, 3, 1, 20, 0, 0, tzinfo=UTC),
         )
         record = _make_record(match_date="2026-03-01 15:00:00 UTC")
@@ -127,12 +143,12 @@ class TestMatchRecordToEvent:
         assert _match_record_to_event(record, []) is None
 
     def test_missing_team_in_record(self) -> None:
-        event = _make_event()
+        event = _make_pending()
         record = {"home_team": "", "away_team": "Chelsea", "match_date": "2026-03-01 15:00:00 UTC"}
         assert _match_record_to_event(record, [event]) is None
 
     def test_missing_match_date(self) -> None:
-        event = _make_event()
+        event = _make_pending()
         record = {"home_team": "Arsenal", "away_team": "Chelsea", "match_date": ""}
         assert _match_record_to_event(record, [event]) is None
 
@@ -385,3 +401,103 @@ class TestSportResolution:
         stats = await process_results(raw_matches=[], sport="unknown_sport")
         assert stats.matches_scraped == 0
         assert stats.events_updated == 0
+
+
+class TestMainSelfSchedules:
+    """Self-schedule must run even when the results phase raises."""
+
+    @pytest.mark.asyncio
+    async def test_self_schedules_when_process_results_raises(self) -> None:
+        from odds_lambda.jobs import fetch_oddsportal_results
+        from odds_lambda.scheduling.jobs import JobContext
+
+        scheduled_calls: list[dict] = []
+
+        async def mock_schedule_next(
+            job_name: str,
+            next_time: datetime,
+            payload: dict[str, object] | None = None,
+        ) -> None:
+            scheduled_calls.append(
+                {"job_name": job_name, "next_time": next_time, "payload": payload}
+            )
+
+        mock_backend = AsyncMock()
+        mock_backend.schedule_next_execution = mock_schedule_next
+        mock_backend.get_backend_name = lambda: "mock_backend"
+
+        async def failing_process_results(**_kwargs) -> None:
+            raise RuntimeError("simulated per-record failure")
+
+        with (
+            patch.object(
+                fetch_oddsportal_results, "process_results", side_effect=failing_process_results
+            ),
+            patch(
+                "odds_lambda.scheduling.backends.get_scheduler_backend",
+                return_value=mock_backend,
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="simulated per-record failure"):
+                await fetch_oddsportal_results.main(JobContext(sport="soccer_epl"))
+
+        assert len(scheduled_calls) == 1, "self-schedule must run even when process_results raises"
+        assert scheduled_calls[0]["job_name"] == "fetch-oddsportal-results-epl"
+        assert scheduled_calls[0]["payload"] == {"sport": "soccer_epl"}
+
+    @pytest.mark.asyncio
+    async def test_self_schedules_when_single_record_update_fails(self, test_session) -> None:
+        """A forced error in one record's update path should not block self-scheduling."""
+        from odds_lambda.jobs import fetch_oddsportal_results
+        from odds_lambda.scheduling.jobs import JobContext
+
+        event = _make_event()
+        test_session.add(event)
+        await test_session.commit()
+
+        record = _make_record()
+
+        mock_session_maker = AsyncMock()
+        mock_session_maker.__aenter__ = AsyncMock(return_value=test_session)
+        mock_session_maker.__aexit__ = AsyncMock(return_value=None)
+
+        scheduled_calls: list[dict] = []
+
+        async def mock_schedule_next(
+            job_name: str,
+            next_time: datetime,
+            payload: dict[str, object] | None = None,
+        ) -> None:
+            scheduled_calls.append(
+                {"job_name": job_name, "next_time": next_time, "payload": payload}
+            )
+
+        mock_backend = AsyncMock()
+        mock_backend.schedule_next_execution = mock_schedule_next
+        mock_backend.get_backend_name = lambda: "mock_backend"
+
+        async def failing_update_event_status(*_args, **_kwargs):
+            raise RuntimeError("simulated update failure")
+
+        with (
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+                return_value=mock_session_maker,
+            ),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal_results.run_harvester_historic",
+                AsyncMock(return_value=[record]),
+            ),
+            patch(
+                "odds_lambda.storage.writers.OddsWriter.update_event_status",
+                side_effect=failing_update_event_status,
+            ),
+            patch(
+                "odds_lambda.scheduling.backends.get_scheduler_backend",
+                return_value=mock_backend,
+            ),
+        ):
+            await fetch_oddsportal_results.main(JobContext(sport="soccer_epl"))
+
+        assert len(scheduled_calls) == 1, "self-schedule must run after per-record failure"
+        assert scheduled_calls[0]["job_name"] == "fetch-oddsportal-results-epl"

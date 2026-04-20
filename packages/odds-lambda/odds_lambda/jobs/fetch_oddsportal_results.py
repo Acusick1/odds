@@ -74,6 +74,20 @@ class ResultsStats:
     errors: list[str] = field(default_factory=list)
 
 
+@dataclass
+class PendingEvent:
+    """Plain-data snapshot of a pending event, decoupled from any DB session.
+
+    The results job reads pending events into these dataclasses so the DB
+    session can be closed before the long-running scrape begins.
+    """
+
+    id: str
+    home_team: str
+    away_team: str
+    commence_time: datetime | None
+
+
 async def run_harvester_historic(spec: LeagueSpec) -> list[dict[str, Any]]:
     """Scrape historical results for the given league via ``run_scraper_with_retry``."""
     from oddsharvester.utils.command_enum import CommandEnum
@@ -92,9 +106,13 @@ async def run_harvester_historic(spec: LeagueSpec) -> list[dict[str, Any]]:
 
 async def get_pending_events(
     session: AsyncSession, sport_key: str = DEFAULT_SPORT_KEY
-) -> list[Event]:
-    """Get SCHEDULED or LIVE events with commence_time in the past for the given sport."""
-    query = select(Event).where(
+) -> list[PendingEvent]:
+    """Get SCHEDULED or LIVE events with commence_time in the past for the given sport.
+
+    Returns plain ``PendingEvent`` dataclasses so callers can use the data after
+    the session is closed.
+    """
+    query = select(Event.id, Event.home_team, Event.away_team, Event.commence_time).where(
         and_(
             Event.sport_key == sport_key,
             Event.status.in_([EventStatus.SCHEDULED, EventStatus.LIVE]),
@@ -102,7 +120,15 @@ async def get_pending_events(
         )
     )
     result = await session.execute(query)
-    return list(result.scalars().all())
+    return [
+        PendingEvent(
+            id=row.id,
+            home_team=row.home_team,
+            away_team=row.away_team,
+            commence_time=row.commence_time,
+        )
+        for row in result.all()
+    ]
 
 
 def _parse_score(record: dict[str, Any]) -> tuple[int, int] | None:
@@ -116,8 +142,8 @@ def _parse_score(record: dict[str, Any]) -> tuple[int, int] | None:
 
 def _match_record_to_event(
     record: dict[str, Any],
-    pending_events: list[Event],
-) -> Event | None:
+    pending_events: list[PendingEvent],
+) -> PendingEvent | None:
     """Match a scraped record to a pending event by team name and date window."""
     home_team = record.get("home_team", "").strip()
     away_team = record.get("away_team", "").strip()
@@ -149,6 +175,14 @@ async def process_results(
 ) -> ResultsStats:
     """Process scraped results: update scores and store closing snapshots.
 
+    The job runs in three phases with distinct session scopes so no DB session
+    is held across the long-running OddsHarvester scrape (Neon closes idle
+    connections, which would crash the write phase):
+
+    1. Read phase — open a session, load pending events (detached), close session.
+    2. Scrape phase — run ``run_harvester_historic`` with no open session.
+    3. Write phase — open a fresh session, upsert scores and snapshots, commit.
+
     Args:
         raw_matches: Pre-scraped data (skips harvester call). For testing.
         sport: Sport key to filter (e.g. "soccer_epl"). Defaults to DEFAULT_SPORT_KEY.
@@ -168,26 +202,31 @@ async def process_results(
     market_key = _market_key_for_spec(spec)
     db_market = _db_market_for_spec(spec)
 
+    # Phase 1: read pending events, then release the session
     async with async_session_maker() as session:
         pending_events = await get_pending_events(session, sport_key=sport_key)
 
-        if not pending_events:
-            logger.info("no_pending_events", sport_key=sport_key)
-            return stats
+    if not pending_events:
+        logger.info("no_pending_events", sport_key=sport_key)
+        return stats
 
-        logger.info("pending_events_found", count=len(pending_events))
+    logger.info("pending_events_found", count=len(pending_events))
 
-        if raw_matches is None:
-            raw_matches = await run_harvester_historic(spec)
+    # Phase 2: scrape with no open session
+    if raw_matches is None:
+        raw_matches = await run_harvester_historic(spec)
 
-        stats.matches_scraped = len(raw_matches)
+    stats.matches_scraped = len(raw_matches)
 
-        if not raw_matches:
-            logger.warning("no_matches_scraped")
-            return stats
+    if not raw_matches:
+        logger.warning("no_matches_scraped")
+        return stats
 
-        logger.info("matches_scraped", count=len(raw_matches))
+    logger.info("matches_scraped", count=len(raw_matches))
 
+    # Phase 3: open a fresh session and write results, committing per-record so
+    # a single failure cannot invalidate earlier writes.
+    async with async_session_maker() as session:
         writer = OddsWriter(session)
 
         for record in raw_matches:
@@ -208,56 +247,58 @@ async def process_results(
 
                 home_score, away_score = scores
 
-                # Update event status
                 await writer.update_event_status(
                     event_id=event.id,
                     status=EventStatus.FINAL,
                     home_score=home_score,
                     away_score=away_score,
                 )
-                stats.events_updated += 1
 
-                # Remove from pending list so it can't match again
-                pending_events.remove(event)
-
-                # Store closing odds snapshot
+                snapshot_stored = False
                 market_data = record.get(market_key, [])
-                if not market_data:
-                    continue
+                if market_data:
+                    match_dt = parse_match_date(record["match_date"])
+                    raw_data = build_raw_data(
+                        market_data,
+                        event.home_team,
+                        event.away_team,
+                        use_opening=False,
+                        match_dt=match_dt,
+                        num_outcomes=spec.num_outcomes,
+                        db_market=db_market,
+                    )
+                    if raw_data is not None:
+                        snapshot_time_str = raw_data.pop("_snapshot_time", None)
+                        if snapshot_time_str:
+                            snapshot_time = datetime.fromisoformat(
+                                snapshot_time_str.replace("Z", "+00:00")
+                            )
+                            snapshot, _ = await writer.store_odds_snapshot(
+                                event_id=event.id,
+                                raw_data=raw_data,
+                                snapshot_time=snapshot_time,
+                            )
+                            snapshot.api_request_id = API_REQUEST_ID
+                            snapshot_stored = True
 
-                match_dt = parse_match_date(record["match_date"])
-                raw_data = build_raw_data(
-                    market_data,
-                    event.home_team,
-                    event.away_team,
-                    use_opening=False,
-                    match_dt=match_dt,
-                    num_outcomes=spec.num_outcomes,
-                    db_market=db_market,
-                )
-                if raw_data is None:
-                    continue
+                await session.commit()
 
-                snapshot_time_str = raw_data.pop("_snapshot_time", None)
-                if not snapshot_time_str:
-                    continue
-
-                snapshot_time = datetime.fromisoformat(snapshot_time_str.replace("Z", "+00:00"))
-
-                snapshot, _ = await writer.store_odds_snapshot(
-                    event_id=event.id,
-                    raw_data=raw_data,
-                    snapshot_time=snapshot_time,
-                )
-                snapshot.api_request_id = API_REQUEST_ID
-                stats.snapshots_stored += 1
+                # Only advance batch state after the commit succeeds so rolled-back
+                # records don't inflate success counters or prematurely drop events
+                # from the in-flight dedupe list.
+                stats.events_updated += 1
+                if snapshot_stored:
+                    stats.snapshots_stored += 1
+                pending_events.remove(event)
 
             except Exception as e:
                 msg = f"{record.get('home_team', '?')} vs {record.get('away_team', '?')}: {e}"
                 stats.errors.append(msg)
                 logger.error("result_processing_failed", error=msg, exc_info=True)
-
-        await session.commit()
+                try:
+                    await session.rollback()
+                except Exception:
+                    logger.warning("session_rollback_failed", exc_info=True)
 
     logger.info(
         "results_collection_complete",
@@ -272,43 +313,59 @@ async def process_results(
 
 
 async def main(ctx: JobContext) -> None:
-    """Main job entry point — runs results collection, then self-schedules for tomorrow."""
+    """Main job entry point — runs results collection, then self-schedules for tomorrow.
+
+    Self-scheduling runs in a ``finally`` block so a failure inside
+    ``process_results`` cannot leave the EventBridge rule disabled.
+    """
     from odds_core.alerts import job_alert_context
     from odds_core.config import get_settings
 
     settings = get_settings()
     sport = ctx.sport
-
-    async with job_alert_context(make_compound_job_name("fetch-oddsportal-results", sport)):
-        logger.info("fetch_oddsportal_results_started", sport=sport)
-        await process_results(sport=sport)
-
-    # Self-schedule: run again tomorrow at 08:00 UTC
-    now = datetime.now(UTC)
-    tomorrow_8am = (now + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
-
-    schedule_payload: dict[str, object] | None = None
-    if sport:
-        schedule_payload = {"sport": sport}
+    schedule_job_name = make_compound_job_name("fetch-oddsportal-results", sport)
 
     try:
-        from odds_lambda.scheduling.backends import get_scheduler_backend
+        async with job_alert_context(schedule_job_name):
+            logger.info("fetch_oddsportal_results_started", sport=sport)
+            await process_results(sport=sport)
+    finally:
+        # Self-schedule: run again tomorrow at 08:00 UTC, regardless of outcome.
+        now = datetime.now(UTC)
+        tomorrow_8am = (now + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
 
-        backend = get_scheduler_backend(dry_run=settings.scheduler.dry_run)
-        schedule_job_name = make_compound_job_name("fetch-oddsportal-results", sport)
-        await backend.schedule_next_execution(
-            job_name=schedule_job_name,
-            next_time=tomorrow_8am,
-            payload=schedule_payload,
-        )
-        logger.info(
-            "fetch_oddsportal_results_next_scheduled",
-            next_time=tomorrow_8am.isoformat(),
-            backend=backend.get_backend_name(),
-        )
-    except Exception as e:
-        logger.error("fetch_oddsportal_results_scheduling_failed", error=str(e), exc_info=True)
-        raise
+        schedule_payload: dict[str, object] | None = None
+        if sport:
+            schedule_payload = {"sport": sport}
+
+        try:
+            from odds_lambda.scheduling.backends import get_scheduler_backend
+
+            backend = get_scheduler_backend(dry_run=settings.scheduler.dry_run)
+            await backend.schedule_next_execution(
+                job_name=schedule_job_name,
+                next_time=tomorrow_8am,
+                payload=schedule_payload,
+            )
+            logger.info(
+                "fetch_oddsportal_results_next_scheduled",
+                next_time=tomorrow_8am.isoformat(),
+                backend=backend.get_backend_name(),
+            )
+        except Exception as e:
+            logger.error("fetch_oddsportal_results_scheduling_failed", error=str(e), exc_info=True)
+            # Escalate to Discord so the failure is visible. Alert dispatch is
+            # best-effort — any error here must not mask an upstream exception
+            # propagating through this ``finally`` block.
+            try:
+                from odds_core.alerts import send_critical
+
+                await send_critical(
+                    f"🚨 fetch-oddsportal-results self-schedule failed "
+                    f"(job={schedule_job_name}): {type(e).__name__}: {e}"
+                )
+            except Exception:
+                logger.warning("fetch_oddsportal_results_scheduling_alert_failed", exc_info=True)
 
 
 if __name__ == "__main__":
