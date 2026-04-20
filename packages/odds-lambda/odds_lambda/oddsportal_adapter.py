@@ -27,9 +27,13 @@ logger = structlog.get_logger()
 # in the past at scrape time. Guards against a known OddsPortal bug where the
 # H2H page's React event header occasionally hydrates with the most recent
 # PAST meeting between the two teams (stale `startDate` + swapped home/away),
-# producing frankenstein records — live odds pinned to a historical date. An
-# upcoming-scrape should never surface a genuinely finished game.
-STALE_MATCH_REJECT_THRESHOLD = timedelta(hours=2)
+# producing frankenstein records — live odds pinned to a historical date.
+#
+# The threshold is intentionally wide (12h): observed frankenstein match_dates
+# are days-to-months in the past, so any value >3-4h catches them. We keep
+# extra margin for legitimate in-play snapshots on long MLB games (extras can
+# push first-pitch + 4h+) so a game still in progress is never dropped.
+STALE_MATCH_REJECT_THRESHOLD = timedelta(hours=12)
 
 # Regex: Betfair format is "FRAC_REPEAT(LIQUIDITY)" e.g. "99/10099/100(300)"
 # The fraction is repeated (concatenated), followed by optional (liquidity).
