@@ -21,6 +21,9 @@ logger = structlog.get_logger()
 class OddsWriter:
     """Handles all write operations to the database."""
 
+    LIVE_EVENT_ID_PREFIX = "op_live_"
+    LIVE_EVENT_STALE_THRESHOLD = timedelta(hours=1)
+
     def __init__(self, session: AsyncSession):
         """
         Initialize writer with database session.
@@ -72,9 +75,6 @@ class OddsWriter:
             self.session.add(event)
             logger.info("event_created", event_id=event.id)
             return event
-
-    LIVE_EVENT_ID_PREFIX = "op_live_"
-    LIVE_EVENT_STALE_THRESHOLD = timedelta(hours=1)
 
     @staticmethod
     def _build_event_id(home_team: str, away_team: str, match_date: datetime) -> str:
