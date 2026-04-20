@@ -254,9 +254,6 @@ async def process_results(
                     away_score=away_score,
                 )
 
-                # Remove from pending list so it can't match again
-                pending_events.remove(event)
-
                 snapshot_stored = False
                 market_data = record.get(market_key, [])
                 if market_data:
@@ -286,11 +283,13 @@ async def process_results(
 
                 await session.commit()
 
-                # Only advance stats after the commit succeeds so rolled-back
-                # records don't inflate success counters.
+                # Only advance batch state after the commit succeeds so rolled-back
+                # records don't inflate success counters or prematurely drop events
+                # from the in-flight dedupe list.
                 stats.events_updated += 1
                 if snapshot_stored:
                     stats.snapshots_stored += 1
+                pending_events.remove(event)
 
             except Exception as e:
                 msg = f"{record.get('home_team', '?')} vs {record.get('away_team', '?')}: {e}"
