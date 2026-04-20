@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from odds_core.models import Event, EventStatus
@@ -165,7 +165,7 @@ class TestFindOrCreateEventOnWriter:
         event_id, created = await writer.find_or_create_event(
             home_team="Arsenal",
             away_team="Chelsea",
-            match_date=datetime(2026, 4, 15, 15, 0, tzinfo=UTC),
+            match_date=datetime(2030, 4, 15, 15, 0, tzinfo=UTC),
             sport_key="soccer_epl",
             sport_title="EPL",
         )
@@ -210,7 +210,7 @@ class TestFindOrCreateEventOnWriter:
         from odds_lambda.storage.writers import OddsWriter
 
         writer = OddsWriter(test_session)
-        match_date = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
+        match_date = datetime(2030, 4, 15, 15, 0, tzinfo=UTC)
 
         event_id_1, created_1 = await writer.find_or_create_event(
             home_team="Arsenal",
@@ -334,3 +334,95 @@ class TestFindOrCreateEventMatchWindow:
         assert created_1 is True
         assert created_2 is False
         assert event_id_1 == event_id_2
+
+
+class TestFindOrCreateEventStaleLiveGuardrail:
+    """Defense-in-depth: refuse to mint op_live_* events with past commence times."""
+
+    @pytest.mark.asyncio
+    async def test_accepts_live_event_within_window(self, test_session) -> None:
+        from odds_lambda.storage.writers import OddsWriter
+
+        writer = OddsWriter(test_session)
+        match_date = datetime.now(UTC) + timedelta(minutes=30)
+
+        event_id, created = await writer.find_or_create_event(
+            home_team="Arsenal",
+            away_team="Chelsea",
+            match_date=match_date,
+            sport_key="soccer_epl",
+            sport_title="EPL",
+        )
+
+        assert created is True
+        assert event_id.startswith("op_live_")
+
+    @pytest.mark.asyncio
+    async def test_rejects_stale_live_event(self, test_session) -> None:
+        from odds_lambda.storage.writers import OddsWriter
+
+        writer = OddsWriter(test_session)
+        match_date = datetime.now(UTC) - timedelta(hours=2)
+
+        with pytest.raises(ValueError, match="stale live-scrape event"):
+            await writer.find_or_create_event(
+                home_team="Arsenal",
+                away_team="Chelsea",
+                match_date=match_date,
+                sport_key="soccer_epl",
+                sport_title="EPL",
+            )
+
+    @pytest.mark.asyncio
+    async def test_historical_ingestion_via_upsert_event_unaffected(self, test_session) -> None:
+        """Historical backfill callers go through upsert_event with non-live ids."""
+        from odds_lambda.storage.writers import OddsWriter
+
+        writer = OddsWriter(test_session)
+        match_date = datetime(2020, 1, 1, 15, 0, tzinfo=UTC)
+
+        event = Event(
+            id="fduk_2020_01_01_arsenal_chelsea",
+            sport_key="soccer_epl",
+            sport_title="EPL",
+            commence_time=match_date,
+            home_team="Arsenal",
+            away_team="Chelsea",
+            status=EventStatus.FINAL,
+        )
+
+        result = await writer.upsert_event(event)
+
+        assert result.id == "fduk_2020_01_01_arsenal_chelsea"
+        assert result.commence_time == match_date
+
+    @pytest.mark.asyncio
+    async def test_finds_existing_stale_live_event_without_creating(self, test_session) -> None:
+        """Guardrail only fires on create — looking up existing stale events still works."""
+        from odds_lambda.storage.writers import OddsWriter
+
+        match_date = datetime.now(UTC) - timedelta(hours=5)
+        event = Event(
+            id="op_live_ARS_CHE_2020-01-01T1500",
+            sport_key="soccer_epl",
+            sport_title="EPL",
+            commence_time=match_date,
+            home_team="Arsenal",
+            away_team="Chelsea",
+            status=EventStatus.SCHEDULED,
+        )
+        test_session.add(event)
+        await test_session.flush()
+
+        writer = OddsWriter(test_session)
+
+        event_id, created = await writer.find_or_create_event(
+            home_team="Arsenal",
+            away_team="Chelsea",
+            match_date=match_date,
+            sport_key="soccer_epl",
+            sport_title="EPL",
+        )
+
+        assert created is False
+        assert event_id == "op_live_ARS_CHE_2020-01-01T1500"
