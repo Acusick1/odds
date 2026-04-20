@@ -253,11 +253,11 @@ async def process_results(
                     home_score=home_score,
                     away_score=away_score,
                 )
-                stats.events_updated += 1
 
                 # Remove from pending list so it can't match again
                 pending_events.remove(event)
 
+                snapshot_stored = False
                 market_data = record.get(market_key, [])
                 if market_data:
                     match_dt = parse_match_date(record["match_date"])
@@ -282,9 +282,15 @@ async def process_results(
                                 snapshot_time=snapshot_time,
                             )
                             snapshot.api_request_id = API_REQUEST_ID
-                            stats.snapshots_stored += 1
+                            snapshot_stored = True
 
                 await session.commit()
+
+                # Only advance stats after the commit succeeds so rolled-back
+                # records don't inflate success counters.
+                stats.events_updated += 1
+                if snapshot_stored:
+                    stats.snapshots_stored += 1
 
             except Exception as e:
                 msg = f"{record.get('home_team', '?')} vs {record.get('away_team', '?')}: {e}"
@@ -349,6 +355,18 @@ async def main(ctx: JobContext) -> None:
             )
         except Exception as e:
             logger.error("fetch_oddsportal_results_scheduling_failed", error=str(e), exc_info=True)
+            # Escalate to Discord so the failure is visible. Alert dispatch is
+            # best-effort — any error here must not mask an upstream exception
+            # propagating through this ``finally`` block.
+            try:
+                from odds_core.alerts import send_critical
+
+                await send_critical(
+                    f"🚨 fetch-oddsportal-results self-schedule failed "
+                    f"(job={schedule_job_name}): {type(e).__name__}: {e}"
+                )
+            except Exception:
+                logger.warning("fetch_oddsportal_results_scheduling_alert_failed", exc_info=True)
 
 
 if __name__ == "__main__":
