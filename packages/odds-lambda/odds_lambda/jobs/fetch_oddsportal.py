@@ -30,7 +30,7 @@ from odds_lambda.oddsportal_adapter import (
     MatchOdds,
     convert_upcoming_matches,
 )
-from odds_lambda.oddsportal_common import hours_to_tier, run_scraper_with_retry
+from odds_lambda.oddsportal_common import run_scraper_with_retry
 from odds_lambda.scheduling.helpers import apply_overnight_skip, get_next_kickoff, self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
@@ -195,9 +195,6 @@ async def ingest_league(
                 )
 
                 snapshot.api_request_id = api_request_id
-                hours_before = (match.match_date - match.scraped_date).total_seconds() / 3600
-                snapshot.hours_until_commence = max(0.0, hours_before)
-                snapshot.fetch_tier = hours_to_tier(hours_before)
                 stats.snapshots_stored += 1
 
             except Exception as e:

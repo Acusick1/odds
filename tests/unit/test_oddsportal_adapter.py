@@ -306,6 +306,65 @@ class TestConvertUpcomingMatches:
         matches = [{"home_team": "Leeds", "away_team": "", "match_date": ""}]
         assert convert_upcoming_matches(matches, "1x2") == []
 
+    def test_rejects_stale_match(self) -> None:
+        matches = [
+            {
+                "scraped_date": "2026-04-19 19:00:00 UTC",
+                "match_date": "2025-07-06 17:37:00 UTC",
+                "match_link": "https://www.oddsportal.com/baseball/h2h/example/",
+                "home_team": "Toronto Blue Jays",
+                "away_team": "Los Angeles Angels",
+                "home_away_market": [
+                    {"1": "5/6", "2": "EVS", "bookmaker_name": "bet365", "period": "FullTime"},
+                ],
+            }
+        ]
+        assert convert_upcoming_matches(matches, "home_away") == []
+
+    def test_accepts_match_within_threshold(self) -> None:
+        # match_date is 1h before scraped_date — plausible mid-game scrape
+        matches = [
+            {
+                "scraped_date": "2026-04-19 20:00:00 UTC",
+                "match_date": "2026-04-19 19:00:00 UTC",
+                "match_link": "https://www.oddsportal.com/baseball/example/",
+                "home_team": "New York Yankees",
+                "away_team": "Boston Red Sox",
+                "home_away_market": [
+                    {"1": "5/6", "2": "EVS", "bookmaker_name": "bet365", "period": "FullTime"},
+                ],
+            }
+        ]
+        assert len(convert_upcoming_matches(matches, "home_away")) == 1
+
+    def test_stale_filter_does_not_drop_good_matches(self) -> None:
+        # Good match + stale match in same batch: only stale gets dropped
+        matches = [
+            {
+                "scraped_date": "2026-04-19 19:00:00 UTC",
+                "match_date": "2026-04-20 22:45:00 UTC",
+                "match_link": "https://www.oddsportal.com/baseball/good/",
+                "home_team": "Atlanta Braves",
+                "away_team": "Washington Nationals",
+                "home_away_market": [
+                    {"1": "5/6", "2": "EVS", "bookmaker_name": "bet365", "period": "FullTime"},
+                ],
+            },
+            {
+                "scraped_date": "2026-04-19 19:00:00 UTC",
+                "match_date": "2024-10-02 20:38:00 UTC",
+                "match_link": "https://www.oddsportal.com/baseball/stale/",
+                "home_team": "Baltimore Orioles",
+                "away_team": "Kansas City Royals",
+                "home_away_market": [
+                    {"1": "5/6", "2": "EVS", "bookmaker_name": "bet365", "period": "FullTime"},
+                ],
+            },
+        ]
+        results = convert_upcoming_matches(matches, "home_away")
+        assert len(results) == 1
+        assert results[0].home_team == "Atlanta Braves"
+
     def test_home_away_market_converts(self) -> None:
         matches = [
             {
