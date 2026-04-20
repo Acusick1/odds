@@ -922,10 +922,14 @@ async def find_retail_edges(
         sharp_lookback_hours: How far back to search for sharp prices (default 2.0 h).
 
     Returns:
-        Dict with ``event``, ``snapshot_time``, ``sharp_source``,
-        ``per_outcome`` (flat array keyed by ``(outcome, point)``), and
-        ``retail_edges`` (flat array of negative-divergence entries,
-        sorted ascending by divergence).
+        Dict with ``event``, ``snapshot_time``, ``sharp_bookmakers`` (the
+        configured input list; per-outcome resolution under the hybrid
+        fallback is visible via ``sharp_snapshot_time`` / ``sharp_age_seconds``
+        on each ``per_outcome`` row), ``per_outcome`` (flat array keyed by
+        ``(outcome, point)``), and ``retail_edges`` (flat array of
+        negative-divergence entries sorted ascending by divergence; ties
+        broken by ``z_score`` ascending — more-negative first — then
+        ``book``, ``outcome``, and ``point`` for full determinism).
     """
     sharp_bms = _coerce_bookmaker_list(sharp_bookmakers) or _DEFAULT_SHARP_BOOKMAKERS
 
@@ -941,7 +945,7 @@ async def find_retail_edges(
             return {
                 "event": _event_to_dict(event),
                 "snapshot_time": None,
-                "sharp_source": sharp_bms,
+                "sharp_bookmakers": sharp_bms,
                 "per_outcome": [],
                 "retail_edges": [],
                 "message": "No odds snapshots available for this event",
@@ -966,7 +970,7 @@ async def find_retail_edges(
         return {
             "event": event_dict,
             "snapshot_time": snapshot_time_iso,
-            "sharp_source": sharp_bms,
+            "sharp_bookmakers": sharp_bms,
             "per_outcome": [],
             "retail_edges": [],
             "message": f"No {market} odds in latest snapshot",
@@ -1098,19 +1102,22 @@ async def find_retail_edges(
                     )
 
     # Rank: divergence ascending (most negative first), then z_score ascending
-    # (more negative first), then book alphabetical — deterministic tie-break.
+    # (more negative first), then book, outcome, and point (None last) — full
+    # deterministic tie-break across (outcome, point) buckets.
     retail_edges.sort(
         key=lambda e: (
             e["divergence"],
             math.inf if e["z_score"] is None else e["z_score"],
             e["book"],
+            e["outcome"],
+            (e["point"] is None, e["point"] if e["point"] is not None else 0.0),
         )
     )
 
     return {
         "event": event_dict,
         "snapshot_time": snapshot_time_iso,
-        "sharp_source": sharp_bms,
+        "sharp_bookmakers": sharp_bms,
         "per_outcome": per_outcome,
         "retail_edges": retail_edges,
     }

@@ -1,4 +1,4 @@
-"""Integration tests for Phase 2 MCP tools (match briefs + sharp/soft spread).
+"""Integration tests for Phase 2 MCP tools (match briefs + find_retail_edges).
 
 Tests call the actual MCP tool handler functions end-to-end, with
 async_session_maker patched to use the PGlite test database.
@@ -579,7 +579,7 @@ class TestFindRetailEdges:
 
     @pytest.mark.asyncio
     async def test_happy_path(self, patch_session_maker, epl_event_with_odds):
-        """Response has the documented shape with sharp_source, per_outcome, retail_edges."""
+        """Response has the documented shape with sharp_bookmakers, per_outcome, retail_edges."""
         from odds_mcp.server import find_retail_edges
 
         event, _ = epl_event_with_odds
@@ -589,7 +589,7 @@ class TestFindRetailEdges:
         assert "error" not in result
         assert result["event"]["id"] == event.id
         assert result["snapshot_time"] is not None
-        assert result["sharp_source"] == ["pinnacle", "betfair_exchange"]
+        assert result["sharp_bookmakers"] == ["pinnacle", "betfair_exchange"]
         assert isinstance(result["per_outcome"], list)
         assert isinstance(result["retail_edges"], list)
 

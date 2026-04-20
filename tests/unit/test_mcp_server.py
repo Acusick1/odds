@@ -717,7 +717,7 @@ class TestFindRetailEdges:
 
         assert "event" in result
         assert "snapshot_time" in result
-        assert result["sharp_source"] == ["pinnacle", "betfair_exchange"]
+        assert result["sharp_bookmakers"] == ["pinnacle", "betfair_exchange"]
         assert isinstance(result["per_outcome"], list)
         assert isinstance(result["retail_edges"], list)
 
@@ -939,7 +939,10 @@ class TestFindRetailEdges:
 
     @pytest.mark.asyncio
     async def test_partial_book_market_hold_none(self) -> None:
-        # partial_book only has Arsenal — market_hold must be null for its rows.
+        # partial_book only has Arsenal, priced LONGER than sharp so it wins
+        # best_retail on that outcome. It is dropped from per_book_market_holds
+        # (missing Chelsea), so its row must carry market_hold=None — and that
+        # null propagates into best_retail.
         odds = [
             self._make_odds("pinnacle", "Arsenal", -110),
             self._make_odds("pinnacle", "Chelsea", -110),
@@ -947,29 +950,31 @@ class TestFindRetailEdges:
             self._make_odds("bet365", "Chelsea", -115),
             self._make_odds("betway", "Arsenal", -115),
             self._make_odds("betway", "Chelsea", -105),
-            self._make_odds("partial_book", "Arsenal", -110),
+            # partial_book Arsenal at +120 → implied 0.4545 (longest on Arsenal)
+            self._make_odds("partial_book", "Arsenal", +120),
         ]
         result = await self._call(odds, self._mock_reader())
 
         arsenal_bucket = next(e for e in result["per_outcome"] if e["outcome"] == "Arsenal")
-        # Partial book entry should have market_hold=null even though it appears
-        # Check via retail_edges / per_outcome composition — we need partial_book's row.
-        # partial_book is the only one possibly in best/worst; confirm via edges if negative.
-        # Easier: pull all retail rows via find_retail_edges output is folded — use the full
-        # retail_rows access by inspecting best/worst across outcomes.
-        # Since we don't expose retail_rows directly, test via best/worst where partial shows:
-        # bet365 -105 = 0.5122, betway -115 = 0.5349, partial -110 = 0.5238, sharp 0.524
-        # best on Arsenal (smallest implied_prob) = bet365 (-105). partial is middle.
-        # Instead surface partial via retail_edges where its divergence is negative:
-        # partial -110 => 0.5238; sharp 0.524 => divergence ~0 (slightly negative or zero)
-        # We verify by finding partial_book in the edges list.
-        edges = [e for e in result["retail_edges"] if e["book"] == "partial_book"]
-        if edges:
-            assert edges[0]["market_hold"] is None
-        # Also: best_retail should never be partial_book in this fixture; ensure market_hold on
-        # best_retail (bet365) is a float.
-        assert arsenal_bucket["best_retail"]["book"] == "bet365"
-        assert isinstance(arsenal_bucket["best_retail"]["market_hold"], float)
+
+        # partial_book wins best_retail (lowest implied_prob / longest price)
+        assert arsenal_bucket["best_retail"]["book"] == "partial_book"
+        # and its market_hold must be None because partial_book is dropped
+        # from per_book_market_holds (it is missing the Chelsea outcome).
+        assert arsenal_bucket["best_retail"]["market_hold"] is None
+
+        # Its divergence is negative, so it surfaces in retail_edges — same null hold.
+        edges = [
+            e
+            for e in result["retail_edges"]
+            if e["book"] == "partial_book" and e["outcome"] == "Arsenal"
+        ]
+        assert len(edges) == 1
+        assert edges[0]["market_hold"] is None
+
+        # Full-book retail rows still report a float hold (sanity: bet365 on Chelsea).
+        chelsea_bucket = next(e for e in result["per_outcome"] if e["outcome"] == "Chelsea")
+        assert isinstance(chelsea_bucket["best_retail"]["market_hold"], float)
 
     @pytest.mark.asyncio
     async def test_zscore_hand_checked_fixture(self) -> None:
@@ -1052,3 +1057,22 @@ class TestFindRetailEdges:
             ]
             assert len(matching) == 1
             assert matching[0]["z_score"] == expected_best_z
+
+    @pytest.mark.asyncio
+    async def test_no_retail_books_when_all_books_are_sharp(self) -> None:
+        # Every book in the snapshot is in the configured sharp set, so there
+        # is no retail row on any outcome. per_outcome / retail_edges are both
+        # empty, and the top-level response is still well-formed.
+        odds = [
+            self._make_odds("pinnacle", "Arsenal", -110),
+            self._make_odds("pinnacle", "Chelsea", -110),
+            self._make_odds("betfair_exchange", "Arsenal", -108),
+            self._make_odds("betfair_exchange", "Chelsea", -112),
+        ]
+        result = await self._call(odds, self._mock_reader())
+
+        assert "error" not in result
+        assert result["sharp_bookmakers"] == ["pinnacle", "betfair_exchange"]
+        assert result["snapshot_time"] is not None
+        assert result["per_outcome"] == []
+        assert result["retail_edges"] == []
