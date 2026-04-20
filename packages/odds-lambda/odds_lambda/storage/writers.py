@@ -21,6 +21,9 @@ logger = structlog.get_logger()
 class OddsWriter:
     """Handles all write operations to the database."""
 
+    LIVE_EVENT_ID_PREFIX = "op_live_"
+    LIVE_EVENT_STALE_THRESHOLD = timedelta(hours=1)
+
     def __init__(self, session: AsyncSession):
         """
         Initialize writer with database session.
@@ -84,7 +87,7 @@ class OddsWriter:
         home_abbrev = team_abbrev(home_team)
         away_abbrev = team_abbrev(away_team)
         date_str = match_date.strftime("%Y-%m-%dT%H%M")
-        return f"op_live_{home_abbrev}_{away_abbrev}_{date_str}"
+        return f"{OddsWriter.LIVE_EVENT_ID_PREFIX}{home_abbrev}_{away_abbrev}_{date_str}"
 
     async def find_or_create_event(
         self,
@@ -137,6 +140,15 @@ class OddsWriter:
         existing = await self.session.get(Event, event_id)
         if existing:
             return event_id, False
+
+        if event_id.startswith(self.LIVE_EVENT_ID_PREFIX):
+            stale_cutoff = datetime.now(UTC) - self.LIVE_EVENT_STALE_THRESHOLD
+            if ensure_utc(match_date) < stale_cutoff:
+                raise ValueError(
+                    "Refusing to create stale live-scrape event: "
+                    f"home={home_team} away={away_team} "
+                    f"match_date={match_date.isoformat()}"
+                )
 
         event = Event(
             id=event_id,
