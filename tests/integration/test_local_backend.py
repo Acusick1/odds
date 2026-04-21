@@ -373,3 +373,97 @@ class TestLocalSchedulerBackend:
                     assert _job2_event.is_set()
                 except TimeoutError:
                     pytest.fail("Jobs did not execute within timeout")
+
+    @pytest.mark.asyncio
+    async def test_schedule_cron_registers_cron_trigger(self):
+        """schedule_cron installs a CronTrigger that persists on the data store."""
+        from apscheduler.triggers.cron import CronTrigger
+
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch("odds_lambda.scheduling.jobs.get_job_function", return_value=_noop_job),
+        ):
+            async with LocalSchedulerBackend() as backend:
+                await backend.schedule_cron(job_name="test-cron", cron_expr="0 8 * * *")
+
+                assert backend._scheduler is not None
+                sched = await backend._scheduler.get_schedule("test-cron")
+                assert isinstance(sched.trigger, CronTrigger)
+
+                jobs = await backend.get_scheduled_jobs()
+                assert len(jobs) == 1
+                assert jobs[0].job_name == "test-cron"
+                assert jobs[0].next_run_time is not None
+
+    @pytest.mark.asyncio
+    async def test_schedule_cron_replaces_existing_expression(self):
+        """Re-applying schedule_cron with a new expression swaps the trigger.
+
+        Regression guard for the bootstrap short-circuit bug: editing
+        ``_JOB_CRON_MAP`` must propagate to the stored schedule on the
+        next ``odds scheduler start``.
+        """
+        from apscheduler.triggers.cron import CronTrigger
+
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch("odds_lambda.scheduling.jobs.get_job_function", return_value=_noop_job),
+        ):
+            async with LocalSchedulerBackend() as backend:
+                await backend.schedule_cron(job_name="test-cron", cron_expr="0 8 * * *")
+                await backend.schedule_cron(job_name="test-cron", cron_expr="0 9 * * *")
+
+                jobs = await backend.get_scheduled_jobs()
+                assert len(jobs) == 1
+
+                assert backend._scheduler is not None
+                sched = await backend._scheduler.get_schedule("test-cron")
+                assert isinstance(sched.trigger, CronTrigger)
+                # CronTrigger stringifies to a canonical crontab; assert the
+                # minute/hour reflect the second (replaced) expression.
+                assert "hour='9'" in str(sched.trigger) or "'9'" in str(sched.trigger)
+
+    @pytest.mark.asyncio
+    async def test_cron_and_date_schedules_coexist(self):
+        """CronTrigger and DateTrigger schedules may coexist on the same backend."""
+        from apscheduler.triggers.cron import CronTrigger
+        from apscheduler.triggers.date import DateTrigger
+
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch("odds_lambda.scheduling.jobs.get_job_function", return_value=_noop_job),
+        ):
+            async with LocalSchedulerBackend() as backend:
+                await backend.schedule_cron(job_name="cron-job", cron_expr="0 8 * * *")
+                await backend.schedule_next_execution(
+                    job_name="date-job",
+                    next_time=datetime.now(UTC) + timedelta(hours=1),
+                )
+
+                jobs = await backend.get_scheduled_jobs()
+                assert {j.job_name for j in jobs} == {"cron-job", "date-job"}
+
+                assert backend._scheduler is not None
+                cron_sched = await backend._scheduler.get_schedule("cron-job")
+                date_sched = await backend._scheduler.get_schedule("date-job")
+                assert isinstance(cron_sched.trigger, CronTrigger)
+                assert isinstance(date_sched.trigger, DateTrigger)
+
+    @pytest.mark.asyncio
+    async def test_schedule_cron_dry_run_is_noop(self):
+        backend = LocalSchedulerBackend(dry_run=True)
+        await backend.schedule_cron(job_name="cron-job", cron_expr="0 8 * * *")
+        # No scheduler built, no exception raised — call is a no-op by design.
+
+    @pytest.mark.asyncio
+    async def test_schedule_cron_unknown_job_raises(self):
+        with (
+            patch(_BUILD_PATCH, side_effect=_in_memory_scheduler),
+            patch(
+                "odds_lambda.scheduling.jobs.get_job_function",
+                side_effect=KeyError("Unknown job 'invalid'"),
+            ),
+        ):
+            async with LocalSchedulerBackend() as backend:
+                with pytest.raises(SchedulingFailedError):
+                    await backend.schedule_cron(job_name="invalid", cron_expr="0 8 * * *")

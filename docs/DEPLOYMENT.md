@@ -31,11 +31,10 @@ Both use the same Lambda handler entry point and job registry, but different Doc
 
 | Rule | Schedule | Lambda | Job |
 |------|----------|--------|-----|
-| `odds-fetch-oddsportal` | `rate(1 hour)` | Scraper | `fetch-oddsportal` |
 | `odds-fetch-oddsportal-results` | `cron(0 8 * * ? *)` | Scraper | `fetch-oddsportal-results` |
-| `odds-score-predictions` | `cron(15 * * * ? *)` | Scheduler | `score-predictions` |
-| `odds-daily-digest` | `cron(0 8 * * ? *)` | Scheduler | `daily-digest` |
 | `odds-backfill-polymarket` | `rate(3 days)` | Scheduler | `backfill-polymarket` (if enabled) |
+
+`daily-digest` and `fetch-espn-fixtures` run locally via `LocalSchedulerBackend` cron (EPL only) — see `_JOB_CRON_MAP` in `odds_lambda/scheduling/jobs.py`. `score-predictions` no longer exists as a standalone job; it is invoked inline at the end of `fetch-oddsportal`. `fetch-odds` remains on EventBridge (self-scheduling).
 
 **Self-scheduling rules** (pre-created disabled, activated by Lambda at runtime):
 

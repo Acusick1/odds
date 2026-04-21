@@ -36,6 +36,11 @@ depends_on = None
 
 
 AGENT_ROLE = "odds_agent"
+# Only INSERT/UPDATE are granted — the MCP server has been audited and does
+# not issue DELETE on any of these tables (paper trades settle via UPDATE,
+# briefs append-only, wakeups upsert). If a future MCP tool needs DELETE,
+# add a new migration that extends these grants rather than silently
+# expanding this tuple.
 WRITABLE_TABLES = ("paper_trades", "match_briefs", "agent_wakeups")
 
 
