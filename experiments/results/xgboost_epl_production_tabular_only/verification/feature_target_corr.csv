@@ -1,0 +1,8 @@
+feature,pearson_r,pearson_p,spearman_r,spearman_p
+tab_consensus_prob,-0.073389,0.001761,-0.062073,0.008182
+tab_sharp_prob,-0.069476,0.00307,-0.058455,0.012771
+tab_retail_sharp_diff,-0.181649,0.0,-0.193998,0.0
+tab_num_bookmakers,0.026938,0.251483,0.057611,0.014126
+tab_is_weekend,-0.026385,0.261355,-0.028637,0.222809
+tab_day_of_week,-0.011385,0.627986,0.031774,0.176156
+hours_until_event,-0.03014,0.199461,-0.020246,0.388804
