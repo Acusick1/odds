@@ -170,7 +170,6 @@ class AlertConfig(BaseSettings):
         default={
             "fetch-oddsportal-epl": 2,
             "fetch-oddsportal-results-epl": 26,
-            "score-predictions-epl": 2,
             "daily-digest-epl": 26,
             "fetch-oddsportal-mlb": 2,
             "fetch-oddsportal-results-mlb": 26,

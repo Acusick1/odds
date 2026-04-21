@@ -36,8 +36,11 @@ resource "aws_lambda_permission" "allow_eventbridge_backfill_polymarket" {
   ]
 }
 
-# Per-sport fixed-schedule rules (daily-digest and score-predictions).
-# Generated from sport_configs so each sport gets independent rules.
+# Per-sport fixed-schedule rules. Currently empty — score-predictions,
+# daily-digest, and fetch-espn-fixtures now run on the local scheduler
+# (see `fixed_schedule_expressions` below). The resources are retained so
+# adding a new Lambda-hosted fixed-schedule job is a single-line change
+# (add the job to `fixed_schedule_expressions` + `sport_fixed_scheduler_rules`).
 resource "aws_cloudwatch_event_rule" "fixed_scheduler" {
   for_each = local.fixed_scheduler_rules_map
 

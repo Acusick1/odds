@@ -35,7 +35,8 @@ def start_local(
     Start local scheduler for testing (APScheduler backend).
 
     Simulates AWS Lambda + EventBridge behavior locally using APScheduler.
-    Jobs will self-schedule just like in production.
+    Event-driven jobs self-schedule as they run; fixed-schedule jobs listed
+    in ``_JOB_CRON_MAP`` install recurring cron triggers at bootstrap.
 
     Requirements:
     - SCHEDULER_BACKEND=local in .env
@@ -88,6 +89,7 @@ def start_local(
             JobContext,
             get_bootstrap_function,
             get_job_cron,
+            get_job_cron_sports,
             is_per_sport_job,
             make_compound_job_name,
         )
@@ -110,7 +112,28 @@ def start_local(
                     # Cron-triggered jobs: install a recurring CronTrigger
                     # instead of going through the dynamic bootstrap path.
                     if is_per_sport_job(job_name):
-                        for sport_key in app_settings.data_collection.sports:
+                        allowed_sports = get_job_cron_sports(job_name)
+                        target_sports = (
+                            list(allowed_sports)
+                            if allowed_sports is not None
+                            else list(app_settings.data_collection.sports)
+                        )
+                        skipped_sports = (
+                            [
+                                s
+                                for s in app_settings.data_collection.sports
+                                if s not in target_sports
+                            ]
+                            if allowed_sports is not None
+                            else []
+                        )
+                        for skipped in skipped_sports:
+                            skipped_compound = make_compound_job_name(job_name, skipped)
+                            console.print(
+                                f"[dim]  {skipped_compound} skipped — "
+                                f"{job_name} does not support {skipped}[/dim]"
+                            )
+                        for sport_key in target_sports:
                             compound = make_compound_job_name(job_name, sport_key)
                             existing = await _backend.get_job_status(compound)
                             if existing and existing.next_run_time:

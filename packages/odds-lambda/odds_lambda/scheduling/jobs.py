@@ -104,16 +104,50 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
 # ``fixed_schedule_expressions`` for the jobs that have moved out of
 # Lambda and into the local scheduler. Keys are base job names (no sport
 # suffix); the scheduler CLI expands per-sport jobs into one schedule per
-# configured sport, each with its own compound job name.
-_JOB_CRON_MAP: dict[str, str] = {
-    "daily-digest": "0 8 * * *",
-    "fetch-espn-fixtures": "0 6 * * *",
+# allowed sport, each with its own compound job name.
+#
+# Values are ``(cron_expression, allowed_sports_or_None)``. When the second
+# element is ``None`` the job runs for every sport in
+# ``data_collection.sports``; otherwise it runs only for the listed sport
+# keys. Use an allowlist for jobs whose ``main()`` raises on unsupported
+# sports (e.g. ``fetch-espn-fixtures`` is EPL-only) — otherwise the daily
+# cron fire on an unsupported sport would raise inside ``job_alert_context``
+# and spam critical Discord alerts.
+_JOB_CRON_MAP: dict[str, tuple[str, tuple[SportKey, ...] | None]] = {
+    # daily-digest is gated to EPL because the digest formatter and
+    # heartbeat_expectations entry are EPL-only today.
+    "daily-digest": ("0 8 * * *", ("soccer_epl",)),
+    "fetch-espn-fixtures": ("0 6 * * *", ("soccer_epl",)),
 }
 
 
 def get_job_cron(job_name: str) -> str | None:
     """Return the cron expression for a job, or None if it is event-driven."""
-    return _JOB_CRON_MAP.get(job_name)
+    entry = _JOB_CRON_MAP.get(job_name)
+    if entry is None:
+        return None
+    cron_expr, _ = entry
+    return cron_expr
+
+
+def get_job_cron_sports(job_name: str) -> tuple[SportKey, ...] | None:
+    """Return the allowlist of sports for a cron job, or ``None`` for all sports.
+
+    Returns:
+        A tuple of ``SportKey`` values when the job's cron schedule is
+        restricted, ``None`` when it runs for every configured sport, and
+        ``None`` for event-driven (non-cron) jobs.
+    """
+    entry = _JOB_CRON_MAP.get(job_name)
+    if entry is None:
+        return None
+    _, sports = entry
+    return sports
+
+
+assert set(_JOB_CRON_MAP) <= set(_JOB_MODULE_MAP), (
+    f"Unknown jobs in _JOB_CRON_MAP: {set(_JOB_CRON_MAP) - set(_JOB_MODULE_MAP)}"
+)
 
 
 # Cache of already-imported job functions.

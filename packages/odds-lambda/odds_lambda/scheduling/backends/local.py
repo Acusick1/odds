@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from types import TracebackType
+from typing import TYPE_CHECKING
 
 import structlog
 from apscheduler import AsyncScheduler, ConflictPolicy, SchedulerRole
@@ -12,6 +14,11 @@ from apscheduler.eventbrokers.asyncpg import AsyncpgEventBroker
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+if TYPE_CHECKING:
+    from odds_lambda.scheduling.jobs import JobContext
+
+    JobFunc = Callable[[JobContext], Awaitable[None]]
 
 from odds_lambda.scheduling.backends.base import (
     BackendHealth,
@@ -286,10 +293,10 @@ class LocalSchedulerBackend(SchedulerBackend):
 
     async def _add_cron_schedule(
         self,
-        job_func: object,
+        job_func: JobFunc,
         job_name: str,
         cron_expr: str,
-        ctx: object,
+        ctx: JobContext,
     ) -> None:
         """Write a cron schedule to the data store, reusing a live scheduler if available."""
         from apscheduler import current_async_scheduler
@@ -305,12 +312,12 @@ class LocalSchedulerBackend(SchedulerBackend):
     async def _write_cron_schedule(
         self,
         scheduler: AsyncScheduler,
-        job_func: object,
+        job_func: JobFunc,
         job_name: str,
         cron_expr: str,
-        ctx: object,
+        ctx: JobContext,
     ) -> None:
-        task_key = f"{job_func.__module__}.{job_func.__qualname__}"  # type: ignore[union-attr]
+        task_key = f"{job_func.__module__}.{job_func.__qualname__}"
         if task_key not in self._configured_tasks:
             await scheduler.configure_task(job_func)
             self._configured_tasks.add(task_key)

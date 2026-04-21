@@ -80,6 +80,21 @@ def downgrade() -> None:
     Guarded with ``IF EXISTS`` so re-running or partial-upgrade teardown
     doesn't crash. ``DROP OWNED BY`` is required before ``DROP ROLE`` to
     clear any default-privilege grants the role owns.
+
+    .. warning::
+
+        ``DROP ROLE`` fails with ``role "odds_agent" cannot be dropped
+        because some objects depend on it`` (or, with ``DROP OWNED BY``,
+        aborts on any active backend owned by the role) if any sessions
+        are still connected as ``odds_agent``. Before running downgrade,
+        terminate every live agent session — e.g.::
+
+            SELECT pg_terminate_backend(pid)
+            FROM pg_stat_activity
+            WHERE usename = 'odds_agent';
+
+        Stop any local ``odds agent run`` / scheduler subprocesses first,
+        then run the termination query, then apply the downgrade.
     """
     op.execute(
         f"""
