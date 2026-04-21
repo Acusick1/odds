@@ -20,7 +20,7 @@ from odds_lambda.espn_fixture_fetcher import (
     current_season,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.live_api]
 
 
 # ESPN's canonical state enum. If any of these disappear from live responses,
