@@ -1111,7 +1111,6 @@ async def schedule_next_wakeup(
 # categorising fixtures as past/live/upcoming.
 _ESPN_STATE_POST = "post"  # completed match (any kind: FT, AET, after pens)
 _ESPN_STATE_IN = "in"  # live match (any in-play status)
-_ESPN_STATE_PRE = "pre"  # not started
 
 # Fallback set for rows written before the ``state`` column was introduced
 # (``state is None``). Values are ESPN's ``status.type.description`` strings
