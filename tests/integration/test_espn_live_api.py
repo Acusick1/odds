@@ -10,6 +10,10 @@ offseason edge cases where the expected shape may legitimately be empty.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
+import httpx
 import pytest
 from odds_lambda.espn_fixture_fetcher import (
     EspnFixtureFetcher,
@@ -24,6 +28,19 @@ pytestmark = pytest.mark.integration
 _EXPECTED_STATES: frozenset[str] = frozenset({"pre", "in", "post"})
 
 
+@contextmanager
+def _skip_on_espn_failure() -> Iterator[None]:
+    """Skip (rather than fail) when ESPN is unreachable or returns HTTP errors.
+
+    Assertion failures from shape checks still surface normally — only the
+    HTTP transport failure itself is converted into a skip.
+    """
+    try:
+        yield
+    except httpx.HTTPError as e:
+        pytest.skip(f"ESPN API unavailable: {e}")
+
+
 class TestEspnLiveApi:
     @pytest.mark.asyncio
     async def test_fetch_upcoming_returns_pre_state_rows(self) -> None:
@@ -32,8 +49,9 @@ class TestEspnLiveApi:
         Skips (rather than fails) during deep offseason when no scheduled
         fixtures exist in the next 30 days across any configured competition.
         """
-        async with EspnFixtureFetcher() as fetcher:
-            records = await fetcher.fetch_upcoming(days_ahead=30)
+        with _skip_on_espn_failure():
+            async with EspnFixtureFetcher() as fetcher:
+                records = await fetcher.fetch_upcoming(days_ahead=30)
 
         if not records:
             pytest.skip(
@@ -54,8 +72,9 @@ class TestEspnLiveApi:
         arrived, no matches played yet).
         """
         season = current_season()
-        async with EspnFixtureFetcher() as fetcher:
-            records = await fetcher.fetch_season(season)
+        with _skip_on_espn_failure():
+            async with EspnFixtureFetcher() as fetcher:
+                records = await fetcher.fetch_season(season)
 
         if not records:
             pytest.skip(
@@ -76,9 +95,10 @@ class TestEspnLiveApi:
         value (or returns blank), the filtering logic in ``get_team_context``
         will silently drop those rows. Catching it here surfaces the drift.
         """
-        async with EspnFixtureFetcher() as fetcher:
-            upcoming = await fetcher.fetch_upcoming(days_ahead=30)
-            season = await fetcher.fetch_season(current_season())
+        with _skip_on_espn_failure():
+            async with EspnFixtureFetcher() as fetcher:
+                upcoming = await fetcher.fetch_upcoming(days_ahead=30)
+                season = await fetcher.fetch_season(current_season())
 
         all_records = [*upcoming, *season]
         if not all_records:

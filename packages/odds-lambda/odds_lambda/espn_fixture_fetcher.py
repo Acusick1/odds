@@ -138,7 +138,7 @@ class EspnFixtureFetcher:
                 resp = await client.get(url, timeout=_REQUEST_TIMEOUT_SECONDS)
                 resp.raise_for_status()
                 return resp.json()
-            except (httpx.HTTPError, httpx.TimeoutException) as e:
+            except httpx.HTTPError as e:
                 last_exc = e
                 if attempt == _MAX_ATTEMPTS - 1:
                     break
@@ -250,7 +250,7 @@ class EspnFixtureFetcher:
         url = f"{BASE_URL}/{league_slug}/scoreboard?dates={start_str}-{end_str}"
         try:
             data = await self._fetch_json(url)
-        except (httpx.HTTPError, httpx.TimeoutException) as e:
+        except httpx.HTTPError as e:
             logger.warning(
                 "espn_scoreboard_fetch_failed",
                 league=league_slug,
@@ -390,7 +390,7 @@ class EspnFixtureFetcher:
                     await asyncio.sleep(self.request_delay_seconds)
                 try:
                     fixtures = await self.fetch_team_schedule(league_slug, team_id, season)
-                except (httpx.HTTPError, httpx.TimeoutException) as e:
+                except httpx.HTTPError as e:
                     logger.warning(
                         "espn_schedule_fetch_failed",
                         team=team_name,
