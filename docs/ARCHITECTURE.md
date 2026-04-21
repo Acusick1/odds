@@ -142,10 +142,10 @@ Centralized mapping of job names to async entry points. Modules are lazy-importe
 | `check-health` | `odds_lambda.jobs.check_health` | Self-scheduling |
 | `fetch-polymarket` | `odds_lambda.jobs.fetch_polymarket` | Self-scheduling (deprioritized) |
 | `backfill-polymarket` | `odds_lambda.jobs.backfill_polymarket` | Fixed: every 3 days (deprioritized) |
-| `fetch-oddsportal` | `odds_lambda.jobs.fetch_oddsportal` | Fixed: hourly |
-| `fetch-oddsportal-results` | `odds_lambda.jobs.fetch_oddsportal_results` | Fixed: 08:00 UTC daily |
-| `score-predictions` | `odds_lambda.jobs.score_predictions` | Fixed: hourly at :15 |
-| `daily-digest` | `odds_lambda.jobs.daily_digest` | Fixed: 08:00 UTC daily |
+| `fetch-oddsportal` | `odds_lambda.jobs.fetch_oddsportal` | Self-scheduling (proximity tier). Runs score-predictions inline. |
+| `fetch-oddsportal-results` | `odds_lambda.jobs.fetch_oddsportal_results` | Fixed: 08:00 UTC daily (EventBridge) |
+| `daily-digest` | `odds_lambda.jobs.daily_digest` | Local cron: 08:00 UTC daily (EPL only) |
+| `fetch-espn-fixtures` | `odds_lambda.jobs.fetch_espn_fixtures` | Local cron: 06:00 UTC daily (EPL only) |
 
 ## Intelligent Scheduling System
 

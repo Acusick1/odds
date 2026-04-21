@@ -36,7 +36,13 @@ class TestSettings:
             assert settings.scheduler.backend == "local"
             assert settings.scheduler.dry_run is False
             assert settings.scheduler.lookahead_days == 7
-            assert settings.scheduler.bootstrap_jobs == ["agent-run"]
+            assert settings.scheduler.bootstrap_jobs == [
+                "agent-run",
+                "fetch-oddsportal",
+                "fetch-oddsportal-results",
+                "daily-digest",
+                "fetch-espn-fixtures",
+            ]
             assert settings.data_quality.enable_validation is True
             assert settings.data_quality.reject_invalid_odds is False
             assert settings.alerts.alert_enabled is False

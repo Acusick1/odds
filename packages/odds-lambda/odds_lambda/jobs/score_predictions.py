@@ -6,6 +6,9 @@ the unique constraint on (event_id, snapshot_id, model_name) prevents
 duplicate predictions via ON CONFLICT DO NOTHING.
 
 Called inline at the end of fetch-oddsportal to score newly arrived data.
+The ``main()`` entry point is retained for manual invocation via
+``odds scheduler run-once score-predictions-<sport>`` (e.g. for backfills
+or ad-hoc scoring runs outside the scrape loop).
 """
 
 from __future__ import annotations

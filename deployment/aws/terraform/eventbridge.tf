@@ -36,8 +36,11 @@ resource "aws_lambda_permission" "allow_eventbridge_backfill_polymarket" {
   ]
 }
 
-# Per-sport fixed-schedule rules (daily-digest and score-predictions).
-# Generated from sport_configs so each sport gets independent rules.
+# Per-sport fixed-schedule rules. Currently empty — score-predictions,
+# daily-digest, and fetch-espn-fixtures now run on the local scheduler
+# (see `fixed_schedule_expressions` below). The resources are retained so
+# adding a new Lambda-hosted fixed-schedule job is a single-line change
+# (add the job to `fixed_schedule_expressions` + `sport_fixed_scheduler_rules`).
 resource "aws_cloudwatch_event_rule" "fixed_scheduler" {
   for_each = local.fixed_scheduler_rules_map
 
@@ -135,33 +138,15 @@ locals {
 
   # Schedule expressions for fixed-schedule jobs (map lookup prevents
   # a new job silently inheriting the wrong schedule via a ternary fallback).
-  fixed_schedule_expressions = {
-    "daily-digest"        = "cron(0 8 * * ? *)"
-    "score-predictions"   = "cron(30 * * * ? *)"
-    "fetch-espn-fixtures" = "cron(0 6 * * ? *)"
-  }
+  # score-predictions, daily-digest, and fetch-espn-fixtures now run in the
+  # local scheduler so the agent, scraper, and scorer share one DB. Only
+  # jobs that still fire from EventBridge belong here.
+  fixed_schedule_expressions = {}
 
-  # Per-sport fixed-schedule jobs. fetch-espn-fixtures is EPL-only today —
-  # gated on sport_suffix to avoid scheduling it for sports without ESPN fixture
-  # coverage in this pipeline.
-  sport_fixed_scheduler_rules = flatten([
-    for sport_suffix, cfg in local.sport_configs : concat(
-      [
-        for job in ["daily-digest", "score-predictions"] : {
-          key       = "${job}-${sport_suffix}"
-          job       = job
-          sport_key = cfg.sport_key
-        }
-      ],
-      sport_suffix == "epl" ? [
-        {
-          key       = "fetch-espn-fixtures-${sport_suffix}"
-          job       = "fetch-espn-fixtures"
-          sport_key = cfg.sport_key
-        }
-      ] : []
-    )
-  ])
+  # Per-sport fixed-schedule jobs. Empty until a Lambda-hosted fixed-schedule
+  # job is reintroduced; kept as a list comprehension so adding one back is
+  # a single-line change.
+  sport_fixed_scheduler_rules = []
 
   fixed_scheduler_rules_map = { for r in local.sport_fixed_scheduler_rules : r.key => r }
 }
@@ -275,7 +260,7 @@ output "dynamic_rules" {
 
 output "scheduler_jobs" {
   description = "Job names routed to the scheduler Lambda (CSV for scripts)"
-  value       = join(",", concat(local.self_scheduling_scheduler_jobs, keys(local.fixed_scheduler_rules_map)))
+  value       = join(",", local.self_scheduling_scheduler_jobs)
 }
 
 output "scraper_jobs" {

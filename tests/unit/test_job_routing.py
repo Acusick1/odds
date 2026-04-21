@@ -4,8 +4,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from odds_lambda.scheduling.jobs import (
+    _JOB_CRON_MAP,
+    _JOB_MODULE_MAP,
     JobContext,
     get_bootstrap_function,
+    get_job_cron,
+    get_job_cron_sports,
     make_compound_job_name,
     resolve_job_name,
     sport_key_to_suffix,
@@ -188,3 +192,39 @@ class TestGetBootstrapFunction:
     def test_unknown_job_raises_key_error(self) -> None:
         with pytest.raises(KeyError, match="Unknown job"):
             get_bootstrap_function("nonexistent-job")
+
+
+class TestJobCronRegistry:
+    """Tests for cron schedule + sport-allowlist lookups on ``_JOB_CRON_MAP``."""
+
+    def test_get_job_cron_returns_none_for_event_driven_job(self) -> None:
+        assert get_job_cron("fetch-odds") is None
+
+    def test_get_job_cron_returns_expression_for_mapped_job(self) -> None:
+        assert get_job_cron("daily-digest") == "0 8 * * *"
+
+    def test_get_job_cron_returns_none_for_unknown_job(self) -> None:
+        assert get_job_cron("totally-made-up") is None
+
+    def test_get_job_cron_sports_returns_allowlist_when_restricted(self) -> None:
+        # daily-digest and fetch-espn-fixtures are EPL-only — the sport
+        # allowlist is load-bearing (prevents the MLB digest from crashing
+        # inside job_alert_context each morning).
+        sports = get_job_cron_sports("daily-digest")
+        assert sports == ("soccer_epl",)
+
+    def test_get_job_cron_sports_restricted_for_fetch_espn_fixtures(self) -> None:
+        sports = get_job_cron_sports("fetch-espn-fixtures")
+        assert sports == ("soccer_epl",)
+
+    def test_get_job_cron_sports_returns_none_for_event_driven_job(self) -> None:
+        assert get_job_cron_sports("fetch-odds") is None
+
+    def test_get_job_cron_sports_returns_none_for_unknown_job(self) -> None:
+        assert get_job_cron_sports("totally-made-up") is None
+
+    def test_every_cron_job_is_in_module_map(self) -> None:
+        """Cron jobs must be registered as importable — the import-time
+        assertion in ``jobs.py`` guards this, but the test pins the contract.
+        """
+        assert set(_JOB_CRON_MAP) <= set(_JOB_MODULE_MAP)

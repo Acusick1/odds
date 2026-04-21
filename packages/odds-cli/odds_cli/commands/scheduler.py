@@ -35,7 +35,8 @@ def start_local(
     Start local scheduler for testing (APScheduler backend).
 
     Simulates AWS Lambda + EventBridge behavior locally using APScheduler.
-    Jobs will self-schedule just like in production.
+    Event-driven jobs self-schedule as they run; fixed-schedule jobs listed
+    in ``_JOB_CRON_MAP`` install recurring cron triggers at bootstrap.
 
     Requirements:
     - SCHEDULER_BACKEND=local in .env
@@ -87,6 +88,8 @@ def start_local(
         from odds_lambda.scheduling.jobs import (
             JobContext,
             get_bootstrap_function,
+            get_job_cron,
+            get_job_cron_sports,
             is_per_sport_job,
             make_compound_job_name,
         )
@@ -95,6 +98,49 @@ def start_local(
 
         # Start scheduler first so bootstrap jobs can schedule via the backend
         async with LocalSchedulerBackend() as _backend:
+
+            async def _bootstrap_cron(compound: str, cron_expr: str) -> None:
+                """Install a recurring CronTrigger, re-applying on every start.
+
+                Cron jobs intentionally do NOT short-circuit on an existing
+                schedule — APScheduler's data store persists triggers across
+                restarts, so a stale cron expression would otherwise win over
+                an edit to ``_JOB_CRON_MAP``. ``ConflictPolicy.replace`` inside
+                ``LocalSchedulerBackend.schedule_cron`` makes this idempotent.
+                """
+                existing = await _backend.get_job_status(compound)
+                if existing and existing.next_run_time:
+                    console.print(
+                        f"[dim]  {compound} existing schedule "
+                        f"at {existing.next_run_time:%H:%M:%S UTC} — re-applying[/dim]"
+                    )
+                try:
+                    await _backend.schedule_cron(compound, cron_expr)
+                    console.print(f"[green]  {compound} cron scheduled ({cron_expr})[/green]")
+                except Exception as e:
+                    console.print(f"[yellow]  {compound} cron schedule failed: {e}[/yellow]")
+
+            async def _bootstrap_dynamic(compound: str, ctx: JobContext, bootstrap_fn) -> None:
+                """Run a job's bootstrap entry point once, skipping if already scheduled.
+
+                Unlike cron jobs, dynamic (self-scheduling) jobs own their next
+                fire time — re-running bootstrap would clobber an agent-requested
+                override or an in-flight proximity tier. The skip is the right
+                call here.
+                """
+                existing = await _backend.get_job_status(compound)
+                if existing and existing.next_run_time:
+                    console.print(
+                        f"[dim]  {compound} already scheduled "
+                        f"at {existing.next_run_time:%H:%M:%S UTC} — skipping[/dim]"
+                    )
+                    return
+                try:
+                    await bootstrap_fn(ctx)
+                    console.print(f"[green]  {compound} bootstrapped[/green]")
+                except Exception as e:
+                    console.print(f"[yellow]  {compound} bootstrap failed: {e}[/yellow]")
+
             if bootstrap_jobs:
                 console.print("[green]Bootstrapping jobs...[/green]")
             else:
@@ -103,36 +149,48 @@ def start_local(
                 )
 
             for job_name in bootstrap_jobs:
+                cron_expr = get_job_cron(job_name)
+                per_sport = is_per_sport_job(job_name)
+
+                if cron_expr is not None:
+                    if per_sport:
+                        allowed_sports = get_job_cron_sports(job_name)
+                        configured_sports = app_settings.data_collection.sports
+                        target_sports = (
+                            list(allowed_sports)
+                            if allowed_sports is not None
+                            else list(configured_sports)
+                        )
+                        skipped_sports = (
+                            [s for s in configured_sports if s not in target_sports]
+                            if allowed_sports is not None
+                            else []
+                        )
+                        for skipped in skipped_sports:
+                            skipped_compound = make_compound_job_name(job_name, skipped)
+                            console.print(
+                                f"[dim]  {skipped_compound} skipped — "
+                                f"{job_name} does not support {skipped}[/dim]"
+                            )
+                        for sport_key in target_sports:
+                            await _bootstrap_cron(
+                                make_compound_job_name(job_name, sport_key), cron_expr
+                            )
+                    else:
+                        await _bootstrap_cron(job_name, cron_expr)
+                    continue
+
                 bootstrap_fn = get_bootstrap_function(job_name)
 
-                if is_per_sport_job(job_name):
+                if per_sport:
                     for sport_key in app_settings.data_collection.sports:
-                        compound = make_compound_job_name(job_name, sport_key)
-                        existing = await _backend.get_job_status(compound)
-                        if existing and existing.next_run_time:
-                            console.print(
-                                f"[dim]  {compound} already scheduled "
-                                f"at {existing.next_run_time:%H:%M:%S UTC} — skipping[/dim]"
-                            )
-                            continue
-                        try:
-                            await bootstrap_fn(JobContext(sport=sport_key))
-                            console.print(f"[green]  {compound} bootstrapped[/green]")
-                        except Exception as e:
-                            console.print(f"[yellow]  {compound} bootstrap failed: {e}[/yellow]")
-                else:
-                    existing = await _backend.get_job_status(job_name)
-                    if existing and existing.next_run_time:
-                        console.print(
-                            f"[dim]  {job_name} already scheduled "
-                            f"at {existing.next_run_time:%H:%M:%S UTC} — skipping[/dim]"
+                        await _bootstrap_dynamic(
+                            make_compound_job_name(job_name, sport_key),
+                            JobContext(sport=sport_key),
+                            bootstrap_fn,
                         )
-                        continue
-                    try:
-                        await bootstrap_fn(JobContext())
-                        console.print(f"[green]  {job_name} bootstrapped[/green]")
-                    except Exception as e:
-                        console.print(f"[yellow]  {job_name} bootstrap failed: {e}[/yellow]")
+                else:
+                    await _bootstrap_dynamic(job_name, JobContext(), bootstrap_fn)
 
             console.print()
 

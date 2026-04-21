@@ -136,6 +136,32 @@ def _log_stream_message(msg: dict[str, Any]) -> None:
         )
 
 
+def _build_agent_subprocess_env() -> dict[str, str]:
+    """Return an environment dict for the agent subprocess.
+
+    When ``AGENT_DATABASE_URL`` is set, its value replaces ``DATABASE_URL``
+    so the agent connects as the read-mostly ``odds_agent`` role rather
+    than inheriting the scraper/scheduler's write-capable DSN. When it is
+    unset the subprocess inherits the parent's ``DATABASE_URL`` and a
+    warning is logged — the security control is then disabled but the
+    agent continues to function, preserving pre-control behaviour for
+    operators who haven't provisioned the role yet.
+    """
+    env = os.environ.copy()
+    agent_dsn = env.get("AGENT_DATABASE_URL")
+    if agent_dsn:
+        env["DATABASE_URL"] = agent_dsn
+    else:
+        logger.warning(
+            "agent_database_url_not_set",
+            msg=(
+                "AGENT_DATABASE_URL not set — agent will run with scraper's "
+                "write-capable DSN (security control disabled)"
+            ),
+        )
+    return env
+
+
 async def _run_claude_agent(sport: SportKey) -> int:
     """Spawn ``claude -p`` subprocess and return exit code.
 
@@ -164,6 +190,8 @@ async def _run_claude_agent(sport: SportKey) -> int:
     # PID suffix avoids collisions when two invocations start in the same second.
     log_path = log_dir / f"{sport}_{timestamp}_{os.getpid()}.jsonl"
 
+    subprocess_env = _build_agent_subprocess_env()
+
     logger.info("agent_subprocess_starting", sport=sport, cmd=cmd, log_file=str(log_path))
 
     proc = await asyncio.create_subprocess_exec(
@@ -172,6 +200,7 @@ async def _run_claude_agent(sport: SportKey) -> int:
         stderr=asyncio.subprocess.STDOUT,
         cwd=str(settings.project_root),
         limit=AGENT_STREAM_LINE_LIMIT,
+        env=subprocess_env,
     )
 
     with log_path.open("ab") as log_file:
