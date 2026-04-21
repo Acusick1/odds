@@ -135,33 +135,15 @@ locals {
 
   # Schedule expressions for fixed-schedule jobs (map lookup prevents
   # a new job silently inheriting the wrong schedule via a ternary fallback).
-  fixed_schedule_expressions = {
-    "daily-digest"        = "cron(0 8 * * ? *)"
-    "score-predictions"   = "cron(30 * * * ? *)"
-    "fetch-espn-fixtures" = "cron(0 6 * * ? *)"
-  }
+  # score-predictions, daily-digest, and fetch-espn-fixtures now run in the
+  # local scheduler so the agent, scraper, and scorer share one DB. Only
+  # jobs that still fire from EventBridge belong here.
+  fixed_schedule_expressions = {}
 
-  # Per-sport fixed-schedule jobs. fetch-espn-fixtures is EPL-only today —
-  # gated on sport_suffix to avoid scheduling it for sports without ESPN fixture
-  # coverage in this pipeline.
-  sport_fixed_scheduler_rules = flatten([
-    for sport_suffix, cfg in local.sport_configs : concat(
-      [
-        for job in ["daily-digest", "score-predictions"] : {
-          key       = "${job}-${sport_suffix}"
-          job       = job
-          sport_key = cfg.sport_key
-        }
-      ],
-      sport_suffix == "epl" ? [
-        {
-          key       = "fetch-espn-fixtures-${sport_suffix}"
-          job       = "fetch-espn-fixtures"
-          sport_key = cfg.sport_key
-        }
-      ] : []
-    )
-  ])
+  # Per-sport fixed-schedule jobs. Empty until a Lambda-hosted fixed-schedule
+  # job is reintroduced; kept as a list comprehension so adding one back is
+  # a single-line change.
+  sport_fixed_scheduler_rules = []
 
   fixed_scheduler_rules_map = { for r in local.sport_fixed_scheduler_rules : r.key => r }
 }

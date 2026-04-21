@@ -19,7 +19,7 @@ def run(
         ..., "--sport", "-s", help="Sport key (e.g. 'soccer_epl', 'baseball_mlb')"
     ),
     db: str = typer.Option(
-        "odds_test",
+        "odds",
         "--db",
         help="Database name to run against. Swapped into DATABASE_URL.",
     ),
@@ -28,9 +28,9 @@ def run(
 
     No pre-schedule, no agent_wakeups consumption, no reschedule — so repeated
     runs don't disturb the scheduler. By default the agent runs against the
-    ``odds_test`` database (same host/credentials as the configured
-    DATABASE_URL, just a different dbname); refresh it from the source-of-truth
-    DB with ``scripts/snapshot_to_dev.sh`` before use.
+    local ``odds`` database (same host/credentials as the configured
+    DATABASE_URL, just a different dbname), which is also where the local
+    scheduler writes scraper output and scored predictions.
     """
     override_database_url(db)
 

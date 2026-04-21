@@ -87,6 +87,7 @@ def start_local(
         from odds_lambda.scheduling.jobs import (
             JobContext,
             get_bootstrap_function,
+            get_job_cron,
             is_per_sport_job,
             make_compound_job_name,
         )
@@ -103,6 +104,49 @@ def start_local(
                 )
 
             for job_name in bootstrap_jobs:
+                cron_expr = get_job_cron(job_name)
+
+                if cron_expr is not None:
+                    # Cron-triggered jobs: install a recurring CronTrigger
+                    # instead of going through the dynamic bootstrap path.
+                    if is_per_sport_job(job_name):
+                        for sport_key in app_settings.data_collection.sports:
+                            compound = make_compound_job_name(job_name, sport_key)
+                            existing = await _backend.get_job_status(compound)
+                            if existing and existing.next_run_time:
+                                console.print(
+                                    f"[dim]  {compound} already scheduled "
+                                    f"at {existing.next_run_time:%H:%M:%S UTC} — skipping[/dim]"
+                                )
+                                continue
+                            try:
+                                await _backend.schedule_cron(compound, cron_expr)
+                                console.print(
+                                    f"[green]  {compound} cron scheduled ({cron_expr})[/green]"
+                                )
+                            except Exception as e:
+                                console.print(
+                                    f"[yellow]  {compound} cron schedule failed: {e}[/yellow]"
+                                )
+                    else:
+                        existing = await _backend.get_job_status(job_name)
+                        if existing and existing.next_run_time:
+                            console.print(
+                                f"[dim]  {job_name} already scheduled "
+                                f"at {existing.next_run_time:%H:%M:%S UTC} — skipping[/dim]"
+                            )
+                            continue
+                        try:
+                            await _backend.schedule_cron(job_name, cron_expr)
+                            console.print(
+                                f"[green]  {job_name} cron scheduled ({cron_expr})[/green]"
+                            )
+                        except Exception as e:
+                            console.print(
+                                f"[yellow]  {job_name} cron schedule failed: {e}[/yellow]"
+                            )
+                    continue
+
                 bootstrap_fn = get_bootstrap_function(job_name)
 
                 if is_per_sport_job(job_name):

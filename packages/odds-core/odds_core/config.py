@@ -86,7 +86,13 @@ class SchedulerConfig(BaseSettings):
         description="How many days ahead to check for games when scheduling",
     )
     bootstrap_jobs: list[str] = Field(
-        default=["agent-run"],
+        default=[
+            "agent-run",
+            "fetch-oddsportal",
+            "fetch-oddsportal-results",
+            "daily-digest",
+            "fetch-espn-fixtures",
+        ],
         description="Jobs to bootstrap when starting the local scheduler",
     )
 

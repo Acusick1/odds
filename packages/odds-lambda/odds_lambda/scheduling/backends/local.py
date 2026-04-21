@@ -9,6 +9,7 @@ import structlog
 from apscheduler import AsyncScheduler, ConflictPolicy, SchedulerRole
 from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
 from apscheduler.eventbrokers.asyncpg import AsyncpgEventBroker
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -224,6 +225,103 @@ class LocalSchedulerBackend(SchedulerBackend):
                 exc_info=True,
             )
             raise SchedulingFailedError(f"Failed to schedule {job_name}: {e}") from e
+
+    async def schedule_cron(
+        self,
+        job_name: str,
+        cron_expr: str,
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        """Register a recurring cron schedule for a job.
+
+        Unlike ``schedule_next_execution`` (one-shot ``DateTrigger``), this
+        installs a ``CronTrigger`` that fires on the expression indefinitely.
+        Intended for fixed-schedule jobs (e.g. daily digest) whose fire time
+        does not depend on game proximity.
+        """
+        if self.dry_run:
+            logger.info(
+                "dry_run_schedule_cron",
+                job=job_name,
+                cron=cron_expr,
+                backend="local_apscheduler",
+            )
+            return
+
+        try:
+            from odds_lambda.scheduling.jobs import (
+                JobContext,
+                get_job_function,
+                resolve_job_name,
+            )
+
+            base_name, resolved_sport = resolve_job_name(job_name)
+            job_func = get_job_function(base_name)
+            ctx_payload: dict[str, object] = {}
+            if resolved_sport:
+                ctx_payload["sport"] = resolved_sport
+            if payload:
+                ctx_payload.update(payload)
+            ctx = JobContext.from_payload(ctx_payload)
+
+            await self._add_cron_schedule(job_func, job_name, cron_expr, ctx)
+
+            logger.info(
+                "local_cron_scheduled",
+                job=job_name,
+                cron=cron_expr,
+            )
+
+        except KeyError as e:
+            raise SchedulingFailedError(str(e)) from e
+        except Exception as e:
+            logger.error(
+                "local_cron_scheduling_failed",
+                job=job_name,
+                cron=cron_expr,
+                error=str(e),
+                exc_info=True,
+            )
+            raise SchedulingFailedError(f"Failed to schedule {job_name}: {e}") from e
+
+    async def _add_cron_schedule(
+        self,
+        job_func: object,
+        job_name: str,
+        cron_expr: str,
+        ctx: object,
+    ) -> None:
+        """Write a cron schedule to the data store, reusing a live scheduler if available."""
+        from apscheduler import current_async_scheduler
+
+        scheduler = self._scheduler or current_async_scheduler.get(None)
+        if scheduler is not None:
+            await self._write_cron_schedule(scheduler, job_func, job_name, cron_expr, ctx)
+            return
+
+        async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
+            await self._write_cron_schedule(scheduler, job_func, job_name, cron_expr, ctx)
+
+    async def _write_cron_schedule(
+        self,
+        scheduler: AsyncScheduler,
+        job_func: object,
+        job_name: str,
+        cron_expr: str,
+        ctx: object,
+    ) -> None:
+        task_key = f"{job_func.__module__}.{job_func.__qualname__}"  # type: ignore[union-attr]
+        if task_key not in self._configured_tasks:
+            await scheduler.configure_task(job_func)
+            self._configured_tasks.add(task_key)
+
+        await scheduler.add_schedule(
+            job_func,
+            trigger=CronTrigger.from_crontab(cron_expr, timezone="UTC"),
+            id=job_name,
+            args=[ctx],
+            conflict_policy=ConflictPolicy.replace,
+        )
 
     async def _add_schedule(
         self,

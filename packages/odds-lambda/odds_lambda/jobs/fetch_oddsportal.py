@@ -346,6 +346,22 @@ async def main(ctx: JobContext) -> None:
                 message=f"⚠️ OddsPortal scrape empty ({detail})",
             )
 
+    # Score predictions for newly arrived snapshots. Wrapped in its own
+    # try/except (outside the scrape alert context) so scoring failures
+    # don't surface as scrape alerts — they're logged independently.
+    try:
+        from odds_lambda.jobs.score_predictions import score_events
+
+        score_stats = await score_events(sport=ctx.sport)
+        logger.info("fetch_oddsportal_scoring_complete", **score_stats)
+    except Exception as e:
+        logger.error(
+            "fetch_oddsportal_scoring_failed",
+            sport=sport,
+            error=str(e),
+            exc_info=True,
+        )
+
     # On success, re-query next kickoff (scrape may have created new events)
     # and reschedule at the updated interval.
     if total_scraped > 0:
