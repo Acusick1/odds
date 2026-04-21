@@ -8,7 +8,6 @@ it via AlertManager. Skips sending when both sections are empty.
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -296,14 +295,18 @@ async def send_digest(
     """Query predictions and results, send Discord digest.
 
     Args:
-        model_name: Model to filter predictions by. Defaults to MODEL_NAME env var.
+        model_name: Model to filter predictions by. Defaults to
+            ``settings.model.name`` (``MODEL_NAME`` env var), falling back to
+            ``"epl-clv-home"`` if unset.
         lookback_hours: How far back to look for completed events.
         lookahead_hours: How far ahead to look for upcoming events.
         sport_key: Sport to generate digest for.
 
     Returns dict with counts: results_count, upcoming_count, sent (0 or 1).
     """
-    model_name = model_name or os.environ.get("MODEL_NAME") or "epl-clv-home"
+    from odds_core.config import get_settings
+
+    model_name = model_name or get_settings().model.name or "epl-clv-home"
 
     now = datetime.now(UTC)
     since = now - timedelta(hours=lookback_hours)

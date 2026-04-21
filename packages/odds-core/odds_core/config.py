@@ -111,6 +111,27 @@ class AWSConfig(BaseSettings):
     )
 
 
+class ModelConfig(BaseSettings):
+    """CLV model artifact location (S3) for local scoring and Lambda inference."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="MODEL_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        protected_namespaces=(),
+    )
+
+    name: str | None = Field(
+        default=None,
+        description="S3 key prefix for the model artifact (e.g. 'epl-clv-home')",
+    )
+    bucket: str | None = Field(
+        default=None,
+        description="S3 bucket containing '<name>/latest/model.pkl' and 'config.yaml'",
+    )
+
+
 class DataQualityConfig(BaseSettings):
     """Data quality and validation settings."""
 
@@ -247,7 +268,12 @@ class Settings(BaseSettings):
         bookmakers = settings.data_collection.bookmakers
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        protected_namespaces=(),
+    )
 
     # Repository root (walk up from packages/odds-core/odds_core/config.py)
     project_root: Path = Field(default=Path(__file__).resolve().parents[3])
@@ -258,6 +284,7 @@ class Settings(BaseSettings):
     data_collection: DataCollectionConfig = Field(default_factory=DataCollectionConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     aws: AWSConfig = Field(default_factory=AWSConfig)
+    model: ModelConfig = Field(default_factory=ModelConfig)
     data_quality: DataQualityConfig = Field(default_factory=DataQualityConfig)
     alerts: AlertConfig = Field(default_factory=AlertConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)

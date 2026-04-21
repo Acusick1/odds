@@ -9,6 +9,7 @@ import joblib
 import structlog
 import yaml
 from odds_analytics.training.config import FeatureConfig
+from odds_core.config import get_settings
 
 logger = structlog.get_logger(__name__)
 
@@ -73,13 +74,15 @@ def load_model(
         (FeatureConfig or None if config.yaml missing).
 
     Raises:
-        ValueError: If model_name or bucket is not provided and env vars are unset.
+        ValueError: If model_name or bucket is not provided and settings
+            (``MODEL_NAME`` / ``MODEL_BUCKET``) are unset.
         FileNotFoundError: If the model does not exist in S3.
     """
     global _cached_model, _cached_etag, _cached_model_key
 
-    model_name = model_name or os.environ.get("MODEL_NAME")
-    bucket = bucket or os.environ.get("MODEL_BUCKET")
+    settings = get_settings()
+    model_name = model_name or settings.model.name
+    bucket = bucket or settings.model.bucket
 
     if not model_name:
         raise ValueError("model_name required (or set MODEL_NAME env var)")
