@@ -83,12 +83,12 @@ async def _fetch_and_upsert(season: int) -> tuple[int, int, int]:
 
     # Dedup across past + upcoming on (date, team, opponent). The team-schedule
     # endpoint (past) and the scoreboard endpoint (upcoming) can overlap for an
-    # in-progress-today match, and the writer's upsert constraint is on
-    # (date, team, competition) — keeping the first occurrence here avoids a
-    # redundant upsert rather than a correctness issue.
+    # in-progress-today match. Iterate scoreboard first so it wins any conflict:
+    # team-schedule can lag for matches that just kicked off, while the scoreboard
+    # has the freshest ``state``, which is the reason this job fetches both.
     seen: set[tuple[str, str, str]] = set()
     combined: list[EspnFixtureRecord] = []
-    for record in (*past_records, *upcoming_records):
+    for record in (*upcoming_records, *past_records):
         key = (record.date.isoformat(), record.team, record.opponent)
         if key in seen:
             continue
