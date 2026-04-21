@@ -161,12 +161,11 @@ class TestDeriveStandings:
     def test_position_tiebreak_by_goal_diff_then_gf(self) -> None:
         from odds_mcp.server import _derive_standings
 
-        # X, Y, Z all play 2 games, all end with 4 pts, differentiated by GD/GF.
-        # X: beats Y 3-0, draws Z 0-0 → 4 pts, GD +3, GF 3
-        # Y: loses to X 0-3, beats Z 2-0 → 3 pts
-        # Z: draws X 0-0, loses to Y 0-2 → 1 pt
-        # Add W that mirrors X's points with different GD to force tiebreak:
-        # Actually let's build a cleaner tie: two teams on same pts & GD, differ on GF.
+        # Two matches chosen to tie X and Y on points (3) AND goal diff (+2),
+        # with X ahead on goals-for — exercises the GF tiebreak branch.
+        # X beats Z 4-2 → X: 3 pts, GD +2, GF 4
+        # Y beats Z 3-1 → Y: 3 pts, GD +2, GF 3
+        # Z loses both  → Z: 0 pts, GD -4, GF 3
         records: list[EspnFixtureRecord] = []
         records.extend(
             _match_records(
@@ -186,7 +185,6 @@ class TestDeriveStandings:
                 score_away=1,
             )
         )
-        # Now X and Y both have 3 pts, GD +2; X has GF 4 vs Y's GF 3.
         table = _derive_standings(self._build(records))
         assert table["X"]["points"] == 3
         assert table["Y"]["points"] == 3
