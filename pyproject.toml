@@ -91,6 +91,10 @@ pythonpath = ["scripts"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
+markers = [
+    "integration: hits live external APIs — may be skipped in offline CI",
+    "live_api: hits live third-party HTTP APIs — run only in the scheduled live-api workflow",
+]
 env = [
     "ODDS_API_KEY=",
 ]

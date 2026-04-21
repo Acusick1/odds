@@ -380,6 +380,7 @@ class TestLoadFixturesDf:
             "score_team",
             "score_opponent",
             "status",
+            "state",
             "season",
         }
         assert set(df.columns) == expected_cols
