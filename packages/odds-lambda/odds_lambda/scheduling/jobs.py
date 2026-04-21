@@ -66,6 +66,7 @@ _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
     "score-predictions": ("odds_lambda.jobs.score_predictions", "main"),
     "daily-digest": ("odds_lambda.jobs.daily_digest", "main"),
     "agent-run": ("odds_lambda.jobs.agent_run", "main"),
+    "fetch-espn-fixtures": ("odds_lambda.jobs.fetch_espn_fixtures", "main"),
 }
 
 # Bootstrap entry-point overrides: jobs listed here use a different function
@@ -95,6 +96,7 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
         "score-predictions",
         "daily-digest",
         "agent-run",
+        "fetch-espn-fixtures",
     }
 )
 

@@ -136,19 +136,31 @@ locals {
   # Schedule expressions for fixed-schedule jobs (map lookup prevents
   # a new job silently inheriting the wrong schedule via a ternary fallback).
   fixed_schedule_expressions = {
-    "daily-digest"      = "cron(0 8 * * ? *)"
-    "score-predictions" = "cron(30 * * * ? *)"
+    "daily-digest"        = "cron(0 8 * * ? *)"
+    "score-predictions"   = "cron(30 * * * ? *)"
+    "fetch-espn-fixtures" = "cron(0 6 * * ? *)"
   }
 
-  # Per-sport fixed-schedule jobs (daily-digest, score-predictions)
+  # Per-sport fixed-schedule jobs. fetch-espn-fixtures is EPL-only today —
+  # gated on sport_suffix to avoid scheduling it for sports without ESPN fixture
+  # coverage in this pipeline.
   sport_fixed_scheduler_rules = flatten([
-    for sport_suffix, cfg in local.sport_configs : [
-      for job in ["daily-digest", "score-predictions"] : {
-        key       = "${job}-${sport_suffix}"
-        job       = job
-        sport_key = cfg.sport_key
-      }
-    ]
+    for sport_suffix, cfg in local.sport_configs : concat(
+      [
+        for job in ["daily-digest", "score-predictions"] : {
+          key       = "${job}-${sport_suffix}"
+          job       = job
+          sport_key = cfg.sport_key
+        }
+      ],
+      sport_suffix == "epl" ? [
+        {
+          key       = "fetch-espn-fixtures-${sport_suffix}"
+          job       = "fetch-espn-fixtures"
+          sport_key = cfg.sport_key
+        }
+      ] : []
+    )
   ])
 
   fixed_scheduler_rules_map = { for r in local.sport_fixed_scheduler_rules : r.key => r }
