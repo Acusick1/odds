@@ -75,6 +75,7 @@ def _schedule_payload(
     score_team: str | None = None,
     score_opponent: str | None = None,
     status: str = "Scheduled",
+    state: str = "pre",
     season_name: str = "Regular Season",
 ) -> dict[str, Any]:
     """Build a minimal ESPN `/teams/{id}/schedule` response containing one event."""
@@ -100,7 +101,7 @@ def _schedule_payload(
                 "competitions": [
                     {
                         "competitors": [team_competitor, opponent_competitor],
-                        "status": {"type": {"description": status}},
+                        "status": {"type": {"description": status, "state": state}},
                     }
                 ],
             }
@@ -159,7 +160,8 @@ class TestEspnFixtureFetcher:
             home_away="home",
             score_team="2",
             score_opponent="1",
-            status="Final",
+            status="Full Time",
+            state="post",
         )
         transport_responses[
             "http://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams/2/schedule"
@@ -172,7 +174,8 @@ class TestEspnFixtureFetcher:
             home_away="away",
             score_team="1",
             score_opponent="2",
-            status="Final",
+            status="Full Time",
+            state="post",
         )
 
         # All other competition endpoints: empty events list.
@@ -212,8 +215,9 @@ class TestEspnFixtureFetcher:
         assert wolves_row.score_team == "1"
         assert wolves_row.score_opponent == "2"
 
-        # Status + competition propagated
-        assert arsenal_row.status == "Final"
+        # Status + competition + state propagated
+        assert arsenal_row.status == "Full Time"
+        assert arsenal_row.state == "post"
         assert arsenal_row.competition == "Premier League"
 
         # Date parsed as UTC-aware datetime
@@ -243,7 +247,8 @@ class TestEspnFixtureFetcher:
             team_name="Arsenal",
             opponent_name="Chelsea",
             date="2025-09-01T15:00:00Z",
-            status="Final",
+            status="Full Time",
+            state="post",
             score_team="3",
             score_opponent="0",
         )
@@ -256,3 +261,120 @@ class TestEspnFixtureFetcher:
         assert len(records) == 1
         assert records[0].team == "Arsenal"
         assert records[0].opponent == "Chelsea"
+
+
+def _scoreboard_payload(
+    *,
+    home_id: str,
+    home_name: str,
+    away_id: str,
+    away_name: str,
+    date: str,
+    state: str = "pre",
+    status: str = "Scheduled",
+    home_score: str | None = None,
+    away_score: str | None = None,
+    season_name: str = "Regular Season",
+) -> dict[str, Any]:
+    """Build a minimal ESPN ``/scoreboard`` response with one event."""
+    home_comp: dict[str, Any] = {
+        "homeAway": "home",
+        "team": {"id": home_id, "displayName": home_name},
+    }
+    away_comp: dict[str, Any] = {
+        "homeAway": "away",
+        "team": {"id": away_id, "displayName": away_name},
+    }
+    if home_score is not None:
+        home_comp["score"] = {"displayValue": home_score}
+    if away_score is not None:
+        away_comp["score"] = {"displayValue": away_score}
+
+    return {
+        "events": [
+            {
+                "date": date,
+                "seasonType": {"name": season_name},
+                "competitions": [
+                    {
+                        "competitors": [home_comp, away_comp],
+                        "status": {"type": {"state": state, "description": status}},
+                    }
+                ],
+            }
+        ]
+    }
+
+
+class TestFetchUpcoming:
+    """Unit tests for fetch_upcoming using the scoreboard endpoint."""
+
+    @pytest.fixture
+    def transport_responses(self) -> dict[str, dict[str, Any]]:
+        return {}
+
+    @pytest.fixture
+    def mock_client(self, transport_responses: dict[str, dict[str, Any]]) -> httpx.AsyncClient:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            # Match by league slug prefix before the query string.
+            for prefix, payload in transport_responses.items():
+                if url.startswith(prefix):
+                    return httpx.Response(200, json=payload)
+            # Cup/European slugs without a registered response → empty events.
+            return httpx.Response(200, json={"events": []})
+
+        transport = httpx.MockTransport(handler)
+        return httpx.AsyncClient(transport=transport)
+
+    @pytest.mark.asyncio
+    async def test_scoreboard_event_produces_two_records(
+        self,
+        mock_client: httpx.AsyncClient,
+        transport_responses: dict[str, dict[str, Any]],
+    ) -> None:
+        """One scoreboard event → two anchored records (home + away)."""
+        transport_responses[
+            "http://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard"
+        ] = _scoreboard_payload(
+            home_id="1",
+            home_name="Arsenal",
+            away_id="2",
+            away_name="Wolverhampton Wanderers",
+            date="2025-09-27T14:00:00Z",
+            state="pre",
+            status="Scheduled",
+        )
+
+        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+            records = await fetcher.fetch_upcoming(days_ahead=7)
+
+        # Two rows produced: one anchored on each team.
+        assert len(records) == 2
+
+        home_row = next(r for r in records if r.team == "Arsenal")
+        away_row = next(r for r in records if r.team == "Wolves")
+
+        assert home_row.opponent == "Wolves"
+        assert home_row.home_away == "home"
+        assert home_row.state == "pre"
+        assert home_row.status == "Scheduled"
+        assert home_row.score_team == ""
+        assert home_row.competition == "Premier League"
+        assert home_row.date == datetime(2025, 9, 27, 14, 0, tzinfo=UTC)
+
+        assert away_row.opponent == "Arsenal"
+        assert away_row.home_away == "away"
+        assert away_row.state == "pre"
+        assert away_row.score_team == ""
+
+    @pytest.mark.asyncio
+    async def test_empty_scoreboards_return_no_records(
+        self,
+        mock_client: httpx.AsyncClient,
+    ) -> None:
+        """All-empty scoreboards produce an empty result without raising."""
+        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+            records = await fetcher.fetch_upcoming(days_ahead=7)
+
+        assert records == []

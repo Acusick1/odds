@@ -19,7 +19,8 @@ def _pl_record(
     home_away: str,
     score_team: str,
     score_opponent: str,
-    status: str = "Final",
+    status: str = "Full Time",
+    state: str | None = "post",
     competition: str = "Premier League",
     season: str = "2025-26",
 ) -> EspnFixtureRecord:
@@ -33,6 +34,7 @@ def _pl_record(
         score_team=score_team,
         score_opponent=score_opponent,
         status=status,
+        state=state,
         season=season,
     )
 
@@ -44,7 +46,8 @@ def _match_records(
     date: datetime,
     score_home: int,
     score_away: int,
-    status: str = "Final",
+    status: str = "Full Time",
+    state: str | None = "post",
     competition: str = "Premier League",
     season: str = "2025-26",
 ) -> list[EspnFixtureRecord]:
@@ -58,6 +61,7 @@ def _match_records(
             score_team=str(score_home),
             score_opponent=str(score_away),
             status=status,
+            state=state,
             competition=competition,
             season=season,
         ),
@@ -69,6 +73,7 @@ def _match_records(
             score_team=str(score_away),
             score_opponent=str(score_home),
             status=status,
+            state=state,
             competition=competition,
             season=season,
         ),
@@ -87,6 +92,7 @@ class TestDeriveStandings:
             row.opponent = r.opponent
             row.competition = r.competition
             row.status = r.status
+            row.state = r.state
             row.score_team = r.score_team
             row.score_opponent = r.score_opponent
             row.date = r.date
@@ -224,6 +230,7 @@ class TestDeriveStandings:
                 score_home=3,
                 score_away=0,
                 status="Scheduled",
+                state="pre",
             )
         )
         table = _derive_standings(self._build(records))
@@ -301,6 +308,7 @@ class TestGetTeamContextAsOf:
                 score_home=0,
                 score_away=0,
                 status="Scheduled",
+                state="pre",
             )
         )
         await writer.upsert_fixtures(records)
@@ -346,7 +354,8 @@ class TestGetTeamContextAsOf:
                 date=datetime(2025, 9, 10, 14, 0, tzinfo=UTC),
                 score_home=1,
                 score_away=0,
-                status="In Progress",
+                status="1st Half",
+                state="in",
             )
         )
         await writer.upsert_fixtures(records)
@@ -413,6 +422,7 @@ class TestGetTeamContextAsOf:
                 score_home=0,
                 score_away=0,
                 status="Scheduled",
+                state="pre",
             )
         )
         records.extend(
@@ -423,6 +433,7 @@ class TestGetTeamContextAsOf:
                 score_home=0,
                 score_away=0,
                 status="Scheduled",
+                state="pre",
                 competition="Champions League",
             )
         )
@@ -485,6 +496,65 @@ class TestGetTeamContextAsOf:
         assert arsenal_row["position"] == 1
         # Full table returned in position order
         assert [r["team"] for r in standings["table"]] == ["Arsenal", "Liverpool", "Chelsea"]
+
+    @pytest.mark.asyncio
+    async def test_null_state_falls_back_to_status_string(
+        self, pglite_async_session, test_engine
+    ) -> None:
+        """Legacy rows (state=None) are classified as final via the status fallback."""
+        from odds_mcp import server as mcp_server
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        writer = EspnFixtureWriter(pglite_async_session)
+
+        # Two legacy rows: Arsenal beats Chelsea (Full Time) and Arsenal draws
+        # Liverpool (Final Score - After Extra Time). Both have state=None
+        # so must be recognised via the fallback set.
+        records: list[EspnFixtureRecord] = []
+        records.extend(
+            _match_records(
+                "Arsenal",
+                "Chelsea",
+                date=datetime(2025, 8, 15, 15, 0, tzinfo=UTC),
+                score_home=2,
+                score_away=0,
+                status="Full Time",
+                state=None,
+            )
+        )
+        records.extend(
+            _match_records(
+                "Arsenal",
+                "Liverpool",
+                date=datetime(2025, 8, 22, 15, 0, tzinfo=UTC),
+                score_home=1,
+                score_away=1,
+                status="Final Score - After Extra Time",
+                state=None,
+            )
+        )
+        await writer.upsert_fixtures(records)
+        await pglite_async_session.commit()
+
+        test_session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
+
+        with patch.object(mcp_server, "async_session_maker", test_session_maker):
+            result = await mcp_server.get_team_context(
+                team="Arsenal",
+                as_of="2025-09-01T00:00:00Z",
+                include_standings=True,
+            )
+
+        # last_results picks up both via the fallback.
+        assert len(result["last_results"]) == 2
+        outcomes = [r["outcome"] for r in result["last_results"]]
+        assert set(outcomes) == {"W", "D"}
+
+        # Standings derived from the same fallback.
+        arsenal_row = result["standings"]["team_row"]
+        assert arsenal_row["points"] == 4
+        assert arsenal_row["wins"] == 1
+        assert arsenal_row["draws"] == 1
 
 
 class TestParseScore:

@@ -1107,14 +1107,48 @@ async def schedule_next_wakeup(
 # ---------------------------------------------------------------------------
 
 
-# Matches ESPN's "status.type.description" for completed matches.
-_ESPN_STATUS_FINAL = "Final"
-# ESPN reports an "In Progress" description for currently-live matches. We
-# treat these as neither past nor future so the agent does not mistake a
-# partial score for a final result or schedule the match as "upcoming".
-_ESPN_STATUS_IN_PROGRESS = "In Progress"
+# ESPN's canonical match-state enum (``status.type.state``). Used for
+# categorising fixtures as past/live/upcoming.
+_ESPN_STATE_POST = "post"  # completed match (any kind: FT, AET, after pens)
+_ESPN_STATE_IN = "in"  # live match (any in-play status)
+_ESPN_STATE_PRE = "pre"  # not started
+
+# Fallback set for rows written before the ``state`` column was introduced
+# (``state is None``). Values are ESPN's ``status.type.description`` strings
+# that indicate a completed match. Kept narrow — only strings confirmed in
+# live ESPN responses. Matches are intentionally exact; partial matches
+# (e.g. "Final Score") would risk false positives.
+_ESPN_FINAL_STATUS_FALLBACK: frozenset[str] = frozenset(
+    {
+        "Full Time",
+        "Final Score - After Penalties",
+        "Final Score - After Extra Time",
+        "Final",
+    }
+)
 
 _PREMIER_LEAGUE = "Premier League"
+
+
+def _is_final(row: EspnFixture) -> bool:
+    """Return True if ``row`` represents a completed match.
+
+    Prefers ``state == "post"`` when available; falls back to a curated set of
+    ``status`` description strings for rows written before the migration.
+    """
+    if row.state is not None:
+        return row.state == _ESPN_STATE_POST
+    return row.status in _ESPN_FINAL_STATUS_FALLBACK
+
+
+def _is_in_progress(row: EspnFixture) -> bool:
+    """Return True if ``row`` is currently live.
+
+    Only the ``state`` column can distinguish "in" vs "pre" reliably, so rows
+    with ``state is None`` are treated as not-in-progress (the old "In
+    Progress" status string was never persisted on historical rows anyway).
+    """
+    return row.state == _ESPN_STATE_IN
 
 
 def _parse_score(value: str) -> int | None:
@@ -1179,18 +1213,19 @@ def _derive_standings(fixtures: list[EspnFixture]) -> dict[str, dict[str, Any]]:
     """Build a points table keyed by team from a season's Premier League rows.
 
     The input is the set of EspnFixture rows for the target season. Only rows
-    where ``competition == "Premier League"`` and ``status == "Final"`` with
-    parseable scores count. Position is assigned by sorting the team-indexed
-    table by (points desc, goal_diff desc, goals_for desc) — the standard EPL
-    tiebreak chain. Each match contributes to both teams' rows (rows are per
-    team in ``espn_fixtures``).
+    where ``competition == "Premier League"`` and state is ``"post"`` (or, for
+    legacy rows with no state, a matching fallback status) with parseable
+    scores count. Position is assigned by sorting the team-indexed table by
+    (points desc, goal_diff desc, goals_for desc) — the standard EPL tiebreak
+    chain. Each match contributes to both teams' rows (rows are per team in
+    ``espn_fixtures``).
     """
     table: dict[str, dict[str, Any]] = {}
 
     for fixture in fixtures:
         if fixture.competition != _PREMIER_LEAGUE:
             continue
-        if fixture.status != _ESPN_STATUS_FINAL:
+        if not _is_final(fixture):
             continue
         score_team = _parse_score(fixture.score_team)
         score_opponent = _parse_score(fixture.score_opponent)
@@ -1254,20 +1289,20 @@ async def get_team_context(
     Draws from the ``espn_fixtures`` table (refreshed daily by the
     ``fetch-espn-fixtures`` job). Returns:
 
-    - ``last_results``: up to ``last_n`` most recent Premier-League-only Final
-      fixtures before ``as_of``, each with score, outcome (W/D/L), home/away.
-      PL-only to keep "form" meaningful — cup results sit in upcoming_fixtures
-      via rotation risk, not form.
+    - ``last_results``: up to ``last_n`` most recent Premier-League-only
+      completed fixtures before ``as_of``, each with score, outcome (W/D/L),
+      home/away. PL-only to keep "form" meaningful — cup results sit in
+      upcoming_fixtures via rotation risk, not form.
     - ``upcoming_fixtures``: next ``next_n`` fixtures after ``as_of`` across
       all competitions (PL, FA Cup, League Cup, European) with
       ``days_until_ko``. This is the rotation-risk signal.
     - ``standings`` (when ``include_standings=True``): derived on the fly from
-      Premier League Final rows in the current season. Position assigned by a
-      simplified tiebreak chain: points, goal diff, goals for, team name. This
-      omits the official EPL head-to-head step, so ``position`` on a tight
-      3-way tie at the threshold is approximate — do not over-trust it.
+      Premier League completed rows in the current season. Position assigned
+      by a simplified tiebreak chain: points, goal diff, goals for, team name.
+      This omits the official EPL head-to-head step, so ``position`` on a
+      tight 3-way tie at the threshold is approximate — do not over-trust it.
 
-    Mid-match ``In Progress`` rows are skipped from both last_results and
+    Live (``state="in"``) rows are skipped from both last_results and
     upcoming_fixtures; they neither count as form nor as upcoming rotation.
 
     Args:
@@ -1321,20 +1356,23 @@ async def get_team_context(
             standings_result = await session.execute(standings_query)
             standings_rows = list(standings_result.scalars().all())
 
-    # Split team_rows into past (Final, PL only) and upcoming (any competition,
-    # not started). "In Progress" is skipped on both sides.
+    # Split team_rows into past (final, PL only) and upcoming (any competition,
+    # not started). Live matches ("in") are skipped on both sides.
     last_results: list[dict[str, Any]] = []
     upcoming: list[dict[str, Any]] = []
     for row in team_rows:
-        if row.status == _ESPN_STATUS_IN_PROGRESS:
+        if _is_in_progress(row):
             continue
-        if row.date < resolved_as_of:
-            if row.status != _ESPN_STATUS_FINAL or row.competition != _PREMIER_LEAGUE:
+        if _is_final(row):
+            if row.competition != _PREMIER_LEAGUE:
+                continue
+            if row.date >= resolved_as_of:
                 continue
             entry = _result_to_dict(row)
             if entry is not None:
                 last_results.append(entry)
         elif row.date >= resolved_as_of:
+            # "pre" rows and unknown-state future-dated rows.
             upcoming.append(_fixture_to_dict(row, as_of=resolved_as_of))
 
     # Newest-first on last_results; already date-asc on upcoming.

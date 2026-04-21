@@ -27,6 +27,7 @@ class EspnFixtureRecord:
     score_opponent: str
     status: str
     season: str
+    state: str | None = None
 
 
 @dataclass(slots=True)
@@ -83,6 +84,7 @@ class EspnFixture(SQLModel, table=True):
     score_team: str = Field(default="")
     score_opponent: str = Field(default="")
     status: str = Field(default="")
+    state: str | None = Field(default=None)
     season: str = Field(index=True)
 
     created_at: datetime = Field(

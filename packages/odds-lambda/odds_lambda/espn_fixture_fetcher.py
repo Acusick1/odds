@@ -10,7 +10,7 @@ The ESPN Site API is free and unauthenticated.
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -202,6 +202,7 @@ class EspnFixtureFetcher:
 
             status_type = comp.get("status", {}).get("type", {})
             status = status_type.get("description", "")
+            state = status_type.get("state") or None
             round_name = event.get("seasonType", {}).get("name", "")
 
             dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
@@ -219,11 +220,152 @@ class EspnFixtureFetcher:
                     score_team=_extract_score(team_entry),
                     score_opponent=_extract_score(opponent_entry),
                     status=status,
+                    state=state,
                     season=label,
                 )
             )
 
         return records
+
+    async def fetch_scoreboard(
+        self,
+        league_slug: str,
+        start: datetime,
+        end: datetime,
+    ) -> list[EspnFixtureRecord]:
+        """Fetch a date-range scoreboard for one competition.
+
+        The scoreboard endpoint returns one event per match (rather than one
+        per team per match, like ``teams/{id}/schedule``). For each event we
+        emit two records — one anchored on each team — to match the schema
+        used by ``fetch_team_schedule``.
+
+        Returns an empty list if ESPN does not publish a scoreboard for
+        ``league_slug`` (rather than raising) so cup/European slugs without
+        upcoming fixtures don't fail the whole fetch.
+        """
+        competition = LEAGUE_SLUGS[league_slug]
+        start_str = start.strftime("%Y%m%d")
+        end_str = end.strftime("%Y%m%d")
+        url = f"{BASE_URL}/{league_slug}/scoreboard?dates={start_str}-{end_str}"
+        try:
+            data = await self._fetch_json(url)
+        except Exception as e:
+            logger.warning(
+                "espn_scoreboard_fetch_failed",
+                league=league_slug,
+                error=str(e),
+            )
+            return []
+
+        events = data.get("events", [])
+        records: list[EspnFixtureRecord] = []
+        for event in events:
+            date_str = event.get("date", "")
+            if not date_str:
+                continue
+            comps = event.get("competitions", [])
+            if not comps:
+                continue
+            comp = comps[0]
+            competitors = comp.get("competitors", [])
+            if len(competitors) != 2:
+                continue
+
+            home_entry = None
+            away_entry = None
+            for c in competitors:
+                if c.get("homeAway") == "home":
+                    home_entry = c
+                elif c.get("homeAway") == "away":
+                    away_entry = c
+            if home_entry is None or away_entry is None:
+                continue
+
+            status_type = comp.get("status", {}).get("type", {})
+            status = status_type.get("description", "")
+            state = status_type.get("state") or None
+            round_name = event.get("seasonType", {}).get("name", "")
+
+            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+
+            home_name = normalize_team_name(home_entry["team"]["displayName"])
+            away_name = normalize_team_name(away_entry["team"]["displayName"])
+            home_score = _extract_score(home_entry)
+            away_score = _extract_score(away_entry)
+
+            label = season_label(current_season(dt))
+
+            # Home-anchored row
+            records.append(
+                EspnFixtureRecord(
+                    date=dt,
+                    team=home_name,
+                    opponent=away_name,
+                    competition=competition,
+                    match_round=round_name,
+                    home_away="home",
+                    score_team=home_score,
+                    score_opponent=away_score,
+                    status=status,
+                    state=state,
+                    season=label,
+                )
+            )
+            # Away-anchored row (mirror)
+            records.append(
+                EspnFixtureRecord(
+                    date=dt,
+                    team=away_name,
+                    opponent=home_name,
+                    competition=competition,
+                    match_round=round_name,
+                    home_away="away",
+                    score_team=away_score,
+                    score_opponent=home_score,
+                    status=status,
+                    state=state,
+                    season=label,
+                )
+            )
+
+        return records
+
+    async def fetch_upcoming(self, days_ahead: int = 30) -> list[EspnFixtureRecord]:
+        """Fetch near-future fixtures across all configured competitions.
+
+        The ``teams/{id}/schedule`` endpoint only returns completed matches,
+        so upcoming fixtures must come from the scoreboard endpoint. Iterates
+        ``LEAGUE_SLUGS`` with a ``today → today+days_ahead`` date range and
+        deduplicates on ``(date, team, opponent)``.
+        """
+        now = datetime.now(UTC)
+        end = now + timedelta(days=days_ahead)
+        all_records: list[EspnFixtureRecord] = []
+        seen: set[tuple[str, str, str]] = set()
+
+        for league_slug in LEAGUE_SLUGS:
+            if self.request_delay_seconds > 0:
+                await asyncio.sleep(self.request_delay_seconds)
+            fixtures = await self.fetch_scoreboard(league_slug, now, end)
+            new_count = 0
+            for record in fixtures:
+                key = (record.date.isoformat(), record.team, record.opponent)
+                if key in seen:
+                    continue
+                seen.add(key)
+                all_records.append(record)
+                new_count += 1
+            logger.info(
+                "espn_scoreboard_loaded",
+                league=league_slug,
+                new_fixtures=new_count,
+            )
+
+        all_records.sort(key=lambda r: r.date)
+        return all_records
 
     async def fetch_season(self, season: int) -> list[EspnFixtureRecord]:
         """Fetch all fixtures for all EPL teams in a season across all competitions.
