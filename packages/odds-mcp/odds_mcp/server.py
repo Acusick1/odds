@@ -1234,6 +1234,8 @@ def _derive_standings(fixtures: list[EspnFixture]) -> dict[str, dict[str, Any]]:
     )
     for position, (team, row) in enumerate(ordered, start=1):
         row["position"] = position
+        # Duplicate the team name into the row so callers can flatten via
+        # ``sorted(table.values(), ...)`` without losing the dict key.
         row["team"] = team
 
     return table
@@ -1260,8 +1262,10 @@ async def get_team_context(
       all competitions (PL, FA Cup, League Cup, European) with
       ``days_until_ko``. This is the rotation-risk signal.
     - ``standings`` (when ``include_standings=True``): derived on the fly from
-      Premier League Final rows in the current season. Position assigned by the
-      standard EPL tiebreak chain: points, goal diff, goals for.
+      Premier League Final rows in the current season. Position assigned by a
+      simplified tiebreak chain: points, goal diff, goals for, team name. This
+      omits the official EPL head-to-head step, so ``position`` on a tight
+      3-way tie at the threshold is approximate — do not over-trust it.
 
     Mid-match ``In Progress`` rows are skipped from both last_results and
     upcoming_fixtures; they neither count as form nor as upcoming rotation.
