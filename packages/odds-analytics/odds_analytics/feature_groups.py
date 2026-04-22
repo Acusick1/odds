@@ -432,14 +432,19 @@ def filter_completed_events(events: list[Event]) -> list[Event]:
 
 
 def make_backtest_event(event: Event) -> BacktestEvent:
-    """Convert Event to BacktestEvent for feature extraction."""
+    """Convert Event to BacktestEvent for feature extraction.
+
+    Scores default to 0 for SCHEDULED events (used at inference time):
+    feature extractors do not consume score fields, but BacktestEvent
+    validates them as ints.
+    """
     return BacktestEvent(
         id=event.id,
         commence_time=event.commence_time,
         home_team=event.home_team,
         away_team=event.away_team,
-        home_score=event.home_score,
-        away_score=event.away_score,
+        home_score=event.home_score if event.home_score is not None else 0,
+        away_score=event.away_score if event.away_score is not None else 0,
         status=event.status,
     )
 

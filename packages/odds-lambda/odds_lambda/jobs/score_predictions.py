@@ -15,24 +15,32 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import numpy as np
 import structlog
-from odds_analytics.backtesting import BacktestEvent
-from odds_analytics.feature_extraction import TabularFeatureExtractor
-from odds_analytics.feature_groups import resolve_outcome_name
+from odds_analytics.feature_groups import (
+    XGBoostAdapter,
+    _load_fixtures_df,
+    _load_lineup_cache,
+    collect_event_data,
+)
 from odds_analytics.training.config import FeatureConfig
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.prediction_models import Prediction
-from odds_core.snapshot_utils import extract_odds_from_snapshot
 from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.model_loader import get_cached_version, load_model
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
+
+if TYPE_CHECKING:
+    import pandas as pd
+    from odds_analytics.epl_lineup_features import LineupCache
+    from odds_analytics.match_stats_features import MatchStatsCache
 
 logger = structlog.get_logger()
 
@@ -80,58 +88,43 @@ async def _get_unscored_snapshots(
     return list(result.scalars().all())
 
 
-def _extract_features(
-    event: Event,
-    snapshot: OddsSnapshot,
+async def _preload_caches(
+    session: AsyncSession,
     config: FeatureConfig,
-    expected_features: list[str],
-) -> np.ndarray | None:
-    """Extract feature vector for a single snapshot.
+    sport_key: str,
+) -> tuple[
+    dict[str, list[Event]] | None,
+    MatchStatsCache | None,
+    pd.DataFrame | None,
+    LineupCache | None,
+]:
+    """Load feature-group caches once per scoring invocation.
 
-    Returns None if feature extraction fails (e.g. no odds data in snapshot)
-    or if the produced feature names don't match what the model expects.
+    Mirrors the guarded-preload pattern used in
+    ``feature_groups.prepare_training_data`` so that caches are only built
+    when their corresponding feature group is configured.
     """
-    market = config.primary_market
-    outcome_name = resolve_outcome_name(config, event)
+    standings_cache: dict[str, list[Event]] | None = None
+    if {"standings", "epl_schedule"} & set(config.feature_groups):
+        from odds_analytics.standings_features import load_season_events_cache
 
-    odds = extract_odds_from_snapshot(snapshot, event.id, market=market)
-    if not odds:
-        return None
+        standings_cache = await load_season_events_cache(session, sport_key)
 
-    backtest_event = BacktestEvent(
-        id=event.id,
-        commence_time=event.commence_time,
-        home_team=event.home_team,
-        away_team=event.away_team,
-        home_score=0,
-        away_score=0,
-        status=event.status,
-    )
+    match_stats_cache: MatchStatsCache | None = None
+    if "match_stats" in config.feature_groups:
+        from odds_analytics.match_stats_features import load_match_stats_cache
 
-    extractor = TabularFeatureExtractor.from_config(config)
-    tab_feats = extractor.extract_features(
-        event=backtest_event,
-        odds_data=odds,
-        outcome=outcome_name,
-        market=market,
-    )
-    tab_array = tab_feats.to_array()
+        match_stats_cache = await load_match_stats_cache(session, sport_key)
 
-    hours_until = (event.commence_time - snapshot.snapshot_time).total_seconds() / 3600
-    feature_vector = np.concatenate([tab_array, np.array([hours_until])])
-    feature_vector = np.nan_to_num(feature_vector, nan=0.0).astype(np.float32)
+    fixtures_df: pd.DataFrame | None = None
+    if "epl_schedule" in config.feature_groups:
+        fixtures_df = await _load_fixtures_df(session)
 
-    # Verify feature alignment — mismatched features produce garbage predictions
-    produced_names = [f"tab_{n}" for n in extractor.get_feature_names()] + ["hours_until_event"]
-    if produced_names != expected_features:
-        logger.error(
-            "feature_name_mismatch",
-            expected=expected_features,
-            produced=produced_names,
-        )
-        return None
+    lineup_cache: LineupCache | None = None
+    if "epl_lineup" in config.feature_groups:
+        lineup_cache = await _load_lineup_cache(session)
 
-    return feature_vector
+    return standings_cache, match_stats_cache, fixtures_df, lineup_cache
 
 
 async def score_events(
@@ -168,7 +161,7 @@ async def score_events(
         return stats
 
     model = model_data["model"]
-    feature_names: list[str] = model_data["feature_names"]
+    expected_feature_names: list[str] = model_data["feature_names"]
     model_version = get_cached_version() or "unknown"
 
     bundled_config: FeatureConfig | None = model_data.get("feature_config")
@@ -187,7 +180,6 @@ async def score_events(
         )
         return stats
 
-    # Validate that requested sport matches the model's sport
     if sport and sport != sport_key:
         logger.error(
             "sport_mismatch",
@@ -195,6 +187,16 @@ async def score_events(
             model_sport=sport_key,
             model_name=model_name,
             msg="Requested sport does not match model's sport_key",
+        )
+        return stats
+
+    adapter = XGBoostAdapter()
+    produced_feature_names = adapter.feature_names(config)
+    if produced_feature_names != expected_feature_names:
+        logger.error(
+            "feature_name_mismatch",
+            expected=expected_feature_names,
+            produced=produced_feature_names,
         )
         return stats
 
@@ -206,17 +208,34 @@ async def score_events(
             logger.info("no_upcoming_events", sport_key=sport_key)
             return stats
 
+        standings_cache, match_stats_cache, fixtures_df, lineup_cache = await _preload_caches(
+            session, config, sport_key
+        )
+
         for event in events:
             snapshots = await _get_unscored_snapshots(session, event.id, model_name)
+            if not snapshots:
+                continue
+
+            bundle = await collect_event_data(
+                event,
+                session,
+                config,
+                standings_cache=standings_cache,
+                match_stats_cache=match_stats_cache,
+                fixtures_df=fixtures_df,
+                lineup_cache=lineup_cache,
+            )
 
             for snapshot in snapshots:
                 try:
-                    features = _extract_features(event, snapshot, config, feature_names)
-                    if features is None:
+                    output = adapter.transform(bundle, snapshot, config)
+                    if output is None:
                         stats["snapshots_skipped"] += 1
                         continue
 
-                    predicted_clv = float(model.predict(features.reshape(1, -1))[0])
+                    feature_vector = output.features.astype(np.float32)
+                    predicted_clv = float(model.predict(feature_vector.reshape(1, -1))[0])
 
                     stmt = (
                         pg_insert(Prediction)
