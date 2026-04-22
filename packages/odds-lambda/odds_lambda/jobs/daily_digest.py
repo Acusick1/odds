@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
+from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.prediction_models import Prediction
@@ -304,8 +305,6 @@ async def send_digest(
 
     Returns dict with counts: results_count, upcoming_count, sent (0 or 1).
     """
-    from odds_core.config import get_settings
-
     model_name = model_name or get_settings().model.name or "epl-clv-home"
 
     now = datetime.now(UTC)

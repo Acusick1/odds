@@ -38,9 +38,12 @@ class TestLoadModel:
     def _isolate_model_settings(self, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         """Neutralize any local ``.env`` ``MODEL_NAME`` / ``MODEL_BUCKET`` values.
 
-        ``get_settings()`` is ``@lru_cache``d, so we reset it both before and
-        after each test to prevent a cached instance from leaking between tests
-        (or from a prior test run) and to pick up the empty env overrides.
+        Explicit env vars take precedence over ``.env`` file values in
+        pydantic-settings, so we set both to empty strings rather than
+        ``delenv`` — the latter would leave the developer's local ``.env``
+        values in effect. ``get_settings()`` is ``@lru_cache``d, so we reset
+        it both before and after each test to prevent a cached instance from
+        leaking between tests and to pick up the empty env overrides.
         """
         monkeypatch.setenv("MODEL_NAME", "")
         monkeypatch.setenv("MODEL_BUCKET", "")

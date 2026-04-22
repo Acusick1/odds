@@ -22,6 +22,7 @@ from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import TabularFeatureExtractor
 from odds_analytics.feature_groups import resolve_outcome_name
 from odds_analytics.training.config import FeatureConfig
+from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.prediction_models import Prediction
@@ -156,8 +157,6 @@ async def score_events(
     Returns:
         Dict with counts: events_checked, snapshots_scored, snapshots_skipped, errors.
     """
-    from odds_core.config import get_settings
-
     model_name = model_name or get_settings().model.name
 
     stats = {"events_checked": 0, "snapshots_scored": 0, "snapshots_skipped": 0, "errors": 0}
