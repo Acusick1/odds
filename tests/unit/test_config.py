@@ -47,6 +47,8 @@ class TestSettings:
             assert settings.data_quality.reject_invalid_odds is False
             assert settings.alerts.alert_enabled is False
             assert settings.logging.level == "INFO"
+            assert settings.model.name is None
+            assert settings.model.bucket is None
 
     def test_settings_custom_values(self):
         """Test custom configuration values."""

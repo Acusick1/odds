@@ -39,3 +39,4 @@ Concrete examples that fit each `common.md` edge category in an EPL context:
 - **Lineup drops** land roughly 60 minutes before kick-off. Close-to-KO deep research should target that window.
 - **Kick-off clusters** (UK): Sat 12:30 / 15:00 / 17:30; Sun 14:00 / 16:30; occasional Fri / Mon evening slots.
 - **Predictive model** — `get_predictions` returns an XGBoost CLV estimate. Low single-digit R². Sanity check only, never a primary reason to bet.
+- **Team context** — `get_team_context` returns recent PL form (last 5 W/D/L), upcoming fixtures across all competitions (rotation-risk signal), and a derived standings position. Use for fundamental-value reads where rotation under fixture congestion, form trajectory, or table-position incentives plausibly diverge from what sharp is pricing.

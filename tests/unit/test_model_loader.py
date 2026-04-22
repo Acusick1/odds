@@ -1,11 +1,13 @@
 """Tests for S3 model loader with ETag-based caching."""
 
+from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
 from botocore.exceptions import ClientError
 from odds_analytics.training.config import FeatureConfig
+from odds_core.config import reset_settings_cache
 from odds_lambda.model_loader import clear_cache, load_model
 
 
@@ -32,6 +34,23 @@ def _make_config_yaml(
 
 
 class TestLoadModel:
+    @pytest.fixture(autouse=True)
+    def _isolate_model_settings(self, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+        """Neutralize any local ``.env`` ``MODEL_NAME`` / ``MODEL_BUCKET`` values.
+
+        Explicit env vars take precedence over ``.env`` file values in
+        pydantic-settings, so we set both to empty strings rather than
+        ``delenv`` — the latter would leave the developer's local ``.env``
+        values in effect. ``get_settings()`` is ``@lru_cache``d, so we reset
+        it both before and after each test to prevent a cached instance from
+        leaking between tests and to pick up the empty env overrides.
+        """
+        monkeypatch.setenv("MODEL_NAME", "")
+        monkeypatch.setenv("MODEL_BUCKET", "")
+        reset_settings_cache()
+        yield
+        reset_settings_cache()
+
     def setup_method(self) -> None:
         clear_cache()
 
@@ -139,6 +158,8 @@ class TestLoadModel:
     ) -> None:
         monkeypatch.setenv("MODEL_NAME", "env-model")
         monkeypatch.setenv("MODEL_BUCKET", "env-bucket")
+        # Force Settings reconstruction so the monkeypatched env is read.
+        reset_settings_cache()
 
         s3 = MagicMock()
         mock_get_client.return_value = s3

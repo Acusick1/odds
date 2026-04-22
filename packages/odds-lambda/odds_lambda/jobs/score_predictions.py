@@ -14,7 +14,6 @@ or ad-hoc scoring runs outside the scrape loop).
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import UTC, datetime
 
 import numpy as np
@@ -23,6 +22,7 @@ from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import TabularFeatureExtractor
 from odds_analytics.feature_groups import resolve_outcome_name
 from odds_analytics.training.config import FeatureConfig
+from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.prediction_models import Prediction
@@ -145,8 +145,10 @@ async def score_events(
     Uses INSERT ... ON CONFLICT DO NOTHING for safe concurrent execution.
 
     Args:
-        model_name: S3 model name. Defaults to MODEL_NAME env var.
-        bucket: S3 bucket. Defaults to MODEL_BUCKET env var.
+        model_name: S3 model name. Defaults to ``settings.model.name``
+            (``MODEL_NAME`` env var).
+        bucket: S3 bucket. Defaults to ``settings.model.bucket``
+            (``MODEL_BUCKET`` env var).
         config: Override feature config (mainly for testing). If None, uses
             the config bundled in the model artifact.
         sport: Sport key from event payload. When provided, validated against
@@ -155,7 +157,7 @@ async def score_events(
     Returns:
         Dict with counts: events_checked, snapshots_scored, snapshots_skipped, errors.
     """
-    model_name = model_name or os.environ.get("MODEL_NAME") or None
+    model_name = model_name or get_settings().model.name
 
     stats = {"events_checked": 0, "snapshots_scored": 0, "snapshots_skipped": 0, "errors": 0}
 
