@@ -8,7 +8,7 @@ import pytest
 from odds_analytics.feature_groups import XGBoostAdapter, collect_event_data
 from odds_analytics.training.config import FeatureConfig
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_lambda.jobs.score_predictions import score_events
+from odds_lambda.jobs.score_predictions import _preload_caches, score_events
 
 _TEST_FEATURE_CONFIG = FeatureConfig(
     adapter="xgboost",
@@ -407,3 +407,210 @@ class TestScoreEvents:
 
         assert stats["events_checked"] == 0
         assert stats["snapshots_scored"] == 0
+
+
+def _config_with_groups(*groups: str) -> FeatureConfig:
+    return FeatureConfig(
+        adapter="xgboost",
+        sharp_bookmakers=["bet365"],
+        retail_bookmakers=["betway", "betfred", "bwin"],
+        markets=["h2h"],
+        outcome="home",
+        feature_groups=tuple(groups),
+        target_type="devigged_bookmaker",
+        target_bookmaker="bet365",
+        sport_key="soccer_epl",
+    )
+
+
+class TestPreloadCaches:
+    """Direct unit tests for _preload_caches gating."""
+
+    @pytest.mark.asyncio
+    @patch("odds_lambda.jobs.score_predictions._load_lineup_cache", new_callable=AsyncMock)
+    @patch("odds_lambda.jobs.score_predictions._load_fixtures_df", new_callable=AsyncMock)
+    @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
+    @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
+    async def test_tabular_only_loads_no_caches(
+        self,
+        mock_standings: AsyncMock,
+        mock_match_stats: AsyncMock,
+        mock_fixtures: AsyncMock,
+        mock_lineup: AsyncMock,
+    ) -> None:
+        config = _config_with_groups("tabular")
+        session = AsyncMock()
+
+        result = await _preload_caches(session, config, "soccer_epl")
+
+        assert result == (None, None, None, None)
+        mock_standings.assert_not_called()
+        mock_match_stats.assert_not_called()
+        mock_fixtures.assert_not_called()
+        mock_lineup.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("odds_lambda.jobs.score_predictions._load_lineup_cache", new_callable=AsyncMock)
+    @patch("odds_lambda.jobs.score_predictions._load_fixtures_df", new_callable=AsyncMock)
+    @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
+    @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
+    async def test_standings_only_loads_standings_cache(
+        self,
+        mock_standings: AsyncMock,
+        mock_match_stats: AsyncMock,
+        mock_fixtures: AsyncMock,
+        mock_lineup: AsyncMock,
+    ) -> None:
+        sentinel: dict[str, list[Event]] = {"2025-26": []}
+        mock_standings.return_value = sentinel
+        config = _config_with_groups("tabular", "standings")
+        session = AsyncMock()
+
+        standings_cache, match_stats_cache, fixtures_df, lineup_cache = await _preload_caches(
+            session, config, "soccer_epl"
+        )
+
+        assert standings_cache is sentinel
+        assert match_stats_cache is None
+        assert fixtures_df is None
+        assert lineup_cache is None
+        mock_standings.assert_awaited_once_with(session, "soccer_epl")
+        mock_match_stats.assert_not_called()
+        mock_fixtures.assert_not_called()
+        mock_lineup.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("odds_lambda.jobs.score_predictions._load_lineup_cache", new_callable=AsyncMock)
+    @patch("odds_lambda.jobs.score_predictions._load_fixtures_df", new_callable=AsyncMock)
+    @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
+    @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
+    async def test_match_stats_only_loads_match_stats_cache(
+        self,
+        mock_standings: AsyncMock,
+        mock_match_stats: AsyncMock,
+        mock_fixtures: AsyncMock,
+        mock_lineup: AsyncMock,
+    ) -> None:
+        sentinel = MagicMock(name="match_stats_cache")
+        mock_match_stats.return_value = sentinel
+        config = _config_with_groups("tabular", "match_stats")
+        session = AsyncMock()
+
+        standings_cache, match_stats_cache, fixtures_df, lineup_cache = await _preload_caches(
+            session, config, "soccer_epl"
+        )
+
+        assert standings_cache is None
+        assert match_stats_cache is sentinel
+        assert fixtures_df is None
+        assert lineup_cache is None
+        mock_standings.assert_not_called()
+        mock_match_stats.assert_awaited_once_with(session, "soccer_epl")
+        mock_fixtures.assert_not_called()
+        mock_lineup.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("odds_lambda.jobs.score_predictions._load_lineup_cache", new_callable=AsyncMock)
+    @patch("odds_lambda.jobs.score_predictions._load_fixtures_df", new_callable=AsyncMock)
+    @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
+    @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
+    async def test_epl_schedule_loads_fixtures_and_standings(
+        self,
+        mock_standings: AsyncMock,
+        mock_match_stats: AsyncMock,
+        mock_fixtures: AsyncMock,
+        mock_lineup: AsyncMock,
+    ) -> None:
+        """epl_schedule pulls in standings_cache too (shared by season-rest features)."""
+        standings_sentinel: dict[str, list[Event]] = {"2025-26": []}
+        fixtures_sentinel = MagicMock(name="fixtures_df")
+        mock_standings.return_value = standings_sentinel
+        mock_fixtures.return_value = fixtures_sentinel
+        config = _config_with_groups("tabular", "epl_schedule")
+        session = AsyncMock()
+
+        standings_cache, match_stats_cache, fixtures_df, lineup_cache = await _preload_caches(
+            session, config, "soccer_epl"
+        )
+
+        assert standings_cache is standings_sentinel
+        assert match_stats_cache is None
+        assert fixtures_df is fixtures_sentinel
+        assert lineup_cache is None
+        mock_standings.assert_awaited_once_with(session, "soccer_epl")
+        mock_fixtures.assert_awaited_once_with(session)
+        mock_match_stats.assert_not_called()
+        mock_lineup.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("odds_lambda.jobs.score_predictions._load_lineup_cache", new_callable=AsyncMock)
+    @patch("odds_lambda.jobs.score_predictions._load_fixtures_df", new_callable=AsyncMock)
+    @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
+    @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
+    async def test_epl_lineup_loads_lineup_cache(
+        self,
+        mock_standings: AsyncMock,
+        mock_match_stats: AsyncMock,
+        mock_fixtures: AsyncMock,
+        mock_lineup: AsyncMock,
+    ) -> None:
+        sentinel = MagicMock(name="lineup_cache")
+        mock_lineup.return_value = sentinel
+        config = _config_with_groups("tabular", "epl_lineup")
+        session = AsyncMock()
+
+        standings_cache, match_stats_cache, fixtures_df, lineup_cache = await _preload_caches(
+            session, config, "soccer_epl"
+        )
+
+        assert standings_cache is None
+        assert match_stats_cache is None
+        assert fixtures_df is None
+        assert lineup_cache is sentinel
+        mock_standings.assert_not_called()
+        mock_match_stats.assert_not_called()
+        mock_fixtures.assert_not_called()
+        mock_lineup.assert_awaited_once_with(session)
+
+    @pytest.mark.asyncio
+    @patch("odds_lambda.jobs.score_predictions._load_lineup_cache", new_callable=AsyncMock)
+    @patch("odds_lambda.jobs.score_predictions._load_fixtures_df", new_callable=AsyncMock)
+    @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
+    @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
+    async def test_all_groups_load_all_caches(
+        self,
+        mock_standings: AsyncMock,
+        mock_match_stats: AsyncMock,
+        mock_fixtures: AsyncMock,
+        mock_lineup: AsyncMock,
+    ) -> None:
+        standings_sentinel: dict[str, list[Event]] = {"2025-26": []}
+        match_stats_sentinel = MagicMock(name="match_stats_cache")
+        fixtures_sentinel = MagicMock(name="fixtures_df")
+        lineup_sentinel = MagicMock(name="lineup_cache")
+        mock_standings.return_value = standings_sentinel
+        mock_match_stats.return_value = match_stats_sentinel
+        mock_fixtures.return_value = fixtures_sentinel
+        mock_lineup.return_value = lineup_sentinel
+
+        config = _config_with_groups(
+            "tabular",
+            "standings",
+            "match_stats",
+            "epl_schedule",
+            "epl_lineup",
+        )
+        session = AsyncMock()
+
+        standings_cache, match_stats_cache, fixtures_df, lineup_cache = await _preload_caches(
+            session, config, "soccer_epl"
+        )
+
+        assert standings_cache is standings_sentinel
+        assert match_stats_cache is match_stats_sentinel
+        assert fixtures_df is fixtures_sentinel
+        assert lineup_cache is lineup_sentinel
+        mock_standings.assert_awaited_once_with(session, "soccer_epl")
+        mock_match_stats.assert_awaited_once_with(session, "soccer_epl")
+        mock_fixtures.assert_awaited_once_with(session)
+        mock_lineup.assert_awaited_once_with(session)
