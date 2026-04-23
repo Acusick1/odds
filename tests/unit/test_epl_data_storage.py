@@ -352,14 +352,14 @@ class TestFplAvailabilityReader:
 class TestLoadFixturesDf:
     @pytest.mark.asyncio
     async def test_returns_none_when_empty(self, pglite_async_session):
-        from odds_analytics.feature_groups import _load_fixtures_df
+        from odds_analytics.feature_groups import load_fixtures_df
 
-        df = await _load_fixtures_df(pglite_async_session)
+        df = await load_fixtures_df(pglite_async_session)
         assert df is None
 
     @pytest.mark.asyncio
     async def test_returns_dataframe_with_expected_columns(self, pglite_async_session):
-        from odds_analytics.feature_groups import _load_fixtures_df
+        from odds_analytics.feature_groups import load_fixtures_df
 
         writer = EspnFixtureWriter(pglite_async_session)
         await writer.upsert_fixtures(
@@ -367,7 +367,7 @@ class TestLoadFixturesDf:
         )
         await pglite_async_session.commit()
 
-        df = await _load_fixtures_df(pglite_async_session)
+        df = await load_fixtures_df(pglite_async_session)
         assert df is not None
         assert len(df) == 2
         expected_cols = {
@@ -387,13 +387,13 @@ class TestLoadFixturesDf:
 
     @pytest.mark.asyncio
     async def test_dates_are_utc_aware(self, pglite_async_session):
-        from odds_analytics.feature_groups import _load_fixtures_df
+        from odds_analytics.feature_groups import load_fixtures_df
 
         writer = EspnFixtureWriter(pglite_async_session)
         await writer.upsert_fixtures([_fixture_record()])
         await pglite_async_session.commit()
 
-        df = await _load_fixtures_df(pglite_async_session)
+        df = await load_fixtures_df(pglite_async_session)
         assert df is not None
         assert df["date"].dt.tz is not None
 
@@ -401,14 +401,14 @@ class TestLoadFixturesDf:
 class TestLoadLineupCache:
     @pytest.mark.asyncio
     async def test_returns_none_when_empty(self, pglite_async_session):
-        from odds_analytics.feature_groups import _load_lineup_cache
+        from odds_analytics.feature_groups import load_lineup_cache
 
-        cache = await _load_lineup_cache(pglite_async_session)
+        cache = await load_lineup_cache(pglite_async_session)
         assert cache is None
 
     @pytest.mark.asyncio
     async def test_returns_cache_from_db_records(self, pglite_async_session):
-        from odds_analytics.feature_groups import _load_lineup_cache
+        from odds_analytics.feature_groups import load_lineup_cache
 
         writer = EspnLineupWriter(pglite_async_session)
         await writer.upsert_lineups(
@@ -420,6 +420,6 @@ class TestLoadLineupCache:
         )
         await pglite_async_session.commit()
 
-        cache = await _load_lineup_cache(pglite_async_session)
+        cache = await load_lineup_cache(pglite_async_session)
         assert cache is not None
         assert "Arsenal" in cache
