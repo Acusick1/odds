@@ -41,6 +41,20 @@ __all__ = ["BettingStrategy", "BacktestEngine"]
 logger = structlog.get_logger()
 
 
+def _require_scores(event: BacktestEvent) -> tuple[int, int]:
+    """Narrow ``BacktestEvent`` scores to non-None for outcome evaluation.
+
+    ``BacktestEvent.home_score`` / ``away_score`` are typed ``int | None`` so
+    the same model can carry pre-match events through feature extraction, but
+    all bet-evaluation paths must run on completed events. Raises
+    ``AssertionError`` if a caller reaches here with missing scores.
+    """
+    assert event.home_score is not None and event.away_score is not None, (
+        f"BacktestEvent {event.id} reached outcome evaluation without final scores"
+    )
+    return event.home_score, event.away_score
+
+
 class BettingStrategy(ABC):
     """Abstract base class for all betting strategies."""
 
@@ -304,7 +318,8 @@ class BacktestEngine:
         wins, backing a team loses. For 2-way markets (basketball), a tie is
         a push (returns None).
         """
-        side = determine_h2h_winner(event.home_score, event.away_score)
+        home_score, away_score = _require_scores(event)
+        side = determine_h2h_winner(home_score, away_score)
         if side == "draw":
             if is_three_way:
                 return outcome.lower() == "draw"
@@ -320,15 +335,16 @@ class BacktestEngine:
         if line is None:
             return None
 
+        home_score, away_score = _require_scores(event)
         if outcome == event.home_team:
-            adjusted_score = event.home_score + line
-            won = adjusted_score > event.away_score
-            push = adjusted_score == event.away_score
+            adjusted_score = home_score + line
+            won = adjusted_score > away_score
+            push = adjusted_score == away_score
         else:
             away_line = -line
-            adjusted_score = event.away_score + away_line
-            won = adjusted_score > event.home_score
-            push = adjusted_score == event.home_score
+            adjusted_score = away_score + away_line
+            won = adjusted_score > home_score
+            push = adjusted_score == home_score
 
         if push:
             return None
@@ -342,7 +358,8 @@ class BacktestEngine:
         if line is None:
             return None
 
-        total_points = event.home_score + event.away_score
+        home_score, away_score = _require_scores(event)
+        total_points = home_score + away_score
 
         if outcome.lower() == "over":
             won = total_points > line

@@ -5,12 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
+from odds_analytics.feature_groups import FeatureGroupCaches, XGBoostAdapter, collect_event_data
 from odds_analytics.training.config import FeatureConfig
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_lambda.jobs.score_predictions import (
-    _extract_features,
-    score_events,
-)
+from odds_lambda.jobs.score_predictions import score_events
 
 _TEST_FEATURE_CONFIG = FeatureConfig(
     adapter="xgboost",
@@ -24,17 +22,21 @@ _TEST_FEATURE_CONFIG = FeatureConfig(
     sport_key="soccer_epl",
 )
 
-_EXPECTED_FEATURE_NAMES = [
-    f"tab_{n}"
-    for n in [
-        "consensus_prob",
-        "sharp_prob",
-        "retail_sharp_diff",
-        "num_bookmakers",
-        "is_weekend",
-        "day_of_week",
-    ]
-] + ["hours_until_event"]
+_EXPECTED_FEATURE_NAMES = XGBoostAdapter().feature_names(_TEST_FEATURE_CONFIG)
+
+_TABULAR_STANDINGS_CONFIG = FeatureConfig(
+    adapter="xgboost",
+    sharp_bookmakers=["bet365"],
+    retail_bookmakers=["betway", "betfred", "bwin"],
+    markets=["h2h"],
+    outcome="home",
+    feature_groups=("tabular", "standings"),
+    target_type="devigged_bookmaker",
+    target_bookmaker="bet365",
+    sport_key="soccer_epl",
+)
+
+_TABULAR_STANDINGS_FEATURE_NAMES = XGBoostAdapter().feature_names(_TABULAR_STANDINGS_CONFIG)
 
 
 def _make_event(
@@ -104,20 +106,61 @@ def _make_snapshot(
     )
 
 
-class TestExtractFeatures:
-    def test_extracts_features_successfully(self) -> None:
+class TestAdapterTabular:
+    @pytest.mark.asyncio
+    async def test_tabular_only_vector_matches_legacy_extraction(self) -> None:
+        """Adapter output for tabular-only must equal the prior hand-rolled vector.
+
+        Replicates the pre-#354 extraction (TabularFeatureExtractor +
+        hours_until_event concatenation, modulo np.nan_to_num) and asserts
+        byte equality with the new XGBoostAdapter path.
+        """
+        from odds_analytics.backtesting import BacktestEvent
+        from odds_analytics.feature_extraction import TabularFeatureExtractor
+        from odds_analytics.feature_groups import resolve_outcome_name
+        from odds_core.snapshot_utils import extract_odds_from_snapshot
+
         event = _make_event()
         snapshot = _make_snapshot(event)
 
-        result = _extract_features(event, snapshot, _TEST_FEATURE_CONFIG, _EXPECTED_FEATURE_NAMES)
+        market = _TEST_FEATURE_CONFIG.primary_market
+        outcome_name = resolve_outcome_name(_TEST_FEATURE_CONFIG, event)
+        odds = extract_odds_from_snapshot(snapshot, event.id, market=market)
+        backtest_event = BacktestEvent(
+            id=event.id,
+            commence_time=event.commence_time,
+            home_team=event.home_team,
+            away_team=event.away_team,
+            home_score=0,
+            away_score=0,
+            status=event.status,
+        )
+        extractor = TabularFeatureExtractor.from_config(_TEST_FEATURE_CONFIG)
+        tab_array = extractor.extract_features(
+            event=backtest_event,
+            odds_data=odds,
+            outcome=outcome_name,
+            market=market,
+        ).to_array()
+        hours_until = (event.commence_time - snapshot.snapshot_time).total_seconds() / 3600
+        legacy_vector = np.concatenate([tab_array, np.array([hours_until])]).astype(np.float32)
 
-        assert result is not None
-        assert isinstance(result, np.ndarray)
-        assert result.shape == (len(_EXPECTED_FEATURE_NAMES),)
-        assert result.dtype == np.float32
-        assert not np.any(np.isnan(result))
+        session = AsyncMock()
+        snapshots_result = MagicMock()
+        snapshots_result.scalars.return_value.all.return_value = [snapshot]
+        session.execute = AsyncMock(return_value=snapshots_result)
 
-    def test_returns_none_for_empty_snapshot(self) -> None:
+        bundle = await collect_event_data(event, session, _TEST_FEATURE_CONFIG)
+        adapter = XGBoostAdapter()
+        output = adapter.transform(bundle, snapshot, _TEST_FEATURE_CONFIG)
+
+        assert output is not None
+        adapter_vector = output.features.astype(np.float32)
+        assert adapter_vector.shape == legacy_vector.shape
+        assert np.array_equal(adapter_vector, legacy_vector, equal_nan=True)
+
+    @pytest.mark.asyncio
+    async def test_returns_none_for_empty_snapshot(self) -> None:
         event = _make_event()
         snapshot = OddsSnapshot(
             id=1,
@@ -127,32 +170,21 @@ class TestExtractFeatures:
             bookmaker_count=0,
         )
 
-        result = _extract_features(event, snapshot, _TEST_FEATURE_CONFIG, [])
+        session = AsyncMock()
+        snapshots_result = MagicMock()
+        snapshots_result.scalars.return_value.all.return_value = [snapshot]
+        session.execute = AsyncMock(return_value=snapshots_result)
 
-        assert result is None
+        bundle = await collect_event_data(event, session, _TEST_FEATURE_CONFIG)
+        adapter = XGBoostAdapter()
+        output = adapter.transform(bundle, snapshot, _TEST_FEATURE_CONFIG)
 
-    def test_returns_none_on_feature_name_mismatch(self) -> None:
-        event = _make_event()
-        snapshot = _make_snapshot(event)
-
-        wrong_names = ["wrong_feature_1", "wrong_feature_2"]
-        result = _extract_features(event, snapshot, _TEST_FEATURE_CONFIG, wrong_names)
-
-        assert result is None
-
-    def test_hours_until_is_positive_for_future_event(self) -> None:
-        event = _make_event(hours_from_now=48.0)
-        snapshot = _make_snapshot(event, hours_before=24.0)
-
-        result = _extract_features(event, snapshot, _TEST_FEATURE_CONFIG, _EXPECTED_FEATURE_NAMES)
-
-        assert result is not None
-        hours_until = result[-1]
-        assert hours_until > 0
+        assert output is None
 
 
 class TestScoreEvents:
     @pytest.mark.asyncio
+    @patch("odds_lambda.jobs.score_predictions.collect_event_data")
     @patch("odds_lambda.jobs.score_predictions.load_model")
     @patch("odds_lambda.jobs.score_predictions.get_cached_version")
     @patch("odds_lambda.jobs.score_predictions.async_session_maker")
@@ -161,6 +193,7 @@ class TestScoreEvents:
         mock_session_maker: MagicMock,
         mock_version: MagicMock,
         mock_load: MagicMock,
+        mock_collect: MagicMock,
     ) -> None:
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([0.015])
@@ -175,10 +208,16 @@ class TestScoreEvents:
         event = _make_event()
         snapshot = _make_snapshot(event)
 
-        mock_session = AsyncMock()
+        from odds_analytics.feature_groups import EventDataBundle
 
-        # First execute returns events, second returns unscored snapshots,
-        # third is the INSERT ON CONFLICT
+        mock_collect.return_value = EventDataBundle(
+            event=event,
+            snapshots=[snapshot],
+            closing_snapshot=snapshot,
+            pm_context=None,
+        )
+
+        mock_session = AsyncMock()
         events_result = MagicMock()
         events_result.scalars.return_value.all.return_value = [event]
         snapshots_result = MagicMock()
@@ -196,10 +235,103 @@ class TestScoreEvents:
         assert stats["events_checked"] == 1
         assert stats["snapshots_scored"] == 1
         assert stats["errors"] == 0
-
-        # Verify the INSERT statement was executed (3rd call)
         assert mock_session.execute.call_count == 3
         mock_model.predict.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("odds_lambda.jobs.score_predictions.preload_feature_group_caches")
+    @patch("odds_lambda.jobs.score_predictions.collect_event_data")
+    @patch("odds_lambda.jobs.score_predictions.load_model")
+    @patch("odds_lambda.jobs.score_predictions.get_cached_version")
+    @patch("odds_lambda.jobs.score_predictions.async_session_maker")
+    async def test_scores_multi_group_path(
+        self,
+        mock_session_maker: MagicMock,
+        mock_version: MagicMock,
+        mock_load: MagicMock,
+        mock_collect: MagicMock,
+        mock_preload: AsyncMock,
+    ) -> None:
+        """Tabular + standings model scores end-to-end with caches provided."""
+        mock_model = MagicMock()
+        mock_model.predict.return_value = np.array([0.02])
+        mock_load.return_value = {
+            "model": mock_model,
+            "feature_names": _TABULAR_STANDINGS_FEATURE_NAMES,
+            "params": {},
+            "feature_config": _TABULAR_STANDINGS_CONFIG,
+        }
+        mock_version.return_value = '"v2"'
+
+        event = _make_event()
+        snapshot = _make_snapshot(event)
+        sentinel_standings: dict[str, list[Event]] = {"2025-26": []}
+        mock_preload.return_value = FeatureGroupCaches(standings=sentinel_standings)
+
+        from odds_analytics.feature_groups import EventDataBundle
+
+        mock_collect.return_value = EventDataBundle(
+            event=event,
+            snapshots=[snapshot],
+            closing_snapshot=snapshot,
+            pm_context=None,
+        )
+
+        mock_session = AsyncMock()
+        events_result = MagicMock()
+        events_result.scalars.return_value.all.return_value = [event]
+        snapshots_result = MagicMock()
+        snapshots_result.scalars.return_value.all.return_value = [snapshot]
+        insert_result = MagicMock()
+        insert_result.rowcount = 1
+        mock_session.execute = AsyncMock(
+            side_effect=[events_result, snapshots_result, insert_result]
+        )
+        mock_session_maker.return_value.__aenter__.return_value = mock_session
+
+        stats = await score_events(model_name="epl-clv-multi", bucket="test-bucket")
+
+        assert stats["events_checked"] == 1
+        assert stats["snapshots_scored"] == 1
+        assert stats["errors"] == 0
+
+        mock_preload.assert_awaited_once()
+        collect_kwargs = mock_collect.await_args.kwargs
+        assert collect_kwargs["standings_cache"] is sentinel_standings
+        assert collect_kwargs["match_stats_cache"] is None
+        assert collect_kwargs["fixtures_df"] is None
+        assert collect_kwargs["lineup_cache"] is None
+
+        predict_input = mock_model.predict.call_args.args[0]
+        assert predict_input.shape == (1, len(_TABULAR_STANDINGS_FEATURE_NAMES))
+
+    @pytest.mark.asyncio
+    @patch("odds_lambda.jobs.score_predictions.async_session_maker")
+    @patch("odds_lambda.jobs.score_predictions.get_cached_version")
+    @patch("odds_lambda.jobs.score_predictions.load_model")
+    async def test_skips_on_feature_name_mismatch(
+        self,
+        mock_load: MagicMock,
+        mock_version: MagicMock,
+        mock_session_maker: MagicMock,
+    ) -> None:
+        """When the model's bundled feature names diverge from the adapter's,
+        scoring logs and returns without invoking the model or DB."""
+        mock_model = MagicMock()
+        mock_load.return_value = {
+            "model": mock_model,
+            "feature_names": ["wrong_feature_1", "wrong_feature_2"],
+            "params": {},
+            "feature_config": _TEST_FEATURE_CONFIG,
+        }
+        mock_version.return_value = '"etag123"'
+
+        stats = await score_events(model_name="bad-model", bucket="test-bucket")
+
+        assert stats["events_checked"] == 0
+        assert stats["snapshots_scored"] == 0
+        mock_model.predict.assert_not_called()
+        mock_session_maker.assert_not_called()
 
     @pytest.mark.asyncio
     @patch("odds_lambda.jobs.score_predictions.load_model")
@@ -223,18 +355,16 @@ class TestScoreEvents:
     ) -> None:
         mock_load.return_value = {
             "model": MagicMock(),
-            "feature_names": [],
+            "feature_names": _EXPECTED_FEATURE_NAMES,
             "params": {},
             "feature_config": _TEST_FEATURE_CONFIG,
         }
         mock_version.return_value = '"v1"'
 
         mock_session = AsyncMock()
-
         events_result = MagicMock()
         events_result.scalars.return_value.all.return_value = []
         mock_session.execute = AsyncMock(return_value=events_result)
-
         mock_session_maker.return_value.__aenter__.return_value = mock_session
 
         stats = await score_events(model_name="test", bucket="test-bucket")

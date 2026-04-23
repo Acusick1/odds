@@ -25,14 +25,21 @@ __all__ = [
 
 
 class BacktestEvent(BaseModel):
-    """Event validated for backtesting - guaranteed to have final scores."""
+    """Event payload used for both backtesting and live scoring.
+
+    Constructed via ``from_db_event`` for completed events (scores guaranteed
+    non-None) and via ``feature_groups.make_backtest_event`` for upcoming
+    events at inference time (scores may be ``None``). Score fields are
+    therefore optional; backtest call sites that read them are reached only
+    after ``from_db_event`` has filtered out scoreless events.
+    """
 
     id: str
     commence_time: datetime
     home_team: str
     away_team: str
-    home_score: int
-    away_score: int
+    home_score: int | None
+    away_score: int | None
     status: EventStatus
 
     @field_validator("commence_time")

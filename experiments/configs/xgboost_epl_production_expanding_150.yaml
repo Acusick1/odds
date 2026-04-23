@@ -8,13 +8,12 @@ experiment:
   - football
   - hybrid_sharp
   - standings
-  description: >
-    Production-candidate EPL CLV model with tabular + standings features,
-    3-way (1x2) market, and hybrid Pinnacle/Betfair-Exchange sharp reference.
-    Intended to replace the deployed epl-clv-home model which was trained
-    on 2-way h2h and therefore skips all OddsPortal snapshots at scoring
-    time.
+  description: 'Production-candidate EPL CLV model with tabular + standings features,
+    3-way (1x2) market, and hybrid Pinnacle/Betfair-Exchange sharp reference. Intended
+    to replace the deployed epl-clv-home model which was trained on 2-way h2h and
+    therefore skips all OddsPortal snapshots at scoring time.
 
+    '
 training:
   strategy_type: xgboost_line_movement
   data:
@@ -39,17 +38,17 @@ training:
     max_depth: 3
     min_child_weight: 20
     learning_rate: 0.1
-    gamma: 0.01
+    gamma: 0.0
     subsample: 0.8
     colsample_bytree: 0.8
     colsample_bylevel: 1.0
     colsample_bynode: 1.0
-    reg_alpha: 0.5
+    reg_alpha: 0.0
     reg_lambda: 1.5
     objective: reg:squarederror
     random_state: 42
     n_jobs: 1
-    early_stopping_rounds: 15
+    early_stopping_rounds: 50
   features:
     adapter: xgboost
     sharp_bookmakers:
@@ -115,29 +114,29 @@ tuning:
   search_spaces:
     n_estimators:
       type: int
-      low: 50.0
-      high: 400.0
-      step: 50.0
+      low: 100
+      high: 600
+      step: 50
       log: false
       choices: null
     max_depth:
       type: int
-      low: 2.0
-      high: 6.0
+      low: 2
+      high: 4
       step: null
       log: false
       choices: null
     learning_rate:
       type: float
       low: 0.01
-      high: 0.3
+      high: 0.1
       step: null
       log: true
       choices: null
     min_child_weight:
       type: int
-      low: 5.0
-      high: 50.0
+      low: 1
+      high: 15
       step: null
       log: false
       choices: null
@@ -155,25 +154,11 @@ tuning:
       step: 0.1
       log: false
       choices: null
-    gamma:
-      type: float
-      low: 0.0
-      high: 1.0
-      step: null
-      log: false
-      choices: null
-    reg_alpha:
-      type: float
-      low: 0.0
-      high: 2.0
-      step: null
-      log: false
-      choices: null
     reg_lambda:
       type: float
-      low: 0.5
+      low: 0.01
       high: 5.0
       step: null
-      log: false
+      log: true
       choices: null
 tracking: null
