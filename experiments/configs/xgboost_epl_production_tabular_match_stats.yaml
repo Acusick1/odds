@@ -1,5 +1,5 @@
 experiment:
-  name: xgboost_epl_production_tabular_standings
+  name: xgboost_epl_production_tabular_match_stats
   tags:
   - xgboost
   - epl
@@ -7,13 +7,11 @@ experiment:
   - tuning
   - football
   - hybrid_sharp
-  - standings
-  description: 'Production-candidate EPL CLV model with tabular + standings features,
-    3-way (1x2) market, and hybrid Pinnacle/Betfair-Exchange sharp reference. Intended
-    to replace the deployed epl-clv-home model which was trained on 2-way h2h and
-    therefore skips all OddsPortal snapshots at scoring time.
-
-    '
+  - match_stats
+  description: "Production candidate: EPL CLV with tabular + match_stats features\
+    \ under sliding-380:50 + principled Optuna search (early_stopping=50, mcw [1,15],\
+    \ gamma=0, reg_alpha=0, reg_lambda log [0.01, 5.0]). 2026-04-23 ablation: best\
+    \ individual feature group config; CV val_R\xB2=0.058, val_MSE=0.000716."
 training:
   strategy_type: xgboost_line_movement
   data:
@@ -76,7 +74,7 @@ training:
     normalize: false
     feature_groups:
     - tabular
-    - standings
+    - match_stats
     movement_threshold: 0.005
     pm_velocity_window_hours: 2.0
     pm_price_tolerance_minutes: 30
