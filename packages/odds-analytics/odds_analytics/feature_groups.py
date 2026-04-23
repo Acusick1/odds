@@ -80,6 +80,10 @@ __all__ = [
     "filter_completed_events",
     "resolve_outcome_name",
     "snapshot_has_bookmaker",
+    "FeatureGroupCaches",
+    "preload_feature_group_caches",
+    "load_fixtures_df",
+    "load_lineup_cache",
 ]
 
 
@@ -989,7 +993,7 @@ def _select_closing_snapshot(
 # =============================================================================
 
 
-async def _load_fixtures_df(session: AsyncSession) -> pd.DataFrame | None:
+async def load_fixtures_df(session: AsyncSession) -> pd.DataFrame | None:
     """Load all ESPN fixtures from DB into a DataFrame.
 
     Returns None if no fixtures exist in the database.
@@ -1009,7 +1013,7 @@ async def _load_fixtures_df(session: AsyncSession) -> pd.DataFrame | None:
     return df
 
 
-async def _load_lineup_cache(session: AsyncSession) -> LineupCache | None:
+async def load_lineup_cache(session: AsyncSession) -> LineupCache | None:
     """Load all ESPN lineups from DB and build a per-team starting XI cache.
 
     Loads the full roster (starters + subs) with player_name so that downstream
@@ -1038,6 +1042,51 @@ async def _load_lineup_cache(session: AsyncSession) -> LineupCache | None:
 
     logger.info("espn_lineups_loaded_from_db", rows=len(df))
     return build_lineup_cache(df[df["starter"]].drop(columns=["starter"]))
+
+
+@dataclass
+class FeatureGroupCaches:
+    """Bulk-loaded caches shared across events during feature extraction.
+
+    Populated by :func:`preload_feature_group_caches` and forwarded into
+    :func:`collect_event_data` so per-event DB queries stay O(1).
+    """
+
+    standings: dict[str, list[Event]] | None = None
+    match_stats: MatchStatsCache | None = None
+    fixtures_df: pd.DataFrame | None = None
+    lineup_cache: LineupCache | None = None
+
+
+async def preload_feature_group_caches(
+    session: AsyncSession,
+    config: FeatureConfig,
+    sport_key: str | None,
+) -> FeatureGroupCaches:
+    """Load every cache required by ``config.feature_groups`` in one pass.
+
+    Each cache is gated on its feature groups; sport-scoped caches
+    (standings, match_stats) are skipped when ``sport_key`` is ``None``.
+    """
+    caches = FeatureGroupCaches()
+
+    if {"standings", "epl_schedule"} & set(config.feature_groups) and sport_key:
+        from odds_analytics.standings_features import load_season_events_cache
+
+        caches.standings = await load_season_events_cache(session, sport_key)
+
+    if "match_stats" in config.feature_groups and sport_key:
+        from odds_analytics.match_stats_features import load_match_stats_cache
+
+        caches.match_stats = await load_match_stats_cache(session, sport_key)
+
+    if "epl_schedule" in config.feature_groups:
+        caches.fixtures_df = await load_fixtures_df(session)
+
+    if "epl_lineup" in config.feature_groups:
+        caches.lineup_cache = await load_lineup_cache(session)
+
+    return caches
 
 
 class PreparedFeatureData:
@@ -1119,31 +1168,7 @@ async def prepare_training_data(
     # Resolve sport_key once for cache loaders
     sport_key = config.sport_key or (valid_events[0].sport_key if valid_events else None)
 
-    # Preload standings cache to avoid N+1 queries (also used by epl_schedule)
-    standings_cache: dict[str, list[Event]] | None = None
-    if {"standings", "epl_schedule"} & set(config.feature_groups):
-        from odds_analytics.standings_features import load_season_events_cache
-
-        if sport_key:
-            standings_cache = await load_season_events_cache(session, sport_key)
-
-    # Preload match stats cache to avoid N+1 queries
-    match_stats_cache: MatchStatsCache | None = None
-    if "match_stats" in config.feature_groups:
-        from odds_analytics.match_stats_features import load_match_stats_cache
-
-        if sport_key:
-            match_stats_cache = await load_match_stats_cache(session, sport_key)
-
-    # Preload all-competition fixtures DataFrame for rest/congestion features
-    fixtures_df: pd.DataFrame | None = None
-    if "epl_schedule" in config.feature_groups:
-        fixtures_df = await _load_fixtures_df(session)
-
-    # Preload lineup cache for lineup-delta features
-    lineup_cache: LineupCache | None = None
-    if "epl_lineup" in config.feature_groups:
-        lineup_cache = await _load_lineup_cache(session)
+    caches = await preload_feature_group_caches(session, config, sport_key)
 
     for event in valid_events:
         # Load all data for this event in bulk
@@ -1151,10 +1176,10 @@ async def prepare_training_data(
             event,
             session,
             config,
-            standings_cache=standings_cache,
-            match_stats_cache=match_stats_cache,
-            fixtures_df=fixtures_df,
-            lineup_cache=lineup_cache,
+            standings_cache=caches.standings,
+            match_stats_cache=caches.match_stats,
+            fixtures_df=caches.fixtures_df,
+            lineup_cache=caches.lineup_cache,
         )
 
         # Closing snapshot is required

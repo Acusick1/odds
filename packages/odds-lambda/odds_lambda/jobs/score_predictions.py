@@ -15,15 +15,13 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 
 import numpy as np
 import structlog
 from odds_analytics.feature_groups import (
     XGBoostAdapter,
-    _load_fixtures_df,
-    _load_lineup_cache,
     collect_event_data,
+    preload_feature_group_caches,
 )
 from odds_analytics.training.config import FeatureConfig
 from odds_core.config import get_settings
@@ -36,11 +34,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.model_loader import get_cached_version, load_model
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
-
-if TYPE_CHECKING:
-    import pandas as pd
-    from odds_analytics.epl_lineup_features import LineupCache
-    from odds_analytics.match_stats_features import MatchStatsCache
 
 logger = structlog.get_logger()
 
@@ -86,45 +79,6 @@ async def _get_unscored_snapshots(
     )
     result = await session.execute(query)
     return list(result.scalars().all())
-
-
-async def _preload_caches(
-    session: AsyncSession,
-    config: FeatureConfig,
-    sport_key: str,
-) -> tuple[
-    dict[str, list[Event]] | None,
-    MatchStatsCache | None,
-    pd.DataFrame | None,
-    LineupCache | None,
-]:
-    """Load feature-group caches once per scoring invocation.
-
-    Mirrors the guarded-preload pattern used in
-    ``feature_groups.prepare_training_data`` so that caches are only built
-    when their corresponding feature group is configured.
-    """
-    standings_cache: dict[str, list[Event]] | None = None
-    if {"standings", "epl_schedule"} & set(config.feature_groups):
-        from odds_analytics.standings_features import load_season_events_cache
-
-        standings_cache = await load_season_events_cache(session, sport_key)
-
-    match_stats_cache: MatchStatsCache | None = None
-    if "match_stats" in config.feature_groups:
-        from odds_analytics.match_stats_features import load_match_stats_cache
-
-        match_stats_cache = await load_match_stats_cache(session, sport_key)
-
-    fixtures_df: pd.DataFrame | None = None
-    if "epl_schedule" in config.feature_groups:
-        fixtures_df = await _load_fixtures_df(session)
-
-    lineup_cache: LineupCache | None = None
-    if "epl_lineup" in config.feature_groups:
-        lineup_cache = await _load_lineup_cache(session)
-
-    return standings_cache, match_stats_cache, fixtures_df, lineup_cache
 
 
 async def score_events(
@@ -208,9 +162,7 @@ async def score_events(
             logger.info("no_upcoming_events", sport_key=sport_key)
             return stats
 
-        standings_cache, match_stats_cache, fixtures_df, lineup_cache = await _preload_caches(
-            session, config, sport_key
-        )
+        caches = await preload_feature_group_caches(session, config, sport_key)
 
         for event in events:
             snapshots = await _get_unscored_snapshots(session, event.id, model_name)
@@ -221,10 +173,10 @@ async def score_events(
                 event,
                 session,
                 config,
-                standings_cache=standings_cache,
-                match_stats_cache=match_stats_cache,
-                fixtures_df=fixtures_df,
-                lineup_cache=lineup_cache,
+                standings_cache=caches.standings,
+                match_stats_cache=caches.match_stats,
+                fixtures_df=caches.fixtures_df,
+                lineup_cache=caches.lineup_cache,
             )
 
             for snapshot in snapshots:
