@@ -348,6 +348,21 @@ After #359 unblocked multi-feature-group scoring in production, re-ran per-group
 
 **Tooling correction:** discovered that committed `xgboost_epl_production_tabular_standings.yaml` had `window_type: sliding` while the rest of the production family used expanding (#360 fixes).
 
+**Offline A/B (head-to-head prediction comparison, 2026-04-23):** scored 17 upcoming EPL events with both `tabular_only` (deployed config) and `tabular_match_stats` (production candidate) locally; 1088 shared (event, snapshot) pairs.
+
+| Metric | Value |
+|---|---|
+| mean Δ (match_stats − tabular) | **−0.0040** (~0.4pp more bearish on home) |
+| median Δ | −0.0032 |
+| stdev Δ | 0.0088 |
+| abs mean Δ | 0.0077 |
+| abs max Δ | 0.0220 |
+| sign agreement | **945/1088 (86.9%)** |
+
+Top differentiated events all show match_stats more bearish on home: Leeds vs Burnley (Δ −1.53pp), Arsenal vs Newcastle (Δ −1.02pp), ManU vs Brentford (Δ −0.89pp). Likely driven by rolling shots/corners/cards capturing relative team quality the tabular features miss.
+
+**Limits of offline A/B:** point-in-time prediction comparison only — without realised closing lines we can't say which model is *correct*. The 13% directional disagreement and consistent bearish-on-home shift suggest the models are not redundant; a live A/B against realised CLV (run both models for several matchdays, settle, compare per-snapshot CLV error) is the next validation step.
+
 ## Open Questions
 
 ### Signal
