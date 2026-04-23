@@ -363,6 +363,48 @@ Top differentiated events all show match_stats more bearish on home: Leeds vs Bu
 
 **Limits of offline A/B:** point-in-time prediction comparison only — without realised closing lines we can't say which model is *correct*. The 13% directional disagreement and consistent bearish-on-home shift suggest the models are not redundant; a live A/B against realised CLV (run both models for several matchdays, settle, compare per-snapshot CLV error) is the next validation step.
 
+### Principled search space + protocol re-test (Apr 2026, post-degeneracy fix)
+
+After verifying the sliding-380:50 constant-predictor pathology (above), the root cause was traced to the Optuna search space, not the protocol. Web research on XGBoost tuning for small-N low-SNR regression (Kaggle grandmaster guides, XGBoost official docs, randomrealizations, Laurae on gamma) yielded a principled revised search space:
+
+```yaml
+n_estimators:       [100, 600]  step 50       # was [50, 400]
+max_depth:          [2, 4]                    # was [2, 6]
+learning_rate:      [0.01, 0.1]  log          # was [0.01, 0.3]
+min_child_weight:   [1, 15]                   # was [5, 50]
+subsample:          [0.5, 1.0]  step 0.1      # unchanged
+colsample_bytree:   [0.5, 1.0]  step 0.1      # unchanged
+reg_lambda:         [0.01, 5.0]  log          # was [0.5, 5.0] linear
+gamma:              0.0 (locked)              # was [0, 1]
+reg_alpha:          0.0 (locked)              # was [0, 2]
+early_stopping_rounds: 50                     # was 15
+```
+
+**Principles:**
+- `mcw` heuristic ≤ √N/10 → ≈2 at N=380; mcw=50 forces leaves ≥13% of training rows → guaranteed collapse.
+- `gamma` and `mcw` are redundant regularization axes at low depth — locking gamma=0 removes the joint over-regularization trap.
+- Don't tune both L1 (`reg_alpha`) and L2 (`reg_lambda`) simultaneously — lock one.
+- `log`-scale `reg_lambda` from 0.01 lets Optuna discover lighter L2 helps.
+- `early_stopping=50` (was 15) is the biggest single fix: with lr≤0.05 and noisy 50-example val sets, meaningful improvement rarely appears before tree 20; early_stopping=15 aborts before any tree can show value.
+
+**Results (100 trials each, 1813 events, hybrid sharp, 2026-04-23):**
+
+| Config | Old search val_R² | Principled val_R² | Principled val_MSE |
+|---|---|---|---|
+| expanding:50 + tabular | +0.0354 | +0.0472 | 0.000753 |
+| expanding:50 + tabular + match_stats | +0.0514 | +0.0579 | 0.000743 |
+| sliding-380:50 + tabular | DEGENERATE (constant predictor) | +0.0517 | 0.000721 |
+| sliding-380:50 + tabular + match_stats | DEGENERATE | **+0.0581** | **0.000716** (best) |
+
+**Implications:**
+- **Sliding-380:50 is no longer degenerate** — verified directly (48-50 unique predictions on 50 val examples, best_iteration=31-33, was 9 under old search).
+- **Sliding-380:50 slightly beats expanding:50** on MSE once the tuner can find good hyperparams — flips the "expanding is the only working protocol" conclusion above.
+- **All four configs improved** — even the working expanding configs had been under-tuned by ~0.01 R².
+- **match_stats > tabular-only** ranking holds under both protocols — the feature-group ablation conclusions survive the search-space fix.
+- **New production candidate:** sliding-380:50 + tabular + match_stats + principled search. R²=+0.058, MSE=0.000716.
+
+**Tooling change proposed (not yet applied):** update the committed `experiments/configs/xgboost_epl_production_*.yaml` search_spaces to the principled bounds, so future tuning runs default to this. Current committed configs still use the old broad search.
+
 ## Open Questions
 
 ### Signal
@@ -385,7 +427,7 @@ Top differentiated events all show match_stats more bearish on home: Leeds vs Bu
 
 ### Methodology
 - ~~Does CV protocol affect hyperparameter selection?~~ — **Yes** (Mar 2026): Expanding 150-event windows select materially different hyperparams than sliding 1-season with matchday steps.
-- ~~What is the production retraining strategy?~~ — **Resolved in favour of expanding** (Apr 2026): sliding-380:50 + standard Optuna search + early_stopping degenerates to a constant predictor (verified directly 2026-04-23). Expanding:50 is the only protocol producing useful tuning signal under current conditions, so production should use expanding. The sliding-380 path could be revived with a narrower search space + no early stopping if needed.
+- ~~What is the production retraining strategy?~~ — **Resolved: either works, sliding-380:50 marginally better** (Apr 2026, post-search-space fix): the earlier "sliding-380 degenerates" finding was a search-space artefact, not a property of the protocol. With the principled search (see Apr 2026 section above), sliding-380:50 produces R²=+0.058 (best MSE 0.000716) vs expanding:50 R²=+0.058 (MSE 0.000743). Either protocol is defensible; sliding-380:50 has a marginal MSE edge and matches the natural production retrain cadence (1-season window).
 - Is devigged Pinnacle the right target, or should we explore market-wide targets?
 - Multi-horizon sampling: does it genuinely increase effective sample size, or just add correlated noise?
 
