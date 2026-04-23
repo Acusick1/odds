@@ -322,6 +322,32 @@ Pinnacle API shutdown (Jan 2026) excluded 71 events from training. Betfair Excha
 
 **Cross-source contamination bug (#231):** TierSampler selected decision snapshots by latest wall-clock time from eligible tiers. OddsPortal `sharp`-tier snapshots (no Pinnacle) won over FDUK `early`-tier snapshots (has Pinnacle) for ~37/150 events in the final walk-forward fold (Apr-Oct 2025). Combined with `np.nan_to_num(X, nan=0.0)` converting missing Pinnacle probs to 0.0, this corrupted cross-source features and distorted tuner optimization across all folds. Fix: TierSampler now accepts `required_bookmakers` to filter candidates; all `nan_to_num` calls removed (XGBoost handles NaN natively).
 
+### EPL feature group re-ablation (Apr 2026, hybrid sharp, 1813 events through 2026-04-20)
+
+After #359 unblocked multi-feature-group scoring in production, re-ran per-group ablation under expanding:50 + hybrid sharp + 100 Optuna trials each.
+
+| Config | Features | val_R² | val_MSE | Δ R² vs tabular |
+|---|---|---|---|---|
+| tabular only | 7 | +0.0354 ± 0.0643 | 0.000765 | — |
+| + rest | 7 (+0) | +0.0354 ± 0.0643 | 0.000765 | 0.000 (no-op) |
+| + epl_schedule | 15 (+8) | +0.0277 ± 0.0564 | 0.000770 | −0.008 |
+| + standings | 18 (+11) | +0.0367 ± 0.0657 | 0.000764 | +0.001 (≈neutral) |
+| **+ match_stats** | **21 (+14)** | **+0.0514 ± 0.0791** | **0.000751** | **+0.016** |
+| all 5 groups | 40 | +0.0429 ± 0.0781 | 0.000757 | +0.008 |
+
+**Headline findings:**
+- `rest` is a no-op for EPL — the rest extractor produces 0 features for EPL events (NBA-only).
+- `match_stats` alone is the best individual addition (+0.016 R²) — beats the all-5-group model.
+- `standings` is essentially neutral under expanding:50 + hybrid sharp (contradicts earlier sliding-380 finding that standings was the only group that helped).
+- All-5-group (+0.0429) is *worse* than tabular+match_stats alone (+0.0514) — the marginal groups dilute the match_stats signal.
+- Effect sizes are small relative to fold-to-fold std (±0.06–0.08); a second-seed validation is recommended before publishing.
+
+**Sliding-380:50 caveat (verified 2026-04-23):** Re-running the same ablation under sliding-380:50 produced byte-identical results across all feature sets. Direct verification showed all Optuna-explored trials produce a **constant predictor** — 50 val examples, 1 unique prediction value, std=0.0, early-stopped at iteration 9. The standard search space (mcw∈[5,50], gamma∈[0,1], reg_λ∈[0.5,5]) + early_stopping=15 + 380 train events / 50 val events makes "predict-near-mean" the lowest-MSE model among the 100 trials. A manual low-regularization config (mcw=5, gamma=0) does not degenerate and beats Optuna's "best" by ~12% MSE — so sliding-380 is not fundamentally broken, but the standard tuning protocol applied to it produces meaningless comparisons.
+
+**Why the earlier sliding-380 numbers (R²=+0.026 for tabular) couldn't be reproduced:** prior runs used Pinnacle-only sharp (different target distribution) and possibly hit non-degenerate hyperparams by luck. The 2026-03 sliding-380 numbers in the tables above should be treated as not-reproducible under current data + hybrid sharp.
+
+**Tooling correction:** discovered that committed `xgboost_epl_production_tabular_standings.yaml` had `window_type: sliding` while the rest of the production family used expanding (#360 fixes).
+
 ## Open Questions
 
 ### Signal
@@ -344,7 +370,7 @@ Pinnacle API shutdown (Jan 2026) excluded 71 events from training. Betfair Excha
 
 ### Methodology
 - ~~Does CV protocol affect hyperparameter selection?~~ — **Yes** (Mar 2026): Expanding 150-event windows select materially different hyperparams than sliding 1-season with matchday steps.
-- **What is the production retraining strategy?** (NEW, Mar 2026): Expanding vs sliding window determines whether feature groups add signal. Expanding (train on all history) favours more features (R²=5.2% with 32 features). Sliding-380 (rolling 1-season) favours tabular-only (R²=2.6% with 7 features). Grid search was originally validated with tabular-only; re-run with all-features (2026-03-19) confirmed sliding-380 still has lowest MSE but expanding gives highest R² for feature-rich models. This must be decided before declaring which features to use in production.
+- ~~What is the production retraining strategy?~~ — **Resolved in favour of expanding** (Apr 2026): sliding-380:50 + standard Optuna search + early_stopping degenerates to a constant predictor (verified directly 2026-04-23). Expanding:50 is the only protocol producing useful tuning signal under current conditions, so production should use expanding. The sliding-380 path could be revived with a narrower search space + no early stopping if needed.
 - Is devigged Pinnacle the right target, or should we explore market-wide targets?
 - Multi-horizon sampling: does it genuinely increase effective sample size, or just add correlated noise?
 
@@ -454,3 +480,5 @@ Before reporting experiment results in FINDINGS.md, verify:
 | 2026-03-19 | Hybrid sharp: Pinnacle + BFE | 32 features, hybrid sharp [pinnacle, betfair_exchange] | devigged bet365 | 1.8K EPL (OP+FDUK) | R²=0.060±0.080 (fixed params, expanding:50) | Adopt hybrid sharp | BFE sharp_prob correlates 0.9994 with Pinnacle. Hybrid recovers 71 post-shutdown events (1800 vs 1729). Folds 0-19 identical to Pinnacle-only; extra folds 20-21 show R²=+7.4%, +2.7%. Code change: sharp_bookmakers uses priority-ordered fallback (ANY, not ALL). |
 | 2026-03-20 | FPL availability (sliding-380:50) | tabular 7 + standings 11 + match_stats 14 + fpl_availability 9, hybrid sharp [pinnacle, betfair_exchange] | devigged bet365 | 1.8K EPL (OP+FDUK) | CV R²=-0.017±0.031 | FPL adds noise | 28-fold walk-forward, 100 trials. Adding FPL availability (41 features total) degrades from tabular-only baseline (R²=0.026). Market already prices in squad availability. |
 | 2026-03-20 | FPL availability (expanding:150) | tabular 7 + standings 11 + match_stats 14 + fpl_availability 9, hybrid sharp [pinnacle, betfair_exchange] | devigged bet365 | 1.8K EPL (OP+FDUK) | CV R²=0.022±0.037 | FPL degrades expanding baseline | 9-fold walk-forward, 100 trials. Positive R² but below expanding:150 all-features baseline (R²=0.052 with 32 features). FPL's 9 extra features (41 total) halve the R². |
+| 2026-04-23 | EPL ablation re-run (expanding:50, hybrid sharp) | per-group: tabular, +rest, +epl_schedule, +standings, +match_stats, all-5 | devigged bet365 | 1.8K EPL (OP+FDUK) | tabular R²=0.0354; +match_stats R²=0.0514 (best); +standings R²=0.0367 (≈neutral); +epl_schedule R²=0.0277; +rest R²=0.0354 (no-op); all-5 R²=0.0429 | match_stats is best individual; rest no-op for EPL; all-5 worse than tabular+match_stats | 22-fold walk-forward (expanding:50, val_step=50), 100 trials each, 1813 events through 2026-04-20. `rest` extractor produces 0 features for EPL. Effect sizes small vs std (±0.06–0.08); second-seed validation recommended. |
+| 2026-04-23 | sliding-380:50 ablation (degenerate) | same per-group set | devigged bet365 | 1.8K EPL | All configs converged to same trial 86, identical val_MSE to 16 decimals (constant predictor verified directly: 50 val examples → 1 unique prediction) | Sliding-380 + standard Optuna search degenerates | Standard search space (mcw∈[5,50], gamma∈[0,1], reg_λ∈[0.5,5]) + early_stopping=15 + 380 train events makes "predict-near-mean" the lowest-MSE model. Manual low-reg config (mcw=5, gamma=0) does not degenerate and beats Optuna best by ~12% MSE. The protocol isn't broken; the standard tuning protocol applied to it is. |
