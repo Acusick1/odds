@@ -30,9 +30,9 @@ training:
     cv_method: walk_forward
     n_folds: 5
     kfold_shuffle: false
-    window_type: sliding
-    min_train_events: 380
-    max_train_events: 380
+    window_type: expanding
+    min_train_events: 700
+    max_train_events: null
     val_step_events: 50
   model:
     n_estimators: 200
