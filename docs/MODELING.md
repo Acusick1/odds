@@ -301,7 +301,7 @@ Two protocols tested: **sliding-380** (fixed 1-season training window, ~26 folds
 - Sliding-380 caps training at 380 events (~1 season). With 32 features, that's ~12 events per feature — insufficient for the model to learn genuine patterns, so extra features add noise.
 - Expanding windows grow to 1000+ events in later folds, giving the model enough data to exploit feature interactions. The 5.2% R² with all features is reproducible and real.
 - The full 15-cell grid search (5 window types × 3 val steps) was re-run with all-features (2026-03-19). Lowest MSE is still sliding-380:10 (0.000693) for both tabular-only and all-features, confirming the window size is optimal regardless of feature count. But R² behaviour differs: expanding:50 gives R²=6.1% for all-features vs 4.1% for tabular-only.
-- **The open question is not "do features help?" but "what is the production retraining strategy?"** If production retrains on all historical data → use expanding, features help. If production uses a rolling 1-season window → use sliding-380, tabular-only is best.
+- **(Superseded 2026-04-23):** the sliding-380 vs expanding feature-help disagreement turned out to be a *search-space artefact*, not a real property of the protocols. Both protocols benefit from extra features once Optuna isn't constrained to find degenerate models. See "Principled search space + protocol re-test" below.
 
 **Hybrid sharp reference (Pinnacle + Betfair Exchange, Mar 2026):**
 
@@ -346,9 +346,9 @@ After #359 unblocked multi-feature-group scoring in production, re-ran per-group
 
 **Why the earlier sliding-380 numbers (R²=+0.026 for tabular) couldn't be reproduced:** prior runs used Pinnacle-only sharp (different target distribution) and possibly hit non-degenerate hyperparams by luck. The 2026-03 sliding-380 numbers in the tables above should be treated as not-reproducible under current data + hybrid sharp.
 
-**Tooling correction:** discovered that committed `xgboost_epl_production_tabular_standings.yaml` had `window_type: sliding` while the rest of the production family used expanding (#360 fixes).
+**Tooling note:** committed `xgboost_epl_production_tabular_standings.yaml` was `window_type: sliding` while the other tabular-* configs used expanding. Originally flagged as a bug (it leaked sliding-380 into the expanding ablation, hiding the standings result). Post-principled-search, sliding-380 is a valid protocol — the deployed model uses it — so the "inconsistency" is no longer a bug.
 
-**Offline A/B (head-to-head prediction comparison, 2026-04-23):** scored 17 upcoming EPL events with both `tabular_only` (deployed config) and `tabular_match_stats` (production candidate) locally; 1088 shared (event, snapshot) pairs.
+**Offline A/B (head-to-head prediction comparison, 2026-04-23):** scored 17 upcoming EPL events with the prior deployed `tabular_only` config and the new `tabular_match_stats` candidate locally; 1088 shared (event, snapshot) pairs.
 
 | Metric | Value |
 |---|---|
@@ -401,9 +401,7 @@ early_stopping_rounds: 50                     # was 15
 - **Sliding-380:50 slightly beats expanding:50** on MSE once the tuner can find good hyperparams — flips the "expanding is the only working protocol" conclusion above.
 - **All four configs improved** — even the working expanding configs had been under-tuned by ~0.01 R².
 - **match_stats > tabular-only** ranking holds under both protocols — the feature-group ablation conclusions survive the search-space fix.
-- **New production candidate:** sliding-380:50 + tabular + match_stats + principled search. R²=+0.058, MSE=0.000716.
-
-**Tooling change proposed (not yet applied):** update the committed `experiments/configs/xgboost_epl_production_*.yaml` search_spaces to the principled bounds, so future tuning runs default to this. Current committed configs still use the old broad search.
+- **Deployed (2026-04-23):** sliding-380:50 + tabular + match_stats + principled search published to S3 as `epl-clv-home v308058c`. CV val_R²=+0.058, MSE=0.000716. Replaces prior tabular-only model (CV val_R²=+0.035). Committed source config: `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml` (#362). Production scorer (#359) handles multi-feature-group models, including the standings/match_stats/epl_schedule cache preload.
 
 ## Open Questions
 
