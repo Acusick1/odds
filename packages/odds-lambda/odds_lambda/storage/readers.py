@@ -828,10 +828,17 @@ class OddsReader:
 
             age_seconds = round((ref_time - snapshot.snapshot_time).total_seconds(), 1)
 
+            # Dedup is first-wins both across and within snapshots: snapshots
+            # are walked newest-first, so the first time a
+            # ``(bookmaker_key, outcome_name, point)`` tuple is seen its price
+            # is locked in. Within-snapshot duplicates (the same tuple
+            # repeated inside one bookmaker block) are not expected in
+            # well-formed ``raw_data``; if they ever occur the earlier entry
+            # in the iteration order wins.
             for o in odds:
                 key = (o.bookmaker_key, o.outcome_name, o.point)
                 if key in book_result.entries:
-                    continue  # already resolved from a newer snapshot
+                    continue
                 book_result.entries[key] = BookPriceEntry(
                     odds=o,
                     meta=BookPriceMeta(

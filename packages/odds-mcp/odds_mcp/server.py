@@ -96,7 +96,12 @@ def _event_to_dict(event: Event) -> dict[str, Any]:
 
 
 def _odds_to_dict(odds: Odds) -> dict[str, Any]:
-    """Serialize an Odds object to a JSON-safe dict."""
+    """Serialize an Odds object to a JSON-safe dict.
+
+    Includes ``last_update`` (the bookmaker's self-reported update time from
+    ``raw_data``) so callers can judge per-book freshness independently of
+    the contributing snapshot's wall-clock time.
+    """
     return {
         "bookmaker_key": odds.bookmaker_key,
         "bookmaker_title": odds.bookmaker_title,
@@ -104,6 +109,7 @@ def _odds_to_dict(odds: Odds) -> dict[str, Any]:
         "outcome_name": odds.outcome_name,
         "price": odds.price,
         "point": odds.point,
+        "last_update": odds.last_update.isoformat() if odds.last_update else None,
     }
 
 
@@ -209,12 +215,20 @@ async def get_current_odds(
     alongside its ``last_update`` from ``raw_data`` so callers can judge
     per-book staleness.
 
+    Anchor metadata (``anchor_snapshot_id``, ``anchor_created_at``,
+    ``anchor_fetch_tier``, ``anchor_hours_until_commence``) describes the
+    latest snapshot used to anchor the lookback window. It is **not**
+    aggregated across surfaced rows — surfaced ``odds`` may span several
+    older snapshots. ``bookmaker_count`` is derived from the surfaced rows
+    (count of distinct ``bookmaker_key`` values) so it always matches what
+    the caller sees.
+
     Args:
         event_id: Event identifier.
         market: Market type — "h2h" (2-way moneyline), "1x2" (3-way with
             draw), "totals", or "spreads".
         include_raw_data: If True, also include the full raw_data JSON blob
-            of the newest contributing snapshot.
+            of the anchor (newest) snapshot.
         lookback_hours: How far back to search for per-bookmaker prices
             (default 2.0 h).
 
@@ -248,7 +262,6 @@ async def get_current_odds(
         # Capture all data we need from ORM objects while the session is open.
         anchor_snapshot_id = latest_snapshot.id
         anchor_snapshot_created_at = latest_snapshot.created_at
-        anchor_bookmaker_count = latest_snapshot.bookmaker_count
         anchor_fetch_tier = latest_snapshot.fetch_tier
         anchor_hours_until_commence = latest_snapshot.hours_until_commence
         anchor_raw_data = latest_snapshot.raw_data if include_raw_data else None
@@ -280,14 +293,19 @@ async def get_current_odds(
             }
         )
 
+    # Bookmaker count is derived from surfaced rows (distinct keys) so the
+    # field always agrees with the visible odds[] — not from the anchor
+    # snapshot, which can be misleading when retail rows span older snapshots.
+    bookmaker_count = len({o["bookmaker_key"] for o in odds_dicts})
+
     snapshot_dict: dict[str, Any] = {
-        "id": anchor_snapshot_id,
+        "anchor_snapshot_id": anchor_snapshot_id,
         "event_id": event_id,
         "snapshot_time": newest_snapshot_time.isoformat(),
-        "created_at": anchor_snapshot_created_at.isoformat(),
-        "bookmaker_count": anchor_bookmaker_count,
-        "fetch_tier": anchor_fetch_tier,
-        "hours_until_commence": anchor_hours_until_commence,
+        "anchor_created_at": anchor_snapshot_created_at.isoformat(),
+        "bookmaker_count": bookmaker_count,
+        "anchor_fetch_tier": anchor_fetch_tier,
+        "anchor_hours_until_commence": anchor_hours_until_commence,
         "lookback_hours": lookback_hours,
         "odds": odds_dicts,
     }
@@ -973,6 +991,7 @@ async def find_retail_edges(
             "sharp_bookmakers": sharp_bms,
             "per_outcome": [],
             "retail_edges": [],
+            "message": "No retail bookmakers in lookback window",
         }
 
     # Top-level snapshot_time = max across surfaced retail snapshot times.
