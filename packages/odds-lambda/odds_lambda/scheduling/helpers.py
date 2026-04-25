@@ -2,13 +2,48 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 import structlog
 
+from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.scheduling.backends import get_scheduler_backend
 
 logger = structlog.get_logger()
+
+
+@dataclass(frozen=True)
+class ProximitySchedule:
+    """Per-job proximity-based scheduling intervals (hours).
+
+    The boundary thresholds come from ``FetchTier`` so all jobs agree on what
+    "closing" / "pregame" / "far" mean; only the polling cadence varies per
+    job (e.g. cheap API polls more aggressively than browser-driven scrapes).
+    """
+
+    closing: float
+    pregame: float
+    far: float
+    db_fallback: float = 1.0
+
+    def interval_for(
+        self,
+        next_kickoff: datetime | None,
+        *,
+        now: datetime | None = None,
+    ) -> float:
+        """Compute the next-fire interval (hours) from proximity to kickoff."""
+        if next_kickoff is None:
+            return self.far
+        if now is None:
+            now = datetime.now(UTC)
+        hours_until = (next_kickoff - now).total_seconds() / 3600
+        if hours_until < FetchTier.CLOSING.max_hours:
+            return self.closing
+        if hours_until < FetchTier.PREGAME.max_hours:
+            return self.pregame
+        return self.far
 
 
 async def get_next_kickoff(sport_key: str) -> datetime | None:

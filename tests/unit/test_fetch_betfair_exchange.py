@@ -7,13 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from odds_lambda.betfair.client import BetfairBook
 from odds_lambda.betfair.constants import SPORT_CONFIG
-from odds_lambda.jobs.fetch_betfair_exchange import (
-    CLOSING_INTERVAL_HOURS,
-    FAR_INTERVAL_HOURS,
-    PREGAME_INTERVAL_HOURS,
-    _interval_for_kickoff,
-    _should_skip_book,
-)
+from odds_lambda.jobs.fetch_betfair_exchange import SCHEDULE, _should_skip_book
 
 
 def _book(
@@ -48,24 +42,26 @@ def _book(
     )
 
 
-class TestIntervalForKickoff:
+class TestBetfairSchedule:
+    """Validate the BFE-specific ProximitySchedule values."""
+
     def test_no_kickoff_returns_far(self) -> None:
-        assert _interval_for_kickoff(None) == FAR_INTERVAL_HOURS
+        assert SCHEDULE.interval_for(None) == SCHEDULE.far
 
     def test_imminent_kickoff_returns_closing(self) -> None:
         now = datetime(2026, 4, 25, 12, 0, tzinfo=UTC)
         ko = now + timedelta(hours=2)  # < 3h => CLOSING
-        assert _interval_for_kickoff(ko, now=now) == CLOSING_INTERVAL_HOURS
+        assert SCHEDULE.interval_for(ko, now=now) == SCHEDULE.closing
 
     def test_pregame_window(self) -> None:
         now = datetime(2026, 4, 25, 12, 0, tzinfo=UTC)
         ko = now + timedelta(hours=6)
-        assert _interval_for_kickoff(ko, now=now) == PREGAME_INTERVAL_HOURS
+        assert SCHEDULE.interval_for(ko, now=now) == SCHEDULE.pregame
 
     def test_far_out_kickoff(self) -> None:
         now = datetime(2026, 4, 25, 12, 0, tzinfo=UTC)
         ko = now + timedelta(hours=24)
-        assert _interval_for_kickoff(ko, now=now) == FAR_INTERVAL_HOURS
+        assert SCHEDULE.interval_for(ko, now=now) == SCHEDULE.far
 
 
 class TestShouldSkipBook:

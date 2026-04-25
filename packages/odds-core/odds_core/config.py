@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from odds_core.sports import SportKey
@@ -266,16 +266,35 @@ class BetfairConfig(BaseSettings):
     cert_file: str | None = Field(default=None, description="Path to client SSL cert (.crt)")
     cert_key: str | None = Field(default=None, description="Path to client SSL key (.key)")
 
-    # Sport scoping — only fetch sports listed here even if other settings reference them
-    sports: list[SportKey] = Field(
-        default=["soccer_epl", "baseball_mlb"],
-        description="Sports to fetch via Betfair Exchange API",
+    # Sport scoping override. ``None`` means "all sports the BFE adapter supports"
+    # (resolved at job-execution time from ``odds_lambda.betfair.SPORT_CONFIG``).
+    sports: list[SportKey] | None = Field(
+        default=None,
+        description="Override sport scope; defaults to all BFE-supported sports",
     )
 
     # Look-ahead window for event discovery (covers an EPL gameweek + MLB week)
     lookahead_hours: int = Field(
         default=168, description="Hours ahead to look when discovering events"
     )
+
+    @model_validator(mode="after")
+    def _require_creds_when_enabled(self) -> BetfairConfig:
+        if self.enabled:
+            missing = [
+                name
+                for name, value in (
+                    ("BETFAIR_USERNAME", self.username),
+                    ("BETFAIR_PASSWORD", self.password),
+                    ("BETFAIR_APP_KEY", self.app_key),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    f"BETFAIR_ENABLED=true but credentials missing: {', '.join(missing)}"
+                )
+        return self
 
 
 class LoggingConfig(BaseSettings):

@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import betfairlightweight
 import structlog
@@ -24,9 +24,6 @@ from betfairlightweight import filters
 from betfairlightweight.exceptions import APIError, BetfairError
 
 from odds_lambda.betfair.constants import SportBetfairConfig
-
-if TYPE_CHECKING:
-    pass
 
 logger = structlog.get_logger()
 

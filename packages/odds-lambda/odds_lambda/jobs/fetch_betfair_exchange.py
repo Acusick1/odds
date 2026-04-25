@@ -31,18 +31,19 @@ from odds_lambda.betfair import (
     betfair_book_to_bookmaker_entry,
     resolve_teams,
 )
-from odds_lambda.fetch_tier import FetchTier
-from odds_lambda.scheduling.helpers import get_next_kickoff, self_schedule
+from odds_lambda.scheduling.helpers import (
+    ProximitySchedule,
+    get_next_kickoff,
+    self_schedule,
+)
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-# Proximity-based scheduling intervals (hours), mirroring fetch-oddsportal.
-CLOSING_INTERVAL_HOURS = 0.25  # < 3h to kickoff — every 15min
-PREGAME_INTERVAL_HOURS = 0.5  # 3–12h
-FAR_INTERVAL_HOURS = 2.0  # 12h+ or no upcoming games
-DB_FALLBACK_INTERVAL_HOURS = 1.0
+# Proximity-based scheduling intervals (hours): cheap delayed API — poll
+# more aggressively than browser-driven fetch-oddsportal.
+SCHEDULE = ProximitySchedule(closing=0.25, pregame=0.5, far=2.0, db_fallback=1.0)
 
 
 @dataclass
@@ -53,28 +54,11 @@ class IngestionStats:
     events_seen: int = 0
     books_fetched: int = 0
     books_in_play: int = 0
+    books_suspended: int = 0
     snapshots_stored: int = 0
     events_matched: int = 0
     events_created: int = 0
     errors: list[str] = field(default_factory=list)
-
-
-def _interval_for_kickoff(
-    next_kickoff: datetime | None,
-    *,
-    now: datetime | None = None,
-) -> float:
-    """Compute scheduling interval (hours) based on proximity to next kickoff."""
-    if next_kickoff is None:
-        return FAR_INTERVAL_HOURS
-    if now is None:
-        now = datetime.now(UTC)
-    hours_until = (next_kickoff - now).total_seconds() / 3600
-    if hours_until < FetchTier.CLOSING.max_hours:
-        return CLOSING_INTERVAL_HOURS
-    if hours_until < FetchTier.PREGAME.max_hours:
-        return PREGAME_INTERVAL_HOURS
-    return FAR_INTERVAL_HOURS
 
 
 def _should_skip_book(book: BetfairBook, sport_cfg: SportBetfairConfig) -> bool:
@@ -122,6 +106,9 @@ async def ingest_sport(
                 if book.inplay:
                     stats.books_in_play += 1
                 continue
+
+            if (book.market_status or "").upper() == "SUSPENDED":
+                stats.books_suspended += 1
 
             teams = resolve_teams(book, sport_cfg)
             if teams is None:
@@ -192,6 +179,7 @@ async def ingest_sport(
         events_seen=stats.events_seen,
         books_fetched=stats.books_fetched,
         books_in_play=stats.books_in_play,
+        books_suspended=stats.books_suspended,
         snapshots_stored=stats.snapshots_stored,
         events_matched=stats.events_matched,
         events_created=stats.events_created,
@@ -209,13 +197,6 @@ async def main(ctx: JobContext) -> None:
         logger.info("betfair_job_disabled", reason="betfair.enabled=False")
         return
 
-    if not (bf.username and bf.password and bf.app_key):
-        logger.error(
-            "betfair_credentials_missing",
-            note="Set BETFAIR_USERNAME / BETFAIR_PASSWORD / BETFAIR_APP_KEY",
-        )
-        return
-
     sport: SportKey | None = ctx.sport
     if sport:
         if sport not in SPORT_CONFIG:
@@ -223,7 +204,9 @@ async def main(ctx: JobContext) -> None:
             return
         target_sports: list[SportKey] = [sport]
     else:
-        target_sports = [s for s in bf.sports if s in SPORT_CONFIG]
+        # Default to every adapter-supported sport; honour an explicit override.
+        configured = bf.sports if bf.sports is not None else list(SPORT_CONFIG)
+        target_sports = [s for s in configured if s in SPORT_CONFIG]
 
     if not target_sports:
         logger.warning("betfair_no_target_sports")
@@ -233,14 +216,14 @@ async def main(ctx: JobContext) -> None:
 
     # Pre-schedule before doing the work, so a crash mid-fetch doesn't break
     # the chain. Use the soonest kickoff across configured sports.
-    pre_interval = DB_FALLBACK_INTERVAL_HOURS
+    pre_interval = SCHEDULE.db_fallback
     try:
         soonest: datetime | None = None
         for sk in target_sports:
             ko = await get_next_kickoff(sk)
             if ko is not None and (soonest is None or ko < soonest):
                 soonest = ko
-        pre_interval = _interval_for_kickoff(soonest)
+        pre_interval = SCHEDULE.interval_for(soonest)
     except Exception as e:
         logger.warning("betfair_next_kickoff_query_failed", error=str(e), exc_info=True)
 
@@ -255,9 +238,12 @@ async def main(ctx: JobContext) -> None:
         )
     except Exception as e:
         logger.error("betfair_pre_schedule_failed", error=str(e), exc_info=True)
+        raise
 
     snapshot_time = datetime.now(UTC)
     all_stats: list[IngestionStats] = []
+    # BetfairConfig validator guarantees these are non-None when enabled=True.
+    assert bf.username and bf.password and bf.app_key
     async with job_alert_context(compound_job_name):
         client = BetfairExchangeClient(
             username=bf.username,
@@ -305,7 +291,7 @@ async def main(ctx: JobContext) -> None:
             ko = await get_next_kickoff(sk)
             if ko is not None and (soonest is None or ko < soonest):
                 soonest = ko
-        post_interval = _interval_for_kickoff(soonest)
+        post_interval = SCHEDULE.interval_for(soonest)
     except Exception:
         post_interval = pre_interval
 

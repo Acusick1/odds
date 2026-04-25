@@ -9,6 +9,8 @@ from importlib import import_module
 import structlog
 from odds_core.sports import SportKey
 
+from odds_lambda.betfair.constants import SPORT_CONFIG as BETFAIR_SPORT_CONFIG
+
 logger = structlog.get_logger()
 
 
@@ -122,8 +124,10 @@ _JOB_CRON_MAP: dict[str, tuple[str, tuple[SportKey, ...] | None]] = {
     "fetch-espn-fixtures": ("0 6 * * *", ("soccer_epl",)),
     # Betfair Exchange direct ingestion. The job self-schedules a tighter
     # cadence near kickoff; this cron is the safety floor that catches
-    # cold-start gaps and backfills if self-scheduling stalls.
-    "fetch-betfair-exchange": ("*/30 * * * *", ("soccer_epl", "baseball_mlb")),
+    # cold-start gaps and backfills if self-scheduling stalls. Allowlist
+    # is derived from the BFE adapter's supported-sports map so adding a
+    # new sport requires only a SPORT_CONFIG entry.
+    "fetch-betfair-exchange": ("*/30 * * * *", tuple(BETFAIR_SPORT_CONFIG)),
 }
 
 

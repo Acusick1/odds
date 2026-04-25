@@ -161,7 +161,7 @@ class TestSettings:
             assert settings.polymarket.nba_series_id == "99999"
 
     def test_betfair_defaults(self):
-        """Defaults: disabled, no creds, both EPL+MLB in scope."""
+        """Defaults: disabled, no creds, sports=None (resolved from SPORT_CONFIG at runtime)."""
         from odds_core.config import BetfairConfig
 
         with patch.dict(os.environ, {}, clear=True):
@@ -172,7 +172,7 @@ class TestSettings:
             assert cfg.app_key is None
             assert cfg.cert_file is None
             assert cfg.cert_key is None
-            assert cfg.sports == ["soccer_epl", "baseball_mlb"]
+            assert cfg.sports is None
             assert cfg.lookahead_hours == 168
 
     def test_betfair_env_overrides(self):
@@ -200,3 +200,28 @@ class TestSettings:
             assert cfg.cert_file == "/tmp/bf.crt"
             assert cfg.cert_key == "/tmp/bf.key"
             assert cfg.lookahead_hours == 72
+
+    def test_betfair_enabled_requires_credentials(self):
+        """enabled=True with missing creds must fail at config load, not at runtime."""
+        import pytest
+        from odds_core.config import BetfairConfig
+        from pydantic import ValidationError
+
+        with patch.dict(
+            os.environ,
+            {"BETFAIR_ENABLED": "true", "BETFAIR_APP_KEY": "appkey123"},
+            clear=True,
+        ):
+            with pytest.raises(ValidationError) as exc_info:
+                BetfairConfig(_env_file=None)
+            msg = str(exc_info.value)
+            assert "BETFAIR_USERNAME" in msg
+            assert "BETFAIR_PASSWORD" in msg
+
+    def test_betfair_disabled_skips_credential_check(self):
+        """enabled=False with no creds is valid (default state)."""
+        from odds_core.config import BetfairConfig
+
+        with patch.dict(os.environ, {"BETFAIR_ENABLED": "false"}, clear=True):
+            cfg = BetfairConfig(_env_file=None)
+            assert cfg.enabled is False

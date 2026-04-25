@@ -11,74 +11,15 @@ EVENT_TYPE_SOCCER = "1"
 EVENT_TYPE_BASEBALL = "7511"
 
 # Premier League competition ID — community-stable across seasons.
+# Hints are a fallback in case Betfair re-issues the competition_id.
 EPL_COMPETITION_ID = "10932509"
+EPL_COMPETITION_NAME_HINTS: tuple[str, ...] = ("English Premier League", "Premier League")
 
 # MLB competition ID — Betfair calls it "Major League Baseball".
 # Pinning the discovered ID here as the primary path; the name hint is
 # kept as a fallback in case Betfair re-issues the competition_id.
 MLB_COMPETITION_ID = "11196870"
 MLB_COMPETITION_NAME_HINTS: tuple[str, ...] = ("Major League Baseball", "MLB")
-
-
-# Betfair runner-name aliases → pipeline canonical team names.
-# Soccer entries supplement odds_core.team alias map; baseball is exhaustive.
-BETFAIR_TEAM_ALIASES: dict[str, str] = {
-    # EPL — Betfair renders many short forms not in odds_core.team
-    "spurs": "Tottenham",
-    "wolves": "Wolves",
-    "man utd": "Manchester Utd",
-    "man city": "Manchester City",
-    "newcastle": "Newcastle",
-    "leeds": "Leeds",
-    "leicester": "Leicester",
-    "brighton": "Brighton",
-    "bournemouth": "Bournemouth",
-    "burnley": "Burnley",
-    "ipswich": "Ipswich",
-    "nottm forest": "Nottingham",
-    "nott'm forest": "Nottingham",
-    "sheff utd": "Sheffield Utd",
-    "west ham": "West Ham",
-    "west brom": "West Brom",
-    # MLB — Betfair short forms → canonical "events.home_team" names
-    "arizona d'backs": "Arizona Diamondbacks",
-    "arizona diamondbacks": "Arizona Diamondbacks",
-    "atlanta braves": "Atlanta Braves",
-    "baltimore orioles": "Baltimore Orioles",
-    "boston red sox": "Boston Red Sox",
-    "chicago cubs": "Chicago Cubs",
-    "chicago white sox": "Chicago White Sox",
-    "cincinnati reds": "Cincinnati Reds",
-    "cleveland guardians": "Cleveland Guardians",
-    "colorado rockies": "Colorado Rockies",
-    "detroit tigers": "Detroit Tigers",
-    "houston astros": "Houston Astros",
-    "kansas city royals": "Kansas City Royals",
-    "la angels": "Los Angeles Angels",
-    "los angeles angels": "Los Angeles Angels",
-    "la dodgers": "Los Angeles Dodgers",
-    "los angeles dodgers": "Los Angeles Dodgers",
-    "miami marlins": "Miami Marlins",
-    "milwaukee brewers": "Milwaukee Brewers",
-    "minnesota twins": "Minnesota Twins",
-    "ny mets": "New York Mets",
-    "new york mets": "New York Mets",
-    "ny yankees": "New York Yankees",
-    "new york yankees": "New York Yankees",
-    "oakland athletics": "Athletics",
-    "athletics": "Athletics",
-    "philadelphia phillies": "Philadelphia Phillies",
-    "pittsburgh pirates": "Pittsburgh Pirates",
-    "san diego padres": "San Diego Padres",
-    "san francisco giants": "San Francisco Giants",
-    "seattle mariners": "Seattle Mariners",
-    "st louis cardinals": "St.Louis Cardinals",
-    "st. louis cardinals": "St.Louis Cardinals",
-    "tampa bay rays": "Tampa Bay Rays",
-    "texas rangers": "Texas Rangers",
-    "toronto blue jays": "Toronto Blue Jays",
-    "washington nationals": "Washington Nationals",
-}
 
 
 @dataclass(frozen=True)
@@ -112,6 +53,7 @@ SPORT_CONFIG: dict[SportKey, SportBetfairConfig] = {
         market_type_code="MATCH_ODDS",
         market_key="1x2",
         competition_id=EPL_COMPETITION_ID,
+        competition_name_hints=EPL_COMPETITION_NAME_HINTS,
         has_draw=True,
     ),
     "baseball_mlb": SportBetfairConfig(

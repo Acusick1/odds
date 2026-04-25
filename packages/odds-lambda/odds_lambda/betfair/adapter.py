@@ -39,14 +39,16 @@ from odds_core.odds_math import decimal_to_american
 from odds_core.team import normalize_team_name
 
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
-from odds_lambda.betfair.constants import BETFAIR_TEAM_ALIASES, SportBetfairConfig
+from odds_lambda.betfair.constants import SportBetfairConfig
 
 logger = structlog.get_logger()
 
 DRAW_RUNNER_NAMES: frozenset[str] = frozenset({"the draw", "draw"})
 
 # Strip parenthetical annotations Betfair appends to baseball runner/event
-# names (e.g. "(TBD)", "(Cole)" for starting pitchers).
+# names (e.g. "(TBD)", "(Cole)" for starting pitchers). This is a Betfair-API
+# quirk — kept here rather than in odds_core.team because trailing parens can
+# legitimately disambiguate teams in other contexts (e.g. "(W)" for women's).
 _PAREN_ANNOTATION_RE = re.compile(r"\s*\([^)]*\)\s*$")
 
 
@@ -56,12 +58,8 @@ def _strip_pitcher_annotation(name: str) -> str:
 
 
 def _normalize_runner_name(name: str) -> str:
-    """Apply Betfair-specific aliases first, then odds_core normalization."""
-    cleaned = _strip_pitcher_annotation(" ".join(name.split()))
-    aliased = BETFAIR_TEAM_ALIASES.get(cleaned.lower())
-    if aliased is not None:
-        return aliased
-    return normalize_team_name(cleaned)
+    """Strip Betfair's pitcher annotation, then delegate to canonical normalization."""
+    return normalize_team_name(_strip_pitcher_annotation(name))
 
 
 def _is_draw(runner_name: str) -> bool:
@@ -124,6 +122,13 @@ def _runner_to_outcome(
         else:
             # Fallback: use the canonical (may not equal home/away if
             # alias incomplete, but downstream sees a stable name).
+            logger.warning(
+                "betfair_runner_name_fallback",
+                runner_name=name_in,
+                normalized=canonical,
+                home_team=home_team,
+                away_team=away_team,
+            )
             outcome_name = canonical
 
     return {
