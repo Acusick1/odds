@@ -50,7 +50,7 @@ SCHEDULE = ProximitySchedule(closing=0.25, pregame=0.5, far=2.0, db_fallback=1.0
 class IngestionStats:
     """Per-sport ingestion stats for one fetch_betfair_exchange run."""
 
-    sport: SportKey | str = ""
+    sport: SportKey
     events_seen: int = 0
     books_fetched: int = 0
     books_in_play: int = 0
@@ -292,7 +292,8 @@ async def main(ctx: JobContext) -> None:
             if ko is not None and (soonest is None or ko < soonest):
                 soonest = ko
         post_interval = SCHEDULE.interval_for(soonest)
-    except Exception:
+    except Exception as e:
+        logger.warning("betfair_post_kickoff_query_failed", error=str(e), exc_info=True)
         post_interval = pre_interval
 
     post_next_time = datetime.now(UTC) + timedelta(hours=post_interval)

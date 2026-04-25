@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from odds_core.sports import SportKey
 
@@ -39,10 +40,10 @@ class SportBetfairConfig:
     # If True, the market is a 3-way h2h with a "draw" outcome.
     has_draw: bool = False
     # Betfair event-name separator and ordering. Soccer: "Home v Away".
-    # Baseball: "Away @ Home". The first token in the tuple is the literal
-    # separator; the second is "home_first" or "away_first".
+    # Baseball: "Away @ Home". ``name_separator`` splits the event name and
+    # ``name_order`` says which side comes first in the resulting parts.
     name_separator: str = " v "
-    name_order: str = "home_first"
+    name_order: Literal["home_first", "away_first"] = "home_first"
 
 
 SPORT_CONFIG: dict[SportKey, SportBetfairConfig] = {
