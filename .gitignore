@@ -31,6 +31,10 @@ ENV/
 .env.local
 .env.prod
 
+# Betfair Exchange API certificates (never commit private keys)
+.betfair/
+secrets/
+
 # IDE
 .vscode/
 .idea/

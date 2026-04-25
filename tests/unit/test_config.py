@@ -42,6 +42,7 @@ class TestSettings:
                 "fetch-oddsportal-results",
                 "daily-digest",
                 "fetch-espn-fixtures",
+                "fetch-betfair-exchange",
             ]
             assert settings.data_quality.enable_validation is True
             assert settings.data_quality.reject_invalid_odds is False
@@ -158,3 +159,44 @@ class TestSettings:
             assert settings.polymarket.orderbook_poll_interval == 900
             assert settings.polymarket.collect_player_props is True
             assert settings.polymarket.nba_series_id == "99999"
+
+    def test_betfair_defaults(self):
+        """Defaults: disabled, no creds, both EPL+MLB in scope."""
+        from odds_core.config import BetfairConfig
+
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = BetfairConfig(_env_file=None)
+            assert cfg.enabled is False
+            assert cfg.username is None
+            assert cfg.password is None
+            assert cfg.app_key is None
+            assert cfg.cert_file is None
+            assert cfg.cert_key is None
+            assert cfg.sports == ["soccer_epl", "baseball_mlb"]
+            assert cfg.lookahead_hours == 168
+
+    def test_betfair_env_overrides(self):
+        """Env-driven overrides for credentials and toggles."""
+        from odds_core.config import BetfairConfig
+
+        with patch.dict(
+            os.environ,
+            {
+                "BETFAIR_ENABLED": "true",
+                "BETFAIR_USERNAME": "alice",
+                "BETFAIR_PASSWORD": "secret",
+                "BETFAIR_APP_KEY": "appkey123",
+                "BETFAIR_CERT_FILE": "/tmp/bf.crt",
+                "BETFAIR_CERT_KEY": "/tmp/bf.key",
+                "BETFAIR_LOOKAHEAD_HOURS": "72",
+            },
+            clear=True,
+        ):
+            cfg = BetfairConfig(_env_file=None)
+            assert cfg.enabled is True
+            assert cfg.username == "alice"
+            assert cfg.password == "secret"
+            assert cfg.app_key == "appkey123"
+            assert cfg.cert_file == "/tmp/bf.crt"
+            assert cfg.cert_key == "/tmp/bf.key"
+            assert cfg.lookahead_hours == 72
