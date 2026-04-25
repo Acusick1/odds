@@ -661,20 +661,53 @@ class TestFindRetailEdges:
         }
         return result
 
-    def _mock_reader(self, sharp_result: MagicMock | None = None) -> AsyncMock:
+    def _make_book_result(
+        self,
+        odds: list[MagicMock],
+        snapshot_time: datetime | None = None,
+    ) -> MagicMock:
+        """Build a BookPriceResult-like mock from a flat list of Odds mocks."""
+        from odds_lambda.storage.readers import BookPriceEntry, BookPriceMeta, BookPriceResult
+
+        snap_time = snapshot_time or datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
+        entries: dict[tuple[str, str, float | None], BookPriceEntry] = {}
+        for o in odds:
+            key = (o.bookmaker_key, o.outcome_name, o.point)
+            # Newer entries (later in the list) win — matches reader semantics
+            entries[key] = BookPriceEntry(
+                odds=o,
+                meta=BookPriceMeta(
+                    snapshot_id=1,
+                    snapshot_time=snap_time,
+                    age_seconds=0.0,
+                ),
+            )
+        return BookPriceResult(entries=entries)
+
+    def _mock_reader(
+        self,
+        sharp_result: MagicMock | None = None,
+        book_result: object | None = None,
+    ) -> AsyncMock:
         reader = AsyncMock()
         reader.get_event_by_id = AsyncMock(return_value=self._make_event())
         reader.get_latest_snapshot = AsyncMock(return_value=self._make_snapshot())
         reader.get_sharp_prices = AsyncMock(return_value=sharp_result or self._make_sharp_result())
+        if book_result is not None:
+            reader.get_latest_book_prices = AsyncMock(return_value=book_result)
         return reader
 
     async def _call(self, odds: list, reader: AsyncMock, market: str = "h2h") -> dict:
         from odds_mcp.server import find_retail_edges
 
+        # Build a BookPriceResult from the supplied odds list to feed the
+        # reader's get_latest_book_prices mock — replaces the old
+        # extract_odds_from_snapshot patch.
+        reader.get_latest_book_prices = AsyncMock(return_value=self._make_book_result(odds))
+
         with (
             patch("odds_mcp.server.async_session_maker") as mock_session_maker,
             patch("odds_mcp.server.OddsReader", return_value=reader),
-            patch("odds_mcp.server.extract_odds_from_snapshot", return_value=odds),
         ):
             mock_session_maker.return_value.__aenter__ = AsyncMock()
             mock_session_maker.return_value.__aexit__ = AsyncMock()
@@ -727,6 +760,8 @@ class TestFindRetailEdges:
                     "divergence",
                     "z_score",
                     "market_hold",
+                    "snapshot_time",
+                    "book_age_seconds",
                 }
 
     @pytest.mark.asyncio
