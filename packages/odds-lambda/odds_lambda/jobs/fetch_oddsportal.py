@@ -25,23 +25,24 @@ from typing import Any
 import structlog
 from odds_core.database import async_session_maker
 
-from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.oddsportal_adapter import (
     MatchOdds,
     convert_upcoming_matches,
 )
 from odds_lambda.oddsportal_common import run_scraper_with_retry
-from odds_lambda.scheduling.helpers import apply_overnight_skip, get_next_kickoff, self_schedule
+from odds_lambda.scheduling.helpers import (
+    ProximitySchedule,
+    apply_overnight_skip,
+    get_next_kickoff,
+    self_schedule,
+)
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-# Proximity-based scheduling intervals (hours)
-CLOSING_INTERVAL_HOURS = 0.5  # < 3h to kickoff
-PREGAME_INTERVAL_HOURS = 1.0  # 3–12h to kickoff
-FAR_INTERVAL_HOURS = 2.0  # 12h+ or no upcoming games
-DB_FALLBACK_INTERVAL_HOURS = 1.0  # DB unreachable
+# Proximity-based scheduling intervals (hours): browser scrape — moderate cadence.
+SCHEDULE = ProximitySchedule(closing=0.5, pregame=1.0, far=2.0, db_fallback=1.0)
 
 
 @dataclass
@@ -217,27 +218,6 @@ async def ingest_league(
     return stats
 
 
-def _interval_for_kickoff(
-    next_kickoff: datetime | None,
-    *,
-    now: datetime | None = None,
-) -> float:
-    """Compute scheduling interval (hours) based on proximity to next kickoff."""
-    if next_kickoff is None:
-        return FAR_INTERVAL_HOURS
-
-    if now is None:
-        now = datetime.now(UTC)
-
-    hours_until = (next_kickoff - now).total_seconds() / 3600
-
-    if hours_until < FetchTier.CLOSING.max_hours:
-        return CLOSING_INTERVAL_HOURS
-    if hours_until < FetchTier.PREGAME.max_hours:
-        return PREGAME_INTERVAL_HOURS
-    return FAR_INTERVAL_HOURS
-
-
 async def main(ctx: JobContext) -> None:
     """Main job execution — scrapes configured league(s), then self-schedules.
 
@@ -268,10 +248,10 @@ async def main(ctx: JobContext) -> None:
 
     # Query DB for next kickoff to determine scheduling interval.
     # On failure, fall back to 1h so we don't block on DB availability.
-    pre_interval = DB_FALLBACK_INTERVAL_HOURS
+    pre_interval = SCHEDULE.db_fallback
     try:
         next_kickoff = await get_next_kickoff(primary_spec.sport_key)
-        pre_interval = _interval_for_kickoff(next_kickoff)
+        pre_interval = SCHEDULE.interval_for(next_kickoff)
         logger.info(
             "proximity_schedule",
             next_kickoff=next_kickoff.isoformat() if next_kickoff else None,
@@ -365,10 +345,10 @@ async def main(ctx: JobContext) -> None:
     # On success, re-query next kickoff (scrape may have created new events)
     # and reschedule at the updated interval.
     if total_scraped > 0:
-        post_interval = DB_FALLBACK_INTERVAL_HOURS
+        post_interval = SCHEDULE.db_fallback
         try:
             post_kickoff = await get_next_kickoff(primary_spec.sport_key)
-            post_interval = _interval_for_kickoff(post_kickoff)
+            post_interval = SCHEDULE.interval_for(post_kickoff)
         except Exception as e:
             logger.warning("post_scrape_kickoff_query_failed", error=str(e), exc_info=True)
 

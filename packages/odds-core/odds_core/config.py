@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from odds_core.sports import SportKey
@@ -92,6 +92,7 @@ class SchedulerConfig(BaseSettings):
             "fetch-oddsportal-results",
             "daily-digest",
             "fetch-espn-fixtures",
+            "fetch-betfair-exchange",
         ],
         description="Jobs to bootstrap when starting the local scheduler",
     )
@@ -242,6 +243,60 @@ class PolymarketConfig(BaseSettings):
     )
 
 
+class BetfairConfig(BaseSettings):
+    """Betfair Exchange API configuration.
+
+    Read-only ingestion via the delayed application key. The free delayed key
+    returns prices with a 1-180s variable lag — sufficient as a sharp benchmark
+    for pre-match decisions made hours before kickoff.
+
+    Authentication: cert-based non-interactive login is the production path.
+    For dev/local probes, leaving cert paths unset falls back to interactive
+    login (which prompts 2FA if enabled — not viable unattended).
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="BETFAIR_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+    enabled: bool = Field(default=False, description="Enable Betfair Exchange ingestion")
+    username: str | None = Field(default=None, description="Betfair account username")
+    password: str | None = Field(default=None, description="Betfair account password")
+    app_key: str | None = Field(default=None, description="Betfair application key (delayed)")
+    cert_file: str | None = Field(default=None, description="Path to client SSL cert (.crt)")
+    cert_key: str | None = Field(default=None, description="Path to client SSL key (.key)")
+
+    # Sport scoping override. ``None`` means "all sports the BFE adapter supports"
+    # (resolved at job-execution time from ``odds_lambda.betfair.SPORT_CONFIG``).
+    sports: list[SportKey] | None = Field(
+        default=None,
+        description="Override sport scope; defaults to all BFE-supported sports",
+    )
+
+    # Look-ahead window for event discovery (covers an EPL gameweek + MLB week)
+    lookahead_hours: int = Field(
+        default=168, description="Hours ahead to look when discovering events"
+    )
+
+    @model_validator(mode="after")
+    def _require_creds_when_enabled(self) -> BetfairConfig:
+        if self.enabled:
+            missing = [
+                name
+                for name, value in (
+                    ("BETFAIR_USERNAME", self.username),
+                    ("BETFAIR_PASSWORD", self.password),
+                    ("BETFAIR_APP_KEY", self.app_key),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    f"BETFAIR_ENABLED=true but credentials missing: {', '.join(missing)}"
+                )
+        return self
+
+
 class LoggingConfig(BaseSettings):
     """Logging configuration."""
 
@@ -288,6 +343,7 @@ class Settings(BaseSettings):
     alerts: AlertConfig = Field(default_factory=AlertConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     polymarket: PolymarketConfig = Field(default_factory=PolymarketConfig)
+    betfair: BetfairConfig = Field(default_factory=BetfairConfig)
 
 
 @lru_cache

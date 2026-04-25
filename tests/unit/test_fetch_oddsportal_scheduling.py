@@ -9,59 +9,52 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from odds_lambda.fetch_tier import FetchTier
-from odds_lambda.jobs.fetch_oddsportal import (
-    CLOSING_INTERVAL_HOURS,
-    DB_FALLBACK_INTERVAL_HOURS,
-    FAR_INTERVAL_HOURS,
-    PREGAME_INTERVAL_HOURS,
-    _interval_for_kickoff,
-    main,
-)
+from odds_lambda.jobs.fetch_oddsportal import SCHEDULE, main
 from odds_lambda.scheduling.jobs import JobContext
 
 
 class TestIntervalForKickoff:
-    """Tests for _interval_for_kickoff proximity logic."""
+    """Tests for the OddsPortal SCHEDULE proximity bands."""
 
     def test_no_upcoming_games_returns_far_interval(self) -> None:
-        assert _interval_for_kickoff(None) == FAR_INTERVAL_HOURS
+        assert SCHEDULE.interval_for(None) == SCHEDULE.far
 
     def test_game_within_closing_window(self) -> None:
         now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
         kickoff = now + timedelta(hours=1)
-        assert _interval_for_kickoff(kickoff, now=now) == CLOSING_INTERVAL_HOURS
+        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.closing
 
     def test_game_at_closing_boundary(self) -> None:
         now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
-        # Exactly at 3h boundary — should be closing (< 3h is false, so pregame)
+        # Exactly at 3h boundary — should be pregame (< 3h is false)
         kickoff = now + timedelta(hours=FetchTier.CLOSING.max_hours)
-        assert _interval_for_kickoff(kickoff, now=now) == PREGAME_INTERVAL_HOURS
+        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.pregame
 
     def test_game_just_under_closing_threshold(self) -> None:
         now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
         kickoff = now + timedelta(hours=2.99)
-        assert _interval_for_kickoff(kickoff, now=now) == CLOSING_INTERVAL_HOURS
+        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.closing
 
     def test_game_in_pregame_window(self) -> None:
         now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
         kickoff = now + timedelta(hours=6)
-        assert _interval_for_kickoff(kickoff, now=now) == PREGAME_INTERVAL_HOURS
+        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.pregame
 
     def test_game_at_pregame_boundary(self) -> None:
         now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
         kickoff = now + timedelta(hours=FetchTier.PREGAME.max_hours)
-        assert _interval_for_kickoff(kickoff, now=now) == FAR_INTERVAL_HOURS
+        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.far
 
     def test_game_far_away(self) -> None:
         now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
         kickoff = now + timedelta(hours=24)
-        assert _interval_for_kickoff(kickoff, now=now) == FAR_INTERVAL_HOURS
+        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.far
 
     def test_game_already_started(self) -> None:
         now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
         kickoff = now - timedelta(hours=1)
         # Negative hours_until — should still return closing interval
-        assert _interval_for_kickoff(kickoff, now=now) == CLOSING_INTERVAL_HOURS
+        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.closing
 
 
 class TestProximityScheduling:
@@ -255,7 +248,7 @@ class TestProximityScheduling:
         first_call = mock_backend.schedule_next_execution.call_args_list[0]
         scheduled_time = first_call.kwargs["next_time"]
         delta_hours = (scheduled_time - now).total_seconds() / 3600
-        assert 0.9 <= delta_hours <= DB_FALLBACK_INTERVAL_HOURS + 0.1
+        assert 0.9 <= delta_hours <= SCHEDULE.db_fallback + 0.1
 
     @pytest.mark.asyncio
     async def test_closing_game_schedules_30min(self) -> None:
