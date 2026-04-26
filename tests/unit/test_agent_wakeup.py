@@ -174,9 +174,9 @@ class TestGetScheduledJobs:
 
         now = datetime.now(UTC)
         schedules = [
-            _make_schedule("fetch_odds_soccer_epl", now),
-            _make_schedule("fetch_odds_baseball_mlb", now),
-            _make_schedule("agent_run_soccer_epl", now),
+            _make_schedule("fetch-odds-epl", now),
+            _make_schedule("fetch-odds-mlb", now),
+            _make_schedule("agent-run-epl", now),
         ]
 
         with _patch_build_scheduler(schedules=schedules):
@@ -184,9 +184,9 @@ class TestGetScheduledJobs:
 
         assert result["job_count"] == 2
         job_names = [j["job_name"] for j in result["jobs"]]
-        assert "fetch_odds_soccer_epl" in job_names
-        assert "agent_run_soccer_epl" in job_names
-        assert "fetch_odds_baseball_mlb" not in job_names
+        assert "fetch-odds-epl" in job_names
+        assert "agent-run-epl" in job_names
+        assert "fetch-odds-mlb" not in job_names
 
     @pytest.mark.asyncio
     async def test_no_filter_returns_all(self) -> None:
@@ -194,8 +194,8 @@ class TestGetScheduledJobs:
 
         now = datetime.now(UTC)
         schedules = [
-            _make_schedule("fetch_odds_soccer_epl", now),
-            _make_schedule("fetch_odds_baseball_mlb", now),
+            _make_schedule("fetch-odds-epl", now),
+            _make_schedule("fetch-odds-mlb", now),
         ]
 
         with _patch_build_scheduler(schedules=schedules):
