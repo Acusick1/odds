@@ -10,6 +10,7 @@ import structlog
 import yaml
 from odds_analytics.training.config import FeatureConfig
 from odds_core.config import get_settings
+from odds_core.sports import SportKey
 
 logger = structlog.get_logger(__name__)
 
@@ -144,6 +145,30 @@ def load_model(
     _cached_model_key = key
 
     return model_data
+
+
+def model_supports_sport(sport: SportKey | None) -> bool:
+    """Whether the configured model serves the given sport.
+
+    Returns ``True`` when ``sport`` is ``None`` (caller defers to the
+    model's own ``sport_key``). Returns ``False`` when no model is
+    configured, the model artifact has no bundled config, or its
+    ``sport_key`` differs from the requested sport.
+
+    Lets pre-sport callers (e.g. ``fetch-oddsportal-mlb``) skip
+    speculative scoring without raising the ``sport_mismatch`` error in
+    ``score_events``.
+    """
+    if sport is None:
+        return True
+    try:
+        model_data = load_model()
+    except (ValueError, FileNotFoundError):
+        return False
+    config: FeatureConfig | None = model_data.get("feature_config")
+    if config is None or not config.sport_key:
+        return False
+    return config.sport_key == sport
 
 
 def get_cached_version() -> str | None:
