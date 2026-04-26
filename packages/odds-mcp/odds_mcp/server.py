@@ -32,7 +32,7 @@ from odds_lambda.paper_trading import (
     place_trade,
     settle_trades,
 )
-from odds_lambda.storage.readers import OddsReader
+from odds_lambda.storage.readers import BookPriceEntry, OddsReader
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -96,7 +96,12 @@ def _event_to_dict(event: Event) -> dict[str, Any]:
 
 
 def _odds_to_dict(odds: Odds) -> dict[str, Any]:
-    """Serialize an Odds object to a JSON-safe dict."""
+    """Serialize an Odds object to a JSON-safe dict.
+
+    Includes ``last_update`` (the bookmaker's self-reported update time from
+    ``raw_data``) so callers can judge per-book freshness independently of
+    the contributing snapshot's wall-clock time.
+    """
     return {
         "bookmaker_key": odds.bookmaker_key,
         "bookmaker_title": odds.bookmaker_title,
@@ -104,6 +109,7 @@ def _odds_to_dict(odds: Odds) -> dict[str, Any]:
         "outcome_name": odds.outcome_name,
         "price": odds.price,
         "point": odds.point,
+        "last_update": odds.last_update.isoformat() if odds.last_update else None,
     }
 
 
@@ -192,17 +198,43 @@ async def get_current_odds(
     event_id: str,
     market: MarketKey,
     include_raw_data: bool = False,
+    lookback_hours: float = 2.0,
 ) -> dict[str, Any]:
-    """Get the latest odds snapshot for an event, showing current bookmaker prices.
+    """Get the latest odds for an event, resolved per-bookmaker over a lookback window.
+
+    For each ``(bookmaker_key, outcome_name, point)`` tuple, returns the
+    newest price within ``[latest_snapshot_time - lookback_hours,
+    latest_snapshot_time]``. This is robust to multiple writer streams: when
+    a Betfair Exchange direct-ingestion snapshot wins the latest-snapshot
+    race but contains only BFE, retail prices from an older snapshot in the
+    window are still surfaced.
+
+    The top-level ``snapshot_time`` is the newest contributing snapshot in
+    the window (max of surfaced book snapshot times). Each bookmaker entry
+    additionally surfaces the contributing snapshot's ``snapshot_time``
+    alongside its ``last_update`` from ``raw_data`` so callers can judge
+    per-book staleness.
+
+    Anchor metadata (``anchor_snapshot_id``, ``anchor_created_at``,
+    ``anchor_fetch_tier``, ``anchor_hours_until_commence``) describes the
+    latest snapshot used to anchor the lookback window. It is **not**
+    aggregated across surfaced rows — surfaced ``odds`` may span several
+    older snapshots. ``bookmaker_count`` is derived from the surfaced rows
+    (count of distinct ``bookmaker_key`` values) so it always matches what
+    the caller sees.
 
     Args:
         event_id: Event identifier.
         market: Market type — "h2h" (2-way moneyline), "1x2" (3-way with
             draw), "totals", or "spreads".
-        include_raw_data: If True, also include the full raw_data JSON blob.
+        include_raw_data: If True, also include the full raw_data JSON blob
+            of the anchor (newest) snapshot.
+        lookback_hours: How far back to search for per-bookmaker prices
+            (default 2.0 h).
 
     Returns:
-        Dict with event info and the latest snapshot with structured odds.
+        Dict with event info and the resolved snapshot view with structured
+        odds (per-book ``snapshot_time`` and ``book_age_seconds`` fields).
     """
     async with async_session_maker() as session:
         reader = OddsReader(session)
@@ -210,20 +242,79 @@ async def get_current_odds(
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        snapshot = await reader.get_latest_snapshot(event_id, market=market)
-        if snapshot is None:
+        # Anchor the lookback window on the latest snapshot time so the
+        # window is data-relative, not clock-relative.
+        latest_snapshot = await reader.get_latest_snapshot(event_id, market=market)
+        if latest_snapshot is None:
             return {
                 "event": _event_to_dict(event),
                 "snapshot": None,
                 "message": "No odds snapshots available for this event",
             }
 
-    odds = extract_odds_from_snapshot(snapshot, event_id, market=market)
+        book_result = await reader.get_latest_book_prices(
+            event_id,
+            market=market,
+            lookback_hours=lookback_hours,
+            now=latest_snapshot.snapshot_time,
+        )
+
+        # Capture all data we need from ORM objects while the session is open.
+        anchor_snapshot_id = latest_snapshot.id
+        anchor_snapshot_created_at = latest_snapshot.created_at
+        anchor_fetch_tier = latest_snapshot.fetch_tier
+        anchor_hours_until_commence = latest_snapshot.hours_until_commence
+        anchor_raw_data = latest_snapshot.raw_data if include_raw_data else None
+        event_dict = _event_to_dict(event)
+
+    if not book_result.entries:
+        return {
+            "event": event_dict,
+            "snapshot": None,
+            "message": f"No {market} odds in lookback window",
+        }
+
+    # Determine the newest contributing snapshot in the window.
+    newest_snapshot_time = max(entry.meta.snapshot_time for entry in book_result.entries.values())
+
+    # Serialize per-bookmaker odds with provenance fields. Sorted by
+    # bookmaker key, outcome name, point (None last) for deterministic output.
+    odds_dicts: list[dict[str, Any]] = []
+    for key in sorted(
+        book_result.entries.keys(),
+        key=lambda k: (k[0], k[1], math.inf if k[2] is None else k[2]),
+    ):
+        entry = book_result.entries[key]
+        odds_dicts.append(
+            {
+                **_odds_to_dict(entry.odds),
+                "snapshot_time": entry.meta.snapshot_time.isoformat(),
+                "book_age_seconds": entry.meta.age_seconds,
+            }
+        )
+
+    # Bookmaker count is derived from surfaced rows (distinct keys) so the
+    # field always agrees with the visible odds[] — not from the anchor
+    # snapshot, which can be misleading when retail rows span older snapshots.
+    bookmaker_count = len({o["bookmaker_key"] for o in odds_dicts})
+
+    snapshot_dict: dict[str, Any] = {
+        "anchor_snapshot_id": anchor_snapshot_id,
+        "event_id": event_id,
+        "snapshot_time": newest_snapshot_time.isoformat(),
+        "anchor_created_at": anchor_snapshot_created_at.isoformat(),
+        "bookmaker_count": bookmaker_count,
+        "anchor_fetch_tier": anchor_fetch_tier,
+        "anchor_hours_until_commence": anchor_hours_until_commence,
+        "lookback_hours": lookback_hours,
+        "odds": odds_dicts,
+    }
+    if include_raw_data:
+        snapshot_dict["raw_data"] = anchor_raw_data
+
     return {
-        "event": _event_to_dict(event),
-        "snapshot": _snapshot_to_dict(
-            snapshot, include_raw_data=include_raw_data, extracted_odds=odds
-        ),
+        "event": event_dict,
+        "snapshot": snapshot_dict,
     }
 
 
@@ -769,6 +860,7 @@ async def find_retail_edges(
     market: MarketKey,
     sharp_bookmakers: str | list[str] | None = None,
     sharp_lookback_hours: float = 2.0,
+    lookback_hours: float = 2.0,
 ) -> dict[str, Any]:
     """Surface retail books pricing longer than sharp, with dispersion stats.
 
@@ -781,7 +873,27 @@ async def find_retail_edges(
 
     Sharp prices are resolved via a time-windowed lookback across recent
     snapshots so a missing sharp book in the latest scrape does not discard
-    a nearby valid price. Retail prices come from the single latest snapshot.
+    a nearby valid price. Retail prices are likewise resolved per-bookmaker
+    over a lookback window: for each ``(bookmaker_key, outcome, point)``,
+    the newest price within ``[latest_snapshot_time - lookback_hours,
+    latest_snapshot_time]`` is used. This means a Betfair Exchange-only
+    snapshot winning the latest-snapshot race does not hide retail prices
+    from an older snapshot in the same window.
+
+    Each retail row carries ``snapshot_time`` and ``book_age_seconds``
+    mirroring ``sharp_snapshot_time`` / ``sharp_age_seconds``. The top-level
+    ``snapshot_time`` is the newest contributing retail snapshot in the
+    window (max of surfaced book snapshot times). Because per-book prices
+    can come from different snapshots, dispersion stats
+    (``median_divergence``, ``dispersion_stddev``, ``z_score``) are computed
+    across non-co-temporal prices. The trade-off is acceptable for the
+    default 2 h pre-match window — line moves within that window are
+    typically small relative to retail dispersion — but consumers should
+    weight ``dispersion_stddev`` accordingly when the window is widened.
+    Consumers should likewise weight ``book_age_seconds`` when sizing: a
+    retail row from an older snapshot (e.g. a 60-min-old OP scrape with a
+    newer BFE-only snapshot in between) may no longer be takeable because
+    the bookmaker has since moved its line.
 
     ``z_score`` per retail entry is ``(divergence - median_divergence) /
     dispersion_stddev`` computed across that outcome's retail books; ``null``
@@ -795,16 +907,20 @@ async def find_retail_edges(
         market: Market type — "h2h", "1x2", "totals", or "spreads".
         sharp_bookmakers: Sharp bookmaker keys (default: ["pinnacle", "betfair_exchange"]).
         sharp_lookback_hours: How far back to search for sharp prices (default 2.0 h).
+        lookback_hours: How far back to search for retail prices, per
+            bookmaker (default 2.0 h).
 
     Returns:
-        Dict with ``event``, ``snapshot_time``, ``sharp_bookmakers`` (the
-        configured input list; per-outcome resolution under the hybrid
-        fallback is visible via ``sharp_snapshot_time`` / ``sharp_age_seconds``
-        on each ``per_outcome`` row), ``per_outcome`` (flat array keyed by
+        Dict with ``event``, ``snapshot_time`` (newest contributing retail
+        snapshot in the window), ``sharp_bookmakers`` (the configured input
+        list; per-outcome sharp resolution under the hybrid fallback is
+        visible via ``sharp_snapshot_time`` / ``sharp_age_seconds`` on each
+        ``per_outcome`` row), ``per_outcome`` (flat array keyed by
         ``(outcome, point)``), and ``retail_edges`` (flat array of
-        negative-divergence entries sorted ascending by divergence; ties
-        broken by ``z_score`` ascending — more-negative first — then
-        ``book``, ``outcome``, and ``point`` for full determinism).
+        negative-divergence entries with per-row ``snapshot_time`` /
+        ``book_age_seconds``, sorted ascending by divergence; ties broken
+        by ``z_score`` ascending — more-negative first — then ``book``,
+        ``outcome``, and ``point`` for full determinism).
     """
     sharp_bms = _coerce_bookmaker_list(sharp_bookmakers) or _DEFAULT_SHARP_BOOKMAKERS
 
@@ -814,9 +930,10 @@ async def find_retail_edges(
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        # Retail prices: latest snapshot only
-        snapshot = await reader.get_latest_snapshot(event_id, market=market)
-        if snapshot is None:
+        # Anchor lookback windows on the latest snapshot time so they are
+        # data-relative, not clock-relative.
+        latest_snapshot = await reader.get_latest_snapshot(event_id, market=market)
+        if latest_snapshot is None:
             return {
                 "event": _event_to_dict(event),
                 "snapshot_time": None,
@@ -826,41 +943,69 @@ async def find_retail_edges(
                 "message": "No odds snapshots available for this event",
             }
 
-        # Sharp prices: lookback across recent snapshots, anchored on the
-        # latest snapshot time so the window is data-relative, not clock-relative.
+        # Sharp prices: lookback across recent snapshots.
         sharp_result = await reader.get_sharp_prices(
             event_id,
             market=market,
             sharp_bookmakers=sharp_bms,
             lookback_hours=sharp_lookback_hours,
-            now=snapshot.snapshot_time,
+            now=latest_snapshot.snapshot_time,
         )
 
-        # Extract retail odds and metadata while ORM objects are live
-        odds = extract_odds_from_snapshot(snapshot, event_id, market=market)
-        snapshot_time_iso = snapshot.snapshot_time.isoformat()
+        # Retail prices: per-bookmaker latest within the lookback window.
+        book_result = await reader.get_latest_book_prices(
+            event_id,
+            market=market,
+            lookback_hours=lookback_hours,
+            now=latest_snapshot.snapshot_time,
+        )
+
         event_dict = _event_to_dict(event)
 
-    if not odds:
+    sharp_set = set(sharp_bms)
+
+    # Build per-(outcome, point) buckets of retail odds, dropping sharp books.
+    # Each retail row carries provenance from its contributing snapshot.
+    buckets: dict[tuple[str, float | None], list[BookPriceEntry]] = {}
+    for (bookmaker_key, _outcome, _point), entry in book_result.entries.items():
+        if bookmaker_key in sharp_set:
+            continue
+        o = entry.odds
+        buckets.setdefault((o.outcome_name, o.point), []).append(entry)
+
+    if not buckets:
+        # Either no odds in the window, or every book in the window is sharp.
+        if not book_result.entries:
+            return {
+                "event": event_dict,
+                "snapshot_time": None,
+                "sharp_bookmakers": sharp_bms,
+                "per_outcome": [],
+                "retail_edges": [],
+                "message": f"No {market} odds in lookback window",
+            }
+        # All books were sharp — newest contributing snapshot is still
+        # informative for the response envelope.
+        snapshot_time_iso = max(
+            e.meta.snapshot_time for e in book_result.entries.values()
+        ).isoformat()
         return {
             "event": event_dict,
             "snapshot_time": snapshot_time_iso,
             "sharp_bookmakers": sharp_bms,
             "per_outcome": [],
             "retail_edges": [],
-            "message": f"No {market} odds in latest snapshot",
+            "message": "No retail bookmakers in lookback window",
         }
 
-    sharp_by_outcome = sharp_result.prices
-    sharp_set = set(sharp_bms)
+    # Top-level snapshot_time = max across surfaced retail snapshot times.
+    retail_snapshot_times = [e.meta.snapshot_time for entries in buckets.values() for e in entries]
+    snapshot_time_iso = max(retail_snapshot_times).isoformat()
 
-    # Group retail odds by (outcome_name, point). Totals with multiple point
-    # values produce one bucket per (outcome, point); h2h / 1x2 have point=None.
-    buckets: dict[tuple[str, float | None], list[Odds]] = {}
-    for o in odds:
-        if o.bookmaker_key in sharp_set:
-            continue
-        buckets.setdefault((o.outcome_name, o.point), []).append(o)
+    sharp_by_outcome = sharp_result.prices
+
+    # Flat list of all retail odds (across buckets) for per-book hold calc.
+    odds: list[Odds] = [e.odds for entries in buckets.values() for e in entries]
 
     # Per-book market hold is only meaningful for single-line markets; totals /
     # spreads span multiple lines, so computing it event-wide would conflate them.
@@ -882,20 +1027,20 @@ async def find_retail_edges(
         outcome_name, point = key
         return (outcome_name, math.inf if point is None else point)
 
-    for (outcome_name, point), outcome_odds in sorted(buckets.items(), key=_bucket_sort_key):
+    for (outcome_name, point), outcome_entries in sorted(buckets.items(), key=_bucket_sort_key):
         sharp_entry = sharp_by_outcome.get(outcome_name)
         sharp_prob = sharp_entry["implied_prob"] if sharp_entry else None
         sharp_meta = sharp_result.meta.get(outcome_name) if sharp_entry else None
 
         # Build per-book retail rows for this (outcome, point) bucket.
-        # Deduplicate on bookmaker_key (last entry wins — matches per_book_market_holds).
-        by_book: dict[str, Odds] = {}
-        for o in outcome_odds:
-            by_book[o.bookmaker_key] = o
-
+        # ``book_result.entries`` is already keyed by
+        # ``(bookmaker_key, outcome_name, point)``, so each entry in this
+        # bucket has a unique ``bookmaker_key`` by construction — iterate
+        # directly in ``bookmaker_key`` order for deterministic output.
         retail_rows: list[dict[str, Any]] = []
-        for bm_key in sorted(by_book):
-            o = by_book[bm_key]
+        for entry in sorted(outcome_entries, key=lambda e: e.odds.bookmaker_key):
+            o = entry.odds
+            bm_key = o.bookmaker_key
             retail_prob = round(calculate_implied_probability(o.price), 6)
             divergence = round(retail_prob - sharp_prob, 6) if sharp_prob is not None else None
             market_hold = (
@@ -912,6 +1057,8 @@ async def find_retail_edges(
                     # z_score filled in below once dispersion is known
                     "z_score": None,
                     "market_hold": market_hold,
+                    "snapshot_time": entry.meta.snapshot_time.isoformat(),
+                    "book_age_seconds": entry.meta.age_seconds,
                 }
             )
 

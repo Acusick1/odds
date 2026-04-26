@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import structlog
@@ -16,6 +17,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from odds_lambda.fetch_tier import FetchTier
 
 logger = structlog.get_logger()
+
+
+@dataclass
+class BookPriceMeta:
+    """Metadata about a per-bookmaker price found via lookback search.
+
+    Mirrors :class:`SharpPriceMeta` so consumers can handle staleness
+    uniformly across sharp and retail prices.
+    """
+
+    snapshot_id: int
+    snapshot_time: datetime
+    age_seconds: float
+
+
+@dataclass
+class BookPriceEntry:
+    """A single per-bookmaker price with its provenance."""
+
+    odds: Odds
+    meta: BookPriceMeta
+
+
+@dataclass
+class BookPriceResult:
+    """Per-bookmaker prices resolved across a time window of snapshots.
+
+    ``entries`` maps ``(bookmaker_key, outcome_name, point)`` to the newest
+    price for that tuple within the lookback window, along with provenance
+    metadata. Tuples for which no snapshot in the window contained the book
+    are absent from the mapping.
+    """
+
+    entries: dict[tuple[str, str, float | None], BookPriceEntry] = field(default_factory=dict)
 
 
 class OddsReader:
@@ -726,6 +761,94 @@ class OddsReader:
                 break
 
         return sharp_result
+
+    async def get_latest_book_prices(
+        self,
+        event_id: str,
+        market: str,
+        lookback_hours: float = 2.0,
+        *,
+        now: datetime | None = None,
+    ) -> BookPriceResult:
+        """Return the newest price per bookmaker within a lookback window.
+
+        Scans snapshots within ``[now - lookback_hours, now]`` newest-first.
+        For each unique ``(bookmaker_key, outcome_name, point)`` tuple, keeps
+        the first (newest) price seen. Books absent from every snapshot in
+        the window do not appear in the result.
+
+        Robust to multiple writer streams — when one stream produces a
+        snapshot containing only a subset of books (e.g. a Betfair Exchange
+        direct-ingestion row) and another, slightly older stream produced a
+        snapshot with the broader retail book set, both contribute their
+        most recent prices.
+
+        Args:
+            event_id: Event identifier.
+            market: Market key (e.g. ``"h2h"``, ``"1x2"``).
+            lookback_hours: How far back to search (default 2 h).
+            now: Reference time for the lookback window. Defaults to
+                ``datetime.now(UTC)``. Exposed for testing and for
+                data-relative anchoring (e.g. anchor on the latest snapshot
+                time so the window is independent of clock drift).
+
+        Returns:
+            A :class:`BookPriceResult` mapping each
+            ``(bookmaker_key, outcome_name, point)`` tuple to its newest
+            ``Odds`` row in the window plus :class:`BookPriceMeta`
+            (``snapshot_id``, ``snapshot_time``, ``age_seconds``).
+        """
+        ref_time = now or datetime.now(UTC)
+        window_start = ref_time - timedelta(hours=lookback_hours)
+
+        query = (
+            select(OddsSnapshot)
+            .where(
+                and_(
+                    OddsSnapshot.event_id == event_id,
+                    OddsSnapshot.snapshot_time >= window_start,
+                    OddsSnapshot.snapshot_time <= ref_time,
+                )
+            )
+            .order_by(OddsSnapshot.snapshot_time.desc())
+        )
+
+        result = await self.session.execute(query)
+        snapshots = list(result.scalars().all())
+
+        book_result = BookPriceResult()
+
+        for snapshot in snapshots:
+            if not raw_data_has_market(snapshot.raw_data, market):
+                continue
+
+            odds = extract_odds_from_snapshot(snapshot, event_id, market=market)
+            if not odds:
+                continue
+
+            age_seconds = round((ref_time - snapshot.snapshot_time).total_seconds(), 1)
+
+            # Dedup is first-wins both across and within snapshots: snapshots
+            # are walked newest-first, so the first time a
+            # ``(bookmaker_key, outcome_name, point)`` tuple is seen its price
+            # is locked in. Within-snapshot duplicates (the same tuple
+            # repeated inside one bookmaker block) are not expected in
+            # well-formed ``raw_data``; if they ever occur the earlier entry
+            # in the iteration order wins.
+            for o in odds:
+                key = (o.bookmaker_key, o.outcome_name, o.point)
+                if key in book_result.entries:
+                    continue
+                book_result.entries[key] = BookPriceEntry(
+                    odds=o,
+                    meta=BookPriceMeta(
+                        snapshot_id=snapshot.id,
+                        snapshot_time=snapshot.snapshot_time,
+                        age_seconds=age_seconds,
+                    ),
+                )
+
+        return book_result
 
     async def get_games_by_date(
         self, target_date: datetime, status: EventStatus | None = EventStatus.FINAL

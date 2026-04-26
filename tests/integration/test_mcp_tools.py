@@ -610,6 +610,8 @@ class TestFindRetailEdges:
                 "divergence",
                 "z_score",
                 "market_hold",
+                "snapshot_time",
+                "book_age_seconds",
             }
 
     @pytest.mark.asyncio
@@ -1132,3 +1134,391 @@ class TestFindRetailEdgesSharpLookback:
             # best_retail/worst_retail still populated but with null divergence/z_score
             assert entry["best_retail"]["divergence"] is None
             assert entry["best_retail"]["z_score"] is None
+
+
+@pytest.fixture
+async def bfe_newest_with_older_retail_event(pglite_async_session):
+    """Event where a BFE-only snapshot is newer than an OP retail+sharp snapshot.
+
+    Reproduces the production scenario from issue #364: ``fetch_betfair_exchange``
+    writes a Betfair-Exchange-only snapshot that wins the latest-snapshot race,
+    while the older OddsPortal snapshot containing 17 retail books would be
+    invisible without per-bookmaker lookback resolution.
+    """
+    commence_time = datetime(2026, 4, 26, 15, 0, tzinfo=UTC)
+    event = Event(
+        id="epl_bfe_newest_001",
+        sport_key="soccer_epl",
+        sport_title="EPL",
+        commence_time=commence_time,
+        home_team="Brighton",
+        away_team="Wolves",
+        status=EventStatus.SCHEDULED,
+    )
+    pglite_async_session.add(event)
+
+    # Older OP snapshot at T-90min: pinnacle + 17 retail books
+    op_time = commence_time - timedelta(minutes=90)
+    retail_books = [
+        "bet365",
+        "betway",
+        "betfred",
+        "betvictor",
+        "bwin",
+        "paddypower",
+        "skybet",
+        "williamhill",
+        "10bet",
+        "betmgm",
+        "888sport",
+        "midnite",
+        "betuk",
+        "spreadex",
+        "betano",
+        "unibet_uk",
+        "allbritishcasino",
+    ]
+    op_bookmakers = [
+        {
+            "key": "pinnacle",
+            "title": "Pinnacle",
+            "last_update": op_time.isoformat(),
+            "markets": [
+                {
+                    "key": "1x2",
+                    "outcomes": [
+                        {"name": "Brighton", "price": -140},
+                        {"name": "Draw", "price": 270},
+                        {"name": "Wolves", "price": 350},
+                    ],
+                }
+            ],
+        }
+    ]
+    for book in retail_books:
+        op_bookmakers.append(
+            {
+                "key": book,
+                "title": book.title(),
+                "last_update": op_time.isoformat(),
+                "markets": [
+                    {
+                        "key": "1x2",
+                        "outcomes": [
+                            {"name": "Brighton", "price": -130},
+                            {"name": "Draw", "price": 280},
+                            {"name": "Wolves", "price": 360},
+                        ],
+                    }
+                ],
+            }
+        )
+
+    snap_op = OddsSnapshot(
+        event_id=event.id,
+        snapshot_time=op_time,
+        raw_data={"bookmakers": op_bookmakers},
+        bookmaker_count=len(op_bookmakers),
+        fetch_tier="pregame",
+        hours_until_commence=1.5,
+    )
+    pglite_async_session.add(snap_op)
+
+    # Newer BFE-only snapshot at T-30min — wins latest-snapshot race
+    bfe_time = commence_time - timedelta(minutes=30)
+    snap_bfe = OddsSnapshot(
+        event_id=event.id,
+        snapshot_time=bfe_time,
+        raw_data={
+            "bookmakers": [
+                {
+                    "key": "betfair_exchange",
+                    "title": "Betfair Exchange",
+                    "last_update": bfe_time.isoformat(),
+                    "markets": [
+                        {
+                            "key": "1x2",
+                            "outcomes": [
+                                {"name": "Brighton", "price": -135},
+                                {"name": "Draw", "price": 275},
+                                {"name": "Wolves", "price": 355},
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+        bookmaker_count=1,
+        fetch_tier="pregame",
+        hours_until_commence=0.5,
+    )
+    pglite_async_session.add(snap_bfe)
+
+    await pglite_async_session.commit()
+    await pglite_async_session.refresh(event)
+    await pglite_async_session.refresh(snap_op)
+    await pglite_async_session.refresh(snap_bfe)
+    return event, snap_op, snap_bfe, retail_books
+
+
+class TestFindRetailEdgesPerBookmakerLookback:
+    """Per-bookmaker lookback isolates retail data from BFE-only snapshot races."""
+
+    @pytest.mark.asyncio
+    async def test_bfe_newest_does_not_hide_older_retail(
+        self, patch_session_maker, bfe_newest_with_older_retail_event
+    ):
+        """A BFE-only newer snapshot must not hide 17 retail books from an
+        older OP snapshot in the lookback window."""
+        from odds_mcp.server import find_retail_edges
+
+        event, snap_op, _snap_bfe, retail_books = bfe_newest_with_older_retail_event
+
+        result = await find_retail_edges(event_id=event.id, market="1x2")
+
+        assert "error" not in result
+
+        # All 17 retail books surface on each outcome
+        for outcome_name in ("Brighton", "Draw", "Wolves"):
+            bucket = next(e for e in result["per_outcome"] if e["outcome"] == outcome_name)
+            assert bucket["n_books"] == 17
+
+        # Each retail row carries provenance to the OP snapshot
+        brighton = next(e for e in result["per_outcome"] if e["outcome"] == "Brighton")
+        assert brighton["best_retail"]["snapshot_time"] == snap_op.snapshot_time.isoformat()
+        assert brighton["best_retail"]["book_age_seconds"] is not None
+
+        # Top-level snapshot_time = newest contributing retail snapshot — here
+        # all retail came from snap_op so it equals snap_op.snapshot_time
+        assert result["snapshot_time"] == snap_op.snapshot_time.isoformat()
+
+    @pytest.mark.asyncio
+    async def test_lookback_hours_override_excludes_older_snapshot(
+        self, patch_session_maker, bfe_newest_with_older_retail_event
+    ):
+        """A short ``lookback_hours`` override excludes the older OP snapshot.
+
+        The OP snapshot (pinnacle + 17 retail) is at T-90min and the BFE
+        anchor at T-30min. With ``lookback_hours=0.5`` (30 min) the window
+        is ``[T-60min, T-30min]`` — only BFE is in range, so no retail books
+        survive the sharp filter and ``retail_edges`` is empty.
+        """
+        from odds_mcp.server import find_retail_edges
+
+        event, _snap_op, _snap_bfe, _retail_books = bfe_newest_with_older_retail_event
+
+        result = await find_retail_edges(event_id=event.id, market="1x2", lookback_hours=0.5)
+
+        assert "error" not in result
+        assert result["per_outcome"] == []
+        assert result["retail_edges"] == []
+        # Only sharp (BFE) was in window, so the no-retail message is surfaced
+        assert result.get("message") == "No retail bookmakers in lookback window"
+
+
+class TestGetCurrentOddsPerBookmakerLookback:
+    """get_current_odds resolves per-bookmaker prices over a lookback window."""
+
+    @pytest.mark.asyncio
+    async def test_bfe_newest_does_not_hide_older_retail(
+        self, patch_session_maker, bfe_newest_with_older_retail_event
+    ):
+        """get_current_odds includes both BFE (newer) and the 17 retail books
+        (older) when both fall within the lookback window."""
+        from odds_mcp.server import get_current_odds
+
+        event, snap_op, snap_bfe, retail_books = bfe_newest_with_older_retail_event
+
+        result = await get_current_odds(event_id=event.id, market="1x2")
+
+        assert "error" not in result
+        snapshot = result["snapshot"]
+        assert snapshot is not None
+
+        odds = snapshot["odds"]
+        books_surfaced = {o["bookmaker_key"] for o in odds}
+
+        # All 17 retail books and BFE present
+        assert "betfair_exchange" in books_surfaced
+        for book in retail_books:
+            assert book in books_surfaced
+
+        # Per-row snapshot_time provenance: BFE from newer, retail from older
+        bfe_rows = [o for o in odds if o["bookmaker_key"] == "betfair_exchange"]
+        for row in bfe_rows:
+            assert row["snapshot_time"] == snap_bfe.snapshot_time.isoformat()
+
+        bet365_rows = [o for o in odds if o["bookmaker_key"] == "bet365"]
+        for row in bet365_rows:
+            assert row["snapshot_time"] == snap_op.snapshot_time.isoformat()
+
+        # Top-level snapshot_time = newest contributing snapshot (BFE)
+        assert snapshot["snapshot_time"] == snap_bfe.snapshot_time.isoformat()
+        assert snapshot["lookback_hours"] == 2.0
+
+    @pytest.mark.asyncio
+    async def test_bookmaker_count_reflects_surfaced_rows(
+        self, patch_session_maker, bfe_newest_with_older_retail_event
+    ):
+        """``bookmaker_count`` is derived from surfaced rows, not the anchor
+        snapshot. In the BFE-newer scenario the response surfaces 19 books
+        (1 BFE + 1 pinnacle + 17 retail) even though the anchor snapshot has
+        only 1 book."""
+        from odds_mcp.server import get_current_odds
+
+        event, _snap_op, _snap_bfe, retail_books = bfe_newest_with_older_retail_event
+
+        result = await get_current_odds(event_id=event.id, market="1x2")
+        snapshot = result["snapshot"]
+        assert snapshot is not None
+
+        # 19 unique bookmakers: betfair_exchange (BFE) + pinnacle + 17 retail.
+        # The anchor BFE snapshot only has 1 book — the response field reflects
+        # the wider per-bookmaker lookback union, not the anchor.
+        unique_books = {o["bookmaker_key"] for o in snapshot["odds"]}
+        assert len(unique_books) == snapshot["bookmaker_count"]
+        assert snapshot["bookmaker_count"] == 1 + 1 + len(retail_books)
+
+    @pytest.mark.asyncio
+    async def test_anchor_fields_describe_anchor_snapshot(
+        self, patch_session_maker, bfe_newest_with_older_retail_event
+    ):
+        """``anchor_*`` fields describe the latest (BFE) snapshot — not
+        aggregated across surfaced rows."""
+        from odds_mcp.server import get_current_odds
+
+        event, _snap_op, snap_bfe, _retail_books = bfe_newest_with_older_retail_event
+
+        result = await get_current_odds(event_id=event.id, market="1x2")
+        snapshot = result["snapshot"]
+        assert snapshot is not None
+
+        assert snapshot["anchor_snapshot_id"] == snap_bfe.id
+        assert snapshot["anchor_created_at"] == snap_bfe.created_at.isoformat()
+        assert snapshot["anchor_fetch_tier"] == snap_bfe.fetch_tier
+        assert snapshot["anchor_hours_until_commence"] == snap_bfe.hours_until_commence
+
+    @pytest.mark.asyncio
+    async def test_lookback_hours_override_excludes_older_snapshot(
+        self, patch_session_maker, bfe_newest_with_older_retail_event
+    ):
+        """A short ``lookback_hours`` override excludes the older OP snapshot.
+
+        The OP snapshot is at T-90min and the BFE anchor at T-30min. With
+        ``lookback_hours=0.5`` (30 min) the window is
+        ``[T-60min, T-30min]`` — only BFE is in range, so the response
+        surfaces 1 book (just betfair_exchange) instead of 18.
+        """
+        from odds_mcp.server import get_current_odds
+
+        event, _snap_op, snap_bfe, _retail_books = bfe_newest_with_older_retail_event
+
+        result = await get_current_odds(event_id=event.id, market="1x2", lookback_hours=0.5)
+        snapshot = result["snapshot"]
+        assert snapshot is not None
+
+        books_surfaced = {o["bookmaker_key"] for o in snapshot["odds"]}
+        assert books_surfaced == {"betfair_exchange"}
+        assert snapshot["lookback_hours"] == 0.5
+        # Newest contributing snapshot is BFE
+        assert snapshot["snapshot_time"] == snap_bfe.snapshot_time.isoformat()
+
+    @pytest.mark.asyncio
+    async def test_per_book_last_update_surfaced(
+        self, patch_session_maker, bfe_newest_with_older_retail_event
+    ):
+        """Each surfaced row carries ``last_update`` from ``raw_data``."""
+        from odds_mcp.server import get_current_odds
+
+        event, _snap_op, _snap_bfe, _retail_books = bfe_newest_with_older_retail_event
+
+        result = await get_current_odds(event_id=event.id, market="1x2")
+        snapshot = result["snapshot"]
+        assert snapshot is not None
+
+        for row in snapshot["odds"]:
+            assert "last_update" in row
+            assert row["last_update"] is not None
+
+    @pytest.mark.asyncio
+    async def test_totals_multiple_points_produce_distinct_entries(
+        self, patch_session_maker, pglite_async_session
+    ):
+        """A totals snapshot where one book has Over@2.5 and Over@3.0 produces
+        two surfaced entries for that book (keyed by point)."""
+        from odds_mcp.server import get_current_odds
+
+        commence_time = datetime(2026, 4, 27, 15, 0, tzinfo=UTC)
+        event = Event(
+            id="totals_points_test_001",
+            sport_key="baseball_mlb",
+            sport_title="MLB",
+            commence_time=commence_time,
+            home_team="Yankees",
+            away_team="Red Sox",
+            status=EventStatus.SCHEDULED,
+        )
+        pglite_async_session.add(event)
+
+        snapshot_time = commence_time - timedelta(hours=3)
+        raw_data = {
+            "bookmakers": [
+                {
+                    "key": "bet365",
+                    "title": "Bet365",
+                    "last_update": snapshot_time.isoformat(),
+                    "markets": [
+                        {
+                            "key": "totals",
+                            "outcomes": [
+                                {"name": "Over", "price": -110, "point": 2.5},
+                                {"name": "Under", "price": -110, "point": 2.5},
+                                {"name": "Over", "price": +120, "point": 3.0},
+                                {"name": "Under", "price": -140, "point": 3.0},
+                            ],
+                        }
+                    ],
+                },
+            ]
+        }
+        snapshot = OddsSnapshot(
+            event_id=event.id,
+            snapshot_time=snapshot_time,
+            raw_data=raw_data,
+            bookmaker_count=1,
+            fetch_tier="pregame",
+            hours_until_commence=3.0,
+        )
+        pglite_async_session.add(snapshot)
+        await pglite_async_session.commit()
+        await pglite_async_session.refresh(event)
+
+        result = await get_current_odds(event_id=event.id, market="totals")
+        odds = result["snapshot"]["odds"]
+
+        bet365_over = [
+            o for o in odds if o["bookmaker_key"] == "bet365" and o["outcome_name"] == "Over"
+        ]
+        bet365_under = [
+            o for o in odds if o["bookmaker_key"] == "bet365" and o["outcome_name"] == "Under"
+        ]
+        assert {row["point"] for row in bet365_over} == {2.5, 3.0}
+        assert {row["point"] for row in bet365_under} == {2.5, 3.0}
+
+    @pytest.mark.asyncio
+    async def test_include_raw_data_returns_anchor_raw_data(
+        self, patch_session_maker, bfe_newest_with_older_retail_event
+    ):
+        """``include_raw_data=True`` returns the anchor (BFE) snapshot's raw_data."""
+        from odds_mcp.server import get_current_odds
+
+        event, _snap_op, snap_bfe, _retail_books = bfe_newest_with_older_retail_event
+
+        result = await get_current_odds(event_id=event.id, market="1x2", include_raw_data=True)
+        snapshot = result["snapshot"]
+        assert snapshot is not None
+
+        assert "raw_data" in snapshot
+        assert snapshot["raw_data"] == snap_bfe.raw_data
+        # The anchor snapshot is BFE-only — raw_data has just one bookmaker
+        assert {bm["key"] for bm in snapshot["raw_data"]["bookmakers"]} == {"betfair_exchange"}
