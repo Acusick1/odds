@@ -46,15 +46,28 @@ def _parse_utc(value: str) -> datetime:
 
 
 def dates_for_window(now: datetime, lookahead_hours: float) -> list[date]:
-    """Return the set of UTC dates spanning ``[now, now + lookahead_hours]``.
+    """Return the set of dates covering ``[now, now + lookahead_hours]`` plus a 1-day pad on each side.
 
-    Includes both endpoints; results are ordered ascending.
+    The MLB Stats API ``/schedule?date=YYYY-MM-DD`` parameter resolves the date
+    in MLBAM's reference frame (effectively US Eastern / stadium-local), not
+    UTC. A late-night ET game on April 26 carries ``gameDate=2026-04-27T03:05Z``
+    but appears in the MLBAM response under ``date=2026-04-26``. Conversely, an
+    early-UTC game (before ~4 AM UTC) corresponds to the previous ET calendar
+    date.
+
+    To avoid missing games whose ET-local date differs from their UTC date,
+    we over-fetch by one calendar day on each side of the UTC window. The
+    downstream reader/tool already filter by ``commence_time`` window and the
+    writer is idempotent on ``(game_pk, fetched_at)``, so over-fetching is
+    safe.
+
+    Includes both padded endpoints; results are ordered ascending.
     """
     if lookahead_hours < 0:
         raise ValueError("lookahead_hours must be non-negative")
     end = now + timedelta(hours=lookahead_hours)
-    start_d = now.astimezone(UTC).date()
-    end_d = end.astimezone(UTC).date()
+    start_d = now.astimezone(UTC).date() - timedelta(days=1)
+    end_d = end.astimezone(UTC).date() + timedelta(days=1)
     days: list[date] = []
     cur = start_d
     while cur <= end_d:

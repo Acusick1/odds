@@ -16,7 +16,7 @@ doesn't fire. The 3-day window matches MLBAM's empirical populate rate
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import structlog
 from odds_core.config import get_settings
@@ -59,7 +59,7 @@ async def main(ctx: JobContext) -> None:
     )
 
     async with job_alert_context("fetch-mlb-probables"):
-        record_count = await _fetch_and_store(now)
+        record_count = await _fetch_and_store(now, target_dates)
         logger.info(
             "fetch_mlb_probables_completed",
             sport=SPORT_KEY,
@@ -67,9 +67,8 @@ async def main(ctx: JobContext) -> None:
         )
 
 
-async def _fetch_and_store(now: datetime) -> int:
-    """Fetch the probable-pitcher snapshot for today + next 3 days and persist it."""
-    target_dates = dates_for_window(now, _LOOKAHEAD_HOURS)
+async def _fetch_and_store(now: datetime, target_dates: list[date]) -> int:
+    """Fetch the probable-pitcher snapshot for the given dates and persist it."""
     async with MlbStatsFetcher() as fetcher:
         records = await fetcher.fetch_dates(target_dates, fetched_at=now)
 

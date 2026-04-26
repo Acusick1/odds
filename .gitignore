@@ -102,6 +102,9 @@ logs/
 plans/
 *.log
 
+# Local TODO scratch
+TODO.md
+
 # Local dev helpers
 scripts/snapshot_to_dev.sh
 

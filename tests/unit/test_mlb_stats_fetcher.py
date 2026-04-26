@@ -11,27 +11,44 @@ from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher, dates_for_window
 
 
 class TestDatesForWindow:
-    def test_zero_lookahead_single_day(self) -> None:
+    def test_zero_lookahead_pads_one_day_each_side(self) -> None:
         now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
-        assert dates_for_window(now, 0) == [date(2026, 4, 26)]
+        # MLB Stats API resolves date= in ET, so we pad +/- 1 day.
+        assert dates_for_window(now, 0) == [
+            date(2026, 4, 25),
+            date(2026, 4, 26),
+            date(2026, 4, 27),
+        ]
 
     def test_lookahead_within_same_utc_day(self) -> None:
         now = datetime(2026, 4, 26, 6, 0, tzinfo=UTC)
-        # 6 hours later is still 2026-04-26 UTC.
-        assert dates_for_window(now, 6) == [date(2026, 4, 26)]
+        # 6 hours later is still 2026-04-26 UTC, padded to [-1, +1] days.
+        assert dates_for_window(now, 6) == [
+            date(2026, 4, 25),
+            date(2026, 4, 26),
+            date(2026, 4, 27),
+        ]
 
     def test_lookahead_crosses_midnight(self) -> None:
         now = datetime(2026, 4, 26, 22, 0, tzinfo=UTC)
-        # 6 hours later is 2026-04-27 04:00 UTC.
-        assert dates_for_window(now, 6) == [date(2026, 4, 26), date(2026, 4, 27)]
+        # 6 hours later is 2026-04-27 04:00 UTC; pad to [-1, +1].
+        assert dates_for_window(now, 6) == [
+            date(2026, 4, 25),
+            date(2026, 4, 26),
+            date(2026, 4, 27),
+            date(2026, 4, 28),
+        ]
 
     def test_three_day_lookahead(self) -> None:
         now = datetime(2026, 4, 26, 0, 0, tzinfo=UTC)
+        # Core UTC window is 04-26..04-29; pad to [-1, +1] = 04-25..04-30.
         assert dates_for_window(now, 24 * 3) == [
+            date(2026, 4, 25),
             date(2026, 4, 26),
             date(2026, 4, 27),
             date(2026, 4, 28),
             date(2026, 4, 29),
+            date(2026, 4, 30),
         ]
 
     def test_negative_lookahead_raises(self) -> None:
