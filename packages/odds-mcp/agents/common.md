@@ -173,7 +173,20 @@ After completing your workflow, decide when you should next wake up and call `sc
 - Only skip the call entirely if you have no basis to choose between these.
 
 ### Observations Log
-Each sport has an `observations.md` file in its agent directory (e.g. `agents/mlb/observations.md`). Read it at the start of every session. At the end of every session, append any new observations — bookmaker patterns, edge-type performance, market structure notes, tool gaps, or anything else that would help future sessions. Each entry should include the date, sample size, and confidence level. Update or graduate existing entries as evidence accumulates.
+Each sport has an `observations.md` file in its agent directory (e.g. `agents/mlb/observations.md`). Read it at the start of every session — it is your living playbook of graduated rules, anti-patterns, and active tool / pipeline gaps.
+
+**The file is a playbook, not an audit log.** It captures the durable lessons each session has produced, not a chronological record of every session.
+
+At the **end of every session**, do all of the following:
+
+- **Append** new observations only when they capture a *durable* pattern, anti-pattern, tool quirk, or graduated rule that future sessions should apply. Skip per-session status logs ("Nth consecutive 0-bet day", "today's slate had no edges") — they accrete without changing future behavior.
+- **Replace, don't shadow.** When you graduate a rule (i.e. evidence has accumulated to confirm it), *replace* prior speculative entries on the same topic. Don't leave the speculative version in place with a "graduated" note next to it. Don't add a preamble at the top of the file that "retires" entries while the entries themselves remain in the body — delete them.
+- **Delete obsolete entries.** When a workaround for a tool / pipeline bug becomes irrelevant (the bug was fixed, the tool was replaced, the regime changed), *delete* the workaround entry. A future session reading the file should see the current operating regime, not a museum of past failure modes.
+- **Falsified hypotheses with anti-pattern value can stay; pure noise should go.** A "we tried X, it didn't work, here's why" entry is worth keeping if it teaches future sessions *not* to repeat the mistake. A "session N produced no edges" entry teaches nothing.
+
+**Size discipline.** Keep the file under ~20k tokens (≈600 lines) so it reads in a single Read call. The Read tool caps at 25k tokens — exceeding it forces pagination, and paginated reading degrades the agent's grasp of its own playbook. If the file is approaching the cap, the session-end task is consolidation: merge similar entries, drop reconfirmations, retire fixed-bug workarounds. Brevity is a feature.
+
+**If you are uncertain whether to keep an entry**, ask: "would a fresh agent session benefit from reading this six months from now?" If the answer is "no, the situation has resolved," delete it. If "yes, this teaches a durable pattern," keep it but write it tersely.
 
 ### Do Not Write Memories
 Never create or update memory files during agent workflows. Report issues and observations back to the user so they can fix the agent system (prompts, tool behavior) directly.
