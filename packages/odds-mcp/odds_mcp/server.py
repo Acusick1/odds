@@ -35,6 +35,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from odds_mcp.tools.epl import epl_mcp
+from odds_mcp.tools.mlb import mlb_mcp
 
 logger = structlog.get_logger()
 
@@ -1252,6 +1253,7 @@ async def schedule_next_wakeup(
 # Mount sport-specific sub-servers without a namespace so tool names are
 # preserved verbatim (``get_team_context`` stays ``get_team_context``).
 mcp.mount(epl_mcp)
+mcp.mount(mlb_mcp)
 
 
 async def _assert_unique_tool_names() -> None:
