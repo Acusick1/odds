@@ -46,7 +46,9 @@ class MlbProbablePitchers(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
 
-    game_pk: int = Field(index=True)
+    # No standalone index on game_pk: the unique constraint on
+    # (game_pk, fetched_at) below provides one via leftmost-prefix.
+    game_pk: int = Field()
     commence_time: datetime = Field(
         sa_column=Column(DateTime(timezone=True), index=True),
     )

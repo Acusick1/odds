@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from odds_core.mlb_data_models import MlbProbablePitchers, MlbProbablePitchersRecord
 from odds_lambda.storage.mlb_pitcher_reader import MlbPitcherReader
@@ -281,6 +282,7 @@ class TestGetProbablePitchersTool:
         assert {r.game_pk for r in all_rows} == {1, 2}
 
         assert result["lookahead_hours"] == 48
+        assert result["fetch_status"] == "live"
         assert result["game_count"] == 1
         game = result["games"][0]
         assert game["game_pk"] == 1
@@ -343,6 +345,83 @@ class TestGetProbablePitchersTool:
         )
         rows = list(result_db.scalars().all())
         assert len(rows) == 2
+
+    @pytest.mark.asyncio
+    async def test_refresh_false_skips_fetch_and_reads_db(self, pglite_async_session) -> None:
+        """``refresh=False`` returns cached rows and never invokes the fetcher."""
+        from odds_mcp.tools import mlb as mlb_module
+
+        in_window = datetime.now(UTC) + timedelta(hours=12)
+        prior_fetch = datetime.now(UTC) - timedelta(hours=6)
+        writer = MlbPitcherWriter(pglite_async_session)
+        await writer.insert_snapshots(
+            [_record(game_pk=77, fetched_at=prior_fetch, commence_time=in_window)]
+        )
+        await pglite_async_session.commit()
+
+        fetcher_factory = MagicMock(
+            side_effect=AssertionError("fetcher must not be constructed when refresh=False")
+        )
+
+        session_cm = MagicMock()
+        session_cm.__aenter__ = AsyncMock(return_value=pglite_async_session)
+        session_cm.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch.object(mlb_module, "MlbStatsFetcher", fetcher_factory),
+            patch.object(mlb_module, "async_session_maker", return_value=session_cm),
+        ):
+            result = await mlb_module.get_probable_pitchers(lookahead_hours=48, refresh=False)
+
+        assert result["fetch_status"] == "db_only"
+        assert result["game_count"] == 1
+        assert result["games"][0]["game_pk"] == 77
+        assert result["games"][0]["fetched_at"] == prior_fetch.isoformat()
+        fetcher_factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_db_when_mlbam_unreachable(self, pglite_async_session) -> None:
+        """When MLBAM raises, return cached DB rows with fetch_status=stale_db_only."""
+        from odds_mcp.tools import mlb as mlb_module
+
+        # Pre-populate the DB with a prior snapshot.
+        in_window = datetime.now(UTC) + timedelta(hours=12)
+        prior_fetch = datetime.now(UTC) - timedelta(hours=6)
+        writer = MlbPitcherWriter(pglite_async_session)
+        await writer.insert_snapshots(
+            [_record(game_pk=99, fetched_at=prior_fetch, commence_time=in_window)]
+        )
+        await pglite_async_session.commit()
+
+        class _FailingFetcher:
+            async def __aenter__(self) -> _FailingFetcher:
+                return self
+
+            async def __aexit__(self, *exc_info: Any) -> None:
+                return None
+
+            async def fetch_dates(self, *args: Any, **kwargs: Any) -> Any:
+                raise httpx.ConnectError("mlbam unreachable")
+
+        session_cm = MagicMock()
+        session_cm.__aenter__ = AsyncMock(return_value=pglite_async_session)
+        session_cm.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch.object(mlb_module, "MlbStatsFetcher", return_value=_FailingFetcher()),
+            patch.object(mlb_module, "async_session_maker", return_value=session_cm),
+        ):
+            result = await mlb_module.get_probable_pitchers(lookahead_hours=48)
+
+        assert result["fetch_status"] == "stale_db_only"
+        assert result["game_count"] == 1
+        assert result["games"][0]["game_pk"] == 99
+        # The returned row carries the prior fetch's timestamp, not "now".
+        assert result["games"][0]["fetched_at"] == prior_fetch.isoformat()
+
+        # No new snapshot row written on the failed fetch.
+        rows_db = await pglite_async_session.execute(select(MlbProbablePitchers))
+        assert len(list(rows_db.scalars().all())) == 1
 
     @pytest.mark.asyncio
     async def test_orders_returned_games_by_commence_time(self, pglite_async_session) -> None:

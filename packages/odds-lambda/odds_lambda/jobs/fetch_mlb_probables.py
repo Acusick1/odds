@@ -31,7 +31,8 @@ logger = structlog.get_logger()
 # Sport this job serves.
 SPORT_KEY = "baseball_mlb"
 
-# Today + next 3 UTC days.
+# Core UTC window: today + next 3 days. ``dates_for_window`` pads ±1
+# calendar day to absorb the ET-anchored MLBAM ``date=`` parameter.
 _LOOKAHEAD_HOURS = 24 * 3
 
 

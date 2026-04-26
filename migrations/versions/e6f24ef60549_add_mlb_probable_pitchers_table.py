@@ -52,16 +52,11 @@ def upgrade() -> None:
         ["fetched_at"],
         unique=False,
     )
-    op.create_index(
-        op.f("ix_mlb_probable_pitchers_game_pk"),
-        "mlb_probable_pitchers",
-        ["game_pk"],
-        unique=False,
-    )
+    # No standalone index on game_pk: the unique constraint on
+    # (game_pk, fetched_at) provides one via leftmost-prefix.
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_mlb_probable_pitchers_game_pk"), table_name="mlb_probable_pitchers")
     op.drop_index(op.f("ix_mlb_probable_pitchers_fetched_at"), table_name="mlb_probable_pitchers")
     op.drop_index(
         op.f("ix_mlb_probable_pitchers_commence_time"),
