@@ -673,7 +673,11 @@ class TestFindRetailEdges:
         entries: dict[tuple[str, str, float | None], BookPriceEntry] = {}
         for o in odds:
             key = (o.bookmaker_key, o.outcome_name, o.point)
-            # Newer entries (later in the list) win — matches reader semantics
+            # First-wins: matches OddsReader.get_latest_book_prices, which walks
+            # snapshots newest-first and skips a key once already present
+            # (readers.py: ``if key in book_result.entries: continue``).
+            if key in entries:
+                continue
             entries[key] = BookPriceEntry(
                 odds=o,
                 meta=BookPriceMeta(

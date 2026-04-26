@@ -1292,6 +1292,29 @@ class TestFindRetailEdgesPerBookmakerLookback:
         # all retail came from snap_op so it equals snap_op.snapshot_time
         assert result["snapshot_time"] == snap_op.snapshot_time.isoformat()
 
+    @pytest.mark.asyncio
+    async def test_lookback_hours_override_excludes_older_snapshot(
+        self, patch_session_maker, bfe_newest_with_older_retail_event
+    ):
+        """A short ``lookback_hours`` override excludes the older OP snapshot.
+
+        The OP snapshot (pinnacle + 17 retail) is at T-90min and the BFE
+        anchor at T-30min. With ``lookback_hours=0.5`` (30 min) the window
+        is ``[T-60min, T-30min]`` — only BFE is in range, so no retail books
+        survive the sharp filter and ``retail_edges`` is empty.
+        """
+        from odds_mcp.server import find_retail_edges
+
+        event, _snap_op, _snap_bfe, _retail_books = bfe_newest_with_older_retail_event
+
+        result = await find_retail_edges(event_id=event.id, market="1x2", lookback_hours=0.5)
+
+        assert "error" not in result
+        assert result["per_outcome"] == []
+        assert result["retail_edges"] == []
+        # Only sharp (BFE) was in window, so the no-retail message is surfaced
+        assert result.get("message") == "No retail bookmakers in lookback window"
+
 
 class TestGetCurrentOddsPerBookmakerLookback:
     """get_current_odds resolves per-bookmaker prices over a lookback window."""

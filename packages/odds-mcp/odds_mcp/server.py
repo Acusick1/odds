@@ -890,6 +890,10 @@ async def find_retail_edges(
     default 2 h pre-match window — line moves within that window are
     typically small relative to retail dispersion — but consumers should
     weight ``dispersion_stddev`` accordingly when the window is widened.
+    Consumers should likewise weight ``book_age_seconds`` when sizing: a
+    retail row from an older snapshot (e.g. a 60-min-old OP scrape with a
+    newer BFE-only snapshot in between) may no longer be takeable because
+    the bookmaker has since moved its line.
 
     ``z_score`` per retail entry is ``(divergence - median_divergence) /
     dispersion_stddev`` computed across that outcome's retail books; ``null``
@@ -1028,17 +1032,15 @@ async def find_retail_edges(
         sharp_prob = sharp_entry["implied_prob"] if sharp_entry else None
         sharp_meta = sharp_result.meta.get(outcome_name) if sharp_entry else None
 
-        # Build per-book retail rows for this (outcome, point) bucket. The
-        # reader already keyed by (bookmaker_key, outcome_name, point), so
-        # entries here are unique per book within this bucket.
-        by_book: dict[str, BookPriceEntry] = {}
-        for entry in outcome_entries:
-            by_book[entry.odds.bookmaker_key] = entry
-
+        # Build per-book retail rows for this (outcome, point) bucket.
+        # ``book_result.entries`` is already keyed by
+        # ``(bookmaker_key, outcome_name, point)``, so each entry in this
+        # bucket has a unique ``bookmaker_key`` by construction — iterate
+        # directly in ``bookmaker_key`` order for deterministic output.
         retail_rows: list[dict[str, Any]] = []
-        for bm_key in sorted(by_book):
-            entry = by_book[bm_key]
+        for entry in sorted(outcome_entries, key=lambda e: e.odds.bookmaker_key):
             o = entry.odds
+            bm_key = o.bookmaker_key
             retail_prob = round(calculate_implied_probability(o.price), 6)
             divergence = round(retail_prob - sharp_prob, 6) if sharp_prob is not None else None
             market_hold = (
