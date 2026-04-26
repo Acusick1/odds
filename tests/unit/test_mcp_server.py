@@ -8,6 +8,30 @@ from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 
 
+class TestToolNamespace:
+    """Guard against silent name shadowing across mounted sub-servers.
+
+    FastMCP's unprefixed mount surfaces both colliding tools through
+    ``list_tools`` without raising — see ``_assert_unique_tool_names``. This
+    test catches a duplicate before it ships.
+    """
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_tool_names(self) -> None:
+        from odds_mcp.server import mcp
+
+        tools = await mcp.list_tools()
+        names = [t.name for t in tools]
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        assert not duplicates, f"Duplicate MCP tool names: {duplicates}"
+
+    @pytest.mark.asyncio
+    async def test_assert_unique_tool_names_helper_passes(self) -> None:
+        from odds_mcp.server import _assert_unique_tool_names
+
+        await _assert_unique_tool_names()
+
+
 class TestCoerceBookmakerList:
     def test_none_passthrough(self) -> None:
         from odds_mcp.server import _coerce_bookmaker_list

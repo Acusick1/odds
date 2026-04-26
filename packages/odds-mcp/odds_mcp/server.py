@@ -4,6 +4,7 @@ Thin wrappers over existing DB queries, jobs, and paper trading logic.
 All tools are stateless and use async_session_maker() for DB access.
 """
 
+import asyncio
 import json
 import math
 import statistics
@@ -1253,5 +1254,17 @@ async def schedule_next_wakeup(
 mcp.mount(epl_mcp)
 
 
+async def _assert_unique_tool_names() -> None:
+    # Unprefixed mounts mean a child server can silently shadow a parent tool
+    # of the same name — FastMCP returns both entries from ``list_tools`` with
+    # no warning. Fail loudly at startup instead.
+    tools = await mcp.list_tools()
+    names = [t.name for t in tools]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise RuntimeError(f"Duplicate MCP tool names across mounted servers: {duplicates}")
+
+
 if __name__ == "__main__":
+    asyncio.run(_assert_unique_tool_names())
     mcp.run()
