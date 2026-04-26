@@ -326,14 +326,17 @@ async def main(ctx: JobContext) -> None:
                 message=f"⚠️ OddsPortal scrape empty ({detail})",
             )
 
-    # Score predictions for newly arrived snapshots. Wrapped in its own
-    # try/except (outside the scrape alert context) so scoring failures
-    # don't surface as scrape alerts — they're logged independently.
+    # Outside job_alert_context so scoring failures don't fire scrape alerts.
     try:
-        from odds_lambda.jobs.score_predictions import score_events
+        from odds_lambda.model_loader import model_supports_sport
 
-        score_stats = await score_events(sport=ctx.sport)
-        logger.info("fetch_oddsportal_scoring_complete", **score_stats)
+        if model_supports_sport(ctx.sport):
+            from odds_lambda.jobs.score_predictions import score_events
+
+            score_stats = await score_events(sport=ctx.sport)
+            logger.info("fetch_oddsportal_scoring_complete", **score_stats)
+        else:
+            logger.info("fetch_oddsportal_scoring_skipped", sport=sport)
     except Exception as e:
         logger.error(
             "fetch_oddsportal_scoring_failed",

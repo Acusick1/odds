@@ -10,6 +10,7 @@ import structlog
 import yaml
 from odds_analytics.training.config import FeatureConfig
 from odds_core.config import get_settings
+from odds_core.sports import SportKey
 
 logger = structlog.get_logger(__name__)
 
@@ -144,6 +145,20 @@ def load_model(
     _cached_model_key = key
 
     return model_data
+
+
+def model_supports_sport(sport: SportKey | None) -> bool:
+    """Whether the configured model serves ``sport`` (``None`` ⇒ no preference)."""
+    if sport is None:
+        return True
+    try:
+        model_data = load_model()
+    except (ValueError, FileNotFoundError):
+        return False
+    config: FeatureConfig | None = model_data.get("feature_config")
+    if config is None or not config.sport_key:
+        return False
+    return config.sport_key == sport
 
 
 def get_cached_version() -> str | None:
