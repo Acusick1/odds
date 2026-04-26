@@ -456,28 +456,39 @@ async def get_scrape_status(
 
             job_result: dict[str, Any] | None = None
             if job_id is not None and not pending_jobs:
-                result = await scheduler.get_job_result(UUID(job_id), wait=False)
-                if result is not None:
-                    stats = result.return_value
-                    job_result = {
-                        "job_id": job_id,
-                        "state": "completed",
-                        "outcome": result.outcome.name,
-                        "started_at": result.started_at.isoformat() if result.started_at else None,
-                        "finished_at": result.finished_at.isoformat(),
-                        "stats": dataclasses.asdict(stats)
-                        if dataclasses.is_dataclass(stats)
-                        else None,
-                        "exception": repr(result.exception) if result.exception else None,
-                    }
+                from apscheduler import JobLookupError
+
+                try:
+                    result = await scheduler.get_job_result(UUID(job_id), wait=False)
+                except* JobLookupError:
+                    # Result-retention window has elapsed since the job completed.
+                    # Treat as a clean state — agent should fall back to
+                    # get_current_odds / get_odds_history to verify ingestion.
+                    job_result = {"job_id": job_id, "state": "expired"}
                 else:
-                    job_result = {"job_id": job_id, "state": "unknown"}
+                    if result is not None:
+                        stats = result.return_value
+                        job_result = {
+                            "job_id": job_id,
+                            "state": "completed",
+                            "outcome": result.outcome.name,
+                            "started_at": result.started_at.isoformat()
+                            if result.started_at
+                            else None,
+                            "finished_at": result.finished_at.isoformat(),
+                            "stats": dataclasses.asdict(stats)
+                            if dataclasses.is_dataclass(stats)
+                            else None,
+                            "exception": repr(result.exception) if result.exception else None,
+                        }
+                    else:
+                        job_result = {"job_id": job_id, "state": "unknown"}
 
     except Exception as e:
-        logger.warning("get_scrape_status_failed", error=str(e))
+        logger.warning("get_scrape_status_failed", error=repr(e))
         return {
             "status": "unavailable",
-            "message": f"Could not query scheduler: {e}",
+            "message": f"Could not query scheduler: {e!r}",
             "jobs": [],
         }
 
@@ -1153,14 +1164,14 @@ async def get_scheduled_jobs(
     """List all currently scheduled jobs from the scheduler backend.
 
     Returns job name, next run time, and status for each job. Optionally
-    filter by sport key (substring match on job name).
+    filter by sport key — matches the registered sport suffix (e.g.
+    ``soccer_epl`` matches ``...-epl`` job ids).
 
     If the scheduler backend is not running (e.g. local APScheduler not
     started), returns an informative message rather than an error.
 
     Args:
         sport: Optional sport key to filter jobs (e.g. "soccer_epl").
-               Matches as substring against job names.
 
     Returns:
         Dict with list of scheduled jobs or an informative message.
@@ -1172,10 +1183,10 @@ async def get_scheduled_jobs(
         async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
             schedules = await scheduler.get_schedules()
     except Exception as e:
-        logger.warning("get_scheduled_jobs_failed", error=str(e))
+        logger.warning("get_scheduled_jobs_failed", error=repr(e))
         return {
             "jobs": [],
-            "message": f"Could not query scheduler: {e}",
+            "message": f"Could not query scheduler: {e!r}",
         }
 
     jobs = [
@@ -1188,7 +1199,10 @@ async def get_scheduled_jobs(
     ]
 
     if sport:
-        jobs = [j for j in jobs if sport in j["job_name"]]
+        from odds_lambda.scheduling.jobs import sport_key_to_suffix
+
+        suffix = sport_key_to_suffix(sport) or sport
+        jobs = [j for j in jobs if j["job_name"].endswith(f"-{suffix}")]
 
     return {
         "job_count": len(jobs),
