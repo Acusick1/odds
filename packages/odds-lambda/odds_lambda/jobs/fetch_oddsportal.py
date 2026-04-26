@@ -326,11 +326,7 @@ async def main(ctx: JobContext) -> None:
                 message=f"⚠️ OddsPortal scrape empty ({detail})",
             )
 
-    # Score predictions for newly arrived snapshots. Wrapped in its own
-    # try/except (outside the scrape alert context) so scoring failures
-    # don't surface as scrape alerts — they're logged independently.
-    # Guarded with model_supports_sport so per-sport scrapes for sports
-    # without a published model don't trigger noisy sport_mismatch errors.
+    # Outside job_alert_context so scoring failures don't fire scrape alerts.
     try:
         from odds_lambda.model_loader import model_supports_sport
 
