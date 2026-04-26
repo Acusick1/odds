@@ -100,7 +100,7 @@ class TestDeriveStandings:
         return rows
 
     def test_three_teams_round_robin(self) -> None:
-        from odds_mcp.server import _derive_standings
+        from odds_mcp.tools.epl import _derive_standings
 
         # A beats B 2-0, A draws C 1-1, B beats C 3-1
         records: list[EspnFixtureRecord] = []
@@ -165,7 +165,7 @@ class TestDeriveStandings:
         assert c["position"] == 3
 
     def test_position_tiebreak_by_goal_diff_then_gf(self) -> None:
-        from odds_mcp.server import _derive_standings
+        from odds_mcp.tools.epl import _derive_standings
 
         # Two matches chosen to tie X and Y on points (3) AND goal diff (+2),
         # with X ahead on goals-for — exercises the GF tiebreak branch.
@@ -201,7 +201,7 @@ class TestDeriveStandings:
         assert table["Y"]["position"] == 2
 
     def test_only_counts_premier_league(self) -> None:
-        from odds_mcp.server import _derive_standings
+        from odds_mcp.tools.epl import _derive_standings
 
         # An FA Cup win does NOT count toward the league table.
         records: list[EspnFixtureRecord] = []
@@ -219,7 +219,7 @@ class TestDeriveStandings:
         assert table == {}
 
     def test_only_counts_final_status(self) -> None:
-        from odds_mcp.server import _derive_standings
+        from odds_mcp.tools.epl import _derive_standings
 
         records: list[EspnFixtureRecord] = []
         records.extend(
@@ -237,7 +237,7 @@ class TestDeriveStandings:
         assert table == {}
 
     def test_skips_malformed_scores(self) -> None:
-        from odds_mcp.server import _derive_standings
+        from odds_mcp.tools.epl import _derive_standings
 
         # Final row with blank scores (ESPN quirk) is ignored.
         records: list[EspnFixtureRecord] = []
@@ -284,7 +284,7 @@ class TestGetTeamContextAsOf:
         self, pglite_async_session, test_engine
     ) -> None:
         """as_of must exclude fixtures strictly in the future (no look-ahead)."""
-        from odds_mcp import server as mcp_server
+        from odds_mcp.tools import epl as mcp_server
 
         writer = EspnFixtureWriter(pglite_async_session)
 
@@ -339,7 +339,7 @@ class TestGetTeamContextAsOf:
     async def test_in_progress_rows_skipped_from_both_sides(
         self, pglite_async_session, test_engine
     ) -> None:
-        from odds_mcp import server as mcp_server
+        from odds_mcp.tools import epl as mcp_server
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
         writer = EspnFixtureWriter(pglite_async_session)
@@ -379,7 +379,7 @@ class TestGetTeamContextAsOf:
     @pytest.mark.asyncio
     async def test_normalises_team_alias(self, pglite_async_session, test_engine) -> None:
         """Inputs like 'Wolverhampton Wanderers' resolve to canonical 'Wolves'."""
-        from odds_mcp import server as mcp_server
+        from odds_mcp.tools import epl as mcp_server
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
         writer = EspnFixtureWriter(pglite_async_session)
@@ -409,7 +409,7 @@ class TestGetTeamContextAsOf:
     async def test_upcoming_includes_cup_competitions(
         self, pglite_async_session, test_engine
     ) -> None:
-        from odds_mcp import server as mcp_server
+        from odds_mcp.tools import epl as mcp_server
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
         writer = EspnFixtureWriter(pglite_async_session)
@@ -454,7 +454,7 @@ class TestGetTeamContextAsOf:
 
     @pytest.mark.asyncio
     async def test_standings_returned_from_db(self, pglite_async_session, test_engine) -> None:
-        from odds_mcp import server as mcp_server
+        from odds_mcp.tools import epl as mcp_server
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
         writer = EspnFixtureWriter(pglite_async_session)
@@ -502,7 +502,7 @@ class TestGetTeamContextAsOf:
         self, pglite_async_session, test_engine
     ) -> None:
         """Legacy rows (state=None) are classified as final via the status fallback."""
-        from odds_mcp import server as mcp_server
+        from odds_mcp.tools import epl as mcp_server
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
         writer = EspnFixtureWriter(pglite_async_session)
@@ -559,22 +559,22 @@ class TestGetTeamContextAsOf:
 
 class TestParseScore:
     def test_valid_integer(self) -> None:
-        from odds_mcp.server import _parse_score
+        from odds_mcp.tools.epl import _parse_score
 
         assert _parse_score("3") == 3
 
     def test_blank(self) -> None:
-        from odds_mcp.server import _parse_score
+        from odds_mcp.tools.epl import _parse_score
 
         assert _parse_score("") is None
 
     def test_malformed(self) -> None:
-        from odds_mcp.server import _parse_score
+        from odds_mcp.tools.epl import _parse_score
 
         assert _parse_score("abc") is None
 
     def test_negative_rejected(self) -> None:
-        from odds_mcp.server import _parse_score
+        from odds_mcp.tools.epl import _parse_score
 
         assert _parse_score("-1") is None
 
@@ -584,14 +584,14 @@ class TestGetTeamContextMockedDB:
 
     @pytest.mark.asyncio
     async def test_default_as_of_returns_now(self) -> None:
-        from odds_mcp import server as mcp_server
+        from odds_mcp.tools import epl as mcp_server
 
         mock_session = AsyncMock()
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = []
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        with patch("odds_mcp.server.async_session_maker") as mock_session_maker:
+        with patch("odds_mcp.tools.epl.async_session_maker") as mock_session_maker:
             mock_session_maker.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_session_maker.return_value.__aexit__ = AsyncMock()
 
