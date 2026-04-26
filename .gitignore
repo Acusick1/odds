@@ -102,6 +102,9 @@ logs/
 plans/
 *.log
 
+# Local TODO scratch
+TODO.md
+
 # Local dev helpers
 scripts/snapshot_to_dev.sh
 
@@ -113,7 +116,6 @@ Thumbs.db
 **/agents/*/observations.md
 
 # Scratch files
-TODO.md
 /oddsportal-*.png
 /oddsportal_*.md
 

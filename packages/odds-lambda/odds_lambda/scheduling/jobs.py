@@ -70,6 +70,7 @@ _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
     "agent-run": ("odds_lambda.jobs.agent_run", "main"),
     "fetch-espn-fixtures": ("odds_lambda.jobs.fetch_espn_fixtures", "main"),
     "fetch-betfair-exchange": ("odds_lambda.jobs.fetch_betfair_exchange", "main"),
+    "fetch-mlb-probables": ("odds_lambda.jobs.fetch_mlb_probables", "main"),
 }
 
 # Bootstrap entry-point overrides: jobs listed here use a different function
@@ -101,6 +102,7 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
         "agent-run",
         "fetch-espn-fixtures",
         "fetch-betfair-exchange",
+        "fetch-mlb-probables",
     }
 )
 
@@ -128,6 +130,9 @@ _JOB_CRON_MAP: dict[str, tuple[str, tuple[SportKey, ...] | None]] = {
     # is derived from the BFE adapter's supported-sports map so adding a
     # new sport requires only a SPORT_CONFIG entry.
     "fetch-betfair-exchange": ("*/30 * * * *", tuple(BETFAIR_SPORT_CONFIG)),
+    # MLB probable pitchers — once daily at 06:00 UTC. Backstop only:
+    # the MCP ``get_probable_pitchers`` tool writes through every call.
+    "fetch-mlb-probables": ("0 6 * * *", ("baseball_mlb",)),
 }
 
 
