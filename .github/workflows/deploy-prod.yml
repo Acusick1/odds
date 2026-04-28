@@ -19,6 +19,9 @@ jobs:
       ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
       ODDS_API_KEYS: ${{ secrets.ODDS_API_KEYS }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
+      BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
+      BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
 
     steps:
       - name: Checkout code
@@ -89,6 +92,10 @@ jobs:
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
             -var="enable_oddsportal_scraper=true" \
             -var="scraper_image_tag=${{ steps.build-scraper.outputs.image_tag }}" \
+            -var="betfair_enabled=true" \
+            -var="betfair_username=$BETFAIR_USERNAME" \
+            -var="betfair_password=$BETFAIR_PASSWORD" \
+            -var="betfair_app_key=$BETFAIR_APP_KEY" \
             -out=tfplan
 
       - name: Deploy to Production

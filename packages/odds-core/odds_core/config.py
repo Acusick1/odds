@@ -266,6 +266,19 @@ class BetfairConfig(BaseSettings):
     cert_file: str | None = Field(default=None, description="Path to client SSL cert (.crt)")
     cert_key: str | None = Field(default=None, description="Path to client SSL key (.key)")
 
+    # SSM SecureString parameter names holding the cert/key PEM contents.
+    # When set, the Lambda materializes them into ``/tmp`` at cold start and
+    # uses those paths (taking precedence over ``cert_file``/``cert_key``).
+    # Lets the cert rotate without redeploying the container image.
+    cert_pem_ssm_param: str | None = Field(
+        default=None,
+        description="SSM SecureString parameter holding the cert PEM (Lambda-only)",
+    )
+    key_pem_ssm_param: str | None = Field(
+        default=None,
+        description="SSM SecureString parameter holding the key PEM (Lambda-only)",
+    )
+
     # Sport scoping override. ``None`` means "all sports the BFE adapter supports"
     # (resolved at job-execution time from ``odds_lambda.betfair.SPORT_CONFIG``).
     sports: list[SportKey] | None = Field(

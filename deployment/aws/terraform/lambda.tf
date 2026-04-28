@@ -94,6 +94,31 @@ resource "aws_ssm_parameter" "active_api_key_index" {
   }
 }
 
+# Read-only access to the Betfair cert/key SSM SecureString parameters.
+# The parameter values themselves are populated out-of-band by an operator
+# (`aws ssm put-parameter --type SecureString ...`) so cert material is never
+# stored in terraform state, GH Actions secrets, or the Lambda image.
+resource "aws_iam_role_policy" "ssm_betfair_cert" {
+  count = var.betfair_enabled ? 1 : 0
+
+  name = "${var.project_name}-ssm-betfair-cert"
+  role = aws_iam_role.lambda_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["ssm:GetParameter"]
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/betfair/cert_pem",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/betfair/key_pem",
+        ]
+      }
+    ]
+  })
+}
+
 # Lambda function (container image deployment)
 resource "aws_lambda_function" "odds_scheduler" {
   function_name = var.project_name
@@ -114,12 +139,23 @@ resource "aws_lambda_function" "odds_scheduler" {
       RULE_PREFIX       = var.rule_prefix
 
       # Optional: Configure other settings
-      LOG_LEVEL         = "INFO"
-      ENABLE_VALIDATION = "true"
+      LOG_LEVEL           = "INFO"
+      ENABLE_VALIDATION   = "true"
       MODEL_BUCKET        = var.model_bucket_name
       MODEL_NAME          = var.model_name
       DISCORD_WEBHOOK_URL = var.discord_webhook_url
       ALERT_ENABLED       = var.discord_webhook_url != "" ? "true" : "false"
+
+      # Betfair Exchange direct ingestion. Cert PEM contents live in SSM
+      # SecureString and are materialized to /tmp at cold start so we don't
+      # bake cert material into the image or burn the 4 KB Lambda env-var
+      # ceiling on PEMs.
+      BETFAIR_ENABLED            = var.betfair_enabled ? "true" : "false"
+      BETFAIR_USERNAME           = var.betfair_username
+      BETFAIR_PASSWORD           = var.betfair_password
+      BETFAIR_APP_KEY            = var.betfair_app_key
+      BETFAIR_CERT_PEM_SSM_PARAM = "/${var.project_name}/betfair/cert_pem"
+      BETFAIR_KEY_PEM_SSM_PARAM  = "/${var.project_name}/betfair/key_pem"
     }
   }
 
