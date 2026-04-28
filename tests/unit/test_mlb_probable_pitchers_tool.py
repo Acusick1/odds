@@ -246,8 +246,8 @@ class TestGetProbablePitchersTool:
     async def test_write_through_returns_persisted_rows(self, pglite_async_session) -> None:
         from odds_mcp.tools import mlb as mlb_module
 
-        in_window = datetime(2026, 4, 26, 23, 5, tzinfo=UTC)
-        out_of_window = datetime(2026, 5, 10, 23, 5, tzinfo=UTC)
+        in_window = datetime.now(UTC) + timedelta(hours=12)
+        out_of_window = datetime.now(UTC) + timedelta(days=14)
 
         fake_fetcher = _FakeFetcher(
             [
