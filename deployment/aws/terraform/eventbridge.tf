@@ -90,8 +90,14 @@ locals {
     # mlb = { sport_key = "baseball_mlb", scraper = false }
   }
 
-  # Jobs that run once per sport (scheduler Lambda)
-  per_sport_scheduler_jobs = ["fetch-odds", "fetch-scores"]
+  # Jobs that run once per sport (scheduler Lambda).
+  # ``fetch-betfair-exchange`` is gated on ``var.betfair_enabled`` — the job
+  # self-schedules at the end of each run, so the dynamic-rule pattern fits
+  # without introducing a new fixed-schedule entry.
+  per_sport_scheduler_jobs = concat(
+    ["fetch-odds", "fetch-scores"],
+    var.betfair_enabled ? ["fetch-betfair-exchange"] : [],
+  )
 
   # Jobs that run once per sport (scraper Lambda)
   per_sport_scraper_jobs = ["fetch-oddsportal", "fetch-oddsportal-results"]
@@ -219,8 +225,8 @@ resource "aws_cloudwatch_event_target" "scraper_dynamic" {
   })
 
   retry_policy {
-    maximum_retry_attempts         = 0
-    maximum_event_age_in_seconds   = 60
+    maximum_retry_attempts       = 0
+    maximum_event_age_in_seconds = 60
   }
 }
 

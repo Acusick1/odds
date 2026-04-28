@@ -95,3 +95,30 @@ variable "discord_webhook_url" {
   sensitive   = true
   default     = ""
 }
+
+variable "betfair_enabled" {
+  description = "Enable Betfair Exchange direct ingestion (requires creds + cert in SSM)"
+  type        = bool
+  default     = false
+}
+
+variable "betfair_username" {
+  description = "Betfair account username"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "betfair_password" {
+  description = "Betfair account password"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "betfair_app_key" {
+  description = "Betfair delayed application key"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

@@ -31,6 +31,7 @@ from odds_lambda.betfair import (
     betfair_book_to_bookmaker_entry,
     resolve_teams,
 )
+from odds_lambda.betfair.cert_loader import resolve_cert_paths
 from odds_lambda.scheduling.helpers import (
     ProximitySchedule,
     get_next_kickoff,
@@ -244,13 +245,14 @@ async def main(ctx: JobContext) -> None:
     all_stats: list[IngestionStats] = []
     # BetfairConfig validator guarantees these are non-None when enabled=True.
     assert bf.username and bf.password and bf.app_key
+    cert_file, cert_key = resolve_cert_paths(bf)
     async with job_alert_context(compound_job_name):
         client = BetfairExchangeClient(
             username=bf.username,
             password=bf.password,
             app_key=bf.app_key,
-            cert_file=bf.cert_file,
-            cert_key=bf.cert_key,
+            cert_file=cert_file,
+            cert_key=cert_key,
         )
         await asyncio.to_thread(client.login)
         try:
