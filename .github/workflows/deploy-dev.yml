@@ -18,6 +18,9 @@ jobs:
       ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
       ODDS_API_KEYS: ${{ secrets.ODDS_API_KEYS }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
+      BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
+      BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
 
     steps:
       - name: Checkout code
@@ -85,6 +88,10 @@ jobs:
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
             -var="enable_oddsportal_scraper=true" \
             -var="scraper_image_tag=${{ steps.build-scraper.outputs.image_tag }}" \
+            -var="betfair_enabled=true" \
+            -var="betfair_username=$BETFAIR_USERNAME" \
+            -var="betfair_password=$BETFAIR_PASSWORD" \
+            -var="betfair_app_key=$BETFAIR_APP_KEY" \
             -out=tfplan
 
       - name: Clean up stale log group
@@ -103,8 +110,10 @@ jobs:
       - name: Validate database migrations
         run: uv run pytest tests/migration -v
 
-      - name: Test Lambda functions (check-health only to avoid API credit usage)
-        run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler-dev --jobs check-health --region ${{ env.AWS_REGION }}
+      - name: Test Lambda (check-health + fetch-betfair-exchange-epl)
+        # Betfair has no quota cost on the delayed app key, so we run it on
+        # every dev push to catch SSM/IAM/cert regressions pre-prod.
+        run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler-dev --jobs check-health,fetch-betfair-exchange-epl --region ${{ env.AWS_REGION }}
 
       - name: Verify database writes
         run: uv run python scripts/ci/verify_database.py
@@ -134,6 +143,10 @@ jobs:
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
             -var="enable_oddsportal_scraper=true" \
             -var="scraper_image_tag=${{ steps.build-scraper.outputs.image_tag }}" \
+            -var="betfair_enabled=true" \
+            -var="betfair_username=$BETFAIR_USERNAME" \
+            -var="betfair_password=$BETFAIR_PASSWORD" \
+            -var="betfair_app_key=$BETFAIR_APP_KEY" \
             -auto-approve
         continue-on-error: true
 
