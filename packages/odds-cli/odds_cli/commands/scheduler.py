@@ -13,6 +13,26 @@ console = Console()
 logger = structlog.get_logger()
 
 
+def _print_scheduled_jobs(con: Console, jobs: list) -> None:
+    if not jobs:
+        con.print("[yellow]No jobs currently scheduled[/yellow]")
+        return
+    jobs = sorted(jobs, key=lambda j: (j.next_run_time is None, j.next_run_time))
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Job Name", style="white")
+    table.add_column("Next Run Time", style="yellow")
+    table.add_column("Status", style="green")
+    for job in jobs:
+        next_run = (
+            job.next_run_time.strftime("%Y-%m-%d %H:%M:%S UTC")
+            if job.next_run_time
+            else "[dim]Not scheduled[/dim]"
+        )
+        table.add_row(job.job_name, next_run, job.status.value)
+    con.print(table)
+    con.print(f"[dim]Total: {len(jobs)} jobs[/dim]")
+
+
 @app.command("start")
 def start_local(
     db: str | None = typer.Option(
@@ -96,8 +116,58 @@ def start_local(
 
         bootstrap_jobs = app_settings.scheduler.bootstrap_jobs if effective_bootstrap else []
 
+        def _expected_compound_names() -> set[str]:
+            """Compute the full set of compound job names the current config expects."""
+            expected: set[str] = set()
+            for job_name in bootstrap_jobs:
+                per_sport = is_per_sport_job(job_name)
+                cron_expr = get_job_cron(job_name)
+                if per_sport:
+                    allowed_sports = (
+                        get_job_cron_sports(job_name) if cron_expr is not None else None
+                    )
+                    configured_sports = app_settings.data_collection.sports
+                    target_sports = (
+                        list(allowed_sports)
+                        if allowed_sports is not None
+                        else list(configured_sports)
+                    )
+                    for sport_key in target_sports:
+                        expected.add(make_compound_job_name(job_name, sport_key))
+                else:
+                    expected.add(job_name)
+            return expected
+
         # Start scheduler first so bootstrap jobs can schedule via the backend
         async with LocalSchedulerBackend() as _backend:
+            from apscheduler import Event, JobReleased
+
+            async def _on_job_released(_event: Event) -> None:
+                try:
+                    jobs = await _backend.get_scheduled_jobs()
+                except Exception:
+                    return
+                console.print()
+                _print_scheduled_jobs(console, jobs)
+
+            _backend.subscribe(_on_job_released, {JobReleased})
+
+            # Prune schedules that are no longer in bootstrap_jobs. Without this,
+            # self-scheduling jobs removed from the config persist indefinitely in
+            # the Postgres data store and keep firing after restart.
+            if effective_bootstrap:
+                expected = _expected_compound_names()
+                existing_jobs = await _backend.get_scheduled_jobs()
+                stale = [j for j in existing_jobs if j.job_name not in expected]
+                if stale:
+                    console.print("[yellow]Removing stale schedules...[/yellow]")
+                    for job in stale:
+                        try:
+                            await _backend.cancel_scheduled_execution(job.job_name)
+                            console.print(f"[dim]  {job.job_name} removed[/dim]")
+                        except Exception as e:
+                            console.print(f"[yellow]  {job.job_name} removal failed: {e}[/yellow]")
+                    console.print()
 
             async def _bootstrap_cron(compound: str, cron_expr: str) -> None:
                 """Install a recurring CronTrigger, re-applying on every start.
@@ -198,6 +268,10 @@ def start_local(
             console.print("[bold green]Scheduler started![/bold green]")
             console.print("[dim]Jobs will self-schedule based on game proximity[/dim]")
             console.print("[dim]Press Ctrl+C to stop[/dim]\n")
+
+            jobs = await _backend.get_scheduled_jobs()
+            _print_scheduled_jobs(console, jobs)
+            console.print()
 
             try:
                 logger.info("local_scheduler_running", message="Press Ctrl+C to stop")
@@ -350,26 +424,7 @@ def list_jobs():
 
         jobs = asyncio.run(get_jobs())
 
-        if not jobs:
-            console.print("[yellow]No jobs currently scheduled[/yellow]")
-            return
-
-        # Create jobs table
-        table = Table(show_header=True, header_style="bold cyan")
-        table.add_column("Job Name", style="white")
-        table.add_column("Next Run Time", style="yellow")
-        table.add_column("Status", style="green")
-
-        for job in jobs:
-            next_run = (
-                job.next_run_time.strftime("%Y-%m-%d %H:%M:%S UTC")
-                if job.next_run_time
-                else "[dim]Not scheduled[/dim]"
-            )
-            table.add_row(job.job_name, next_run, job.status.value)
-
-        console.print(table)
-        console.print(f"\n[dim]Total: {len(jobs)} jobs[/dim]")
+        _print_scheduled_jobs(console, jobs)
 
     except BackendUnavailableError as e:
         console.print(f"[yellow]⚠ Not supported:[/yellow] {e}")
