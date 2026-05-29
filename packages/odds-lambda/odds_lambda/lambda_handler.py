@@ -69,7 +69,11 @@ def lambda_handler(event: dict, context: object) -> dict:
         # Explicit sport in payload takes precedence over suffix-derived sport
         sport = event.get("sport") or resolved_sport
 
-        # Bind sport to structlog context for all downstream log entries
+        # Bind invocation context for all downstream log entries
+        structlog.contextvars.bind_contextvars(
+            job=base_job_name,
+            request_id=context.aws_request_id,
+        )
         if sport:
             structlog.contextvars.bind_contextvars(sport=sport)
 
@@ -141,4 +145,4 @@ def lambda_handler(event: dict, context: object) -> dict:
             ),
         }
     finally:
-        structlog.contextvars.unbind_contextvars("sport")
+        structlog.contextvars.clear_contextvars()
