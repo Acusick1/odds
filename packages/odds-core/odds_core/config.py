@@ -93,6 +93,7 @@ class SchedulerConfig(BaseSettings):
             "daily-digest",
             "fetch-espn-fixtures",
             "fetch-betfair-exchange",
+            "fetch-mlb-probables",
         ],
         description="Jobs to bootstrap when starting the local scheduler",
     )
