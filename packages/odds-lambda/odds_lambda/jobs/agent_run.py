@@ -174,6 +174,8 @@ async def _run_claude_agent(sport: SportKey) -> int:
         "claude",
         "-p",
         f"/agent {sport}",
+        "--model",
+        "claude-sonnet-4-6",
         "--output-format",
         "stream-json",
         "--verbose",
