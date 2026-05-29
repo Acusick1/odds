@@ -277,13 +277,17 @@ async def main(ctx: JobContext) -> None:
         finally:
             await asyncio.to_thread(client.logout)
 
-    # Soft warning when zero snapshots stored across all sports — likely
-    # cert/auth/credentials/geo issue worth investigating.
+    # Soft warning when zero snapshots stored despite Betfair returning events
+    # — likely a parsing/filtering regression. An empty event list is treated
+    # as a benign venue-side gap (e.g. next day's MLB markets not yet posted)
+    # and does not alert.
     total_stored = sum(s.snapshots_stored for s in all_stats)
-    if total_stored == 0:
+    total_events_seen = sum(s.events_seen for s in all_stats)
+    if total_stored == 0 and total_events_seen > 0:
         await send_job_warning(
             f"job_empty:{compound_job_name}",
-            f"⚠️ {compound_job_name} stored 0 snapshots across {len(all_stats)} sport(s).",
+            f"⚠️ {compound_job_name} stored 0 snapshots from {total_events_seen} event(s) "
+            f"across {len(all_stats)} sport(s).",
         )
 
     # Reschedule based on (possibly updated) next kickoff after fetch.
