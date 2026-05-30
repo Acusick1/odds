@@ -1,6 +1,9 @@
 """Scheduler management CLI commands."""
 
+from __future__ import annotations
+
 import asyncio
+from typing import TYPE_CHECKING
 
 import structlog
 import typer
@@ -8,9 +11,32 @@ from odds_core.config import get_settings
 from rich.console import Console
 from rich.table import Table
 
+if TYPE_CHECKING:
+    from odds_lambda.scheduling.backends.base import ScheduledJob
+
 app = typer.Typer()
 console = Console()
 logger = structlog.get_logger()
+
+
+def _print_scheduled_jobs(con: Console, jobs: list[ScheduledJob]) -> None:
+    if not jobs:
+        con.print("[yellow]No jobs currently scheduled[/yellow]")
+        return
+    jobs = sorted(jobs, key=lambda j: (j.next_run_time is None, j.next_run_time))
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Job Name", style="white")
+    table.add_column("Next Run Time", style="yellow")
+    table.add_column("Status", style="green")
+    for job in jobs:
+        next_run = (
+            job.next_run_time.strftime("%Y-%m-%d %H:%M:%S UTC")
+            if job.next_run_time
+            else "[dim]Not scheduled[/dim]"
+        )
+        table.add_row(job.job_name, next_run, job.status.value)
+    con.print(table)
+    con.print(f"[dim]Total: {len(jobs)} jobs[/dim]")
 
 
 @app.command("start")
@@ -87,17 +113,48 @@ def start_local(
         """Run scheduler using async context manager."""
         from odds_lambda.scheduling.jobs import (
             JobContext,
+            expected_compound_job_names,
             get_bootstrap_function,
             get_job_cron,
-            get_job_cron_sports,
             is_per_sport_job,
             make_compound_job_name,
+            resolve_target_sports,
         )
 
         bootstrap_jobs = app_settings.scheduler.bootstrap_jobs if effective_bootstrap else []
+        configured_sports = app_settings.data_collection.sports
 
         # Start scheduler first so bootstrap jobs can schedule via the backend
         async with LocalSchedulerBackend() as _backend:
+            from apscheduler import Event, JobReleased
+
+            async def _on_job_released(_event: Event) -> None:
+                try:
+                    jobs = await _backend.get_scheduled_jobs()
+                except Exception as e:
+                    logger.debug("job_released_refresh_failed", error=str(e))
+                    return
+                console.print()
+                _print_scheduled_jobs(console, jobs)
+
+            _backend.subscribe(_on_job_released, {JobReleased})
+
+            # Prune schedules that are no longer in bootstrap_jobs. Without this,
+            # self-scheduling jobs removed from the config persist indefinitely in
+            # the Postgres data store and keep firing after restart.
+            if effective_bootstrap:
+                expected = expected_compound_job_names(bootstrap_jobs, configured_sports)
+                existing_jobs = await _backend.get_scheduled_jobs()
+                stale = [j for j in existing_jobs if j.job_name not in expected]
+                if stale:
+                    console.print("[yellow]Removing stale schedules...[/yellow]")
+                    for job in stale:
+                        try:
+                            await _backend.cancel_scheduled_execution(job.job_name)
+                            console.print(f"[dim]  {job.job_name} removed[/dim]")
+                        except Exception as e:
+                            console.print(f"[yellow]  {job.job_name} removal failed: {e}[/yellow]")
+                    console.print()
 
             async def _bootstrap_cron(compound: str, cron_expr: str) -> None:
                 """Install a recurring CronTrigger, re-applying on every start.
@@ -154,18 +211,8 @@ def start_local(
 
                 if cron_expr is not None:
                     if per_sport:
-                        allowed_sports = get_job_cron_sports(job_name)
-                        configured_sports = app_settings.data_collection.sports
-                        target_sports = (
-                            list(allowed_sports)
-                            if allowed_sports is not None
-                            else list(configured_sports)
-                        )
-                        skipped_sports = (
-                            [s for s in configured_sports if s not in target_sports]
-                            if allowed_sports is not None
-                            else []
-                        )
+                        target_sports = resolve_target_sports(job_name, configured_sports)
+                        skipped_sports = [s for s in configured_sports if s not in target_sports]
                         for skipped in skipped_sports:
                             skipped_compound = make_compound_job_name(job_name, skipped)
                             console.print(
@@ -183,7 +230,7 @@ def start_local(
                 bootstrap_fn = get_bootstrap_function(job_name)
 
                 if per_sport:
-                    for sport_key in app_settings.data_collection.sports:
+                    for sport_key in configured_sports:
                         await _bootstrap_dynamic(
                             make_compound_job_name(job_name, sport_key),
                             JobContext(sport=sport_key),
@@ -198,6 +245,10 @@ def start_local(
             console.print("[bold green]Scheduler started![/bold green]")
             console.print("[dim]Jobs will self-schedule based on game proximity[/dim]")
             console.print("[dim]Press Ctrl+C to stop[/dim]\n")
+
+            jobs = await _backend.get_scheduled_jobs()
+            _print_scheduled_jobs(console, jobs)
+            console.print()
 
             try:
                 logger.info("local_scheduler_running", message="Press Ctrl+C to stop")
@@ -350,26 +401,7 @@ def list_jobs():
 
         jobs = asyncio.run(get_jobs())
 
-        if not jobs:
-            console.print("[yellow]No jobs currently scheduled[/yellow]")
-            return
-
-        # Create jobs table
-        table = Table(show_header=True, header_style="bold cyan")
-        table.add_column("Job Name", style="white")
-        table.add_column("Next Run Time", style="yellow")
-        table.add_column("Status", style="green")
-
-        for job in jobs:
-            next_run = (
-                job.next_run_time.strftime("%Y-%m-%d %H:%M:%S UTC")
-                if job.next_run_time
-                else "[dim]Not scheduled[/dim]"
-            )
-            table.add_row(job.job_name, next_run, job.status.value)
-
-        console.print(table)
-        console.print(f"\n[dim]Total: {len(jobs)} jobs[/dim]")
+        _print_scheduled_jobs(console, jobs)
 
     except BackendUnavailableError as e:
         console.print(f"[yellow]⚠ Not supported:[/yellow] {e}")

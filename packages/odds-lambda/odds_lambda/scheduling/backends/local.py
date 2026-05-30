@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import datetime
 from types import TracebackType
 from typing import TYPE_CHECKING
 
 import structlog
-from apscheduler import AsyncScheduler, ConflictPolicy, SchedulerRole
+from apscheduler import AsyncScheduler, ConflictPolicy, Event, SchedulerRole
 from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
 from apscheduler.eventbrokers.asyncpg import AsyncpgEventBroker
 from apscheduler.triggers.cron import CronTrigger
@@ -375,6 +375,16 @@ class LocalSchedulerBackend(SchedulerBackend):
             args=[ctx],
             conflict_policy=ConflictPolicy.replace,
         )
+
+    def subscribe(
+        self,
+        callback: Callable[[Event], object],
+        event_types: type[Event] | Iterable[type[Event]] | None = None,
+    ) -> None:
+        """Subscribe a listener to scheduler events on the running scheduler."""
+        if self._scheduler is None:
+            raise BackendUnavailableError("Scheduler not started")
+        self._scheduler.subscribe(callback, event_types)
 
     async def cancel_scheduled_execution(self, job_name: str) -> None:
         if self.dry_run:

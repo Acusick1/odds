@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, fields
 from importlib import import_module
 
@@ -251,6 +251,34 @@ def get_job_function(job_name: str) -> Callable[[JobContext], Awaitable[None]]:
 def is_per_sport_job(job_name: str) -> bool:
     """Check whether a job accepts a sport parameter."""
     return job_name in _PER_SPORT_JOBS
+
+
+def resolve_target_sports(job_name: str, configured_sports: Sequence[SportKey]) -> list[SportKey]:
+    """Sports a per-sport job actually schedules for, honoring any cron allowlist.
+
+    A cron job may restrict itself to a subset of sports via ``_JOB_CRON_MAP``;
+    event-driven and unrestricted jobs run for every configured sport.
+    """
+    allowed = get_job_cron_sports(job_name) if get_job_cron(job_name) is not None else None
+    return list(allowed) if allowed is not None else list(configured_sports)
+
+
+def expected_compound_job_names(
+    bootstrap_jobs: Iterable[str], configured_sports: Sequence[SportKey]
+) -> set[str]:
+    """Compute the full set of compound job names a config is expected to schedule.
+
+    Mirrors the bootstrap loop's naming so callers (e.g. stale-schedule pruning)
+    can compare against what is actually in the data store.
+    """
+    expected: set[str] = set()
+    for job_name in bootstrap_jobs:
+        if is_per_sport_job(job_name):
+            for sport_key in resolve_target_sports(job_name, configured_sports):
+                expected.add(make_compound_job_name(job_name, sport_key))
+        else:
+            expected.add(job_name)
+    return expected
 
 
 def get_bootstrap_function(job_name: str) -> Callable[[JobContext], Awaitable[None]]:

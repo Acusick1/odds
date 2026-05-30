@@ -7,11 +7,13 @@ from odds_lambda.scheduling.jobs import (
     _JOB_CRON_MAP,
     _JOB_MODULE_MAP,
     JobContext,
+    expected_compound_job_names,
     get_bootstrap_function,
     get_job_cron,
     get_job_cron_sports,
     make_compound_job_name,
     resolve_job_name,
+    resolve_target_sports,
     sport_key_to_suffix,
 )
 
@@ -228,3 +230,49 @@ class TestJobCronRegistry:
         assertion in ``jobs.py`` guards this, but the test pins the contract.
         """
         assert set(_JOB_CRON_MAP) <= set(_JOB_MODULE_MAP)
+
+
+class TestResolveTargetSports:
+    """Tests for resolve_target_sports()."""
+
+    def test_event_driven_job_targets_all_configured_sports(self) -> None:
+        assert resolve_target_sports("fetch-odds", ["soccer_epl", "baseball_mlb"]) == [
+            "soccer_epl",
+            "baseball_mlb",
+        ]
+
+    def test_cron_job_with_allowlist_ignores_unlisted_sports(self) -> None:
+        # daily-digest is restricted to EPL even when MLB is configured.
+        assert resolve_target_sports("daily-digest", ["soccer_epl", "baseball_mlb"]) == [
+            "soccer_epl"
+        ]
+
+    def test_empty_configured_sports_yields_empty(self) -> None:
+        assert resolve_target_sports("fetch-odds", []) == []
+
+
+class TestExpectedCompoundJobNames:
+    """Tests for expected_compound_job_names() — drives stale-schedule pruning."""
+
+    def test_expands_per_sport_and_keeps_global_jobs(self) -> None:
+        expected = expected_compound_job_names(
+            ["fetch-odds", "daily-digest", "check-health"],
+            ["soccer_epl", "baseball_mlb"],
+        )
+        assert expected == {
+            "fetch-odds-epl",
+            "fetch-odds-mlb",
+            "daily-digest-epl",  # cron allowlist drops MLB
+            "check-health",  # global job kept as-is
+        }
+
+    def test_prune_drops_compound_for_unconfigured_sport(self) -> None:
+        # When MLB is removed from config, its compound becomes stale while
+        # the configured EPL schedule is preserved.
+        expected = expected_compound_job_names(["fetch-odds"], ["soccer_epl"])
+        existing = ["fetch-odds-epl", "fetch-odds-mlb"]
+        stale = [name for name in existing if name not in expected]
+        assert stale == ["fetch-odds-mlb"]
+
+    def test_no_bootstrap_jobs_yields_empty(self) -> None:
+        assert expected_compound_job_names([], ["soccer_epl"]) == set()
