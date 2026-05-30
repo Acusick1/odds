@@ -418,7 +418,7 @@ dev = [
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.10.7" },
     { name = "numpy", specifier = ">=1.24.0" },
-    { name = "oddsharvester", git = "https://github.com/Acusick1/OddsHarvester.git?branch=fix%2Ffractional-odds-and-unknown-bookmaker" },
+    { name = "oddsharvester", git = "https://github.com/Acusick1/OddsHarvester.git?tag=odds-fork-2026.05.29" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "plotly", specifier = ">=6.3.1" },
     { name = "pre-commit", specifier = ">=3.5.0" },
@@ -3131,8 +3131,8 @@ requires-dist = [
 
 [[package]]
 name = "oddsharvester"
-version = "0.1.0"
-source = { git = "https://github.com/Acusick1/OddsHarvester.git?branch=fix%2Ffractional-odds-and-unknown-bookmaker#ffb64c47c4b389fbfda3b0e8b2fbb2c740e7fbf3" }
+version = "0.3.0"
+source = { git = "https://github.com/Acusick1/OddsHarvester.git?tag=odds-fork-2026.05.29#9343f8f0deebdc869e474c30606d0a0b260accf9" }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "boto3" },
