@@ -1,4 +1,4 @@
-"""Fetch MLB probable-pitcher snapshots — backstop for days the agent doesn't run.
+"""Fetch MLB probable-pitcher snapshots — sole writer of ``mlb_probable_pitchers``.
 
 Flow:
 1. Hit MLB Stats API ``/schedule`` with the ``probablePitcher`` hydration for
@@ -7,10 +7,11 @@ Flow:
    (idempotent on ``(game_pk, fetched_at)``).
 3. Alerts on failure via ``job_alert_context``.
 
-The MCP ``get_probable_pitchers`` tool is the primary write path; this cron
-exists to keep the announcement-timing series populated on days the agent
-doesn't fire. The 3-day window matches MLBAM's empirical populate rate
-(D+0 fully populated, D+1..D+3 partial, D+4 onwards empty).
+This cron is the only write path for the snapshot table. The MCP
+``get_probable_pitchers`` tool is read-only — it read-throughs MLBAM live for
+agent freshness but never persists, so the agent's read-mostly DB role needs
+no write grant on the table. The 3-day window matches MLBAM's empirical
+populate rate (D+0 fully populated, D+1..D+3 partial, D+4 onwards empty).
 """
 
 from __future__ import annotations

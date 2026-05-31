@@ -192,7 +192,7 @@ class TestMlbPitcherReader:
 
 
 # ---------------------------------------------------------------------------
-# get_probable_pitchers MCP tool — full write-through path with mocked fetcher.
+# get_probable_pitchers MCP tool — read-only path with mocked fetcher.
 # ---------------------------------------------------------------------------
 
 
@@ -243,7 +243,7 @@ class _FakeFetcher:
 
 class TestGetProbablePitchersTool:
     @pytest.mark.asyncio
-    async def test_write_through_returns_persisted_rows(self, pglite_async_session) -> None:
+    async def test_live_returns_fetched_rows_without_writing(self, pglite_async_session) -> None:
         from odds_mcp.tools import mlb as mlb_module
 
         in_window = datetime.now(UTC) + timedelta(hours=12)
@@ -254,7 +254,7 @@ class TestGetProbablePitchersTool:
                 [
                     _record(
                         game_pk=1,
-                        fetched_at=datetime(1970, 1, 1, tzinfo=UTC),  # rewritten by tool
+                        fetched_at=datetime(1970, 1, 1, tzinfo=UTC),
                         commence_time=in_window,
                     ),
                     _record(
@@ -276,11 +276,11 @@ class TestGetProbablePitchersTool:
         ):
             result = await mlb_module.get_probable_pitchers(lookahead_hours=48)
 
-        # Both rows persisted, but only the in-window game is returned.
+        # Read-only: nothing is persisted on a live fetch.
         result_db = await pglite_async_session.execute(select(MlbProbablePitchers))
-        all_rows = list(result_db.scalars().all())
-        assert {r.game_pk for r in all_rows} == {1, 2}
+        assert list(result_db.scalars().all()) == []
 
+        # Only the in-window game is returned, built straight from the live records.
         assert result["lookahead_hours"] == 48
         assert result["fetch_status"] == "live"
         assert result["game_count"] == 1
@@ -288,63 +288,42 @@ class TestGetProbablePitchersTool:
         assert game["game_pk"] == 1
         assert game["home_pitcher_name"] == "Home Ace"
         assert game["away_pitcher_name"] == "Away Ace"
+        # The fetcher re-stamps every live record with the tool's fetch time.
+        assert game["fetched_at"] == result["fetched_at"]
         assert "hours_until_commence" in game
-        assert "fetched_at" in game
 
     @pytest.mark.asyncio
-    async def test_idempotent_recall_appends_new_fetched_at_row(self, pglite_async_session) -> None:
+    async def test_live_collapses_duplicate_game_pk(self, pglite_async_session) -> None:
+        """MLBAM's ±1-day over-fetch can return a game_pk twice; collapse to one entry."""
         from odds_mcp.tools import mlb as mlb_module
 
+        live_fetch = datetime.now(UTC)
         in_window = datetime.now(UTC) + timedelta(hours=12)
 
-        # First call: pitcher not yet announced. Second call: pitcher announced.
-        first_records = [
-            _record(
-                game_pk=42,
-                fetched_at=datetime(1970, 1, 1, tzinfo=UTC),
-                commence_time=in_window,
-                home_pitcher=None,
-                home_pitcher_id=None,
-            )
-        ]
-        second_records = [
-            _record(
-                game_pk=42,
-                fetched_at=datetime(1970, 1, 1, tzinfo=UTC),
-                commence_time=in_window,
-            )
-        ]
-        fake_fetcher_first = _FakeFetcher([first_records])
-        fake_fetcher_second = _FakeFetcher([second_records])
+        fake_fetcher = _FakeFetcher(
+            [
+                [
+                    _record(game_pk=42, fetched_at=live_fetch, commence_time=in_window),
+                    _record(game_pk=42, fetched_at=live_fetch, commence_time=in_window),
+                ]
+            ]
+        )
 
         session_cm = MagicMock()
         session_cm.__aenter__ = AsyncMock(return_value=pglite_async_session)
         session_cm.__aexit__ = AsyncMock(return_value=None)
 
         with (
-            patch.object(mlb_module, "MlbStatsFetcher", return_value=fake_fetcher_first),
+            patch.object(mlb_module, "MlbStatsFetcher", return_value=fake_fetcher),
             patch.object(mlb_module, "async_session_maker", return_value=session_cm),
         ):
-            first = await mlb_module.get_probable_pitchers(lookahead_hours=48)
+            result = await mlb_module.get_probable_pitchers(lookahead_hours=48)
 
-        with (
-            patch.object(mlb_module, "MlbStatsFetcher", return_value=fake_fetcher_second),
-            patch.object(mlb_module, "async_session_maker", return_value=session_cm),
-        ):
-            second = await mlb_module.get_probable_pitchers(lookahead_hours=48)
-
-        # Both calls returned a row for the same game.
-        assert first["game_count"] == 1
-        assert second["game_count"] == 1
-        assert first["games"][0]["home_pitcher_name"] is None
-        assert second["games"][0]["home_pitcher_name"] == "Home Ace"
-
-        # Two snapshot rows were persisted (different fetched_at values).
-        result_db = await pglite_async_session.execute(
-            select(MlbProbablePitchers).order_by(MlbProbablePitchers.fetched_at)
-        )
-        rows = list(result_db.scalars().all())
-        assert len(rows) == 2
+        # Nothing persisted; the duplicate game_pk collapses to a single entry.
+        result_db = await pglite_async_session.execute(select(MlbProbablePitchers))
+        assert list(result_db.scalars().all()) == []
+        assert result["game_count"] == 1
+        assert result["games"][0]["game_pk"] == 42
 
     @pytest.mark.asyncio
     async def test_refresh_false_skips_fetch_and_reads_db(self, pglite_async_session) -> None:
