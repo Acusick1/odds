@@ -34,6 +34,29 @@ class MlbProbablePitchersRecord:
     away_pitcher_id: int | None = None
 
 
+def select_latest_in_window(
+    records: list[MlbProbablePitchersRecord],
+    start: datetime,
+    end: datetime,
+) -> list[MlbProbablePitchersRecord]:
+    """Latest record per ``game_pk`` whose ``commence_time`` is in ``[start, end]``.
+
+    The single selection rule shared by the live read-through path (records
+    straight from MLBAM) and the cached read path (records mapped from persisted
+    snapshots), so both produce identically shaped results. Records outside the
+    window are dropped; among records for the same ``game_pk`` the newest
+    ``fetched_at`` wins. Ordered by ``commence_time`` ascending.
+    """
+    latest: dict[int, MlbProbablePitchersRecord] = {}
+    for record in records:
+        if not (start <= record.commence_time <= end):
+            continue
+        existing = latest.get(record.game_pk)
+        if existing is None or record.fetched_at > existing.fetched_at:
+            latest[record.game_pk] = record
+    return sorted(latest.values(), key=lambda r: r.commence_time)
+
+
 class MlbProbablePitchers(SQLModel, table=True):
     """Snapshot of MLBAM's probable-pitcher state for a single game.
 

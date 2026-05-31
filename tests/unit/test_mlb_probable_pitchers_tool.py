@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from odds_core.mlb_data_models import MlbProbablePitchers, MlbProbablePitchersRecord
+from odds_core.mlb_data_models import (
+    MlbProbablePitchers,
+    MlbProbablePitchersRecord,
+    select_latest_in_window,
+)
 from odds_lambda.storage.mlb_pitcher_reader import MlbPitcherReader
 from odds_lambda.storage.mlb_pitcher_writer import MlbPitcherWriter
 from sqlalchemy import select
@@ -138,6 +142,8 @@ class TestMlbPitcherReader:
         )
 
         assert len(rows) == 1
+        # The reader speaks in domain records — the SQLModel type stays in storage.
+        assert isinstance(rows[0], MlbProbablePitchersRecord)
         # Latest is the second_fetch row (pitcher announced).
         assert rows[0].fetched_at == second_fetch
         assert rows[0].home_pitcher_name == "Home Ace"
@@ -189,6 +195,61 @@ class TestMlbPitcherReader:
         )
 
         assert [r.game_pk for r in rows] == [1]
+
+
+class TestSelectLatestInWindow:
+    """The pure selection rule shared by the live and cached read paths."""
+
+    def test_drops_out_of_window_records(self) -> None:
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
+        fetched = datetime(2026, 4, 26, 6, 0, tzinfo=UTC)
+        records = [
+            _record(game_pk=1, fetched_at=fetched, commence_time=now + timedelta(hours=6)),
+            _record(game_pk=2, fetched_at=fetched, commence_time=now + timedelta(days=9)),
+        ]
+
+        selected = select_latest_in_window(records, now, now + timedelta(hours=48))
+
+        assert [r.game_pk for r in selected] == [1]
+
+    def test_keeps_newest_fetched_at_per_game(self) -> None:
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
+        commence = now + timedelta(hours=6)
+        records = [
+            _record(
+                game_pk=1,
+                fetched_at=datetime(2026, 4, 26, 6, 0, tzinfo=UTC),
+                commence_time=commence,
+                home_pitcher=None,
+                home_pitcher_id=None,
+            ),
+            _record(
+                game_pk=1,
+                fetched_at=datetime(2026, 4, 26, 10, 0, tzinfo=UTC),
+                commence_time=commence,
+            ),
+        ]
+
+        selected = select_latest_in_window(records, now, now + timedelta(hours=48))
+
+        assert len(selected) == 1
+        assert selected[0].home_pitcher_name == "Home Ace"
+
+    def test_orders_by_commence_time(self) -> None:
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
+        fetched = datetime(2026, 4, 26, 6, 0, tzinfo=UTC)
+        records = [
+            _record(game_pk=2, fetched_at=fetched, commence_time=now + timedelta(hours=20)),
+            _record(game_pk=1, fetched_at=fetched, commence_time=now + timedelta(hours=4)),
+        ]
+
+        selected = select_latest_in_window(records, now, now + timedelta(hours=48))
+
+        assert [r.game_pk for r in selected] == [1, 2]
+
+    def test_empty_input_returns_empty(self) -> None:
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
+        assert select_latest_in_window([], now, now + timedelta(hours=48)) == []
 
 
 # ---------------------------------------------------------------------------

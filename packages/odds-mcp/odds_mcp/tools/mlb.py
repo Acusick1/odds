@@ -4,58 +4,85 @@ Mounted onto the parent ``odds-mcp`` server in :mod:`odds_mcp.server` without a
 namespace, so tool names are exposed verbatim to clients.
 """
 
+from __future__ import annotations
+
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import structlog
 from fastmcp import FastMCP
 from odds_core.database import async_session_maker
-from odds_core.mlb_data_models import MlbProbablePitchersRecord
+from odds_core.mlb_data_models import MlbProbablePitchersRecord, select_latest_in_window
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher, dates_for_window
 from odds_lambda.storage.mlb_pitcher_reader import MlbPitcherReader
+from pydantic import BaseModel
 
 logger = structlog.get_logger()
 
 mlb_mcp = FastMCP("odds-mcp-mlb")
 
-
-def _game_dict(row: Any, now: datetime) -> dict[str, Any]:
-    """Format a probable-pitcher row (live record or DB row) for the response."""
-    hours_until = (row.commence_time - now).total_seconds() / 3600.0
-    return {
-        "game_pk": row.game_pk,
-        "commence_time": row.commence_time.isoformat(),
-        "home_team": row.home_team,
-        "away_team": row.away_team,
-        "home_pitcher_name": row.home_pitcher_name,
-        "home_pitcher_id": row.home_pitcher_id,
-        "away_pitcher_name": row.away_pitcher_name,
-        "away_pitcher_id": row.away_pitcher_id,
-        "fetched_at": row.fetched_at.isoformat(),
-        "hours_until_commence": round(hours_until, 3),
-    }
+FetchStatus = Literal["live", "stale_db_only", "db_only"]
 
 
-def _latest_in_window(
-    records: list[MlbProbablePitchersRecord],
-    start: datetime,
-    end: datetime,
-) -> list[MlbProbablePitchersRecord]:
-    """Latest record per ``game_pk`` whose ``commence_time`` is in ``[start, end]``.
+class ProbablePitcherGame(BaseModel):
+    """One game's probable-pitcher state in the ``get_probable_pitchers`` response."""
 
-    Mirrors :meth:`MlbPitcherReader.get_latest_in_window` so live (unpersisted)
-    records and cached DB rows are filtered identically. Ordered by
-    ``commence_time`` ascending.
-    """
-    latest: dict[int, MlbProbablePitchersRecord] = {}
-    for record in records:
-        if not (start <= record.commence_time <= end):
-            continue
-        existing = latest.get(record.game_pk)
-        if existing is None or record.fetched_at > existing.fetched_at:
-            latest[record.game_pk] = record
-    return sorted(latest.values(), key=lambda r: r.commence_time)
+    game_pk: int
+    commence_time: str
+    home_team: str
+    away_team: str
+    home_pitcher_name: str | None
+    home_pitcher_id: int | None
+    away_pitcher_name: str | None
+    away_pitcher_id: int | None
+    fetched_at: str
+    hours_until_commence: float
+
+    @classmethod
+    def from_record(cls, record: MlbProbablePitchersRecord, now: datetime) -> ProbablePitcherGame:
+        """Serialize a domain record into the response shape, stamping freshness."""
+        hours_until = (record.commence_time - now).total_seconds() / 3600.0
+        return cls(
+            game_pk=record.game_pk,
+            commence_time=record.commence_time.isoformat(),
+            home_team=record.home_team,
+            away_team=record.away_team,
+            home_pitcher_name=record.home_pitcher_name,
+            home_pitcher_id=record.home_pitcher_id,
+            away_pitcher_name=record.away_pitcher_name,
+            away_pitcher_id=record.away_pitcher_id,
+            fetched_at=record.fetched_at.isoformat(),
+            hours_until_commence=round(hours_until, 3),
+        )
+
+
+class ProbablePitchersResponse(BaseModel):
+    """Validated contract for the ``get_probable_pitchers`` tool output."""
+
+    fetched_at: str
+    lookahead_hours: int
+    fetch_status: FetchStatus
+    game_count: int
+    games: list[ProbablePitcherGame]
+
+    @classmethod
+    def from_records(
+        cls,
+        records: list[MlbProbablePitchersRecord],
+        now: datetime,
+        lookahead_hours: int,
+        fetch_status: FetchStatus,
+    ) -> ProbablePitchersResponse:
+        """Build the response from already-selected, ordered domain records."""
+        games = [ProbablePitcherGame.from_record(r, now) for r in records]
+        return cls(
+            fetched_at=now.isoformat(),
+            lookahead_hours=lookahead_hours,
+            fetch_status=fetch_status,
+            game_count=len(games),
+            games=games,
+        )
 
 
 @mlb_mcp.tool()
@@ -113,19 +140,15 @@ async def get_probable_pitchers(
     now = datetime.now(UTC)
     end = now + timedelta(hours=lookahead_hours)
 
+    fetch_status: FetchStatus
     if refresh:
         target_dates = dates_for_window(now, lookahead_hours)
         try:
             async with MlbStatsFetcher() as fetcher:
                 records = await fetcher.fetch_dates(target_dates, fetched_at=now)
-            games = [_game_dict(r, now) for r in _latest_in_window(records, now, end)]
-            return {
-                "fetched_at": now.isoformat(),
-                "lookahead_hours": lookahead_hours,
-                "fetch_status": "live",
-                "game_count": len(games),
-                "games": games,
-            }
+            selected = select_latest_in_window(records, now, end)
+            response = ProbablePitchersResponse.from_records(selected, now, lookahead_hours, "live")
+            return response.model_dump()
         except httpx.HTTPError as e:
             logger.warning(
                 "get_probable_pitchers_fetch_failed",
@@ -138,13 +161,7 @@ async def get_probable_pitchers(
 
     async with async_session_maker() as session:
         reader = MlbPitcherReader(session)
-        rows = await reader.get_latest_in_window(now, end)
+        records = await reader.get_latest_in_window(now, end)
 
-    games = [_game_dict(row, now) for row in rows]
-    return {
-        "fetched_at": now.isoformat(),
-        "lookahead_hours": lookahead_hours,
-        "fetch_status": fetch_status,
-        "game_count": len(games),
-        "games": games,
-    }
+    response = ProbablePitchersResponse.from_records(records, now, lookahead_hours, fetch_status)
+    return response.model_dump()
