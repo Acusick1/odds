@@ -14,15 +14,17 @@ The system supports three scheduler backends:
 
 ## Job Deployment Matrix
 
-Where each job runs is determined by three things: the Terraform `enable_*` gates
-(`eventbridge.tf`), the sports in `local.sport_configs` (`eventbridge.tf`), and the
-local scheduler's `bootstrap_jobs` + `_JOB_CRON_MAP` (`config.py`, `jobs.py`). The
-table below is the design; the gates default to **off** and `sport_configs` currently
-contains **EPL only**, so the committed configuration deploys a narrow AWS surface and
-runs everything else locally.
+Where each job *can* run is determined by three things: the Terraform `enable_*` gates
+(`eventbridge.tf`), the sports in `local.sport_configs` (`eventbridge.tf`), and the local
+scheduler's `bootstrap_jobs` + `_JOB_CRON_MAP` (`config.py`, `jobs.py`). The table below
+is the **design**, not a record of what is currently deployed.
 
-**Ground truth for the live deployed schedule** is the AWS account itself, not this
-table — query it with:
+**The repo is not a reliable record of the deployed state.** The committed tfvars
+(`terraform.tfvars`, `terraform.prod.tfvars`) do not pin the `enable_*` gates, and the
+live account has been applied with values that differ from the variable defaults. On top
+of that, Terraform uses `ignore_changes = [schedule_expression, state]` on the
+self-scheduling rules, so `terraform plan` never shows the real cadences. **Ground truth
+for the live deployed schedule is the AWS account itself** — query it with:
 
 ```bash
 odds scheduler list-jobs --backend aws   # needs AWS_REGION, AWS_LAMBDA_ARN, AWS_RULE_PREFIX + creds
@@ -45,13 +47,19 @@ odds scheduler list-jobs --backend aws   # needs AWS_REGION, AWS_LAMBDA_ARN, AWS
 | `fetch-espn-fixtures` | — | Cron `0 6 * * *` (EPL) | Cron | local only |
 | `fetch-mlb-probables` | — | Cron `0 6 * * *` (MLB) | Cron | local only |
 
-**Current committed configuration** (all `enable_*` gates off, `sport_configs` = EPL only):
+**Always local-only** (no EventBridge rule is ever created for these — they are absent
+from both `scheduler_rules_map` and `scraper_rules_map`): `agent-run`, `daily-digest`,
+`fetch-espn-fixtures`, `fetch-mlb-probables`, and `score-predictions` (which runs inline).
+The agent in particular is local-by-design and in interactive evaluation, not autonomous
+production — see [BETTING_AGENT.md](BETTING_AGENT.md).
 
-- **Deployed to AWS** (scheduler Lambda): `fetch-odds-epl`, `fetch-scores-epl`, `update-status`, `check-health`.
-- **Local-only**: the scraper (`fetch-oddsportal[-results]`), `agent-run`, `daily-digest`,
-  `fetch-espn-fixtures`, `fetch-betfair-exchange`, `fetch-mlb-probables`, and **all MLB jobs**
-  (MLB has no AWS rules — it is absent from `sport_configs`). The scraper and agent run locally
-  by design (residential IP avoids Cloudflare) — see [BETTING_AGENT.md](BETTING_AGENT.md).
+Everything else (`fetch-odds`, `fetch-scores`, `update-status`, `check-health`,
+`fetch-oddsportal[-results]`, `fetch-betfair-exchange`, `fetch-polymarket`) *may* be on AWS,
+on the local scheduler, or both, depending on how the account was applied and which jobs
+are in the local `bootstrap_jobs`. Run the `list-jobs --backend aws` command above to see
+which are actually enabled, and watch for jobs running in **both** places (e.g. the scraper
+can be enabled on AWS while also bootstrapped locally) and for stale rules whose next-run
+time is in the past (enabled-but-dead leftovers from an earlier apply).
 
 ## AWS Lambda (Primary Production)
 
@@ -61,8 +69,8 @@ Two Lambda functions deployed in `eu-west-1`:
 
 | Function | Image | Purpose | Memory | Timeout |
 |----------|-------|---------|--------|---------|
-| **Scheduler** (`odds-scheduler-dev`) | `Dockerfile.lambda` | Odds API fetching, scoring, digest, scheduling | 512 MB | 300s |
-| **Scraper** (`odds-scheduler-dev-scraper`) | `Dockerfile.scraper` | OddsPortal headless browser scraping | 2048 MB | 600s |
+| **Scheduler** (`odds-scheduler`) | `Dockerfile.lambda` | Odds API fetching, scoring, digest, scheduling | 512 MB | 300s |
+| **Scraper** (`odds-scheduler-scraper`) | `Dockerfile.scraper` | OddsPortal headless browser scraping | 2048 MB | 600s |
 
 Both use the same Lambda handler entry point and job registry, but different Docker images with different dependencies.
 
@@ -107,7 +115,8 @@ Multiple Odds API keys are supported via `ODDS_API_KEYS` (comma-separated). The 
 ```bash
 SCHEDULER_BACKEND=aws
 AWS_REGION=eu-west-1
-AWS_LAMBDA_ARN=arn:aws:lambda:eu-west-1:123456789:function:odds-scheduler-dev
+AWS_LAMBDA_ARN=arn:aws:lambda:eu-west-1:123456789:function:odds-scheduler
+AWS_RULE_PREFIX=odds
 ```
 
 ### Key Constraints
@@ -144,7 +153,7 @@ deployment/aws/
 |----------|---------|---------|
 | `aws_region` | `eu-west-1` | Deployment region |
 | `environment` | `development` | Resource tagging |
-| `project_name` | `odds-scheduler-dev` | Lambda function naming |
+| `project_name` | `odds-scheduler-dev` | Lambda function naming (prod tfvars override to `odds-scheduler`) |
 | `enable_oddsportal_scraper` | `false` | Deploy scraper Lambda |
 | `enable_polymarket` | `false` | Deploy Polymarket rules |
 | `odds_api_keys` | `""` | Comma-separated rotation keys |
