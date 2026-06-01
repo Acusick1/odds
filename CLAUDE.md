@@ -14,6 +14,19 @@ Sport-agnostic betting data pipeline with sport-specific LLM agents. Infrastruct
 
 **Shared data sources:** The Odds API (US bookmakers), OddsPortal (UK bookmakers, headless scraper). **Sport-specific sources:** football-data.co.uk (historical EPL with Pinnacle + Betfair Exchange closing odds). An XGBoost CLV model produces supplementary predictions, but the agent's primary edge comes from information synthesis, not the model. See [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) for the full data source inventory.
 
+### What runs where (deployed vs local)
+
+Two AWS Lambdas (`odds-scheduler`, `odds-scheduler-scraper`) plus a local scheduler
+(`odds scheduler start`). **The committed tfvars are not a reliable record of the deployed
+state** — the live account has been applied with gate/sport values that differ from the
+variable defaults, and Terraform `ignore_changes` the self-scheduling rules. The betting
+agent, daily digest, ESPN fixtures, and MLB probables are **always local-only** (no
+EventBridge rule exists for them); the agent is in interactive evaluation, not autonomous
+production. Most data-fetching jobs (odds, scores, OddsPortal scraper, Betfair) *may* run
+on AWS, locally, or both. For the design see the
+[Job Deployment Matrix](docs/DEPLOYMENT.md#job-deployment-matrix); for the **live** deployed
+schedule run `odds scheduler list-jobs --backend aws`.
+
 ## Package Structure
 
 ```

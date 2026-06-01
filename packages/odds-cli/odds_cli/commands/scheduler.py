@@ -24,17 +24,25 @@ def _print_scheduled_jobs(con: Console, jobs: list[ScheduledJob]) -> None:
         con.print("[yellow]No jobs currently scheduled[/yellow]")
         return
     jobs = sorted(jobs, key=lambda j: (j.next_run_time is None, j.next_run_time))
+    # The raw EventBridge schedule expression is only populated by the AWS
+    # backend; show the column only when present so local listings stay clean.
+    show_schedule = any(job.schedule_expression for job in jobs)
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("Job Name", style="white")
     table.add_column("Next Run Time", style="yellow")
     table.add_column("Status", style="green")
+    if show_schedule:
+        table.add_column("Schedule", style="cyan")
     for job in jobs:
         next_run = (
             job.next_run_time.strftime("%Y-%m-%d %H:%M:%S UTC")
             if job.next_run_time
             else "[dim]Not scheduled[/dim]"
         )
-        table.add_row(job.job_name, next_run, job.status.value)
+        row = [job.job_name, next_run, job.status.value]
+        if show_schedule:
+            row.append(job.schedule_expression or "[dim]—[/dim]")
+        table.add_row(*row)
     con.print(table)
     con.print(f"[dim]Total: {len(jobs)} jobs[/dim]")
 
@@ -376,9 +384,18 @@ def info():
 
 
 @app.command("list-jobs")
-def list_jobs():
-    app_settings = get_settings()
-
+def list_jobs(
+    backend: str | None = typer.Option(
+        None,
+        "--backend",
+        help=(
+            "Override the configured scheduler backend ('aws', 'local', 'railway'). "
+            "Use '--backend aws' to query the live deployed EventBridge schedule "
+            "without editing .env (requires AWS_REGION, AWS_LAMBDA_ARN, AWS_RULE_PREFIX "
+            "and AWS credentials)."
+        ),
+    ),
+):
     """
     List all currently scheduled jobs.
 
@@ -386,18 +403,22 @@ def list_jobs():
     - Job name
     - Next run time
     - Status
+    - Schedule (raw EventBridge expression, AWS backend only)
 
     Note: Not supported on Railway backend (static cron schedules).
     """
-    console.print("[bold blue]Scheduled Jobs[/bold blue]\n")
+    app_settings = get_settings()
+    effective_backend = backend or app_settings.scheduler.backend
+    console.print("[bold blue]Scheduled Jobs[/bold blue]")
+    console.print(f"[dim]Backend: {effective_backend}[/dim]\n")
 
     try:
         from odds_lambda.scheduling.backends import BackendUnavailableError, get_scheduler_backend
 
-        backend = get_scheduler_backend()
+        backend_instance = get_scheduler_backend(backend_type=backend)
 
         async def get_jobs():
-            return await backend.get_scheduled_jobs()
+            return await backend_instance.get_scheduled_jobs()
 
         jobs = asyncio.run(get_jobs())
 
@@ -405,9 +426,7 @@ def list_jobs():
 
     except BackendUnavailableError as e:
         console.print(f"[yellow]⚠ Not supported:[/yellow] {e}")
-        console.print(
-            f"\n[dim]Backend {app_settings.scheduler.backend} does not support job listing[/dim]"
-        )
+        console.print(f"\n[dim]Backend {effective_backend} does not support job listing[/dim]")
 
     except Exception as e:
         console.print(f"[bold red]✗ Failed to list jobs:[/bold red] {e}")

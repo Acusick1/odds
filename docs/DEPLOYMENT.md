@@ -12,6 +12,55 @@ The system supports three scheduler backends:
 | Railway | Alternative cloud | $5-10/month |
 | Local | Development | Free |
 
+## Job Deployment Matrix
+
+Where each job *can* run is determined by three things: the Terraform `enable_*` gates
+(`eventbridge.tf`), the sports in `local.sport_configs` (`eventbridge.tf`), and the local
+scheduler's `bootstrap_jobs` + `_JOB_CRON_MAP` (`config.py`, `jobs.py`). The table below
+is the **design**, not a record of what is currently deployed.
+
+**The repo is not a reliable record of the deployed state.** The committed tfvars
+(`terraform.tfvars`, `terraform.prod.tfvars`) do not pin the `enable_*` gates, and the
+live account has been applied with values that differ from the variable defaults. On top
+of that, Terraform uses `ignore_changes = [schedule_expression, state]` on the
+self-scheduling rules, so `terraform plan` never shows the real cadences. **Ground truth
+for the live deployed schedule is the AWS account itself** — query it with:
+
+```bash
+odds scheduler list-jobs --backend aws   # needs AWS_REGION, AWS_LAMBDA_ARN, AWS_RULE_PREFIX + creds
+```
+
+| Job | AWS (when enabled) | Local | Schedule | Gated by |
+|-----|--------------------|-------|----------|----------|
+| `fetch-odds` | Scheduler Lambda (per sport in `sport_configs`) | — | Self-scheduling, tier-based (30 min–48 h) | `sport_configs` |
+| `fetch-scores` | Scheduler Lambda (per sport) | — | Self-scheduling, game-activity | `sport_configs` |
+| `update-status` | Scheduler Lambda (global) | — | Self-scheduling | always |
+| `check-health` | Scheduler Lambda (global) | — | Self-scheduling | always |
+| `fetch-polymarket` | Scheduler Lambda (global) | — | Self-scheduling | `enable_polymarket` |
+| `backfill-polymarket` | Scheduler Lambda (global) | — | Fixed `rate(3 days)` | `enable_polymarket` |
+| `fetch-betfair-exchange` | Scheduler Lambda (per sport) | Cron `*/30 * * * *` | Self-scheduling (AWS) / cron floor (local) | `betfair_enabled` (AWS) |
+| `fetch-oddsportal` | Scraper Lambda (per scraper sport) | Bootstrap, self-scheduling | Self-scheduling, hourly | `enable_oddsportal_scraper` (AWS) |
+| `fetch-oddsportal-results` | Scraper Lambda (per scraper sport) | Bootstrap, self-scheduling | Self-scheduling, daily ~08:00 | `enable_oddsportal_scraper` (AWS) |
+| `score-predictions` | — (inline at end of `fetch-oddsportal`) | — (inline) | n/a | n/a |
+| `agent-run` | — | Bootstrap, dynamic | Fixture-proximity tiers | local only |
+| `daily-digest` | — | Cron `0 8 * * *` (EPL) | Cron | local only |
+| `fetch-espn-fixtures` | — | Cron `0 6 * * *` (EPL) | Cron | local only |
+| `fetch-mlb-probables` | — | Cron `0 6 * * *` (MLB) | Cron | local only |
+
+**Always local-only** (no EventBridge rule is ever created for these — they are absent
+from both `scheduler_rules_map` and `scraper_rules_map`): `agent-run`, `daily-digest`,
+`fetch-espn-fixtures`, `fetch-mlb-probables`, and `score-predictions` (which runs inline).
+The agent in particular is local-by-design and in interactive evaluation, not autonomous
+production — see [BETTING_AGENT.md](BETTING_AGENT.md).
+
+Everything else (`fetch-odds`, `fetch-scores`, `update-status`, `check-health`,
+`fetch-oddsportal[-results]`, `fetch-betfair-exchange`, `fetch-polymarket`) *may* be on AWS,
+on the local scheduler, or both, depending on how the account was applied and which jobs
+are in the local `bootstrap_jobs`. Run the `list-jobs --backend aws` command above to see
+which are actually enabled, and watch for jobs running in **both** places (e.g. the scraper
+can be enabled on AWS while also bootstrapped locally) and for stale rules whose next-run
+time is in the past (enabled-but-dead leftovers from an earlier apply).
+
 ## AWS Lambda (Primary Production)
 
 ### Overview
@@ -20,33 +69,35 @@ Two Lambda functions deployed in `eu-west-1`:
 
 | Function | Image | Purpose | Memory | Timeout |
 |----------|-------|---------|--------|---------|
-| **Scheduler** (`odds-scheduler-dev`) | `Dockerfile.lambda` | Odds API fetching, scoring, digest, scheduling | 512 MB | 300s |
-| **Scraper** (`odds-scheduler-dev-scraper`) | `Dockerfile.scraper` | OddsPortal headless browser scraping | 2048 MB | 600s |
+| **Scheduler** (`odds-scheduler`) | `Dockerfile.lambda` | Odds API fetching, scoring, digest, scheduling | 512 MB | 300s |
+| **Scraper** (`odds-scheduler-scraper`) | `Dockerfile.scraper` | OddsPortal headless browser scraping | 2048 MB | 600s |
 
 Both use the same Lambda handler entry point and job registry, but different Docker images with different dependencies.
 
 ### EventBridge Rules
 
-**Fixed-schedule rules** (managed by Terraform):
+See the [Job Deployment Matrix](#job-deployment-matrix) above for the full job/backend
+mapping. This section covers the EventBridge mechanics.
 
-| Rule | Schedule | Lambda | Job |
-|------|----------|--------|-----|
-| `odds-fetch-oddsportal-results` | `cron(0 8 * * ? *)` | Scraper | `fetch-oddsportal-results` |
-| `odds-backfill-polymarket` | `rate(3 days)` | Scheduler | `backfill-polymarket` (if enabled) |
+**Fixed-schedule rules** (managed by Terraform): `local.fixed_schedule_expressions` is
+currently empty — no Lambda-hosted fixed-cron jobs remain. The only fixed rule is
+`odds-backfill-polymarket` (`rate(3 days)`), created when `enable_polymarket = true`.
+`daily-digest` and `fetch-espn-fixtures` moved to `LocalSchedulerBackend` cron (EPL only)
+— see `_JOB_CRON_MAP` in `odds_lambda/scheduling/jobs.py`. `score-predictions` is no longer
+a standalone job; it is invoked inline at the end of `fetch-oddsportal`.
 
-`daily-digest` and `fetch-espn-fixtures` run locally via `LocalSchedulerBackend` cron (EPL only) — see `_JOB_CRON_MAP` in `odds_lambda/scheduling/jobs.py`. `score-predictions` no longer exists as a standalone job; it is invoked inline at the end of `fetch-oddsportal`. `fetch-odds` remains on EventBridge (self-scheduling).
+**Self-scheduling rules** (pre-created `DISABLED` with a `rate(1 day)` placeholder,
+activated and re-scheduled by the Lambda at runtime). One rule per entry in
+`local.scheduler_rules_map` / `scraper_rules_map`, e.g. `odds-fetch-odds-epl`,
+`odds-fetch-scores-epl`, `odds-update-status`, `odds-check-health`. Scraper rules
+(`odds-fetch-oddsportal-epl`, `odds-fetch-oddsportal-results-epl`) are only created when
+`enable_oddsportal_scraper = true`.
 
-**Self-scheduling rules** (pre-created disabled, activated by Lambda at runtime):
-
-| Rule | Job | Scheduling |
-|------|-----|------------|
-| `odds-fetch-odds` | `fetch-odds` | Tier-based (30min–48h intervals) |
-| `odds-fetch-scores` | `fetch-scores` | Game-activity based |
-| `odds-update-status` | `update-status` | Dynamic |
-| `odds-check-health` | `check-health` | Dynamic |
-| `odds-fetch-polymarket` | `fetch-polymarket` | Fixed interval (if enabled) |
-
-Terraform uses `ignore_changes = [schedule_expression, state]` on self-scheduling rules so Lambda can update them at runtime.
+Terraform uses `ignore_changes = [schedule_expression, state]` on self-scheduling rules so
+the Lambda can update them at runtime. Because of this, **the live schedule is not visible
+in Terraform state** — `terraform plan` will not show the real cadences. Use
+`odds scheduler list-jobs --backend aws` (which lists rules with their raw
+`ScheduleExpression` and state) to see what is actually deployed.
 
 ### API Key Rotation
 
@@ -64,7 +115,8 @@ Multiple Odds API keys are supported via `ODDS_API_KEYS` (comma-separated). The 
 ```bash
 SCHEDULER_BACKEND=aws
 AWS_REGION=eu-west-1
-AWS_LAMBDA_ARN=arn:aws:lambda:eu-west-1:123456789:function:odds-scheduler-dev
+AWS_LAMBDA_ARN=arn:aws:lambda:eu-west-1:123456789:function:odds-scheduler
+AWS_RULE_PREFIX=odds
 ```
 
 ### Key Constraints
@@ -101,7 +153,7 @@ deployment/aws/
 |----------|---------|---------|
 | `aws_region` | `eu-west-1` | Deployment region |
 | `environment` | `development` | Resource tagging |
-| `project_name` | `odds-scheduler-dev` | Lambda function naming |
+| `project_name` | `odds-scheduler-dev` | Lambda function naming (prod tfvars override to `odds-scheduler`) |
 | `enable_oddsportal_scraper` | `false` | Deploy scraper Lambda |
 | `enable_polymarket` | `false` | Deploy Polymarket rules |
 | `odds_api_keys` | `""` | Comma-separated rotation keys |
