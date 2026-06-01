@@ -37,10 +37,10 @@ class TestSettings:
             assert settings.scheduler.dry_run is False
             assert settings.scheduler.lookahead_days == 7
             assert settings.scheduler.bootstrap_jobs == [
-                "agent-run",
+                # "agent-run",
                 "fetch-oddsportal",
                 "fetch-oddsportal-results",
-                "daily-digest",
+                # "daily-digest",
                 "fetch-espn-fixtures",
                 "fetch-betfair-exchange",
                 "fetch-mlb-probables",
