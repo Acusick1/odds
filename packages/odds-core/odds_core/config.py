@@ -111,6 +111,10 @@ class AWSConfig(BaseSettings):
         default=None,
         description="Lambda function ARN (for self-scheduling)",
     )
+    rule_prefix: str | None = Field(
+        default=None,
+        description="EventBridge rule name prefix (e.g. 'odds') for querying deployed schedules",
+    )
 
 
 class ModelConfig(BaseSettings):

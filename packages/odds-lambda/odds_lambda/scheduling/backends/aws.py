@@ -84,6 +84,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
         retry_config: RetryConfig | None = None,
         aws_region: str | None = None,
         lambda_arn: str | None = None,
+        rule_prefix: str | None = None,
     ):
         """
         Initialize AWS EventBridge client.
@@ -93,6 +94,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
             retry_config: Retry configuration (uses defaults if None)
             aws_region: AWS region override (uses AWS_REGION env var if None)
             lambda_arn: Lambda ARN override (uses LAMBDA_ARN env var if None)
+            rule_prefix: EventBridge rule prefix override (uses RULE_PREFIX env var if None)
 
         Raises:
             ConfigurationError: If required configuration is missing
@@ -101,7 +103,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
 
         self.aws_region = aws_region or os.getenv("AWS_REGION")
         self.lambda_arn = lambda_arn or os.getenv("LAMBDA_ARN")
-        self.rule_prefix = os.getenv("RULE_PREFIX")
+        self.rule_prefix = rule_prefix or os.getenv("RULE_PREFIX")
 
         # Health check caching (5-minute TTL)
         self._health_check_cache: tuple[BackendHealth, datetime] | None = None
@@ -278,6 +280,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
                         job_name=job_name,
                         next_run_time=next_run,
                         status=status,
+                        schedule_expression=schedule_expr or None,
                     )
                 )
 
@@ -307,6 +310,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
                 job_name=job_name,
                 next_run_time=next_run,
                 status=status,
+                schedule_expression=schedule_expr or None,
             )
         except self.events_client.exceptions.ResourceNotFoundException:
             return None

@@ -75,8 +75,9 @@ def get_scheduler_backend(
         return AWSEventBridgeBackend(
             dry_run=dry_run,
             retry_config=retry_config,
-            aws_region=kwargs.get("aws_region"),
-            lambda_arn=kwargs.get("lambda_arn"),
+            aws_region=kwargs.get("aws_region") or settings.aws.region,
+            lambda_arn=kwargs.get("lambda_arn") or settings.aws.lambda_arn,
+            rule_prefix=kwargs.get("rule_prefix") or settings.aws.rule_prefix,
         )
 
     elif backend == "railway":

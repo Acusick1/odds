@@ -27,6 +27,7 @@ class ScheduledJob:
     next_run_time: datetime | None
     status: JobStatus = JobStatus.UNKNOWN
     error_message: str | None = None
+    schedule_expression: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
