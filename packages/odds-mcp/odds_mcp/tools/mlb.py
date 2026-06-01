@@ -7,7 +7,7 @@ namespace, so tool names are exposed verbatim to clients.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Literal
 
 import httpx
 import structlog
@@ -89,7 +89,7 @@ class ProbablePitchersResponse(BaseModel):
 async def get_probable_pitchers(
     lookahead_hours: int = 48,
     refresh: bool = True,
-) -> dict[str, Any]:
+) -> ProbablePitchersResponse:
     """Return announced probable starting pitchers for upcoming MLB games.
 
     This tool is read-only: it never writes to ``mlb_probable_pitchers``. The
@@ -131,9 +131,11 @@ async def get_probable_pitchers(
             fetch and return the latest cached snapshot per game.
 
     Returns:
-        Dict with ``fetched_at``, ``lookahead_hours``, ``fetch_status``
-        (``"live"`` | ``"stale_db_only"`` | ``"db_only"``), and ``games``
-        (a list ordered by ``commence_time`` ascending; each entry carries
+        A :class:`ProbablePitchersResponse` (FastMCP advertises its schema as
+        the tool's structured output) carrying ``fetched_at``,
+        ``lookahead_hours``, ``fetch_status``
+        (``"live"`` | ``"stale_db_only"`` | ``"db_only"``), ``game_count``, and
+        ``games`` (ordered by ``commence_time`` ascending; each entry carries
         its own ``fetched_at`` indicating when that row was last refreshed).
     """
     lookahead_hours = max(1, min(int(lookahead_hours), 168))
@@ -147,8 +149,7 @@ async def get_probable_pitchers(
             async with MlbStatsFetcher() as fetcher:
                 records = await fetcher.fetch_dates(target_dates, fetched_at=now)
             selected = select_latest_in_window(records, now, end)
-            response = ProbablePitchersResponse.from_records(selected, now, lookahead_hours, "live")
-            return response.model_dump()
+            return ProbablePitchersResponse.from_records(selected, now, lookahead_hours, "live")
         except httpx.HTTPError as e:
             logger.warning(
                 "get_probable_pitchers_fetch_failed",
@@ -163,5 +164,4 @@ async def get_probable_pitchers(
         reader = MlbPitcherReader(session)
         records = await reader.get_latest_in_window(now, end)
 
-    response = ProbablePitchersResponse.from_records(records, now, lookahead_hours, fetch_status)
-    return response.model_dump()
+    return ProbablePitchersResponse.from_records(records, now, lookahead_hours, fetch_status)
