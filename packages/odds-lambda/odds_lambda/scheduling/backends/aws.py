@@ -101,6 +101,10 @@ class AWSEventBridgeBackend(SchedulerBackend):
         """
         super().__init__(dry_run=dry_run, retry_config=retry_config)
 
+        # The unprefixed env vars are the Lambda-runtime contract: the deployed
+        # function sets LAMBDA_ARN / RULE_PREFIX (and the runtime sets AWS_REGION),
+        # not the AWS_-prefixed names that AWSConfig reads. Explicit args (from the
+        # backend factory / CLI) take precedence over both.
         self.aws_region = aws_region or os.getenv("AWS_REGION")
         self.lambda_arn = lambda_arn or os.getenv("LAMBDA_ARN")
         self.rule_prefix = rule_prefix or os.getenv("RULE_PREFIX")

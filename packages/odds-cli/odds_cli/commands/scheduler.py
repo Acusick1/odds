@@ -396,8 +396,6 @@ def list_jobs(
         ),
     ),
 ):
-    app_settings = get_settings()
-
     """
     List all currently scheduled jobs.
 
@@ -409,6 +407,7 @@ def list_jobs(
 
     Note: Not supported on Railway backend (static cron schedules).
     """
+    app_settings = get_settings()
     effective_backend = backend or app_settings.scheduler.backend
     console.print("[bold blue]Scheduled Jobs[/bold blue]")
     console.print(f"[dim]Backend: {effective_backend}[/dim]\n")
