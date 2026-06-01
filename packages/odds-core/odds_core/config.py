@@ -87,10 +87,10 @@ class SchedulerConfig(BaseSettings):
     )
     bootstrap_jobs: list[str] = Field(
         default=[
-            "agent-run",
+            # "agent-run",
             "fetch-oddsportal",
             "fetch-oddsportal-results",
-            "daily-digest",
+            # "daily-digest",
             "fetch-espn-fixtures",
             "fetch-betfair-exchange",
             "fetch-mlb-probables",
