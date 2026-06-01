@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from odds_core.mlb_data_models import MlbProbablePitchers, MlbProbablePitchersRecord
+from odds_core.mlb_data_models import (
+    MlbProbablePitchers,
+    MlbProbablePitchersRecord,
+    select_latest_in_window,
+)
 from odds_lambda.storage.mlb_pitcher_reader import MlbPitcherReader
 from odds_lambda.storage.mlb_pitcher_writer import MlbPitcherWriter
 from sqlalchemy import select
@@ -138,6 +142,8 @@ class TestMlbPitcherReader:
         )
 
         assert len(rows) == 1
+        # The reader speaks in domain records — the SQLModel type stays in storage.
+        assert isinstance(rows[0], MlbProbablePitchersRecord)
         # Latest is the second_fetch row (pitcher announced).
         assert rows[0].fetched_at == second_fetch
         assert rows[0].home_pitcher_name == "Home Ace"
@@ -191,8 +197,63 @@ class TestMlbPitcherReader:
         assert [r.game_pk for r in rows] == [1]
 
 
+class TestSelectLatestInWindow:
+    """The pure selection rule shared by the live and cached read paths."""
+
+    def test_drops_out_of_window_records(self) -> None:
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
+        fetched = datetime(2026, 4, 26, 6, 0, tzinfo=UTC)
+        records = [
+            _record(game_pk=1, fetched_at=fetched, commence_time=now + timedelta(hours=6)),
+            _record(game_pk=2, fetched_at=fetched, commence_time=now + timedelta(days=9)),
+        ]
+
+        selected = select_latest_in_window(records, now, now + timedelta(hours=48))
+
+        assert [r.game_pk for r in selected] == [1]
+
+    def test_keeps_newest_fetched_at_per_game(self) -> None:
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
+        commence = now + timedelta(hours=6)
+        records = [
+            _record(
+                game_pk=1,
+                fetched_at=datetime(2026, 4, 26, 6, 0, tzinfo=UTC),
+                commence_time=commence,
+                home_pitcher=None,
+                home_pitcher_id=None,
+            ),
+            _record(
+                game_pk=1,
+                fetched_at=datetime(2026, 4, 26, 10, 0, tzinfo=UTC),
+                commence_time=commence,
+            ),
+        ]
+
+        selected = select_latest_in_window(records, now, now + timedelta(hours=48))
+
+        assert len(selected) == 1
+        assert selected[0].home_pitcher_name == "Home Ace"
+
+    def test_orders_by_commence_time(self) -> None:
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
+        fetched = datetime(2026, 4, 26, 6, 0, tzinfo=UTC)
+        records = [
+            _record(game_pk=2, fetched_at=fetched, commence_time=now + timedelta(hours=20)),
+            _record(game_pk=1, fetched_at=fetched, commence_time=now + timedelta(hours=4)),
+        ]
+
+        selected = select_latest_in_window(records, now, now + timedelta(hours=48))
+
+        assert [r.game_pk for r in selected] == [1, 2]
+
+    def test_empty_input_returns_empty(self) -> None:
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
+        assert select_latest_in_window([], now, now + timedelta(hours=48)) == []
+
+
 # ---------------------------------------------------------------------------
-# get_probable_pitchers MCP tool — full write-through path with mocked fetcher.
+# get_probable_pitchers MCP tool — read-only path with mocked fetcher.
 # ---------------------------------------------------------------------------
 
 
@@ -243,7 +304,7 @@ class _FakeFetcher:
 
 class TestGetProbablePitchersTool:
     @pytest.mark.asyncio
-    async def test_write_through_returns_persisted_rows(self, pglite_async_session) -> None:
+    async def test_live_returns_fetched_rows_without_writing(self, pglite_async_session) -> None:
         from odds_mcp.tools import mlb as mlb_module
 
         in_window = datetime.now(UTC) + timedelta(hours=12)
@@ -254,7 +315,7 @@ class TestGetProbablePitchersTool:
                 [
                     _record(
                         game_pk=1,
-                        fetched_at=datetime(1970, 1, 1, tzinfo=UTC),  # rewritten by tool
+                        fetched_at=datetime(1970, 1, 1, tzinfo=UTC),
                         commence_time=in_window,
                     ),
                     _record(
@@ -276,75 +337,54 @@ class TestGetProbablePitchersTool:
         ):
             result = await mlb_module.get_probable_pitchers(lookahead_hours=48)
 
-        # Both rows persisted, but only the in-window game is returned.
+        # Read-only: nothing is persisted on a live fetch.
         result_db = await pglite_async_session.execute(select(MlbProbablePitchers))
-        all_rows = list(result_db.scalars().all())
-        assert {r.game_pk for r in all_rows} == {1, 2}
+        assert list(result_db.scalars().all()) == []
 
-        assert result["lookahead_hours"] == 48
-        assert result["fetch_status"] == "live"
-        assert result["game_count"] == 1
-        game = result["games"][0]
-        assert game["game_pk"] == 1
-        assert game["home_pitcher_name"] == "Home Ace"
-        assert game["away_pitcher_name"] == "Away Ace"
-        assert "hours_until_commence" in game
-        assert "fetched_at" in game
+        # Only the in-window game is returned, built straight from the live records.
+        assert result.lookahead_hours == 48
+        assert result.fetch_status == "live"
+        assert result.game_count == 1
+        game = result.games[0]
+        assert game.game_pk == 1
+        assert game.home_pitcher_name == "Home Ace"
+        assert game.away_pitcher_name == "Away Ace"
+        # The fetcher re-stamps every live record with the tool's fetch time.
+        assert game.fetched_at == result.fetched_at
+        assert game.hours_until_commence is not None
 
     @pytest.mark.asyncio
-    async def test_idempotent_recall_appends_new_fetched_at_row(self, pglite_async_session) -> None:
+    async def test_live_collapses_duplicate_game_pk(self, pglite_async_session) -> None:
+        """MLBAM's ±1-day over-fetch can return a game_pk twice; collapse to one entry."""
         from odds_mcp.tools import mlb as mlb_module
 
+        live_fetch = datetime.now(UTC)
         in_window = datetime.now(UTC) + timedelta(hours=12)
 
-        # First call: pitcher not yet announced. Second call: pitcher announced.
-        first_records = [
-            _record(
-                game_pk=42,
-                fetched_at=datetime(1970, 1, 1, tzinfo=UTC),
-                commence_time=in_window,
-                home_pitcher=None,
-                home_pitcher_id=None,
-            )
-        ]
-        second_records = [
-            _record(
-                game_pk=42,
-                fetched_at=datetime(1970, 1, 1, tzinfo=UTC),
-                commence_time=in_window,
-            )
-        ]
-        fake_fetcher_first = _FakeFetcher([first_records])
-        fake_fetcher_second = _FakeFetcher([second_records])
+        fake_fetcher = _FakeFetcher(
+            [
+                [
+                    _record(game_pk=42, fetched_at=live_fetch, commence_time=in_window),
+                    _record(game_pk=42, fetched_at=live_fetch, commence_time=in_window),
+                ]
+            ]
+        )
 
         session_cm = MagicMock()
         session_cm.__aenter__ = AsyncMock(return_value=pglite_async_session)
         session_cm.__aexit__ = AsyncMock(return_value=None)
 
         with (
-            patch.object(mlb_module, "MlbStatsFetcher", return_value=fake_fetcher_first),
+            patch.object(mlb_module, "MlbStatsFetcher", return_value=fake_fetcher),
             patch.object(mlb_module, "async_session_maker", return_value=session_cm),
         ):
-            first = await mlb_module.get_probable_pitchers(lookahead_hours=48)
+            result = await mlb_module.get_probable_pitchers(lookahead_hours=48)
 
-        with (
-            patch.object(mlb_module, "MlbStatsFetcher", return_value=fake_fetcher_second),
-            patch.object(mlb_module, "async_session_maker", return_value=session_cm),
-        ):
-            second = await mlb_module.get_probable_pitchers(lookahead_hours=48)
-
-        # Both calls returned a row for the same game.
-        assert first["game_count"] == 1
-        assert second["game_count"] == 1
-        assert first["games"][0]["home_pitcher_name"] is None
-        assert second["games"][0]["home_pitcher_name"] == "Home Ace"
-
-        # Two snapshot rows were persisted (different fetched_at values).
-        result_db = await pglite_async_session.execute(
-            select(MlbProbablePitchers).order_by(MlbProbablePitchers.fetched_at)
-        )
-        rows = list(result_db.scalars().all())
-        assert len(rows) == 2
+        # Nothing persisted; the duplicate game_pk collapses to a single entry.
+        result_db = await pglite_async_session.execute(select(MlbProbablePitchers))
+        assert list(result_db.scalars().all()) == []
+        assert result.game_count == 1
+        assert result.games[0].game_pk == 42
 
     @pytest.mark.asyncio
     async def test_refresh_false_skips_fetch_and_reads_db(self, pglite_async_session) -> None:
@@ -373,10 +413,10 @@ class TestGetProbablePitchersTool:
         ):
             result = await mlb_module.get_probable_pitchers(lookahead_hours=48, refresh=False)
 
-        assert result["fetch_status"] == "db_only"
-        assert result["game_count"] == 1
-        assert result["games"][0]["game_pk"] == 77
-        assert result["games"][0]["fetched_at"] == prior_fetch.isoformat()
+        assert result.fetch_status == "db_only"
+        assert result.game_count == 1
+        assert result.games[0].game_pk == 77
+        assert result.games[0].fetched_at == prior_fetch.isoformat()
         fetcher_factory.assert_not_called()
 
     @pytest.mark.asyncio
@@ -413,11 +453,11 @@ class TestGetProbablePitchersTool:
         ):
             result = await mlb_module.get_probable_pitchers(lookahead_hours=48)
 
-        assert result["fetch_status"] == "stale_db_only"
-        assert result["game_count"] == 1
-        assert result["games"][0]["game_pk"] == 99
+        assert result.fetch_status == "stale_db_only"
+        assert result.game_count == 1
+        assert result.games[0].game_pk == 99
         # The returned row carries the prior fetch's timestamp, not "now".
-        assert result["games"][0]["fetched_at"] == prior_fetch.isoformat()
+        assert result.games[0].fetched_at == prior_fetch.isoformat()
 
         # No new snapshot row written on the failed fetch.
         rows_db = await pglite_async_session.execute(select(MlbProbablePitchers))
@@ -455,4 +495,69 @@ class TestGetProbablePitchersTool:
         ):
             result = await mlb_module.get_probable_pitchers(lookahead_hours=48)
 
-        assert [g["game_pk"] for g in result["games"]] == [1, 2]
+        assert [g.game_pk for g in result.games] == [1, 2]
+
+
+# ---------------------------------------------------------------------------
+# get_probable_pitchers exposed through the FastMCP server — verifies the
+# Pydantic return type is advertised as a structured output schema and that
+# the structured content round-trips for a client.
+# ---------------------------------------------------------------------------
+
+
+class TestGetProbablePitchersViaMcp:
+    @pytest.mark.asyncio
+    async def test_advertises_structured_output_schema(self) -> None:
+        """The mounted tool exposes the ProbablePitchersResponse shape as its output schema."""
+        from fastmcp import Client
+        from odds_mcp.server import mcp as odds_mcp_server
+
+        async with Client(odds_mcp_server) as client:
+            tools = await client.list_tools()
+
+        tool = next(t for t in tools if t.name == "get_probable_pitchers")
+        schema = tool.outputSchema
+        assert schema is not None, "tool must advertise a structured output schema"
+        props = schema["properties"]
+        assert {"fetched_at", "lookahead_hours", "fetch_status", "game_count", "games"} <= set(
+            props
+        )
+        # The nested per-game shape is described on the games array's items.
+        game_defs = schema.get("$defs", {}).get("ProbablePitcherGame", props["games"]["items"])
+        assert {"game_pk", "home_pitcher_name", "hours_until_commence"} <= set(
+            game_defs["properties"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_call_returns_structured_content(self, pglite_async_session) -> None:
+        """A client call yields structured content that round-trips through the schema."""
+        from fastmcp import Client
+        from odds_mcp.server import mcp as odds_mcp_server
+        from odds_mcp.tools import mlb as mlb_module
+
+        in_window = datetime.now(UTC) + timedelta(hours=12)
+        prior_fetch = datetime.now(UTC) - timedelta(hours=6)
+        writer = MlbPitcherWriter(pglite_async_session)
+        await writer.insert_snapshots(
+            [_record(game_pk=77, fetched_at=prior_fetch, commence_time=in_window)]
+        )
+        await pglite_async_session.commit()
+
+        session_cm = MagicMock()
+        session_cm.__aenter__ = AsyncMock(return_value=pglite_async_session)
+        session_cm.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(mlb_module, "async_session_maker", return_value=session_cm):
+            async with Client(odds_mcp_server) as client:
+                result = await client.call_tool(
+                    "get_probable_pitchers",
+                    {"lookahead_hours": 48, "refresh": False},
+                )
+
+        assert not result.is_error
+        structured = result.structured_content
+        assert structured["fetch_status"] == "db_only"
+        assert structured["game_count"] == 1
+        assert structured["games"][0]["game_pk"] == 77
+        # FastMCP deserializes the structured content back into the typed shape.
+        assert result.data.games[0].game_pk == 77

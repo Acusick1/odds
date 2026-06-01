@@ -14,7 +14,7 @@ When calling MCP tools, use these MLB parameters:
 - `find_retail_edges`: `sharp_bookmakers=["betfair_exchange"]` (Pinnacle is absent for MLB; Betfair Exchange is the sole sharp reference)
 - `refresh_scrape`: `league="mlb"`, `market="home_away"`
 - `paper_bet`: `market="h2h"`, `selection="home"` or `selection="away"`
-- `get_probable_pitchers`: returns announced probable starting pitchers for the next `lookahead_hours` (default 48). Write-through: each call hits MLB Stats API live and appends a snapshot. Null pitcher fields mean "not yet announced" — a meaningful signal for upcoming-day games. The tool **cannot** flag opener / bulk-role; web-search if you suspect one.
+- `get_probable_pitchers`: returns announced probable starting pitchers for the next `lookahead_hours` (default 48). Read-only — by default (`refresh=True`) it read-throughs MLB Stats API live and returns the current state per game without persisting (falling back to the cached snapshot table on an MLBAM outage); `refresh=False` reads the cached snapshots only. `fetch_status` (`live` / `stale_db_only` / `db_only`) tells you which. Null pitcher fields mean "not yet announced" — a meaningful signal for upcoming-day games. The tool **cannot** flag opener / bulk-role; web-search if you suspect one.
 
 ## Data Sources
 
