@@ -11,20 +11,22 @@ from odds_lambda.scheduling.backends import get_scheduler_backend
 logger = structlog.get_logger()
 
 
-async def get_next_kickoff(sport_key: str) -> datetime | None:
-    """Earliest scheduled event commence_time for a sport."""
+async def get_next_kickoff(sport_key: str, *, now: datetime | None = None) -> datetime | None:
+    """Earliest scheduled event commence_time for a sport after ``now``."""
 
     from odds_core.database import async_session_maker
     from odds_core.models import Event, EventStatus
     from sqlalchemy import select
     from sqlmodel import col
 
+    now = now or datetime.now(UTC)
+
     async with async_session_maker() as session:
         result = await session.execute(
             select(Event.commence_time)
             .where(
                 col(Event.sport_key) == sport_key,
-                col(Event.commence_time) > datetime.now(UTC),
+                col(Event.commence_time) > now,
                 col(Event.status) == EventStatus.SCHEDULED,
             )
             .order_by(col(Event.commence_time))

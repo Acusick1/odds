@@ -11,6 +11,7 @@ from odds_lambda.scheduling.decision import (
     CadenceConfig,
     decide_backward,
     decide_forward,
+    decide_forward_resilient,
 )
 from odds_lambda.storage.writers import OddsWriter
 
@@ -176,6 +177,42 @@ class TestDecideForward:
         assert epl.tier == FetchTier.OPENING
         # MLB keys off its own 1h game (CLOSING).
         assert mlb.tier == FetchTier.CLOSING
+
+
+class TestDecideForwardResilient:
+    """Soonest-of-many-sports gate with a DB-failure fallback cadence."""
+
+    @pytest.mark.asyncio
+    async def test_keys_off_soonest_sport(self, monkeypatch) -> None:
+        """The decision names the sport that owns the soonest kickoff."""
+        kickoffs = {
+            "soccer_epl": NOW + timedelta(hours=48),  # EARLY
+            "baseball_mlb": NOW + timedelta(hours=2),  # CLOSING — soonest
+        }
+
+        async def fake_kickoff(sport_key: str, *, now: datetime) -> datetime:
+            return kickoffs[sport_key]
+
+        monkeypatch.setattr("odds_lambda.scheduling.decision.get_next_kickoff", fake_kickoff)
+
+        decision = await decide_forward_resilient(["soccer_epl", "baseball_mlb"], CADENCE, now=NOW)
+        assert decision.tier == FetchTier.CLOSING
+        assert "baseball_mlb" in decision.reason
+        assert _hours_after(NOW, decision.next_execution) == CADENCE.closing
+
+    @pytest.mark.asyncio
+    async def test_db_failure_falls_back(self, monkeypatch) -> None:
+        """A kickoff-query failure yields should_execute=True at db_fallback cadence."""
+
+        async def boom(sport_key: str, *, now: datetime) -> datetime:
+            raise RuntimeError("DB connection refused")
+
+        monkeypatch.setattr("odds_lambda.scheduling.decision.get_next_kickoff", boom)
+
+        decision = await decide_forward_resilient(["soccer_epl"], CADENCE, now=NOW)
+        assert decision.should_execute is True
+        assert decision.tier is None
+        assert _hours_after(NOW, decision.next_execution) == CADENCE.db_fallback
 
 
 class TestDecideBackward:

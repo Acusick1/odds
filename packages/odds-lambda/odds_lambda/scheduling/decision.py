@@ -24,12 +24,14 @@ another sport's fixtures.
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.database import async_session_maker
 from odds_core.models import EventStatus
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.scheduling.helpers import apply_overnight_skip, get_next_kickoff
@@ -38,7 +40,7 @@ from odds_lambda.storage.readers import OddsReader
 logger = structlog.get_logger()
 
 # A session factory yields an async session usable as ``async with factory()``.
-SessionFactory = Callable[[], object]
+SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
 # (overnight_start_utc, overnight_resume_utc)
 OvernightWindow = tuple[int, int]
@@ -127,6 +129,41 @@ def _next_time(
     )
 
 
+def _decide_from_kickoff(
+    sport_key: str,
+    cadence: CadenceConfig,
+    next_kickoff: datetime | None,
+    *,
+    now: datetime,
+    overnight: OvernightWindow | None,
+    lookahead_days: int,
+) -> ScheduleDecision:
+    """Classify an already-resolved kickoff into a decision (no DB access).
+
+    Shared core of :func:`decide_forward` and :func:`decide_forward_resilient`:
+    gates ``should_execute=False`` when ``next_kickoff`` is absent or beyond
+    ``lookahead_days``; otherwise maps proximity to a ``FetchTier`` cadence.
+    """
+    if next_kickoff is None or next_kickoff > now + timedelta(days=lookahead_days):
+        return ScheduleDecision(
+            should_execute=False,
+            reason=f"No upcoming {sport_key} game within {lookahead_days}d",
+            next_execution=_next_time(now, cadence.no_game, overnight),
+            tier=None,
+        )
+
+    hours_until = (next_kickoff - now).total_seconds() / 3600
+    tier = _classify(hours_until)
+    interval = cadence.interval_for(tier)
+
+    return ScheduleDecision(
+        should_execute=True,
+        reason=f"Next {sport_key} game in {hours_until:.1f}h ({tier.value} tier)",
+        next_execution=_next_time(now, interval, overnight),
+        tier=tier,
+    )
+
+
 async def decide_forward(
     sport_key: str,
     cadence: CadenceConfig,
@@ -156,25 +193,15 @@ async def decide_forward(
     now = now or datetime.now(UTC)
 
     if next_kickoff is None:
-        next_kickoff = await get_next_kickoff(sport_key)
+        next_kickoff = await get_next_kickoff(sport_key, now=now)
 
-    if next_kickoff is None or next_kickoff > now + timedelta(days=lookahead_days):
-        return ScheduleDecision(
-            should_execute=False,
-            reason=f"No upcoming {sport_key} game within {lookahead_days}d",
-            next_execution=_next_time(now, cadence.no_game, overnight),
-            tier=None,
-        )
-
-    hours_until = (next_kickoff - now).total_seconds() / 3600
-    tier = _classify(hours_until)
-    interval = cadence.interval_for(tier)
-
-    return ScheduleDecision(
-        should_execute=True,
-        reason=f"Next {sport_key} game in {hours_until:.1f}h ({tier.value} tier)",
-        next_execution=_next_time(now, interval, overnight),
-        tier=tier,
+    return _decide_from_kickoff(
+        sport_key,
+        cadence,
+        next_kickoff,
+        now=now,
+        overnight=overnight,
+        lookahead_days=lookahead_days,
     )
 
 
@@ -196,17 +223,18 @@ async def decide_forward_resilient(
     now = now or datetime.now(UTC)
     try:
         soonest: datetime | None = None
+        soonest_sport = sport_keys[0]
         for sk in sport_keys:
-            ko = await get_next_kickoff(sk)
+            ko = await get_next_kickoff(sk, now=now)
             if ko is not None and (soonest is None or ko < soonest):
-                soonest = ko
-        return await decide_forward(
-            sport_keys[0],
+                soonest, soonest_sport = ko, sk
+        return _decide_from_kickoff(
+            soonest_sport,
             cadence,
+            soonest,
+            now=now,
             overnight=overnight,
             lookahead_days=lookahead_days,
-            now=now,
-            next_kickoff=soonest,
         )
     except Exception as e:
         logger.warning("next_kickoff_query_failed", error=str(e), exc_info=True)
