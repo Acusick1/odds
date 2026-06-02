@@ -229,7 +229,8 @@ async def main(ctx: JobContext) -> None:
     # per-sport path). Combined local runs span sports with different windows,
     # so no suppression is applied there.
     overnight = OVERNIGHT_WINDOWS.get(target_sports[0]) if len(target_sports) == 1 else None
-    # Most conservative lead across targeted sports (combined runs wake earliest).
+    # Combined runs use the minimum lead across targeted sports, so the gate
+    # opens no later than the shortest-lead sport requires.
     lead_days = min(settings.scheduler.lead_days_for(sk) for sk in target_sports)
 
     # Season-gated fetcher: skip the API fetch (and re-gate on every cron

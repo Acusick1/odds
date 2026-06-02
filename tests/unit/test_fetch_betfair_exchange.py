@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from odds_lambda.betfair.client import BetfairBook
 from odds_lambda.betfair.constants import SPORT_CONFIG
 from odds_lambda.fetch_tier import FetchTier
-from odds_lambda.jobs.fetch_betfair_exchange import CADENCE, _should_skip_book
+from odds_lambda.jobs.fetch_betfair_exchange import CADENCE, _should_skip_book, main
+from odds_lambda.scheduling.jobs import JobContext
 
 
 def _book(
@@ -78,3 +82,53 @@ class TestShouldSkipBook:
 
     def test_2way_for_2way_market_kept(self) -> None:
         assert not _should_skip_book(_book(runners_count=2), SPORT_CONFIG["baseball_mlb"])
+
+
+class TestBetfairSeasonGate:
+    """Verify the season gate skips the Betfair login/fetch when no fixture is near."""
+
+    @staticmethod
+    @asynccontextmanager
+    async def _noop_alert_context(name: str) -> AsyncIterator[None]:
+        yield
+
+    @pytest.mark.asyncio
+    async def test_season_gate_skips_fetch_when_no_fixture(self) -> None:
+        """Deep offseason (no fixture): pre-schedule fires, login/fetch is skipped."""
+        mock_backend = AsyncMock()
+        mock_backend.get_backend_name = Mock(return_value="test")
+
+        mock_client_cls = Mock()
+
+        with (
+            patch(
+                "odds_lambda.jobs.fetch_betfair_exchange.BetfairExchangeClient",
+                mock_client_cls,
+            ),
+            patch(
+                "odds_lambda.scheduling.helpers.get_scheduler_backend",
+                return_value=mock_backend,
+            ),
+            patch("odds_lambda.jobs.fetch_betfair_exchange.get_settings") as mock_settings,
+            patch(
+                "odds_lambda.jobs.fetch_betfair_exchange.job_alert_context",
+                side_effect=self._noop_alert_context,
+            ),
+            patch(
+                "odds_lambda.scheduling.decision.get_next_kickoff",
+                new_callable=AsyncMock,
+                # No upcoming fixture → the season gate stays shut.
+                return_value=None,
+            ),
+        ):
+            mock_settings.return_value.betfair.enabled = True
+            mock_settings.return_value.betfair.sports = ["soccer_epl"]
+            mock_settings.return_value.scheduler.dry_run = False
+            mock_settings.return_value.scheduler.lead_days_for = lambda _sport: 7
+
+            await main(JobContext(sport="soccer_epl"))
+
+        # Pre-schedule still fires so the chain survives the offseason.
+        assert mock_backend.schedule_next_execution.call_count == 1
+        # The Betfair client is never constructed and login never runs.
+        mock_client_cls.assert_not_called()

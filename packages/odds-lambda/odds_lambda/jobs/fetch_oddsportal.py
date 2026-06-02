@@ -256,7 +256,8 @@ async def main(ctx: JobContext) -> None:
     primary_spec = specs[0]
     overnight = (primary_spec.overnight_start_utc, primary_spec.overnight_resume_utc)
     sport_keys = [s.sport_key for s in specs]
-    # Most conservative lead across targeted sports (combined runs wake earliest).
+    # Combined runs use the minimum lead across targeted sports, so the gate
+    # opens no later than the shortest-lead sport requires.
     lead_days = min(settings.scheduler.lead_days_for(sk) for sk in sport_keys)
 
     # Season-gated scraper: the decision's ``should_execute`` says whether the
