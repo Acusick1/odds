@@ -256,11 +256,16 @@ async def main(ctx: JobContext) -> None:
     primary_spec = specs[0]
     overnight = (primary_spec.overnight_start_utc, primary_spec.overnight_resume_utc)
     sport_keys = [s.sport_key for s in specs]
+    # Most conservative lead across targeted sports (combined runs wake earliest).
+    lead_days = min(settings.scheduler.lead_days_for(sk) for sk in sport_keys)
 
-    # This is a always-run scraper (no execution gate): we only use the
-    # decision's proximity-derived next_execution, not should_execute.
+    # Season-gated scraper: the decision's ``should_execute`` says whether the
+    # next fixture is within the lead window. When it is not we self-schedule the
+    # precise wake and skip all browser work (offseason / long mid-season break).
     async def _reschedule(label: str) -> ScheduleDecision:
-        decision = await decide_forward_resilient(sport_keys, CADENCE, overnight=overnight)
+        decision = await decide_forward_resilient(
+            sport_keys, CADENCE, overnight=overnight, lookahead_days=lead_days
+        )
         assert decision.next_execution is not None  # noqa: S101
         try:
             await self_schedule(
@@ -278,7 +283,17 @@ async def main(ctx: JobContext) -> None:
 
     # Pre-schedule before any browser work so the chain survives Lambda
     # timeouts or browser crashes.
-    await _reschedule("pre-schedule")
+    decision = await _reschedule("pre-schedule")
+
+    # Season gate: no fixture within the lead window — skip the 2 GB browser run.
+    if not decision.should_execute:
+        logger.info(
+            "fetch_oddsportal_season_gated",
+            sport=sport,
+            next_execution=decision.next_execution.isoformat(),
+            reason=decision.reason,
+        )
+        return
 
     async with job_alert_context(compound_job_name):
         logger.info(

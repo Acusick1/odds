@@ -7,7 +7,14 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from odds_lambda.scheduling.helpers import apply_overnight_skip, get_next_kickoff, self_schedule
+from odds_lambda.scheduling.helpers import (
+    apply_overnight_skip,
+    get_next_kickoff,
+    self_schedule,
+    within_lead,
+)
+
+NOW = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
 
 
 class TestApplyOvernightSkip:
@@ -76,6 +83,42 @@ class TestGetNextKickoff:
     def test_accepts_sport_key_param(self) -> None:
         sig = inspect.signature(get_next_kickoff)
         assert "sport_key" in sig.parameters
+
+
+class TestWithinLead:
+    """Cheap DB-only season gate for cron-driven forward jobs."""
+
+    @pytest.mark.asyncio
+    async def test_no_fixture_returns_false(self) -> None:
+        async def no_kickoff(sport_key: str, *, now: datetime) -> datetime | None:
+            return None
+
+        with patch("odds_lambda.scheduling.helpers.get_next_kickoff", no_kickoff):
+            assert await within_lead("baseball_mlb", 7, now=NOW) is False
+
+    @pytest.mark.asyncio
+    async def test_fixture_within_lead_returns_true(self) -> None:
+        async def soon(sport_key: str, *, now: datetime) -> datetime:
+            return NOW + timedelta(days=3)
+
+        with patch("odds_lambda.scheduling.helpers.get_next_kickoff", soon):
+            assert await within_lead("soccer_epl", 7, now=NOW) is True
+
+    @pytest.mark.asyncio
+    async def test_fixture_beyond_lead_returns_false(self) -> None:
+        async def far(sport_key: str, *, now: datetime) -> datetime:
+            return NOW + timedelta(days=14)
+
+        with patch("odds_lambda.scheduling.helpers.get_next_kickoff", far):
+            assert await within_lead("soccer_epl", 7, now=NOW) is False
+
+    @pytest.mark.asyncio
+    async def test_fixture_exactly_at_lead_boundary_returns_true(self) -> None:
+        async def boundary(sport_key: str, *, now: datetime) -> datetime:
+            return NOW + timedelta(days=7)
+
+        with patch("odds_lambda.scheduling.helpers.get_next_kickoff", boundary):
+            assert await within_lead("soccer_epl", 7, now=NOW) is True
 
 
 class TestSelfSchedule:
