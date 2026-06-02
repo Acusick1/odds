@@ -9,7 +9,9 @@ from odds_core.models import Event, EventStatus
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.scheduling.decision import (
     CadenceConfig,
+    ScheduleDecision,
     decide_backward,
+    decide_backward_resilient,
     decide_forward,
     decide_forward_resilient,
 )
@@ -332,3 +334,53 @@ class TestDecideBackward:
             session_factory=mock_session_factory,
         )
         assert decision.should_execute is False
+
+
+class TestDecideBackwardResilient:
+    """Any-sport recent-games gate with a DB-failure fallback cadence."""
+
+    @pytest.mark.asyncio
+    async def test_runs_when_any_sport_needs_update(self, monkeypatch) -> None:
+        """Returns the first should_execute=True across sports."""
+
+        async def fake_backward(sport_key: str, **_kw) -> ScheduleDecision:
+            execute = sport_key == "baseball_mlb"
+            return ScheduleDecision(
+                should_execute=execute,
+                reason=f"{sport_key}",
+                next_execution=NOW + timedelta(hours=6 if execute else 12),
+                tier=None,
+            )
+
+        monkeypatch.setattr("odds_lambda.scheduling.decision.decide_backward", fake_backward)
+
+        decision = await decide_backward_resilient(
+            ["soccer_epl", "baseball_mlb"],
+            window=timedelta(days=3),
+            active_interval=6.0,
+            idle_interval=12.0,
+            now=NOW,
+        )
+        assert decision.should_execute is True
+        assert "baseball_mlb" in decision.reason
+
+    @pytest.mark.asyncio
+    async def test_db_failure_falls_back(self, monkeypatch) -> None:
+        """A recent-games query failure yields should_execute=True at db_fallback."""
+
+        async def boom(sport_key: str, **_kw) -> ScheduleDecision:
+            raise RuntimeError("DB connection refused")
+
+        monkeypatch.setattr("odds_lambda.scheduling.decision.decide_backward", boom)
+
+        decision = await decide_backward_resilient(
+            ["soccer_epl"],
+            window=timedelta(days=3),
+            active_interval=6.0,
+            idle_interval=12.0,
+            db_fallback=1.0,
+            now=NOW,
+        )
+        assert decision.should_execute is True
+        assert decision.tier is None
+        assert _hours_after(NOW, decision.next_execution) == 1.0

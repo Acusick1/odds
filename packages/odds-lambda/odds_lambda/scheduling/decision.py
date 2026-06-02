@@ -309,6 +309,55 @@ async def decide_backward(
     )
 
 
+async def decide_backward_resilient(
+    sport_keys: list[str],
+    *,
+    window: timedelta,
+    active_interval: float,
+    idle_interval: float,
+    db_fallback: float = 1.0,
+    statuses_needing_update: set[EventStatus] | None = None,
+    overnight: OvernightWindow | None = None,
+    now: datetime | None = None,
+    session_factory: SessionFactory | None = None,
+) -> ScheduleDecision:
+    """``decide_backward`` over one-or-more sports, resilient to query failure.
+
+    Executes (returns the first ``should_execute=True``) if *any* sport has a
+    recent game needing an update; otherwise idles. If the recent-games query
+    fails (DB unreachable), falls back to ``should_execute=True`` at the
+    ``db_fallback`` cadence so the self-scheduling chain survives a DB outage —
+    the same crash-survival guarantee :func:`decide_forward_resilient` gives the
+    forward jobs.
+    """
+    now = now or datetime.now(UTC)
+    try:
+        decision: ScheduleDecision | None = None
+        for sk in sport_keys:
+            decision = await decide_backward(
+                sk,
+                window=window,
+                active_interval=active_interval,
+                idle_interval=idle_interval,
+                statuses_needing_update=statuses_needing_update,
+                overnight=overnight,
+                now=now,
+                session_factory=session_factory,
+            )
+            if decision.should_execute:
+                return decision
+        assert decision is not None  # noqa: S101 — sport_keys non-empty by caller contract
+        return decision
+    except Exception as e:
+        logger.warning("recent_games_query_failed", error=str(e), exc_info=True)
+        return ScheduleDecision(
+            should_execute=True,
+            reason="recent-games query failed — db_fallback cadence",
+            next_execution=_next_time(now, db_fallback, overnight),
+            tier=None,
+        )
+
+
 def _classify(hours_until: float) -> FetchTier:
     """Classify hours-until-kickoff into a canonical ``FetchTier``.
 

@@ -18,7 +18,7 @@ from odds_core.database import async_session_maker
 from odds_core.models import EventStatus
 
 from odds_lambda.data_fetcher import TheOddsAPIClient
-from odds_lambda.scheduling.decision import ScheduleDecision, decide_backward
+from odds_lambda.scheduling.decision import ScheduleDecision, decide_backward_resilient
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
@@ -32,20 +32,17 @@ SCORES_IDLE_INTERVAL = 12.0
 
 
 async def _scores_decision(sports: list[str]) -> ScheduleDecision:
-    """Run if any configured sport has a recent game still lacking a final score."""
-    decision: ScheduleDecision | None = None
-    for sk in sports:
-        d = await decide_backward(
-            sk,
-            window=SCORES_WINDOW,
-            active_interval=SCORES_ACTIVE_INTERVAL,
-            idle_interval=SCORES_IDLE_INTERVAL,
-        )
-        if d.should_execute:
-            return d
-        decision = d
-    assert decision is not None  # noqa: S101 — sports is non-empty by caller contract
-    return decision
+    """Run if any configured sport has a recent game still lacking a final score.
+
+    Resilient to DB failure: a recent-games query error falls back to running at
+    the db_fallback cadence so the self-scheduling chain survives a DB outage.
+    """
+    return await decide_backward_resilient(
+        sports,
+        window=SCORES_WINDOW,
+        active_interval=SCORES_ACTIVE_INTERVAL,
+        idle_interval=SCORES_IDLE_INTERVAL,
+    )
 
 
 async def main(ctx: JobContext) -> None:
