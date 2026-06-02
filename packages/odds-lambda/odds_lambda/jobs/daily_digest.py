@@ -345,12 +345,19 @@ async def main(ctx: JobContext) -> None:
     """Main job entry point."""
     from odds_core.alerts import job_alert_context
 
+    from odds_lambda.scheduling.helpers import within_lead
     from odds_lambda.scheduling.jobs import make_compound_job_name
 
     sport = ctx.sport
     sport_key = sport or DEFAULT_SPORT_KEY
     lookback_hours = ctx.lookback_hours
     lookahead_hours = ctx.lookahead_hours
+
+    # Season gate: skip in the offseason when no fixture is within the lead.
+    lead_days = get_settings().scheduler.lead_days_for(sport_key)
+    if not await within_lead(sport_key, lead_days):
+        logger.info("daily_digest_season_gated", sport_key=sport_key, lead_days=lead_days)
+        return
 
     async with job_alert_context(make_compound_job_name("daily-digest", sport)):
         logger.info(

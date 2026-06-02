@@ -58,15 +58,13 @@ AGENT_RUN_LOG_KEEP = 50
 # payload) routinely exceeds it and would raise ``LimitOverrunError``.
 AGENT_STREAM_LINE_LIMIT = 8 * 1024 * 1024
 
-# Horizon for "no fixtures" classification (matches decide_forward lookahead).
-FIXTURE_HORIZON_DAYS = 7
-
 
 class ScheduleResult(NamedTuple):
     """Values computed by schedule_next(), reused by main() for overrides."""
 
     next_time: datetime
     compound_job_name: str
+    should_execute: bool
 
 
 def _preview_tool_input(d: dict[str, Any] | None, *, max_value_chars: int = 60) -> str | None:
@@ -266,9 +264,10 @@ async def schedule_next(sport: SportKey) -> ScheduleResult:
 
     Uses the unified decision engine to map fixture proximity to a wake
     interval (canonical FetchTier boundaries, agent ``CADENCE`` values) with
-    the sport's overnight suppression applied. The agent always wakes — the
-    decision's ``should_execute`` gate is ignored; only ``next_execution`` is
-    used.
+    the sport's overnight suppression applied. The returned ``should_execute``
+    is the season gate: ``False`` when the next fixture is beyond the lead
+    window (or absent), in which case the precise wake is scheduled and the
+    caller must skip launching the agent.
 
     This is the crash-safe pre-scheduling step — called both during bootstrap
     (without launching the agent) and at the start of a full agent run.
@@ -287,7 +286,7 @@ async def schedule_next(sport: SportKey) -> ScheduleResult:
         [sport],
         CADENCE,
         overnight=OVERNIGHT_WINDOWS[sport],
-        lookahead_days=FIXTURE_HORIZON_DAYS,
+        lookahead_days=settings.scheduler.lead_days_for(sport),
     )
     assert decision.next_execution is not None  # noqa: S101
     logger.info("agent_proximity", sport=sport, reason=decision.reason)
@@ -307,6 +306,7 @@ async def schedule_next(sport: SportKey) -> ScheduleResult:
     return ScheduleResult(
         next_time=decision.next_execution,
         compound_job_name=compound_job_name,
+        should_execute=decision.should_execute,
     )
 
 
@@ -321,6 +321,15 @@ async def main(ctx: JobContext) -> None:
 
     # --- Pre-schedule before work (crash-safe) ---
     result = await schedule_next(sport)
+
+    # --- Season gate: skip the agent run when no fixture is within the lead ---
+    if not result.should_execute:
+        logger.info(
+            "agent_run_season_gated",
+            sport=sport,
+            next_execution=result.next_time.isoformat(),
+        )
+        return
 
     # --- Run the agent ---
     exit_code = await _run_claude_agent(sport)

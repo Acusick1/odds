@@ -36,6 +36,9 @@ class TestSettings:
             assert settings.scheduler.backend == "local"
             assert settings.scheduler.dry_run is False
             assert settings.scheduler.lookahead_days == 7
+            assert settings.scheduler.season_lead_days == {}
+            # Default lead falls back to DEFAULT_SEASON_LEAD_DAYS for any sport.
+            assert settings.scheduler.lead_days_for("soccer_epl") == 7
             assert settings.scheduler.bootstrap_jobs == [
                 # "agent-run",
                 "fetch-oddsportal",
@@ -75,6 +78,19 @@ class TestSettings:
             assert settings.scheduler.lookahead_days == 14
             assert settings.data_quality.enable_validation is False
             assert settings.logging.level == "DEBUG"
+
+    def test_season_lead_days_per_sport_override(self):
+        """Per-sport season lead overrides the default; absent sports fall back."""
+        with patch.dict(
+            os.environ,
+            {"ODDS_API_KEY": "test_key", "DATABASE_URL": "postgresql://test:test@localhost/test"},
+            clear=True,
+        ):
+            from odds_core.config import SchedulerConfig
+
+            cfg = SchedulerConfig(season_lead_days={"soccer_epl": 14})
+            assert cfg.lead_days_for("soccer_epl") == 14
+            assert cfg.lead_days_for("baseball_mlb") == 7
 
     def test_settings_bookmakers(self):
         """Test bookmaker configuration."""

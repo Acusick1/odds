@@ -46,11 +46,20 @@ async def main(ctx: JobContext) -> None:
     """
     from odds_core.alerts import job_alert_context
 
+    from odds_lambda.scheduling.helpers import within_lead
+
     if ctx.sport is not None and ctx.sport != SPORT_KEY:
         raise ValueError(f"fetch-mlb-probables only supports {SPORT_KEY}, got sport={ctx.sport!r}")
 
     app_settings = get_settings()
     now = datetime.now(UTC)
+
+    # Season gate: skip in the offseason when no fixture is within the lead.
+    lead_days = app_settings.scheduler.lead_days_for(SPORT_KEY)
+    if not await within_lead(SPORT_KEY, lead_days, now=now):
+        logger.info("fetch_mlb_probables_season_gated", sport=SPORT_KEY, lead_days=lead_days)
+        return
+
     target_dates = dates_for_window(now, _LOOKAHEAD_HOURS)
 
     logger.info(
