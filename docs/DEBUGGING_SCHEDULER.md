@@ -150,7 +150,7 @@ Two Lambda functions handle jobs based on event payload:
 | `early` | 24-72h (1-3 days) | 24 hours | Line establishment |
 | `opening` | >72h (3+ days) | 48 hours | Initial line release |
 
-### Scheduling Algorithm (from `packages/odds-lambda/odds_lambda/scheduling/intelligence.py`)
+### Scheduling Algorithm (from `packages/odds-lambda/odds_lambda/scheduling/decision.py`)
 
 1. Find closest upcoming game in database
 2. Calculate hours until game starts
@@ -160,7 +160,7 @@ Two Lambda functions handle jobs based on event payload:
 
 **Key Files**:
 
-- `packages/odds-lambda/odds_lambda/scheduling/intelligence.py` - Decision logic
+- `packages/odds-lambda/odds_lambda/scheduling/decision.py` - Decision logic
 - `packages/odds-lambda/odds_lambda/fetch_tier.py` - Tier definitions and intervals
 - `packages/odds-lambda/odds_lambda/tier_utils.py` - Tier calculation functions
 - `packages/odds-lambda/odds_lambda/jobs/fetch_odds.py` - Fetch odds job implementation
@@ -329,7 +329,7 @@ aws logs filter-log-events \
 
 ## Related Files
 
-- `packages/odds-lambda/odds_lambda/scheduling/intelligence.py` - Scheduling decision logic
+- `packages/odds-lambda/odds_lambda/scheduling/decision.py` - Scheduling decision logic
 - `packages/odds-lambda/odds_lambda/scheduling/backends/aws.py` - EventBridge integration
 - `packages/odds-lambda/odds_lambda/jobs/fetch_odds.py` - Main fetch job
 - `packages/odds-lambda/odds_lambda/storage/writers.py` - Tier assignment during storage

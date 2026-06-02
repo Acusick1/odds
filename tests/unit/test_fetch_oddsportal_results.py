@@ -434,7 +434,7 @@ class TestMainSelfSchedules:
                 fetch_oddsportal_results, "process_results", side_effect=failing_process_results
             ),
             patch(
-                "odds_lambda.scheduling.backends.get_scheduler_backend",
+                "odds_lambda.scheduling.helpers.get_scheduler_backend",
                 return_value=mock_backend,
             ),
         ):
@@ -493,7 +493,7 @@ class TestMainSelfSchedules:
                 side_effect=failing_update_event_status,
             ),
             patch(
-                "odds_lambda.scheduling.backends.get_scheduler_backend",
+                "odds_lambda.scheduling.helpers.get_scheduler_backend",
                 return_value=mock_backend,
             ),
         ):

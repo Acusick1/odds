@@ -7,7 +7,7 @@ This test suite provides TWO complementary E2E tests:
    APScheduler executing jobs (using real-time scheduling, no time mocking)
 
 2. **test_job_self_scheduling_chain**: Tests the critical self-scheduling loop
-   (Job -> SchedulingIntelligence -> Backend) with time mocking for all tiers
+   (Job -> decide_forward -> Backend) with time mocking for all tiers
 
 Together these provide confidence the scheduler will work in production.
 """
@@ -63,7 +63,7 @@ async def _wrapped_fetch_odds(ctx: JobContext) -> None:
     with (
         patch("odds_lambda.jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
         patch("odds_lambda.jobs.fetch_odds.build_event_sync_service", return_value=mock_event_sync),
-        patch("odds_lambda.scheduling.intelligence.async_session_maker", _e2e_session_factory),
+        patch("odds_core.database.async_session_maker", _e2e_session_factory),
     ):
         _e2e_execution_happened["fetch_odds"] = True
         await _e2e_original_main(JobContext(sport="basketball_nba"))
@@ -233,11 +233,11 @@ async def test_scheduler_end_to_end(
 @pytest.mark.asyncio
 async def test_job_self_scheduling_chain(test_session, mock_session_factory):
     """
-    Test the self-scheduling chain: Job -> SchedulingIntelligence -> Backend.
+    Test the self-scheduling chain: Job -> decide_forward -> Backend.
 
     This verifies that:
     1. Job executes
-    2. SchedulingIntelligence determines next execution time based on tier
+    2. decide_forward determines next execution time based on tier
     3. Job calls backend.schedule_next_execution() with correct time
     4. Adaptive intervals work correctly (48h -> 24h -> 12h -> 3h -> 30min)
 
@@ -301,8 +301,8 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
             patch(
                 "odds_lambda.jobs.fetch_odds.build_event_sync_service", return_value=mock_event_sync
             ),
-            patch("odds_lambda.scheduling.intelligence.async_session_maker", mock_session_factory),
-            patch("odds_lambda.jobs.fetch_odds.get_scheduler_backend") as mock_backend_getter,
+            patch("odds_core.database.async_session_maker", mock_session_factory),
+            patch("odds_lambda.scheduling.helpers.get_scheduler_backend") as mock_backend_getter,
         ):
             mock_backend = AsyncMock()
             mock_backend.schedule_next_execution = mock_schedule_next
@@ -311,11 +311,13 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
 
             await fetch_odds.main(JobContext(sport="basketball_nba"))
 
-        assert len(scheduled_calls) == 1, f"Expected 1 schedule call for {tier_name}"
-        scheduled = scheduled_calls[0]
+        # fetch_odds pre-schedules then post-reschedules; both land on the same
+        # proximity-derived time under frozen clock + unchanged fixtures.
+        assert len(scheduled_calls) == 2, f"Expected 2 schedule calls for {tier_name}"
 
         expected_next_time = test_time + timedelta(hours=expected_hours)
-        assert scheduled["next_time"] == expected_next_time
+        for scheduled in scheduled_calls:
+            assert scheduled["next_time"] == expected_next_time
 
-        hours_ahead = (scheduled["next_time"] - test_time).total_seconds() / 3600
+        hours_ahead = (scheduled_calls[-1]["next_time"] - test_time).total_seconds() / 3600
         print(f"{tier_name}: Next run in {hours_ahead}h (tier interval={expected_hours}h)")

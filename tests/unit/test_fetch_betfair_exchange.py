@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 from odds_lambda.betfair.client import BetfairBook
 from odds_lambda.betfair.constants import SPORT_CONFIG
-from odds_lambda.jobs.fetch_betfair_exchange import SCHEDULE, _should_skip_book
+from odds_lambda.fetch_tier import FetchTier
+from odds_lambda.jobs.fetch_betfair_exchange import CADENCE, _should_skip_book
 
 
 def _book(
@@ -42,26 +43,22 @@ def _book(
     )
 
 
-class TestBetfairSchedule:
-    """Validate the BFE-specific ProximitySchedule values."""
+class TestBetfairCadence:
+    """Validate the BFE-specific cadence values (aggressive cheap-API polling)."""
 
-    def test_no_kickoff_returns_far(self) -> None:
-        assert SCHEDULE.interval_for(None) == SCHEDULE.far
+    def test_closing_band(self) -> None:
+        assert CADENCE.interval_for(FetchTier.CLOSING) == 0.25
 
-    def test_imminent_kickoff_returns_closing(self) -> None:
-        now = datetime(2026, 4, 25, 12, 0, tzinfo=UTC)
-        ko = now + timedelta(hours=2)  # < 3h => CLOSING
-        assert SCHEDULE.interval_for(ko, now=now) == SCHEDULE.closing
+    def test_pregame_band(self) -> None:
+        assert CADENCE.interval_for(FetchTier.PREGAME) == 0.5
 
-    def test_pregame_window(self) -> None:
-        now = datetime(2026, 4, 25, 12, 0, tzinfo=UTC)
-        ko = now + timedelta(hours=6)
-        assert SCHEDULE.interval_for(ko, now=now) == SCHEDULE.pregame
+    def test_far_bands_all_2h(self) -> None:
+        assert CADENCE.interval_for(FetchTier.SHARP) == 2.0
+        assert CADENCE.interval_for(FetchTier.EARLY) == 2.0
+        assert CADENCE.interval_for(FetchTier.OPENING) == 2.0
 
-    def test_far_out_kickoff(self) -> None:
-        now = datetime(2026, 4, 25, 12, 0, tzinfo=UTC)
-        ko = now + timedelta(hours=24)
-        assert SCHEDULE.interval_for(ko, now=now) == SCHEDULE.far
+    def test_no_game_band(self) -> None:
+        assert CADENCE.no_game == 2.0
 
 
 class TestShouldSkipBook:

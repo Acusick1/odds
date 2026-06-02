@@ -9,6 +9,7 @@ This job:
 """
 
 import asyncio
+from datetime import timedelta
 
 import structlog
 from odds_core.api_models import parse_scores_from_api_dict
@@ -17,12 +18,31 @@ from odds_core.database import async_session_maker
 from odds_core.models import EventStatus
 
 from odds_lambda.data_fetcher import TheOddsAPIClient
-from odds_lambda.scheduling.backends import get_scheduler_backend
-from odds_lambda.scheduling.intelligence import SchedulingIntelligence
+from odds_lambda.scheduling.decision import ScheduleDecision, decide_backward_resilient
+from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
+
+# Recent-games window and cadence (hours) for score backfill.
+SCORES_WINDOW = timedelta(days=3)
+SCORES_ACTIVE_INTERVAL = 6.0
+SCORES_IDLE_INTERVAL = 12.0
+
+
+async def _scores_decision(sports: list[str]) -> ScheduleDecision:
+    """Run if any configured sport has a recent game still lacking a final score.
+
+    Resilient to DB failure: a recent-games query error falls back to running at
+    the db_fallback cadence so the self-scheduling chain survives a DB outage.
+    """
+    return await decide_backward_resilient(
+        sports,
+        window=SCORES_WINDOW,
+        active_interval=SCORES_ACTIVE_INTERVAL,
+        idle_interval=SCORES_IDLE_INTERVAL,
+    )
 
 
 async def main(ctx: JobContext) -> None:
@@ -45,15 +65,35 @@ async def main(ctx: JobContext) -> None:
         sports=sports,
     )
 
-    # Smart execution gating
-    intelligence = SchedulingIntelligence(lookahead_days=app_settings.scheduler.lookahead_days)
-    decision = await intelligence.should_execute_scores()
+    if not sports:
+        logger.warning("fetch_scores_no_sports_configured")
+        return
 
     # Self-scheduling uses the sport-suffixed job name to match Terraform rules
     schedule_job_name = make_compound_job_name("fetch-scores", sport)
-    schedule_payload: dict[str, object] | None = None
-    if sport:
-        schedule_payload = {"sport": sport}
+
+    async def _schedule(decision: ScheduleDecision, *, label: str) -> None:
+        if not decision.next_execution:
+            return
+        try:
+            await self_schedule(
+                job_name=schedule_job_name,
+                next_time=decision.next_execution,
+                dry_run=app_settings.scheduler.dry_run,
+                sport=sport,
+                reason=f"{label}: {decision.reason}",
+            )
+        except Exception as e:
+            logger.error("fetch_scores_scheduling_failed", error=str(e), exc_info=True)
+            from odds_core.alerts import send_error
+
+            await send_error(f"Fetch scores scheduling failed: {type(e).__name__}: {str(e)}")
+
+    # Smart execution gating, scoped to this job's sport(s).
+    decision = await _scores_decision(sports)
+
+    # Pre-schedule before any work so the chain survives crashes.
+    await _schedule(decision, label="pre-schedule")
 
     if not decision.should_execute:
         logger.info(
@@ -61,16 +101,6 @@ async def main(ctx: JobContext) -> None:
             reason=decision.reason,
             next_check=decision.next_execution.isoformat() if decision.next_execution else None,
         )
-
-        # Still schedule next check even if not executing
-        if decision.next_execution:
-            backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
-            await backend.schedule_next_execution(
-                job_name=schedule_job_name,
-                next_time=decision.next_execution,
-                payload=schedule_payload,
-            )
-
         return
 
     # Execute fetch logic
@@ -90,27 +120,15 @@ async def main(ctx: JobContext) -> None:
 
         raise
 
-    # Self-schedule next execution
-    if decision.next_execution:
-        try:
-            backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
-            await backend.schedule_next_execution(
-                job_name=schedule_job_name,
-                next_time=decision.next_execution,
-                payload=schedule_payload,
-            )
-            logger.info(
-                "fetch_scores_next_scheduled",
-                next_time=decision.next_execution.isoformat(),
-                backend=backend.get_backend_name(),
-            )
-        except Exception as e:
-            logger.error("fetch_scores_scheduling_failed", error=str(e), exc_info=True)
-
-            # Send error alert
-            from odds_core.alerts import send_error
-
-            await send_error(f"Fetch scores scheduling failed: {type(e).__name__}: {str(e)}")
+    # Re-evaluate and reschedule after fetching scores.
+    post_decision = await _scores_decision(sports)
+    await _schedule(post_decision, label="post-fetch")
+    logger.info(
+        "fetch_scores_next_scheduled",
+        next_time=post_decision.next_execution.isoformat()
+        if post_decision.next_execution
+        else None,
+    )
 
 
 async def _fetch_and_update_scores(sports: list[str]) -> None:

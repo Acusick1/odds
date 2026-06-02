@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -30,19 +30,28 @@ from odds_lambda.oddsportal_adapter import (
     convert_upcoming_matches,
 )
 from odds_lambda.oddsportal_common import run_scraper_with_retry
-from odds_lambda.scheduling.helpers import (
-    ProximitySchedule,
-    apply_overnight_skip,
-    get_next_kickoff,
-    self_schedule,
+from odds_lambda.scheduling.decision import (
+    CadenceConfig,
+    ScheduleDecision,
+    decide_forward_resilient,
 )
+from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-# Proximity-based scheduling intervals (hours): browser scrape — moderate cadence.
-SCHEDULE = ProximitySchedule(closing=0.5, pregame=1.0, far=2.0, db_fallback=1.0)
+# Proximity-based polling cadence (hours): browser scrape — moderate cadence.
+# 12h+ to kickoff (and no-game) all poll at 2h, matching the previous "far" band.
+CADENCE = CadenceConfig(
+    closing=0.5,
+    pregame=1.0,
+    sharp=2.0,
+    early=2.0,
+    opening=2.0,
+    no_game=2.0,
+    db_fallback=1.0,
+)
 
 
 @dataclass
@@ -245,39 +254,31 @@ async def main(ctx: JobContext) -> None:
     # Combined job (no --sport) uses first spec's overnight window.
     # Production invokes per-sport; only relevant for local multi-league runs.
     primary_spec = specs[0]
+    overnight = (primary_spec.overnight_start_utc, primary_spec.overnight_resume_utc)
+    sport_keys = [s.sport_key for s in specs]
 
-    # Query DB for next kickoff to determine scheduling interval.
-    # On failure, fall back to 1h so we don't block on DB availability.
-    pre_interval = SCHEDULE.db_fallback
-    try:
-        next_kickoff = await get_next_kickoff(primary_spec.sport_key)
-        pre_interval = SCHEDULE.interval_for(next_kickoff)
-        logger.info(
-            "proximity_schedule",
-            next_kickoff=next_kickoff.isoformat() if next_kickoff else None,
-            interval_hours=pre_interval,
-        )
-    except Exception as e:
-        logger.warning("next_kickoff_query_failed", error=str(e), exc_info=True)
+    # This is a always-run scraper (no execution gate): we only use the
+    # decision's proximity-derived next_execution, not should_execute.
+    async def _reschedule(label: str) -> ScheduleDecision:
+        decision = await decide_forward_resilient(sport_keys, CADENCE, overnight=overnight)
+        assert decision.next_execution is not None  # noqa: S101
+        try:
+            await self_schedule(
+                job_name=compound_job_name,
+                next_time=decision.next_execution,
+                dry_run=settings.scheduler.dry_run,
+                sport=sport,
+                reason=f"{label}: {decision.reason}",
+            )
+        except Exception as e:
+            logger.error("fetch_oddsportal_scheduling_failed", error=str(e), exc_info=True)
+            if label == "pre-schedule":
+                raise
+        return decision
 
     # Pre-schedule before any browser work so the chain survives Lambda
     # timeouts or browser crashes.
-    pre_next_time = apply_overnight_skip(
-        datetime.now(UTC) + timedelta(hours=pre_interval),
-        overnight_start_utc=primary_spec.overnight_start_utc,
-        overnight_resume_utc=primary_spec.overnight_resume_utc,
-    )
-    try:
-        await self_schedule(
-            job_name=compound_job_name,
-            next_time=pre_next_time,
-            dry_run=settings.scheduler.dry_run,
-            sport=sport,
-            interval_hours=pre_interval,
-        )
-    except Exception as e:
-        logger.error("fetch_oddsportal_scheduling_failed", error=str(e), exc_info=True)
-        raise
+    await _reschedule("pre-schedule")
 
     async with job_alert_context(compound_job_name):
         logger.info(
@@ -348,28 +349,7 @@ async def main(ctx: JobContext) -> None:
     # On success, re-query next kickoff (scrape may have created new events)
     # and reschedule at the updated interval.
     if total_scraped > 0:
-        post_interval = SCHEDULE.db_fallback
-        try:
-            post_kickoff = await get_next_kickoff(primary_spec.sport_key)
-            post_interval = SCHEDULE.interval_for(post_kickoff)
-        except Exception as e:
-            logger.warning("post_scrape_kickoff_query_failed", error=str(e), exc_info=True)
-
-        success_next_time = apply_overnight_skip(
-            datetime.now(UTC) + timedelta(hours=post_interval),
-            overnight_start_utc=primary_spec.overnight_start_utc,
-            overnight_resume_utc=primary_spec.overnight_resume_utc,
-        )
-        try:
-            await self_schedule(
-                job_name=compound_job_name,
-                next_time=success_next_time,
-                dry_run=settings.scheduler.dry_run,
-                sport=sport,
-                interval_hours=post_interval,
-            )
-        except Exception as e:
-            logger.error("fetch_oddsportal_success_scheduling_failed", error=str(e), exc_info=True)
+        await _reschedule("post-scrape")
 
 
 if __name__ == "__main__":

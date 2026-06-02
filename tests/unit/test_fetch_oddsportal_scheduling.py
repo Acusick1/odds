@@ -9,52 +9,29 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from odds_lambda.fetch_tier import FetchTier
-from odds_lambda.jobs.fetch_oddsportal import SCHEDULE, main
+from odds_lambda.jobs.fetch_oddsportal import CADENCE, main
 from odds_lambda.scheduling.jobs import JobContext
 
 
-class TestIntervalForKickoff:
-    """Tests for the OddsPortal SCHEDULE proximity bands."""
+class TestCadenceBands:
+    """The OddsPortal cadence preserves the previous browser-scrape bands."""
 
-    def test_no_upcoming_games_returns_far_interval(self) -> None:
-        assert SCHEDULE.interval_for(None) == SCHEDULE.far
+    def test_closing_band(self) -> None:
+        assert CADENCE.interval_for(FetchTier.CLOSING) == 0.5
 
-    def test_game_within_closing_window(self) -> None:
-        now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
-        kickoff = now + timedelta(hours=1)
-        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.closing
+    def test_pregame_band(self) -> None:
+        assert CADENCE.interval_for(FetchTier.PREGAME) == 1.0
 
-    def test_game_at_closing_boundary(self) -> None:
-        now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
-        # Exactly at 3h boundary — should be pregame (< 3h is false)
-        kickoff = now + timedelta(hours=FetchTier.CLOSING.max_hours)
-        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.pregame
+    def test_far_bands_all_2h(self) -> None:
+        assert CADENCE.interval_for(FetchTier.SHARP) == 2.0
+        assert CADENCE.interval_for(FetchTier.EARLY) == 2.0
+        assert CADENCE.interval_for(FetchTier.OPENING) == 2.0
 
-    def test_game_just_under_closing_threshold(self) -> None:
-        now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
-        kickoff = now + timedelta(hours=2.99)
-        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.closing
+    def test_no_game_band(self) -> None:
+        assert CADENCE.no_game == 2.0
 
-    def test_game_in_pregame_window(self) -> None:
-        now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
-        kickoff = now + timedelta(hours=6)
-        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.pregame
-
-    def test_game_at_pregame_boundary(self) -> None:
-        now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
-        kickoff = now + timedelta(hours=FetchTier.PREGAME.max_hours)
-        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.far
-
-    def test_game_far_away(self) -> None:
-        now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
-        kickoff = now + timedelta(hours=24)
-        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.far
-
-    def test_game_already_started(self) -> None:
-        now = datetime(2026, 4, 7, 14, 0, tzinfo=UTC)
-        kickoff = now - timedelta(hours=1)
-        # Negative hours_until — should still return closing interval
-        assert SCHEDULE.interval_for(kickoff, now=now) == SCHEDULE.closing
+    def test_db_fallback(self) -> None:
+        assert CADENCE.db_fallback == 1.0
 
 
 class TestProximityScheduling:
@@ -92,7 +69,7 @@ class TestProximityScheduling:
             patch("odds_core.config.get_settings") as mock_settings,
             patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
             patch(
-                "odds_lambda.jobs.fetch_oddsportal.get_next_kickoff",
+                "odds_lambda.scheduling.decision.get_next_kickoff",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -122,7 +99,7 @@ class TestProximityScheduling:
             patch("odds_core.config.get_settings") as mock_settings,
             patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
             patch(
-                "odds_lambda.jobs.fetch_oddsportal.get_next_kickoff",
+                "odds_lambda.scheduling.decision.get_next_kickoff",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -162,7 +139,7 @@ class TestProximityScheduling:
             patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
             patch("odds_core.alerts.send_job_warning", new_callable=AsyncMock),
             patch(
-                "odds_lambda.jobs.fetch_oddsportal.get_next_kickoff",
+                "odds_lambda.scheduling.decision.get_next_kickoff",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -197,7 +174,7 @@ class TestProximityScheduling:
             patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
             patch("odds_core.alerts.send_job_warning", new_callable=AsyncMock),
             patch(
-                "odds_lambda.jobs.fetch_oddsportal.get_next_kickoff",
+                "odds_lambda.scheduling.decision.get_next_kickoff",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -225,12 +202,12 @@ class TestProximityScheduling:
             patch("odds_core.config.get_settings") as mock_settings,
             patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
             patch(
-                "odds_lambda.jobs.fetch_oddsportal.get_next_kickoff",
+                "odds_lambda.scheduling.decision.get_next_kickoff",
                 new_callable=AsyncMock,
                 side_effect=Exception("DB connection refused"),
             ),
             patch(
-                "odds_lambda.jobs.fetch_oddsportal.apply_overnight_skip",
+                "odds_lambda.scheduling.decision.apply_overnight_skip",
                 side_effect=lambda t, **kw: t,
             ),
         ):
@@ -248,7 +225,7 @@ class TestProximityScheduling:
         first_call = mock_backend.schedule_next_execution.call_args_list[0]
         scheduled_time = first_call.kwargs["next_time"]
         delta_hours = (scheduled_time - now).total_seconds() / 3600
-        assert 0.9 <= delta_hours <= SCHEDULE.db_fallback + 0.1
+        assert 0.9 <= delta_hours <= CADENCE.db_fallback + 0.1
 
     @pytest.mark.asyncio
     async def test_closing_game_schedules_30min(self) -> None:
@@ -269,12 +246,12 @@ class TestProximityScheduling:
             patch("odds_core.config.get_settings") as mock_settings,
             patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
             patch(
-                "odds_lambda.jobs.fetch_oddsportal.get_next_kickoff",
+                "odds_lambda.scheduling.decision.get_next_kickoff",
                 new_callable=AsyncMock,
                 return_value=kickoff,
             ),
             patch(
-                "odds_lambda.jobs.fetch_oddsportal.apply_overnight_skip",
+                "odds_lambda.scheduling.decision.apply_overnight_skip",
                 side_effect=lambda t, **kw: t,
             ),
         ):
@@ -313,12 +290,12 @@ class TestProximityScheduling:
             patch("odds_core.config.get_settings") as mock_settings,
             patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
             patch(
-                "odds_lambda.jobs.fetch_oddsportal.get_next_kickoff",
+                "odds_lambda.scheduling.decision.get_next_kickoff",
                 new_callable=AsyncMock,
                 return_value=kickoff,
             ),
             patch(
-                "odds_lambda.jobs.fetch_oddsportal.apply_overnight_skip",
+                "odds_lambda.scheduling.decision.apply_overnight_skip",
                 side_effect=lambda t, **kw: t,
             ),
         ):
