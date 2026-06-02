@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import structlog
 from odds_core.alerts import job_alert_context, send_job_warning
@@ -32,19 +32,30 @@ from odds_lambda.betfair import (
     resolve_teams,
 )
 from odds_lambda.betfair.cert_loader import resolve_cert_paths
-from odds_lambda.scheduling.helpers import (
-    ProximitySchedule,
-    get_next_kickoff,
-    self_schedule,
+from odds_lambda.scheduling.decision import (
+    OVERNIGHT_WINDOWS,
+    CadenceConfig,
+    ScheduleDecision,
+    decide_forward_resilient,
 )
+from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-# Proximity-based scheduling intervals (hours): cheap delayed API — poll
-# more aggressively than browser-driven fetch-oddsportal.
-SCHEDULE = ProximitySchedule(closing=0.25, pregame=0.5, far=2.0, db_fallback=1.0)
+# Proximity-based polling cadence (hours): cheap delayed API — poll more
+# aggressively than browser-driven fetch-oddsportal. 12h+ to kickoff (and
+# no-game) all poll at 2h, matching the previous "far" band.
+CADENCE = CadenceConfig(
+    closing=0.25,
+    pregame=0.5,
+    sharp=2.0,
+    early=2.0,
+    opening=2.0,
+    no_game=2.0,
+    db_fallback=1.0,
+)
 
 
 @dataclass
@@ -214,32 +225,33 @@ async def main(ctx: JobContext) -> None:
         return
 
     compound_job_name = make_compound_job_name("fetch-betfair-exchange", sport)
+    # Apply the overnight skip when a single sport is targeted (the production
+    # per-sport path). Combined local runs span sports with different windows,
+    # so no suppression is applied there.
+    overnight = OVERNIGHT_WINDOWS.get(target_sports[0]) if len(target_sports) == 1 else None
+
+    # Always-run fetcher (no execution gate): we only use the decision's
+    # proximity-derived next_execution, not should_execute.
+    async def _reschedule(label: str) -> ScheduleDecision:
+        decision = await decide_forward_resilient(target_sports, CADENCE, overnight=overnight)
+        assert decision.next_execution is not None  # noqa: S101
+        try:
+            await self_schedule(
+                job_name=compound_job_name,
+                next_time=decision.next_execution,
+                dry_run=settings.scheduler.dry_run,
+                sport=sport,
+                reason=f"{label}: {decision.reason}",
+            )
+        except Exception as e:
+            logger.error("betfair_schedule_failed", error=str(e), exc_info=True)
+            if label == "pre-schedule":
+                raise
+        return decision
 
     # Pre-schedule before doing the work, so a crash mid-fetch doesn't break
-    # the chain. Use the soonest kickoff across configured sports.
-    pre_interval = SCHEDULE.db_fallback
-    try:
-        soonest: datetime | None = None
-        for sk in target_sports:
-            ko = await get_next_kickoff(sk)
-            if ko is not None and (soonest is None or ko < soonest):
-                soonest = ko
-        pre_interval = SCHEDULE.interval_for(soonest)
-    except Exception as e:
-        logger.warning("betfair_next_kickoff_query_failed", error=str(e), exc_info=True)
-
-    pre_next_time = datetime.now(UTC) + timedelta(hours=pre_interval)
-    try:
-        await self_schedule(
-            job_name=compound_job_name,
-            next_time=pre_next_time,
-            dry_run=settings.scheduler.dry_run,
-            sport=sport,
-            interval_hours=pre_interval,
-        )
-    except Exception as e:
-        logger.error("betfair_pre_schedule_failed", error=str(e), exc_info=True)
-        raise
+    # the chain.
+    await _reschedule("pre-schedule")
 
     snapshot_time = datetime.now(UTC)
     all_stats: list[IngestionStats] = []
@@ -291,26 +303,4 @@ async def main(ctx: JobContext) -> None:
         )
 
     # Reschedule based on (possibly updated) next kickoff after fetch.
-    try:
-        soonest = None
-        for sk in target_sports:
-            ko = await get_next_kickoff(sk)
-            if ko is not None and (soonest is None or ko < soonest):
-                soonest = ko
-        post_interval = SCHEDULE.interval_for(soonest)
-    except Exception as e:
-        logger.warning("betfair_post_kickoff_query_failed", error=str(e), exc_info=True)
-        post_interval = pre_interval
-
-    post_next_time = datetime.now(UTC) + timedelta(hours=post_interval)
-    try:
-        await self_schedule(
-            job_name=compound_job_name,
-            next_time=post_next_time,
-            dry_run=settings.scheduler.dry_run,
-            sport=sport,
-            interval_hours=post_interval,
-            reason="post_fetch",
-        )
-    except Exception as e:
-        logger.error("betfair_post_schedule_failed", error=str(e), exc_info=True)
+    await _reschedule("post-fetch")

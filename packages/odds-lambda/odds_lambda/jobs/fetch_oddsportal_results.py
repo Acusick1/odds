@@ -31,6 +31,7 @@ from odds_lambda.oddsportal_common import (
     parse_match_date,
     run_scraper_with_retry,
 )
+from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
@@ -331,26 +332,20 @@ async def main(ctx: JobContext) -> None:
             await process_results(sport=sport)
     finally:
         # Self-schedule: run again tomorrow at 08:00 UTC, regardless of outcome.
+        # This is a once-a-day results sweep, not a proximity-driven fetch, so
+        # it intentionally uses a fixed wake time and does NOT apply the
+        # overnight skip (08:00 UTC is outside every configured overnight
+        # window anyway).
         now = datetime.now(UTC)
         tomorrow_8am = (now + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
 
-        schedule_payload: dict[str, object] | None = None
-        if sport:
-            schedule_payload = {"sport": sport}
-
         try:
-            from odds_lambda.scheduling.backends import get_scheduler_backend
-
-            backend = get_scheduler_backend(dry_run=settings.scheduler.dry_run)
-            await backend.schedule_next_execution(
+            await self_schedule(
                 job_name=schedule_job_name,
                 next_time=tomorrow_8am,
-                payload=schedule_payload,
-            )
-            logger.info(
-                "fetch_oddsportal_results_next_scheduled",
-                next_time=tomorrow_8am.isoformat(),
-                backend=backend.get_backend_name(),
+                dry_run=settings.scheduler.dry_run,
+                sport=sport,
+                reason="daily results sweep (fixed 08:00 UTC)",
             )
         except Exception as e:
             logger.error("fetch_oddsportal_results_scheduling_failed", error=str(e), exc_info=True)

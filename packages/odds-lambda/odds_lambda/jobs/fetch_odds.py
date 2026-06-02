@@ -9,6 +9,7 @@ This job:
 """
 
 import asyncio
+from datetime import datetime
 
 import structlog
 from odds_core.config import Settings, get_settings
@@ -16,11 +17,32 @@ from odds_core.config import Settings, get_settings
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.event_sync import EventSyncService
 from odds_lambda.ingestion import OddsIngestionService
-from odds_lambda.scheduling.backends import get_scheduler_backend
-from odds_lambda.scheduling.intelligence import SchedulingIntelligence
+from odds_lambda.scheduling.decision import CadenceConfig, ScheduleDecision, decide_forward
+from odds_lambda.scheduling.helpers import get_next_kickoff, self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 
 logger = structlog.get_logger()
+
+# Proximity-based polling cadence (hours) for the cheap /odds API. Matches the
+# canonical FetchTier intervals odds fetch has always used.
+CADENCE = CadenceConfig(
+    closing=0.5,
+    pregame=3.0,
+    sharp=12.0,
+    early=24.0,
+    opening=48.0,
+    no_game=24.0,
+)
+
+
+async def _soonest_kickoff(sports: list[str]) -> datetime | None:
+    """Earliest scheduled kickoff across the given sports (None if none)."""
+    soonest: datetime | None = None
+    for sk in sports:
+        ko = await get_next_kickoff(sk)
+        if ko is not None and (soonest is None or ko < soonest):
+            soonest = ko
+    return soonest
 
 
 def build_ingestion_service(client: TheOddsAPIClient, settings: Settings) -> OddsIngestionService:
@@ -54,6 +76,10 @@ async def main(ctx: JobContext) -> None:
         sports=sports,
     )
 
+    if not sports:
+        logger.warning("fetch_odds_no_sports_configured")
+        return
+
     # Sync upcoming events first (free, 0 quota units).
     # Failures here should not block odds ingestion.
     try:
@@ -71,15 +97,39 @@ async def main(ctx: JobContext) -> None:
     except Exception as e:
         logger.warning("event_sync_failed", error=str(e), exc_info=True)
 
-    # Smart execution gating
-    intelligence = SchedulingIntelligence(lookahead_days=app_settings.scheduler.lookahead_days)
-    decision = await intelligence.should_execute_fetch()
-
     # Self-scheduling uses the sport-suffixed job name to match Terraform rules
     schedule_job_name = make_compound_job_name("fetch-odds", sport)
-    schedule_payload: dict[str, object] | None = None
-    if sport:
-        schedule_payload = {"sport": sport}
+
+    async def _schedule(decision: ScheduleDecision, *, label: str) -> None:
+        if not decision.next_execution:
+            return
+        try:
+            await self_schedule(
+                job_name=schedule_job_name,
+                next_time=decision.next_execution,
+                dry_run=app_settings.scheduler.dry_run,
+                sport=sport,
+                interval_hours=None,
+                reason=f"{label}: {decision.reason}",
+            )
+        except Exception as e:
+            logger.error("fetch_odds_scheduling_failed", error=str(e), exc_info=True)
+            from odds_core.alerts import send_error
+
+            await send_error(f"Fetch odds scheduling failed: {type(e).__name__}: {str(e)}")
+
+    # Smart execution gating, scoped to this job's sport(s) — fixes the prior
+    # all-sports bug where another sport's fixtures kept this job alive.
+    gate_kickoff = await _soonest_kickoff(sports)
+    decision = await decide_forward(
+        sports[0],
+        CADENCE,
+        lookahead_days=app_settings.scheduler.lookahead_days,
+        next_kickoff=gate_kickoff,
+    )
+
+    # Pre-schedule before any work so the chain survives crashes.
+    await _schedule(decision, label="pre-schedule")
 
     if not decision.should_execute:
         logger.info(
@@ -87,16 +137,6 @@ async def main(ctx: JobContext) -> None:
             reason=decision.reason,
             next_check=decision.next_execution.isoformat() if decision.next_execution else None,
         )
-
-        # Still schedule next check even if not executing
-        if decision.next_execution:
-            backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
-            await backend.schedule_next_execution(
-                job_name=schedule_job_name,
-                next_time=decision.next_execution,
-                payload=schedule_payload,
-            )
-
         return
 
     # Execute fetch logic
@@ -184,33 +224,26 @@ async def main(ctx: JobContext) -> None:
 
         await send_critical(f"🚨 Fetch odds job failed: {type(e).__name__}: {str(e)}")
 
-        # Don't schedule next run if we failed - let manual intervention happen
+        # Pre-schedule already ran, so the chain survives. Re-raise for visibility.
         raise
 
-    # Self-schedule next execution
-    if decision.next_execution:
-        try:
-            backend = get_scheduler_backend(dry_run=app_settings.scheduler.dry_run)
-            await backend.schedule_next_execution(
-                job_name=schedule_job_name,
-                next_time=decision.next_execution,
-                payload=schedule_payload,
-            )
-            logger.info(
-                "fetch_odds_next_scheduled",
-                next_time=decision.next_execution.isoformat(),
-                backend=backend.get_backend_name(),
-                tier=decision.tier.value if decision.tier else None,
-            )
-        except Exception as e:
-            logger.error("fetch_odds_scheduling_failed", error=str(e), exc_info=True)
-
-            # Send error alert
-            from odds_core.alerts import send_error
-
-            await send_error(f"Fetch odds scheduling failed: {type(e).__name__}: {str(e)}")
-
-            # Don't fail the job if scheduling fails - the fetch itself succeeded
+    # Re-query and reschedule — ingestion may have created new events that move
+    # the proximity tier.
+    post_kickoff = await _soonest_kickoff(sports)
+    post_decision = await decide_forward(
+        sports[0],
+        CADENCE,
+        lookahead_days=app_settings.scheduler.lookahead_days,
+        next_kickoff=post_kickoff,
+    )
+    await _schedule(post_decision, label="post-fetch")
+    logger.info(
+        "fetch_odds_next_scheduled",
+        next_time=post_decision.next_execution.isoformat()
+        if post_decision.next_execution
+        else None,
+        tier=post_decision.tier.value if post_decision.tier else None,
+    )
 
 
 if __name__ == "__main__":

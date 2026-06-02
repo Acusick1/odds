@@ -1,15 +1,16 @@
 """Run the betting agent and self-schedule based on fixture proximity.
 
-Scheduling strategy: query DB for next kickoff, compute wake interval from
-proximity tiers, pre-schedule before launching the agent subprocess (survives
+Scheduling strategy: query DB for next kickoff, compute the wake interval via
+the unified decision engine (proximity → cadence on canonical FetchTier
+boundaries), pre-schedule before launching the agent subprocess (survives
 crashes). After the agent exits, check the agent_wakeups table for an
 agent-requested override and reschedule if it's sooner.
 
-Wake interval tiers:
-  > 48h to KO   -> 24h  (far out)
-  24-48h        -> 12h  (research window opening)
-  6-24h         ->  4h  (active research)
-  < 6h          ->  1h  (lineups dropping, final decisions)
+Wake cadence (canonical FetchTier boundaries, see ``CADENCE`` below):
+  72h+ to KO    -> 24h  (far out)
+  24-72h        -> 12h  (research window opening)
+  3-24h         ->  4h  (active research)
+  < 3h          ->  1h  (lineups dropping, final decisions)
   no fixtures   -> 12h  (off-season check-in)
 """
 
@@ -18,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -26,25 +27,25 @@ import structlog
 from odds_core.config import get_settings
 from odds_core.sports import SportKey
 
-from odds_lambda.scheduling.helpers import apply_overnight_skip, get_next_kickoff, self_schedule
+from odds_lambda.scheduling.decision import (
+    OVERNIGHT_WINDOWS,
+    CadenceConfig,
+    decide_forward_resilient,
+)
+from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 
 logger = structlog.get_logger()
 
-# Wake interval tiers (hours)
-TIER_FAR_HOURS = 24.0  # > 48h to KO
-TIER_RESEARCH_HOURS = 12.0  # 24-48h to KO
-TIER_ACTIVE_HOURS = 4.0  # 6-24h to KO
-TIER_LINEUP_HOURS = 1.0  # < 6h to KO
-TIER_NO_FIXTURES_HOURS = 12.0  # no fixtures within 7 days
-
-# Overnight suppression windows (start_utc, resume_utc) per sport
-# EPL: last KO ~20:00 UTC, suppress 22:00-06:00
-# MLB: last pitch ~04:00 UTC, suppress 06:00-14:00
-OVERNIGHT_WINDOWS: dict[SportKey, tuple[int, int]] = {
-    "soccer_epl": (22, 6),
-    "baseball_mlb": (6, 14),
-}
+# Wake cadence (hours) keyed by canonical FetchTier proximity bands.
+CADENCE = CadenceConfig(
+    closing=1.0,  # < 3h to KO — lineups dropping, final decisions
+    pregame=4.0,  # 3-12h
+    sharp=4.0,  # 12-24h — active research
+    early=12.0,  # 24-72h — research window opening
+    opening=24.0,  # 72h+ — far out
+    no_game=12.0,  # no fixtures within lookahead — off-season check-in
+)
 
 # Agent subprocess limits
 AGENT_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
@@ -57,7 +58,7 @@ AGENT_RUN_LOG_KEEP = 50
 # payload) routinely exceeds it and would raise ``LimitOverrunError``.
 AGENT_STREAM_LINE_LIMIT = 8 * 1024 * 1024
 
-# Horizon for "no fixtures" classification
+# Horizon for "no fixtures" classification (matches decide_forward lookahead).
 FIXTURE_HORIZON_DAYS = 7
 
 
@@ -65,23 +66,7 @@ class ScheduleResult(NamedTuple):
     """Values computed by schedule_next(), reused by main() for overrides."""
 
     next_time: datetime
-    hours_until_ko: float | None
     compound_job_name: str
-    overnight_start_utc: int
-    overnight_resume_utc: int
-
-
-def _compute_wake_interval(hours_until_ko: float | None) -> float:
-    """Return wake interval in hours based on fixture proximity tier."""
-    if hours_until_ko is None:
-        return TIER_NO_FIXTURES_HOURS
-    if hours_until_ko > 48:
-        return TIER_FAR_HOURS
-    if hours_until_ko > 24:
-        return TIER_RESEARCH_HOURS
-    if hours_until_ko > 6:
-        return TIER_ACTIVE_HOURS
-    return TIER_LINEUP_HOURS
 
 
 def _preview_tool_input(d: dict[str, Any] | None, *, max_value_chars: int = 60) -> str | None:
@@ -279,8 +264,11 @@ async def _check_agent_requested_wakeup(sport_key: SportKey) -> datetime | None:
 async def schedule_next(sport: SportKey) -> ScheduleResult:
     """Compute and schedule the next agent wake-up for a sport.
 
-    Queries the DB for the next kickoff, computes the wake interval from
-    proximity tiers, and schedules via self_schedule.
+    Uses the unified decision engine to map fixture proximity to a wake
+    interval (canonical FetchTier boundaries, agent ``CADENCE`` values) with
+    the sport's overnight suppression applied. The agent always wakes — the
+    decision's ``should_execute`` gate is ignored; only ``next_execution`` is
+    used.
 
     This is the crash-safe pre-scheduling step — called both during bootstrap
     (without launching the agent) and at the start of a full agent run.
@@ -294,50 +282,31 @@ async def schedule_next(sport: SportKey) -> ScheduleResult:
 
     settings = get_settings()
     compound_job_name = make_compound_job_name("agent-run", sport)
-    overnight_start_utc, overnight_resume_utc = OVERNIGHT_WINDOWS[sport]
 
-    # --- Determine default wake interval from fixture proximity ---
-    hours_until_ko: float | None = None
-    try:
-        next_kickoff = await get_next_kickoff(sport)
-        if next_kickoff is not None:
-            hours_until_ko = (next_kickoff - datetime.now(UTC)).total_seconds() / 3600
-        logger.info(
-            "agent_proximity",
-            sport=sport,
-            next_kickoff=next_kickoff.isoformat() if next_kickoff else None,
-            hours_until_ko=round(hours_until_ko, 2) if hours_until_ko is not None else None,
-        )
-    except Exception as e:
-        logger.warning("agent_kickoff_query_failed", error=str(e), exc_info=True)
-
-    default_interval = _compute_wake_interval(hours_until_ko)
-
-    # --- Schedule next wake-up ---
-    default_next_time = apply_overnight_skip(
-        datetime.now(UTC) + timedelta(hours=default_interval),
-        overnight_start_utc=overnight_start_utc,
-        overnight_resume_utc=overnight_resume_utc,
+    decision = await decide_forward_resilient(
+        [sport],
+        CADENCE,
+        overnight=OVERNIGHT_WINDOWS[sport],
+        lookahead_days=FIXTURE_HORIZON_DAYS,
     )
+    assert decision.next_execution is not None  # noqa: S101
+    logger.info("agent_proximity", sport=sport, reason=decision.reason)
+
     try:
         await self_schedule(
             job_name=compound_job_name,
-            next_time=default_next_time,
+            next_time=decision.next_execution,
             dry_run=settings.scheduler.dry_run,
             sport=sport,
-            interval_hours=default_interval,
-            reason="pre-schedule (default tier)",
+            reason=f"pre-schedule: {decision.reason}",
         )
     except Exception as e:
         logger.error("agent_run_preschedule_failed", error=str(e), exc_info=True)
         raise
 
     return ScheduleResult(
-        next_time=default_next_time,
-        hours_until_ko=hours_until_ko,
+        next_time=decision.next_execution,
         compound_job_name=compound_job_name,
-        overnight_start_utc=overnight_start_utc,
-        overnight_resume_utc=overnight_resume_utc,
     )
 
 

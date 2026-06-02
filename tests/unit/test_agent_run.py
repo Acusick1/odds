@@ -8,14 +8,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from odds_lambda.jobs.agent_run import (
     OVERNIGHT_WINDOWS,
-    TIER_ACTIVE_HOURS,
-    TIER_FAR_HOURS,
-    TIER_LINEUP_HOURS,
-    TIER_NO_FIXTURES_HOURS,
-    TIER_RESEARCH_HOURS,
     ScheduleResult,
     _build_agent_subprocess_env,
-    _compute_wake_interval,
     _log_stream_message,
     _preview_tool_input,
     main,
@@ -23,37 +17,9 @@ from odds_lambda.jobs.agent_run import (
 )
 from odds_lambda.scheduling.jobs import JobContext
 
-
-class TestComputeWakeInterval:
-    """Tests for fixture-proximity wake interval tiers."""
-
-    def test_no_fixtures_returns_no_fixtures_tier(self) -> None:
-        assert _compute_wake_interval(None) == TIER_NO_FIXTURES_HOURS
-
-    def test_far_out_over_48h(self) -> None:
-        assert _compute_wake_interval(72.0) == TIER_FAR_HOURS
-
-    def test_boundary_exactly_48h(self) -> None:
-        # > 48 is false at exactly 48, falls to next tier
-        assert _compute_wake_interval(48.0) == TIER_RESEARCH_HOURS
-
-    def test_research_window_24_to_48h(self) -> None:
-        assert _compute_wake_interval(36.0) == TIER_RESEARCH_HOURS
-
-    def test_boundary_exactly_24h(self) -> None:
-        assert _compute_wake_interval(24.0) == TIER_ACTIVE_HOURS
-
-    def test_active_research_6_to_24h(self) -> None:
-        assert _compute_wake_interval(12.0) == TIER_ACTIVE_HOURS
-
-    def test_boundary_exactly_6h(self) -> None:
-        assert _compute_wake_interval(6.0) == TIER_LINEUP_HOURS
-
-    def test_lineup_window_under_6h(self) -> None:
-        assert _compute_wake_interval(3.0) == TIER_LINEUP_HOURS
-
-    def test_very_close_to_ko_still_runs(self) -> None:
-        assert _compute_wake_interval(0.5) == TIER_LINEUP_HOURS
+# schedule_next delegates proximity computation to the unified decision engine;
+# patch the kickoff query where the engine imports it.
+_KICKOFF_PATCH = "odds_lambda.scheduling.decision.get_next_kickoff"
 
 
 class TestMainNoSport:
@@ -63,7 +29,7 @@ class TestMainNoSport:
     async def test_no_sport_returns_early(self) -> None:
         ctx = JobContext(sport=None)
         # Should not raise, just log error and return
-        with patch("odds_lambda.jobs.agent_run.get_next_kickoff") as mock_kickoff:
+        with patch(_KICKOFF_PATCH) as mock_kickoff:
             await main(ctx)
             mock_kickoff.assert_not_called()
 
@@ -84,7 +50,7 @@ class TestMainOrchestration:
             return 0
 
         with (
-            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=mock_schedule),
             patch("odds_lambda.jobs.agent_run._run_claude_agent", side_effect=mock_run),
             patch(
@@ -110,7 +76,7 @@ class TestMainOrchestration:
         override_time = datetime.now(UTC) + timedelta(hours=2)
 
         with (
-            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
             patch(
                 "odds_lambda.jobs.agent_run._run_claude_agent",
@@ -142,7 +108,7 @@ class TestMainOrchestration:
         past_time = datetime.now(UTC) - timedelta(hours=1)
 
         with (
-            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
             patch(
                 "odds_lambda.jobs.agent_run._run_claude_agent",
@@ -161,7 +127,7 @@ class TestMainOrchestration:
 
         # Only the pre-schedule call, no override
         assert len(schedule_calls) == 1
-        assert schedule_calls[0]["reason"] == "pre-schedule (default tier)"
+        assert schedule_calls[0]["reason"].startswith("pre-schedule")
 
     @pytest.mark.asyncio
     async def test_agent_override_later_than_default_applied(self) -> None:
@@ -175,7 +141,7 @@ class TestMainOrchestration:
         override_time = datetime.now(UTC) + timedelta(hours=20)
 
         with (
-            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
             patch(
                 "odds_lambda.jobs.agent_run._run_claude_agent",
@@ -220,11 +186,12 @@ class TestOvernightWindowPerSport:
 
         # Set now to a time where default interval lands at 08:00 UTC
         fake_now = datetime(2026, 7, 15, 4, 0, tzinfo=UTC)
-        # 4h active tier -> wake at 08:00 UTC, inside MLB window (06-14)
+        # PREGAME tier (10h to KO) -> 4h interval -> wake at 08:00 UTC,
+        # inside MLB window (05-14)
         next_ko = fake_now + timedelta(hours=10)
 
         with (
-            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
             patch(
                 "odds_lambda.jobs.agent_run._run_claude_agent",
@@ -237,7 +204,7 @@ class TestOvernightWindowPerSport:
                 return_value=None,
             ),
             patch("odds_core.config.get_settings"),
-            patch("odds_lambda.jobs.agent_run.datetime") as mock_dt,
+            patch("odds_lambda.scheduling.decision.datetime") as mock_dt,
         ):
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
@@ -262,7 +229,7 @@ class TestOvernightWindowPerSport:
         next_ko = fake_now + timedelta(hours=10)
 
         with (
-            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
             patch(
                 "odds_lambda.jobs.agent_run._run_claude_agent",
@@ -275,7 +242,7 @@ class TestOvernightWindowPerSport:
                 return_value=None,
             ),
             patch("odds_core.config.get_settings"),
-            patch("odds_lambda.jobs.agent_run.datetime") as mock_dt,
+            patch("odds_lambda.scheduling.decision.datetime") as mock_dt,
         ):
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
@@ -299,11 +266,11 @@ class TestScheduleNext:
 
     @pytest.mark.asyncio
     async def test_returns_schedule_result_with_kickoff(self) -> None:
-        """schedule_next() returns ScheduleResult with correct hours_until_ko."""
+        """schedule_next() returns a ScheduleResult and schedules once."""
         next_ko = datetime.now(UTC) + timedelta(hours=30)
 
         with (
-            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
+            patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", new_callable=AsyncMock) as sched,
             patch("odds_core.config.get_settings"),
         ):
@@ -311,24 +278,23 @@ class TestScheduleNext:
             result = await schedule_next("soccer_epl")
 
         assert isinstance(result, ScheduleResult)
-        assert result.hours_until_ko is not None
-        assert 29.9 < result.hours_until_ko < 30.1
         assert result.compound_job_name == "agent-run-epl"
-        assert result.overnight_start_utc == 22
-        assert result.overnight_resume_utc == 6
+        assert result.next_time is not None
         sched.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_returns_none_hours_when_no_fixtures(self) -> None:
+    async def test_schedules_off_season_checkin_when_no_fixtures(self) -> None:
+        """With no fixtures, schedule_next still schedules an off-season check-in."""
         with (
-            patch("odds_lambda.jobs.agent_run.get_next_kickoff", new_callable=AsyncMock) as mk,
-            patch("odds_lambda.jobs.agent_run.self_schedule", new_callable=AsyncMock),
+            patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
+            patch("odds_lambda.jobs.agent_run.self_schedule", new_callable=AsyncMock) as sched,
             patch("odds_core.config.get_settings"),
         ):
             mk.return_value = None
             result = await schedule_next("soccer_epl")
 
-        assert result.hours_until_ko is None
+        assert result.next_time is not None
+        sched.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_unknown_sport_raises_valueerror(self) -> None:
