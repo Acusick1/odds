@@ -9,7 +9,6 @@ This job:
 """
 
 import asyncio
-from datetime import datetime
 
 import structlog
 from odds_core.config import Settings, get_settings
@@ -17,8 +16,12 @@ from odds_core.config import Settings, get_settings
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.event_sync import EventSyncService
 from odds_lambda.ingestion import OddsIngestionService
-from odds_lambda.scheduling.decision import CadenceConfig, ScheduleDecision, decide_forward
-from odds_lambda.scheduling.helpers import get_next_kickoff, self_schedule
+from odds_lambda.scheduling.decision import (
+    CadenceConfig,
+    ScheduleDecision,
+    decide_forward_resilient,
+)
+from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 
 logger = structlog.get_logger()
@@ -33,16 +36,6 @@ CADENCE = CadenceConfig(
     opening=48.0,
     no_game=24.0,
 )
-
-
-async def _soonest_kickoff(sports: list[str]) -> datetime | None:
-    """Earliest scheduled kickoff across the given sports (None if none)."""
-    soonest: datetime | None = None
-    for sk in sports:
-        ko = await get_next_kickoff(sk)
-        if ko is not None and (soonest is None or ko < soonest):
-            soonest = ko
-    return soonest
 
 
 def build_ingestion_service(client: TheOddsAPIClient, settings: Settings) -> OddsIngestionService:
@@ -119,13 +112,14 @@ async def main(ctx: JobContext) -> None:
             await send_error(f"Fetch odds scheduling failed: {type(e).__name__}: {str(e)}")
 
     # Smart execution gating, scoped to this job's sport(s) — fixes the prior
-    # all-sports bug where another sport's fixtures kept this job alive.
-    gate_kickoff = await _soonest_kickoff(sports)
-    decision = await decide_forward(
-        sports[0],
+    # all-sports bug where another sport's fixtures kept this job alive. The
+    # resilient path keys off the soonest kickoff across this job's sports and
+    # falls back to db_fallback cadence (should_execute=True, burning one cheap
+    # /odds call) if the kickoff query fails, so the chain never breaks.
+    decision = await decide_forward_resilient(
+        sports,
         CADENCE,
         lookahead_days=app_settings.scheduler.lookahead_days,
-        next_kickoff=gate_kickoff,
     )
 
     # Pre-schedule before any work so the chain survives crashes.
@@ -229,12 +223,10 @@ async def main(ctx: JobContext) -> None:
 
     # Re-query and reschedule — ingestion may have created new events that move
     # the proximity tier.
-    post_kickoff = await _soonest_kickoff(sports)
-    post_decision = await decide_forward(
-        sports[0],
+    post_decision = await decide_forward_resilient(
+        sports,
         CADENCE,
         lookahead_days=app_settings.scheduler.lookahead_days,
-        next_kickoff=post_kickoff,
     )
     await _schedule(post_decision, label="post-fetch")
     logger.info(

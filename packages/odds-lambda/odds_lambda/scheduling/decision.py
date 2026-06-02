@@ -284,8 +284,12 @@ async def decide_backward(
 def _classify(hours_until: float) -> FetchTier:
     """Classify hours-until-kickoff into a canonical ``FetchTier``.
 
-    Mirrors ``tier_utils.calculate_tier`` but uses ``FetchTier.max_hours``
-    boundaries directly so the canonical thresholds live in one place.
+    Reads the boundaries straight off ``FetchTier.max_hours`` so the canonical
+    thresholds live in one place, and applies the strict ``<`` comparison its
+    contract documents (``hours_before < tier.max_hours``). A game exactly on a
+    boundary (e.g. 3.0h) therefore falls into the *next* tier up — not the tier
+    whose ``max_hours`` it equals. This differs from ``tier_utils.calculate_tier``,
+    which uses ``<=`` and so disagrees at exact boundaries.
     """
     if hours_until < 0:
         return FetchTier.IN_PLAY

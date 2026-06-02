@@ -149,13 +149,18 @@ Centralized mapping of job names to async entry points. Modules are lazy-importe
 
 ## Intelligent Scheduling System
 
-`packages/odds-lambda/odds_lambda/scheduling/intelligence.py`
+`packages/odds-lambda/odds_lambda/scheduling/decision.py`
 
-Game-aware scheduling that adapts fetch frequency based on game proximity.
+Game-aware scheduling that adapts fetch frequency based on game proximity. A
+single, sport-scoped decision engine owns the mapping from proximity to polling
+cadence plus the run/skip gate. `decide_forward` keys off the next upcoming game
+(`decide_forward_resilient` adds a DB-failure fallback cadence so the
+self-scheduling chain survives a kickoff-query failure); `decide_backward` keys
+off recent games for scores and status-update jobs.
 
 **Key Features:**
 - Automatically discovers upcoming games from API
-- Adjusts frequency as games approach using tiered intervals
+- Adjusts frequency as games approach using tiered intervals (`CadenceConfig`)
 - No fetching during off-season
 - Self-scheduling pattern for serverless deployment
 

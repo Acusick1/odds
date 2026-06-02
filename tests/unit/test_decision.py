@@ -94,6 +94,33 @@ class TestDecideForward:
         assert _hours_after(NOW, decision.next_execution) == interval
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("hours_until", "tier", "interval"),
+        [
+            # Exactly on a boundary: strict ``<`` means the game falls into the
+            # NEXT tier up, not the tier whose ``max_hours`` it equals. This is
+            # where _classify intentionally differs from calculate_tier (``<=``).
+            (0.0, FetchTier.CLOSING, 0.5),  # IN_PLAY is only < 0
+            (3.0, FetchTier.PREGAME, 3.0),  # not CLOSING (max 3.0)
+            (12.0, FetchTier.SHARP, 12.0),  # not PREGAME (max 12.0)
+            (24.0, FetchTier.EARLY, 24.0),  # not SHARP (max 24.0)
+            (72.0, FetchTier.OPENING, 48.0),  # not EARLY (max 72.0)
+        ],
+    )
+    async def test_tier_boundary_uses_strict_less_than(
+        self, hours_until: float, tier: FetchTier, interval: float
+    ) -> None:
+        decision = await decide_forward(
+            "soccer_epl",
+            CADENCE,
+            now=NOW,
+            lookahead_days=14,
+            next_kickoff=NOW + timedelta(hours=hours_until),
+        )
+        assert decision.tier == tier
+        assert _hours_after(NOW, decision.next_execution) == interval
+
+    @pytest.mark.asyncio
     async def test_overnight_skip_applied(self) -> None:
         # 23:00 UTC + 3h = 02:00, inside EPL window 22-06 -> pushed to 06:00.
         late = datetime(2026, 6, 2, 23, 0, tzinfo=UTC)
