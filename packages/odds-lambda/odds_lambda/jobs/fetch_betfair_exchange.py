@@ -260,10 +260,12 @@ async def main(ctx: JobContext) -> None:
 
     # Season gate: no fixture within the lead window — skip the Betfair login/fetch.
     if not decision.should_execute:
+        next_execution = decision.next_execution
+        assert next_execution is not None  # noqa: S101
         logger.info(
             "betfair_season_gated",
             sport=sport,
-            next_execution=decision.next_execution.isoformat(),
+            next_execution=next_execution.isoformat(),
             reason=decision.reason,
         )
         return

@@ -287,10 +287,12 @@ async def main(ctx: JobContext) -> None:
 
     # Season gate: no fixture within the lead window — skip the 2 GB browser run.
     if not decision.should_execute:
+        next_execution = decision.next_execution
+        assert next_execution is not None  # noqa: S101
         logger.info(
             "fetch_oddsportal_season_gated",
             sport=sport,
-            next_execution=decision.next_execution.isoformat(),
+            next_execution=next_execution.isoformat(),
             reason=decision.reason,
         )
         return

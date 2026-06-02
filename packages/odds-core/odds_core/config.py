@@ -112,7 +112,7 @@ class SchedulerConfig(BaseSettings):
         description="Jobs to bootstrap when starting the local scheduler",
     )
 
-    def lead_days_for(self, sport_key: SportKey | str) -> int:
+    def lead_days_for(self, sport_key: SportKey) -> int:
         """Return the season-gate lead (days) for a sport, with default fallback."""
         return self.season_lead_days.get(sport_key, DEFAULT_SEASON_LEAD_DAYS)
 
