@@ -90,14 +90,8 @@ locals {
     # mlb = { sport_key = "baseball_mlb", scraper = false }
   }
 
-  # Jobs that run once per sport (scheduler Lambda).
-  # ``fetch-betfair-exchange`` is gated on ``var.betfair_enabled`` — the job
-  # self-schedules at the end of each run, so the dynamic-rule pattern fits
-  # without introducing a new fixed-schedule entry.
-  per_sport_scheduler_jobs = concat(
-    ["fetch-odds", "fetch-scores"],
-    var.betfair_enabled ? ["fetch-betfair-exchange"] : [],
-  )
+  # Jobs that run once per sport (scheduler Lambda)
+  per_sport_scheduler_jobs = ["fetch-odds", "fetch-scores"]
 
   # Jobs that run once per sport (scraper Lambda)
   per_sport_scraper_jobs = ["fetch-oddsportal", "fetch-oddsportal-results"]
@@ -106,6 +100,15 @@ locals {
   global_jobs = ["update-status", "check-health"]
 
   polymarket_jobs = var.enable_polymarket ? ["fetch-polymarket"] : []
+
+  # Betfair Exchange ingestion sport scope. Decoupled from `sport_configs`
+  # because BFE supports its own sport set (see odds_lambda.betfair.SPORT_CONFIG)
+  # which is not necessarily the same as the Odds-API sport set. Adding a sport
+  # here requires a matching entry in BFE's SPORT_CONFIG.
+  betfair_sport_configs = var.betfair_enabled ? {
+    epl = { sport_key = "soccer_epl" }
+    mlb = { sport_key = "baseball_mlb" }
+  } : {}
 
   # Generate per-sport scheduler job names: "fetch-odds-epl", "fetch-scores-epl", etc.
   sport_scheduler_rules = flatten([
@@ -117,6 +120,14 @@ locals {
       }
     ]
   ])
+
+  betfair_scheduler_rules = [
+    for sport_suffix, cfg in local.betfair_sport_configs : {
+      key       = "fetch-betfair-exchange-${sport_suffix}"
+      job       = "fetch-betfair-exchange"
+      sport_key = cfg.sport_key
+    }
+  ]
 
   # Generate per-sport scraper job names (only for sports with scraper = true)
   sport_scraper_rules = var.enable_oddsportal_scraper ? flatten([
@@ -132,6 +143,7 @@ locals {
   # Maps for for_each (keyed by compound name)
   scheduler_rules_map = merge(
     { for r in local.sport_scheduler_rules : r.key => r },
+    { for r in local.betfair_scheduler_rules : r.key => r },
     { for j in local.global_jobs : j => { key = j, job = j, sport_key = null } },
     { for j in local.polymarket_jobs : j => { key = j, job = j, sport_key = null } },
   )
