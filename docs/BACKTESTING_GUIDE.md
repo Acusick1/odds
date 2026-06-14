@@ -83,18 +83,21 @@ Uses the Kelly Criterion to size bets optimally based on edge and odds. Quarter-
 ### Flat Betting
 
 ```bash
---bet-sizing flat --flat-bet-amount 100
+--bet-sizing flat
 ```
 
-Bets a fixed dollar amount on every opportunity. Good for baseline comparison.
+Bets a fixed amount on every opportunity (good for baseline comparison). The stake
+amount comes from `BetSizingConfig.flat_stake_amount` (default 100) and is set
+programmatically; the CLI uses the default.
 
 ### Percentage Betting
 
 ```bash
---bet-sizing percentage --percentage-bet 0.02
+--bet-sizing percentage
 ```
 
-Bets a fixed percentage of current bankroll on every opportunity.
+Bets a fixed percentage of current bankroll on every opportunity. The percentage comes
+from `BetSizingConfig` (default 0.02) and is set programmatically; the CLI uses the default.
 
 ## CLI Commands
 
@@ -113,10 +116,10 @@ Run a backtest with specified parameters.
 - `--bankroll, -b`: Initial bankroll (default: 10000)
 - `--output-json, -j`: Save to JSON file
 - `--output-csv, -c`: Save to CSV file
-- `--bet-sizing`: Method (default: fractional_kelly)
+- `--bet-sizing`: Method — `fractional_kelly`, `flat`, or `percentage` (default: fractional_kelly)
 - `--kelly-fraction`: Kelly fraction (default: 0.25)
-- `--flat-bet-amount`: Flat bet size (default: 100)
-- `--percentage-bet`: Percentage of bankroll (default: 0.02)
+- `--model-path, -m`: Model artifact path (for model-driven strategies)
+- `--sport`: Sport key filter
 
 ### `backtest show`
 
@@ -198,6 +201,8 @@ Return per unit of drawdown risk. Higher is better.
 To create a new strategy, inherit from `BettingStrategy`:
 
 ```python
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from odds_analytics.backtesting import BettingStrategy, BacktestEvent, BetOpportunity, BacktestConfig
 from odds_core.models import Odds
 
@@ -213,6 +218,7 @@ class MyStrategy(BettingStrategy):
         event: BacktestEvent,  # Type-safe event with guaranteed scores
         odds_snapshot: list[Odds],
         config: BacktestConfig,
+        session: AsyncSession | None = None,  # engine passes the reader's session
     ) -> list[BetOpportunity]:
         opportunities = []
 
@@ -243,18 +249,21 @@ STRATEGIES = {
 
 ```python
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
+
 from odds_analytics.backtesting import BacktestConfig, BacktestEngine, BetSizingConfig
 from odds_analytics.strategies import BasicEVStrategy
 from odds_core.database import async_session_maker
+from odds_lambda.storage.readers import OddsReader
 
 async def run_backtest():
     strategy = BasicEVStrategy()
 
     config = BacktestConfig(
         initial_bankroll=10000.0,
-        start_date=datetime(2024, 10, 1),
-        end_date=datetime(2024, 12, 31),
+        start_date=datetime(2024, 10, 1, tzinfo=UTC),
+        end_date=datetime(2024, 12, 31, tzinfo=UTC),
+        sport_key="soccer_epl",
         sizing=BetSizingConfig(
             method="fractional_kelly",
             kelly_fraction=0.25,
@@ -262,18 +271,19 @@ async def run_backtest():
     )
 
     async with async_session_maker() as session:
-        engine = BacktestEngine(strategy, config, session)
+        # BacktestEngine takes an OddsReader, not a raw session
+        engine = BacktestEngine(strategy, config, OddsReader(session))
         result = await engine.run()
 
-        # Access results programmatically
-        print(f"ROI: {result.roi:.2f}%")
-        print(f"Sharpe: {result.sharpe_ratio:.2f}")
+    # Access results programmatically
+    print(f"ROI: {result.roi:.2f}%")
+    print(f"Sharpe: {result.sharpe_ratio:.2f}")
 
-        # Export
-        result.to_json("my_results.json")
-        result.to_csv("my_bets.csv")
+    # Export
+    result.to_json("my_results.json")
+    result.to_csv("my_bets.csv")
 
-        break
+    return result
 
 asyncio.run(run_backtest())
 ```

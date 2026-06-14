@@ -58,20 +58,12 @@ Why delta (not absolute close):
 
 ## Available Feature Groups
 
-### Sportsbook Tabular (28 features)
-Point-in-time snapshot at decision time:
-- **Consensus**: avg/std odds, implied probs (home/away)
-- **Sharp vs retail**: sharp prob vs retail avg, differential
-- **Market efficiency**: num bookmakers, avg/std market hold
-- **Line shopping**: best/worst odds, range across books
-
-### Trajectory (23 features)
-Aggregate statistics from the full odds sequence up to decision time:
-- **Momentum**: prob change to decision, avg change rate, max increase/decrease
-- **Volatility**: prob range, odds volatility, movement count
-- **Trend**: slope, strength, reversals, acceleration
-- **Sharp money**: sharp prob trajectory, sharp-retail divergence trend, sharp leads retail (binary)
-- **Timing**: early vs recent movement distribution
+### Sportsbook Tabular (6 features)
+Outcome-relative, point-in-time snapshot at decision time (`TabularFeatures`):
+- **Consensus**: `consensus_prob` (devigged consensus probability for the outcome)
+- **Sharp vs retail**: `sharp_prob`, `retail_sharp_diff`
+- **Market breadth**: `num_bookmakers`
+- **Calendar**: `is_weekend`, `day_of_week`
 
 ### Standings (11 features, EPL only)
 League table context at decision time:
@@ -111,7 +103,7 @@ PM prices and order book microstructure. Not validated at scale.
 ### Cross-Source (7 features) — deprioritized
 PM vs sportsbook divergence.
 
-### Sequence (13 features per timestep, for LSTM) — no predictive value
+### Sequence (15 features per timestep, for LSTM) — no predictive value
 Time-series per snapshot. LSTM conclusively ruled out — sequential modeling adds no value
 over cross-sectional features (see MODELING.md).
 

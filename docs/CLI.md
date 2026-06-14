@@ -22,6 +22,8 @@
 | `injuries` | NBA injury report operations |
 | `nba-stats` | NBA game log operations |
 | `pbpstats` | PBPStats player season stats |
+| `paper` | Paper trading bets and P&L |
+| `agent` | Run the betting agent |
 
 ## Data Collection
 
@@ -29,8 +31,8 @@
 
 ```bash
 odds fetch current
-odds fetch current --sport basketball_nba
 odds fetch current --sport soccer_epl
+odds fetch current --sport baseball_mlb
 ```
 
 Manually fetches current odds for upcoming games.
@@ -39,7 +41,7 @@ Manually fetches current odds for upcoming games.
 
 ```bash
 odds fetch scores
-odds fetch scores --sport basketball_nba --days 3
+odds fetch scores --sport soccer_epl --days 3
 ```
 
 Fetches game scores and updates event status.
@@ -56,7 +58,6 @@ odds scrape upcoming --from-file matches.json
 Scrapes upcoming match odds from OddsPortal via OddsHarvester (headless browser).
 
 **Options:**
-- `--sport, -s`: OddsHarvester sport name (default: football)
 - `--league, -l`: OddsHarvester league name (default: england-premier-league)
 - `--market, -m`: Markets to scrape, repeatable (default: 1x2)
 - `--dry-run`: Scrape and convert but don't store
@@ -68,7 +69,7 @@ Scrapes upcoming match odds from OddsPortal via OddsHarvester (headless browser)
 
 ```bash
 odds discover upcoming
-odds discover upcoming --sport basketball_nba
+odds discover upcoming --sport soccer_epl
 ```
 
 Syncs upcoming games from the free `/events` endpoint (0 quota units). Runs automatically at the start of every `fetch-odds` job, but can also be called directly.
@@ -219,18 +220,18 @@ odds backtest run --strategy basic_ev --start 2024-10-01 --end 2024-12-31 --outp
 ```
 
 **Required:**
-- `--strategy, -s`: Strategy name (flat, basic_ev, arbitrage)
-- `--start`: Start date
-- `--end`: End date
+- `--strategy, -s`: Strategy name (`flat`, `basic_ev`, `arbitrage`, `lstm_line_movement`, `xgb_line_movement`)
+- `--start`: Start date (YYYY-MM-DD)
+- `--end`: End date (YYYY-MM-DD)
 
 **Optional:**
 - `--bankroll, -b`: Initial bankroll (default: 10000)
 - `--output-json, -j`: Save to JSON file
 - `--output-csv, -c`: Save to CSV file
-- `--bet-sizing`: Method (default: fractional_kelly)
+- `--bet-sizing`: Method — `fractional_kelly`, `flat`, or `percentage` (default: fractional_kelly)
 - `--kelly-fraction`: Kelly fraction (default: 0.25)
-- `--flat-bet-amount`: Flat bet size (default: 100)
-- `--percentage-bet`: Percentage of bankroll (default: 0.02)
+- `--model-path, -m`: Model artifact path (for model-driven strategies)
+- `--sport`: Sport key filter
 
 ### Show Results
 
@@ -252,10 +253,10 @@ Compares multiple backtest results side-by-side.
 ### Export to CSV
 
 ```bash
-odds backtest export results.json --output bets.csv
+odds backtest export results.json bets.csv
 ```
 
-Converts JSON results to CSV format.
+Converts JSON results to CSV. Both the input JSON and output CSV are positional arguments.
 
 ### List Strategies
 
@@ -299,21 +300,29 @@ Lists recent events, optionally filtered by team.
 
 ## Validation & Data Management
 
-### Validate Coverage
+### Validate Data
 
 ```bash
-odds validate coverage --start YYYY-MM-DD --end YYYY-MM-DD
+odds validate daily                          # validate yesterday (default)
+odds validate daily --date YYYY-MM-DD --verbose
+odds validate game <event_id> --show-snapshots
+odds validate tier-coverage --start YYYY-MM-DD --end YYYY-MM-DD
 ```
 
-Validates data completeness for date range.
+- `daily`: completeness checks for a single day (defaults to yesterday). Options: `--date/-d`, `--strict/--no-strict`, `--check-scores/--no-check-scores`, `--check-discovery`, `--output-json/-o`, `--verbose/-v`.
+- `game`: inspect a single event by ID. Option: `--show-snapshots`.
+- `tier-coverage`: fetch-tier coverage across a date range. Required `--start/-s`, `--end/-e`; optional `--output-json/-o`.
 
 ### Copy from Production
 
 ```bash
-odds copy from-prod --start YYYY-MM-DD --end YYYY-MM-DD
+odds copy from-prod YYYY-MM-DD YYYY-MM-DD
+odds copy from-prod 2024-10-01 2024-12-31 --sport soccer_epl --dry-run
 ```
 
-Copies data from production database to local database.
+Copies data from the production database to the local database. `start` and `end` are
+positional arguments. Options: `--sport/-s` (default `soccer_epl`), `--dry-run`,
+`--skip-existing/--overwrite` (default skip-existing), `--prod-url`, `--local-url`.
 
 ## NBA Data Commands
 
@@ -405,6 +414,48 @@ odds scheduler start
 ```
 
 Starts the scheduler (local backend only). Runs until Ctrl+C.
+
+## Paper Trading Commands
+
+The agent records paper trades; these commands inspect and settle them.
+
+### List Bets
+
+```bash
+odds paper list
+odds paper list --settled --limit 100
+```
+
+Lists paper bets. Options: `--settled/-s` (show settled instead of open), `--limit/-n` (default 50).
+
+### Settle Bets
+
+```bash
+odds paper settle
+```
+
+Settles paper bets for completed events.
+
+### Portfolio Summary
+
+```bash
+odds paper summary
+odds paper summary --bankroll 5000
+```
+
+Shows P&L summary. Option: `--bankroll/-b` (starting bankroll, default 1000).
+
+## Agent Commands
+
+### Run the Betting Agent
+
+```bash
+odds agent run --sport soccer_epl
+odds agent run --sport baseball_mlb --db odds
+```
+
+Runs the betting agent for a single wake-up. Required `--sport/-s` (e.g. `soccer_epl`,
+`baseball_mlb`); optional `--db` (database name, default `odds`).
 
 ## Historical Backfill Strategy
 

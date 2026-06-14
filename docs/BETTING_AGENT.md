@@ -108,27 +108,18 @@ Implemented via the existing `LocalSchedulerBackend` with proximity-aware schedu
 
 ## MCP Tools
 
-### Existing (Phase 1 — complete)
+The agent consumes the pipeline through the MCP server. The `@mcp.tool()` definitions
+in `packages/odds-mcp/odds_mcp/server.py` are the source of truth for the live toolset
+(some sport-specific tools are registered from companion modules); the tools group by purpose as follows:
 
-| Tool | Purpose |
-|------|---------|
-| `get_upcoming_fixtures` | Events from DB |
-| `get_current_odds` | Latest snapshots per bookmaker |
-| `get_odds_history` | Odds movement timeline |
-| `get_predictions` | CLV model inference (supplementary signal) |
-| `paper_bet` | Record a paper trade with reasoning |
-| `get_portfolio` | Open bets, P&L summary |
-| `settle_bets` | Settle completed events |
-| `refresh_scrape` | Trigger OddsPortal scrape on-demand |
+- **Odds & fixtures** — `get_upcoming_fixtures`, `get_current_odds`, `get_odds_history`, `find_retail_edges` (ranked retail-vs-sharp divergence screener with per-outcome dispersion stats)
+- **Predictions** — `get_predictions` (CLV model inference, supplementary signal)
+- **Briefs** — `save_match_brief` (append-only), `get_match_brief`, `get_slate_briefs` (per-event triage)
+- **Paper trading** — `paper_bet`, `get_portfolio`, `settle_bets`
+- **Scraping & scheduling** — `refresh_scrape`, `get_scrape_status`, `get_scheduled_jobs`, `schedule_next_wakeup`
+- **Sport-specific context** — e.g. `get_team_context`, `get_probable_pitchers` (MLB)
 
-### New (Phase 2)
-
-| Tool | Purpose |
-|------|---------|
-| `save_match_brief` | Persist analysis brief with decision + summary (append-only) |
-| `get_match_brief` | Load full briefs for a single event |
-| `get_slate_briefs` | Latest decision/summary per event for slate triage |
-| `find_retail_edges` | Ranked retail-vs-sharp divergence screener with per-outcome dispersion stats |
+Both the EPL and MLB agents are active (interactive evaluation).
 
 ## Data Model Additions
 

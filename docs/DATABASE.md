@@ -225,4 +225,4 @@ Composite indexes on frequently queried combinations:
 
 ### Batch Operations
 
-Use `bulk_insert_historical()` for backfill operations to reduce round trips.
+Use `OddsWriter.bulk_insert_odds()` for backfill operations to reduce round trips.

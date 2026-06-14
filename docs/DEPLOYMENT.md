@@ -122,7 +122,7 @@ AWS_RULE_PREFIX=odds
 ### Key Constraints
 
 - **15-minute max execution** - Design jobs for <5 minutes (scraper: <10 minutes)
-- **NullPool required** - No connection reuse between invocations (automatic when `SCHEDULER_BACKEND=aws`)
+- **NullPool required** - No connection reuse between invocations (automatic in Lambda — keyed on the `AWS_LAMBDA_FUNCTION_NAME` env var, not the scheduler backend)
 - **Stateless** - No persistent state between invocations (SSM used for key rotation state)
 - **Cold start** - ~1-2 seconds latency (acceptable)
 - **EventBridge limit** - 300 rules per region
