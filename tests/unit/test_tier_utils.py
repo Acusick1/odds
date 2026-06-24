@@ -98,19 +98,19 @@ class TestCalculateTier:
         assert calculate_tier(12.0) == FetchTier.PREGAME
         assert FetchTier.PREGAME.interval_hours == 3.0
 
-        # SHARP: 12-24 hours (interval 12.0)
+        # SHARP: 12-24 hours (interval 6.0)
         assert calculate_tier(12.1) == FetchTier.SHARP
         assert calculate_tier(24.0) == FetchTier.SHARP
-        assert FetchTier.SHARP.interval_hours == 12.0
+        assert FetchTier.SHARP.interval_hours == 6.0
 
         # EARLY: 24-72 hours (interval 24.0)
         assert calculate_tier(24.1) == FetchTier.EARLY
         assert calculate_tier(72.0) == FetchTier.EARLY
         assert FetchTier.EARLY.interval_hours == 24.0
 
-        # OPENING: 72+ hours (interval 48.0)
+        # OPENING: 72+ hours (interval 24.0)
         assert calculate_tier(72.1) == FetchTier.OPENING
-        assert FetchTier.OPENING.interval_hours == 48.0
+        assert FetchTier.OPENING.interval_hours == 24.0
 
 
 class TestCalculateTierFromTimestamps:
