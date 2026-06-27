@@ -165,7 +165,7 @@ class TestFindOrCreateEventOnWriter:
         event_id, created = await writer.find_or_create_event(
             home_team="Arsenal",
             away_team="Chelsea",
-            match_date=datetime(2030, 4, 15, 15, 0, tzinfo=UTC),
+            match_date=datetime.now(UTC) + timedelta(days=7),
             sport_key="soccer_epl",
             sport_title="EPL",
         )
@@ -210,7 +210,7 @@ class TestFindOrCreateEventOnWriter:
         from odds_lambda.storage.writers import OddsWriter
 
         writer = OddsWriter(test_session)
-        match_date = datetime(2030, 4, 15, 15, 0, tzinfo=UTC)
+        match_date = datetime.now(UTC) + timedelta(days=7)
 
         event_id_1, created_1 = await writer.find_or_create_event(
             home_team="Arsenal",
@@ -248,8 +248,11 @@ class TestFindOrCreateEventMatchWindow:
 
         writer = OddsWriter(test_session)
 
-        day_one = datetime(2026, 6, 10, 23, 10, tzinfo=UTC)
-        day_two = datetime(2026, 6, 11, 23, 10, tzinfo=UTC)
+        # Anchor to the future so the live-event stale guardrail never trips.
+        day_one = (datetime.now(UTC) + timedelta(days=1)).replace(
+            hour=23, minute=10, second=0, microsecond=0
+        )
+        day_two = day_one + timedelta(days=1)
 
         event_id_1, created_1 = await writer.find_or_create_event(
             home_team="New York Yankees",
@@ -279,8 +282,11 @@ class TestFindOrCreateEventMatchWindow:
 
         writer = OddsWriter(test_session)
 
-        game_one = datetime(2026, 7, 4, 13, 0, tzinfo=UTC)
-        game_two = datetime(2026, 7, 4, 18, 0, tzinfo=UTC)
+        # Anchor to the future so the live-event stale guardrail never trips.
+        game_one = (datetime.now(UTC) + timedelta(days=1)).replace(
+            hour=13, minute=0, second=0, microsecond=0
+        )
+        game_two = game_one + timedelta(hours=5)
 
         event_id_1, created_1 = await writer.find_or_create_event(
             home_team="Chicago Cubs",
@@ -310,9 +316,12 @@ class TestFindOrCreateEventMatchWindow:
 
         writer = OddsWriter(test_session)
 
-        first_scrape = datetime(2026, 6, 10, 23, 10, tzinfo=UTC)
+        # Anchor to the future so the live-event stale guardrail never trips.
+        first_scrape = (datetime.now(UTC) + timedelta(days=1)).replace(
+            hour=23, minute=10, second=0, microsecond=0
+        )
         # Source occasionally re-reports commence_time within a small window.
-        second_scrape = datetime(2026, 6, 10, 23, 45, tzinfo=UTC)
+        second_scrape = first_scrape + timedelta(minutes=35)
 
         event_id_1, created_1 = await writer.find_or_create_event(
             home_team="New York Yankees",
