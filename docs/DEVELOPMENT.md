@@ -26,7 +26,7 @@ Configuration uses Pydantic Settings with environment variables. See `packages/o
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SPORTS` | Sports to track | ["basketball_nba"] (also supports "soccer_epl") |
+| `SPORTS` | Sports to track | ["soccer_epl", "baseball_mlb"] (also supports "basketball_nba") |
 | `BOOKMAKERS` | Bookmaker list | [pinnacle, circa, draftkings, fanduel, betmgm, williamhill_us, betrivers, bovada] (US); OddsPortal uses [bet365, betway, betfred, bwin] (UK) |
 | `MARKETS` | Bet types | ["h2h", "spreads", "totals"] |
 | `REGIONS` | Odds regions | ["us"] |
@@ -129,11 +129,10 @@ def get_event(session: Session, event_id: str) -> Event: ...
 ### Adding Betting Strategies
 
 1. Create class in `packages/odds-analytics/odds_analytics/strategies.py` inheriting from `BettingStrategy`
-2. Implement `evaluate_opportunity()` method
-3. Add to `AVAILABLE_STRATEGIES` dict
-4. Register in CLI: `packages/odds-cli/odds_cli/commands/backtest.py`
-5. Write tests
-6. Document if complex
+2. Implement the `evaluate_opportunity()` method
+3. Register it in the `STRATEGIES` dict in `packages/odds-cli/odds_cli/commands/backtest.py`
+4. Write tests
+5. Document if complex
 
 ### Modifying API Client
 

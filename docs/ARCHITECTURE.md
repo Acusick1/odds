@@ -4,7 +4,7 @@
 
 ## System Overview
 
-A single-user betting odds data collection and analysis system supporting multiple sports (NBA, EPL football). Collects odds from sportsbooks and OddsPortal, runs CLV prediction models, and delivers daily prediction digests via Discord. Prioritizes robust data pipeline architecture with comprehensive historical data collection, storage, and validation.
+A single-user betting odds data collection and analysis system supporting multiple sports (EPL football and MLB baseball active; NBA infrastructure exists but is deprioritized). Collects odds from sportsbooks and OddsPortal, runs CLV prediction models, and delivers daily prediction digests via Discord. Prioritizes robust data pipeline architecture with comprehensive historical data collection, storage, and validation.
 
 **Core Principles:**
 - Data pipeline first - robust collection and storage is paramount
@@ -29,7 +29,7 @@ packages/
 
 - Base URL: `https://api.the-odds-api.com/v4`
 - Sport-parameterized: `/sports/{sport_key}/odds`, `/sports/{sport_key}/scores`, etc.
-- Supported sport keys: `basketball_nba`, `soccer_epl`
+- Supported sport keys: `soccer_epl`, `baseball_mlb`, `basketball_nba`
 
 See CLAUDE.md for endpoint pricing breakdown and DEPLOYMENT.md for tier details.
 
@@ -92,15 +92,21 @@ The system supports multiple deployment backends through an abstraction layer.
 
 ### Backend Interface
 
-All backends implement `SchedulerBackend` (`packages/odds-lambda/odds_lambda/scheduling/backends/base.py`):
+All backends implement the `SchedulerBackend` ABC (`packages/odds-lambda/odds_lambda/scheduling/backends/base.py`). The core methods are:
 
 ```python
 class SchedulerBackend(ABC):
-    @abstractmethod
-    async def schedule_job(self, job_name: str, execution_time: datetime) -> None: ...
-    @abstractmethod
-    def get_backend_info(self) -> dict: ...
+    async def schedule_next_execution(self, job_name, next_time, payload=None) -> None: ...
+    async def cancel_scheduled_execution(self, job_name) -> None: ...
+    async def get_scheduled_jobs(self) -> list[ScheduledJob]: ...
+    async def get_job_status(self, job_name) -> ScheduledJob | None: ...
+    async def health_check(self) -> BackendHealth: ...
+    def validate_configuration(self) -> ValidationResult: ...
+    def get_backend_name(self) -> str: ...
 ```
+
+The self-scheduling pattern is built on `schedule_next_execution`: each invocation
+schedules its own next wake-up rather than relying on a fixed external cron.
 
 ### AWS Lambda Backend
 
@@ -115,9 +121,7 @@ class SchedulerBackend(ABC):
 
 `packages/odds-lambda/odds_lambda/scheduling/backends/railway.py`
 
-- Uses APScheduler with persistent scheduling
-- Long-running process with managed restarts
-- Standard connection pooling
+- **No-op shim, not currently used.** `schedule_next_execution` / `cancel_scheduled_execution` only log and return; `get_scheduled_jobs` / `get_job_status` raise `BackendUnavailableError`. The intent was static cron configured in `railway.json` (not APScheduler), but Railway is not a live deployment target.
 - Configuration: `SCHEDULER_BACKEND=railway`
 
 ### Local Backend
@@ -132,20 +136,15 @@ class SchedulerBackend(ABC):
 
 `packages/odds-lambda/odds_lambda/scheduling/jobs.py`
 
-Centralized mapping of job names to async entry points. Modules are lazy-imported on first access to avoid pulling unused dependencies (e.g. scraper Lambda doesn't load xgboost).
+`_JOB_MODULE_MAP` is the centralized mapping of job names to async entry points.
+Modules are lazy-imported on first access to avoid pulling unused dependencies
+(e.g. the scraper Lambda doesn't load xgboost).
 
-| Job | Module | Scheduling |
-|-----|--------|------------|
-| `fetch-odds` | `odds_lambda.jobs.fetch_odds` | Self-scheduling (tier-based) |
-| `fetch-scores` | `odds_lambda.jobs.fetch_scores` | Self-scheduling |
-| `update-status` | `odds_lambda.jobs.update_status` | Self-scheduling |
-| `check-health` | `odds_lambda.jobs.check_health` | Self-scheduling |
-| `fetch-polymarket` | `odds_lambda.jobs.fetch_polymarket` | Self-scheduling (deprioritized) |
-| `backfill-polymarket` | `odds_lambda.jobs.backfill_polymarket` | Fixed: every 3 days (deprioritized) |
-| `fetch-oddsportal` | `odds_lambda.jobs.fetch_oddsportal` | Self-scheduling (proximity tier). Runs score-predictions inline. |
-| `fetch-oddsportal-results` | `odds_lambda.jobs.fetch_oddsportal_results` | Fixed: 08:00 UTC daily (EventBridge) |
-| `daily-digest` | `odds_lambda.jobs.daily_digest` | Local cron: 08:00 UTC daily (EPL only) |
-| `fetch-espn-fixtures` | `odds_lambda.jobs.fetch_espn_fixtures` | Local cron: 06:00 UTC daily (EPL only) |
+**`jobs.py` is the source of truth for the registered jobs; [DEPLOYMENT.md](DEPLOYMENT.md#job-deployment-matrix)
+is authoritative for where each job runs (AWS / local / both) and on what schedule.**
+This document does not duplicate that matrix. Note that most jobs self-schedule
+their next wake-up rather than running on a fixed external cron — see the backend
+interface above.
 
 ## Intelligent Scheduling System
 
@@ -226,15 +225,15 @@ Tier tracking stored in `OddsSnapshot.fetch_tier` for validation and ML features
 
 `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py`
 
-- Runs daily at 08:00 UTC on the scraper Lambda
+- Runs on the scraper Lambda; self-schedules its next run for ~08:00 UTC the next day (in a `finally` block, so the chain survives a failed scrape)
 - Scrapes EPL results and closing odds from OddsPortal
 - Updates event status to FINAL with scores
 
-### Score Predictions Job
+### Score Predictions (inline)
 
 `packages/odds-lambda/odds_lambda/jobs/score_predictions.py`
 
-- Runs hourly at :15 (offset to allow scraper to finish)
+- **Not a standalone scheduled job.** `score_events()` runs inline at the end of the `fetch-oddsportal` job, after ingest, when the model supports the sport. (`score-predictions-<sport>` can still be invoked manually.)
 - Loads CLV model from S3 (`odds-models` bucket) with ETag-based caching
 - Extracts tabular features for upcoming SCHEDULED events
 - Stores predictions in `Prediction` table with idempotency (unique constraint on event_id, snapshot_id, model_name)
@@ -344,12 +343,9 @@ All issues logged to `DataQualityLog` table:
 
 ## Discord Alerts
 
-`packages/odds-cli/odds_cli/alerts/base.py`
-
-- `DiscordAlert` class with webhook support
-- `AlertManager` routing class
-- Used by daily-digest job and quota/health alerts
-- Configured via `DISCORD_WEBHOOK_URL` environment variable
+`packages/odds-core/odds_core/alerts.py` — `AlertManager` + `DiscordAlert` (webhook delivery).
+Used by the daily-digest job and quota/health alerts; configured via `DISCORD_WEBHOOK_URL`.
+See [REPORTING.md](REPORTING.md) for the authoritative description of alerting surfaces and backing tables.
 
 ## Technical Stack
 

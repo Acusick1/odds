@@ -34,6 +34,7 @@ packages/
 ├── odds-core/      # Shared models, config, database (odds_core/)
 │   ├── models.py              # Event, OddsSnapshot, Odds, FetchLog, DataQualityLog
 │   ├── prediction_models.py   # Prediction table (CLV scoring output)
+│   ├── alerts.py              # AlertManager + DiscordAlert (webhook delivery)
 │   └── config.py              # Pydantic Settings (API, DB, scheduler, alerts)
 ├── odds-lambda/    # Data fetching, storage, scheduling (odds_lambda/)
 │   ├── data_fetcher.py        # TheOddsAPIClient (with key rotation)
@@ -47,11 +48,10 @@ packages/
 ├── odds-mcp/       # MCP server — agent tool interface (odds_mcp/)
 │   └── agents/                # Sport-specific agent prompts (epl/, mlb/)
 └── odds-cli/       # CLI commands (odds_cli/)
-    ├── commands/              # 16 command groups (see CLI.md)
-    └── alerts/base.py         # AlertManager + DiscordAlert (webhook delivery)
+    └── commands/              # CLI command groups (see CLI.md)
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system architecture, all 10 scheduled jobs, and storage module index.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the system architecture and storage module index, and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#job-deployment-matrix) for the authoritative job/schedule matrix.
 
 ## Critical Constraints
 
@@ -65,7 +65,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system architectur
 ### AWS Lambda
 
 - Two Lambda functions: scheduler (512 MB, 5 min) and scraper (2 GB, 10 min)
-- Must use NullPool for DB connections (automatic when `SCHEDULER_BACKEND=aws`)
+- Must use NullPool for DB connections (automatic in Lambda — keyed on the `AWS_LAMBDA_FUNCTION_NAME` env var, not the scheduler backend)
 - Stateless between invocations; API key rotation state in SSM Parameter Store
 
 ### API Cost
@@ -198,7 +198,7 @@ uv run odds scheduler start
 | [docs/DATABASE.md](docs/DATABASE.md) | Schemas, environments, migrations, queries |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | File workflows, testing, code style, config |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | AWS Lambda (2 functions), Terraform, S3, costs |
-| [docs/CLI.md](docs/CLI.md) | Full command reference (16 command groups) |
+| [docs/CLI.md](docs/CLI.md) | Full command reference |
 | [docs/DATA_MODELS.md](docs/DATA_MODELS.md) | Training pipeline, feature groups, target definition |
 | [docs/MODELING.md](docs/MODELING.md) | Modeling rationale, experiments, open questions |
 | [docs/DEBUGGING_SCHEDULER.md](docs/DEBUGGING_SCHEDULER.md) | Scheduler diagnostics, EventBridge, CloudWatch |

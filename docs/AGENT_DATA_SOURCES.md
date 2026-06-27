@@ -12,7 +12,7 @@ These feed the agent's DB-backed context. Collected on a schedule, available via
 |--------|-----------------|--------|-----------|
 | **OddsPortal** | Multi-bookmaker odds (bet365, betway, betfred, betvictor, bwin), opening + closing snapshots | Active, hourly on AWS Lambda | `jobs/fetch_oddsportal.py`, `oddsportal_common.py` |
 | **The Odds API** | US bookmaker odds, live polling | Active but quota-limited (500 units/month) | `data_fetcher.py`, `jobs/fetch_odds.py` |
-| **football-data.co.uk** | Historical EPL (11 seasons), Pinnacle + Betfair Exchange closing odds | Loaded, not live | `storage/fduk_writer.py` |
+| **football-data.co.uk** | Historical EPL (11 seasons), Pinnacle + Betfair Exchange closing odds | Loaded, not live | `scripts/ingest_football_data_uk.py` |
 | **Polymarket** | Volume, orderbook depth, bid/ask imbalance, price velocity | Full pipeline built, **deprioritized** — EPL volume thin ($10-100K/match) and AMM-driven | See [POLYMARKET.md](POLYMARKET.md) |
 | **ESPN fixtures/lineups** | All-competition fixture schedule, starting XI data | Models + reader/writer exist, manual ingestion scripts | `scripts/ingest_espn_fixtures.py`, `scripts/ingest_espn_lineups.py` |
 

@@ -136,7 +136,7 @@ Two Lambda functions handle jobs based on event payload:
 ### Scraper Lambda (`odds-scheduler-scraper`)
 
 6. **`fetch-oddsportal`**: Scrapes upcoming EPL match odds — self-scheduling (proximity tier). Runs CLV scoring inline after ingest.
-7. **`fetch-oddsportal-results`**: Scrapes EPL results + closing odds — `cron(0 8 * * ? *)`
+7. **`fetch-oddsportal-results`**: Scrapes EPL results + closing odds — self-schedules its next run for ~08:00 UTC the next day (in a `finally` block), not a fixed EventBridge cron
 
 ## Intelligent Scheduling Logic
 
