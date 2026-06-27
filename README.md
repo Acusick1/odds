@@ -67,5 +67,3 @@ A full documentation index is in [CLAUDE.md](CLAUDE.md#documentation).
 ## License
 
 Private project — all rights reserved.
-</content>
-</invoke>
