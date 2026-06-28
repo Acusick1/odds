@@ -329,6 +329,179 @@ def run_once(
         raise typer.Exit(1) from e
 
 
+@app.command("smoke")
+def smoke(
+    include_agent: bool = typer.Option(
+        False,
+        "--include-agent",
+        help="Also run smoke-unsafe jobs (agent-run). Off by default so a deploy "
+        "check never places paper bets.",
+    ),
+    no_side_effects: bool = typer.Option(
+        False,
+        "--no-side-effects",
+        help="Drop outward-posting jobs (daily-digest) so the check stays silent "
+        "on shared channels.",
+    ),
+    only: list[str] | None = typer.Option(  # noqa: B008 — typer option idiom
+        None,
+        "--only",
+        help="Run only these jobs (base or compound name). Repeatable.",
+    ),
+    exclude: list[str] | None = typer.Option(  # noqa: B008 — typer option idiom
+        None,
+        "--exclude",
+        help="Skip these jobs (base or compound name). Repeatable.",
+    ),
+) -> None:
+    """
+    Run each bootstrapped job once and report pass/fail (deploy validation).
+
+    Derives the job set from ``scheduler.bootstrap_jobs`` (the same single
+    source of truth ``start`` uses), expands per-sport jobs into one run per
+    configured sport, runs each once, and prints a per-job pass/fail table.
+    Exits non-zero (exit code = number of failed jobs) if any job fails.
+
+    ``agent-run`` is skipped by default (never place paper bets during a deploy
+    check); pass ``--include-agent`` to run it. ``daily-digest`` posts to Discord;
+    pass ``--no-side-effects`` to drop it.
+
+    Run with ``SCHEDULER_DRY_RUN=true`` (as ``deploy.sh`` does) so self-scheduling
+    is a no-op and the live schedule store is untouched.
+
+    Coverage caveat: smoke always exercises each job's import / config / decision /
+    schema path, but the full fetch+ingest body only runs when the job's cadence
+    gate (``decision.should_execute``) says execute. A ``--force`` gate bypass is
+    out of scope.
+
+    Usage:
+        SCHEDULER_DRY_RUN=true odds scheduler smoke
+        odds scheduler smoke --no-side-effects
+        odds scheduler smoke --only fetch-oddsportal --only fetch-espn-fixtures
+        odds scheduler smoke --include-agent
+    """
+    app_settings = get_settings()
+
+    from odds_lambda.scheduling.jobs import (
+        JobContext,
+        expected_compound_job_names,
+        get_job_function,
+        is_outward_posting,
+        is_smoke_unsafe,
+        resolve_job_name,
+    )
+
+    bootstrap_jobs = app_settings.scheduler.bootstrap_jobs
+    configured_sports = app_settings.data_collection.sports
+    candidates = sorted(expected_compound_job_names(bootstrap_jobs, configured_sports))
+
+    if not candidates:
+        console.print("[yellow]No jobs to smoke — bootstrap_jobs is empty.[/yellow]")
+        return
+
+    if not app_settings.scheduler.dry_run:
+        console.print(
+            "[yellow]⚠ SCHEDULER_DRY_RUN is not set — jobs may write real schedules "
+            "to the store. Set SCHEDULER_DRY_RUN=true (deploy.sh does this).[/yellow]"
+        )
+
+    base_of = {c: resolve_job_name(c)[0] for c in candidates}
+
+    def _match_tokens(tokens: list[str]) -> tuple[set[str], list[str]]:
+        """Resolve ``--only``/``--exclude`` tokens against the candidate set.
+
+        A token matches a candidate when it equals the compound name or the
+        base name. Returns (matched compound names, unknown tokens).
+        """
+        matched: set[str] = set()
+        unknown: list[str] = []
+        for token in tokens:
+            hits = [c for c in candidates if c == token or base_of[c] == token]
+            if hits:
+                matched.update(hits)
+            else:
+                unknown.append(token)
+        return matched, unknown
+
+    unknown_tokens: list[str] = []
+    if only:
+        only_set, unknown = _match_tokens(only)
+        unknown_tokens.extend(unknown)
+        selected = only_set
+    else:
+        selected = set(candidates)
+
+    excluded_names: set[str] = set()
+    if exclude:
+        exclude_set, unknown = _match_tokens(exclude)
+        unknown_tokens.extend(unknown)
+        excluded_names = exclude_set
+
+    if unknown_tokens:
+        console.print(f"[bold red]Error:[/bold red] Unknown job(s): {', '.join(unknown_tokens)}")
+        console.print(f"[dim]Available: {', '.join(candidates)}[/dim]")
+        raise typer.Exit(1)
+
+    # Classify each candidate into run / skip with a reason.
+    to_run: list[str] = []
+    skipped: list[tuple[str, str]] = []
+    for name in sorted(selected):
+        if name in excluded_names:
+            skipped.append((name, "excluded (--exclude)"))
+        elif is_smoke_unsafe(name) and not include_agent:
+            skipped.append((name, "smoke-unsafe (pass --include-agent)"))
+        elif is_outward_posting(name) and no_side_effects:
+            skipped.append((name, "outward-posting (--no-side-effects)"))
+        else:
+            to_run.append(name)
+
+    console.print("[bold blue]Smoke-testing bootstrapped jobs...[/bold blue]")
+    console.print(f"[dim]Backend: {app_settings.scheduler.backend} | ", end="")
+    console.print(f"dry_run: {app_settings.scheduler.dry_run}[/dim]\n")
+
+    async def _run_all() -> list[tuple[str, bool, str]]:
+        results: list[tuple[str, bool, str]] = []
+        for name in to_run:
+            base_name, sport = resolve_job_name(name)
+            ctx = JobContext(sport=sport) if sport else JobContext()
+            try:
+                job_func = get_job_function(base_name)
+                await job_func(ctx)
+                results.append((name, True, ""))
+                console.print(f"[green]  ✓ {name}[/green]")
+            except Exception as e:  # noqa: BLE001 — one failure must not abort the rest
+                logger.error("smoke_job_failed", job=name, error=str(e), exc_info=True)
+                results.append((name, False, str(e)))
+                console.print(f"[red]  ✗ {name}: {e}[/red]")
+        return results
+
+    results = asyncio.run(_run_all()) if to_run else []
+
+    # Render results table.
+    console.print()
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Job", style="white")
+    table.add_column("Result", style="white")
+    table.add_column("Detail", style="dim")
+    for name, ok, detail in results:
+        result_cell = "[green]PASS[/green]" if ok else "[red]FAIL[/red]"
+        table.add_row(name, result_cell, detail)
+    for name, reason in skipped:
+        table.add_row(name, "[yellow]SKIP[/yellow]", reason)
+    console.print(table)
+
+    failed = [name for name, ok, _ in results if not ok]
+    passed = len(results) - len(failed)
+    console.print(f"\n[bold]{passed} passed, {len(failed)} failed, {len(skipped)} skipped[/bold]")
+
+    if failed:
+        console.print(f"[bold red]✗ Smoke check failed: {', '.join(failed)}[/bold red]")
+        # Exit code = number of failed jobs (clamped to a valid 1-255 range).
+        raise typer.Exit(min(len(failed), 255))
+
+    console.print("[bold green]✓ Smoke check passed[/bold green]")
+
+
 @app.command("info")
 def info():
     app_settings = get_settings()

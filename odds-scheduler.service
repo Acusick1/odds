@@ -1,0 +1,19 @@
+[Unit]
+Description=Odds pipeline local scheduler (APScheduler)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Replace with the deploying user and the absolute repo path on the host.
+User=andrew
+WorkingDirectory=/home/andrew/code/odds
+EnvironmentFile=/home/andrew/code/odds/.env
+# systemd requires an absolute path to the executable; adjust if uv lives elsewhere
+# (`which uv` — e.g. ~/.local/bin/uv).
+ExecStart=/home/andrew/.cargo/bin/uv run odds scheduler start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
