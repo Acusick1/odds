@@ -84,7 +84,7 @@ _JOB_BOOTSTRAP_MAP: dict[str, tuple[str, str]] = {
 
 # Maps sport suffix to sport_key for per-sport job routing.
 # e.g. "fetch-odds-epl" resolves to ("fetch-odds", "soccer_epl")
-_SPORT_SUFFIX_MAP: dict[str, str] = {
+_SPORT_SUFFIX_MAP: dict[str, SportKey] = {
     "epl": "soccer_epl",
     "mlb": "baseball_mlb",
 }
@@ -208,7 +208,7 @@ def make_compound_job_name(base_job_name: str, sport: str | None) -> str:
     return base_job_name
 
 
-def resolve_job_name(compound_name: str) -> tuple[str, str | None]:
+def resolve_job_name(compound_name: str) -> tuple[str, SportKey | None]:
     """Resolve a potentially sport-suffixed job name.
 
     Args:

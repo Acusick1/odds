@@ -456,8 +456,10 @@ def smoke(
             to_run.append(name)
 
     console.print("[bold blue]Smoke-testing bootstrapped jobs...[/bold blue]")
-    console.print(f"[dim]Backend: {app_settings.scheduler.backend} | ", end="")
-    console.print(f"dry_run: {app_settings.scheduler.dry_run}[/dim]\n")
+    console.print(
+        f"[dim]Backend: {app_settings.scheduler.backend} | "
+        f"dry_run: {app_settings.scheduler.dry_run}[/dim]\n"
+    )
 
     async def _run_all() -> list[tuple[str, bool, str]]:
         results: list[tuple[str, bool, str]] = []
