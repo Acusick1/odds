@@ -84,10 +84,21 @@ _JOB_BOOTSTRAP_MAP: dict[str, tuple[str, str]] = {
 
 # Maps sport suffix to sport_key for per-sport job routing.
 # e.g. "fetch-odds-epl" resolves to ("fetch-odds", "soccer_epl")
-_SPORT_SUFFIX_MAP: dict[str, str] = {
+_SPORT_SUFFIX_MAP: dict[str, SportKey] = {
     "epl": "soccer_epl",
     "mlb": "baseball_mlb",
 }
+
+# Jobs that must never run during a deploy smoke check, even when listed in
+# ``bootstrap_jobs``. ``agent-run`` places paper bets — executing it as part of
+# a pre-restart validation would pollute the live portfolio. The smoke command
+# skips these by default and only runs them under an explicit opt-in.
+_SMOKE_UNSAFE_JOBS: frozenset[str] = frozenset({"agent-run"})
+
+# Jobs that post to outward channels (e.g. Discord) on every run. The smoke
+# command drops these under ``--no-side-effects`` so a validation run can stay
+# silent on shared channels.
+_OUTWARD_POSTING_JOBS: frozenset[str] = frozenset({"daily-digest"})
 
 # Jobs that accept a sport parameter. When invoked with a sport suffix
 # (e.g. "fetch-odds-epl"), the sport_key is extracted and passed as a kwarg.
@@ -197,7 +208,7 @@ def make_compound_job_name(base_job_name: str, sport: str | None) -> str:
     return base_job_name
 
 
-def resolve_job_name(compound_name: str) -> tuple[str, str | None]:
+def resolve_job_name(compound_name: str) -> tuple[str, SportKey | None]:
     """Resolve a potentially sport-suffixed job name.
 
     Args:
@@ -251,6 +262,24 @@ def get_job_function(job_name: str) -> Callable[[JobContext], Awaitable[None]]:
 def is_per_sport_job(job_name: str) -> bool:
     """Check whether a job accepts a sport parameter."""
     return job_name in _PER_SPORT_JOBS
+
+
+def is_smoke_unsafe(job_name: str) -> bool:
+    """Whether a job must never run during a deploy smoke check.
+
+    Accepts a compound (sport-suffixed) or base job name.
+    """
+    base_name, _ = resolve_job_name(job_name)
+    return base_name in _SMOKE_UNSAFE_JOBS
+
+
+def is_outward_posting(job_name: str) -> bool:
+    """Whether a job posts to outward channels (e.g. Discord) on every run.
+
+    Accepts a compound (sport-suffixed) or base job name.
+    """
+    base_name, _ = resolve_job_name(job_name)
+    return base_name in _OUTWARD_POSTING_JOBS
 
 
 def resolve_target_sports(job_name: str, configured_sports: Sequence[SportKey]) -> list[SportKey]:

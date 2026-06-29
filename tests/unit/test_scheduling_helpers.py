@@ -135,3 +135,27 @@ class TestSelfSchedule:
 
         call_kwargs = mock_backend.schedule_next_execution.call_args.kwargs
         assert call_kwargs["payload"] is None
+
+
+class TestSmokeTags:
+    """Tags distinguishing smoke-unsafe and outward-posting jobs."""
+
+    def test_agent_run_is_smoke_unsafe(self) -> None:
+        from odds_lambda.scheduling.jobs import is_smoke_unsafe
+
+        assert is_smoke_unsafe("agent-run")
+        # Compound (sport-suffixed) names resolve to the same base.
+        assert is_smoke_unsafe("agent-run-epl")
+
+    def test_daily_digest_is_outward_posting(self) -> None:
+        from odds_lambda.scheduling.jobs import is_outward_posting
+
+        assert is_outward_posting("daily-digest")
+        assert is_outward_posting("daily-digest-epl")
+
+    def test_data_jobs_are_neither(self) -> None:
+        from odds_lambda.scheduling.jobs import is_outward_posting, is_smoke_unsafe
+
+        for job in ("fetch-oddsportal", "fetch-espn-fixtures", "fetch-betfair-exchange"):
+            assert not is_smoke_unsafe(job)
+            assert not is_outward_posting(job)

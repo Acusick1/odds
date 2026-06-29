@@ -236,6 +236,64 @@ docker-compose up -d
 uv run odds status show
 ```
 
+## Always-On Local Scheduler (systemd + deploy.sh)
+
+The local scheduler can run as an always-on service on a mini-PC, supervised by
+systemd and redeployed with a single script that proves the changed jobs run
+green before it cycles the process.
+
+### systemd unit
+
+`odds-scheduler.service` (repo root) runs `odds scheduler start` under systemd
+with `Restart=always`, so the scheduler comes back after a crash or host reboot.
+Edit `User`, `WorkingDirectory`, `EnvironmentFile`, and the absolute `uv` path in
+`ExecStart` to match the host, then install it:
+
+```bash
+sudo cp odds-scheduler.service /etc/systemd/system/odds-scheduler.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now odds-scheduler   # start now + on every boot
+
+systemctl status odds-scheduler              # check state
+journalctl -u odds-scheduler -f              # follow logs
+```
+
+### Smoke check
+
+`odds scheduler smoke` runs each bootstrapped job once (derived from
+`scheduler.bootstrap_jobs`, per-sport expanded — the same source `start` uses)
+and prints a pass/fail table, exiting non-zero (exit code = number of failed
+jobs) if any job fails.
+
+- `agent-run` is skipped by default (never places paper bets during a deploy
+  check); pass `--include-agent` to run it.
+- `daily-digest` posts to Discord; pass `--no-side-effects` to drop it.
+- `--only`/`--exclude` accept base or compound job names (repeatable).
+- Run with `SCHEDULER_DRY_RUN=true` so self-scheduling is a no-op and the live
+  schedule store is left untouched.
+
+Coverage caveat: smoke always exercises each job's import/config/decision/schema
+path, but the full fetch+ingest body only runs when the job's cadence gate
+(`decision.should_execute`) says execute.
+
+### deploy.sh
+
+`deploy.sh` (repo root) is the redeploy entry point:
+
+```bash
+./deploy.sh
+```
+
+It runs: `git pull` → `uv sync` → `alembic upgrade head` →
+`SCHEDULER_DRY_RUN=true odds scheduler smoke` → `sudo systemctl restart
+odds-scheduler` → `systemctl status` + `odds scheduler list-jobs`. If migration
+or smoke fails it aborts **before** the restart, so the running scheduler keeps
+serving the old code untouched until the new code passes smoke.
+
+Migration ordering: `alembic upgrade head` runs before the restart, so the
+still-running old scheduler briefly sees the new schema. Safe for additive
+migrations (the norm); for a destructive migration, stop the service first.
+
 ## Expected Costs
 
 ### The Odds API
