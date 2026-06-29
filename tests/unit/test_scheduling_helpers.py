@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from odds_lambda.scheduling.decision import ScheduleDecision
 from odds_lambda.scheduling.helpers import apply_overnight_skip, get_next_kickoff, self_schedule
 
 
@@ -169,6 +170,55 @@ class TestSuppressScheduling:
 
         backend = get_scheduler_backend(backend_type="local", dry_run=False)
         assert backend.dry_run is False
+
+
+class TestGateBypass:
+    """Under ``SMOKE_POLICY`` (respect_gate=False) the body runs even when the
+    cadence decision says ``should_execute=False``.
+
+    This is the property that makes ``scheduler smoke`` exercise the real
+    fetch+ingest body of gated jobs that are not "due" at deploy time.
+    """
+
+    @staticmethod
+    def _not_due_decision() -> ScheduleDecision:
+        return ScheduleDecision(
+            should_execute=False,
+            reason="no upcoming game",
+            next_execution=datetime.now(UTC) + timedelta(hours=6),
+            tier=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_smoke_policy_runs_body_when_not_due(self) -> None:
+        from odds_lambda.jobs import fetch_scores
+        from odds_lambda.scheduling.jobs import SMOKE_POLICY, JobContext
+
+        body = AsyncMock()
+        with (
+            patch.object(fetch_scores, "_scores_decision", return_value=self._not_due_decision()),
+            patch.object(fetch_scores, "self_schedule", new=AsyncMock()),
+            patch.object(fetch_scores, "_fetch_and_update_scores", new=body),
+        ):
+            await fetch_scores.main(JobContext(sport="soccer_epl", policy=SMOKE_POLICY))
+
+        body.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_live_policy_skips_body_when_not_due(self) -> None:
+        from odds_lambda.jobs import fetch_scores
+        from odds_lambda.scheduling.jobs import JobContext
+
+        body = AsyncMock()
+        with (
+            patch.object(fetch_scores, "_scores_decision", return_value=self._not_due_decision()),
+            patch.object(fetch_scores, "self_schedule", new=AsyncMock()),
+            patch.object(fetch_scores, "_fetch_and_update_scores", new=body),
+        ):
+            # Default JobContext policy is live (respect_gate=True).
+            await fetch_scores.main(JobContext(sport="soccer_epl"))
+
+        body.assert_not_awaited()
 
 
 class TestSmokeTags:

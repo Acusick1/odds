@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, fields
 from importlib import import_module
 
@@ -27,12 +28,21 @@ class RunPolicy:
 
     Enforcement lives at three chokepoints rather than per-job:
 
-    - ``respect_gate`` — read at each cadence-gate site (``if not
-      should_execute and ctx.policy.respect_gate: return``).
-    - ``self_schedule`` — translated to a ``suppress_scheduling`` scope around
-      the run, enforced where backends are constructed.
-    - ``commit_external`` — translated to a ``commit_external`` scope around the
-      run, enforced inside ``AlertManager`` and the paper-bet writer.
+    - ``respect_gate`` — read directly at each cadence-gate site (``if not
+      should_execute and ctx.policy.respect_gate: return``). It needs no
+      surrounding scope.
+    - ``self_schedule`` — when ``False``, ``apply_run_policy`` opens a
+      ``suppress_scheduling`` scope so no rows are written to the schedule
+      store (enforced where backends are constructed).
+    - ``commit_external`` — when ``False``, ``apply_run_policy`` opens a
+      ``commit_external(False)`` scope so outward delivery is dropped at its
+      sinks (``AlertManager`` and the paper-bet writer).
+
+    ``apply_run_policy(policy)`` is the single translator from these fields to
+    the contextvar scopes; callers should never open the underlying scopes
+    independently. Constructing a ``JobContext`` with a non-default policy and
+    running the body without entering ``apply_run_policy`` would silently
+    bypass only the gate while leaving delivery and scheduling live.
     """
 
     respect_gate: bool = True
@@ -43,6 +53,28 @@ class RunPolicy:
 # Preset for deploy-validation runs: force every body, persist nothing, deliver
 # nothing.
 SMOKE_POLICY = RunPolicy(respect_gate=False, self_schedule=False, commit_external=False)
+
+
+@contextmanager
+def apply_run_policy(policy: RunPolicy) -> Iterator[None]:
+    """Open the contextvar scopes implied by a ``RunPolicy``'s fields.
+
+    This is the single source of truth for translating a policy into the
+    suppression scopes that actually enforce it: ``self_schedule=False`` opens
+    a ``suppress_scheduling`` scope and ``commit_external=False`` opens a
+    ``commit_external(False)`` scope. ``respect_gate`` is consulted directly in
+    job bodies and needs no scope. A live ``RunPolicy()`` leaves both scopes at
+    their permissive defaults, so wrapping a live run is a harmless no-op.
+
+    Enter this around any run that uses a non-default policy (e.g. ``scheduler
+    smoke`` with ``SMOKE_POLICY``); do not open the underlying scopes by hand.
+    """
+    from odds_core.alerts import commit_external
+
+    from odds_lambda.scheduling.backends import suppress_scheduling
+
+    with suppress_scheduling(not policy.self_schedule), commit_external(policy.commit_external):
+        yield
 
 
 @dataclass

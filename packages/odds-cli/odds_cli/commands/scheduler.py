@@ -379,11 +379,10 @@ def smoke(
     """
     app_settings = get_settings()
 
-    from odds_core.alerts import commit_external
-    from odds_lambda.scheduling.backends import suppress_scheduling
     from odds_lambda.scheduling.jobs import (
         SMOKE_POLICY,
         JobContext,
+        apply_run_policy,
         expected_compound_job_names,
         get_job_function,
         is_smoke_expensive,
@@ -452,8 +451,10 @@ def smoke(
     async def _run_all() -> list[tuple[str, bool, str]]:
         results: list[tuple[str, bool, str]] = []
         # Force full bodies (SMOKE_POLICY.respect_gate=False) while suppressing
-        # self-scheduling and outward delivery for the whole batch.
-        with suppress_scheduling(), commit_external(False):
+        # self-scheduling and outward delivery for the whole batch. A single
+        # ``apply_run_policy`` opens both scopes from the policy's fields so the
+        # gate, scheduling, and delivery never drift apart.
+        with apply_run_policy(SMOKE_POLICY):
             for name in to_run:
                 base_name, sport = resolve_job_name(name)
                 ctx = JobContext(sport=sport, policy=SMOKE_POLICY)
