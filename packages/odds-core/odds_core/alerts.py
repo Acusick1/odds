@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 
 import aiohttp
@@ -13,6 +14,40 @@ import structlog
 from odds_core.config import Settings, get_settings
 
 logger = structlog.get_logger()
+
+
+# ---------------------------------------------------------------------------
+# External-delivery policy (the ``commit_external`` seam)
+# ---------------------------------------------------------------------------
+#
+# A single process-local switch that suppresses every outward side effect
+# (Discord posts here; paper bets at their own writer). Default is ``True``
+# (live). The scheduler ``smoke`` command flips it off for the duration of a
+# validation run so a deploy check can exercise full job bodies without
+# anything escaping to a shared channel. Because suppression lives at the
+# delivery sink, no registry of "which jobs post" is needed — any outward call
+# is suppressed automatically.
+_commit_external: ContextVar[bool] = ContextVar("odds_commit_external", default=True)
+
+
+def commit_external_enabled() -> bool:
+    """Whether outward delivery (Discord, paper bets) is currently permitted."""
+    return _commit_external.get()
+
+
+@contextmanager
+def commit_external(enabled: bool) -> Iterator[None]:
+    """Scope outward delivery on/off for the duration of the ``with`` block.
+
+    Used by ``scheduler smoke`` with ``enabled=False`` so job bodies run but
+    deliver nothing. Restores the previous value on exit, so nested or
+    per-task runs stay isolated.
+    """
+    token = _commit_external.set(enabled)
+    try:
+        yield
+    finally:
+        _commit_external.reset(token)
 
 
 class AlertBase(ABC):
@@ -122,6 +157,10 @@ class AlertManager:
         Note:
             Only sends if alerts are enabled in configuration
         """
+        if not commit_external_enabled():
+            logger.debug("alert_suppressed_commit_external", message=message)
+            return
+
         if not self.enabled:
             logger.debug("alert_skipped_disabled", message=message)
             return
@@ -138,6 +177,10 @@ class AlertManager:
 
     async def send_embed(self, embed: dict) -> None:
         """Send a raw embed to all configured channels."""
+        if not commit_external_enabled():
+            logger.debug("embed_suppressed_commit_external")
+            return
+
         if not self.enabled:
             logger.debug("embed_skipped_disabled")
             return
@@ -246,7 +289,11 @@ async def job_alert_context(job_name: str) -> AsyncIterator[None]:
         yield
     except Exception as e:
         alert_type = f"job_failure:{job_name}"
-        if alert_manager.enabled and await check_rate_limit(alert_type):
+        if (
+            commit_external_enabled()
+            and alert_manager.enabled
+            and await check_rate_limit(alert_type)
+        ):
             msg = f"🚨 Job {job_name} failed: {type(e).__name__}: {e}"
             await alert_manager.alert(msg, "critical")
             await record_to_alert_history(alert_type, "critical", msg)
@@ -268,6 +315,8 @@ async def send_job_warning(alert_type: str, message: str) -> bool:
 
     Returns True if the alert was sent, False if disabled or rate-limited.
     """
+    if not commit_external_enabled():
+        return False
     if not alert_manager.enabled:
         return False
     if not await check_rate_limit(alert_type):

@@ -137,25 +137,57 @@ class TestSelfSchedule:
         assert call_kwargs["payload"] is None
 
 
+class TestSuppressScheduling:
+    """The ``suppress_scheduling`` scope forces every backend into dry-run.
+
+    This is the single chokepoint that guarantees no rows are written to the
+    schedule store during a smoke run, regardless of which job self-schedules.
+    """
+
+    def test_default_allows_scheduling(self) -> None:
+        from odds_lambda.scheduling.backends import scheduling_enabled
+
+        assert scheduling_enabled() is True
+
+    def test_scope_disables_and_restores(self) -> None:
+        from odds_lambda.scheduling.backends import scheduling_enabled, suppress_scheduling
+
+        with suppress_scheduling():
+            assert scheduling_enabled() is False
+        assert scheduling_enabled() is True
+
+    def test_backend_forced_dry_run_under_scope(self) -> None:
+        from odds_lambda.scheduling.backends import get_scheduler_backend, suppress_scheduling
+
+        # Even with an explicit dry_run=False, the scope forces dry-run.
+        with suppress_scheduling():
+            backend = get_scheduler_backend(backend_type="local", dry_run=False)
+            assert backend.dry_run is True
+
+    def test_backend_live_outside_scope(self) -> None:
+        from odds_lambda.scheduling.backends import get_scheduler_backend
+
+        backend = get_scheduler_backend(backend_type="local", dry_run=False)
+        assert backend.dry_run is False
+
+
 class TestSmokeTags:
-    """Tags distinguishing smoke-unsafe and outward-posting jobs."""
+    """Tag distinguishing the cost-excluded (expensive) jobs from the rest.
 
-    def test_agent_run_is_smoke_unsafe(self) -> None:
-        from odds_lambda.scheduling.jobs import is_smoke_unsafe
+    There is no longer an outward-posting tag: outward side effects are
+    suppressed universally at their delivery sinks during a smoke run, so no
+    per-job registry can be "forgotten".
+    """
 
-        assert is_smoke_unsafe("agent-run")
+    def test_agent_run_is_smoke_expensive(self) -> None:
+        from odds_lambda.scheduling.jobs import is_smoke_expensive
+
+        assert is_smoke_expensive("agent-run")
         # Compound (sport-suffixed) names resolve to the same base.
-        assert is_smoke_unsafe("agent-run-epl")
+        assert is_smoke_expensive("agent-run-epl")
 
-    def test_daily_digest_is_outward_posting(self) -> None:
-        from odds_lambda.scheduling.jobs import is_outward_posting
-
-        assert is_outward_posting("daily-digest")
-        assert is_outward_posting("daily-digest-epl")
-
-    def test_data_jobs_are_neither(self) -> None:
-        from odds_lambda.scheduling.jobs import is_outward_posting, is_smoke_unsafe
+    def test_data_jobs_are_not_expensive(self) -> None:
+        from odds_lambda.scheduling.jobs import is_smoke_expensive
 
         for job in ("fetch-oddsportal", "fetch-espn-fixtures", "fetch-betfair-exchange"):
-            assert not is_smoke_unsafe(job)
-            assert not is_outward_posting(job)
+            assert not is_smoke_expensive(job)

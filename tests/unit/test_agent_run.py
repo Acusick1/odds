@@ -455,6 +455,31 @@ class TestBuildAgentSubprocessEnv:
         mock_logger.warning.assert_called_once()
         assert mock_logger.warning.call_args[0][0] == "agent_database_url_not_set"
 
+    def test_sets_suppress_flag_under_commit_external_false(self) -> None:
+        """A smoke run (commit_external=False) bridges suppression to the subprocess."""
+        from odds_core.alerts import commit_external
+
+        parent_env = {"DATABASE_URL": "postgresql://parent:pw@host/db", "PATH": "/usr/bin"}
+        with (
+            patch.dict("os.environ", parent_env, clear=True),
+            patch("odds_lambda.jobs.agent_run.logger"),
+        ):
+            with commit_external(False):
+                env = _build_agent_subprocess_env()
+
+        assert env["ODDS_SUPPRESS_PAPER_BET"] == "true"
+
+    def test_no_suppress_flag_when_live(self) -> None:
+        """A live run leaves the suppression bridge unset."""
+        parent_env = {"DATABASE_URL": "postgresql://parent:pw@host/db", "PATH": "/usr/bin"}
+        with (
+            patch.dict("os.environ", parent_env, clear=True),
+            patch("odds_lambda.jobs.agent_run.logger"),
+        ):
+            env = _build_agent_subprocess_env()
+
+        assert "ODDS_SUPPRESS_PAPER_BET" not in env
+
     def test_returned_env_is_a_copy(self) -> None:
         """Mutating the returned env dict must not affect ``os.environ``."""
         import os

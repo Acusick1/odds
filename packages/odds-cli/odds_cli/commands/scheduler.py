@@ -334,14 +334,9 @@ def smoke(
     include_agent: bool = typer.Option(
         False,
         "--include-agent",
-        help="Also run smoke-unsafe jobs (agent-run). Off by default so a deploy "
-        "check never places paper bets.",
-    ),
-    no_side_effects: bool = typer.Option(
-        False,
-        "--no-side-effects",
-        help="Drop outward-posting jobs (daily-digest) so the check stays silent "
-        "on shared channels.",
+        help="Also run agent-run. Off by default because it is expensive (LLM + "
+        "web-search spend, multi-minute subprocess), not because it is unsafe — "
+        "paper bets are suppressed during smoke.",
     ),
     only: list[str] | None = typer.Option(  # noqa: B008 — typer option idiom
         None,
@@ -355,39 +350,43 @@ def smoke(
     ),
 ) -> None:
     """
-    Run each bootstrapped job once and report pass/fail (deploy validation).
+    Run every bootstrapped job's full body once and report pass/fail.
 
     Derives the job set from ``scheduler.bootstrap_jobs`` (the same single
     source of truth ``start`` uses), expands per-sport jobs into one run per
     configured sport, runs each once, and prints a per-job pass/fail table.
     Exits non-zero (exit code = number of failed jobs) if any job fails.
 
-    ``agent-run`` is skipped by default (never place paper bets during a deploy
-    check); pass ``--include-agent`` to run it. ``daily-digest`` posts to Discord;
-    pass ``--no-side-effects`` to drop it.
+    Runs under ``RunPolicy(respect_gate=False, self_schedule=False,
+    commit_external=False)`` so each job's full body executes end-to-end with
+    zero outward side effects:
 
-    Run with ``SCHEDULER_DRY_RUN=true`` (as ``deploy.sh`` does) so self-scheduling
-    is a no-op and the live schedule store is untouched.
+    - the cadence gate is bypassed, so the real fetch+ingest body runs even
+      when a job is not "due" at deploy time;
+    - nothing is written to the schedule store (the live schedule is untouched
+      until the scheduler restarts);
+    - every outward call is suppressed at its sink — Discord posts (including
+      failure alerts and the daily digest) and agent paper bets — so a deploy
+      check never escapes to a shared channel or the live portfolio.
 
-    Coverage caveat: smoke always exercises each job's import / config / decision /
-    schema path, but the full fetch+ingest body only runs when the job's cadence
-    gate (``decision.should_execute``) says execute. A ``--force`` gate bypass is
-    out of scope.
+    ``agent-run`` is skipped by default only because it is expensive; pass
+    ``--include-agent`` to run it (its paper bets are still suppressed).
 
     Usage:
-        SCHEDULER_DRY_RUN=true odds scheduler smoke
-        odds scheduler smoke --no-side-effects
+        odds scheduler smoke
         odds scheduler smoke --only fetch-oddsportal --only fetch-espn-fixtures
         odds scheduler smoke --include-agent
     """
     app_settings = get_settings()
 
+    from odds_core.alerts import commit_external
+    from odds_lambda.scheduling.backends import suppress_scheduling
     from odds_lambda.scheduling.jobs import (
+        SMOKE_POLICY,
         JobContext,
         expected_compound_job_names,
         get_job_function,
-        is_outward_posting,
-        is_smoke_unsafe,
+        is_smoke_expensive,
         resolve_job_name,
     )
 
@@ -398,12 +397,6 @@ def smoke(
     if not candidates:
         console.print("[yellow]No jobs to smoke — bootstrap_jobs is empty.[/yellow]")
         return
-
-    if not app_settings.scheduler.dry_run:
-        console.print(
-            "[yellow]⚠ SCHEDULER_DRY_RUN is not set — jobs may write real schedules "
-            "to the store. Set SCHEDULER_DRY_RUN=true (deploy.sh does this).[/yellow]"
-        )
 
     base_of = {c: resolve_job_name(c)[0] for c in candidates}
 
@@ -448,33 +441,31 @@ def smoke(
     for name in sorted(selected):
         if name in excluded_names:
             skipped.append((name, "excluded (--exclude)"))
-        elif is_smoke_unsafe(name) and not include_agent:
-            skipped.append((name, "smoke-unsafe (pass --include-agent)"))
-        elif is_outward_posting(name) and no_side_effects:
-            skipped.append((name, "outward-posting (--no-side-effects)"))
+        elif is_smoke_expensive(name) and not include_agent:
+            skipped.append((name, "expensive (pass --include-agent)"))
         else:
             to_run.append(name)
 
-    console.print("[bold blue]Smoke-testing bootstrapped jobs...[/bold blue]")
-    console.print(
-        f"[dim]Backend: {app_settings.scheduler.backend} | "
-        f"dry_run: {app_settings.scheduler.dry_run}[/dim]\n"
-    )
+    console.print("[bold blue]Smoke-testing bootstrapped jobs (no side effects)...[/bold blue]")
+    console.print(f"[dim]Backend: {app_settings.scheduler.backend}[/dim]\n")
 
     async def _run_all() -> list[tuple[str, bool, str]]:
         results: list[tuple[str, bool, str]] = []
-        for name in to_run:
-            base_name, sport = resolve_job_name(name)
-            ctx = JobContext(sport=sport) if sport else JobContext()
-            try:
-                job_func = get_job_function(base_name)
-                await job_func(ctx)
-                results.append((name, True, ""))
-                console.print(f"[green]  ✓ {name}[/green]")
-            except Exception as e:  # noqa: BLE001 — one failure must not abort the rest
-                logger.error("smoke_job_failed", job=name, error=str(e), exc_info=True)
-                results.append((name, False, str(e)))
-                console.print(f"[red]  ✗ {name}: {e}[/red]")
+        # Force full bodies (SMOKE_POLICY.respect_gate=False) while suppressing
+        # self-scheduling and outward delivery for the whole batch.
+        with suppress_scheduling(), commit_external(False):
+            for name in to_run:
+                base_name, sport = resolve_job_name(name)
+                ctx = JobContext(sport=sport, policy=SMOKE_POLICY)
+                try:
+                    job_func = get_job_function(base_name)
+                    await job_func(ctx)
+                    results.append((name, True, ""))
+                    console.print(f"[green]  ✓ {name}[/green]")
+                except Exception as e:  # noqa: BLE001 — one failure must not abort the rest
+                    logger.error("smoke_job_failed", job=name, error=str(e), exc_info=True)
+                    results.append((name, False, str(e)))
+                    console.print(f"[red]  ✗ {name}: {e}[/red]")
         return results
 
     results = asyncio.run(_run_all()) if to_run else []
