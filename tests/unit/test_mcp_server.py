@@ -620,6 +620,61 @@ class TestPaperBetValidation:
             assert "nonexistent" in result["error"]
 
 
+class TestPaperBetSuppression:
+    """Paper bets are suppressed when the agent runs under a smoke policy.
+
+    ``agent-run`` exports ``ODDS_SUPPRESS_PAPER_BET`` to its subprocess (and
+    thus the MCP server it spawns) so a deploy check can exercise the agent
+    end-to-end without writing to the live portfolio.
+    """
+
+    @pytest.mark.asyncio
+    async def test_suppressed_returns_without_db_write(self, monkeypatch) -> None:
+        from odds_mcp.server import paper_bet
+
+        monkeypatch.setenv("ODDS_SUPPRESS_PAPER_BET", "true")
+
+        with patch("odds_mcp.server.async_session_maker") as mock_session_maker:
+            result = await paper_bet(
+                event_id="evt-1",
+                market="h2h",
+                selection="home",
+                odds=-110,
+                stake=10.0,
+            )
+
+        assert result["status"] == "suppressed"
+        # The writer is never reached — no session is opened.
+        mock_session_maker.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_not_suppressed_when_env_unset(self, monkeypatch) -> None:
+        from odds_mcp.server import paper_bet
+
+        monkeypatch.delenv("ODDS_SUPPRESS_PAPER_BET", raising=False)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("odds_mcp.server.async_session_maker") as mock_session_maker:
+            mock_session_maker.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session_maker.return_value.__aexit__ = AsyncMock()
+
+            result = await paper_bet(
+                event_id="nonexistent",
+                market="h2h",
+                selection="home",
+                odds=-110,
+                stake=10.0,
+            )
+
+        # Falls through to the normal path (event lookup), not suppressed.
+        assert result.get("status") != "suppressed"
+        mock_session_maker.assert_called_once()
+
+
 class TestFindRetailEdges:
     """Unit tests for the ``find_retail_edges`` MCP tool."""
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable, Sequence
-from dataclasses import dataclass, fields
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, field, fields
 from importlib import import_module
 
 import structlog
@@ -12,6 +13,68 @@ from odds_core.sports import SportKey
 from odds_lambda.betfair.constants import SPORT_CONFIG as BETFAIR_SPORT_CONFIG
 
 logger = structlog.get_logger()
+
+
+@dataclass(frozen=True)
+class RunPolicy:
+    """How a job run treats its cadence gate, self-scheduling, and side effects.
+
+    The default is a live run: respect the cadence gate, write the next
+    schedule, and commit outward side effects (Discord posts, paper bets).
+    ``scheduler smoke`` uses ``RunPolicy(False, False, False)`` so every
+    bootstrapped body runs end-to-end while nothing escapes — the gate is
+    bypassed (forcing the full body), the schedule store is left untouched, and
+    outward delivery is suppressed at its sinks.
+
+    Enforcement lives at three chokepoints rather than per-job:
+
+    - ``respect_gate`` — read directly at each cadence-gate site (``if not
+      should_execute and ctx.policy.respect_gate: return``). It needs no
+      surrounding scope.
+    - ``self_schedule`` — when ``False``, ``apply_run_policy`` opens a
+      ``suppress_scheduling`` scope so no rows are written to the schedule
+      store (enforced where backends are constructed).
+    - ``commit_external`` — when ``False``, ``apply_run_policy`` opens a
+      ``commit_external(False)`` scope so outward delivery is dropped at its
+      sinks (``AlertManager`` and the paper-bet writer).
+
+    ``apply_run_policy(policy)`` is the single translator from these fields to
+    the contextvar scopes; callers should never open the underlying scopes
+    independently. Constructing a ``JobContext`` with a non-default policy and
+    running the body without entering ``apply_run_policy`` would silently
+    bypass only the gate while leaving delivery and scheduling live.
+    """
+
+    respect_gate: bool = True
+    self_schedule: bool = True
+    commit_external: bool = True
+
+
+# Preset for deploy-validation runs: force every body, persist nothing, deliver
+# nothing.
+SMOKE_POLICY = RunPolicy(respect_gate=False, self_schedule=False, commit_external=False)
+
+
+@contextmanager
+def apply_run_policy(policy: RunPolicy) -> Iterator[None]:
+    """Open the contextvar scopes implied by a ``RunPolicy``'s fields.
+
+    This is the single source of truth for translating a policy into the
+    suppression scopes that actually enforce it: ``self_schedule=False`` opens
+    a ``suppress_scheduling`` scope and ``commit_external=False`` opens a
+    ``commit_external(False)`` scope. ``respect_gate`` is consulted directly in
+    job bodies and needs no scope. A live ``RunPolicy()`` leaves both scopes at
+    their permissive defaults, so wrapping a live run is a harmless no-op.
+
+    Enter this around any run that uses a non-default policy (e.g. ``scheduler
+    smoke`` with ``SMOKE_POLICY``); do not open the underlying scopes by hand.
+    """
+    from odds_core.alerts import commit_external
+
+    from odds_lambda.scheduling.backends import suppress_scheduling
+
+    with suppress_scheduling(not policy.self_schedule), commit_external(policy.commit_external):
+        yield
 
 
 @dataclass
@@ -35,14 +98,19 @@ class JobContext:
     lookback_hours: float = 24
     lookahead_hours: float = 48
 
+    # Execution policy — defaults to a live run. Not sourced from the event
+    # payload (scheduled re-runs are always live); ``smoke`` sets it explicitly.
+    policy: RunPolicy = field(default_factory=RunPolicy)
+
     @classmethod
     def from_payload(cls, payload: dict[str, object]) -> JobContext:
         """Construct a ``JobContext`` from a raw event/scheduler payload.
 
         Known keys are mapped to dataclass fields; unknown keys are
-        logged and ignored.
+        logged and ignored. ``policy`` is never taken from a payload — a
+        reconstructed scheduled run is always live.
         """
-        known_fields = {f.name for f in fields(cls)}
+        known_fields = {f.name for f in fields(cls)} - {"policy"}
         known: dict[str, object] = {}
         for k, v in payload.items():
             if k in known_fields:
@@ -89,16 +157,12 @@ _SPORT_SUFFIX_MAP: dict[str, SportKey] = {
     "mlb": "baseball_mlb",
 }
 
-# Jobs that must never run during a deploy smoke check, even when listed in
-# ``bootstrap_jobs``. ``agent-run`` places paper bets — executing it as part of
-# a pre-restart validation would pollute the live portfolio. The smoke command
-# skips these by default and only runs them under an explicit opt-in.
-_SMOKE_UNSAFE_JOBS: frozenset[str] = frozenset({"agent-run"})
-
-# Jobs that post to outward channels (e.g. Discord) on every run. The smoke
-# command drops these under ``--no-side-effects`` so a validation run can stay
-# silent on shared channels.
-_OUTWARD_POSTING_JOBS: frozenset[str] = frozenset({"daily-digest"})
+# Jobs that are skipped by default during a deploy smoke check for *cost*, not
+# safety. Under ``RunPolicy.commit_external=False`` ``agent-run`` writes no
+# paper bet, so it is no longer unsafe — only expensive (LLM + web-search
+# spend, plus a multi-minute subprocess). The smoke command skips these by
+# default and runs them only under an explicit ``--include-agent`` opt-in.
+_SMOKE_EXPENSIVE_JOBS: frozenset[str] = frozenset({"agent-run"})
 
 # Jobs that accept a sport parameter. When invoked with a sport suffix
 # (e.g. "fetch-odds-epl"), the sport_key is extracted and passed as a kwarg.
@@ -264,22 +328,13 @@ def is_per_sport_job(job_name: str) -> bool:
     return job_name in _PER_SPORT_JOBS
 
 
-def is_smoke_unsafe(job_name: str) -> bool:
-    """Whether a job must never run during a deploy smoke check.
+def is_smoke_expensive(job_name: str) -> bool:
+    """Whether a job is skipped by default in smoke for cost (not safety).
 
     Accepts a compound (sport-suffixed) or base job name.
     """
     base_name, _ = resolve_job_name(job_name)
-    return base_name in _SMOKE_UNSAFE_JOBS
-
-
-def is_outward_posting(job_name: str) -> bool:
-    """Whether a job posts to outward channels (e.g. Discord) on every run.
-
-    Accepts a compound (sport-suffixed) or base job name.
-    """
-    base_name, _ = resolve_job_name(job_name)
-    return base_name in _OUTWARD_POSTING_JOBS
+    return base_name in _SMOKE_EXPENSIVE_JOBS
 
 
 def resolve_target_sports(job_name: str, configured_sports: Sequence[SportKey]) -> list[SportKey]:

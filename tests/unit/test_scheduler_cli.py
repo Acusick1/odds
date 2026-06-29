@@ -78,12 +78,14 @@ class _JobRecorder:
     def __init__(self, fail_bases: set[str] | None = None) -> None:
         self.fail_bases = fail_bases or set()
         self.ran: list[tuple[str, str | None]] = []
+        self.policies: list[object] = []
 
     def __call__(self, base_name: str):
         recorder = self
 
         async def _job(ctx) -> None:
             recorder.ran.append((base_name, ctx.sport))
+            recorder.policies.append(ctx.policy)
             if base_name in recorder.fail_bases:
                 raise RuntimeError(f"{base_name} boom")
 
@@ -134,14 +136,21 @@ class TestSmokeCommand:
         assert result.exit_code == 0
         assert "daily-digest" in recorder.ran_bases
 
-    def test_no_side_effects_drops_daily_digest(self) -> None:
-        settings = _settings(["fetch-oddsportal", "daily-digest"], ["soccer_epl"])
+    def test_jobs_run_under_smoke_policy(self) -> None:
+        """Each job receives the no-side-effect policy (gate off, nothing escapes)."""
+        from odds_lambda.scheduling.jobs import SMOKE_POLICY
+
+        settings = _settings(["fetch-oddsportal", "fetch-scores"], ["soccer_epl"])
         recorder = _JobRecorder()
-        result = _invoke_smoke(["--no-side-effects"], settings, recorder)
+        result = _invoke_smoke([], settings, recorder)
 
         assert result.exit_code == 0
-        assert "fetch-oddsportal" in recorder.ran_bases
-        assert "daily-digest" not in recorder.ran_bases
+        assert recorder.policies, "no jobs ran"
+        for policy in recorder.policies:
+            assert policy == SMOKE_POLICY
+            assert policy.respect_gate is False
+            assert policy.self_schedule is False
+            assert policy.commit_external is False
 
     def test_only_by_base_name_matches_all_compounds(self) -> None:
         settings = _settings(["fetch-oddsportal", "fetch-scores"], ["soccer_epl", "baseball_mlb"])

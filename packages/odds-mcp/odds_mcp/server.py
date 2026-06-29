@@ -7,6 +7,7 @@ All tools are stateless and use async_session_maker() for DB access.
 import asyncio
 import json
 import math
+import os
 import statistics
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -38,6 +39,21 @@ from odds_mcp.tools.epl import epl_mcp
 from odds_mcp.tools.mlb import mlb_mcp
 
 logger = structlog.get_logger()
+
+# Truthy env values for the paper-bet suppression bridge.
+_TRUTHY_ENV = frozenset({"1", "true", "yes", "on"})
+
+
+def _paper_bets_suppressed() -> bool:
+    """Whether paper bets are suppressed for this process.
+
+    Set by the agent-run job (via ``ODDS_SUPPRESS_PAPER_BET``) during a deploy
+    smoke run so the agent can be exercised end-to-end without polluting the
+    live portfolio. The flag is inherited by this MCP server because it is a
+    child of the agent subprocess.
+    """
+    return os.environ.get("ODDS_SUPPRESS_PAPER_BET", "").strip().lower() in _TRUTHY_ENV
+
 
 MarketKey = Literal["h2h", "1x2", "totals", "spreads"]
 
@@ -589,6 +605,13 @@ async def paper_bet(
     Returns:
         Dict with the placed trade details.
     """
+    if _paper_bets_suppressed():
+        logger.info("paper_bet_suppressed", event_id=event_id, selection=selection, stake=stake)
+        return {
+            "status": "suppressed",
+            "reason": "paper bets suppressed for this run (deploy smoke / commit_external=False)",
+        }
+
     async with async_session_maker() as session:
         event_result = await session.execute(select(Event).where(Event.id == event_id))
         event = event_result.scalar_one_or_none()

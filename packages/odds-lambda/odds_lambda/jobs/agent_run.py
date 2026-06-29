@@ -144,6 +144,16 @@ def _build_agent_subprocess_env() -> dict[str, str]:
                 "write-capable DSN (security control disabled)"
             ),
         )
+
+    # ``commit_external`` is a process-local contextvar that cannot cross the
+    # subprocess boundary, so bridge it via an env var the MCP ``paper_bet``
+    # tool checks. Under a smoke run (commit_external=False) the agent still
+    # researches and reasons but its paper bets are suppressed at the writer.
+    from odds_core.alerts import commit_external_enabled
+
+    if not commit_external_enabled():
+        env["ODDS_SUPPRESS_PAPER_BET"] = "true"
+
     return env
 
 
