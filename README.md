@@ -59,7 +59,7 @@ For local-clone development of the OddsHarvester scraper, see [docs/DEVELOPMENT.
 | [AGENTS.md](AGENTS.md) | Project overview, conventions, and critical constraints (entry point for technical detail) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, scheduler, backends, jobs, pipeline |
 | [docs/DATABASE.md](docs/DATABASE.md) | Schemas, environments, migrations, queries |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | File workflows, testing, code style, config |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Configuration, development workflows, testing, running experiments |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | AWS Lambda (2 functions), Terraform, S3, costs, authoritative job/schedule matrix |
 | [docs/CLI.md](docs/CLI.md) | Full command reference |
 | [docs/DATA_MODELS.md](docs/DATA_MODELS.md) | Training data reference: sources, target, feature groups, config fields |

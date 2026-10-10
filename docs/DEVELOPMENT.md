@@ -1,10 +1,14 @@
 # Development Reference
 
-> Reference documentation for development workflows, code style, and configuration.
+> Reference documentation for configuration and development workflows. Setup is in the
+> [README Quick Start](../README.md#quick-start); code style is in
+> [AGENTS.md](../AGENTS.md#code-style).
 
 ## Configuration Management
 
-Configuration uses Pydantic Settings with environment variables. See `packages/odds-core/odds_core/config.py`.
+Configuration uses Pydantic Settings with environment variables.
+`packages/odds-core/odds_core/config.py` is authoritative for every setting and default;
+the tables below cover the common ones. See `.env.example` for a complete template.
 
 ### API Settings (`APIConfig`)
 
@@ -27,7 +31,7 @@ Configuration uses Pydantic Settings with environment variables. See `packages/o
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SPORTS` | Sports to track | ["soccer_epl", "baseball_mlb"] (also supports "basketball_nba") |
-| `BOOKMAKERS` | Bookmaker list | [pinnacle, circa, draftkings, fanduel, betmgm, williamhill_us, betrivers, bovada] (US); OddsPortal uses [bet365, betway, betfred, bwin] (UK) |
+| `BOOKMAKERS` | Odds API bookmaker list | [pinnacle, circasports, draftkings, fanduel, betmgm, williamhill_us, betrivers, bovada] |
 | `MARKETS` | Bet types | ["h2h", "spreads", "totals"] |
 | `REGIONS` | Odds regions | ["us"] |
 
@@ -38,6 +42,7 @@ Configuration uses Pydantic Settings with environment variables. See `packages/o
 | `SCHEDULER_BACKEND` | Backend type | "local" |
 | `SCHEDULER_DRY_RUN` | Dry-run mode | false |
 | `SCHEDULER_LOOKAHEAD_DAYS` | Days ahead to check | 7 |
+| `SCHEDULER_BOOTSTRAP_JOBS` | Jobs the local scheduler starts | fetch-oddsportal, fetch-oddsportal-results, fetch-espn-fixtures, fetch-betfair-exchange, fetch-mlb-probables |
 
 ### AWS Settings (`AWSConfig`)
 
@@ -45,6 +50,10 @@ Configuration uses Pydantic Settings with environment variables. See `packages/o
 |----------|-------------|---------|
 | `AWS_REGION` | AWS region for Lambda | Optional |
 | `AWS_LAMBDA_ARN` | Lambda function ARN | Optional |
+| `AWS_RULE_PREFIX` | EventBridge rule prefix | Optional |
+
+Inside Lambda the AWS backend reads `LAMBDA_ARN` and `RULE_PREFIX` instead; see
+[DEPLOYMENT.md](DEPLOYMENT.md#configuration).
 
 ### Data Quality (`DataQualityConfig`)
 
@@ -59,8 +68,15 @@ Configuration uses Pydantic Settings with environment variables. See `packages/o
 |----------|-------------|---------|
 | `DISCORD_WEBHOOK_URL` | Discord webhook for alerts/digests | Optional |
 | `ALERT_ENABLED` | Enable alert sending | false |
-| `QUOTA_WARNING_THRESHOLD` | Quota warning at this % remaining | 0.2 |
+| `QUOTA_WARNING_THRESHOLD` | Quota warning at this fraction remaining | 0.2 |
+| `QUOTA_CRITICAL_THRESHOLD` | Quota critical at this fraction remaining | 0.1 |
 | `CONSECUTIVE_FAILURES_THRESHOLD` | Alert after N consecutive failures | 3 |
+| `STALE_DATA_HOURS` | Alert when no new snapshots for this long | 2 |
+| `ALERT_RATE_LIMIT_MINUTES` | Minimum gap between alerts of one type | 30 |
+| `DATA_QUALITY_ERROR_THRESHOLD` | Alert above this many quality errors in 24h | 10 |
+
+Heartbeat expectations and retention are also in `AlertConfig`; see
+[REPORTING.md](REPORTING.md#3-health-monitoring--packagesodds-lambdaodds_lambdahealth_monitorpy).
 
 ### Logging (`LoggingConfig`)
 
@@ -69,49 +85,11 @@ Configuration uses Pydantic Settings with environment variables. See `packages/o
 | `LOG_LEVEL` | Logging verbosity | INFO |
 | `LOG_FILE` | Log file path | logs/odds_pipeline.log |
 
-See `.env.example` for complete template.
+### Other settings
 
-## Code Style Guidelines
-
-### Type Hints (Required)
-
-```python
-# Good
-def process_odds(event_id: str, limit: int | None = None) -> list[Odds]: ...
-
-# Bad - don't use Optional or typing module
-from typing import Optional, List
-def process_odds(event_id: str, limit: Optional[int] = None) -> List[Odds]: ...
-```
-
-- All function signatures need type hints
-- Use `str | None` not `Optional[str]`
-- Use `list[T]`, `dict[K, V]` not `List[T]`, `Dict[K, V]`
-
-### Async/Await (Required)
-
-```python
-# Good
-async def get_event(session: AsyncSession, event_id: str) -> Event:
-    result = await session.execute(select(Event).where(Event.id == event_id))
-    return result.scalar_one()
-
-# Bad - never use sync Session
-def get_event(session: Session, event_id: str) -> Event: ...
-```
-
-- All database operations must use `async`/`await`
-- Use `AsyncSession`, never sync `Session`
-- CLI commands use `asyncio.run()` for async functions
-- Never mix sync and async database code
-
-### Model Types
-
-| Type | Use Case |
-|------|----------|
-| SQLModel | Database models (ORM + validation) |
-| Pydantic BaseModel | API responses, configs |
-| dataclass | Simple containers without validation |
+`ModelConfig` (`MODEL_NAME`, `MODEL_BUCKET`), `PolymarketConfig` (`POLYMARKET_*`, see
+[POLYMARKET.md](POLYMARKET.md#configuration)) and `BetfairConfig` (`BETFAIR_*`) are defined
+in the same file.
 
 ## File Modification Workflows
 
@@ -142,18 +120,19 @@ def get_event(session: Session, event_id: str) -> Event: ...
 2. Update quota tracking if request patterns change
 3. Add fixtures to `tests/fixtures/` for new endpoints
 4. Update integration tests
-5. Never remove rate limiting or error handling
+5. Never remove retry/backoff, key rotation or error handling
 
 ### Adding Scheduler Jobs
 
 `packages/odds-lambda/odds_lambda/jobs/*.py`
 
-1. Create async job function
-2. Add to `packages/odds-lambda/odds_lambda/scheduling/jobs.py` registry
+1. Create an `async def main(ctx: JobContext)` entry point
+2. Add it to `_JOB_MODULE_MAP` in `packages/odds-lambda/odds_lambda/scheduling/jobs.py`
 3. Implement self-scheduling (calculate next execution time)
-4. Add error handling (log errors, never crash)
-5. Register in CLI: `packages/odds-cli/odds_cli/commands/scheduler.py`
-6. Test locally: `odds scheduler start`
+4. Wrap the job body in `job_alert_context(job_name)` so failures alert and heartbeats are recorded
+5. If the job runs per sport, add it to `_PER_SPORT_JOBS`; if it runs on a fixed local
+   cron, add it to `_JOB_CRON_MAP` (both in `scheduling/jobs.py`)
+6. Test locally: `odds scheduler run-once <job>`, then `odds scheduler start`
 
 ### Modifying Configuration
 
@@ -192,7 +171,9 @@ tests/
 └── fixtures/       # Test data
 ```
 
-Test database uses `odds_test` (isolated from dev data).
+Tests run against an in-process PostgreSQL (py-pglite, port 5434) set up in
+`tests/conftest.py`; they never touch the local or remote databases. See
+[DATABASE.md](DATABASE.md#test-database).
 
 ## Running Experiments
 
@@ -257,29 +238,13 @@ Before reporting results in `FINDINGS.md`, verify that:
    [Current conclusions](MODELING.md#current-conclusions) in place and add the experiment
    to [Evidence](MODELING.md#evidence), linking its `FINDINGS.md`.
 
-## Local Development Setup
-
-```bash
-# Start PostgreSQL
-docker-compose up -d
-
-# Run scheduler locally
-uv run odds scheduler start
-
-# Manual data fetch
-uv run odds fetch current
-
-# Check status
-uv run odds status show
-```
-
 ## Dependency Management
 
 Project uses **uv** workspace architecture. Dependencies managed via `pyproject.toml` and `uv.lock`.
 
 ## Code Quality
 
-Pre-commit hooks (`.pre-commit-config.yaml`) run on every commit, and the `Lint` workflow runs them on all files for every pushed branch:
+Pre-commit hooks (`.pre-commit-config.yaml`) run on every commit, and the `Lint` workflow runs them on all files for every pushed branch except `main`:
 
 - **Ruff** lints and formats Python.
 - **Vale** checks `README.md`, `AGENTS.md` and `docs/` for wording that narrates change instead of describing the current state. Rules live in `.vale/styles/Temporal/`; errors block the commit, warnings are advisory.
@@ -302,21 +267,17 @@ See [docs/agents/issue-tracker.md](agents/issue-tracker.md).
 Uses **structlog** for structured logging.
 
 - Levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
-- Format: JSON to console, rotating files
-- Retention: 30 days
+- Format: human-readable console output and a plain-text log file; JSON when JSON output is
+  enabled (Lambda)
+- Files rotate at 10 MB, keeping 5 backups (`packages/odds-core/odds_core/logging_setup.py`)
 - Config: `LOG_LEVEL`, `LOG_FILE` environment variables
 
 ## Extensibility
 
 ### Adding Sports/Bookmakers/Markets
 
-Add to respective config lists in `.env`:
-- `SPORTS`
-- `BOOKMAKERS`
-- `MARKETS`
+`BOOKMAKERS` and `MARKETS` are config lists in `.env` and need no code changes. `SPORTS`
+only accepts a `SportKey` (`packages/odds-core/odds_core/sports.py`), so a new sport
+needs code as well as config.
 
-No code changes required.
-
-### Adding Strategies
-
-Inherit from `BettingStrategy` and implement `evaluate_opportunity()`. See `packages/odds-analytics/odds_analytics/strategies.py` for examples.
+Strategies are covered under [Adding Betting Strategies](#adding-betting-strategies).
