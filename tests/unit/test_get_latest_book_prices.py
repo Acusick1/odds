@@ -57,7 +57,7 @@ def _make_snapshot(
 
 
 # Standard 17-book retail panel mirroring the OddsPortal scrape coverage
-# documented in AGENTS.md (~30 bookmakers per snapshot, including these 17).
+# (~30 bookmakers per snapshot, including these 17).
 _RETAIL_BOOKS_17 = [
     "bet365",
     "betway",

@@ -1,6 +1,6 @@
 # Betting Odds Pipeline & Agent
 
-IMPORTANT (LLM agents): This document is read-only. Do not create additional documentation files without user consent.
+IMPORTANT (LLM agents): This document is read-only. Do not create additional documentation files without user consent, except `GLOSSARY.md` and `docs/adr/` entries written through the domain-modeling skill.
 
 ## Strategic Goal
 

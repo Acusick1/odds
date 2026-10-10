@@ -31,7 +31,7 @@ packages/
 - Sport-parameterized: `/sports/{sport_key}/odds`, `/sports/{sport_key}/scores`, etc.
 - Supported sport keys: `soccer_epl`, `baseball_mlb`, `basketball_nba`
 
-See AGENTS.md for endpoint pricing breakdown and DEPLOYMENT.md for tier details.
+See the API Cost section of AGENTS.md for the endpoint pricing breakdown and DEPLOYMENT.md for tier details.
 
 ### OddsPortal (via OddsHarvester scraper)
 
