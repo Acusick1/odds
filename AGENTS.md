@@ -1,7 +1,5 @@
 # Betting Odds Pipeline & Agent
 
-IMPORTANT (LLM agents): This document is read-only. Do not create additional documentation files without user consent, except `GLOSSARY.md` and `docs/adr/` entries written through the domain-modeling skill.
-
 ## Strategic Goal
 
 Identify and exploit structural mispricing in betting markets across multiple sports. The edge is **breadth and speed of information synthesis** — an LLM agent that simultaneously monitors bookmaker odds, exchange orderbooks, public sentiment signals, lineup announcements, press conferences, and fixture context can reason across all of it to identify mispricings that no individual bettor can. Structural biases (bookmaker liability shading, accumulator distortion, public money loading) and information gaps are both valid edge types. Execute on whichever venue offers the best price relative to estimated fair value. See [docs/BETTING_AGENT.md](docs/BETTING_AGENT.md) for the agent architecture.
