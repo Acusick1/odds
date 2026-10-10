@@ -68,7 +68,7 @@ For local-clone development of the OddsHarvester scraper, see [docs/DEVELOPMENT.
 | [docs/POLYMARKET.md](docs/POLYMARKET.md) | Polymarket data model, pipeline (deprioritized) |
 | [docs/BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md) | Backtesting strategies, bet sizing, custom strategies |
 | [docs/INJURIES.md](docs/INJURIES.md) | Injury report pipeline (no predictive value for CLV) |
-| [docs/BETTING_AGENT.md](docs/BETTING_AGENT.md) | Agent architecture, matchday workflow, phased rollout |
+| [docs/BETTING_AGENT.md](docs/BETTING_AGENT.md) | Agent architecture, matchday workflow, MCP tools |
 | [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) | Agent data source inventory and evaluation |
 | [docs/BOOKMAKER_LINE_RELEASE.md](docs/BOOKMAKER_LINE_RELEASE.md) | Bookmaker line timing analysis |
 | [docs/REPORTING.md](docs/REPORTING.md) | Reporting surfaces (alerts, digests, health, CLI/MCP, traces) and backing tables |
