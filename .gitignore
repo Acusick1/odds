@@ -45,6 +45,9 @@ secrets/
 # Claude Code
 .claude/
 
+# Git worktrees
+worktrees/
+
 # Playwright MCP
 .playwright-mcp/
 

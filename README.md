@@ -54,15 +54,26 @@ For local-clone development of the OddsHarvester scraper, see [docs/DEVELOPMENT.
 
 ## Documentation
 
-- **[CLAUDE.md](CLAUDE.md)** — project overview, conventions, and critical constraints (entry point for technical detail)
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — system architecture, scheduler, data pipeline
-- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — AWS Lambda deployment and the authoritative job/schedule matrix
-- **[docs/CLI.md](docs/CLI.md)** — full command reference
-- **[docs/BETTING_AGENT.md](docs/BETTING_AGENT.md)** — agent architecture and matchday workflow
-- **[docs/BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md)** — backtesting strategies and metrics
-- **[docs/DATABASE.md](docs/DATABASE.md)** — schemas, environments, migrations
-
-A full documentation index is in [CLAUDE.md](CLAUDE.md#documentation).
+| Document | Content |
+|----------|---------|
+| [AGENTS.md](AGENTS.md) | Project overview, conventions, and critical constraints (entry point for technical detail) |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, scheduler, backends, jobs, pipeline |
+| [docs/DATABASE.md](docs/DATABASE.md) | Schemas, environments, migrations, queries |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | File workflows, testing, code style, config |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | AWS Lambda (2 functions), Terraform, S3, costs, authoritative job/schedule matrix |
+| [docs/CLI.md](docs/CLI.md) | Full command reference |
+| [docs/DATA_MODELS.md](docs/DATA_MODELS.md) | Training pipeline, feature groups, target definition |
+| [docs/MODELING.md](docs/MODELING.md) | Modeling rationale, experiments, open questions |
+| [docs/DEBUGGING_SCHEDULER.md](docs/DEBUGGING_SCHEDULER.md) | Scheduler diagnostics, EventBridge, CloudWatch |
+| [docs/POLYMARKET.md](docs/POLYMARKET.md) | Polymarket data model, pipeline (deprioritized) |
+| [docs/BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md) | Backtesting strategies, bet sizing, custom strategies |
+| [docs/INJURIES.md](docs/INJURIES.md) | Injury report pipeline (no predictive value for CLV) |
+| [docs/BETTING_AGENT.md](docs/BETTING_AGENT.md) | Agent architecture, matchday workflow, phased rollout |
+| [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) | Agent data source inventory and evaluation |
+| [docs/BOOKMAKER_LINE_RELEASE.md](docs/BOOKMAKER_LINE_RELEASE.md) | Bookmaker line timing analysis |
+| [docs/REPORTING.md](docs/REPORTING.md) | Reporting surfaces (alerts, digests, health, CLI/MCP, traces) and backing tables |
+| [docs/agents/](docs/agents/) | Agent skill configuration: issue tracker, triage labels, domain docs |
+| [.env.example](.env.example) | Environment variable template |
 
 ## License
 

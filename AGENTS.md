@@ -1,6 +1,6 @@
 # Betting Odds Pipeline & Agent
 
-IMPORTANT (LLM agents): This document is read-only. Do not create additional documentation files without user consent. Run `uv run ruff check --fix` and `uv run ruff format` immediately before committing — not during development while changes are still in progress.
+IMPORTANT (LLM agents): This document is read-only. Do not create additional documentation files without user consent.
 
 ## Strategic Goal
 
@@ -57,9 +57,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the system architecture and
 
 ### Timezone Handling (CRITICAL)
 
-- ALWAYS use `datetime.now(UTC)` (from `datetime import UTC`)
-- NEVER use `datetime.utcnow()` (deprecated in Python 3.12+)
-- NEVER use `datetime.now()` without timezone
+- Use `datetime.now(UTC)` (from `datetime import UTC`); ruff `DTZ003`/`DTZ005` reject `utcnow()` and naive `now()`
 - Store UTC in database, convert only for display
 
 ### AWS Lambda
@@ -116,8 +114,7 @@ Pipeline code currently targets NBA via `polymarket_fetcher.get_nba_events()`. S
 
 ### Type Hints (Required)
 
-- Use modern syntax: `str | None` not `Optional[str]`
-- Use `list[T]`, `dict[K, V]` not `List[T]`, `Dict[K, V]`
+- Modern syntax (`str | None`, `list[T]`) is enforced by ruff `UP`
 - All functions must have type hints for parameters and return values
 
 ### Async/Await (Required)
@@ -175,7 +172,7 @@ uv run alembic revision --autogenerate -m "description"
 uv run alembic upgrade head
 
 # Local development
-docker-compose up -d
+docker compose up -d
 uv run odds scheduler start
 ```
 
@@ -192,21 +189,18 @@ uv run odds scheduler start
 
 ## Documentation
 
-| Document | Content |
-|----------|---------|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, scheduler, backends, jobs, pipeline |
-| [docs/DATABASE.md](docs/DATABASE.md) | Schemas, environments, migrations, queries |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | File workflows, testing, code style, config |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | AWS Lambda (2 functions), Terraform, S3, costs |
-| [docs/CLI.md](docs/CLI.md) | Full command reference |
-| [docs/DATA_MODELS.md](docs/DATA_MODELS.md) | Training pipeline, feature groups, target definition |
-| [docs/MODELING.md](docs/MODELING.md) | Modeling rationale, experiments, open questions |
-| [docs/DEBUGGING_SCHEDULER.md](docs/DEBUGGING_SCHEDULER.md) | Scheduler diagnostics, EventBridge, CloudWatch |
-| [docs/POLYMARKET.md](docs/POLYMARKET.md) | Polymarket data model, pipeline (deprioritized) |
-| [docs/BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md) | Backtesting strategies, bet sizing, custom strategies |
-| [docs/INJURIES.md](docs/INJURIES.md) | Injury report pipeline (no predictive value for CLV) |
-| [docs/BETTING_AGENT.md](docs/BETTING_AGENT.md) | Agent architecture, matchday workflow, phased rollout |
-| [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) | Agent data source inventory and evaluation |
-| [docs/BOOKMAKER_LINE_RELEASE.md](docs/BOOKMAKER_LINE_RELEASE.md) | Bookmaker line timing analysis |
-| [docs/REPORTING.md](docs/REPORTING.md) | Reporting surfaces (alerts, digests, health, CLI/MCP, traces) and backing tables |
-| [.env.example](.env.example) | Environment variable template |
+The documentation index lives in [README.md](README.md#documentation).
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `Acusick1/odds`, added to the `Personal` project board. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root, created when first needed. See `docs/agents/domain.md`.

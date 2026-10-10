@@ -10,7 +10,7 @@
 
 Data model, pipeline architecture, and API reference for Polymarket prediction market data.
 
-For strategic context, key constraints, and quick-reference patterns see the Polymarket Integration section in [CLAUDE.md](../CLAUDE.md).
+For strategic context, key constraints, and quick-reference patterns see the Polymarket Integration section in [AGENTS.md](../AGENTS.md).
 
 ## Data Model
 
