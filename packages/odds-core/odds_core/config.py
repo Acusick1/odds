@@ -66,6 +66,12 @@ class DataCollectionConfig(BaseSettings):
     regions: list[str] = Field(default=["us"], description="Regions for odds data")
 
 
+# Fallback season lead (days) for sports without an explicit ``season_lead_days``
+# entry: forward collection jobs do real work only when the next kickoff is
+# within this many days, otherwise they sleep until ``next_kickoff − lead``.
+DEFAULT_SEASON_LEAD_DAYS = 7
+
+
 class SchedulerConfig(BaseSettings):
     """Scheduler backend configuration."""
 
@@ -85,6 +91,14 @@ class SchedulerConfig(BaseSettings):
         default=7,
         description="How many days ahead to check for games when scheduling",
     )
+    season_lead_days: dict[SportKey, int] = Field(
+        default_factory=dict,
+        description=(
+            "Per-sport lead time (days) for the forward season gate: collection "
+            "jobs do real work only when the next kickoff is within this many "
+            f"days. Sports absent from this map use {DEFAULT_SEASON_LEAD_DAYS}d."
+        ),
+    )
     bootstrap_jobs: list[str] = Field(
         default=[
             # "agent-run",
@@ -97,6 +111,10 @@ class SchedulerConfig(BaseSettings):
         ],
         description="Jobs to bootstrap when starting the local scheduler",
     )
+
+    def lead_days_for(self, sport_key: SportKey) -> int:
+        """Return the season-gate lead (days) for a sport, with default fallback."""
+        return self.season_lead_days.get(sport_key, DEFAULT_SEASON_LEAD_DAYS)
 
 
 class AWSConfig(BaseSettings):

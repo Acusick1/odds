@@ -81,10 +81,12 @@ class CadenceConfig:
     interval values differ per job (e.g. a cheap API polls more aggressively
     than a browser-driven scrape).
 
-    ``no_game`` is the check-in interval used when there is no upcoming game
-    (off-season / fixtures not yet posted). ``db_fallback`` is the interval a
-    caller should use when the kickoff query itself fails (DB unreachable),
-    so scheduling never blocks on DB availability.
+    ``no_game`` is the deep-offseason heartbeat: the cheap DB-only recheck
+    cadence used when there is no upcoming fixture at all (before the next
+    season's fixtures publish). When a fixture exists but is beyond the season
+    lead, the gate instead wakes precisely at ``next_kickoff − lead_days``.
+    ``db_fallback`` is the interval a caller should use when the kickoff query
+    itself fails (DB unreachable), so scheduling never blocks on DB availability.
     """
 
     closing: float
@@ -141,14 +143,61 @@ def _decide_from_kickoff(
     """Classify an already-resolved kickoff into a decision (no DB access).
 
     Shared core of :func:`decide_forward` and :func:`decide_forward_resilient`:
-    gates ``should_execute=False`` when ``next_kickoff`` is absent or beyond
-    ``lookahead_days``; otherwise maps proximity to a ``FetchTier`` cadence.
+    gates ``should_execute=False`` when ``next_kickoff`` is absent or beyond the
+    season lead (``lookahead_days``); otherwise maps proximity to a ``FetchTier``
+    cadence.
+
+    The season gate computes a *precise* wake so a job sleeping through the
+    offseason re-arms exactly ``lead_days`` before the next kickoff rather than
+    polling on a fixed heartbeat:
+
+    - kickoff beyond lead -> wake at ``next_kickoff − lead_days`` (the next run
+      then lands inside the lead window and does real work),
+    - no future kickoff at all (deep offseason) -> fall back to a cheap DB-only
+      ``cadence.no_game`` recheck, re-arming within a bounded lag once discovery
+      publishes fixtures.
+
+    A structured ``season_gate_skip`` is logged on every gated skip.
     """
-    if next_kickoff is None or next_kickoff > now + timedelta(days=lookahead_days):
+    if next_kickoff is None:
+        next_execution = _next_time(now, cadence.no_game, overnight)
+        logger.info(
+            "season_gate_skip",
+            sport=sport_key,
+            next_kickoff=None,
+            next_execution=next_execution.isoformat(),
+            lead_days=lookahead_days,
+        )
         return ScheduleDecision(
             should_execute=False,
-            reason=f"No upcoming {sport_key} game within {lookahead_days}d",
-            next_execution=_next_time(now, cadence.no_game, overnight),
+            reason=f"No upcoming {sport_key} fixture — deep-offseason heartbeat",
+            next_execution=next_execution,
+            tier=None,
+        )
+
+    lead_start = next_kickoff - timedelta(days=lookahead_days)
+    if now < lead_start:
+        # Beyond the lead window: sleep until the gate opens. Apply the overnight
+        # skip so the wake doesn't land in a suppressed window.
+        if overnight is not None:
+            next_execution = apply_overnight_skip(
+                lead_start,
+                overnight_start_utc=overnight[0],
+                overnight_resume_utc=overnight[1],
+            )
+        else:
+            next_execution = lead_start
+        logger.info(
+            "season_gate_skip",
+            sport=sport_key,
+            next_kickoff=next_kickoff.isoformat(),
+            next_execution=next_execution.isoformat(),
+            lead_days=lookahead_days,
+        )
+        return ScheduleDecision(
+            should_execute=False,
+            reason=f"Next {sport_key} game beyond {lookahead_days}d lead",
+            next_execution=next_execution,
             tier=None,
         )
 
@@ -175,16 +224,19 @@ async def decide_forward(
 ) -> ScheduleDecision:
     """Forward-looking decision keyed off the next upcoming game for a sport.
 
-    Gates ``should_execute=False`` when no upcoming game exists within
-    ``lookahead_days``; otherwise classifies proximity into a ``FetchTier`` and
-    returns the matching cadence interval.
+    Gates ``should_execute=False`` when no upcoming game exists within the
+    season lead (``lookahead_days``); otherwise classifies proximity into a
+    ``FetchTier`` and returns the matching cadence interval. When gated, the
+    wake is precise: ``next_kickoff − lead_days`` (or a ``cadence.no_game``
+    recheck when no fixture exists yet).
 
     Args:
         sport_key: Sport to scope the next-game query to.
         cadence: Per-job intervals keyed by ``FetchTier``.
         overnight: Optional (start_utc, resume_utc) suppression window applied
             to ``next_execution``.
-        lookahead_days: How far ahead a game must be to count as "upcoming".
+        lookahead_days: Season lead (days) — how close the next kickoff must be
+            for the job to do real work.
         now: Injectable clock (defaults to ``datetime.now(UTC)``).
         next_kickoff: Pre-fetched kickoff to avoid a redundant query (used by
             callers that re-query after doing work). When omitted the kickoff is

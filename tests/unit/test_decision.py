@@ -54,22 +54,55 @@ class TestDecideForward:
 
     @pytest.mark.asyncio
     async def test_no_game_gates_off(self) -> None:
+        """No future fixture (deep offseason) -> heartbeat recheck at no_game."""
         decision = await decide_forward("soccer_epl", CADENCE, now=NOW, next_kickoff=None)
         assert decision.should_execute is False
         assert decision.tier is None
         assert _hours_after(NOW, decision.next_execution) == CADENCE.no_game
 
     @pytest.mark.asyncio
-    async def test_game_beyond_lookahead_gates_off(self) -> None:
+    async def test_game_beyond_lookahead_gates_off_with_precise_wake(self) -> None:
+        """Fixture beyond the lead -> wake precisely at next_kickoff − lead_days."""
+        next_kickoff = NOW + timedelta(days=10)
         decision = await decide_forward(
             "soccer_epl",
             CADENCE,
             now=NOW,
             lookahead_days=7,
-            next_kickoff=NOW + timedelta(days=10),
+            next_kickoff=next_kickoff,
         )
         assert decision.should_execute is False
-        assert _hours_after(NOW, decision.next_execution) == CADENCE.no_game
+        assert decision.tier is None
+        # 10d kickoff, 7d lead -> wake 3d (72h) from now.
+        assert decision.next_execution == next_kickoff - timedelta(days=7)
+        assert _hours_after(NOW, decision.next_execution) == 72.0
+
+    @pytest.mark.asyncio
+    async def test_in_season_break_wakes_at_lead(self) -> None:
+        """A ~14d mid-season break does not suppress permanently: wakes at lead."""
+        next_kickoff = NOW + timedelta(days=14)
+        decision = await decide_forward(
+            "soccer_epl",
+            CADENCE,
+            now=NOW,
+            lookahead_days=7,
+            next_kickoff=next_kickoff,
+        )
+        assert decision.should_execute is False
+        assert decision.next_execution == next_kickoff - timedelta(days=7)
+
+    @pytest.mark.asyncio
+    async def test_fixture_within_lead_executes(self) -> None:
+        """A fixture inside the lead window runs (and is tier-classified)."""
+        decision = await decide_forward(
+            "soccer_epl",
+            CADENCE,
+            now=NOW,
+            lookahead_days=7,
+            next_kickoff=NOW + timedelta(days=5),
+        )
+        assert decision.should_execute is True
+        assert decision.tier is FetchTier.OPENING
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

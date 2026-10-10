@@ -35,6 +35,27 @@ async def get_next_kickoff(sport_key: str, *, now: datetime | None = None) -> da
         return result.scalar_one_or_none()
 
 
+async def within_lead(
+    sport_key: str,
+    lead_days: int,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Whether the sport's next fixture is within ``lead_days`` of ``now``.
+
+    Cheap DB-only season gate for cron-driven forward jobs that have no
+    self-scheduling decision of their own (``daily_digest``,
+    ``fetch_mlb_probables``). Returns ``False`` in the offseason (no fixture, or
+    next fixture beyond the lead) so the caller can early-return before doing
+    expensive work; the cron re-fires and re-gates on the next tick.
+    """
+    now = now or datetime.now(UTC)
+    next_kickoff = await get_next_kickoff(sport_key, now=now)
+    if next_kickoff is None:
+        return False
+    return next_kickoff <= now + timedelta(days=lead_days)
+
+
 def apply_overnight_skip(
     next_time: datetime,
     *,

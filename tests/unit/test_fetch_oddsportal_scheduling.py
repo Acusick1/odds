@@ -71,10 +71,13 @@ class TestProximityScheduling:
             patch(
                 "odds_lambda.scheduling.decision.get_next_kickoff",
                 new_callable=AsyncMock,
-                return_value=None,
+                # Fixture within the 7d lead so the season gate opens and the
+                # scrape (and post-scrape reschedule) runs.
+                return_value=datetime.now(UTC) + timedelta(days=2),
             ),
         ):
             mock_settings.return_value.scheduler.dry_run = False
+            mock_settings.return_value.scheduler.lead_days_for = lambda _sport: 7
             await main(JobContext())
 
         assert call_order[0] == "schedule", (
@@ -101,12 +104,15 @@ class TestProximityScheduling:
             patch(
                 "odds_lambda.scheduling.decision.get_next_kickoff",
                 new_callable=AsyncMock,
-                return_value=None,
+                # Fixture within the 7d lead so the season gate opens and the
+                # scrape (and post-scrape reschedule) runs.
+                return_value=datetime.now(UTC) + timedelta(days=2),
             ),
         ):
             from odds_lambda.jobs.fetch_oddsportal import IngestionStats
 
             mock_settings.return_value.scheduler.dry_run = False
+            mock_settings.return_value.scheduler.lead_days_for = lambda _sport: 7
             mock_ingest.return_value = IngestionStats(
                 league="test", matches_scraped=5, snapshots_stored=3
             )
@@ -141,12 +147,15 @@ class TestProximityScheduling:
             patch(
                 "odds_lambda.scheduling.decision.get_next_kickoff",
                 new_callable=AsyncMock,
-                return_value=None,
+                # Fixture within the 7d lead so the season gate opens and the
+                # scrape (and post-scrape reschedule) runs.
+                return_value=datetime.now(UTC) + timedelta(days=2),
             ),
         ):
             from odds_lambda.jobs.fetch_oddsportal import IngestionStats
 
             mock_settings.return_value.scheduler.dry_run = False
+            mock_settings.return_value.scheduler.lead_days_for = lambda _sport: 7
             mock_ingest.return_value = IngestionStats(league="test", matches_scraped=0)
 
             await main(JobContext())
@@ -176,14 +185,48 @@ class TestProximityScheduling:
             patch(
                 "odds_lambda.scheduling.decision.get_next_kickoff",
                 new_callable=AsyncMock,
-                return_value=None,
+                # Fixture within the 7d lead so the season gate opens and the
+                # scrape (and post-scrape reschedule) runs.
+                return_value=datetime.now(UTC) + timedelta(days=2),
             ),
         ):
             mock_settings.return_value.scheduler.dry_run = False
+            mock_settings.return_value.scheduler.lead_days_for = lambda _sport: 7
             await main(JobContext())
 
         # Only the pre-schedule fires
         assert mock_backend.schedule_next_execution.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_season_gate_skips_scrape_when_no_fixture(self) -> None:
+        """Deep offseason (no fixture): pre-schedule fires, scrape is skipped."""
+        mock_backend = AsyncMock()
+        mock_backend.get_backend_name = Mock(return_value="test")
+
+        with (
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal.ingest_league", new_callable=AsyncMock
+            ) as mock_ingest,
+            patch(
+                "odds_lambda.scheduling.helpers.get_scheduler_backend",
+                return_value=mock_backend,
+            ),
+            patch("odds_core.config.get_settings") as mock_settings,
+            patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
+            patch(
+                "odds_lambda.scheduling.decision.get_next_kickoff",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            mock_settings.return_value.scheduler.dry_run = False
+            mock_settings.return_value.scheduler.lead_days_for = lambda _sport: 7
+
+            await main(JobContext())
+
+        # Only the pre-schedule fires; the browser scrape never runs.
+        assert mock_backend.schedule_next_execution.call_count == 1
+        mock_ingest.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_db_failure_falls_back_to_1h(self) -> None:
@@ -214,6 +257,7 @@ class TestProximityScheduling:
             from odds_lambda.jobs.fetch_oddsportal import IngestionStats
 
             mock_settings.return_value.scheduler.dry_run = False
+            mock_settings.return_value.scheduler.lead_days_for = lambda _sport: 7
             mock_ingest.return_value = IngestionStats(
                 league="test", matches_scraped=5, snapshots_stored=3
             )
@@ -258,6 +302,7 @@ class TestProximityScheduling:
             from odds_lambda.jobs.fetch_oddsportal import IngestionStats
 
             mock_settings.return_value.scheduler.dry_run = False
+            mock_settings.return_value.scheduler.lead_days_for = lambda _sport: 7
             mock_ingest.return_value = IngestionStats(
                 league="test", matches_scraped=5, snapshots_stored=3
             )
@@ -302,6 +347,7 @@ class TestProximityScheduling:
             from odds_lambda.jobs.fetch_oddsportal import IngestionStats
 
             mock_settings.return_value.scheduler.dry_run = False
+            mock_settings.return_value.scheduler.lead_days_for = lambda _sport: 7
             mock_ingest.return_value = IngestionStats(
                 league="test", matches_scraped=5, snapshots_stored=3
             )

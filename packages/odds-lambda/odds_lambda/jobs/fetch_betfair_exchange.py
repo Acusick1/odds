@@ -229,11 +229,17 @@ async def main(ctx: JobContext) -> None:
     # per-sport path). Combined local runs span sports with different windows,
     # so no suppression is applied there.
     overnight = OVERNIGHT_WINDOWS.get(target_sports[0]) if len(target_sports) == 1 else None
+    # Combined runs use the minimum lead across targeted sports, so the gate
+    # opens no later than the shortest-lead sport requires.
+    lead_days = min(settings.scheduler.lead_days_for(sk) for sk in target_sports)
 
-    # Always-run fetcher (no execution gate): we only use the decision's
-    # proximity-derived next_execution, not should_execute.
+    # Season-gated fetcher: skip the API fetch (and re-gate on every cron
+    # safety-floor fire) when no fixture is within the lead window. The decision
+    # self-schedules the precise wake either way.
     async def _reschedule(label: str) -> ScheduleDecision:
-        decision = await decide_forward_resilient(target_sports, CADENCE, overnight=overnight)
+        decision = await decide_forward_resilient(
+            target_sports, CADENCE, overnight=overnight, lookahead_days=lead_days
+        )
         assert decision.next_execution is not None  # noqa: S101
         try:
             await self_schedule(
@@ -251,7 +257,19 @@ async def main(ctx: JobContext) -> None:
 
     # Pre-schedule before doing the work, so a crash mid-fetch doesn't break
     # the chain.
-    await _reschedule("pre-schedule")
+    decision = await _reschedule("pre-schedule")
+
+    # Season gate: no fixture within the lead window — skip the Betfair login/fetch.
+    if not decision.should_execute:
+        next_execution = decision.next_execution
+        assert next_execution is not None  # noqa: S101
+        logger.info(
+            "betfair_season_gated",
+            sport=sport,
+            next_execution=next_execution.isoformat(),
+            reason=decision.reason,
+        )
+        return
 
     snapshot_time = datetime.now(UTC)
     all_stats: list[IngestionStats] = []
