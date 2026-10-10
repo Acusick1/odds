@@ -1,6 +1,8 @@
 # NBA Injury Report Pipeline
 
-> **Modeling note:** Extensive experimentation (Exp 6, 6b in [MODELING.md](MODELING.md)) showed that injury features add zero predictive signal for CLV prediction at any decision tier when properly tuned. The pipeline remains functional for data collection but is not used in the active prediction model.
+> **Modeling note:** injury features add no predictive signal for CLV at any decision tier
+> once models are tuned the same way (see [MODELING.md](MODELING.md#injury-features-nba)).
+> The pipeline collects data but the deployed model does not use it.
 
 Injury data from official NBA injury report PDFs, parsed via the [`nbainjuries`](https://github.com/mcmullarkey/nbainjuries) package.
 
@@ -8,9 +10,7 @@ Injury data from official NBA injury report PDFs, parsed via the [`nbainjuries`]
 
 The NBA publishes injury reports as PDFs on their official site. `nbainjuries` uses tabula-java (via jpype) to parse them. Reports are point-in-time snapshots listing every injured player league-wide, with status and reason.
 
-Report intervals changed on 2025-12-22:
-- **Before**: hourly snapshots
-- **After**: 15-minute snapshots
+Reports are published hourly before 2025-12-22 09:00 ET and every 15 minutes from then on.
 
 ## Schema
 
@@ -20,12 +20,14 @@ Table: `nba_injury_reports`
 |--------|------|-------------|
 | report_time | datetime (UTC) | When the report snapshot was published |
 | game_date | date | ET calendar date of the game |
+| game_time_et | str | ET tip-off time as listed in the report |
 | matchup | str | e.g. `BOS@ORL` |
 | team | str | Full team name e.g. `Boston Celtics` |
 | player_name | str | `Last, First` format |
 | status | enum | OUT, QUESTIONABLE, DOUBTFUL, PROBABLE, AVAILABLE |
 | reason | str | Injury description |
 | event_id | FK → events | Auto-matched at write time via team + game_date |
+| created_at | datetime (UTC) | Row creation time |
 
 Unique constraint: `(report_time, team, player_name, game_date)` — upserts are idempotent.
 
@@ -35,23 +37,15 @@ Unique constraint: `(report_time, team, player_name, game_date)` — upserts are
 
 Reports are league-wide — teams that don't play on a given date still appear. These produce expected unmatched pairs.
 
-## CLI Commands
+## Backfill Strategy
 
-```bash
-# Fetch current injury report
-uv run odds injuries fetch
+Commands and flags are in [CLI.md](CLI.md#injury-reports).
 
-# Backfill historical data for a season
-uv run odds injuries backfill --season 2024-25
-uv run odds injuries backfill --season 2025-26 --hours-before 12,8,2 --dry-run
-
-# Pipeline health
-uv run odds injuries status
-```
-
-### Backfill Strategy
-
-Event-driven: computes target report timestamps from game `commence_time` values in the DB, not by crawling every time slot. For each event, fetches reports at `--hours-before` offsets (default: 8h, 2h), rounds to the nearest valid report slot, and deduplicates across events sharing the same slot.
+`odds injuries backfill` is event-driven: it computes target report timestamps from game
+`commence_time` values in the DB rather than crawling every time slot. For each event it
+fetches reports at the `--hours-before` offsets (default: 8h, 2h), rounds each down to the
+report slot (the hour before the 2025-12-22 cutoff, the quarter hour after), and
+deduplicates across events sharing a slot.
 
 Rate-limited at `--delay-ms` (default 500ms) between fetches. JVM startup adds a few seconds to the first fetch.
 
@@ -62,7 +56,7 @@ Rate-limited at `--delay-ms` (default 500ms) between fetches. JVM startup adds a
 ### Pipeline
 
 1. `collect_event_data()` bulk-loads all injury reports for the event (one query)
-2. `extract_injury_features()` filters to `report_time <= snapshot_time` (look-ahead prevention), takes the latest report snapshot, counts by status and team
+2. `extract_injury_features()` filters to `report_time <= snapshot_time` (look-ahead prevention), takes the latest report snapshot, and sums impact scores by status and team
 3. NaN-fill when no injury data exists (events without reports are kept, not dropped)
 
 ### Features (6)
@@ -76,7 +70,7 @@ Rate-limited at `--delay-ms` (default 500ms) between fetches. JVM startup adds a
 | report_hours_before_game | Hours between latest report and tipoff |
 | injury_news_recency | Hours between latest report and snapshot (staleness) |
 
-Impact score per player: `(on_off_rtg - on_def_rtg) * (minutes_per_game / 48)` from `NbaPlayerSeasonStats`. Players without stats fall back to 1.0 (headcount). GTD (QUESTIONABLE + DOUBTFUL) players are discounted by 0.5x. PROBABLE and AVAILABLE statuses are excluded.
+Impact score per player: `(on_off_rtg - on_def_rtg) * (minutes_per_game / 48)` from `NbaPlayerSeasonStats`. Players without stats, without on/off ratings, or with zero games played fall back to 1.0 (headcount). GTD (QUESTIONABLE + DOUBTFUL) players are discounted by 0.5x. PROBABLE and AVAILABLE statuses are excluded.
 
 ## Key Files
 
