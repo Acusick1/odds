@@ -10,3 +10,4 @@ tokens:
   - for now
   - as of
   - nowadays
+  - (?:new|old) (?:approach|implementation|behaviou?r|system|flow|layout)

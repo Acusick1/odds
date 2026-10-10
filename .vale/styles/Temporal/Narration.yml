@@ -7,9 +7,8 @@ tokens:
   - previously
   - formerly
   - no longer
-  - used to
+  - (?:it|we|they|this|that|which|there) used to
   - going forward
   - from now on
   - (?:was|were|has been|have been) (?:changed|renamed|moved|replaced|removed|migrated|refactored|deprecated)
   - we (?:changed|renamed|moved|replaced|removed|switched|migrated|refactored)
-  - (?:the )?(?:new|old) (?:approach|implementation|behaviou?r|system|flow|layout)
