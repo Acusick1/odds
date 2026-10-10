@@ -131,7 +131,7 @@ Two Lambda functions handle jobs based on event payload:
 **Fixed-schedule jobs:**
 5. **`backfill-polymarket`**: Polymarket backfill — `rate(3 days)` (if enabled)
 
-`daily-digest` (Discord predictions digest, 08:00 UTC) and `fetch-espn-fixtures` (06:00 UTC) run locally via `LocalSchedulerBackend` cron — EPL only, see `_JOB_CRON_MAP` in `odds_lambda/scheduling/jobs.py`. CLV model inference (previously `score-predictions`) is inlined at the end of `fetch-oddsportal` and no longer exists as a standalone job.
+`daily-digest` (Discord predictions digest, 08:00 UTC) and `fetch-espn-fixtures` (06:00 UTC) run locally via `LocalSchedulerBackend` cron — EPL only, see `_JOB_CRON_MAP` in `odds_lambda/scheduling/jobs.py`. CLV model inference runs inline at the end of `fetch-oddsportal`; there is no standalone scoring job.
 
 ### Scraper Lambda (`odds-scheduler-scraper`)
 
