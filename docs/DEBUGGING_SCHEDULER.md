@@ -333,4 +333,4 @@ aws logs filter-log-events \
 - `packages/odds-lambda/odds_lambda/scheduling/backends/aws.py` - EventBridge integration
 - `packages/odds-lambda/odds_lambda/jobs/fetch_odds.py` - Main fetch job
 - `packages/odds-lambda/odds_lambda/storage/writers.py` - Tier assignment during storage
-- `CLAUDE.md` - Full system architecture documentation
+- `docs/ARCHITECTURE.md` - Full system architecture documentation

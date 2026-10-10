@@ -223,11 +223,9 @@ Project uses **uv** workspace architecture. Dependencies managed via `pyproject.
 pre-commit install
 ```
 
-Run `uv run ruff check --fix` and `uv run ruff format` immediately before committing.
+## Issue Workflow
 
-## Issue Creation Workflow
-
-Use the `/create-issue` Claude Code skill.
+See [docs/agents/issue-tracker.md](agents/issue-tracker.md).
 
 ## Logging
 

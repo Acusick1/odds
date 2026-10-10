@@ -3,7 +3,7 @@
 
 import asyncio
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 
 from odds_core.database import async_session_maker
 from odds_core.models import OddsSnapshot
@@ -19,11 +19,11 @@ async def check_tier_distribution(days_back: int = 7):
     """
     async with async_session_maker() as session:
         # Calculate start date
-        start_date = datetime.now().date()
+        start_date = datetime.now(UTC).date()
         if days_back > 0:
             from datetime import timedelta
 
-            start_date = (datetime.now() - timedelta(days=days_back)).date()
+            start_date = (datetime.now(UTC) - timedelta(days=days_back)).date()
 
         result = await session.execute(
             select(

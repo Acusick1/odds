@@ -3,7 +3,7 @@
 import asyncio
 import json
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import typer
 from odds_core.database import async_session_maker
@@ -86,7 +86,7 @@ async def _validate_daily(
             )
             sys.exit(1)
     else:
-        target_date = (datetime.now() - timedelta(days=1)).date()
+        target_date = (datetime.now(UTC) - timedelta(days=1)).date()
 
     console.print(f"\n[bold blue]Tier Coverage Validation - {target_date}[/bold blue]\n")
 
