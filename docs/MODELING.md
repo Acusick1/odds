@@ -338,7 +338,7 @@ After #359 unblocked multi-feature-group scoring in production, re-ran per-group
 
 **Why the earlier sliding-380 numbers (R²=+0.026 for tabular) couldn't be reproduced:** prior runs used Pinnacle-only sharp (different target distribution) and possibly hit non-degenerate hyperparams by luck. The 2026-03 sliding-380 numbers in the tables above should be treated as not-reproducible under current data + hybrid sharp.
 
-**Tooling note:** committed `xgboost_epl_production_tabular_standings.yaml` was `window_type: sliding` while the other tabular-* configs used expanding. Originally flagged as a bug (it leaked sliding-380 into the expanding ablation, hiding the standings result). Post-principled-search, sliding-380 is a valid protocol — the deployed model uses it — so the "inconsistency" is no longer a bug.
+**Tooling note:** committed `xgboost_epl_production_tabular_standings.yaml` was `window_type: sliding` while the other tabular-* configs used expanding. Originally flagged as a bug (it leaked sliding-380 into the expanding ablation, hiding the standings result). Post-principled-search, sliding-380 is a valid protocol — the deployed model uses it — so the "inconsistency" is not a bug.
 
 **Offline A/B (head-to-head prediction comparison, 2026-04-23):** scored 17 upcoming EPL events with the prior deployed `tabular_only` config and the new `tabular_match_stats` candidate locally; 1088 shared (event, snapshot) pairs.
 
@@ -389,7 +389,7 @@ early_stopping_rounds: 50                     # was 15
 | sliding-380:50 + tabular + match_stats | DEGENERATE | **+0.0581** | **0.000716** (best) |
 
 **Implications:**
-- **Sliding-380:50 is no longer degenerate** — verified directly (48-50 unique predictions on 50 val examples, best_iteration=31-33, was 9 under old search).
+- **Sliding-380:50 is not degenerate under the principled search** — verified directly (48-50 unique predictions on 50 val examples, best_iteration=31-33, against 9 under the standard search).
 - **Sliding-380:50 slightly beats expanding:50** on MSE once the tuner can find good hyperparams — flips the "expanding is the only working protocol" conclusion above.
 - **All four configs improved** — even the working expanding configs had been under-tuned by ~0.01 R².
 - **match_stats > tabular-only** ranking holds under both protocols — the feature-group ablation conclusions survive the search-space fix.

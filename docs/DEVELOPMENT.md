@@ -216,11 +216,18 @@ Project uses **uv** workspace architecture. Dependencies managed via `pyproject.
 
 ## Code Quality
 
-**Ruff** enforced via pre-commit hooks (`.pre-commit-config.yaml`).
+Pre-commit hooks (`.pre-commit-config.yaml`) run on every commit, and the `Lint` workflow runs them on all files for every pushed branch:
+
+- **Ruff** lints and formats Python.
+- **Vale** checks `README.md`, `AGENTS.md` and `docs/` for wording that narrates change instead of describing the current state. Rules live in `.vale/styles/Temporal/`; errors block the commit, warnings are advisory.
+- **lychee** checks Markdown links and `#heading` anchors offline. It runs in Docker.
 
 ```bash
 # Enable hooks
 pre-commit install
+
+# Run every hook on every file
+pre-commit run --all-files
 ```
 
 ## Issue Workflow

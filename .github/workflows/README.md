@@ -4,10 +4,11 @@
 
 This directory contains CI/CD workflows for the betting odds pipeline:
 
-- **[test.yml](test.yml)** - Run tests and linting
+- **[test.yml](test.yml)** - Run unit and integration tests
+- **[lint.yml](lint.yml)** - Run every pre-commit hook (ruff, Vale, lychee) on all files
 - **[deploy-dev.yml](deploy-dev.yml)** - Deploy to development environment (ephemeral, tears down after testing)
 - **[deploy-prod.yml](deploy-prod.yml)** - Deploy to production environment (persistent infrastructure)
-- **[ci-cd.yml](ci-cd.yml)** - Orchestrates test → deploy-dev pipeline on pushes to master
+- **[ci-cd.yml](ci-cd.yml)** - Orchestrates test → deploy-dev pipeline on pushes to main
 
 ## Production Deployment Setup
 

@@ -5,3 +5,21 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+  - repo: local
+    hooks:
+      # PyPI wrapper fetches the prebuilt binary; the upstream hook builds from source and needs a recent Go.
+      - id: vale
+        name: vale
+        entry: vale
+        language: python
+        additional_dependencies: [vale==3.22.0.0]
+        files: ^(README\.md|AGENTS\.md|docs/.*\.md)$
+        # Parallel invocations race to install the binary on first run.
+        require_serial: true
+  - repo: https://github.com/lycheeverse/lychee
+    rev: lychee-v0.24.2
+    hooks:
+      # The prebuilt binary needs glibc 2.38+; the Docker image runs anywhere.
+      - id: lychee-docker
+        args: [--offline, --include-fragments, --no-progress]
+        files: \.md$

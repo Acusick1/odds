@@ -80,11 +80,11 @@ See the [Job Deployment Matrix](#job-deployment-matrix) above for the full job/b
 mapping. This section covers the EventBridge mechanics.
 
 **Fixed-schedule rules** (managed by Terraform): `local.fixed_schedule_expressions` is
-currently empty — no Lambda-hosted fixed-cron jobs remain. The only fixed rule is
+empty, so no Lambda-hosted job runs on a fixed cron. The only fixed rule is
 `odds-backfill-polymarket` (`rate(3 days)`), created when `enable_polymarket = true`.
-`daily-digest` and `fetch-espn-fixtures` moved to `LocalSchedulerBackend` cron (EPL only)
-— see `_JOB_CRON_MAP` in `odds_lambda/scheduling/jobs.py`. `score-predictions` is no longer
-a standalone job; it is invoked inline at the end of `fetch-oddsportal`.
+`daily-digest` and `fetch-espn-fixtures` run on `LocalSchedulerBackend` cron (EPL only)
+— see `_JOB_CRON_MAP` in `odds_lambda/scheduling/jobs.py`. CLV scoring is not a standalone
+job; it runs inline at the end of `fetch-oddsportal`.
 
 **Self-scheduling rules** (pre-created `DISABLED` with a `rate(1 day)` placeholder,
 activated and re-scheduled by the Lambda at runtime). One rule per entry in

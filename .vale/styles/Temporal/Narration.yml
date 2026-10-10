@@ -1,0 +1,14 @@
+extends: existence
+message: "'%s' narrates change over time. Describe the current state instead."
+link: https://github.com/Acusick1/agent-config/blob/main/global/agents.md#documentation
+level: error
+ignorecase: true
+tokens:
+  - previously
+  - formerly
+  - no longer
+  - (?:it|we|they|this|that|which|there) used to
+  - going forward
+  - from now on
+  - (?:was|were|has been|have been) (?:changed|renamed|moved|replaced|removed|migrated|refactored|deprecated)
+  - we (?:changed|renamed|moved|replaced|removed|switched|migrated|refactored)

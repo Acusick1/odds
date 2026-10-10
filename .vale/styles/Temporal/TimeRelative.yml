@@ -1,0 +1,13 @@
+extends: existence
+message: "'%s' may describe a moment in time rather than the current state. Check the sentence still reads true without it."
+link: https://github.com/Acusick1/agent-config/blob/main/global/agents.md#documentation
+level: warning
+ignorecase: true
+tokens:
+  - currently
+  - recently
+  - at the moment
+  - for now
+  - as of
+  - nowadays
+  - (?:new|old) (?:approach|implementation|behaviou?r|system|flow|layout)
