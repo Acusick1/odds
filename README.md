@@ -64,7 +64,7 @@ For local-clone development of the OddsHarvester scraper, see [docs/DEVELOPMENT.
 | [docs/CLI.md](docs/CLI.md) | Full command reference |
 | [docs/DATA_MODELS.md](docs/DATA_MODELS.md) | Training data reference: sources, target, feature groups, config fields |
 | [docs/MODELING.md](docs/MODELING.md) | CLV model findings, experimental evidence and experiment log |
-| [docs/DEBUGGING_SCHEDULER.md](docs/DEBUGGING_SCHEDULER.md) | Scheduler diagnostics, EventBridge, CloudWatch |
+| [docs/DEBUGGING_SCHEDULER.md](docs/DEBUGGING_SCHEDULER.md) | How to debug the AWS self-scheduling jobs (EventBridge, CloudWatch) |
 | [docs/POLYMARKET.md](docs/POLYMARKET.md) | Polymarket data model, pipeline (deprioritized) |
 | [docs/BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md) | Backtesting strategies, bet sizing, custom strategies |
 | [docs/INJURIES.md](docs/INJURIES.md) | Injury report pipeline (no predictive value for CLV) |
