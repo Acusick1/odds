@@ -1,6 +1,10 @@
 # CLI Reference
 
-> Complete reference for all CLI commands.
+> Complete reference for all CLI commands. Every command's `--help` is authoritative for
+> its flags and defaults.
+
+Commands that take `--sport` default to `basketball_nba` unless stated otherwise; pass
+`--sport soccer_epl` or `--sport baseball_mlb` for the active sports.
 
 ## Command Groups
 
@@ -44,7 +48,7 @@ odds fetch scores
 odds fetch scores --sport soccer_epl --days 3
 ```
 
-Fetches game scores and updates event status.
+Fetches game scores and updates event status. `--days` defaults to 3.
 
 ### Scrape OddsPortal
 
@@ -77,10 +81,11 @@ Syncs upcoming games from the free `/events` endpoint (0 quota units). Runs auto
 ### Discover Historical Games
 
 ```bash
-odds discover games --start YYYY-MM-DD --end YYYY-MM-DD
+odds discover games --start YYYY-MM-DD --end YYYY-MM-DD --sport soccer_epl
 ```
 
-Discovers historical games from The Odds API for potential backfill.
+Discovers historical games from The Odds API for potential backfill. `--start` and `--end`
+default to yesterday and today.
 
 ## Backfill Commands
 
@@ -97,18 +102,23 @@ Analyzes tier coverage gaps (OPENING, EARLY, SHARP, PREGAME, CLOSING) and genera
 ### Plan Backfill
 
 ```bash
-odds backfill plan --start YYYY-MM-DD --end YYYY-MM-DD --games N
+odds backfill plan --start YYYY-MM-DD --end YYYY-MM-DD
+odds backfill plan --start YYYY-MM-DD --end YYYY-MM-DD --games N --output plan.json
 ```
 
-Creates a backfill plan file with selected games.
+Creates a backfill plan file. `--games/-g` selects a balanced subset (default: all
+discovered games); `--output/-o` defaults to `backfill_plan.json`.
 
 ### Execute Backfill
 
 ```bash
 odds backfill execute --plan backfill_plan.json
+odds backfill execute --plan backfill_plan.json --dry-run
 ```
 
-Executes a prepared backfill plan.
+Executes a prepared backfill plan, consuming API quota. `--dry-run` simulates without API
+calls; `--skip-existing/--no-skip-existing` (default skip) controls games that already have
+historical data.
 
 ### Backfill Status
 
@@ -125,7 +135,8 @@ odds backfill scores --start YYYY-MM-DD --end YYYY-MM-DD
 odds backfill scores --start YYYY-MM-DD --end YYYY-MM-DD --dry-run
 ```
 
-Backfills missing scores using NBA API. Use `--dry-run` to preview changes.
+Backfills missing event scores from the NBA game log table (populated by
+[`odds nba-stats fetch`](#game-logs)). Use `--dry-run` to preview changes.
 
 ## ML Training Commands
 
@@ -163,13 +174,14 @@ Runs Optuna hyperparameter optimization. Requires config with a `tuning` section
 - `--config, -c`: Path to training configuration file with tuning section
 
 **Optional:**
-- `--output, -o`: Override output path for best config
+- `--output, -o`: Override output path for best config (default: `{name}_best.yaml`)
 - `--train-best`: Train final model with best parameters after tuning
 - `--n-trials`: Override number of trials from config
 - `--timeout`: Override timeout in seconds
 - `--study-name`: Optuna study name for persistence/resumption
-- `--storage`: Optuna storage URL
+- `--storage`: Optuna storage URL (default: `DATABASE_URL`)
 - `--track`: Enable MLflow experiment tracking
+- `--tracking-uri`: Override MLflow tracking URI
 - `--sport`: Override sport key filter
 
 ### Validate Config
@@ -210,7 +222,7 @@ Publishes a trained model to S3. Uploads `model.pkl`, `config.yaml`, and `metada
 
 ## Backtesting Commands
 
-See `BACKTESTING_GUIDE.md` for comprehensive backtesting documentation.
+Strategies, bet sizing and metrics are described in [BACKTESTING_GUIDE.md](BACKTESTING_GUIDE.md).
 
 ### Run Backtest
 
@@ -313,6 +325,15 @@ odds validate tier-coverage --start YYYY-MM-DD --end YYYY-MM-DD
 - `game`: inspect a single event by ID. Option: `--show-snapshots`.
 - `tier-coverage`: fetch-tier coverage across a date range. Required `--start/-s`, `--end/-e`; optional `--output-json/-o`.
 
+### Data Quality Coverage
+
+```bash
+odds quality coverage --start YYYY-MM-DD --end YYYY-MM-DD --sport soccer_epl
+```
+
+Reports data completeness for odds snapshots, final scores, tier coverage and bookmaker
+availability across a date range. Required `--start/-s`, `--end/-e`.
+
 ### Copy from Production
 
 ```bash
@@ -368,7 +389,7 @@ Pipeline exists but is inactive. Not accessible from UK, data likely collinear w
 odds polymarket discover
 ```
 
-Lists active NBA events currently on Polymarket from the Gamma API.
+Lists active NBA events on Polymarket from the Gamma API.
 
 ### Pipeline Status
 
@@ -410,10 +431,46 @@ Shows the live order book for a game's moneyline market.
 ### Start Scheduler
 
 ```bash
-odds scheduler start
+odds scheduler start                              # bootstrap scheduled jobs
+odds scheduler start --db odds_test               # sandbox database, no bootstrap
+odds scheduler start --db odds_test --bootstrap   # sandbox database with bootstrap
 ```
 
-Starts the scheduler (local backend only). Runs until Ctrl+C.
+Starts the local APScheduler scheduler. Runs until Ctrl+C. `--db` overrides the database
+name in `DATABASE_URL`. `--bootstrap/--no-bootstrap` defaults to on without `--db` and off
+with it, so a sandbox scheduler does not start an `agent-run` alongside one you are
+driving by hand.
+
+### Run a Job Once
+
+```bash
+odds scheduler run-once fetch-odds
+```
+
+Executes a single registered job once and exits, on any backend.
+
+### Smoke Check
+
+```bash
+SCHEDULER_DRY_RUN=true odds scheduler smoke
+```
+
+Runs each bootstrapped job once and reports pass/fail. Options: `--include-agent`,
+`--no-side-effects`, `--only`, `--exclude`. See
+[DEPLOYMENT.md](DEPLOYMENT.md#smoke-check).
+
+### Inspect the Scheduler
+
+```bash
+odds scheduler info                    # active backend and configuration
+odds scheduler list-jobs               # scheduled jobs and next run times
+odds scheduler list-jobs --backend aws # live EventBridge schedule
+odds scheduler health                  # backend health checks
+odds scheduler test-backend            # configuration, database and permission checks
+```
+
+`list-jobs --backend` overrides the configured backend; `--backend aws` needs
+`AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX` and AWS credentials.
 
 ## Paper Trading Commands
 
@@ -457,39 +514,24 @@ odds agent run --sport baseball_mlb --db odds
 Runs the betting agent for a single wake-up. Required `--sport/-s` (e.g. `soccer_epl`,
 `baseball_mlb`); optional `--db` (database name, default `odds`).
 
-## Historical Backfill Strategy
-
-### Sampling Approach
-
-For initial backfill, target a representative sample:
-- Select games distributed across season
-- Include all 30 teams proportionally
-- Mix of matchup types
-- ~20% sample rate recommended
-
-### Selection Criteria
-
-`packages/odds-analytics/odds_analytics/game_selector.py` implements:
-- Even distribution across dates
-- Proportional team representation
-- Variety in matchups
-- Multiple selection strategies (uniform, random, weighted)
-
-### Workflow
+## Historical Backfill Workflow
 
 ```bash
 # 1. Discover available games
-odds discover games --start 2024-10-01 --end 2024-12-31
+odds discover games --start 2024-10-01 --end 2024-12-31 --sport soccer_epl
 
-# 2. Plan backfill (select 250 games)
+# 2. Plan backfill (optionally a balanced subset with --games)
 odds backfill plan --start 2024-10-01 --end 2024-12-31 --games 250
 
-# 3. Execute plan
+# 3. Execute plan (try --dry-run first)
 odds backfill execute --plan backfill_plan.json
 
-# 4. Backfill any missing scores
+# 4. Backfill any missing scores (NBA, from game logs)
 odds backfill scores --start 2024-10-01 --end 2024-12-31
 
 # 5. Check status
 odds backfill status
 ```
+
+Game selection for `--games` is implemented in
+`packages/odds-analytics/odds_analytics/game_selector.py`.
