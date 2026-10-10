@@ -1,4 +1,8 @@
-# Backtesting System Reference
+# Backtesting Reference
+
+Strategies, bet sizing, metrics and extension points for the backtesting engine
+(`packages/odds-analytics/odds_analytics/backtesting/`). Command flags are in
+[CLI.md](CLI.md#backtesting-commands).
 
 ## Quick Start
 
@@ -7,7 +11,7 @@
 odds backtest list-strategies
 
 # Run backtest
-odds backtest run --strategy basic_ev --start 2024-10-01 --end 2024-12-31
+odds backtest run --strategy basic_ev --start 2024-10-01 --end 2024-12-31 --output-json results.json
 
 # View results
 odds backtest show results.json --verbose
@@ -24,7 +28,7 @@ Simple baseline strategy that bets a fixed amount on every game.
 **Parameters:**
 
 - `market`: "h2h", "spreads", or "totals" (default: "h2h")
-- `outcome_pattern`: "home", "away", or "favorite" (default: "home")
+- `outcome_pattern`: "home", "away", "draw", or "favorite" (default: "home")
 - `bookmaker`: Which bookmaker to use (default: "fanduel")
 
 **Example:**
@@ -70,15 +74,29 @@ Finds risk-free profit opportunities by betting both sides of a market across di
 odds backtest run --strategy arbitrage --start 2024-10-01 --end 2024-12-31
 ```
 
+### Model-Driven Strategies
+
+**Names:** `xgb_line_movement`, `lstm_line_movement`
+
+Bet on outcomes where a trained line-movement model predicts the market will move in their
+favour. Pass the model artifact with `--model-path` (`XGBoostLineMovementStrategy` in
+`xgboost_line_movement.py`, `LSTMLineMovementStrategy` in `lstm_line_movement.py`).
+
+**Example:**
+
+```bash
+odds backtest run --strategy xgb_line_movement --start 2024-10-01 --end 2024-12-31 --model-path models/model.pkl
+```
+
 ## Bet Sizing Methods
 
-### Fractional Kelly (Recommended)
+### Fractional Kelly (Default)
 
 ```bash
 --bet-sizing fractional_kelly --kelly-fraction 0.25
 ```
 
-Uses the Kelly Criterion to size bets optimally based on edge and odds. Quarter-Kelly (0.25) is recommended for lower volatility while capturing ~75% of full Kelly returns.
+Uses the Kelly Criterion to size bets from edge and odds. Quarter-Kelly (0.25) is the default, chosen for lower volatility while capturing ~75% of full Kelly returns (inferred).
 
 ### Flat Betting
 
@@ -99,56 +117,6 @@ programmatically; the CLI uses the default.
 Bets a fixed percentage of current bankroll on every opportunity. The percentage comes
 from `BetSizingConfig` (default 0.02) and is set programmatically; the CLI uses the default.
 
-## CLI Commands
-
-### `backtest run`
-
-Run a backtest with specified parameters.
-
-**Required:**
-
-- `--strategy, -s`: Strategy name
-- `--start`: Start date (YYYY-MM-DD)
-- `--end`: End date (YYYY-MM-DD)
-
-**Optional:**
-
-- `--bankroll, -b`: Initial bankroll (default: 10000)
-- `--output-json, -j`: Save to JSON file
-- `--output-csv, -c`: Save to CSV file
-- `--bet-sizing`: Method — `fractional_kelly`, `flat`, or `percentage` (default: fractional_kelly)
-- `--kelly-fraction`: Kelly fraction (default: 0.25)
-- `--model-path, -m`: Model artifact path (for model-driven strategies)
-- `--sport`: Sport key filter
-
-### `backtest show`
-
-Display results from a saved JSON file.
-
-```bash
-odds backtest show results.json [--verbose]
-```
-
-### `backtest compare`
-
-Compare multiple backtest results side-by-side.
-
-```bash
-odds backtest compare result1.json result2.json result3.json
-```
-
-### `backtest export`
-
-Convert JSON results to CSV format.
-
-```bash
-odds backtest export results.json --output bets.csv
-```
-
-### `backtest list-strategies`
-
-List all available strategies with their parameters.
-
 ## Performance Metrics
 
 ### Return on Investment (ROI)
@@ -165,7 +133,7 @@ Percentage of bets that won (excludes pushes).
 
 ### Sharpe Ratio
 
-`(Average Return - Risk-Free Rate) / Standard Deviation of Returns`
+`Average Daily Return / Standard Deviation of Daily Returns` (the engine uses a risk-free rate of 0)
 
 Risk-adjusted return metric. Higher is better:
 
@@ -234,14 +202,12 @@ class MyStrategy(BettingStrategy):
 - `BacktestEvent` guarantees `home_score` and `away_score` are not None (type-safe)
 - No need to check if scores exist - they're always present during backtesting
 
-Register in `packages/odds-cli/odds_cli/commands/backtest.py`:
+Register it in the `STRATEGIES` dict in `packages/odds-cli/odds_cli/commands/backtest.py`:
 
 ```python
 STRATEGIES = {
-    "flat": FlatBettingStrategy,
-    "basic_ev": BasicEVStrategy,
-    "arbitrage": ArbitrageStrategy,
-    "my_strategy": MyStrategy,  # Add your strategy
+    # ...existing strategies...
+    "my_strategy": MyStrategy,
 }
 ```
 
@@ -296,9 +262,5 @@ The backtesting system requires:
 - Historical odds snapshots (`Odds` records with timestamps)
 - Odds available at decision time (typically 1 hour before game)
 
-Use the backfill system to populate historical data:
-
-```bash
-odds backfill plan --start 2024-10-01 --end 2024-12-31 --games 250
-odds backfill execute --plan backfill_plan.json
-```
+Use the backfill commands to populate historical data (see
+[Historical Backfill Workflow](CLI.md#historical-backfill-workflow)).

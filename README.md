@@ -66,7 +66,7 @@ For local-clone development of the OddsHarvester scraper, see [docs/DEVELOPMENT.
 | [docs/MODELING.md](docs/MODELING.md) | CLV model findings, experimental evidence and experiment log |
 | [docs/DEBUGGING_SCHEDULER.md](docs/DEBUGGING_SCHEDULER.md) | How to debug the AWS self-scheduling jobs (EventBridge, CloudWatch) |
 | [docs/POLYMARKET.md](docs/POLYMARKET.md) | Polymarket data model, pipeline (deprioritized) |
-| [docs/BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md) | Backtesting strategies, bet sizing, custom strategies |
+| [docs/BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md) | Backtesting strategies, bet sizing, metrics, custom strategies |
 | [docs/INJURIES.md](docs/INJURIES.md) | Injury report pipeline (no predictive value for CLV) |
 | [docs/BETTING_AGENT.md](docs/BETTING_AGENT.md) | Agent architecture, matchday workflow, MCP tools |
 | [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) | Agent data source inventory and evaluation |
