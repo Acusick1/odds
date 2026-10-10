@@ -21,8 +21,12 @@ with a `FetchTier` indicating how far before the game it was collected:
 | OddsPortal | bet365, Betway, Betfred, bwin (UK) | ~5K NBA + ~1.8K EPL (opening + closing only) | UK retail bookmakers |
 | football-data.co.uk | Pinnacle, bet365, bwin, William Hill, Betvictor, Interwetten, Ladbrokes | ~4K EPL (11 seasons, 2015–2026) | Pinnacle + Betfair Exchange closing odds (sharp reference) |
 
-Event ID patterns: `op_` = OddsPortal, `fduk_` = football-data.co.uk, hex UUID = Odds API.
+Event ID patterns: `op_{season}_{HOME}_{AWAY}_{date}` = OddsPortal,
+`fduk_{season}_{HOME}_{AWAY}_{date}` = football-data.co.uk, hex UUID = Odds API.
 1,810 EPL events matched between OddsPortal and FDUK.
+
+football-data.co.uk Betfair Exchange closing odds (columns `BFE*`/`BFEC*`, from 2024-25
+onwards) are ingested under the `betfair_exchange` bookmaker key.
 
 Each snapshot contains one `Odds` row per bookmaker per market per outcome. American odds are
 converted to implied probabilities internally.
@@ -136,11 +140,11 @@ Key design choices:
 Training uses YAML config files in `experiments/configs/`. Key fields:
 
 ### Data selection
-- `data_source`: `"oddsportal"`, `"oddsapi"`, `"football_data_uk"`, `"all"`, or `null` (no filter)
+- `data_source`: `"oddsportal"`, `"oddsapi"`, `"football_data_uk"`, `"all"`, or `null` (no filter). Filters by event ID prefix.
 - `sport_key`: sport filter (e.g. `"soccer_epl"`, `"basketball_nba"`)
-- `start_date` / `end_date`: date range filter
-- `min_snapshots`: minimum snapshots per event (for sequence data)
-- `closing_source_priority`: ordered list of preferred sources for closing snapshot selection (e.g. `[football_data_uk]`)
+- `start_date` / `end_date`: date range filter (always required)
+- `min_snapshots`: minimum snapshots per event (e.g. `5` for dense sequence data)
+- `closing_source_priority`: ordered list of preferred sources for closing snapshot selection, matched on `api_request_id` (e.g. `[football_data_uk]`). When several sources provide a closing snapshot for an event, the first in the list wins.
 
 ### Target
 - `target_type`: `"devigged_bookmaker"`
@@ -158,3 +162,16 @@ Training uses YAML config files in `experiments/configs/`. Key fields:
 - `val_step_events`: number of events per validation fold
 - `validation_split`: set to `0.0` when using CV
 - `test_split`: set to `0.0` for walk-forward CV
+
+### Choosing data for an experiment
+
+`target_bookmaker` must belong to the selected source's bookmaker set.
+
+- **EPL, bet365 target, hybrid sharp** (the production setup): `data_source: null`
+  (OddsPortal + FDUK combined), `sharp_bookmakers: [pinnacle, betfair_exchange]`,
+  `closing_source_priority: [football_data_uk]`.
+- **NBA, bet365 target**: `data_source: oddsportal`; bet365 is only available from
+  OddsPortal.
+- **NBA, Pinnacle target**: `data_source: oddsapi`; Pinnacle is only available from the
+  Odds API for NBA.
+- **Sequence (LSTM) experiments**: also set `min_snapshots: 5` or higher.

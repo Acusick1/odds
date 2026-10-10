@@ -63,7 +63,7 @@ For local-clone development of the OddsHarvester scraper, see [docs/DEVELOPMENT.
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | AWS Lambda (2 functions), Terraform, S3, costs, authoritative job/schedule matrix |
 | [docs/CLI.md](docs/CLI.md) | Full command reference |
 | [docs/DATA_MODELS.md](docs/DATA_MODELS.md) | Training pipeline, feature groups, target definition |
-| [docs/MODELING.md](docs/MODELING.md) | Modeling rationale, experiments, open questions |
+| [docs/MODELING.md](docs/MODELING.md) | CLV model findings, experimental evidence and experiment log |
 | [docs/DEBUGGING_SCHEDULER.md](docs/DEBUGGING_SCHEDULER.md) | Scheduler diagnostics, EventBridge, CloudWatch |
 | [docs/POLYMARKET.md](docs/POLYMARKET.md) | Polymarket data model, pipeline (deprioritized) |
 | [docs/BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md) | Backtesting strategies, bet sizing, custom strategies |

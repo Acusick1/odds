@@ -194,6 +194,69 @@ tests/
 
 Test database uses `odds_test` (isolated from dev data).
 
+## Running Experiments
+
+Experiments live in `experiments/scripts/` as standalone Python scripts. Each script writes
+its outputs to `experiments/results/<experiment_name>/`. Findings and the experiment log
+are in [MODELING.md](MODELING.md).
+
+### Conventions
+
+- Scripts use the existing training pipeline (`prepare_training_data`, `MLTrainingConfig`,
+  etc.) to load data.
+- Reuse YAML configs in `experiments/configs/` where possible.
+- Scripts must be runnable via `uv run python experiments/scripts/<script>.py`.
+- Commit the script before running it, then commit the results, so `FINDINGS.md` can record
+  the git SHA of the code that produced them.
+
+### Required outputs
+
+- **`FINDINGS.md`**, the primary record of the experiment, with these sections:
+  - **Setup**: date, git SHA, dataset size, sampling method, target definition, exact
+    command to reproduce
+  - **Key Results**: numbers, tables, significance
+  - **Interpretation**: what the results mean, caveats, alternative explanations
+  - **Implications**: what to do next, go/no-go recommendation for downstream experiments
+- **Plots** saved as PNGs in the same directory.
+- **Data artifacts** (CSVs, etc.) for downstream analysis.
+
+### Verification artifacts
+
+Every experiment saves feature verification artifacts to catch silent data bugs (zeroed
+features, missing values, wrong data selection). `odds train run` and `odds train tune`
+save them automatically. Standalone scripts call `save_verification_artifacts()` after
+preparing data:
+
+```python
+from odds_analytics.training import save_verification_artifacts
+
+save_verification_artifacts(X, y, feature_names, output_dir, event_ids=event_ids)
+```
+
+This writes three files:
+
+- **`feature_stats.csv`**: per-feature count, null_count, null_pct, mean, std, min, max,
+  nunique. Check for features that are all-NaN, all-zero, or constant.
+- **`feature_sample.csv`**: the first 20 rows of the feature matrix with event IDs and
+  target. Spot-check that values look reasonable.
+- **`feature_target_corr.csv`**: per-feature Pearson and Spearman correlation with the
+  target. Check for flipped signs or lost signal against expectations.
+
+Before reporting results in `FINDINGS.md`, verify that:
+
+1. No features are 100% NaN or constant, unless expected (for example an optional feature
+   group that was not loaded).
+2. The feature count matches the configured feature groups.
+3. Correlations are directionally consistent with prior experiments.
+
+### After running
+
+1. Add a row to the [Experiment log](MODELING.md#experiment-log) with the headline result
+   and decision.
+2. If the result changes what we know, update
+   [Current conclusions](MODELING.md#current-conclusions) in place and add the experiment
+   to [Evidence](MODELING.md#evidence), linking its `FINDINGS.md`.
+
 ## Local Development Setup
 
 ```bash
