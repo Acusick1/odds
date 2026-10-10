@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
+import json
+import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
-from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, Field, model_validator
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from odds_core.sports import SportKey
 
 
-class APIConfig(BaseSettings):
+class APIConfig(BaseModel):
     """The Odds API configuration."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="ODDS_API_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
-    )
 
     key: str = Field(..., description="The Odds API key")
     keys: str | None = Field(
@@ -28,21 +28,15 @@ class APIConfig(BaseSettings):
     quota: int = Field(default=500, description="Monthly API request quota per key")
 
 
-class DatabaseConfig(BaseSettings):
+class DatabaseConfig(BaseModel):
     """Database connection configuration."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="DATABASE_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
-    )
 
     url: str = Field(..., description="PostgreSQL connection URL")
     pool_size: int = Field(default=5, description="Database connection pool size")
 
 
-class DataCollectionConfig(BaseSettings):
+class DataCollectionConfig(BaseModel):
     """Data collection parameters."""
-
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     sports: list[SportKey] = Field(
         default=["soccer_epl", "baseball_mlb"], description="Sports to track"
@@ -66,12 +60,8 @@ class DataCollectionConfig(BaseSettings):
     regions: list[str] = Field(default=["us"], description="Regions for odds data")
 
 
-class SchedulerConfig(BaseSettings):
+class SchedulerConfig(BaseModel):
     """Scheduler backend configuration."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="SCHEDULER_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
-    )
 
     backend: str = Field(
         default="local",
@@ -99,12 +89,8 @@ class SchedulerConfig(BaseSettings):
     )
 
 
-class AWSConfig(BaseSettings):
+class AWSConfig(BaseModel):
     """AWS-specific configuration (only needed when scheduler_backend='aws')."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="AWS_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
-    )
 
     region: str | None = Field(default=None, description="AWS region")
     lambda_arn: str | None = Field(
@@ -117,15 +103,8 @@ class AWSConfig(BaseSettings):
     )
 
 
-class ModelConfig(BaseSettings):
+class ModelConfig(BaseModel):
     """CLV model artifact location (S3) for local scoring and Lambda inference."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="MODEL_",
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
 
     name: str | None = Field(
         default=None,
@@ -137,10 +116,8 @@ class ModelConfig(BaseSettings):
     )
 
 
-class DataQualityConfig(BaseSettings):
+class DataQualityConfig(BaseModel):
     """Data quality and validation settings."""
-
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     enable_validation: bool = Field(default=True, description="Enable data quality validation")
     reject_invalid_odds: bool = Field(
@@ -148,10 +125,8 @@ class DataQualityConfig(BaseSettings):
     )
 
 
-class AlertConfig(BaseSettings):
-    """Alert configuration (infrastructure for future use)."""
-
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+class AlertConfig(BaseModel):
+    """Alert configuration."""
 
     discord_webhook_url: str | None = Field(default=None, description="Discord webhook URL")
     alert_enabled: bool = Field(default=False, description="Enable alerts")
@@ -211,12 +186,8 @@ class AlertConfig(BaseSettings):
     )
 
 
-class PolymarketConfig(BaseSettings):
+class PolymarketConfig(BaseModel):
     """Polymarket prediction market configuration."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="POLYMARKET_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
-    )
 
     gamma_base_url: str = Field(
         default="https://gamma-api.polymarket.com", description="Gamma API base URL"
@@ -248,7 +219,7 @@ class PolymarketConfig(BaseSettings):
     )
 
 
-class BetfairConfig(BaseSettings):
+class BetfairConfig(BaseModel):
     """Betfair Exchange API configuration.
 
     Read-only ingestion via the delayed application key. The free delayed key
@@ -259,10 +230,6 @@ class BetfairConfig(BaseSettings):
     For dev/local probes, leaving cert paths unset falls back to interactive
     login (which prompts 2FA if enabled — not viable unattended).
     """
-
-    model_config = SettingsConfigDict(
-        env_prefix="BETFAIR_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
-    )
 
     enabled: bool = Field(default=False, description="Enable Betfair Exchange ingestion")
     username: str | None = Field(default=None, description="Betfair account username")
@@ -315,15 +282,104 @@ class BetfairConfig(BaseSettings):
         return self
 
 
-class LoggingConfig(BaseSettings):
+class LoggingConfig(BaseModel):
     """Logging configuration."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="LOG_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
-    )
 
     level: str = Field(default="INFO", description="Logging level")
     file: str = Field(default="logs/odds_pipeline.log", description="Log file path")
+
+
+class _NestedEnvSource(PydanticBaseSettingsSource):
+    """
+    Maps prefixed/unprefixed flat env vars to Settings' nested sub-config fields.
+
+    Reads from os.environ (higher priority) and the dotenv file (lower priority),
+    respecting Settings(_env_file=None) by delegating file reads to the dotenv source.
+    """
+
+    # Maps Settings field name -> uppercase env var prefix
+    _PREFIXED: dict[str, str] = {
+        "api": "ODDS_API_",
+        "database": "DATABASE_",
+        "scheduler": "SCHEDULER_",
+        "aws": "AWS_",
+        "model": "MODEL_",
+        "logging": "LOG_",
+        "polymarket": "POLYMARKET_",
+        "betfair": "BETFAIR_",
+    }
+
+    # Maps Settings field name -> explicit uppercase env var names (no shared prefix)
+    _UNPREFIXED: dict[str, list[str]] = {
+        "data_collection": ["SPORTS", "BOOKMAKERS", "MARKETS", "REGIONS"],
+        "data_quality": ["ENABLE_VALIDATION", "REJECT_INVALID_ODDS"],
+        "alerts": [
+            "DISCORD_WEBHOOK_URL",
+            "ALERT_ENABLED",
+            "QUOTA_WARNING_THRESHOLD",
+            "QUOTA_CRITICAL_THRESHOLD",
+            "CONSECUTIVE_FAILURES_THRESHOLD",
+            "STALE_DATA_HOURS",
+            "ALERT_RATE_LIMIT_MINUTES",
+            "DATA_QUALITY_ERROR_THRESHOLD",
+            "HEARTBEAT_EXPECTATIONS",
+            "HEARTBEAT_RETENTION_DAYS",
+        ],
+    }
+
+    def __init__(
+        self, settings_cls: type[BaseSettings], dotenv_settings: PydanticBaseSettingsSource
+    ) -> None:
+        super().__init__(settings_cls)
+        self._dotenv = dotenv_settings
+
+    def _all_vars(self) -> dict[str, str]:
+        """Merge dotenv (lower priority) and os.environ (higher priority). All keys lowercase."""
+        merged: dict[str, str] = {}
+        for k, v in self._dotenv._read_env_files().items():  # type: ignore[attr-defined]
+            if v is not None:
+                merged[k.lower()] = v
+        for k, v in os.environ.items():
+            merged[k.lower()] = v
+        return merged
+
+    @staticmethod
+    def _maybe_parse_json(v: str) -> Any:
+        stripped = v.strip()
+        if stripped and stripped[0] in ("[", "{"):
+            try:
+                return json.loads(stripped)
+            except json.JSONDecodeError:
+                pass
+        return v
+
+    def __call__(self) -> dict[str, Any]:
+        env = self._all_vars()
+        result: dict[str, Any] = {}
+
+        for field_name, prefix in self._PREFIXED.items():
+            lprefix = prefix.lower()
+            group = {
+                k[len(lprefix) :]: self._maybe_parse_json(v)
+                for k, v in env.items()
+                if k.startswith(lprefix)
+            }
+            if group:
+                result[field_name] = group
+
+        for field_name, env_keys in self._UNPREFIXED.items():
+            group: dict[str, Any] = {}
+            for key in env_keys:
+                lkey = key.lower()
+                if lkey in env:
+                    group[lkey] = self._maybe_parse_json(env[lkey])
+            if group:
+                result[field_name] = group
+
+        return result
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:  # noqa: ARG002
+        return None, field_name, False
 
 
 class Settings(BaseSettings):
@@ -350,9 +406,11 @@ class Settings(BaseSettings):
     # Repository root (walk up from packages/odds-core/odds_core/config.py)
     project_root: Path = Field(default=Path(__file__).resolve().parents[3])
 
-    # Composed configuration sections
-    api: APIConfig = Field(default_factory=APIConfig)
-    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    # Sub-configs with required fields — no default; must be provided via env vars
+    api: APIConfig
+    database: DatabaseConfig
+
+    # Sub-configs with all-optional fields — defaults apply when env vars are absent
     data_collection: DataCollectionConfig = Field(default_factory=DataCollectionConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     aws: AWSConfig = Field(default_factory=AWSConfig)
@@ -362,6 +420,20 @@ class Settings(BaseSettings):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     polymarket: PolymarketConfig = Field(default_factory=PolymarketConfig)
     betfair: BetfairConfig = Field(default_factory=BetfairConfig)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,  # noqa: ARG003
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            _NestedEnvSource(settings_cls, dotenv_settings),
+        )
 
 
 @lru_cache
