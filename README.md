@@ -8,9 +8,9 @@ prompts, and MCP tools.
 **Active sports:** EPL football and MLB baseball (agents in interactive evaluation).
 NBA infrastructure exists but is deprioritized.
 
-The pipeline collects bookmaker odds (The Odds API) and UK exchange/retail odds (OddsPortal,
-football-data.co.uk), stores hybrid raw + normalized data, and runs an XGBoost CLV model as a
-supplementary signal. The betting agent researches matches via web search and Playwright,
+The pipeline collects bookmaker odds (The Odds API), UK retail odds (OddsPortal,
+football-data.co.uk) and Betfair Exchange prices, stores hybrid raw + normalized data, and
+runs an XGBoost CLV model as a supplementary signal. The betting agent researches matches via web search and Playwright,
 consumes pipeline data through MCP tools, and places paper trades with explicit reasoning.
 
 ## Repository Layout
@@ -50,7 +50,7 @@ uv run odds status quota                         # API quota (free tier: 500 uni
 uv run odds scheduler start                      # run the local scheduler
 ```
 
-For local-clone development of the OddsHarvester scraper, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Configuration options are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#configuration-management).
 
 ## Documentation
 
