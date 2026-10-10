@@ -125,7 +125,8 @@ async def main(ctx: JobContext) -> None:
     # Pre-schedule before any work so the chain survives crashes.
     await _schedule(decision, label="pre-schedule")
 
-    if not decision.should_execute:
+    # ``respect_gate=False`` (deploy smoke) forces the full body even when not due.
+    if not decision.should_execute and ctx.policy.respect_gate:
         logger.info(
             "fetch_odds_skipped",
             reason=decision.reason,

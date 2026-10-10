@@ -260,21 +260,29 @@ journalctl -u odds-scheduler -f              # follow logs
 
 ### Smoke check
 
-`odds scheduler smoke` runs each bootstrapped job once (derived from
-`scheduler.bootstrap_jobs`, per-sport expanded — the same source `start` uses)
-and prints a pass/fail table, exiting non-zero (exit code = number of failed
-jobs) if any job fails.
+`odds scheduler smoke` runs every bootstrapped job's **full body** once (job set
+derived from `scheduler.bootstrap_jobs`, per-sport expanded — the same source
+`start` uses) and prints a pass/fail table, exiting non-zero (exit code = number
+of failed jobs) if any job fails.
 
-- `agent-run` is skipped by default (never places paper bets during a deploy
-  check); pass `--include-agent` to run it.
-- `daily-digest` posts to Discord; pass `--no-side-effects` to drop it.
+Smoke runs under `RunPolicy(respect_gate=False, self_schedule=False,
+commit_external=False)` so each body executes end-to-end with **zero outward
+side effects**:
+
+- the **cadence gate is bypassed**, so the real fetch+ingest body runs even when
+  a job is not "due" at deploy time (closing the prior coverage gap where most
+  data jobs only ran their decision/schema path);
+- **nothing is written to the schedule store** — the live schedule is untouched
+  until the scheduler restarts;
+- every **outward call is suppressed at its sink** — Discord posts (including
+  failure alerts and the daily digest) and agent paper bets — so a deploy check
+  never escapes to a shared channel or the live portfolio. Suppression is
+  universal, not a per-job tag, so a new posting job can never be forgotten.
+
+- `agent-run` is skipped by default only because it is **expensive** (LLM +
+  web-search spend, multi-minute subprocess) — not because it is unsafe; pass
+  `--include-agent` to run it (its paper bets are still suppressed).
 - `--only`/`--exclude` accept base or compound job names (repeatable).
-- Run with `SCHEDULER_DRY_RUN=true` so self-scheduling is a no-op and the live
-  schedule store is left untouched.
-
-Coverage caveat: smoke always exercises each job's import/config/decision/schema
-path, but the full fetch+ingest body only runs when the job's cadence gate
-(`decision.should_execute`) says execute.
 
 ### deploy.sh
 
@@ -285,10 +293,12 @@ path, but the full fetch+ingest body only runs when the job's cadence gate
 ```
 
 It runs: `git pull` → `uv sync` → `alembic upgrade head` →
-`SCHEDULER_DRY_RUN=true odds scheduler smoke` → `sudo systemctl restart
-odds-scheduler` → `systemctl status` + `odds scheduler list-jobs`. If migration
-or smoke fails it aborts **before** the restart, so the running scheduler keeps
-serving the old code untouched until the new code passes smoke.
+`odds scheduler smoke` → `sudo systemctl restart odds-scheduler` →
+`systemctl status` + `odds scheduler list-jobs`. Smoke runs every bootstrapped
+job's full body with zero outward side effects (see above), so "smoke passed"
+means "the changed code runs green." If migration or smoke fails it aborts
+**before** the restart, so the running scheduler keeps serving the old code
+untouched until the new code passes smoke.
 
 Migration ordering: `alembic upgrade head` runs before the restart, so the
 still-running old scheduler briefly sees the new schema. Safe for additive

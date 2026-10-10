@@ -142,9 +142,18 @@ class HealthMonitor:
             return False
 
         # Send via alert system
-        from odds_core.alerts import alert_manager
+        from odds_core.alerts import alert_manager, commit_external_enabled
 
         await alert_manager.alert(message, severity)
+
+        # Under suppression (e.g. ``scheduler smoke``) ``alert_manager.alert`` is
+        # a no-op, so persisting an AlertHistory row would falsely claim the
+        # alert was sent and pollute rate-limiting/heartbeat state. Mirror the
+        # ``commit_external_enabled`` guard used by ``job_alert_context`` and
+        # ``send_job_warning``: skip the record (and report not-sent) when
+        # outward delivery is suppressed.
+        if not commit_external_enabled():
+            return False
 
         # Record in database
         await self._record_alert(alert_type, severity, message, context)

@@ -6,9 +6,12 @@ import pytest
 from odds_core.alerts import (
     AlertManager,
     DiscordAlert,
+    commit_external,
+    commit_external_enabled,
     job_alert_context,
     send_critical,
     send_error,
+    send_job_warning,
     send_warning,
 )
 from odds_core.config import AlertConfig, Settings
@@ -87,6 +90,92 @@ class TestAlertManager:
 
             # Should call send because enabled=True
             mock_send.assert_called_once_with("Test message", "warning")
+
+
+class TestCommitExternalSeam:
+    """The ``commit_external`` switch suppresses all outward delivery at the sink."""
+
+    def test_default_is_live(self) -> None:
+        assert commit_external_enabled() is True
+
+    def test_context_manager_scopes_and_restores(self) -> None:
+        assert commit_external_enabled() is True
+        with commit_external(False):
+            assert commit_external_enabled() is False
+        assert commit_external_enabled() is True
+
+    @pytest.mark.asyncio
+    async def test_alert_suppressed_when_commit_external_false(self) -> None:
+        """An outward alert during commit_external=False must not hit delivery."""
+        settings = MagicMock(spec=Settings)
+        settings.alerts = AlertConfig(
+            alert_enabled=True, discord_webhook_url="https://discord.com/api/webhooks/test"
+        )
+        manager = AlertManager(config=settings)
+
+        with patch.object(manager.channels[0], "send", new_callable=AsyncMock) as mock_send:
+            with commit_external(False):
+                await manager.alert("Test message", "warning")
+            mock_send.assert_not_called()
+
+            # Restored outside the scope: delivery happens again.
+            await manager.alert("Test message", "warning")
+            mock_send.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_embed_suppressed_when_commit_external_false(self) -> None:
+        settings = MagicMock(spec=Settings)
+        settings.alerts = AlertConfig(
+            alert_enabled=True, discord_webhook_url="https://discord.com/api/webhooks/test"
+        )
+        manager = AlertManager(config=settings)
+
+        with patch.object(manager.channels[0], "send_embed", new_callable=AsyncMock) as mock_embed:
+            with commit_external(False):
+                await manager.send_embed({"title": "digest"})
+            mock_embed.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("odds_core.alerts.record_to_alert_history", new_callable=AsyncMock)
+    @patch("odds_core.alerts.check_rate_limit", new_callable=AsyncMock, return_value=True)
+    @patch("odds_core.alerts.alert_manager")
+    async def test_job_failure_alert_suppressed_under_commit_external_false(
+        self,
+        mock_manager: MagicMock,
+        mock_rate_limit: AsyncMock,
+        mock_record: AsyncMock,
+    ) -> None:
+        """A failing job under smoke re-raises but pings nothing and records no row."""
+        mock_manager.enabled = True
+        mock_manager.alert = AsyncMock()
+
+        with pytest.raises(ValueError):
+            with commit_external(False):
+                async with job_alert_context("test-job"):
+                    raise ValueError("boom")
+
+        mock_manager.alert.assert_not_called()
+        mock_record.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("odds_core.alerts.record_to_alert_history", new_callable=AsyncMock)
+    @patch("odds_core.alerts.check_rate_limit", new_callable=AsyncMock, return_value=True)
+    @patch("odds_core.alerts.alert_manager")
+    async def test_send_job_warning_suppressed_under_commit_external_false(
+        self,
+        mock_manager: MagicMock,
+        mock_rate_limit: AsyncMock,
+        mock_record: AsyncMock,
+    ) -> None:
+        mock_manager.enabled = True
+        mock_manager.alert = AsyncMock()
+
+        with commit_external(False):
+            sent = await send_job_warning("soft:test", "empty scrape")
+
+        assert sent is False
+        mock_manager.alert.assert_not_called()
+        mock_record.assert_not_called()
 
 
 class TestDiscordAlert:

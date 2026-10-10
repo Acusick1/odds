@@ -1,5 +1,9 @@
 """Scheduler backend implementations."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 from odds_lambda.scheduling.backends.base import (
     BackendHealth,
     JobStatus,
@@ -16,6 +20,40 @@ from odds_lambda.scheduling.exceptions import (
     SchedulerBackendError,
     SchedulingFailedError,
 )
+
+# ---------------------------------------------------------------------------
+# Self-scheduling policy (the ``self_schedule`` seam)
+# ---------------------------------------------------------------------------
+#
+# Process-local switch that forces every backend constructed via
+# ``get_scheduler_backend`` into dry-run, so no rows are written to the
+# schedule store regardless of the ``dry_run`` a caller passes. Default is
+# ``True`` (scheduling permitted). The scheduler ``smoke`` command flips it off
+# so a validation run exercises full job bodies — including their self-schedule
+# call — while leaving the live schedule store untouched. Enforcing it at the
+# single backend-construction chokepoint means no per-job knowledge of which
+# jobs self-schedule is needed. Blast radius stays on the local scheduler: the
+# Lambda/EventBridge dispatch path never enters this context.
+_scheduling_enabled: ContextVar[bool] = ContextVar("odds_scheduling_enabled", default=True)
+
+
+def scheduling_enabled() -> bool:
+    """Whether self-scheduling (writes to the schedule store) is permitted."""
+    return _scheduling_enabled.get()
+
+
+@contextmanager
+def suppress_scheduling(suppressed: bool = True) -> Iterator[None]:
+    """Scope self-scheduling off for the duration of the ``with`` block.
+
+    Used by ``scheduler smoke`` so job bodies run without persisting any
+    schedule. Restores the previous value on exit.
+    """
+    token = _scheduling_enabled.set(not suppressed)
+    try:
+        yield
+    finally:
+        _scheduling_enabled.reset(token)
 
 
 def get_scheduler_backend(
@@ -69,6 +107,10 @@ def get_scheduler_backend(
     settings = get_settings()
     backend = backend_type or settings.scheduler.backend.lower()
 
+    # A ``suppress_scheduling`` scope (set by ``scheduler smoke``) forces dry-run
+    # at this single chokepoint so no job can write to the schedule store.
+    dry_run = dry_run or not scheduling_enabled()
+
     if backend == "aws":
         from odds_lambda.scheduling.backends.aws import AWSEventBridgeBackend
 
@@ -119,4 +161,7 @@ __all__ = [
     "JobNotFoundError",
     # Factory function
     "get_scheduler_backend",
+    # Self-scheduling policy seam
+    "scheduling_enabled",
+    "suppress_scheduling",
 ]
