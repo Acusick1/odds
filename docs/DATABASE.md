@@ -97,7 +97,8 @@ See [POLYMARKET.md](POLYMARKET.md#data-model) for the schema.
 - **Purpose:** automated testing (pytest)
 - **Setup:** `tests/conftest.py` starts an in-process PostgreSQL via py-pglite on TCP port
   5434, creates all tables once per session, and truncates every table before each test
-- **Usage:** automatic; tests never touch the local or remote databases
+- **Usage:** automatic for `tests/unit` and `tests/integration`. `tests/migration` connects to
+  `DATABASE_URL` instead and is run by the deploy workflows
 
 ### Local database (`odds`)
 

@@ -8,15 +8,15 @@ Identify and exploit structural mispricing in betting markets across multiple sp
 
 Sport-agnostic betting data pipeline with sport-specific LLM agents. Infrastructure (odds collection, storage, paper trading, scheduling, alerting) is shared; each sport adds its own data sources, feature extractors, agent prompts, and MCP tools. The agent researches matches via web search and Playwright, consumes pipeline data through MCP tools, and places paper trades with explicit reasoning.
 
-**Target sports:** EPL (active — agent in interactive evaluation), MLB and NBA (planned).
+**Sports:** EPL and MLB are active, with agents in interactive evaluation; NBA code exists but is deprioritized.
 
 **Shared data sources:** The Odds API (US bookmakers), OddsPortal (UK bookmakers, headless scraper). **Sport-specific sources:** football-data.co.uk (historical EPL with Pinnacle + Betfair Exchange closing odds). An XGBoost CLV model produces supplementary predictions, but the agent's primary edge comes from information synthesis, not the model. See [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) for the full data source inventory.
 
 ### What runs where (deployed vs local)
 
 Two AWS Lambdas (`odds-scheduler`, `odds-scheduler-scraper`) plus a local scheduler
-(`odds scheduler start`). **The committed tfvars are not a reliable record of the deployed
-state** — the live account has been applied with gate/sport values that differ from the
+(`odds scheduler start`). **The repo does not record the deployed state** (only `terraform.tfvars.example` is
+committed) — the live account has been applied with gate/sport values that differ from the
 variable defaults, and Terraform `ignore_changes` the self-scheduling rules. The betting
 agent, daily digest, ESPN fixtures, and MLB probables are **always local-only** (no
 EventBridge rule exists for them); the agent is in interactive evaluation, not autonomous
@@ -39,12 +39,12 @@ packages/
 │   ├── event_sync.py          # EventSyncService (free /events endpoint)
 │   ├── oddsportal_common.py   # Shared: bookmaker mapping, odds conversion, tier classification
 │   ├── model_loader.py        # S3 model loading with ETag caching
-│   ├── storage/               # readers + writers (odds, polymarket, injury, game_log, pbpstats)
+│   ├── storage/               # Readers + writers per data source (see ARCHITECTURE.md#storage-modules)
 │   ├── scheduling/            # Multi-backend scheduler (AWS/Railway/local)
 │   └── jobs/                  # All scheduled job entry points (see ARCHITECTURE.md)
 ├── odds-analytics/ # Backtesting, strategies, ML (odds_analytics/)
 ├── odds-mcp/       # MCP server — agent tool interface (odds_mcp/)
-│   └── agents/                # Sport-specific agent prompts (epl/, mlb/)
+│   └── agents/                # Sport-specific agent prompts (epl/, mlb/, common.md), outside odds_mcp/
 └── odds-cli/       # CLI commands (odds_cli/)
     └── commands/              # CLI command groups (see CLI.md)
 ```
@@ -60,13 +60,13 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the system architecture and
 
 ### AWS Lambda
 
-- Two Lambda functions: scheduler (512 MB, 5 min) and scraper (2 GB, 10 min)
+- Two Lambda functions, scheduler and scraper; memory and timeouts are in [DEPLOYMENT.md](docs/DEPLOYMENT.md#functions)
 - Must use NullPool for DB connections (automatic in Lambda — keyed on the `AWS_LAMBDA_FUNCTION_NAME` env var, not the scheduler backend)
 - Stateless between invocations; API key rotation state in SSM Parameter Store
 
 ### API Cost
 
-- `/odds` endpoint: 1 unit per region × per market per call (returns all games in one call — cost does not scale with number of games). Current config: 1 region × 3 markets = 3 units per fetch.
+- `/odds` endpoint: 1 unit per region × per market per call (returns all games in one call — cost does not scale with number of games). The defaults (`regions`, `markets` in `odds_core/config.py`) give 1 region × 3 markets = 3 units per fetch.
 - `/events` endpoint: free (no quota cost) — returns game metadata (IDs, teams, times) without odds
 - `/scores` endpoint: 1 unit without `daysFrom`, 2 units with `daysFrom`
 - `/historical/odds` endpoint: 10 units per region × per market
@@ -106,7 +106,7 @@ Full pipeline built (API client, 5 DB tables, storage, ingestion, feature extrac
 - **EPL**: thin ($10K-$100K/match), AMM-driven — orderbook reflects market maker params, not public sentiment.
 - **NBA** / **MLB**: deep real orderbook (median $152K/MLB game, 1¢ spreads, 30+ levels, $500K+ total depth). MLB prices are collinear with bet365 devigged via arbitrage — viable as sharp reference / alternate to Pinnacle, not a mispricing venue.
 
-Pipeline code currently targets NBA via `polymarket_fetcher.get_nba_events()`. See [docs/POLYMARKET.md](docs/POLYMARKET.md) for technical details (series/tag IDs per sport, ticker formats, market richness).
+The pipeline code targets NBA via `polymarket_fetcher.get_nba_events()`. See [docs/POLYMARKET.md](docs/POLYMARKET.md) for technical details (series/tag IDs per sport, ticker formats, market richness).
 
 ## Code Style
 
@@ -126,7 +126,7 @@ Pipeline code currently targets NBA via `polymarket_fetcher.get_nba_events()`. S
 - Job entry points are `async def main()` functions in `odds_lambda/jobs/`
 - `EventSyncService` syncs games from free `/events` endpoint as first step in `fetch_odds` job
 - OddsPortal jobs share utilities via `oddsportal_common.py` (bookmaker key mapping, decimal→American conversion, tier classification)
-- Scoring pipeline: `score_predictions` job loads model from S3 via `model_loader.load_model()` (ETag-cached), extracts features, stores to `Prediction` table with idempotent upsert (`ON CONFLICT DO NOTHING` on event_id + snapshot_id + model_name)
+- Scoring pipeline: `score_events()` (`jobs/score_predictions.py`) runs inline at the end of the `fetch-oddsportal` job, not on its own schedule. It loads the model from S3 via `model_loader.load_model()` (ETag-cached), extracts features, stores to `Prediction` table with idempotent upsert (`ON CONFLICT DO NOTHING` on event_id + snapshot_id + model_name)
 - Discord alerts: `AlertManager.send_embed()` is generic delivery; each job owns its embed formatting
 - Training pipeline: features NaN-fill when optional data unavailable — rows kept, not dropped
 
@@ -162,8 +162,8 @@ uv run odds model publish --name epl-clv-home --path models/model.pkl
 # Run backtest
 uv run odds backtest run --strategy basic_ev --start 2024-10-01 --end 2024-12-31
 
-# Run tests
-uv run pytest
+# Run tests (tests/migration hits DATABASE_URL; leave it to the deploy workflows)
+uv run pytest tests/unit tests/integration
 
 # Database migrations
 uv run alembic revision --autogenerate -m "description"
@@ -176,12 +176,7 @@ uv run odds scheduler start
 
 ## Database Environments
 
-| Environment | Purpose | Safety |
-|-------------|---------|--------|
-| `odds_test` | Automated testing | Safe - isolated |
-| `odds` (local) | Development | Safe - can reset |
-| Dev (remote) | CI/CD | Ephemeral |
-| Production | Live data | NEVER connect locally |
+Unit and integration tests run against an in-process PostgreSQL (py-pglite). `tests/migration` connects to whatever `DATABASE_URL` points at and is run only by the deploy workflows. The environments and their rules are in [DATABASE.md](docs/DATABASE.md#database-environments).
 
 **CRITICAL:** NEVER set `DATABASE_URL` to production during local development.
 
