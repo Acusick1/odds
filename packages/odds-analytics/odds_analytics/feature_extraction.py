@@ -62,6 +62,7 @@ __all__ = [
 # Odds Filtering and Aggregation Utilities
 # =============================================================================
 
+# Model setting; differs on purpose from the agent reference (odds_core.sharp_reference).
 DEFAULT_SHARP_BOOKMAKERS = ["pinnacle"]
 DEFAULT_RETAIL_BOOKMAKERS = ["fanduel", "draftkings", "betmgm"]
 

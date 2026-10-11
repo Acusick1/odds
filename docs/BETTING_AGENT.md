@@ -136,6 +136,29 @@ created_at:          datetime (UTC)
 Briefs are append-only: each wake-up creates a new row. The agent loads the latest brief
 per match for triage and the full brief only for matches it researches.
 
+## paper_trades sharp context
+
+Each `PaperTrade` stores the sharp reference at placement and at close, so the agent's bets
+can be compared with a mechanical sharp-soft rule without re-deriving prices from snapshots.
+All fields are nullable; missing sharp data never blocks placement or settlement. Field
+definitions are in `packages/odds-core/odds_core/paper_trade_models.py`.
+
+- **Placement** (`paper_bet`): `sharp_prob_at_bet` (devigged sharp probability of the
+  selection), `sharp_bookmaker_at_bet`, `sharp_snapshot_time_at_bet` and
+  `sharp_spread_at_bet` (bet implied probability minus the sharp probability; negative means
+  the bet beats the sharp price).
+- **Settlement** (`settle_bets`): `sharp_prob_at_close`, `sharp_bookmaker_at_close`,
+  `sharp_snapshot_time_at_close` (last pre-kickoff snapshot holding a sharp price) and `clv`
+  (sharp closing probability minus bet implied probability; positive means the line moved in
+  the bet's favour).
+
+The sharp price comes from `OddsReader.get_sharp_prices` with the priority list
+`AGENT_SHARP_BOOKMAKERS` (Pinnacle, then Betfair Exchange) in
+`packages/odds-core/odds_core/sharp_reference.py`, shared with the MCP tools. The XGBoost
+model's Pinnacle-only default is a separate setting. A reading is stored only when every
+outcome of the market has a sharp price, because devigging a partial market overstates the
+selection's probability. Existing trades are not backfilled.
+
 ## Role of the XGBoost Model
 
 The CLV prediction model is a supplementary signal. Its signal is weak and not profitable
