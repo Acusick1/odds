@@ -60,42 +60,47 @@ async def _read_sharp_probability(
     market: str,
     selection: str,
     *,
-    as_of: datetime,
+    as_of: datetime | None,
 ) -> SharpReading | None:
     """Devigged sharp probability of ``selection`` from snapshots at or before ``as_of``.
 
-    Returns None unless every outcome of the market has a sharp price, since devigging a
-    partial market would overstate the selection's probability.
+    ``as_of=None`` anchors on the newest snapshot of the market. Returns None unless every
+    outcome has a price from the same sharp bookmaker in the same snapshot: devigging a
+    partial or mixed market misstates the selection's probability.
     """
     reader = OddsReader(session)
+    sport = SPORT_CONFIG.get(event.sport_key)  # type: ignore[arg-type]
+    selected = _outcome_name(selection, event)
     for market_key in _MARKET_KEY_ALIASES.get(market, (market,)):
+        anchor = as_of
+        if anchor is None:
+            latest = await reader.get_latest_snapshot(event.id, market=market_key)
+            if latest is None:
+                continue
+            anchor = latest.snapshot_time
         result = await reader.get_sharp_prices(
             event.id,
             market=market_key,
             sharp_bookmakers=AGENT_SHARP_BOOKMAKERS,
             lookback_hours=SHARP_LOOKBACK_HOURS,
-            now=as_of,
+            now=anchor,
         )
-        if result.prices:
-            break
-    else:
-        return None
+        has_draw = sport.has_draw if sport is not None else "Draw" in result.prices
+        outcomes = [event.home_team, event.away_team, *(["Draw"] if has_draw else [])]
+        if selected not in outcomes or not all(name in result.prices for name in outcomes):
+            continue
+        if len({result.prices[n]["bookmaker"] for n in outcomes}) != 1:
+            continue
+        if len({result.meta[n].snapshot_id for n in outcomes}) != 1:
+            continue
 
-    sport = SPORT_CONFIG.get(event.sport_key)  # type: ignore[arg-type]
-    has_draw = sport.has_draw if sport is not None else "Draw" in result.prices
-    outcomes = [event.home_team, event.away_team, *(["Draw"] if has_draw else [])]
-    if not all(name in result.prices for name in outcomes):
-        return None
-    selected = _outcome_name(selection, event)
-    if selected not in outcomes:
-        return None
-
-    devigged = devig_probabilities(*(result.prices[n]["implied_prob"] for n in outcomes))
-    return SharpReading(
-        prob=devigged[outcomes.index(selected)],
-        bookmaker=result.prices[selected]["bookmaker"],
-        snapshot_time=result.meta[selected].snapshot_time,
-    )
+        devigged = devig_probabilities(*(result.prices[n]["implied_prob"] for n in outcomes))
+        return SharpReading(
+            prob=devigged[outcomes.index(selected)],
+            bookmaker=result.prices[selected]["bookmaker"],
+            snapshot_time=result.meta[selected].snapshot_time,
+        )
+    return None
 
 
 async def place_trade(
@@ -132,16 +137,12 @@ async def place_trade(
     )
     event = await session.get(Event, event_id)
     if event is not None:
-        latest = await OddsReader(session).get_latest_snapshot(event_id, market=market)
-        if latest is not None:
-            reading = await _read_sharp_probability(
-                session, event, market, selection, as_of=latest.snapshot_time
-            )
-            if reading is not None:
-                trade.sharp_prob_at_bet = reading.prob
-                trade.sharp_bookmaker_at_bet = reading.bookmaker
-                trade.sharp_snapshot_time_at_bet = reading.snapshot_time
-                trade.sharp_spread_at_bet = calculate_implied_probability(odds) - reading.prob
+        reading = await _read_sharp_probability(session, event, market, selection, as_of=None)
+        if reading is not None:
+            trade.sharp_prob_at_bet = reading.prob
+            trade.sharp_bookmaker_at_bet = reading.bookmaker
+            trade.sharp_snapshot_time_at_bet = reading.snapshot_time
+            trade.sharp_spread_at_bet = calculate_implied_probability(odds) - reading.prob
 
     session.add(trade)
     await session.flush()

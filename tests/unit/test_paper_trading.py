@@ -346,14 +346,14 @@ PLACED_SNAPSHOT_TIME = KICKOFF - timedelta(hours=3)
 CLOSING_SNAPSHOT_TIME = KICKOFF - timedelta(minutes=5)
 
 
-def _book(key: str, home: int, draw: int, away: int) -> dict:
+def _book(key: str, home: int, draw: int, away: int, market: str = "h2h") -> dict:
     return {
         "key": key,
         "title": key,
         "last_update": "2026-04-15T11:00:00Z",
         "markets": [
             {
-                "key": "h2h",
+                "key": market,
                 "outcomes": [
                     {"name": "Arsenal", "price": home},
                     {"name": "Draw", "price": draw},
@@ -470,6 +470,62 @@ class TestSharpContextAtPlacement:
         trade = await _place_home_bet(test_session)
 
         assert trade.sharp_prob_at_bet is None
+
+
+class TestSharpMarketKeyAndConsistency:
+    @pytest.mark.asyncio
+    async def test_betfair_1x2_snapshots_resolve_for_h2h_bet(self, test_session) -> None:
+        await _add_event(test_session)
+        test_session.add(
+            _snapshot(PLACED_SNAPSHOT_TIME, _book("betfair_exchange", 100, 300, 300, market="1x2"))
+        )
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.sharp_bookmaker_at_bet == "betfair_exchange"
+        assert trade.sharp_prob_at_bet == pytest.approx(0.5)
+        assert trade.sharp_snapshot_time_at_bet == PLACED_SNAPSHOT_TIME
+
+    @pytest.mark.asyncio
+    async def test_partial_h2h_does_not_hide_complete_1x2(self, test_session) -> None:
+        await _add_event(test_session)
+        partial = _book("pinnacle", -110, 300, 300)
+        partial["markets"][0]["outcomes"] = partial["markets"][0]["outcomes"][:1]
+        test_session.add(_snapshot(PLACED_SNAPSHOT_TIME, partial))
+        test_session.add(
+            _snapshot(
+                PLACED_SNAPSHOT_TIME - timedelta(minutes=10),
+                _book("betfair_exchange", 100, 300, 300, market="1x2"),
+            )
+        )
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.sharp_bookmaker_at_bet == "betfair_exchange"
+
+    @pytest.mark.asyncio
+    async def test_outcomes_from_different_books_leave_fields_null(self, test_session) -> None:
+        await _add_event(test_session)
+        pinnacle_home_only = _book("pinnacle", -110, 300, 300)
+        pinnacle_home_only["markets"][0]["outcomes"] = pinnacle_home_only["markets"][0]["outcomes"][
+            :1
+        ]
+        test_session.add(
+            _snapshot(
+                PLACED_SNAPSHOT_TIME,
+                pinnacle_home_only,
+                _book("betfair_exchange", 100, 300, 300),
+            )
+        )
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        # Pinnacle quotes only home and Betfair the rest: no single-book market, so null
+        assert trade.sharp_prob_at_bet is None
+        assert trade.sharp_bookmaker_at_bet is None
 
 
 class TestSharpContextAtSettlement:

@@ -156,8 +156,9 @@ The sharp price comes from `OddsReader.get_sharp_prices` with the priority list
 `AGENT_SHARP_BOOKMAKERS` (Pinnacle, then Betfair Exchange) in
 `packages/odds-core/odds_core/sharp_reference.py`, shared with the MCP tools. The XGBoost
 model's Pinnacle-only default is a separate setting. A reading is stored only when every
-outcome of the market has a sharp price, because devigging a partial market overstates the
-selection's probability. Existing trades are not backfilled.
+outcome of the market has a price from the same sharp bookmaker in the same snapshot, because
+devigging a partial or mixed market misstates the selection's probability. The `h2h` and
+`1x2` market keys are both searched, since Betfair and OddsPortal write 3-way odds as `1x2`. Existing trades are not backfilled.
 
 ## Role of the XGBoost Model
 
