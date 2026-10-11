@@ -8,9 +8,9 @@ prompts, and MCP tools.
 **Active sports:** EPL football and MLB baseball (agents in interactive evaluation).
 NBA infrastructure exists but is deprioritized.
 
-The pipeline collects bookmaker odds (The Odds API) and UK exchange/retail odds (OddsPortal,
-football-data.co.uk), stores hybrid raw + normalized data, and runs an XGBoost CLV model as a
-supplementary signal. The betting agent researches matches via web search and Playwright,
+The pipeline collects bookmaker odds (The Odds API), UK retail odds (OddsPortal,
+football-data.co.uk) and Betfair Exchange prices, stores hybrid raw + normalized data, and
+runs an XGBoost CLV model as a supplementary signal. The betting agent researches matches via web search and Playwright,
 consumes pipeline data through MCP tools, and places paper trades with explicit reasoning.
 
 ## Repository Layout
@@ -50,7 +50,7 @@ uv run odds status quota                         # API quota (free tier: 500 uni
 uv run odds scheduler start                      # run the local scheduler
 ```
 
-For local-clone development of the OddsHarvester scraper, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Configuration options are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#configuration-management).
 
 ## Documentation
 
@@ -59,16 +59,16 @@ For local-clone development of the OddsHarvester scraper, see [docs/DEVELOPMENT.
 | [AGENTS.md](AGENTS.md) | Project overview, conventions, and critical constraints (entry point for technical detail) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, scheduler, backends, jobs, pipeline |
 | [docs/DATABASE.md](docs/DATABASE.md) | Schemas, environments, migrations, queries |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | File workflows, testing, code style, config |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Configuration, development workflows, testing, running experiments |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | AWS Lambda (2 functions), Terraform, S3, costs, authoritative job/schedule matrix |
 | [docs/CLI.md](docs/CLI.md) | Full command reference |
-| [docs/DATA_MODELS.md](docs/DATA_MODELS.md) | Training pipeline, feature groups, target definition |
-| [docs/MODELING.md](docs/MODELING.md) | Modeling rationale, experiments, open questions |
-| [docs/DEBUGGING_SCHEDULER.md](docs/DEBUGGING_SCHEDULER.md) | Scheduler diagnostics, EventBridge, CloudWatch |
+| [docs/DATA_MODELS.md](docs/DATA_MODELS.md) | Training data reference: sources, target, feature groups, config fields |
+| [docs/MODELING.md](docs/MODELING.md) | CLV model findings, experimental evidence and experiment log |
+| [docs/DEBUGGING_SCHEDULER.md](docs/DEBUGGING_SCHEDULER.md) | How to debug the AWS self-scheduling jobs (EventBridge, CloudWatch) |
 | [docs/POLYMARKET.md](docs/POLYMARKET.md) | Polymarket data model, pipeline (deprioritized) |
-| [docs/BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md) | Backtesting strategies, bet sizing, custom strategies |
+| [docs/BACKTESTING_GUIDE.md](docs/BACKTESTING_GUIDE.md) | Backtesting strategies, bet sizing, metrics, custom strategies |
 | [docs/INJURIES.md](docs/INJURIES.md) | Injury report pipeline (no predictive value for CLV) |
-| [docs/BETTING_AGENT.md](docs/BETTING_AGENT.md) | Agent architecture, matchday workflow, phased rollout |
+| [docs/BETTING_AGENT.md](docs/BETTING_AGENT.md) | Agent architecture, matchday workflow, MCP tools |
 | [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) | Agent data source inventory and evaluation |
 | [docs/BOOKMAKER_LINE_RELEASE.md](docs/BOOKMAKER_LINE_RELEASE.md) | Bookmaker line timing analysis |
 | [docs/REPORTING.md](docs/REPORTING.md) | Reporting surfaces (alerts, digests, health, CLI/MCP, traces) and backing tables |

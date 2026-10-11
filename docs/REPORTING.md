@@ -1,6 +1,6 @@
-# Reporting System
+# Reporting System Reference
 
-This document maps the reporting surfaces of the pipeline — Discord alerts, digests, health monitoring, CLI status, MCP state queries, and agent-run traces — and the storage tables that back them. It also lists sharp edges and possible redesign directions.
+This document maps the reporting surfaces of the pipeline — Discord alerts, digests, health monitoring, CLI status, MCP state queries, and agent-run traces — and the storage tables that back them. It also lists known limitations.
 
 "Reporting" here means: everything the system emits *about itself* (operationally) or *about its outputs* (predictions, paper trades, agent briefs) so that a human or the betting agent can know what is happening.
 
@@ -10,10 +10,10 @@ This document maps the reporting surfaces of the pipeline — Discord alerts, di
 
 ```
                        ┌───────────────────────────────────────────────┐
-                       │             Producers (jobs, services)        │
+                       │       Producers (jobs, services, MCP tools)   │
                        │                                               │
                        │ fetch_odds, fetch_*, score_predictions,       │
-                       │ agent_run, daily_digest, check_health, …      │
+                       │ daily_digest, check_health, MCP tools, …      │
                        └──────────┬────────────────────────────┬───────┘
                                   │                            │
                 wrap with         │                            │ writes to
@@ -52,7 +52,7 @@ This document maps the reporting surfaces of the pipeline — Discord alerts, di
 
 Three reporting *modes* coexist:
 
-1. **Event-driven**: jobs emit alerts at the moment something happens (job crash, low quota, soft scrape failure). Output: Discord. Storage: `AlertHistory` (used for rate-limit + heartbeat).
+1. **Event-driven**: jobs emit alerts when something happens (job crash, low quota, soft scrape failure). Output: Discord. Storage: `AlertHistory` (used for rate-limit + heartbeat).
 2. **Poll-driven**: scheduled jobs (`check_health`, `daily_digest`) walk recent state and emit a summary alert. Output: Discord. Storage: reads from `FetchLog`, `OddsSnapshot`, `DataQualityLog`, `Prediction`, `AlertHistory`.
 3. **On-demand**: CLI commands and MCP tools serve current state to a human/agent. Output: terminal table or JSON. Storage: reads from everything.
 
@@ -71,7 +71,7 @@ Everything that ends up in Discord goes through this module.
 | `AlertManager` | Fan-out router. Reads `settings.alerts`, populates `self.channels` from configured channels, broadcasts to all. Disabled when `alert_enabled=False` or no channels configured. |
 | `alert_manager` | Module-level singleton |
 
-Only one channel class exists today (Discord). The interface is set up for additional channels (Slack, email) but there are no other implementations.
+Only one channel class exists (Discord). The interface allows additional channels (Slack, email), but there are no other implementations.
 
 ### Module-level helpers
 
@@ -125,7 +125,7 @@ After the checks, `purge_old_heartbeats()` deletes heartbeat rows older than `he
 
 ## 4. Daily digest — `packages/odds-lambda/odds_lambda/jobs/daily_digest.py`
 
-The only "human-facing summary of model outputs" report. Run on a schedule per sport.
+The only "human-facing summary of model outputs" report. It runs on the local scheduler's cron at 08:00 UTC for EPL only, when `daily-digest` is in `scheduler.bootstrap_jobs` (see the [Job Deployment Matrix](DEPLOYMENT.md#job-deployment-matrix)).
 
 ### Flow
 
@@ -167,7 +167,7 @@ These are *Rich*-printed terminal tables — no machine-readable output. The sam
 
 ### `packages/odds-cli/odds_cli/commands/scheduler.py`
 
-- `odds scheduler list`: calls the active scheduler backend's job listing; renders a job table. Catches `BackendUnavailableError` for backends that don't support listing (Railway).
+- `odds scheduler list-jobs`: calls the active scheduler backend's job listing; renders a job table. Catches `BackendUnavailableError` for backends that don't support listing (Railway).
 - `odds scheduler health`: calls `backend.health_check()` → `HealthCheckResult`; renders a green/red overall + per-check breakdown.
 
 ---
@@ -212,7 +212,7 @@ Stream lines are:
    - `type=assistant` blocks with `tool_use` → `agent_tool_use` (tool name + input preview).
    - `type=result` → `agent_run_summary` (result text, num_turns, duration_ms, cost_usd).
 
-Trace files older than the newest-per-sport cap (`AGENT_RUN_LOG_KEEP`) are pruned each run. The subprocess runs under `AGENT_DATABASE_URL` (read-only role) if set, otherwise falls back to the parent DSN with a warning.
+Trace files older than the newest-per-sport cap (`AGENT_RUN_LOG_KEEP`) are pruned each run. The subprocess runs under `AGENT_DATABASE_URL` (the read-mostly `odds_agent` role) if set, otherwise falls back to the parent DSN with a warning.
 
 ### Consumer
 
@@ -246,7 +246,7 @@ Index notes:
 
 ---
 
-## 9. Sharp edges and quirks
+## 9. Known limitations
 
 These are the friction points to know about before touching this code.
 
@@ -261,56 +261,12 @@ These are the friction points to know about before touching this code.
 9. **Webhook failure is not itself an alert.** `DiscordAlert._post` logs `discord_alert_error` on exception. There is no secondary channel and no DB-side "alert delivery failed" marker — `record_to_alert_history` is called regardless of whether the Discord POST succeeded, so a failed delivery still counts toward rate-limiting.
 10. **Rate-limit query is read-then-write without a transaction.** Two concurrent jobs can both observe "no recent alert", both send, both record. In practice jobs don't overlap on alert-type but it isn't enforced.
 11. **`alert_manager` is module-level**, instantiated at import time from global settings. Re-reading settings (e.g. flipping `alert_enabled` at runtime) requires re-importing or constructing a new manager. Tests have to monkey-patch it.
-12. **Agent-run reporting has no DB component.** The only durable record is the JSONL file. If the disk is wiped (Lambda ephemeral storage, container restart on Railway), traces are lost — `MatchBrief` is the only persistent agent record.
+12. **Agent-run reporting has no DB component.** The only durable record is the JSONL file. If the local `logs/agent_runs/` directory is wiped, traces are lost — `MatchBrief` is the only persistent agent record.
 13. **Sport-aware naming is ad-hoc.** Daily digest uses `make_compound_job_name("daily-digest", sport)` → `daily-digest-epl`. Other places use the sport key directly (`soccer_epl`). Heartbeat keys, CloudWatch metrics, Discord embed titles, and CLI display names each have their own translation table.
 
 ---
 
-## 10. Alternative directions (bigger shape changes)
-
-These are not "fixes" — they're different ways the reporting layer could have been built. Useful for sketching where the system could evolve.
-
-### Bus-based instead of point-to-point
-
-Today every job pushes alerts directly through `AlertManager`. An alternative: jobs publish typed events (`JobFailed`, `QuotaLow`, `HeartbeatRecorded`, `BriefSaved`) to an internal bus; alert formatting, persistence, and channel fan-out are subscribers. Pros: decouples job logic from channel choice; trivially adds a "log all events" sink for audit. Cons: more indirection for a system with one channel and a handful of alert types.
-
-### Pull-based reporting (Prometheus-shaped)
-
-Instead of jobs pushing alerts to Discord, jobs would write metrics to a metrics store (CloudWatch, Prometheus). Discord becomes a destination for *alarm rules* over those metrics. Pros: standard tooling, dashboards for free, alerting becomes declarative ("alert when fetch_success_rate_24h < 0.95"). Cons: requires a metrics backend; loses the rich per-event context that the current digests carry.
-
-### Single "control plane" surface
-
-Replace Discord webhook + CLI + MCP with one HTTP service that:
-- Serves status, alerts, predictions, briefs, paper trades as JSON.
-- Hosts a tiny web UI for humans.
-- Discord becomes a thin push-notification channel that links back to the UI.
-
-Today the same information is rendered three ways (terminal table, Discord embed, MCP dict). A unified API would centralize the "what is the current state" query.
-
-### Briefs as event-sourced agent log
-
-Right now `MatchBrief` is append-only but each brief is a snapshot of the agent's whole reasoning. An event-sourced log of `(decision_event, prior_observations, prior_pre_market_read, …)` would let downstream tooling diff agent reasoning across briefs, score calibration over time, and replay agent state without re-running the agent. The current schema treats every brief as a fresh dump; events would expose the *delta*.
-
-### CloudWatch-native alerting
-
-The codebase already uses CloudWatch. The hand-rolled `HealthMonitor` checks (stale data, quota, consecutive failures, data quality) are exactly the kind of thing CloudWatch metric alarms handle natively. The pipeline could:
-- Emit one metric per check via PutMetricData.
-- Define CloudWatch alarms (with SNS → Discord webhook lambda).
-- Delete `HealthMonitor`.
-
-The cost: AWS-only, harder to test locally. The benefit: no custom rate-limit code, no custom heartbeat table, alarms get history and graphs for free.
-
-### Separation of "tooling alerts" and "trading alerts"
-
-Two separate Discord destinations:
-- **#odds-ops** (job failures, quota, stale data, heartbeats) — operational, mostly silent.
-- **#odds-trades** (paper trades placed, daily digest, agent run summaries) — substantive, daily traffic.
-
-Today they're collapsed into one webhook and one channel. The signal-to-noise tradeoff differs sharply between the two; they probably want different rate limits, retention, and audiences.
-
----
-
-## 11. Reference: where each piece lives
+## 10. Reference: where each piece lives
 
 - Alert core: `packages/odds-core/odds_core/alerts.py`
 - Alert / fetch / data-quality tables: `packages/odds-core/odds_core/models.py` (`AlertHistory`, `FetchLog`, `DataQualityLog`)
@@ -323,7 +279,7 @@ Today they're collapsed into one webhook and one channel. The signal-to-noise tr
 - Scheduler CLI: `packages/odds-cli/odds_cli/commands/scheduler.py`
 - Paper CLI: `packages/odds-cli/odds_cli/commands/paper.py`
 - MCP server: `packages/odds-mcp/odds_mcp/server.py`
-- Paper trading core: `packages/odds-core/odds_core/paper_trading.py` (helpers `place_trade`, `settle_trades`, `get_portfolio_summary`)
+- Paper trading core: `packages/odds-lambda/odds_lambda/paper_trading.py` (helpers `place_trade`, `settle_trades`, `get_portfolio_summary`)
 - Match brief models: `packages/odds-core/odds_core/match_brief_models.py`
 - Agent wakeup models: `packages/odds-core/odds_core/agent_wakeup_models.py`
 - Paper trade models: `packages/odds-core/odds_core/paper_trade_models.py`

@@ -1,274 +1,201 @@
-# Modeling
+# CLV Model Findings
 
-## Goal
+This page explains what the CLV prediction model can and cannot do, and the experimental
+evidence behind its current configuration. The target, feature groups, CV settings and
+config fields are defined in [DATA_MODELS.md](DATA_MODELS.md); this page covers why they
+are set the way they are. The betting agent uses the model as a supplementary signal only
+(see [BETTING_AGENT.md](BETTING_AGENT.md#role-of-the-xgboost-model)).
 
-Predict line movement: the delta between current fair price and closing fair price. A positive signal here means we can identify mispriced lines before they correct, enabling +EV execution on either sportsbook or Betfair exchange.
+## What the model predicts
 
-We have confirmed a weak but real signal (~2-6% R² on EPL depending on CV protocol, ~3.6% R² on NBA with bet365 self-reference). Current focus: EPL with cross-source features (sharp reference vs bet365 retail) and Betfair exchange execution. Sharp reference uses a hybrid fallback: Pinnacle when available, Betfair Exchange for post-shutdown events (Jan 2026+).
+The model predicts line movement: the devigged bet365 CLV delta between a snapshot and
+close (see [Training Target](DATA_MODELS.md#training-target)). A positive signal means
+a mispriced line can be identified before it corrects.
 
-## Data Sources
+The signal is weak but real. On EPL the best configuration reaches CV R² ≈ 0.058
+([principled search re-test](#principled-search-space-and-protocol-re-test), 2026-04-23);
+on NBA it plateaued at R² ≈ 0.036 ([bet365 at scale](#xgboost-bet365-at-scale), 2026-02-27).
+It is not strong enough to bet on alone: on NBA, flat betting at bet365's ~4.5% vig loses
+money at every threshold that produces a meaningful number of bets, even with line
+shopping across four UK bookmakers ([Exp 7, 7b](#betting-simulation-and-line-shopping)).
 
-Three data sources with complementary bookmaker coverage:
+## Deployed model
+
+`epl-clv-home` version `v308058c`, published 2026-04-23: XGBoost on tabular + match_stats
+features, sliding-380:50 walk-forward CV, the principled search space below, hybrid sharp
+reference. CV val_R² = +0.058, val_MSE = 0.000716, replacing a tabular-only model (CV val_R² =
++0.035). Source config: `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`
+(#362); the production scorer handles multi-feature-group models, including the standings,
+match_stats and epl_schedule cache preload (#359). The live S3 version
+is the authority; `odds model publish` writes it (see [CLI.md](CLI.md#publish-model-to-s3)).
+
+## Current conclusions
+
+Each conclusion links to the experiment that supports it in [Evidence](#evidence).
+
+- **bet365 is the target, not Pinnacle.** Pinnacle CLV was unpredictable with public
+  features for both XGBoost (CV R² = −0.017) and LSTM (CV R² = −0.075); Pinnacle lines move
+  less, leaving 6.7× less target variance than bet365
+  ([Pinnacle tuning](#pinnacle-as-target)).
+- **The sharp reference is Pinnacle with Betfair Exchange fallback.** Betfair Exchange
+  `sharp_prob` correlates 0.9994 with Pinnacle, and the fallback recovers the events
+  Pinnacle stopped covering in January 2026 ([hybrid sharp](#hybrid-sharp-reference)).
+- **Sharp-vs-retail divergence is the core feature.** It was the strongest raw correlate
+  from the first experiment onwards ([Exp 1](#early-nba-experiments)), and the control with
+  more data but no sharp reference showed no signal
+  ([EPL with Pinnacle sharp](#epl-with-pinnacle-sharp-reference)).
+- **For EPL, match_stats helps; other groups do not.** Adding match_stats gives the best
+  individual improvement; standings is neutral, epl_schedule hurts slightly, rest produces
+  no EPL features, and FPL availability degrades results
+  ([EPL feature ablation](#epl-feature-group-ablation)).
+- **Sliding-380:50 is the CV protocol.** The one-season sliding window gave the lowest MSE
+  at validation steps of 10 and 50; a step of 50 was chosen so the tuner can tell feature
+  sets apart. Once the search space stopped collapsing to constant predictors, it also edged
+  expanding windows ([CV protocol](#cv-protocol-grid), [principled search](#principled-search-space-and-protocol-re-test)).
+- **Injury features add nothing (NBA).** Once both variants are tuned the same way, the
+  apparent injury signal disappears at every decision tier ([injuries](#injury-features-nba)).
+  This has not been tested on EPL. See [INJURIES.md](INJURIES.md).
+- **Sequence models add nothing.** LSTM variants never beat predicting the mean
+  ([LSTM](#lstm-sequence-models)).
+- **More historical data alone will not help (NBA).** The learning curve plateaus at ~1.5K
+  events ([Exp 6](#data-volume-learning-curve)). EPL has ~1.8K events; a similar plateau is
+  likely but not independently confirmed.
+- **Pregame (3–12h) is the default decision window.** Sharp-retail divergence peaks 3–6h
+  before the game on NBA ([Exp 4](#hours-to-game-effect)). Timing on EPL has not been tested.
+- **Polymarket features are untested at scale.** They were only tried on 230 events, with
+  no measurable effect ([Exp 2](#early-nba-experiments)). See [POLYMARKET.md](POLYMARKET.md).
+
+## Guards against known failure modes
+
+Three bugs invalidated earlier results. The pipeline now guards against each:
+
+- **In-play snapshots as decision points.** `TierSampler` once offered `IN_PLAY` snapshots
+  as pregame candidates, which leaks post-close information into features. They are
+  excluded; the contaminated LSTM result (R² ≈ +0.02) became R² ≈ −0.015 once fixed
+  ([Exp 2](#early-nba-experiments)).
+- **Cross-source snapshot contamination (#231).** With combined OddsPortal + FDUK data,
+  `TierSampler` picked the latest snapshot by wall-clock time, so OddsPortal snapshots
+  without Pinnacle beat FDUK snapshots with Pinnacle for ~37 of 150 events in the final
+  fold, and `np.nan_to_num` turned the missing Pinnacle probabilities into 0.0. `TierSampler`
+  now takes `required_bookmakers` to filter candidates, and features keep NaN (XGBoost
+  handles it natively). Results from 2026-03-10 are invalid.
+- **Over-regularised search space.** The original Optuna search space let sliding-380:50
+  converge on constant predictors. See
+  [principled search](#principled-search-space-and-protocol-re-test) for the space in use.
+
+## Evidence
+
+Results as recorded at the time of each experiment. Where an experiment has a
+`FINDINGS.md`, that file holds the full results.
+
+### Data used
 
 | | OddsPortal | Odds API | football-data.co.uk |
 |--|-----------|----------|---------------------|
-| **Events** | ~5K NBA (5 seasons) + ~1.8K EPL (5 seasons) | ~1K NBA (Mar–Apr 2025 + Oct 2025–Feb 2026) | ~4K EPL (11 seasons, 2015-2026) |
+| **Events** | ~5K NBA (5 seasons) + ~1.8K EPL (5 seasons) | ~1K NBA (Mar–Apr 2025 + Oct 2025–Feb 2026) | ~4K EPL (11 seasons, 2015–2026) |
 | **Snapshots/event** | 2 (opening + closing) | 15+ avg (all tiers) | 2 (opening + closing) |
-| **Bookmakers** | UK: bet365, betway, betfred, bwin | US: pinnacle, fanduel, draftkings, betmgm, bovada | pinnacle, bet365, bwin, williamhill, betvictor, interwetten, ladbrokes |
-| **Event ID pattern** | `op_YYYY-YYYY_AWAY_HOME_DATE` | hex UUID | `fduk_YYYY-YYYY_HOME_AWAY_DATE` |
-| **Key value** | UK retail bookmakers | Dense snapshots, US bookmakers | Pinnacle + Betfair Exchange closing odds (sharp reference) |
 | **Overlap** | 1,810 EPL events matched to FDUK | 141 NBA events matched to OddsPortal | 1,810 EPL events matched to OddsPortal |
 
-football-data.co.uk is collected manually by Joseph Buchdahl (twice weekly, post-match). Pinnacle odds sourced from Pinnacle's public API, which became unreliable after July 2025 — 81 events in 2025-26 season lack Pinnacle closing data. Betfair Exchange closing odds available from 2024-25 season onwards (FDUK columns `BFE*`/`BFEC*`), ingested as `betfair_exchange` bookmaker key.
+football-data.co.uk is compiled manually (twice weekly, post-match). Its Pinnacle odds
+come from Pinnacle's public API, which became unreliable after July 2025: 81 events in
+2025-26 lack Pinnacle closing data. Betfair Exchange closing odds are available from
+2024-25 onwards. Bookmaker sets and event ID patterns per source are in
+[DATA_MODELS.md](DATA_MODELS.md#sportsbook-odds).
 
-### Config fields
+### Early NBA experiments
 
-- `data_source`: `"oddsportal"`, `"oddsapi"`, `"football_data_uk"`, `"all"`, or `null` (no filter). Filters by event ID prefix (`op_` = OddsPortal, `fduk_` = football-data.co.uk).
-- `closing_source_priority`: ordered list of preferred sources for closing snapshot selection (by `api_request_id`). When multiple sources provide closing snapshots for the same event, prefer sources in this order.
-- `min_snapshots`: Minimum snapshots per event (e.g., `min_snapshots: 5` for dense sequence data).
-- `start_date` / `end_date`: Date range filter (always required).
+All February 2026, devigged Pinnacle target, 193–230 events.
 
-### Which source for which experiment
+- **XGBoost v1** (2026-02-14, 193 events, 75 features): R² ≈ 0. Likely causes at the time:
+  too little data, 21 tabular features zeroed by a bug in `XGBoostAdapter`, order book gaps.
+- **Exp 1, feature-target correlations** (2026-02-17, 229 events): max |r| = 0.12, from
+  sharp-retail divergence; 0 of 75 features significant after Benjamini-Hochberg correction.
+  [FINDINGS.md](../experiments/results/exp1_feature_correlations/FINDINGS.md)
+- **Exp 2, feature group isolation** (2026-02-18, 230 events): every group, architecture
+  and decision time gave R² < 0; adding Polymarket features made no difference. Found the
+  `IN_PLAY` look-ahead bug.
+  [FINDINGS.md](../experiments/results/exp2_feature_group_isolation/FINDINGS.md)
 
-- **EPL bet365 target with hybrid sharp** → `data_source: null` (combined OddsPortal + FDUK), `sharp_bookmakers: [pinnacle, betfair_exchange]`, `closing_source_priority: [football_data_uk]`. Best current EPL setup — Pinnacle as primary sharp reference with Betfair Exchange fallback for post-shutdown events, FDUK closing preferred for target.
-- **NBA bet365 target** → `data_source: oddsportal` — bet365 only available from OddsPortal. ~5K events, 5 seasons.
-- **Pinnacle target** → `data_source: oddsapi` — Pinnacle only available from Odds API for NBA. ~1K events but dense snapshots.
-- **LSTM experiments** → also set `min_snapshots: 5` (or higher) to ensure sufficient sequence data.
-- `target_bookmaker` must belong to the corresponding source's bookmaker set.
+- **Polymarket vs sportsbook cross-source validation** (Feb 2026, 228 events): PM-SB
+  probability correlation 0.9978, so both track the same market; PM prices sit ~2.4pp below
+  SB (liquidity premium / vig difference); only 92 of 228 events had time-matched snapshots
+  within 30 minutes, which limits cross-source features.
 
-## Target Definition
+### Injury features (NBA)
 
-**Devigged bookmaker CLV delta**: `fair_close - fair_at_snapshot` for a configured `target_bookmaker`.
+- **XGBoost with injury + rest features** (2026-02-20, 800 events, Pinnacle target): the
+  first positive result, CV R² = 0.020 ± 0.025, with injuries at 55% of feature importance.
+- **bet365 at scale** (2026-02-27, ~5K OddsPortal events): tabular + injuries CV R² =
+  0.036 ± 0.033 against tabular-only 0.036 ± 0.028 once both were tuned. The earlier
+  injury signal came from comparing a tuned model with an untuned baseline.
+- **Exp 6b, closing tier** (2026-03-01, 479 Odds API events): injuries add exactly zero at
+  the closing tier; the Exp 4 GTD correlation (r = 0.28, Pinnacle) does not transfer to the
+  bet365 target (r = −0.01).
+  [FINDINGS.md](../experiments/results/exp6b_injury_closing_tier/FINDINGS.md)
 
-The target bookmaker must belong to the data source's bookmaker set (see Data Sources above). Pinnacle is the default for Odds API data; bet365 for OddsPortal data.
+### LSTM sequence models
 
-Why Pinnacle (when available):
-- Sharpest bookmaker — closest to true market probability
-- Proportional devigging removes ~2% vig cleanly
-- 32% lower variance than raw consensus target (multi-book average)
-- Single source of truth avoids averaging noise across books with different vig structures
+| Date | Variant | Data | CV R² |
+|------|---------|------|-------|
+| 2026-02-21 | Sequence only (15 features × 24 timesteps) | 800 events, Pinnacle | −0.010 ± 0.039 |
+| 2026-02-21 | Sequence + 17 static features | 800 events, Pinnacle | −0.122 ± 0.115 |
+| 2026-02-28 | Sequence only, packed sequences, 50 trials | ~1K Odds API events, Pinnacle | −0.075 ± 0.113 |
 
-Why delta (not absolute close):
-- We don't need to predict what the line will be — we need to predict how much it will move
-- Delta is stationary and mean-zero, easier to learn than absolute levels
-- Directly maps to CLV: positive delta = current price is too low, line will move up
+Config: `experiments/configs/lstm_pinnacle_tuning.yaml`.
 
-## Cross-Validation Protocol
+### XGBoost bet365 at scale
 
-Walk-forward CV with a **sliding 1-season window** and **~5 matchday validation steps**:
+2026-02-27, ~5K OddsPortal NBA events, 11-fold walk-forward CV, 100 Optuna trials, devigged
+bet365 target. Tabular-only CV R² = 0.036 ± 0.028; adding injuries gave the same result.
+Configs: `experiments/configs/xgboost_bet365_tuning.yaml`,
+`experiments/configs/xgboost_bet365_baseline_tuning.yaml`.
 
-```yaml
-cv_method: walk_forward
-window_type: sliding
-min_train_events: 380    # ~1 EPL season
-max_train_events: 380
-val_step_events: 50      # ~5 matchdays
-```
+### Pinnacle as target
 
-This balances production fidelity with tuner signal quality. Yields ~26 folds for ~1.8K EPL events — enough per-fold samples for the tuner to discriminate between feature sets, while still reflecting a realistic retrain cadence.
+2026-03-01, ~800 Odds API NBA events, 4-fold walk-forward CV, 100 trials: CV R² =
+−0.017 ± 0.015, with the tuner converging to maximum regularisation. Pinnacle MSE
+(0.000431) is 6.7× lower than bet365 MSE (0.002883). Config:
+`experiments/configs/xgboost_pinnacle_tuning.yaml`.
 
-**Protocol chosen via grid search** (`experiments/scripts/cv_protocol_grid.py`) over 3 independent axes: window type (expanding vs sliding), window size (95–760 events), and validation step size (10, 50, 150). Key findings:
+### Hours-to-game effect
 
-| val_step | expanding | sliding-95 | sliding-190 | sliding-380 | sliding-760 |
-|----------|-----------|------------|-------------|-------------|-------------|
-| **10** | 0.000728 | 0.000752 | 0.000749 | **0.000706** | 0.000789 |
-| **50** | 0.000757 | 0.000748 | 0.000756 | **0.000732** | 0.000794 |
-| **150** | 0.000793 | 0.000758 | 0.000742 | 0.000752 | 0.000758 |
+Exp 4, 2026-02-28, 477 Odds API NBA events, 1,593 samples across 1–48h before the game.
+Mean |CLV delta| grows from 1.4pp at 0–3h to 3.0pp at 24–36h. Sharp-retail divergence
+peaks at 3–6h (r = +0.097). Per-bin models were all R² < 0 because the dataset is too small.
+[FINDINGS.md](../experiments/results/exp4_hours_to_game/FINDINGS.md)
 
-- **Sliding-380 (1 season) is the optimal window size** — shorter windows starve the model of data, longer windows include stale data that hurts
-- **val_step=10 gives lowest MSE but forces all feature sets to identical hyperparameters** — the tuner can only distinguish "regularized enough" from "not enough", losing ability to differentiate feature sets
-- **val_step=50 preserves the sliding-380 advantage** while giving the tuner enough per-fold signal to select different hyperparameters per feature set
-- Full results and plots: `experiments/results/cv_protocol_grid/`
+### Data volume learning curve
 
-## Available Features
+Exp 6, 2026-03-01, 500–4,524 OddsPortal NBA events, tuned tabular-only bet365 model. R²
+plateaus at ~1.5K events and oscillates between 0 and +0.035 afterwards; dR²/dN =
+6.7e-06 at N = 4,524.
+[FINDINGS.md](../experiments/results/exp6_learning_curve/FINDINGS.md)
 
-### Sportsbook Tabular (6 features)
-Outcome-relative, point-in-time snapshot at decision time (`TabularFeatures`):
-- **Consensus**: `consensus_prob`
-- **Sharp vs retail**: `sharp_prob`, `retail_sharp_diff`
-- **Market breadth**: `num_bookmakers`
-- **Calendar**: `is_weekend`, `day_of_week`
+### Betting simulation and line shopping
 
-### Polymarket (14 features)
-PM prices and order book microstructure:
-- **Implied probs**: home/away
-- **Order book**: spread, midpoint, best bid/ask, bid/ask depth, imbalance, weighted mid
-- **Liquidity**: volume, total liquidity
-- **Velocity**: 2-hour price velocity and acceleration
+- **Exp 7** (2026-03-01, ~4,500 OddsPortal NBA events, 12-fold expanding walk-forward,
+  flat $100 bets on bet365): thresholds 0.005–0.03 all lose (−2.4% to −11.8% ROI). Threshold
+  0.05 shows +3.36% ROI on 56 bets, not significant (p = 0.260). Average CLV captured is
+  positive at every threshold, so the model finds direction but the vig consumes it.
+  [FINDINGS.md](../experiments/results/exp7_backtest_sim/FINDINGS.md)
+- **Exp 7b** (2026-03-01, same simulation, best price across bet365, Betway, Betfred, bwin):
+  effective overround drops from 4.13% to 1.59% and ROI improves 0.3–1.3pp per threshold,
+  but thresholds ≤ 0.03 still lose. bet365 already offers the best price 67% of the time.
+  [FINDINGS.md](../experiments/results/exp7b_line_shopping/FINDINGS.md)
 
-### Cross-Source (7 features)
-PM vs sportsbook divergence:
-- **Divergence**: PM-SB prob difference (signed, absolute, direction)
-- **Spread vs hold**: PM spread compared to SB market hold
-- **Sharp divergence**: PM vs Pinnacle specifically
+### EPL with Pinnacle sharp reference
 
-### Injury (6 features)
-Impact-weighted injury burden per team at decision time:
-- **Impact OUT**: home/away sum of `(on_off_rtg - on_def_rtg) * (mpg/48)` for OUT players
-- **Impact GTD**: same formula for QUESTIONABLE/DOUBTFUL players, discounted 0.5x
-- **Timing**: hours between latest report and game, hours between latest report and snapshot (staleness)
-- Players without PBPStats data fall back to 1.0 (headcount behavior)
+March 2026, ~1.7K combined OddsPortal + FDUK EPL events, devigged bet365 target, Pinnacle
+as sharp reference, 100 trials per run.
 
-### Rest/Schedule (5 features)
-Game context from NBA game logs:
-- **Days rest**: home/away days since previous game
-- **Rest advantage**: home days rest minus away days rest
-- **Back-to-back**: home/away boolean flags
+- Control with combined data but bet365 as its own sharp reference: CV R² = −0.005 ± 0.008.
+  More data alone adds no signal.
+- After the #231 fix (2026-03-15), expanding:150 protocol: tabular CV R² = 0.019 ± 0.043;
+  tabular + standings + match_stats CV R² = 0.052 ± 0.045.
+- The MSE drop against the OddsPortal-only baseline (0.0024 → 0.0007) reflects lower target
+  variance with Pinnacle closing, not necessarily better prediction.
 
-### Match Stats (14 features)
-Rolling averages of prior match statistics from football-data.co.uk:
-- **Shots**: home/away total shots, shots on target (rolling avg over last N matches, configurable `match_stats_window`, default 5)
-- **Set pieces**: home/away corners
-- **Discipline**: home/away fouls, yellow cards, red cards
-- **Half-time**: home/away half-time goals scored
-- Strict time filtering: only uses completed matches prior to the event's `commence_time` (no look-ahead bias)
-
-### Sequence (15 features per timestep, for LSTM)
-Time-series per snapshot:
-- american/decimal odds, implied prob, num bookmakers
-- hours to game, time of day (sin/cos encoding)
-- odds/prob change from previous and from opening
-- odds std, sharp odds, sharp prob, sharp-retail diff
-
-## What We Know
-
-### Cross-source validation (Feb 2026, 228 events)
-- PM-SB probability correlation: 0.9978 — tracking the same underlying market
-- PM prices systematically ~2.4pp lower than SB (liquidity premium / vig difference)
-- Only 92/228 events had time-matched snapshots within 30min — sparse alignment limits cross-source features
-
-### XGBoost v1 (Feb 2026, 193 events)
-- 656 samples, 75 features, multi-horizon sampling (3.4 rows/event)
-- Group timeseries CV (event-level splits)
-- R² ≈ 0 — no signal beyond predicting the mean
-- Likely causes: insufficient data (193 events), tabular feature bug (21/75 features zeroed), orderbook data gaps, heavy regularization
-
-### Feature-target correlation analysis (Feb 2026, 229 events)
-- 719 samples, 75 features — raw Pearson/Spearman correlations with devigged Pinnacle target
-- **Strongest signal: sharp-retail divergence** (tab_retail_sharp_diff_home r=0.12, traj_sharp_retail_divergence_trend ρ=0.13)
-- 12/75 features significant uncorrected (p<0.05), 0/75 after BH correction
-- Bug fix: 21 tabular features were zeroed due to outcome pre-filtering in XGBoostAdapter — now resolved
-- 15/75 features remain sparse (PM orderbook features require live polling, not yet deployed)
-- 140 collinear feature pairs — heavy redundancy from home/away duplication and line shopping overlap
-- Target variance halves closer to game (std: 0.049 far → 0.025 close); sharp-retail signal peaks 5-8h out
-- Full results: [experiments/results/exp1_feature_correlations/FINDINGS.md](../experiments/results/exp1_feature_correlations/FINDINGS.md)
-
-### Feature group isolation (Feb 2026, 230 events)
-- Trained Ridge and shallow XGBoost independently on each feature group (tabular, trajectory, PM+cross-source, sharp-retail subset, all)
-- Walk-forward group timeseries CV (TimeSeriesSplit on event boundaries)
-- **All groups R² < 0** — no group, architecture, or decision time outperforms predicting the training mean
-- Smaller groups (sharp_retail: 3 features, pm_cross_source: 9) are more stable than larger (tabular, all) — adding features makes CV worse due to collinearity
-- Adding PM features to sportsbook-only features makes no difference (`all` ≈ `all_no_pm` in MSE)
-- Phase 2 controlled comparison (2×2: architecture × decision time):
-
-| | XGBoost | LSTM |
-|--|---------|------|
-| **time_range (3-12h)** | R²≈-0.011 (n=538) | R²≈-0.009 (n=717) |
-| **tier (pregame)** | R²≈-0.024 (n=229) | R²≈-0.015 (n=228) |
-
-- Neither architecture nor decision time matters — all four cells R²≈0
-- LSTM adds no value over XGBoost at either decision time
-- **TierSampler bug found and fixed**: `IN_PLAY` snapshots were incorrectly included as candidates for pregame tier — since in-play snapshots occur *after* the closing snapshot, this was look-ahead bias (features from the future "predicting" past closing prices); earlier LSTM pregame R²≈+0.02 was contaminated; corrected result is R²≈-0.015
-- Full results: [experiments/results/exp2_feature_group_isolation/FINDINGS.md](../experiments/results/exp2_feature_group_isolation/FINDINGS.md)
-
-### XGBoost with injury + rest features (Feb 2026, 800 events)
-- 18 features (tabular 4 + injury 6 + rest 5 + timing 3), tier sampling (pregame), devigged Pinnacle target
-- 100-trial Optuna tuning with 5-fold timeseries CV
-- **First positive out-of-sample signal**: validation R²=0.050, CV mean R²=0.020 ± 0.025
-- Best params: `max_depth=2, min_child_weight=20, lr=0.295` — heavy regularization prevents overfitting
-- Feature importance: **injuries 55%** (`impact_out_away` 17%, `injury_news_recency` 12%), tabular 28%, rest 9%
-- Dead features (zero importance): `away_is_b2b`, `away_days_rest`, `rest_advantage`, `home_is_b2b`, `is_weekend`, `num_bookmakers`
-- Config: `experiments/xgboost_injuries_rest_tuning_best.yaml` (gitignored)
-
-### LSTM tuning (Feb 2026, 800 events)
-- Two-branch architecture: LSTM processes 15-feature sequences (24 timesteps), optional static feature branch (tabular + injury + rest) concatenated with final hidden state
-- 100-trial Optuna tuning with 5-fold timeseries CV, same date range as XGBoost experiment (204 events skipped due to missing snapshots/sequences)
-- Controlled comparison: sequence-only vs sequence + static features
-
-| Variant | Features | CV R² | CV MSE | Best params |
-|---------|----------|-------|--------|-------------|
-| **Sequence only** | 15 seq features × 24 timesteps | -0.010 ± 0.039 | 0.000471 ± 0.000139 | hidden=48, layers=2, dropout=0.2, lr=0.00289 |
-| **Sequence + static** | 15 seq + 17 static (tab 6 + inj 6 + rest 5) | -0.122 ± 0.115 | — | hidden=112, layers=3, dropout=0.0, lr=0.00229 |
-
-- **Both variants R² < 0** — LSTM does not outperform predicting the mean, regardless of static features
-- Adding static features made things *worse* (R² -0.122 vs -0.010) with much higher variance (±0.115 vs ±0.039), suggesting the larger model overfits
-- XGBoost R²=+0.020 remains the best architecture — injury signal is captured by tabular features, not temporal patterns
-- Hypothesis disproven: temporal patterns in line movement sequences do not improve prediction beyond aggregate features
-- Configs: `experiments/lstm_tuning_seq_only_best.yaml`, `experiments/lstm_tuning_best.yaml`
-
-### XGBoost bet365 at scale (Feb 2026, ~5K events OddsPortal)
-- 11-fold walk-forward CV, 100-trial Optuna tuning, devigged bet365 target
-- **Tabular + injuries**: CV R²=0.036 ± 0.033, MSE=0.002883 — best params: n_est=350, max_depth=3, lr=0.054, min_child_weight=37
-- **Tabular-only baseline**: CV R²=0.036 ± 0.028, MSE=0.002884 — best params: n_est=250, max_depth=3, lr=0.280, min_child_weight=36
-- **Identical performance** — injuries add zero signal when both variants are properly tuned under the same CV scheme
-- Earlier comparison (untuned baseline vs tuned injuries) was misleading; the apparent "injury signal" was a tuning artifact
-- ~3.6% R² appears to be the ceiling for public sportsbook features
-- Configs: `experiments/configs/xgboost_bet365_tuning_best.yaml`, `experiments/configs/xgboost_bet365_baseline_tuning_best.yaml`
-
-### Hours-to-game effect (Feb 2026, 477 events Odds API)
-- 1,593 samples across 1-48h before game, time_range sampling with up to 10 snapshots per event
-- **Target variance increases with decision distance**: mean |CLV delta| = 1.4pp at 0-3h → 3.0pp at 24-36h. Market efficiency peaks at 3-6h (std=0.022, lowest).
-- **Sharp-retail divergence peaks at 3-6h** (r=+0.097) — confirming the pregame window as the sweet spot for this feature
-- **GTD injury at 0-3h is the strongest individual signal found** (r=+0.28, p=0.0003) — late injury news not yet priced in. Sign flips negative at 18-24h (early reports already reflected).
-- **Prob level correlation flips**: high prob → negative CLV close to game (reversion), positive CLV far from game (momentum)
-- **Per-bin models all R²<0**: 477 Odds API events too small for per-hour model evaluation. OddsPortal's 5K events only have 2 snapshots, preventing hour stratification.
-- Current pregame tier (3-12h) is a reasonable default; no evidence to change
-- Full results: [experiments/results/exp4_hours_to_game/FINDINGS.md](../experiments/results/exp4_hours_to_game/FINDINGS.md)
-
-### LSTM Pinnacle tuning (Feb 2026, ~1K events Odds API)
-- 5-fold walk-forward CV, 50-trial Optuna tuning, devigged Pinnacle target
-- `data_source: oddsapi`, `min_valid_timesteps: 3`, pregame decision tier (3-12h), packed sequences for correct masking
-- **CV R²=-0.075 ± 0.113** — worse than a constant predictor
-- Best params: hidden_size=128, num_layers=3, dropout=0.5, lr=0.00738, batch_size=32, weight_decay=0.000541, patience=20
-- LSTM conclusively ruled out for CLV prediction with current features — sequential modeling adds no value over cross-sectional features
-- Config: `experiments/configs/lstm_pinnacle_tuning_best.yaml`
-
-### XGBoost Pinnacle tuning (Mar 2026, ~800 events Odds API)
-- 4-fold walk-forward CV, 100-trial Optuna tuning, devigged Pinnacle target
-- **CV R²=-0.017 ± 0.015**, MSE=0.000431 — tuner converged to max regularization (no signal)
-- Best params: n_est=400, max_depth=2, lr=0.145, min_child_weight=47, subsample=0.5
-- Pinnacle MSE (0.000431) is 6.7× lower than bet365 MSE (0.002883) — Pinnacle lines move less, leaving less variance to predict
-- **Conclusion**: bet365 is the viable target for CLV prediction with public features. Pinnacle would need substantially more history or non-public features (order flow, bettor identity) to revisit.
-- Config: `experiments/configs/xgboost_pinnacle_tuning_best.yaml`
-
-### Data volume learning curve (Mar 2026, 500–4,524 events OddsPortal)
-- Walk-forward CV with tuned bet365 baseline params (tabular-only) on chronological subsets of 500 → 4,524 events
-- **R² plateaus at ~1,500 events**: oscillates between 0 and +0.035 from 1.5K onwards, with no upward trend
-- Log-fit: R² = 0.0301·ln(N) − 0.2302, marginal return dR²/dN = 6.7e-06 at N=4,524
-- Extrapolated: R²≈0.047 at 10K events, R²≈0.068 at 20K events — diminishing returns
-- **Injury timing diagnostic (2×2)**: tabular-only vs tabular+injuries at sharp (12-24h) vs pregame (3-12h) tier — injuries add nothing at either tier
-- Pregame tier (3-12h) yields lower R² than sharp (0.001 vs 0.018) — consistent with OddsPortal snapshot timing centered at ~19h
-- **Caveat resolved by Exp 6b**: OddsPortal had zero snapshots in the 0-3h closing window. Exp 6b tested this on 479 Odds API events with bet365 closing-tier snapshots (avg 0.2h) — injuries add exactly zero. The closing-tier target is near-zero (std=0.0016) because the line has already priced in GTD designations.
-- Full results: [experiments/results/exp6_learning_curve/FINDINGS.md](../experiments/results/exp6_learning_curve/FINDINGS.md)
-
-### Walk-forward betting simulation (Mar 2026, ~4,500 events OddsPortal)
-- Walk-forward CV (12 folds, expanding window), flat $100 bets on bet365 vigged American odds, threshold sweep [0.005–0.05]
-- **Not profitable**: all thresholds from 0.005 to 0.03 produce negative ROI (-2.4% to -11.8%)
-- Only threshold=0.05 shows +3.36% ROI (56 bets), but **NOT significant** (p=0.260, 1K permutations) — likely noise from small sample
-- Avg CLV captured is positive at all thresholds (+0.010 to +0.047), confirming the model identifies directional line movement, but the edge is consumed by the vig
-- **Always-home baseline**: 54.2% win rate, -7.55% ROI — confirms the ~4.5% house edge the model must overcome
-- Away bias: model predicts more away bets than home bets at all thresholds (e.g., 812 away vs 495 home at 0.005), suggesting systematic away-side line movement in bet365 pricing
-- **Conclusion**: ~3.6% R² CLV signal is directionally correct but too weak to overcome bet365's vig (~4.5%) for flat betting. Would need either stronger signal (non-public features) or lower-cost execution venues
-- Full results: [experiments/results/exp7_backtest_sim/FINDINGS.md](../experiments/results/exp7_backtest_sim/FINDINGS.md)
-
-### Line shopping across bookmakers (Mar 2026, ~4,500 events OddsPortal)
-- Same walk-forward simulation as Exp 7, but selects the best available price across 4 UK bookmakers (bet365, betway, betfred, bwin) instead of bet365-only
-- **Vig reduction**: effective overround drops from 4.13% (bet365) to 1.59% (best-available), a 2.55pp reduction
-- **ROI improvement at every threshold**: +0.3pp to +1.3pp improvement, with largest gains at lower thresholds (1.3pp at 0.005, 0.9pp at 0.01)
-- **Still not profitable**: all thresholds 0.005–0.03 remain negative ROI. Best threshold=0.05 improves from +3.36% to +3.68% ROI but remains insignificant (p=0.334)
-- **bet365 provides best price 67% of the time**; betfred 13.1%, betway 12.4%, bwin 7.5% — bet365 is already competitive, limiting the shopping upside
-- **Conclusion**: line shopping is directionally correct but insufficient — the ~2.5pp vig reduction is smaller than the ~4% gap between signal strength and breakeven. Would need either exchange-level execution costs or stronger signal
-- Full results: [experiments/results/exp7b_line_shopping/FINDINGS.md](../experiments/results/exp7b_line_shopping/FINDINGS.md)
-
-### EPL with Pinnacle sharp reference (Mar 2026, ~1.7K events combined)
-
-Three-way comparison isolating the effect of Pinnacle as sharp reference vs more data. **Note**: the original Mar 10 results (R²=0.031) were inflated by a cross-source snapshot contamination bug (#231, fixed Mar 15) — OddsPortal snapshots without Pinnacle were selected over FDUK snapshots with Pinnacle, then `nan_to_num` silently filled missing Pinnacle probs with 0.0. Post-fix results below are the trustworthy baseline.
-
-**Feature group results depend on CV protocol — specifically, the training window strategy.**
-
-Two protocols tested: **sliding-380** (fixed 1-season training window, ~26 folds with val_step=50) and **expanding** (growing training window from 700+ events, ~7 folds with val_step=150). The choice determines whether additional feature groups help or hurt.
-
-**Sliding-380 results (val_step=50, ~26 folds, 100 trials each):**
+Sliding-380 results (val_step = 50, ~26 folds, 100 trials each, 2026-03-18):
 
 | Experiment | Sharp Ref | Data | Features | CV MSE | CV R² |
 |---|---|---|---|---|---|
@@ -281,220 +208,130 @@ Two protocols tested: **sliding-380** (fixed 1-season training window, ~26 folds
 | Combined + Pinnacle + standings + match_stats | pinnacle | OP + FDUK | 32 (7 tab + 11 stnd + 14 mstat) | 0.000759 ± 0.000243 | 0.004 ± 0.050 |
 | Combined + Pinnacle + stnd + mstat + fpl_availability | pinnacle | OP + FDUK | 41 (32 + 9 fplav) | 0.000745 ± 0.000228 | 0.004 ± 0.050 |
 
-**Expanding window results (val_step=150, ~7 folds, 100 trials each):**
+Expanding-window results (val_step = 150, ~7 folds, 100 trials each):
 
 | Experiment | Features | CV MSE | CV R² |
 |---|---|---|---|
 | Tabular only | 7 tabular | 0.000793 ± 0.000118 | 0.019 ± 0.043 |
 | Tabular + standings + match_stats | 32 (7 tab + 11 stnd + 14 mstat) | **0.000767** ± 0.000113 | **0.052** ± 0.045 |
 
-**Why the protocols disagree:**
+At the time, the disagreement was attributed to training-set size: sliding-380 gives ~12
+events per feature with 32 features, while expanding windows grow past 1,000 events
+(inferred). The [principled search re-test](#principled-search-space-and-protocol-re-test)
+showed it was a search-space artefact instead, and these sliding-380 numbers do not
+reproduce under current data and the hybrid sharp reference. Feature counts here are as
+recorded; the current tabular group has 6 features.
 
-- Sliding-380 caps training at 380 events (~1 season). With 32 features, that's ~12 events per feature — insufficient for the model to learn genuine patterns, so extra features add noise.
-- Expanding windows grow to 1000+ events in later folds, giving the model enough data to exploit feature interactions. The 5.2% R² with all features is reproducible and real.
-- The full 15-cell grid search (5 window types × 3 val steps) was re-run with all-features (2026-03-19). Lowest MSE is still sliding-380:10 (0.000693) for both tabular-only and all-features, confirming the window size is optimal regardless of feature count. But R² behaviour differs: expanding:50 gives R²=6.1% for all-features vs 4.1% for tabular-only.
-- **(Superseded 2026-04-23):** the sliding-380 vs expanding feature-help disagreement turned out to be a *search-space artefact*, not a real property of the protocols. Both protocols benefit from extra features once Optuna isn't constrained to find degenerate models. See "Principled search space + protocol re-test" below.
+Configs: `experiments/configs/xgboost_epl_combined_*_tuning.yaml`.
 
-**Hybrid sharp reference (Pinnacle + Betfair Exchange, Mar 2026):**
+### CV protocol grid
 
-Pinnacle API shutdown (Jan 2026) excluded 71 events from training. Betfair Exchange (available in FDUK from 2024-25 onwards) validated as a drop-in replacement:
-- `tab_sharp_prob` correlation between Pinnacle and BFE: **0.9994** on 589 overlapping events
-- Systematic level shift of ~1.1pp (BFE back prices slightly worse than Pinnacle devigged) — XGBoost handles this via split point adjustment
-- Hybrid config `sharp_bookmakers: [pinnacle, betfair_exchange]` recovers all 71 excluded events (1800 vs 1729 total)
-- Folds 0-19 produce identical results to Pinnacle-only; folds 20-21 (post-shutdown) show positive R² (7.4%, 2.7%)
-- Sharp bookmaker selection uses priority-ordered fallback: first available bookmaker in the list wins
-- Config: `experiments/configs/xgboost_epl_hybrid_sharp.yaml`
+2026-03-16, ~1.7K EPL events, tabular features, Pinnacle sharp. Script:
+`experiments/scripts/cv_protocol_grid.py`; results:
+`experiments/results/cv_protocol_grid/grid_results.csv`. CV MSE by validation step and
+training window:
 
-**Other findings:**
-- **More data alone adds no signal** — the control (combined data, bet365 sharp) gave R²=-0.005 ± 0.008
-- MSE drop (0.0024 → 0.0007) reflects lower target variance with Pinnacle closing, not necessarily better prediction
-- Verification artifacts for all experiments: `experiments/results/*/verification/`
-- Configs: `experiments/configs/xgboost_epl_combined_*_tuning.yaml`, `xgboost_epl_hybrid_sharp.yaml`
-- Grid search results (both tabular and all-features): `experiments/results/cv_protocol_grid/`
+| val_step | expanding | sliding-95 | sliding-190 | sliding-380 | sliding-760 |
+|----------|-----------|------------|-------------|-------------|-------------|
+| **10** | 0.000728 | 0.000752 | 0.000749 | **0.000706** | 0.000789 |
+| **50** | 0.000757 | 0.000748 | 0.000756 | **0.000732** | 0.000794 |
+| **150** | 0.000793 | 0.000758 | 0.000742 | 0.000752 | 0.000758 |
 
-**Cross-source contamination bug (#231):** TierSampler selected decision snapshots by latest wall-clock time from eligible tiers. OddsPortal `sharp`-tier snapshots (no Pinnacle) won over FDUK `early`-tier snapshots (has Pinnacle) for ~37/150 events in the final walk-forward fold (Apr-Oct 2025). Combined with `np.nan_to_num(X, nan=0.0)` converting missing Pinnacle probs to 0.0, this corrupted cross-source features and distorted tuner optimization across all folds. Fix: TierSampler now accepts `required_bookmakers` to filter candidates; all `nan_to_num` calls removed (XGBoost handles NaN natively).
+- Sliding-380 (one season) is the best window: shorter windows starve the model and
+  longer ones include stale data (inferred).
+- val_step = 10 gives the lowest MSE but leads the tuner to pick identical hyperparameters
+  for every feature set, so it cannot tell feature sets apart. val_step = 50 keeps the
+  sliding-380 advantage while giving the tuner enough per-fold signal.
+- A rerun with 32 features (2026-03-19) gave the same lowest-MSE cell (sliding-380:10,
+  0.000693), but R² favoured expanding windows: expanding:50 R² = 0.061, expanding:150
+  R² = 0.052, sliding-380:50 R² = −0.013.
 
-### EPL feature group re-ablation (Apr 2026, hybrid sharp, 1813 events through 2026-04-20)
+### Hybrid sharp reference
 
-After #359 unblocked multi-feature-group scoring in production, re-ran per-group ablation under expanding:50 + hybrid sharp + 100 Optuna trials each.
+2026-03-19, 1.8K EPL events. Pinnacle's API shutdown (January 2026) excluded 71 events.
+Betfair Exchange `sharp_prob` correlates 0.9994 with Pinnacle on 589 overlapping events,
+with a ~1.1pp level shift that XGBoost absorbs through split points (inferred).
+`sharp_bookmakers: [pinnacle, betfair_exchange]` uses the first available bookmaker in the
+list, recovering all 71 events; folds 0–19 match Pinnacle-only and the two new folds show
+R² of +7.4% and +2.7%. Config: `experiments/configs/xgboost_epl_hybrid_sharp.yaml`.
+
+### EPL feature group ablation
+
+- **FPL availability** (2026-03-20, 41 features with hybrid sharp): CV R² = −0.017 ± 0.031
+  under sliding-380:50 and 0.022 ± 0.037 under expanding:150, both below the baselines
+  without it. The FPL tables and reader remain, but there is no `fpl_availability` feature
+  group in the current training code, so this run cannot be reproduced as recorded.
+- **Per-group ablation** (2026-04-23, 1,813 events through 2026-04-20, expanding:50, hybrid
+  sharp, 100 trials each, original search space):
 
 | Config | Features | val_R² | val_MSE | Δ R² vs tabular |
 |---|---|---|---|---|
 | tabular only | 7 | +0.0354 ± 0.0643 | 0.000765 | — |
-| + rest | 7 (+0) | +0.0354 ± 0.0643 | 0.000765 | 0.000 (no-op) |
+| + rest | 7 (+0) | +0.0354 ± 0.0643 | 0.000765 | 0.000 (no EPL features) |
 | + epl_schedule | 15 (+8) | +0.0277 ± 0.0564 | 0.000770 | −0.008 |
-| + standings | 18 (+11) | +0.0367 ± 0.0657 | 0.000764 | +0.001 (≈neutral) |
+| + standings | 18 (+11) | +0.0367 ± 0.0657 | 0.000764 | +0.001 |
 | **+ match_stats** | **21 (+14)** | **+0.0514 ± 0.0791** | **0.000751** | **+0.016** |
 | all 5 groups | 40 | +0.0429 ± 0.0781 | 0.000757 | +0.008 |
 
-**Headline findings:**
-- `rest` is a no-op for EPL — the rest extractor produces 0 features for EPL events (NBA-only).
-- `match_stats` alone is the best individual addition (+0.016 R²) — beats the all-5-group model.
-- `standings` is essentially neutral under expanding:50 + hybrid sharp (contradicts earlier sliding-380 finding that standings was the only group that helped).
-- All-5-group (+0.0429) is *worse* than tabular+match_stats alone (+0.0514) — the marginal groups dilute the match_stats signal.
-- Effect sizes are small relative to fold-to-fold std (±0.06–0.08); a second-seed validation is recommended before publishing.
+Effect sizes are small relative to fold-to-fold standard deviation (±0.06–0.08).
 
-**Sliding-380:50 caveat (verified 2026-04-23):** Re-running the same ablation under sliding-380:50 produced byte-identical results across all feature sets. Direct verification showed all Optuna-explored trials produce a **constant predictor** — 50 val examples, 1 unique prediction value, std=0.0, early-stopped at iteration 9. The standard search space (mcw∈[5,50], gamma∈[0,1], reg_λ∈[0.5,5]) + early_stopping=15 + 380 train events / 50 val events makes "predict-near-mean" the lowest-MSE model among the 100 trials. A manual low-regularization config (mcw=5, gamma=0) does not degenerate and beats Optuna's "best" by ~12% MSE — so sliding-380 is not fundamentally broken, but the standard tuning protocol applied to it produces meaningless comparisons.
+An offline comparison on 2026-04-23 scored 17 upcoming EPL events with the tabular-only
+and tabular + match_stats models (1,088 shared event-snapshot pairs). The models agreed on
+direction for 86.9% of pairs; match_stats was on average 0.4pp more bearish on the home
+side (mean Δ −0.0040, max |Δ| 0.0220). Without realised closing lines this shows the models
+differ, not which is right.
 
-**Why the earlier sliding-380 numbers (R²=+0.026 for tabular) couldn't be reproduced:** prior runs used Pinnacle-only sharp (different target distribution) and possibly hit non-degenerate hyperparams by luck. The 2026-03 sliding-380 numbers in the tables above should be treated as not-reproducible under current data + hybrid sharp.
+### Principled search space and protocol re-test
 
-**Tooling note:** committed `xgboost_epl_production_tabular_standings.yaml` was `window_type: sliding` while the other tabular-* configs used expanding. Originally flagged as a bug (it leaked sliding-380 into the expanding ablation, hiding the standings result). Post-principled-search, sliding-380 is a valid protocol — the deployed model uses it — so the "inconsistency" is not a bug.
-
-**Offline A/B (head-to-head prediction comparison, 2026-04-23):** scored 17 upcoming EPL events with the prior deployed `tabular_only` config and the new `tabular_match_stats` candidate locally; 1088 shared (event, snapshot) pairs.
-
-| Metric | Value |
-|---|---|
-| mean Δ (match_stats − tabular) | **−0.0040** (~0.4pp more bearish on home) |
-| median Δ | −0.0032 |
-| stdev Δ | 0.0088 |
-| abs mean Δ | 0.0077 |
-| abs max Δ | 0.0220 |
-| sign agreement | **945/1088 (86.9%)** |
-
-Top differentiated events all show match_stats more bearish on home: Leeds vs Burnley (Δ −1.53pp), Arsenal vs Newcastle (Δ −1.02pp), ManU vs Brentford (Δ −0.89pp). Likely driven by rolling shots/corners/cards capturing relative team quality the tabular features miss.
-
-**Limits of offline A/B:** point-in-time prediction comparison only — without realised closing lines we can't say which model is *correct*. The 13% directional disagreement and consistent bearish-on-home shift suggest the models are not redundant; a live A/B against realised CLV (run both models for several matchdays, settle, compare per-snapshot CLV error) is the next validation step.
-
-### Principled search space + protocol re-test (Apr 2026, post-degeneracy fix)
-
-After verifying the sliding-380:50 constant-predictor pathology (above), the root cause was traced to the Optuna search space, not the protocol. Web research on XGBoost tuning for small-N low-SNR regression (Kaggle grandmaster guides, XGBoost official docs, randomrealizations, Laurae on gamma) yielded a principled revised search space:
+2026-04-23. Under sliding-380:50 the original search space produced byte-identical results
+for every feature set: every trial was a constant predictor (one unique prediction across 50
+validation examples, early-stopped at iteration 9). A manual low-regularisation config
+(`min_child_weight` = 5, `gamma` = 0) did not degenerate and beat the tuner's best by ~12%
+MSE, so the search space, not the protocol, was at fault. The revised space,
+drawn from published XGBoost tuning guidance for small-N, low-SNR regression:
 
 ```yaml
-n_estimators:       [100, 600]  step 50       # was [50, 400]
-max_depth:          [2, 4]                    # was [2, 6]
-learning_rate:      [0.01, 0.1]  log          # was [0.01, 0.3]
-min_child_weight:   [1, 15]                   # was [5, 50]
-subsample:          [0.5, 1.0]  step 0.1      # unchanged
-colsample_bytree:   [0.5, 1.0]  step 0.1      # unchanged
-reg_lambda:         [0.01, 5.0]  log          # was [0.5, 5.0] linear
-gamma:              0.0 (locked)              # was [0, 1]
-reg_alpha:          0.0 (locked)              # was [0, 2]
-early_stopping_rounds: 50                     # was 15
+n_estimators:       [100, 600]  step 50
+max_depth:          [2, 4]
+learning_rate:      [0.01, 0.1]  log
+min_child_weight:   [1, 15]
+subsample:          [0.5, 1.0]  step 0.1
+colsample_bytree:   [0.5, 1.0]  step 0.1
+reg_lambda:         [0.01, 5.0]  log
+gamma:              0.0 (locked)
+reg_alpha:          0.0 (locked)
+early_stopping_rounds: 50
 ```
 
-**Principles:**
-- `mcw` heuristic ≤ √N/10 → ≈2 at N=380; mcw=50 forces leaves ≥13% of training rows → guaranteed collapse.
-- `gamma` and `mcw` are redundant regularization axes at low depth — locking gamma=0 removes the joint over-regularization trap.
-- Don't tune both L1 (`reg_alpha`) and L2 (`reg_lambda`) simultaneously — lock one.
-- `log`-scale `reg_lambda` from 0.01 lets Optuna discover lighter L2 helps.
-- `early_stopping=50` (was 15) is the biggest single fix: with lr≤0.05 and noisy 50-example val sets, meaningful improvement rarely appears before tree 20; early_stopping=15 aborts before any tree can show value.
+The original space differed in `n_estimators` [50, 400], `max_depth` [2, 6],
+`learning_rate` [0.01, 0.3], `min_child_weight` [5, 50], linear `reg_lambda` [0.5, 5.0],
+tuned `gamma` [0, 1] and `reg_alpha` [0, 2], and `early_stopping_rounds` 15. Reasons given
+for each change (inferred):
 
-**Results (100 trials each, 1813 events, hybrid sharp, 2026-04-23):**
+- `min_child_weight` of up to 50 forces each leaf to hold ≥13% of 380 training rows, which
+  guarantees collapse; a heuristic of ≤ √N/10 suggests ≈2.
+- `gamma` and `min_child_weight` are redundant regularisers at low depth, so locking
+  `gamma` at 0 removes a joint over-regularisation trap.
+- Tuning both L1 and L2 at once is avoided, so `reg_alpha` is locked.
+- Log-scale `reg_lambda` from 0.01 lets the tuner find lighter L2.
+- With learning rates ≤ 0.05 and noisy 50-example validation sets, improvement rarely
+  shows before tree 20, so early stopping at 15 aborted before any tree could help. This
+  was the largest single fix.
 
-| Config | Old search val_R² | Principled val_R² | Principled val_MSE |
+Results, 100 trials each, 1,813 events, hybrid sharp:
+
+| Config | Original search val_R² | Principled val_R² | Principled val_MSE |
 |---|---|---|---|
 | expanding:50 + tabular | +0.0354 | +0.0472 | 0.000753 |
 | expanding:50 + tabular + match_stats | +0.0514 | +0.0579 | 0.000743 |
-| sliding-380:50 + tabular | DEGENERATE (constant predictor) | +0.0517 | 0.000721 |
-| sliding-380:50 + tabular + match_stats | DEGENERATE | **+0.0581** | **0.000716** (best) |
+| sliding-380:50 + tabular | constant predictor | +0.0517 | 0.000721 |
+| sliding-380:50 + tabular + match_stats | constant predictor | **+0.0581** | **0.000716** |
 
-**Implications:**
-- **Sliding-380:50 is not degenerate under the principled search** — verified directly (48-50 unique predictions on 50 val examples, best_iteration=31-33, against 9 under the standard search).
-- **Sliding-380:50 slightly beats expanding:50** on MSE once the tuner can find good hyperparams — flips the "expanding is the only working protocol" conclusion above.
-- **All four configs improved** — even the working expanding configs had been under-tuned by ~0.01 R².
-- **match_stats > tabular-only** ranking holds under both protocols — the feature-group ablation conclusions survive the search-space fix.
-- **Deployed (2026-04-23):** sliding-380:50 + tabular + match_stats + principled search published to S3 as `epl-clv-home v308058c`. CV val_R²=+0.058, MSE=0.000716. Replaces prior tabular-only model (CV val_R²=+0.035). Committed source config: `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml` (#362). Production scorer (#359) handles multi-feature-group models, including the standings/match_stats/epl_schedule cache preload.
+Under the principled search, sliding-380:50 produces 48–50 unique predictions on 50
+validation examples (best iteration 31–33, against 9 under the original space) and slightly beats expanding:50 on MSE. The match_stats over
+tabular-only ranking holds under both protocols.
 
-## Open Questions
-
-### Signal
-- ~~~3.6% R² is the ceiling for public sportsbook features at 5K events, with the learning curve plateaued. Can Polymarket cross-source features push it higher?~~ — **Partially answered**: Pinnacle cross-source features give EPL R²≈2.6% (tabular-only, sliding-380) or R²≈5.2% (with standings + match_stats, expanding window). Whether additional feature groups help depends on training window size — see protocol comparison above. PM features remain untested at scale.
-- ~~Injury features dominate importance~~ — **Answered for NBA** (Exp 6 + 6b): NBA GTD injuries add zero signal at all decision tiers when properly tuned. GTD injury r=0.28 (Exp 4, Pinnacle) does not transfer to bet365 target (r=-0.01, Exp 6b). At closing tier, the line has already priced in GTD designations. **Untested on EPL** — different injury reporting dynamics (no GTD system, gradual press conference leaks).
-- ~~Does the signal generalize to other sports, or is it NBA-specific?~~ — **Answered**: EPL CLV is predictable (R²≈2.6–5.2% depending on protocol), confirming the signal generalizes beyond NBA. Cross-source sharp-retail divergence is the core feature; public feature groups (standings, match stats) add value only when the training window is large enough (expanding, not sliding-380).
-- Do PM features add signal? Untested at scale — only tested with 230 events (insufficient data). PM order flow from CLOB snapshots remains untapped.
-- ~~Does sharp-retail divergence (Pinnacle vs DraftKings/FanDuel) contain more signal than cross-source (PM vs SB)?~~ — **Partially answered**: Pinnacle vs bet365 divergence is the strongest signal found (R²≈2.6–5.2% on EPL depending on protocol). PM features remain untested at scale but are deprioritized (UK inaccessible).
-
-### Execution
-- ~~At what hours-before-game does the model's edge peak?~~ — **Answered for NBA** (Exp 4 + 6b): sharp-retail diff peaks at 3-6h (Exp 4). GTD injury r=0.28 at 0-3h (Exp 4, Pinnacle target) does NOT transfer to bet365 target (r=-0.01, Exp 6b). **Untested on EPL** — timing dynamics may differ (team news ~24-48h before, lineups ~1h before).
-- Can cross-venue execution (sportsbook vs Polymarket) extract more value than single-venue?
-- ~~What is the optimal bet sizing given the weak but real signal?~~ — **Moot for NBA** (Exp 7): flat betting is unprofitable on NBA; Kelly sizing cannot fix an insufficient edge. EPL execution untested (Betfair exchange offers lower vig than sportsbooks).
-
-### Data
-- ~~Is more OddsPortal data worth collecting?~~ — **No for NBA** (Exp 6): learning curve plateaued at ~1.5K events. EPL has ~1.8K events currently — similar plateau likely but not independently confirmed.
-- ~~**Pinnacle data continuity risk**~~ — **Resolved** (Mar 2026): Betfair Exchange validated as Pinnacle replacement (sharp_prob correlation 0.9994). Hybrid config `sharp_bookmakers: [pinnacle, betfair_exchange]` uses Pinnacle for historical events and BFE for post-shutdown (Jan 2026+). BFE available in FDUK from 2024-25 onwards; for live production, would need Betfair API or historicdata.betfair.com feed.
-- PM order flow features from existing CLOB snapshots — untapped data source (deprioritized — UK inaccessible)
-- Betfair Exchange historical data (historicdata.betfair.com) offers 1-min to 50ms tick data — could provide finer-grained sharp reference for live production
-
-### Methodology
-- ~~Does CV protocol affect hyperparameter selection?~~ — **Yes** (Mar 2026): Expanding 150-event windows select materially different hyperparams than sliding 1-season with matchday steps.
-- ~~What is the production retraining strategy?~~ — **Resolved: either works, sliding-380:50 marginally better** (Apr 2026, post-search-space fix): the earlier "sliding-380 degenerates" finding was a search-space artefact, not a property of the protocol. With the principled search (see Apr 2026 section above), sliding-380:50 produces R²=+0.058 (best MSE 0.000716) vs expanding:50 R²=+0.058 (MSE 0.000743). Either protocol is defensible; sliding-380:50 has a marginal MSE edge and matches the natural production retrain cadence (1-season window).
-- Is devigged Pinnacle the right target, or should we explore market-wide targets?
-- Multi-horizon sampling: does it genuinely increase effective sample size, or just add correlated noise?
-
-## Experiment Plan
-
-### Completed
-- **~~1. Feature-target correlation analysis~~** — max |r|=0.12, sharp-retail diff strongest, 0/75 significant after BH correction
-- **~~2. Feature group isolation~~** — all groups R²<0 at 230 events; TierSampler IN_PLAY bug found
-- **~~3. Minimal feature models~~** — subsumed by XGBoost bet365 at scale: 4 tabular features match 10-feature model
-- **~~4. Hours-to-game effect~~** — target variance grows with decision distance; sharp-retail peaks at 3-6h; GTD injury r=0.28 at 0-3h. Per-bin models inconclusive (478 events). Pregame window confirmed. [Full results](../experiments/results/exp4_hours_to_game/FINDINGS.md).
-- **~~5. LSTM evaluation~~** — LSTM R²<0 across all configurations (800-event Pinnacle, 1K-event Pinnacle with masking fix). Conclusively worse than XGBoost.
-
-- **~~6. Data volume learning curve (NBA)~~** — R² plateaued at ~1.5K events, oscillating 0–0.035 thereafter (log-fit dR²/dN = 6.7e-06). More OddsPortal data will not meaningfully improve the model. Injury timing diagnostic (2×2): injuries add nothing at sharp tier; pregame comparison diluted (~93% of events fall back to sharp-tier snapshots, only ~335 sample at actual 3-12h). The 0-3h closing window where GTD signal is strongest remains untested. [Full results](../experiments/results/exp6_learning_curve/FINDINGS.md).
-
-- **~~6b. Injury closing tier (NBA)~~** — Tested GTD hypothesis on Odds API data with bet365 closing-tier snapshots (avg 0.2h before game). Closing-tier R²=0.596 is a measurement artifact: target std=0.0016 (line has barely moved at 0.2h), so the model explains near-zero residuals. Injuries add exactly zero at closing tier (identical R² to tabular-only). `inj_impact_gtd_away` r=-0.011 at closing — the Exp 4 r=0.28 does not transfer to bet365 target. Injury signal is conclusively uninformative for NBA CLV prediction at any tier. [Full results](../experiments/results/exp6b_injury_closing_tier/FINDINGS.md).
-
-- **~~7. Walk-forward betting simulation (NBA)~~** — Flat $100 bets on bet365 vigged odds across 6 thresholds (0.005–0.05). All thresholds 0.005–0.03 produce negative ROI (-2.4% to -11.8%). Only threshold=0.05 shows +3.36% ROI (56 bets) but p=0.260 (not significant). Model captures positive CLV directionally but the ~3.6% R² signal is too weak to overcome bet365's ~4.5% vig. [Full results](../experiments/results/exp7_backtest_sim/FINDINGS.md).
-
-- **~~7b. Line shopping across bookmakers (NBA)~~** — Re-ran Exp 7 simulation selecting best available price across 4 UK bookmakers (bet365, betway, betfred, bwin). Effective vig drops from 4.13% to 1.59% (2.55pp reduction), ROI improves +0.3–1.3pp at every threshold, but still not profitable at thresholds ≤0.03. bet365 provides the best price 67% of the time, limiting shopping upside. [Full results](../experiments/results/exp7b_line_shopping/FINDINGS.md).
-
-### Active
-
-### 8. Cross-venue execution analysis (deprioritized)
-~~Compare execution opportunity across sportsbook and Polymarket for the same events.~~
-**Deprioritized:** Polymarket not accessible from UK; focus shifted to EPL football with Betfair exchange as the cross-venue execution target (deep liquidity confirmed — 0.5-0.7% spreads on EPL favourites).
-
-### ~~9. Position sizing / Kelly criterion~~
-**Deprioritized** (Exp 7): flat betting is unprofitable — Kelly sizing cannot fix an insufficient edge. Revisit only if signal improves via non-public features or cross-venue execution.
-
-## Running Experiments
-
-Experiments live in `experiments/scripts/` as standalone Python scripts. Each script writes outputs to `experiments/results/<experiment_name>/`.
-
-### Required outputs
-
-Every experiment must produce:
-- **`FINDINGS.md`** — the primary artifact future agents read. Must follow this structure:
-  - **Setup**: date, git SHA, dataset size, sampling method, target definition, exact command to reproduce
-  - **Key Results**: numbers, tables, significance — no vague summaries
-  - **Interpretation**: what the results mean, caveats, alternative explanations
-  - **Implications**: what to do next, go/no-go recommendation for downstream experiments
-- **Plots** saved as PNGs in the same directory.
-- **Data artifacts** (CSVs, etc.) for downstream analysis.
-
-### Verification artifacts (required)
-
-Every experiment must save feature verification artifacts to catch silent data bugs (zeroed features, missing values, wrong data selection). The `train run` and `train tune` CLI commands save these automatically. Standalone experiment scripts must call `save_verification_artifacts()` explicitly after preparing data:
-
-```python
-from odds_analytics.training import save_verification_artifacts
-
-save_verification_artifacts(X, y, feature_names, output_dir, event_ids=event_ids)
-```
-
-This produces three files:
-- **`feature_stats.csv`** — per-feature: count, null_count, null_pct, mean, std, min, max, nunique. Check for features that are all-NaN, all-zero, or constant.
-- **`feature_sample.csv`** — first 20 rows of the feature matrix with event IDs and target. Spot-check that values look reasonable.
-- **`feature_target_corr.csv`** — per-feature Pearson and Spearman correlation with the target. Check for flipped signs or lost signal vs expectations.
-
-Before reporting experiment results in FINDINGS.md, verify:
-1. No features are 100% NaN or constant (unless expected, e.g., optional feature group not loaded)
-2. Feature count matches the expected number for the configured feature groups
-3. Correlations are directionally consistent with prior experiments
-
-### After running
-
-1. Update the **Experiment Log** table below with the headline result and decision.
-2. Update the **What We Know** section if the experiment changes our understanding, linking to the FINDINGS.md. If results contradict a prior entry, amend the prior entry inline with the correction and a link to the new experiment (do not delete — preserve the history of what we believed and why it changed).
-
-### Conventions
-
-- Scripts use the existing training pipeline (`prepare_training_data`, `MLTrainingConfig`, etc.) to load data.
-- Config reuse: reference existing YAML configs in `experiments/configs/` where possible.
-- Scripts must be runnable via `uv run python experiments/scripts/<script>.py`.
-- FINDINGS.md must record the git SHA of the commit containing the experiment code (commit the script first, then run, then commit results).
-
-## Experiment Log
+## Experiment log
 
 | Date | Experiment | Features | Target | Samples | Result | Decision | Notes |
 |------|-----------|----------|--------|---------|--------|----------|-------|
@@ -514,7 +351,7 @@ Before reporting experiment results in FINDINGS.md, verify:
 | 2026-03-01 | Exp 6b: injury closing tier | tabular 4 ± injury 6 | devigged bet365 | 479 (closing) / 826 (sharp) events (Odds API) | Closing R²=0.596 (artifact); sharp R²=-0.02 | GTD hypothesis falsified | Closing-tier target near-zero (std=0.0016); injuries add zero at both tiers; inj_impact_gtd_away r=-0.01 (not r=0.28 from Exp 4) |
 | 2026-03-01 | Exp 7: backtest sim | tabular 4 | devigged bet365 | 2,088 bets (4,524 events OddsPortal) | Best ROI +3.36% (p=0.260) | Not profitable | Flat $100, 12-fold walk-forward; all thresholds ≤0.03 negative ROI; CLV signal too weak to overcome ~4.5% vig |
 | 2026-03-01 | Exp 7b: line shopping | tabular 4 | devigged bet365 | 2,088 bets (4 bookmakers) | Best ROI +3.68% (p=0.334) | Still not profitable | Vig drops 4.13%→1.59% (2.55pp); ROI +0.3–1.3pp at all thresholds; bet365 best price 67% of time |
-| 2026-03-10 | EPL combined + Pinnacle sharp | tabular 7, pinnacle sharp | devigged bet365 | ~1.8K EPL (OP+FDUK) | ~~CV R²=0.031±0.014~~ | ~~Best EPL result~~ | **Inflated by #231 bug** — pre-fix snapshot contamination + nan_to_num; see post-fix row below |
+| 2026-03-10 | EPL combined + Pinnacle sharp | tabular 7, pinnacle sharp | devigged bet365 | ~1.8K EPL (OP+FDUK) | CV R²=0.031±0.014 (invalid) | Superseded | Inflated by the #231 bug (snapshot contamination + nan_to_num); see the 2026-03-15 rows |
 | 2026-03-10 | EPL combined + bet365 sharp (control) | tabular 7, bet365 sharp | devigged bet365 | ~1.8K EPL (OP+FDUK) | CV R²=-0.005±0.008 | More data ≠ signal | Control proves improvement from Pinnacle features, not data volume |
 | 2026-03-15 | #231 bug fix | — | — | — | — | Bug fix | Cross-source snapshot contamination: TierSampler picked OP (no Pinnacle) over FDUK; nan_to_num filled NaN→0.0. Fix: required_bookmakers filter + remove nan_to_num |
 | 2026-03-15 | EPL combined + Pinnacle (post-fix) | tabular 7, pinnacle sharp | devigged bet365 | ~1.7K EPL (OP+FDUK) | CV R²=0.019±0.043 | Trustworthy baseline | 6-fold walk-forward (expanding:150), 100 trials; post-fix clean results |
@@ -527,5 +364,6 @@ Before reporting experiment results in FINDINGS.md, verify:
 | 2026-03-19 | Hybrid sharp: Pinnacle + BFE | 32 features, hybrid sharp [pinnacle, betfair_exchange] | devigged bet365 | 1.8K EPL (OP+FDUK) | R²=0.060±0.080 (fixed params, expanding:50) | Adopt hybrid sharp | BFE sharp_prob correlates 0.9994 with Pinnacle. Hybrid recovers 71 post-shutdown events (1800 vs 1729). Folds 0-19 identical to Pinnacle-only; extra folds 20-21 show R²=+7.4%, +2.7%. Code change: sharp_bookmakers uses priority-ordered fallback (ANY, not ALL). |
 | 2026-03-20 | FPL availability (sliding-380:50) | tabular 7 + standings 11 + match_stats 14 + fpl_availability 9, hybrid sharp [pinnacle, betfair_exchange] | devigged bet365 | 1.8K EPL (OP+FDUK) | CV R²=-0.017±0.031 | FPL adds noise | 28-fold walk-forward, 100 trials. Adding FPL availability (41 features total) degrades from tabular-only baseline (R²=0.026). Market already prices in squad availability. |
 | 2026-03-20 | FPL availability (expanding:150) | tabular 7 + standings 11 + match_stats 14 + fpl_availability 9, hybrid sharp [pinnacle, betfair_exchange] | devigged bet365 | 1.8K EPL (OP+FDUK) | CV R²=0.022±0.037 | FPL degrades expanding baseline | 9-fold walk-forward, 100 trials. Positive R² but below expanding:150 all-features baseline (R²=0.052 with 32 features). FPL's 9 extra features (41 total) halve the R². |
-| 2026-04-23 | EPL ablation re-run (expanding:50, hybrid sharp) | per-group: tabular, +rest, +epl_schedule, +standings, +match_stats, all-5 | devigged bet365 | 1.8K EPL (OP+FDUK) | tabular R²=0.0354; +match_stats R²=0.0514 (best); +standings R²=0.0367 (≈neutral); +epl_schedule R²=0.0277; +rest R²=0.0354 (no-op); all-5 R²=0.0429 | match_stats is best individual; rest no-op for EPL; all-5 worse than tabular+match_stats | 22-fold walk-forward (expanding:50, val_step=50), 100 trials each, 1813 events through 2026-04-20. `rest` extractor produces 0 features for EPL. Effect sizes small vs std (±0.06–0.08); second-seed validation recommended. |
+| 2026-04-23 | EPL ablation re-run (expanding:50, hybrid sharp) | per-group: tabular, +rest, +epl_schedule, +standings, +match_stats, all-5 | devigged bet365 | 1.8K EPL (OP+FDUK) | tabular R²=0.0354; +match_stats R²=0.0514 (best); +standings R²=0.0367 (≈neutral); +epl_schedule R²=0.0277; +rest R²=0.0354 (no-op); all-5 R²=0.0429 | match_stats is best individual; rest no-op for EPL; all-5 worse than tabular+match_stats | 22-fold walk-forward (expanding:50, val_step=50), 100 trials each, 1813 events through 2026-04-20. `rest` extractor produces 0 features for EPL. Effect sizes small vs std (±0.06–0.08). |
 | 2026-04-23 | sliding-380:50 ablation (degenerate) | same per-group set | devigged bet365 | 1.8K EPL | All configs converged to same trial 86, identical val_MSE to 16 decimals (constant predictor verified directly: 50 val examples → 1 unique prediction) | Sliding-380 + standard Optuna search degenerates | Standard search space (mcw∈[5,50], gamma∈[0,1], reg_λ∈[0.5,5]) + early_stopping=15 + 380 train events makes "predict-near-mean" the lowest-MSE model. Manual low-reg config (mcw=5, gamma=0) does not degenerate and beats Optuna best by ~12% MSE. The protocol isn't broken; the standard tuning protocol applied to it is. |
+| 2026-04-23 | Principled search re-test | tabular ± match_stats, hybrid sharp | devigged bet365 | 1,813 EPL | sliding-380:50 + match_stats val_R²=0.0581, MSE=0.000716 (best) | Deploy as `epl-clv-home v308058c` | Revised search space; sliding-380:50 not degenerate under it; match_stats > tabular under both protocols |

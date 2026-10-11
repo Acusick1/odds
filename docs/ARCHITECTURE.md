@@ -4,24 +4,18 @@
 
 ## System Overview
 
-A single-user betting odds data collection and analysis system supporting multiple sports (EPL football and MLB baseball active; NBA infrastructure exists but is deprioritized). Collects odds from sportsbooks and OddsPortal, runs CLV prediction models, and delivers daily prediction digests via Discord. Prioritizes robust data pipeline architecture with comprehensive historical data collection, storage, and validation.
+A single-user betting odds data collection and analysis system supporting multiple sports
+(EPL football and MLB baseball active; NBA code exists but is deprioritized). It collects
+odds from sportsbooks, OddsPortal and Betfair Exchange, runs a CLV prediction model, and
+serves the data to the betting agent through MCP tools. The package layout is in the
+[README](../README.md#repository-layout).
 
-**Core Principles:**
-- Data pipeline first - robust collection and storage is paramount
-- Single-user system - latency not critical, simplicity over scale
-- Extensibility - support additional sports and markets
-- Data quality - validation throughout pipeline
-- Historical analysis - all data preserved for backtesting
-
-## Package Structure
-
-```
-packages/
-├── odds-core/      # Models, config, database (odds_core/)
-├── odds-lambda/    # Data fetching, storage, scheduling (odds_lambda/)
-├── odds-analytics/ # Backtesting, strategies, ML (odds_analytics/)
-└── odds-cli/       # CLI commands (odds_cli/)
-```
+**Design principles (inferred):**
+- Data pipeline first: robust collection and storage come before analysis
+- Single-user system: latency is not critical, so simplicity wins over scale
+- Extensibility: sports and markets can be added
+- Data quality: validation throughout the pipeline
+- Historical analysis: all data is preserved for backtesting
 
 ## Data Sources
 
@@ -31,15 +25,26 @@ packages/
 - Sport-parameterized: `/sports/{sport_key}/odds`, `/sports/{sport_key}/scores`, etc.
 - Supported sport keys: `soccer_epl`, `baseball_mlb`, `basketball_nba`
 
-See [API Cost](../AGENTS.md#api-cost) for the endpoint pricing breakdown and [DEPLOYMENT.md](DEPLOYMENT.md) for tier details.
+See [API Cost](../AGENTS.md#api-cost) for the endpoint pricing breakdown and
+[DEPLOYMENT.md](DEPLOYMENT.md#the-odds-api) for tiers.
 
 ### OddsPortal (via OddsHarvester scraper)
 
-Headless browser scraping of OddsPortal.com via a separate scraper Lambda. Provides historical and live odds from UK bookmakers not available through The Odds API.
+Headless browser scraping of OddsPortal.com. Provides historical and live odds from UK
+bookmakers not available through The Odds API.
 
 - **Scraper**: [OddsHarvester](https://github.com/Acusick1/OddsHarvester) fork, Playwright + Chromium
-- **Jobs**: `fetch-oddsportal` (hourly, upcoming match odds), `fetch-oddsportal-results` (daily, results + closing odds)
-- **Shared utilities**: `packages/odds-lambda/odds_lambda/oddsportal_common.py` (bookmaker mapping, odds conversion, tier classification)
+- **Jobs**: `fetch-oddsportal` (upcoming match odds) and `fetch-oddsportal-results`
+  (results + closing odds); see [OddsPortal jobs](#oddsportal-scrape-job)
+- **Leagues**: `LEAGUE_SPECS` in `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal.py`
+  (EPL and MLB)
+- **Shared utilities**: `packages/odds-lambda/odds_lambda/oddsportal_common.py` (bookmaker
+  mapping, odds conversion, tier classification)
+
+### Betfair Exchange
+
+`packages/odds-lambda/odds_lambda/betfair/`, polled by the `fetch-betfair-exchange` job.
+Stores best back/lay Match Odds as `betfair_exchange` snapshots.
 
 ### Bookmaker Coverage
 
@@ -67,24 +72,14 @@ Headless browser scraping of OddsPortal.com via a separate scraper Lambda. Provi
 
 ### Markets Collected
 
-- **h2h**: Moneyline (2-way for NBA, 3-way for football)
+- **h2h**: Moneyline (2-way for NBA and MLB, 3-way for football)
 - **spreads**: Point spread / handicap
 - **totals**: Over/under total points/goals
 
-### Secondary API: NBA API
+### Polymarket
 
-Library: `nba_api` (Python wrapper for NBA.com)
-
-**Purpose:** Backfill historical scores when The Odds API incomplete
-
-**Key Methods:**
-- `get_live_scores()` - Current game scores
-- `get_historical_scores(start_date, end_date)` - Historical results
-- `match_game_by_teams_and_date()` - Fuzzy matching
-
-### Polymarket (deprioritized)
-
-Prediction market data via Gamma API (discovery) and CLOB API (prices/order books). Pipeline exists but is inactive — not accessible from UK, data likely collinear with sportsbook odds. See [POLYMARKET.md](POLYMARKET.md) for technical details.
+Prediction market data via Gamma API (discovery) and CLOB API (prices/order books). The
+pipeline is deprioritized; see [POLYMARKET.md](POLYMARKET.md).
 
 ## Multi-Backend Scheduler
 
@@ -92,7 +87,8 @@ The system supports multiple deployment backends through an abstraction layer.
 
 ### Backend Interface
 
-All backends implement the `SchedulerBackend` ABC (`packages/odds-lambda/odds_lambda/scheduling/backends/base.py`). The core methods are:
+All backends implement the `SchedulerBackend` ABC
+(`packages/odds-lambda/odds_lambda/scheduling/backends/base.py`). The core methods are:
 
 ```python
 class SchedulerBackend(ABC):
@@ -112,72 +108,76 @@ schedules its own next wake-up rather than relying on a fixed external cron.
 
 `packages/odds-lambda/odds_lambda/scheduling/backends/aws.py`
 
-- Self-scheduling pattern using EventBridge rules
-- Each invocation schedules its next execution
-- NullPool database connections (required)
-- Configuration: `SCHEDULER_BACKEND=aws`, `AWS_LAMBDA_ARN`, `AWS_REGION`
+- Self-scheduling via EventBridge rules: each invocation updates its rule's schedule
+- NullPool database connections (applied automatically inside Lambda)
+- Configuration: `SCHEDULER_BACKEND=aws`; see
+  [DEPLOYMENT.md](DEPLOYMENT.md#configuration) for the environment variables
 
 ### Railway Backend
 
 `packages/odds-lambda/odds_lambda/scheduling/backends/railway.py`
 
-- **No-op shim, not currently used.** `schedule_next_execution` / `cancel_scheduled_execution` only log and return; `get_scheduled_jobs` / `get_job_status` raise `BackendUnavailableError`. The intent was static cron configured in `railway.json` (not APScheduler), but Railway is not a live deployment target.
+- A no-op shim, not a deployment target. `schedule_next_execution` /
+  `cancel_scheduled_execution` only log and return; `get_scheduled_jobs` /
+  `get_job_status` raise `BackendUnavailableError`.
 - Configuration: `SCHEDULER_BACKEND=railway`
 
 ### Local Backend
 
 `packages/odds-lambda/odds_lambda/scheduling/backends/local.py`
 
-- APScheduler for development and testing
-- Runs until process terminated (Ctrl+C)
-- Configuration: `SCHEDULER_BACKEND=local`
+- APScheduler 4 with a PostgreSQL data store
+- Runs until the process is terminated (Ctrl+C)
+- Configuration: `SCHEDULER_BACKEND=local` (the default)
 
 ### Job Registry
 
 `packages/odds-lambda/odds_lambda/scheduling/jobs.py`
 
-`_JOB_MODULE_MAP` is the centralized mapping of job names to async entry points.
-Modules are lazy-imported on first access to avoid pulling unused dependencies
-(e.g. the scraper Lambda doesn't load xgboost).
+`_JOB_MODULE_MAP` maps job names to async entry points. Modules are lazy-imported on first
+access to avoid pulling unused dependencies (for example, the scraper Lambda does not load
+xgboost).
 
-**`jobs.py` is the source of truth for the registered jobs; [DEPLOYMENT.md](DEPLOYMENT.md#job-deployment-matrix)
-is authoritative for where each job runs (AWS / local / both) and on what schedule.**
-This document does not duplicate that matrix. Note that most jobs self-schedule
-their next wake-up rather than running on a fixed external cron — see the backend
-interface above.
+**`jobs.py` is the source of truth for the registered jobs;
+[DEPLOYMENT.md](DEPLOYMENT.md#job-deployment-matrix) is authoritative for where each job
+runs (AWS / local / both) and on what schedule.**
 
 ## Intelligent Scheduling System
 
 `packages/odds-lambda/odds_lambda/scheduling/decision.py`
 
-Game-aware scheduling that adapts fetch frequency based on game proximity. A
-single, sport-scoped decision engine owns the mapping from proximity to polling
-cadence plus the run/skip gate. `decide_forward` keys off the next upcoming game
-(`decide_forward_resilient` adds a DB-failure fallback cadence so the
-self-scheduling chain survives a kickoff-query failure); `decide_backward` keys
-off recent games for scores and status-update jobs.
+Game-aware scheduling adapts fetch frequency to game proximity. A single, sport-scoped
+decision engine owns the mapping from proximity to polling cadence plus the run/skip gate.
+`decide_forward` keys off the next upcoming game (`decide_forward_resilient` adds a
+DB-failure fallback cadence so the self-scheduling chain survives a kickoff-query
+failure); `decide_backward` keys off recent games for scores and status-update jobs.
 
-**Key Features:**
-- Automatically discovers upcoming games from API
-- Adjusts frequency as games approach using tiered intervals (`CadenceConfig`)
-- No fetching during off-season
-- Self-scheduling pattern for serverless deployment
+Each job passes its own `CadenceConfig`, which sets an interval per fetch tier plus
+`no_game` and `db_fallback` intervals. With no upcoming games, a job only wakes at its
+`no_game` interval to check again.
 
 ### Fetch Tier System
 
 `packages/odds-lambda/odds_lambda/fetch_tier.py`
 
-| Tier | Time Before Game | Interval | Purpose |
-|------|------------------|----------|---------|
+| Tier | Time Before Game | `interval_hours` | Purpose |
+|------|------------------|------------------|---------|
 | Opening | 3+ days | 48 hours | Initial line release |
-| Early | 1-3 days | 24 hours | Line establishment |
-| Sharp | 12-24 hours | 12 hours | Professional betting |
-| Pregame | 3-12 hours | 3 hours | Active betting |
-| Closing | 0-3 hours | 30 minutes | Critical line movement |
+| Early | 1–3 days | 24 hours | Line establishment |
+| Sharp | 12–24 hours | 12 hours | Professional betting |
+| Pregame | 3–12 hours | 3 hours | Active betting |
+| Closing | 0–3 hours | 30 minutes | Critical line movement |
+| In-play | After kickoff | 30 minutes | Incidental collection |
 
-Tier tracking stored in `OddsSnapshot.fetch_tier` for validation and ML features.
+The tier is stored in `OddsSnapshot.fetch_tier` for validation and ML features. The
+intervals above are `FetchTier.interval_hours`, which `fetch-odds` uses; other jobs define
+their own cadence per tier (for example `fetch-oddsportal` polls every 30 minutes to
+2 hours).
 
 ## Scheduled Jobs
+
+Where and when each job runs is in the
+[Job Deployment Matrix](DEPLOYMENT.md#job-deployment-matrix).
 
 ### Event Sync (embedded in fetch-odds)
 
@@ -191,10 +191,10 @@ Tier tracking stored in `OddsSnapshot.fetch_tier` for validation and ML features
 
 `packages/odds-lambda/odds_lambda/jobs/fetch_odds.py`
 
-- Game-aware execution (only runs when games upcoming)
+- Game-aware execution (only runs when games are upcoming)
 - Fetches current odds for all scheduled games
 - Stores hybrid data (raw JSONB + normalized records)
-- Calculates next execution based on closest game's tier
+- Calculates next execution from the closest game's tier
 - Logs API quota usage
 
 ### Fetch Scores Job
@@ -209,61 +209,82 @@ Tier tracking stored in `OddsSnapshot.fetch_tier` for validation and ML features
 
 `packages/odds-lambda/odds_lambda/jobs/update_status.py`
 
-- Transitions event statuses (scheduled -> live -> final)
-- Prevents fetching odds for completed games
+- Marks scheduled games that have started as LIVE (FINAL is set by the scores and results
+  jobs)
+- Prevents fetching pre-game odds for started games
 
 ### OddsPortal Scrape Job
 
 `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal.py`
 
-- Runs hourly on the scraper Lambda
-- Scrapes upcoming EPL match odds from OddsPortal via OddsHarvester
+- Scrapes upcoming match odds from OddsPortal via OddsHarvester for each league in
+  `LEAGUE_SPECS`
+- Self-schedules by kickoff proximity: 30 minutes inside 3 hours, 1 hour at 3–12 hours,
+  2 hours further out or with no games (`CADENCE`)
 - Stores snapshots with tier classification based on time to kickoff
-- Shared utilities in `oddsportal_common.py` (bookmaker key mapping, decimal→American conversion)
+- Runs CLV scoring inline after ingest (see [Score Predictions](#score-predictions-inline))
 
 ### OddsPortal Results Job
 
 `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py`
 
-- Runs on the scraper Lambda; self-schedules its next run for ~08:00 UTC the next day (in a `finally` block, so the chain survives a failed scrape)
-- Scrapes EPL results and closing odds from OddsPortal
+- Self-schedules its next run for ~08:00 UTC the next day, in a `finally` block so the
+  chain survives a failed scrape
+- Scrapes results and closing odds from OddsPortal for past SCHEDULED/LIVE events
 - Updates event status to FINAL with scores
 
 ### Score Predictions (inline)
 
 `packages/odds-lambda/odds_lambda/jobs/score_predictions.py`
 
-- **Not a standalone scheduled job.** `score_events()` runs inline at the end of the `fetch-oddsportal` job, after ingest, when the model supports the sport. (`score-predictions-<sport>` can still be invoked manually.)
-- Loads CLV model from S3 (`odds-models` bucket) with ETag-based caching
-- Extracts tabular features for upcoming SCHEDULED events
-- Stores predictions in `Prediction` table with idempotency (unique constraint on event_id, snapshot_id, model_name)
-- Uses `TabularFeatureExtractor` from `odds-analytics`
+- **Not a standalone scheduled job.** `score_events()` runs inline at the end of the
+  `fetch-oddsportal` job, after ingest, when the model supports the sport.
+  (`score-predictions-<sport>` can still be invoked manually.)
+- Loads the CLV model from S3 with ETag-based caching (see
+  [S3 model store](DEPLOYMENT.md#s3-model-store))
+- Extracts features for upcoming SCHEDULED events with `XGBoostAdapter` from `odds-analytics`
+- Stores predictions in the `Prediction` table with idempotency (unique constraint on
+  event_id, snapshot_id, model_name)
+
+### Betfair Exchange Job
+
+`packages/odds-lambda/odds_lambda/jobs/fetch_betfair_exchange.py`
+
+- Polls the Betfair Exchange API for upcoming events and stores best back/lay Match Odds as
+  `betfair_exchange` snapshots
+- Self-schedules by kickoff proximity: 15 minutes inside 3 hours, 30 minutes at 3–12 hours,
+  2 hours further out or with no games (`CADENCE`)
+
+### Fixture and Probables Jobs
+
+- `packages/odds-lambda/odds_lambda/jobs/fetch_espn_fixtures.py`: refreshes current-season
+  all-competition EPL fixtures from the ESPN Site API into `espn_fixtures` (feeds the
+  `epl_schedule` features)
+- `packages/odds-lambda/odds_lambda/jobs/fetch_mlb_probables.py`: snapshots MLB probable
+  pitchers from the MLB Stats API into `mlb_probable_pitchers`
+
+### Health Check Job
+
+`packages/odds-lambda/odds_lambda/jobs/check_health.py` runs `HealthMonitor` checks and
+alerts on breaches; see [REPORTING.md](REPORTING.md#3-health-monitoring--packagesodds-lambdaodds_lambdahealth_monitorpy).
+
+### Agent Run Job
+
+`packages/odds-lambda/odds_lambda/jobs/agent_run.py` runs one betting agent wake-up and
+self-schedules by fixture proximity; see [BETTING_AGENT.md](BETTING_AGENT.md).
 
 ### Daily Digest Job
 
-`packages/odds-lambda/odds_lambda/jobs/daily_digest.py`
-
-- Runs daily at 08:00 UTC
-- Queries completed events (last 24h) and upcoming events (next 48h) from `Prediction` table
-- Formats Discord embed with post-match results and upcoming predictions
-- Sends via `AlertManager.send_embed()` (Discord webhook)
-
-## S3 Model Store
-
-Models are published to S3 and loaded by the score-predictions Lambda job.
-
-- **Bucket**: `odds-models-{account_id}` (versioned, encrypted, no public access)
-- **Path convention**: `s3://{bucket}/{model_name}/latest/` + `{version}/`
-- **Artifacts**: `model.pkl`, `config.yaml`, `metadata.json`
-- **Publishing**: `odds model publish` CLI command
-- **Loading**: `packages/odds-lambda/odds_lambda/model_loader.py` — HEAD + ETag check per invocation, re-downloads only if changed
+`packages/odds-lambda/odds_lambda/jobs/daily_digest.py` posts a Discord embed of recent
+results and upcoming predictions; see
+[REPORTING.md](REPORTING.md#4-daily-digest--packagesodds-lambdaodds_lambdajobsdaily_digestpy).
 
 ## Event Lifecycle
 
 | Status | Description |
 |--------|-------------|
 | SCHEDULED | Odds actively being fetched |
-| LIVE | Game in progress (stop fetching odds) |
+| LIVE | Game in progress (stop fetching pre-game odds) |
 | FINAL | Game completed with results stored |
 | CANCELLED | No further data collection |
 | POSTPONED | No further data collection |
@@ -274,7 +295,7 @@ Models are published to S3 and loaded by the score-predictions Lambda job.
 Scheduler -> API Client -> Validator -> Writer -> Logger
                 |              |           |         |
                 v              v           v         v
-           Rate limit    Log issues    Raw+Norm   Quota
+           Retry/keys    Log issues    Raw+Norm   Quota
 ```
 
 ### API Client
@@ -282,35 +303,38 @@ Scheduler -> API Client -> Validator -> Writer -> Logger
 `packages/odds-lambda/odds_lambda/data_fetcher.py` - `TheOddsAPIClient`
 
 - Retry logic with tenacity (exponential backoff)
-- Rate limiting
-- Quota tracking with API key rotation (multiple keys via `ODDS_API_KEYS`, active index tracked in SSM Parameter Store)
-- Methods: `get_odds()`, `get_scores()`, `get_historical_odds()`, `get_historical_events()`
+- Quota tracking with API key rotation on 401/429 (multiple keys via `ODDS_API_KEYS`,
+  active index tracked in SSM Parameter Store)
+- Methods: `get_odds()`, `get_events()`, `get_scores()`, `get_historical_odds()`,
+  `get_historical_events()`
 
-### Game Log Pipeline
+### Game Log Pipeline (NBA)
 
 `packages/odds-lambda/odds_lambda/game_log_fetcher.py` - `fetch_game_logs()`
 
 - Fetches NBA team game logs from stats.nba.com via Playwright (headless Firefox)
-- Uses Playwright to bypass Akamai bot detection (raw HTTP requests are blocked)
-- Calls LeagueGameFinder API from browser context after establishing session cookies
+- Uses Playwright because raw HTTP requests are blocked by Akamai bot detection
+- Calls the LeagueGameFinder API from the browser context after establishing session cookies
 - Returns ~2,460 rows per season (30 teams × 82 games)
 - Storage: `GameLogWriter` (upsert with event matching), `GameLogReader` (pipeline stats)
-- CLI: `odds nba-stats fetch --season 2024-25`, `odds nba-stats status`
-- Score backfill (`odds backfill scores`) reads from game log table
+- CLI: see [CLI.md](CLI.md#game-logs)
+- Score backfill (`odds backfill scores`) reads from the game log table
 
 ### Validator
 
 `packages/odds-lambda/odds_lambda/storage/validators.py` - `OddsValidator`
 
-**Validation Checks:**
+**Validation checks:**
 - Price within valid range (-10000 to +10000)
-- Timestamp not in future
-- Vig reasonable (2-15%)
+- Bookmaker `last_update` not in the future
+- Vig between 2% and 15% (non-exchange bookmakers)
 - No missing required fields
 - Line movement not excessive (>10 point spread)
 - Outcomes match expected format
 
-**Behavior:** Logs warnings by default, does not reject data (configurable via `REJECT_INVALID_ODDS`)
+**Behavior:** logs warnings by default and does not reject data (configurable via
+`REJECT_INVALID_ODDS`). Issues are written to the `DataQualityLog` table with a severity
+(warning, error, critical), an issue type and full context, for manual review.
 
 ### Storage Modules
 
@@ -328,30 +352,24 @@ Scheduler -> API Client -> Validator -> Writer -> Logger
 | `game_log_reader.py` | Game log queries |
 | `pbpstats_writer.py` | PBPStats player season stats |
 | `pbpstats_reader.py` | Player stats queries |
+| `espn_fixture_writer.py` / `espn_fixture_reader.py` | ESPN all-competition fixtures |
+| `espn_lineup_writer.py` / `espn_lineup_reader.py` | ESPN starting XIs |
+| `fpl_availability_writer.py` / `fpl_availability_reader.py` | FPL player availability |
+| `mlb_pitcher_writer.py` / `mlb_pitcher_reader.py` | MLB probable pitchers |
 | `validators.py` | `OddsValidator` — data quality checks |
 | `tier_validator.py` | Tier assignment validation |
 
-## Data Quality Monitoring
-
-All issues logged to `DataQualityLog` table:
-- Severity level (warning, error, critical)
-- Issue type classification
-- Full context for debugging
-- Timestamp for analysis
-
-**Action:** Log and flag suspicious data but do not reject. Allow manual review.
-
 ## Discord Alerts
 
-`packages/odds-core/odds_core/alerts.py` — `AlertManager` + `DiscordAlert` (webhook delivery).
-Used by the daily-digest job and quota/health alerts; configured via `DISCORD_WEBHOOK_URL`.
-See [REPORTING.md](REPORTING.md) for the authoritative description of alerting surfaces and backing tables.
+`packages/odds-core/odds_core/alerts.py` — `AlertManager` + `DiscordAlert` (webhook
+delivery), configured via `DISCORD_WEBHOOK_URL`. See [REPORTING.md](REPORTING.md) for the
+authoritative description of alerting surfaces and backing tables.
 
 ## Technical Stack
 
 ### Core Technologies
 
-- Python 3.12
+- Python 3.12+
 - SQLModel (SQLAlchemy 2.0 + Pydantic)
 - PostgreSQL 15+ with JSON/JSONB
 - asyncio + aiohttp
@@ -359,7 +377,7 @@ See [REPORTING.md](REPORTING.md) for the authoritative description of alerting s
 ### Key Libraries
 
 - **uv**: Package management
-- **APScheduler**: Job scheduling (local/Railway backends)
+- **APScheduler 4**: Job scheduling (local backend)
 - **Typer + Rich**: CLI
 - **Pydantic Settings**: Configuration
 - **Alembic**: Database migrations

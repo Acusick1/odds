@@ -1,16 +1,29 @@
 # Polymarket Integration
 
-> **Status: Deprioritized for trading, viable as sharp reference (MLB).** UK retail access is blocked for trading across all sports. Characterization varies by sport:
->
-> - **EPL**: thin ($10K-$100K/match), AMM-driven — orderbook reflects automated market maker parameters, not public sentiment. Series ID `10188`, tag IDs `82`/`306`, ticker `epl-{away3}-{home3}-YYYY-MM-DD`.
-> - **NBA**: deep ($178K-$2.5M/match moneyline, ~1¢ spreads, 25-28 levels) — pipeline currently targets NBA via `polymarket_fetcher.get_nba_events()`.
-> - **MLB**: deep ($152K median, up to $5.8M for playoff games), 1¢ spreads, 32-44 levels per side, median $567K total depth. Prices are collinear with bet365 devigged (mean delta ≈1¢ on games with real volume) — this is arbitrage collinearity, not AMM seeding. Discrete orderbook trading (89% of 5-min ticks show zero movement, remainder jump in ≥1¢ increments). Series ID `3`, game tag ID `100639`, ticker `mlb-{away3}-{home3}-YYYY-MM-DD`. Viable as sharp reference / alternate to Pinnacle, not as a mispricing venue.
->
-> Existing pipeline code is NBA-targeted (`get_nba_events`, `NBA_ABBREV_MAP`). To activate for another sport, swap series/tag IDs and ticker parser; core client (`PolymarketClient`) is sport-agnostic.
-
 Data model, pipeline architecture, and API reference for Polymarket prediction market data.
 
-For strategic context, key constraints, and quick-reference patterns see the Polymarket Integration section in [AGENTS.md](../AGENTS.md).
+## Status
+
+**Deprioritized for trading; viable as a sharp reference (MLB).** Trading is blocked from
+the UK for all sports. Market character varies by sport:
+
+- **EPL**: thin ($10K–$100K/match) and AMM-driven, so the order book reflects automated
+  market maker parameters, not public sentiment.
+- **NBA**: deep ($178K–$2.5M/match moneyline, ~1¢ spreads, 25–28 levels).
+- **MLB**: deep ($152K median, up to $5.8M for playoff games), 1¢ spreads, 32–44 levels per
+  side, median $567K total depth. Prices are collinear with devigged bet365 (mean delta ≈1¢
+  on games with real volume) through arbitrage, not AMM seeding. Trading is discrete: 89%
+  of 5-minute ticks show no movement and the rest jump by ≥1¢. Viable as a sharp reference
+  or alternative to Pinnacle, not as a mispricing venue.
+
+The pipeline code targets NBA (`get_nba_events`, `NBA_ABBREV_MAP`, `POLYMARKET_NBA_SERIES_ID`).
+The core client (`PolymarketClient`) is sport-agnostic; another sport needs its series/tag
+IDs and a ticker parser. IDs for other sports, as recorded from research (not in config):
+
+| Sport | Series ID | Tag IDs | Ticker |
+|-------|-----------|---------|--------|
+| EPL | `10188` | `82`, `306` | `epl-{away3}-{home3}-YYYY-MM-DD` |
+| MLB | `3` | `100639` (game tag) | `mlb-{away3}-{home3}-YYYY-MM-DD` |
 
 ## Data Model
 
@@ -63,7 +76,7 @@ Player prop stat keywords: `points`, `rebounds`, `assists`, `steals`, `blocks`, 
 
 ### Fetch Job (Live Polling)
 
-`packages/odds-lambda/odds_lambda/jobs/fetch_polymarket.py` — entry point: `main()`
+`packages/odds-lambda/odds_lambda/jobs/fetch_polymarket.py` — entry point: `main(ctx)`
 
 Orchestrated by `PolymarketIngestionService` in `packages/odds-lambda/odds_lambda/polymarket_ingestion.py`.
 
@@ -83,7 +96,7 @@ Orchestrated by `PolymarketIngestionService` in `packages/odds-lambda/odds_lambd
 
 ### Backfill Job
 
-`packages/odds-lambda/odds_lambda/jobs/backfill_polymarket.py` — entry point: `main(include_spreads, include_totals, dry_run)`
+`packages/odds-lambda/odds_lambda/jobs/backfill_polymarket.py` — entry point: `main(ctx)`, reading `include_spreads`, `include_totals` and `dry_run` from the job context (the `odds polymarket backfill` flags)
 
 1. Fetch all closed NBA events from Gamma API (paginated, 100/page)
 2. Query already-backfilled market IDs (markets with ≥10 existing snapshots)
@@ -91,7 +104,7 @@ Orchestrated by `PolymarketIngestionService` in `packages/odds-lambda/odds_lambd
 4. Bulk insert via `PolymarketWriter.bulk_store_price_history()` with duplicate detection
 5. Log to `PolymarketFetchLog`
 
-**CRITICAL:** Must run every 3–5 days. CLOB price history expires on a ~30-day rolling basis.
+**CRITICAL:** CLOB price history expires on a ~30-day rolling basis, so the backfill must run every few days. On AWS it runs on a fixed `rate(3 days)` rule when `enable_polymarket` is set.
 
 ### Event Matching
 
@@ -133,7 +146,7 @@ Price history params for backfill: `interval=max`, `fidelity=5` (5-minute resolu
 
 Returns: `{history: [{t: unix_timestamp, p: price_string}]}`
 
-No authentication required. Rate-limit friendly delay of 100ms between calls (configurable).
+No authentication required. The backfill job waits 100 ms between calls (`CLOB_DELAY_MS`); the live client limits itself to 10 concurrent requests.
 
 ### Data Availability
 

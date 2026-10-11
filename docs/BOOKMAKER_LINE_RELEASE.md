@@ -1,10 +1,12 @@
 # Bookmaker Line Release Timing
 
-Analysis of when NBA bookmakers release betting lines relative to game time.
+When NBA bookmakers release betting lines relative to game time, measured from Odds API
+snapshots. The date of the analysis and the query behind it are not recorded.
 
 ## Key Finding
 
-**Sharp books (Pinnacle) release lines 12-24 hours before game time**, while soft books (DraftKings, FanDuel) release 2-3+ days earlier.
+**The sharp book (Pinnacle) releases lines 12–24 hours before game time**, while soft books
+(DraftKings, FanDuel) release them 2–3+ days earlier.
 
 ## First Capture Timing by Bookmaker
 
@@ -27,13 +29,15 @@ Analysis of when NBA bookmakers release betting lines relative to game time.
 | 12-24 hours | 4.3 | Pinnacle typically opens |
 | <12 hours | 6.9 | All books available |
 
-## Implications for Line Movement Analysis
+## Implications
 
-1. **"Opening line" varies by bookmaker** - DraftKings opens days out, Pinnacle opens ~12-24 hours out
-2. **Sharp opening = Pinnacle's first line** - This is the benchmark for EV calculations
-3. **Most line movement occurs 12-24 hours out** - When sharp money enters via Pinnacle
-4. **Early soft book lines are less predictive** - Subject to significant adjustment when sharps open
-
-## Data Collection Strategy
-
-Focus sampling frequency on the 12-24 hour window (SHARP tier) where Pinnacle opens and professional bettors act. Early tier data (72+ hours) captures only soft book lines of limited predictive value.
+1. **"Opening line" varies by bookmaker.** DraftKings opens days out; Pinnacle opens
+   ~12–24 hours out.
+2. **The sharp opening line is Pinnacle's first line.**
+3. **Most line movement occurs 12–24 hours out**, when sharp money enters via Pinnacle
+   (inferred).
+4. **Early soft-book lines are less predictive**: they are subject to significant
+   adjustment when the sharp book opens (inferred).
+5. **Opening-tier snapshots (72+ hours) capture only soft-book lines.** The sharp tier
+   (12–24 hours) is where Pinnacle first appears (see
+   [Fetch Tier System](ARCHITECTURE.md#fetch-tier-system)).
