@@ -162,8 +162,12 @@ uv run odds model publish --name epl-clv-home --path models/model.pkl
 # Run backtest
 uv run odds backtest run --strategy basic_ev --start 2024-10-01 --end 2024-12-31
 
-# Run tests (tests/migration hits DATABASE_URL; leave it to the deploy workflows)
-uv run pytest tests/unit tests/integration
+# Run tests (default: tests/unit and tests/integration, excluding live_api)
+uv run pytest
+
+# Deliberate opt-ins: tests/migration connects to DATABASE_URL, live_api calls third-party APIs
+uv run pytest tests/migration -v
+uv run pytest -m live_api -v
 
 # Database migrations
 uv run alembic revision --autogenerate -m "description"

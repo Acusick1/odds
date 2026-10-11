@@ -97,8 +97,11 @@ See [POLYMARKET.md](POLYMARKET.md#data-model) for the schema.
 - **Purpose:** automated testing (pytest)
 - **Setup:** `tests/conftest.py` starts an in-process PostgreSQL via py-pglite on TCP port
   5434, creates all tables once per session, and truncates every table before each test
-- **Usage:** automatic for `tests/unit` and `tests/integration`. `tests/migration` connects to
-  `DATABASE_URL` instead and is run by the deploy workflows
+- **Usage:** automatic for `tests/unit` and `tests/integration`, which a plain `uv run pytest`
+  runs (`testpaths` and `addopts` in `pyproject.toml`). `tests/migration` connects to
+  `DATABASE_URL` instead, so it is excluded from the default run and must be named explicitly:
+  `uv run pytest tests/migration -v`. The deploy workflows run it against the dev and production
+  databases
 
 ### Local database (`odds`)
 
@@ -165,7 +168,7 @@ uv run alembic current
 
 1. Create the migration locally: `uv run alembic revision --autogenerate -m "description"`
 2. Test against the local database: `uv run alembic upgrade head`
-3. Run migration tests: `uv run pytest tests/migration/ -v`
+3. Run migration tests (excluded from the default run): `uv run pytest tests/migration/ -v`
 4. Merge to `main`: CI runs tests, then the dev deployment applies the migration and runs
    `tests/migration` against the dev database
 5. Production deployment is triggered manually and requires approval (see

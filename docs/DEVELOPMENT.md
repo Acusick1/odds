@@ -148,17 +148,24 @@ in the same file.
 ### Running Tests
 
 ```bash
-# All tests
+# Default run: tests/unit and tests/integration, excluding live_api tests
 uv run pytest
 
 # Unit tests only
 uv run pytest tests/unit/
 
-# Integration tests
+# Integration tests only
 uv run pytest tests/integration/
+```
 
-# Migration tests
+Two groups are excluded from the default run and must be requested deliberately:
+
+```bash
+# Migration tests: connect to whatever DATABASE_URL points at
 uv run pytest tests/migration/ -v
+
+# Live API tests: call third-party HTTP APIs
+uv run pytest -m live_api -v
 ```
 
 ### Test Structure
