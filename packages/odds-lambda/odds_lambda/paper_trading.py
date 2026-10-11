@@ -60,48 +60,38 @@ async def _read_sharp_probability(
     market: str,
     selection: str,
     *,
-    as_of: datetime | None,
+    as_of: datetime,
 ) -> SharpReading | None:
     """Devigged sharp probability of ``selection`` from snapshots at or before ``as_of``.
 
-    ``as_of=None`` anchors on the newest snapshot of the market. Returns None unless every
-    outcome has a price from one sharp bookmaker in the same snapshot: devigging a
-    partial or mixed market misstates the selection's probability.
+    Uses one sharp bookmaker's complete market from a single snapshot: devigging a partial or
+    mixed market misstates the selection's probability.
     """
-    reader = OddsReader(session)
     sport = SPORT_CONFIG.get(event.sport_key)  # type: ignore[arg-type]
+    outcomes = [event.home_team, event.away_team]
+    if sport is not None and sport.has_draw:
+        outcomes.append("Draw")
     selected = _outcome_name(selection, event)
-    # Bookmakers are tried one at a time in priority order so a market is never assembled
-    # from several books.
-    for sharp_bookmaker in AGENT_SHARP_BOOKMAKERS:
-        for market_key in _MARKET_KEY_ALIASES.get(market, (market,)):
-            anchor = as_of
-            if anchor is None:
-                latest = await reader.get_latest_snapshot(event.id, market=market_key)
-                if latest is None:
-                    continue
-                anchor = min(latest.snapshot_time, event.commence_time)
-            result = await reader.get_sharp_prices(
-                event.id,
-                market=market_key,
-                sharp_bookmakers=[sharp_bookmaker],
-                lookback_hours=SHARP_LOOKBACK_HOURS,
-                now=anchor,
-            )
-            has_draw = sport.has_draw if sport is not None else "Draw" in result.prices
-            outcomes = [event.home_team, event.away_team, *(["Draw"] if has_draw else [])]
-            if selected not in outcomes or not all(n in result.prices for n in outcomes):
-                continue
-            if len({result.meta[n].snapshot_id for n in outcomes}) != 1:
-                continue
+    if selected not in outcomes:
+        return None
 
-            devigged = devig_probabilities(*(result.prices[n]["implied_prob"] for n in outcomes))
-            return SharpReading(
-                prob=devigged[outcomes.index(selected)],
-                bookmaker=sharp_bookmaker,
-                snapshot_time=result.meta[selected].snapshot_time,
-            )
-    return None
+    sharp_market = await OddsReader(session).get_sharp_market(
+        event.id,
+        markets=_MARKET_KEY_ALIASES.get(market, (market,)),
+        outcomes=outcomes,
+        sharp_bookmakers=AGENT_SHARP_BOOKMAKERS,
+        lookback_hours=SHARP_LOOKBACK_HOURS,
+        now=as_of,
+    )
+    if sharp_market is None:
+        return None
+
+    devigged = devig_probabilities(*(sharp_market.implied_probs[n] for n in outcomes))
+    return SharpReading(
+        prob=devigged[outcomes.index(selected)],
+        bookmaker=sharp_market.bookmaker,
+        snapshot_time=sharp_market.snapshot_time,
+    )
 
 
 async def place_trade(
@@ -138,7 +128,9 @@ async def place_trade(
     )
     event = await session.get(Event, event_id)
     if event is not None:
-        reading = await _read_sharp_probability(session, event, market, selection, as_of=None)
+        reading = await _read_sharp_probability(
+            session, event, market, selection, as_of=min(datetime.now(UTC), event.commence_time)
+        )
         if reading is not None:
             trade.sharp_prob_at_bet = reading.prob
             trade.sharp_bookmaker_at_bet = reading.bookmaker

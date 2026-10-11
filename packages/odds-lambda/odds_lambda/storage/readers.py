@@ -54,6 +54,20 @@ class BookPriceResult:
     entries: dict[tuple[str, str, float | None], BookPriceEntry] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class SharpMarket:
+    """One sharp bookmaker's complete market in a single snapshot.
+
+    ``implied_probs`` maps each requested outcome name to its raw (vigged) implied probability.
+    """
+
+    bookmaker: str
+    market_key: str
+    snapshot_id: int
+    snapshot_time: datetime
+    implied_probs: dict[str, float]
+
+
 class OddsReader:
     """Handles all read operations from the database."""
 
@@ -762,6 +776,70 @@ class OddsReader:
                 break
 
         return sharp_result
+
+    async def get_sharp_market(
+        self,
+        event_id: str,
+        markets: Sequence[str],
+        outcomes: Sequence[str],
+        sharp_bookmakers: Sequence[str],
+        lookback_hours: float,
+        *,
+        now: datetime,
+    ) -> SharpMarket | None:
+        """Find the newest snapshot in which one sharp bookmaker quotes every outcome.
+
+        Unlike :meth:`get_sharp_prices`, outcomes are never assembled from several
+        bookmakers or snapshots, so the result can be devigged as one market. Bookmakers
+        are tried in priority order; for each, snapshots within
+        ``[now - lookback_hours, now]`` are scanned newest-first across every key in
+        *markets* (the same market is stored as ``h2h`` or ``1x2`` depending on source).
+
+        Args:
+            event_id: Event identifier.
+            markets: Market keys to search.
+            outcomes: Outcome names that must all be quoted.
+            sharp_bookmakers: Bookmaker keys, highest priority first.
+            lookback_hours: How far back from *now* to search.
+            now: Upper bound for snapshot time.
+
+        Returns:
+            The first complete market found, or None.
+        """
+        query = (
+            select(OddsSnapshot)
+            .where(
+                and_(
+                    OddsSnapshot.event_id == event_id,
+                    OddsSnapshot.snapshot_time >= now - timedelta(hours=lookback_hours),
+                    OddsSnapshot.snapshot_time <= now,
+                )
+            )
+            .order_by(OddsSnapshot.snapshot_time.desc())
+        )
+        snapshots = list((await self.session.execute(query)).scalars().all())
+
+        for bookmaker in sharp_bookmakers:
+            for snapshot in snapshots:
+                assert snapshot.id is not None
+                for market_key in markets:
+                    quoted = {
+                        o.outcome_name: o.price
+                        for o in extract_odds_from_snapshot(snapshot, event_id, market=market_key)
+                        if o.bookmaker_key == bookmaker
+                    }
+                    if all(name in quoted for name in outcomes):
+                        return SharpMarket(
+                            bookmaker=bookmaker,
+                            market_key=market_key,
+                            snapshot_id=snapshot.id,
+                            snapshot_time=snapshot.snapshot_time,
+                            implied_probs={
+                                name: calculate_implied_probability(quoted[name])
+                                for name in outcomes
+                            },
+                        )
+        return None
 
     async def get_latest_book_prices(
         self,
