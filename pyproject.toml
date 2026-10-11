@@ -96,7 +96,7 @@ python_classes = "Test*"
 python_functions = "test_*"
 markers = [
     "integration: hits live external APIs — may be skipped in offline CI",
-    "live_api: hits live third-party HTTP APIs — run only in the scheduled live-api workflow",
+    "live_api: hits live third-party HTTP APIs — excluded by default (addopts); run with `-m live_api`, as the scheduled live-api workflow does",
 ]
 env = [
     "ODDS_API_KEY=",
