@@ -152,10 +152,12 @@ definitions are in `packages/odds-core/odds_core/paper_trade_models.py`.
   (sharp closing probability minus bet implied probability; positive means the line moved in
   the bet's favour).
 
-The sharp price comes from `OddsReader.get_sharp_prices` with the priority list
+The sharp price comes from `OddsReader.get_sharp_market` with the priority list
 `AGENT_SHARP_BOOKMAKERS` (Pinnacle, then Betfair Exchange) in
 `packages/odds-core/odds_core/sharp_reference.py`, shared with the MCP tools. The XGBoost
-model's Pinnacle-only default is a separate setting. A reading is stored only when one sharp bookmaker, tried in priority order, quotes every
+model's Pinnacle-only default is a separate setting.
+
+A reading is stored only when one sharp bookmaker, tried in priority order, quotes every
 outcome of the market in the same snapshot, because devigging a partial or mixed market
 misstates the selection's probability. The `h2h` and `1x2` market keys are both searched,
 since Betfair and OddsPortal write 3-way odds as `1x2`. Placement ignores snapshots after

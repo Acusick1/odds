@@ -62,8 +62,6 @@ class SharpMarket:
     """
 
     bookmaker: str
-    market_key: str
-    snapshot_id: int
     snapshot_time: datetime
     implied_probs: dict[str, float]
 
@@ -819,20 +817,24 @@ class OddsReader:
         )
         snapshots = list((await self.session.execute(query)).scalars().all())
 
+        # Parse each snapshot once: {bookmaker: {outcome: price}} per market key.
+        parsed: list[tuple[OddsSnapshot, list[dict[str, dict[str, int]]]]] = []
+        for snapshot in snapshots:
+            per_key: list[dict[str, dict[str, int]]] = []
+            for market_key in markets:
+                by_book: dict[str, dict[str, int]] = {}
+                for o in extract_odds_from_snapshot(snapshot, event_id, market=market_key):
+                    by_book.setdefault(o.bookmaker_key, {})[o.outcome_name] = o.price
+                per_key.append(by_book)
+            parsed.append((snapshot, per_key))
+
         for bookmaker in sharp_bookmakers:
-            for snapshot in snapshots:
-                assert snapshot.id is not None
-                for market_key in markets:
-                    quoted = {
-                        o.outcome_name: o.price
-                        for o in extract_odds_from_snapshot(snapshot, event_id, market=market_key)
-                        if o.bookmaker_key == bookmaker
-                    }
+            for snapshot, per_key in parsed:
+                for by_book in per_key:
+                    quoted = by_book.get(bookmaker, {})
                     if all(name in quoted for name in outcomes):
                         return SharpMarket(
                             bookmaker=bookmaker,
-                            market_key=market_key,
-                            snapshot_id=snapshot.id,
                             snapshot_time=snapshot.snapshot_time,
                             implied_probs={
                                 name: calculate_implied_probability(quoted[name])

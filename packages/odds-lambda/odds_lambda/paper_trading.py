@@ -21,6 +21,7 @@ from odds_lambda.betfair.constants import SPORT_CONFIG
 from odds_lambda.storage.readers import OddsReader
 
 SHARP_LOOKBACK_HOURS = 24.0
+DRAW_OUTCOME = "Draw"
 # Same market, different key by source: Betfair writes EPL 3-way odds as "1x2".
 _MARKET_KEY_ALIASES: dict[str, tuple[str, ...]] = {"h2h": ("h2h", "1x2"), "1x2": ("1x2", "h2h")}
 
@@ -51,7 +52,7 @@ class SharpReading:
 
 
 def _outcome_name(selection: str, event: Event) -> str:
-    return {"home": event.home_team, "away": event.away_team, "draw": "Draw"}[selection]
+    return {"home": event.home_team, "away": event.away_team, "draw": DRAW_OUTCOME}[selection]
 
 
 async def _read_sharp_probability(
@@ -70,7 +71,7 @@ async def _read_sharp_probability(
     sport = SPORT_CONFIG.get(event.sport_key)  # type: ignore[arg-type]
     outcomes = [event.home_team, event.away_team]
     if sport is not None and sport.has_draw:
-        outcomes.append("Draw")
+        outcomes.append(DRAW_OUTCOME)
     selected = _outcome_name(selection, event)
     if selected not in outcomes:
         return None

@@ -69,26 +69,25 @@ class TestGetSharpMarket:
     async def test_older_full_market_beats_newer_partial_one(
         self, reader: OddsReader, test_session
     ) -> None:
-        full_id = await _add(test_session, 120, _book("pinnacle"))
+        await _add(test_session, 120, _book("pinnacle"))
         await _add(test_session, 5, _book("pinnacle", names=("Arsenal",)))
 
         market = await _lookup(reader)
 
         assert market is not None
         assert market.bookmaker == "pinnacle"
-        assert market.snapshot_id == full_id
         assert market.snapshot_time == CUTOFF - timedelta(minutes=120)
         assert market.implied_probs["Arsenal"] == pytest.approx(0.52381, abs=1e-5)
         assert set(market.implied_probs) == set(OUTCOMES)
 
     async def test_newest_complete_snapshot_wins(self, reader: OddsReader, test_session) -> None:
         await _add(test_session, 120, _book("pinnacle"))
-        newest_id = await _add(test_session, 5, _book("pinnacle"))
+        await _add(test_session, 5, _book("pinnacle"))
 
         market = await _lookup(reader)
 
         assert market is not None
-        assert market.snapshot_id == newest_id
+        assert market.snapshot_time == CUTOFF - timedelta(minutes=5)
 
     async def test_fallback_book_when_primary_never_complete(
         self, reader: OddsReader, test_session
@@ -122,7 +121,7 @@ class TestGetSharpMarket:
         market = await _lookup(reader)
 
         assert market is not None
-        assert market.market_key == "1x2"
+        assert market.bookmaker == "betfair_exchange"
 
     async def test_none_when_no_sharp_book_is_complete(
         self, reader: OddsReader, test_session
