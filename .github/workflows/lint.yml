@@ -12,10 +12,13 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.1.0
+        with:
+          # The job only runs uvx; a cache keyed on uv.lock never matches what it installs.
+          enable-cache: false
 
       - name: Run all hooks on all files
         run: uvx pre-commit run --all-files --show-diff-on-failure
