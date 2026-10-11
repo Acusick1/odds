@@ -15,8 +15,8 @@ Sport-agnostic betting data pipeline with sport-specific LLM agents. Infrastruct
 ### What runs where (deployed vs local)
 
 Two AWS Lambdas (`odds-scheduler`, `odds-scheduler-scraper`) plus a local scheduler
-(`odds scheduler start`). **The committed tfvars are not a reliable record of the deployed
-state** — the live account has been applied with gate/sport values that differ from the
+(`odds scheduler start`). **The repo does not record the deployed state** (only `terraform.tfvars.example` is
+committed) — the live account has been applied with gate/sport values that differ from the
 variable defaults, and Terraform `ignore_changes` the self-scheduling rules. The betting
 agent, daily digest, ESPN fixtures, and MLB probables are **always local-only** (no
 EventBridge rule exists for them); the agent is in interactive evaluation, not autonomous
@@ -39,7 +39,7 @@ packages/
 │   ├── event_sync.py          # EventSyncService (free /events endpoint)
 │   ├── oddsportal_common.py   # Shared: bookmaker mapping, odds conversion, tier classification
 │   ├── model_loader.py        # S3 model loading with ETag caching
-│   ├── storage/               # readers + writers (odds, polymarket, injury, game_log, pbpstats)
+│   ├── storage/               # Readers + writers per data source (see ARCHITECTURE.md#storage-modules)
 │   ├── scheduling/            # Multi-backend scheduler (AWS/Railway/local)
 │   └── jobs/                  # All scheduled job entry points (see ARCHITECTURE.md)
 ├── odds-analytics/ # Backtesting, strategies, ML (odds_analytics/)
@@ -162,8 +162,8 @@ uv run odds model publish --name epl-clv-home --path models/model.pkl
 # Run backtest
 uv run odds backtest run --strategy basic_ev --start 2024-10-01 --end 2024-12-31
 
-# Run tests
-uv run pytest
+# Run tests (tests/migration hits DATABASE_URL; leave it to the deploy workflows)
+uv run pytest tests/unit tests/integration
 
 # Database migrations
 uv run alembic revision --autogenerate -m "description"
@@ -176,7 +176,7 @@ uv run odds scheduler start
 
 ## Database Environments
 
-Tests run against an in-process PostgreSQL (py-pglite), never a configured database. The environments and their rules are in [DATABASE.md](docs/DATABASE.md#database-environments).
+Unit and integration tests run against an in-process PostgreSQL (py-pglite). `tests/migration` connects to whatever `DATABASE_URL` points at and is run only by the deploy workflows. The environments and their rules are in [DATABASE.md](docs/DATABASE.md#database-environments).
 
 **CRITICAL:** NEVER set `DATABASE_URL` to production during local development.
 
