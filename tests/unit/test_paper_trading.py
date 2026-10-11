@@ -506,7 +506,9 @@ class TestSharpMarketKeyAndConsistency:
         assert trade.sharp_bookmaker_at_bet == "betfair_exchange"
 
     @pytest.mark.asyncio
-    async def test_outcomes_from_different_books_leave_fields_null(self, test_session) -> None:
+    async def test_incomplete_primary_book_falls_back_to_complete_secondary(
+        self, test_session
+    ) -> None:
         await _add_event(test_session)
         pinnacle_home_only = _book("pinnacle", -110, 300, 300)
         pinnacle_home_only["markets"][0]["outcomes"] = pinnacle_home_only["markets"][0]["outcomes"][
@@ -523,9 +525,37 @@ class TestSharpMarketKeyAndConsistency:
 
         trade = await _place_home_bet(test_session)
 
-        # Pinnacle quotes only home and Betfair the rest: no single-book market, so null
+        # Outcomes are never mixed across books: the whole market comes from Betfair
+        assert trade.sharp_bookmaker_at_bet == "betfair_exchange"
+        assert trade.sharp_prob_at_bet == pytest.approx(0.5)
+
+    @pytest.mark.asyncio
+    async def test_complete_primary_under_1x2_beats_secondary_under_h2h(self, test_session) -> None:
+        await _add_event(test_session)
+        test_session.add(
+            _snapshot(
+                PLACED_SNAPSHOT_TIME,
+                _book("pinnacle", -110, 300, 300, market="1x2"),
+                _book("betfair_exchange", 100, 300, 300),
+            )
+        )
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.sharp_bookmaker_at_bet == "pinnacle"
+
+    @pytest.mark.asyncio
+    async def test_snapshots_after_kickoff_are_not_used_at_placement(self, test_session) -> None:
+        await _add_event(test_session)
+        test_session.add(
+            _snapshot(KICKOFF + timedelta(minutes=10), _book("pinnacle", -110, 300, 300))
+        )
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
         assert trade.sharp_prob_at_bet is None
-        assert trade.sharp_bookmaker_at_bet is None
 
 
 class TestSharpContextAtSettlement:
