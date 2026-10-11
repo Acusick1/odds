@@ -6,10 +6,23 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from odds_core.models import Event, EventStatus
-from odds_core.odds_math import calculate_profit_from_odds, determine_h2h_winner
+from odds_core.odds_math import (
+    calculate_implied_probability,
+    calculate_profit_from_odds,
+    determine_h2h_winner,
+    devig_probabilities,
+)
 from odds_core.paper_trade_models import PaperTrade, TradeResult
+from odds_core.sharp_reference import AGENT_SHARP_BOOKMAKERS
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from odds_lambda.betfair.constants import SPORT_CONFIG
+from odds_lambda.storage.readers import OddsReader
+
+SHARP_LOOKBACK_HOURS = 24.0
+# Same market, different key by source: Betfair writes EPL 3-way odds as "1x2".
+_MARKET_KEY_ALIASES: dict[str, tuple[str, ...]] = {"h2h": ("h2h", "1x2"), "1x2": ("1x2", "h2h")}
 
 
 @dataclass(frozen=True)
@@ -26,6 +39,63 @@ class PortfolioSummary:
     win_count: int
     loss_count: int
     push_count: int
+
+
+@dataclass(frozen=True)
+class SharpReading:
+    """Devigged sharp probability for one selection, with provenance."""
+
+    prob: float
+    bookmaker: str
+    snapshot_time: datetime
+
+
+def _outcome_name(selection: str, event: Event) -> str:
+    return {"home": event.home_team, "away": event.away_team, "draw": "Draw"}[selection]
+
+
+async def _read_sharp_probability(
+    session: AsyncSession,
+    event: Event,
+    market: str,
+    selection: str,
+    *,
+    as_of: datetime,
+) -> SharpReading | None:
+    """Devigged sharp probability of ``selection`` from snapshots at or before ``as_of``.
+
+    Returns None unless every outcome of the market has a sharp price, since devigging a
+    partial market would overstate the selection's probability.
+    """
+    reader = OddsReader(session)
+    for market_key in _MARKET_KEY_ALIASES.get(market, (market,)):
+        result = await reader.get_sharp_prices(
+            event.id,
+            market=market_key,
+            sharp_bookmakers=AGENT_SHARP_BOOKMAKERS,
+            lookback_hours=SHARP_LOOKBACK_HOURS,
+            now=as_of,
+        )
+        if result.prices:
+            break
+    else:
+        return None
+
+    sport = SPORT_CONFIG.get(event.sport_key)  # type: ignore[arg-type]
+    has_draw = sport.has_draw if sport is not None else "Draw" in result.prices
+    outcomes = [event.home_team, event.away_team, *(["Draw"] if has_draw else [])]
+    if not all(name in result.prices for name in outcomes):
+        return None
+    selected = _outcome_name(selection, event)
+    if selected not in outcomes:
+        return None
+
+    devigged = devig_probabilities(*(result.prices[n]["implied_prob"] for n in outcomes))
+    return SharpReading(
+        prob=devigged[outcomes.index(selected)],
+        bookmaker=result.prices[selected]["bookmaker"],
+        snapshot_time=result.meta[selected].snapshot_time,
+    )
 
 
 async def place_trade(
@@ -60,6 +130,19 @@ async def place_trade(
         reasoning=reasoning,
         confidence=confidence,
     )
+    event = await session.get(Event, event_id)
+    if event is not None:
+        latest = await OddsReader(session).get_latest_snapshot(event_id, market=market)
+        if latest is not None:
+            reading = await _read_sharp_probability(
+                session, event, market, selection, as_of=latest.snapshot_time
+            )
+            if reading is not None:
+                trade.sharp_prob_at_bet = reading.prob
+                trade.sharp_bookmaker_at_bet = reading.bookmaker
+                trade.sharp_snapshot_time_at_bet = reading.snapshot_time
+                trade.sharp_spread_at_bet = calculate_implied_probability(odds) - reading.prob
+
     session.add(trade)
     await session.flush()
     return trade
@@ -97,6 +180,15 @@ async def settle_trades(session: AsyncSession) -> list[PaperTrade]:
         trade.pnl = pnl
         trade.bankroll_after = trade.bankroll_before + pnl
         trade.settled_at = now
+
+        closing = await _read_sharp_probability(
+            session, event, trade.market, trade.selection, as_of=event.commence_time
+        )
+        if closing is not None:
+            trade.sharp_prob_at_close = closing.prob
+            trade.sharp_bookmaker_at_close = closing.bookmaker
+            trade.sharp_snapshot_time_at_close = closing.snapshot_time
+            trade.clv = closing.prob - calculate_implied_probability(trade.odds)
 
         session.add(trade)
         settled.append(trade)

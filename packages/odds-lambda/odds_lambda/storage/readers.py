@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -673,7 +674,7 @@ class OddsReader:
         self,
         event_id: str,
         market: str,
-        sharp_bookmakers: list[str],
+        sharp_bookmakers: Sequence[str],
         lookback_hours: float = 2.0,
         *,
         now: datetime | None = None,

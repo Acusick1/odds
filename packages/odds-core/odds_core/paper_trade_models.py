@@ -67,6 +67,40 @@ class PaperTrade(SQLModel, table=True):
     result: TradeResult | None = Field(default=None, description="Settlement outcome")
     pnl: float | None = Field(default=None, description="Profit/loss from this bet")
 
+    # Sharp reference context, stored so evaluation is reproducible if snapshots are corrected.
+    # All nullable: sharp data can be missing. Probabilities are devigged across the market.
+    sharp_prob_at_bet: float | None = Field(
+        default=None, description="Devigged sharp probability of the selection at placement"
+    )
+    sharp_bookmaker_at_bet: str | None = Field(
+        default=None, description="Sharp bookmaker that supplied sharp_prob_at_bet"
+    )
+    sharp_snapshot_time_at_bet: datetime | None = Field(
+        sa_column=Column(DateTime(timezone=True)),
+        default=None,
+        description="Snapshot time of the sharp price used at placement",
+    )
+    sharp_spread_at_bet: float | None = Field(
+        default=None,
+        description="Bet implied probability minus sharp_prob_at_bet (negative = better than sharp)",
+    )
+    sharp_prob_at_close: float | None = Field(
+        default=None, description="Devigged sharp probability at the last pre-kickoff snapshot"
+    )
+    sharp_bookmaker_at_close: str | None = Field(
+        default=None, description="Sharp bookmaker that supplied sharp_prob_at_close"
+    )
+    sharp_snapshot_time_at_close: datetime | None = Field(
+        sa_column=Column(DateTime(timezone=True)),
+        default=None,
+        description="Snapshot time of the closing sharp price",
+    )
+    clv: float | None = Field(
+        default=None,
+        description="Closing line value: sharp_prob_at_close minus bet implied probability "
+        "(positive = the line moved in the bet's favour)",
+    )
+
     __table_args__ = (
         Index(
             "ix_paper_trades_unsettled", "settled_at", postgresql_where=text("settled_at IS NULL")
