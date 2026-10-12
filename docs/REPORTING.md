@@ -182,7 +182,7 @@ The agent gets state through tools. Reporting-relevant ones (others fetch raw od
 | `get_scheduled_jobs(sport?)` | All scheduled jobs, next_run_time, status | Substring sport filter on job name |
 | `get_predictions(event_id, limit=5, since_hours?)` | Most-recent predictions for an event | |
 | `get_portfolio(initial_bankroll=1000)` | Portfolio summary: bankroll, P&L, ROI, W/L/P record, open trades | Pure derivation from `PaperTrade` table |
-| `settle_bets()` | Settles open trades against `FINAL` events; returns settlements | Writes to `PaperTrade` |
+| `settle_bets()` | Settles open trades against `FINAL` events; returns settlements | Writes to `PaperTrade`, including closing sharp price and CLV |
 | `save_match_brief(event_id, market, decision, summary, brief_text)` | Creates `MatchBrief` row; snapshots sharp prices at write time | |
 | `get_slate_briefs(league, days_ahead)` | Latest brief per upcoming event | Truncates to most recent brief per event |
 | `schedule_next_wakeup(sport, delay_hours, reason)` | Upserts `AgentWakeup` row (one active per sport) | Read+consumed by `agent_run` |
@@ -237,7 +237,7 @@ All Postgres. Models live in `packages/odds-core/odds_core/models.py` unless not
 | `predictions` (`prediction_models.py`) | Scored predictions | `score_predictions` job | `daily_digest`, MCP `get_predictions` |
 | `match_briefs` (`match_brief_models.py`) | Agent brief log (append-only) | MCP `save_match_brief` | MCP `get_slate_briefs`, `get_match_brief` |
 | `agent_wakeups` (`agent_wakeup_models.py`) | Agent → scheduler override | MCP `schedule_next_wakeup` | `agent_run._check_agent_requested_wakeup` |
-| `paper_trades` (`paper_trade_models.py`) | Paper bets + settlements | MCP `paper_bet`, `settle_bets`; CLI mirrors | MCP `get_portfolio`, CLI `odds paper *` |
+| `paper_trades` (`paper_trade_models.py`) | Paper bets + settlements, with sharp price at bet/close and CLV | MCP `paper_bet`, `settle_bets`; CLI mirrors | MCP `get_portfolio`, CLI `odds paper *` |
 
 Index notes:
 - `alert_history.ix_alert_type_sent_at` — composite, supports rate-limit lookup and heartbeat lookup in one shape.

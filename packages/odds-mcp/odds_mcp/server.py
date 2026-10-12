@@ -21,6 +21,7 @@ from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.odds_math import calculate_implied_probability
 from odds_core.paper_trade_models import PaperTrade
 from odds_core.prediction_models import Prediction
+from odds_core.sharp_reference import AGENT_SHARP_BOOKMAKERS
 from odds_core.snapshot_utils import extract_odds_from_snapshot
 from odds_core.sports import SportKey
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME
@@ -30,7 +31,7 @@ from odds_lambda.paper_trading import (
     place_trade,
     settle_trades,
 )
-from odds_lambda.storage.readers import BookPriceEntry, OddsReader
+from odds_lambda.storage.readers import DEFAULT_SHARP_LOOKBACK_HOURS, BookPriceEntry, OddsReader
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -52,10 +53,6 @@ mcp = FastMCP(
 
 # Re-export canonical lookup built where LEAGUE_SPECS is defined
 _LEAGUE_SPEC_BY_NAME = LEAGUE_SPEC_BY_NAME
-
-# Hybrid sharp reference matching production defaults.
-# Duplicated from feature_extraction.py DEFAULT_SHARP_BOOKMAKERS with EPL-specific overrides — keep in sync.
-_DEFAULT_SHARP_BOOKMAKERS = ["pinnacle", "betfair_exchange"]
 
 
 def _coerce_bookmaker_list(value: str | list[str] | None) -> list[str] | None:
@@ -161,6 +158,22 @@ def _trade_to_dict(trade: PaperTrade) -> dict[str, Any]:
         "settled_at": trade.settled_at.isoformat() if trade.settled_at else None,
         "result": trade.result.value if trade.result else None,
         "pnl": trade.pnl,
+        "sharp_prob_at_bet": trade.sharp_prob_at_bet,
+        "sharp_bookmaker_at_bet": trade.sharp_bookmaker_at_bet,
+        "sharp_snapshot_time_at_bet": (
+            trade.sharp_snapshot_time_at_bet.isoformat()
+            if trade.sharp_snapshot_time_at_bet
+            else None
+        ),
+        "sharp_spread_at_bet": trade.sharp_spread_at_bet,
+        "sharp_prob_at_close": trade.sharp_prob_at_close,
+        "sharp_bookmaker_at_close": trade.sharp_bookmaker_at_close,
+        "sharp_snapshot_time_at_close": (
+            trade.sharp_snapshot_time_at_close.isoformat()
+            if trade.sharp_snapshot_time_at_close
+            else None
+        ),
+        "clv": trade.clv,
     }
 
 
@@ -721,7 +734,7 @@ async def save_match_brief(
             sharp_result = await reader.get_sharp_prices(
                 event_id,
                 market=market,
-                sharp_bookmakers=_DEFAULT_SHARP_BOOKMAKERS,
+                sharp_bookmakers=AGENT_SHARP_BOOKMAKERS,
                 lookback_hours=24.0,
                 now=latest_snapshot.snapshot_time,
             )
@@ -871,7 +884,7 @@ async def find_retail_edges(
     event_id: str,
     market: MarketKey,
     sharp_bookmakers: str | list[str] | None = None,
-    sharp_lookback_hours: float = 2.0,
+    sharp_lookback_hours: float = DEFAULT_SHARP_LOOKBACK_HOURS,
     lookback_hours: float = 2.0,
 ) -> dict[str, Any]:
     """Surface retail books pricing longer than sharp, with dispersion stats.
@@ -934,7 +947,7 @@ async def find_retail_edges(
         by ``z_score`` ascending — more-negative first — then ``book``,
         ``outcome``, and ``point`` for full determinism).
     """
-    sharp_bms = _coerce_bookmaker_list(sharp_bookmakers) or _DEFAULT_SHARP_BOOKMAKERS
+    sharp_bms = _coerce_bookmaker_list(sharp_bookmakers) or list(AGENT_SHARP_BOOKMAKERS)
 
     async with async_session_maker() as session:
         reader = OddsReader(session)

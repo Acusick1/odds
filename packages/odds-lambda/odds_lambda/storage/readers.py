@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -17,6 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from odds_lambda.fetch_tier import FetchTier
 
 logger = structlog.get_logger()
+
+# How far back the agent's sharp lookups search by default.
+DEFAULT_SHARP_LOOKBACK_HOURS = 2.0
 
 
 @dataclass
@@ -51,6 +55,18 @@ class BookPriceResult:
     """
 
     entries: dict[tuple[str, str, float | None], BookPriceEntry] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SharpMarket:
+    """One sharp bookmaker's complete market in a single snapshot.
+
+    ``implied_probs`` maps each requested outcome name to its raw (vigged) implied probability.
+    """
+
+    bookmaker: str
+    snapshot_time: datetime
+    implied_probs: dict[str, float]
 
 
 class OddsReader:
@@ -673,8 +689,8 @@ class OddsReader:
         self,
         event_id: str,
         market: str,
-        sharp_bookmakers: list[str],
-        lookback_hours: float = 2.0,
+        sharp_bookmakers: Sequence[str],
+        lookback_hours: float = DEFAULT_SHARP_LOOKBACK_HOURS,
         *,
         now: datetime | None = None,
     ) -> SharpPriceResult:
@@ -761,6 +777,74 @@ class OddsReader:
                 break
 
         return sharp_result
+
+    async def get_sharp_market(
+        self,
+        event_id: str,
+        markets: Sequence[str],
+        outcomes: Sequence[str],
+        sharp_bookmakers: Sequence[str],
+        lookback_hours: float,
+        *,
+        now: datetime,
+    ) -> SharpMarket | None:
+        """Find the newest snapshot in which one sharp bookmaker quotes every outcome.
+
+        Unlike :meth:`get_sharp_prices`, outcomes are never assembled from several
+        bookmakers or snapshots, so the result can be devigged as one market. Bookmakers
+        are tried in priority order; for each, snapshots within
+        ``[now - lookback_hours, now]`` are scanned newest-first across every key in
+        *markets* (the same market is stored as ``h2h`` or ``1x2`` depending on source).
+
+        Args:
+            event_id: Event identifier.
+            markets: Market keys to search.
+            outcomes: Outcome names that must all be quoted.
+            sharp_bookmakers: Bookmaker keys, highest priority first.
+            lookback_hours: How far back from *now* to search.
+            now: Upper bound for snapshot time.
+
+        Returns:
+            The first complete market found, or None.
+        """
+        query = (
+            select(OddsSnapshot)
+            .where(
+                and_(
+                    OddsSnapshot.event_id == event_id,
+                    OddsSnapshot.snapshot_time >= now - timedelta(hours=lookback_hours),
+                    OddsSnapshot.snapshot_time <= now,
+                )
+            )
+            .order_by(OddsSnapshot.snapshot_time.desc())
+        )
+        snapshots = list((await self.session.execute(query)).scalars().all())
+
+        # Parse each snapshot once: {bookmaker: {outcome: price}} per market key.
+        parsed: list[tuple[OddsSnapshot, list[dict[str, dict[str, int]]]]] = []
+        for snapshot in snapshots:
+            per_key: list[dict[str, dict[str, int]]] = []
+            for market_key in markets:
+                by_book: dict[str, dict[str, int]] = {}
+                for o in extract_odds_from_snapshot(snapshot, event_id, market=market_key):
+                    by_book.setdefault(o.bookmaker_key, {})[o.outcome_name] = o.price
+                per_key.append(by_book)
+            parsed.append((snapshot, per_key))
+
+        for bookmaker in sharp_bookmakers:
+            for snapshot, per_key in parsed:
+                for by_book in per_key:
+                    quoted = by_book.get(bookmaker, {})
+                    if all(name in quoted for name in outcomes):
+                        return SharpMarket(
+                            bookmaker=bookmaker,
+                            snapshot_time=snapshot.snapshot_time,
+                            implied_probs={
+                                name: calculate_implied_probability(quoted[name])
+                                for name in outcomes
+                            },
+                        )
+        return None
 
     async def get_latest_book_prices(
         self,

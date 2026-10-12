@@ -1,9 +1,10 @@
 """Tests for paper trade model and settlement logic."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
-from odds_core.models import Event, EventStatus
+from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_lambda.paper_trading import (
     get_open_trades,
@@ -11,6 +12,7 @@ from odds_lambda.paper_trading import (
     place_trade,
     settle_trades,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class TestPlaceTrade:
@@ -339,3 +341,336 @@ class TestToBetRecord:
         assert record.away_score == 1
         assert record.strategy_confidence == 0.8
         assert record.bet_rationale == "Value bet"
+
+
+KICKOFF = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
+PLACED_SNAPSHOT_TIME = KICKOFF - timedelta(minutes=90)
+CLOSING_SNAPSHOT_TIME = KICKOFF - timedelta(minutes=5)
+
+
+def _book(key: str, home: int, draw: int, away: int, market: str = "h2h") -> dict[str, Any]:
+    return {
+        "key": key,
+        "title": key,
+        "last_update": "2026-04-15T11:00:00Z",
+        "markets": [
+            {
+                "key": market,
+                "outcomes": [
+                    {"name": "Arsenal", "price": home},
+                    {"name": "Draw", "price": draw},
+                    {"name": "Chelsea", "price": away},
+                ],
+            }
+        ],
+    }
+
+
+def _snapshot(when: datetime, *books: dict) -> OddsSnapshot:
+    return OddsSnapshot(
+        event_id="evt-sharp",
+        snapshot_time=when,
+        raw_data={"bookmakers": list(books)},
+        bookmaker_count=len(books),
+    )
+
+
+async def _add_event(session: AsyncSession, *, final: bool = False) -> None:
+    session.add(
+        Event(
+            id="evt-sharp",
+            sport_key="soccer_epl",
+            sport_title="EPL",
+            commence_time=KICKOFF,
+            home_team="Arsenal",
+            away_team="Chelsea",
+            status=EventStatus.FINAL if final else EventStatus.SCHEDULED,
+            home_score=2 if final else None,
+            away_score=0 if final else None,
+        )
+    )
+    await session.flush()
+
+
+async def _place_home_bet(session: AsyncSession, market: str = "h2h") -> PaperTrade:
+    return await place_trade(
+        session,
+        event_id="evt-sharp",
+        market=market,
+        selection="home",
+        bookmaker="bet365",
+        odds=105,
+        stake=50.0,
+        bankroll=1000.0,
+    )
+
+
+class TestSharpContextAtPlacement:
+    @pytest.mark.asyncio
+    async def test_primary_sharp_book_is_snapshotted(self, test_session) -> None:
+        await _add_event(test_session)
+        test_session.add(
+            _snapshot(
+                PLACED_SNAPSHOT_TIME,
+                _book("pinnacle", -110, 300, 300),
+                _book("betfair_exchange", 100, 250, 250),
+            )
+        )
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        # Pinnacle -110/+300/+300: 0.52381 / 1.02381 devigged
+        assert trade.sharp_prob_at_bet == pytest.approx(0.51163, abs=1e-5)
+        assert trade.sharp_bookmaker_at_bet == "pinnacle"
+        assert trade.sharp_snapshot_time_at_bet == PLACED_SNAPSHOT_TIME
+        # Bet +105 implies 0.487805; spread = bet - sharp
+        assert trade.sharp_spread_at_bet == pytest.approx(-0.02382, abs=1e-5)
+
+    @pytest.mark.asyncio
+    async def test_fallback_book_used_when_primary_absent(self, test_session) -> None:
+        await _add_event(test_session)
+        test_session.add(_snapshot(PLACED_SNAPSHOT_TIME, _book("betfair_exchange", 100, 300, 300)))
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.sharp_bookmaker_at_bet == "betfair_exchange"
+        assert trade.sharp_prob_at_bet == pytest.approx(0.5)
+
+    @pytest.mark.asyncio
+    async def test_no_sharp_data_leaves_fields_null_and_still_places(self, test_session) -> None:
+        await _add_event(test_session)
+        test_session.add(_snapshot(PLACED_SNAPSHOT_TIME, _book("bet365", 105, 280, 290)))
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.id is not None
+        assert trade.sharp_prob_at_bet is None
+        assert trade.sharp_bookmaker_at_bet is None
+        assert trade.sharp_snapshot_time_at_bet is None
+        assert trade.sharp_spread_at_bet is None
+
+    @pytest.mark.asyncio
+    async def test_no_snapshots_at_all_still_places(self, test_session) -> None:
+        await _add_event(test_session)
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.id is not None
+        assert trade.sharp_prob_at_bet is None
+
+    @pytest.mark.asyncio
+    async def test_incomplete_sharp_market_is_not_devigged(self, test_session) -> None:
+        await _add_event(test_session)
+        book = _book("pinnacle", -110, 300, 300)
+        book["markets"][0]["outcomes"].pop()  # no Chelsea price
+        test_session.add(_snapshot(PLACED_SNAPSHOT_TIME, book))
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.sharp_prob_at_bet is None
+
+
+class TestSharpMarketKeyAndConsistency:
+    @pytest.mark.asyncio
+    async def test_betfair_1x2_snapshots_resolve_for_h2h_bet(self, test_session) -> None:
+        await _add_event(test_session)
+        test_session.add(
+            _snapshot(PLACED_SNAPSHOT_TIME, _book("betfair_exchange", 100, 300, 300, market="1x2"))
+        )
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.sharp_bookmaker_at_bet == "betfair_exchange"
+        assert trade.sharp_prob_at_bet == pytest.approx(0.5)
+        assert trade.sharp_snapshot_time_at_bet == PLACED_SNAPSHOT_TIME
+
+    @pytest.mark.asyncio
+    async def test_partial_h2h_does_not_hide_complete_1x2(self, test_session) -> None:
+        await _add_event(test_session)
+        partial = _book("pinnacle", -110, 300, 300)
+        partial["markets"][0]["outcomes"] = partial["markets"][0]["outcomes"][:1]
+        test_session.add(_snapshot(PLACED_SNAPSHOT_TIME, partial))
+        test_session.add(
+            _snapshot(
+                PLACED_SNAPSHOT_TIME - timedelta(minutes=10),
+                _book("betfair_exchange", 100, 300, 300, market="1x2"),
+            )
+        )
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.sharp_bookmaker_at_bet == "betfair_exchange"
+
+    @pytest.mark.asyncio
+    async def test_incomplete_primary_book_falls_back_to_complete_secondary(
+        self, test_session
+    ) -> None:
+        await _add_event(test_session)
+        pinnacle_home_only = _book("pinnacle", -110, 300, 300)
+        pinnacle_home_only["markets"][0]["outcomes"] = pinnacle_home_only["markets"][0]["outcomes"][
+            :1
+        ]
+        test_session.add(
+            _snapshot(
+                PLACED_SNAPSHOT_TIME,
+                pinnacle_home_only,
+                _book("betfair_exchange", 100, 300, 300),
+            )
+        )
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        # Outcomes are never mixed across books: the whole market comes from Betfair
+        assert trade.sharp_bookmaker_at_bet == "betfair_exchange"
+        assert trade.sharp_prob_at_bet == pytest.approx(0.5)
+
+    @pytest.mark.asyncio
+    async def test_complete_primary_under_1x2_beats_secondary_under_h2h(self, test_session) -> None:
+        await _add_event(test_session)
+        test_session.add(
+            _snapshot(
+                PLACED_SNAPSHOT_TIME,
+                _book("pinnacle", -110, 300, 300, market="1x2"),
+                _book("betfair_exchange", 100, 300, 300),
+            )
+        )
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.sharp_bookmaker_at_bet == "pinnacle"
+
+    @pytest.mark.asyncio
+    async def test_snapshots_after_kickoff_are_not_used_at_placement(self, test_session) -> None:
+        await _add_event(test_session)
+        test_session.add(
+            _snapshot(KICKOFF + timedelta(minutes=10), _book("pinnacle", -110, 300, 300))
+        )
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.sharp_prob_at_bet is None
+
+
+class TestSharpReadScope:
+    @pytest.mark.asyncio
+    async def test_non_match_markets_get_no_sharp_context(self, test_session: AsyncSession) -> None:
+        await _add_event(test_session)
+        test_session.add(_snapshot(PLACED_SNAPSHOT_TIME, _book("pinnacle", -110, 300, 300)))
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session, market="spreads")
+
+        assert trade.sharp_prob_at_bet is None
+
+
+class TestSharpReadAtSettlementScope:
+    @pytest.mark.asyncio
+    async def test_non_match_markets_get_no_closing_context(
+        self, test_session: AsyncSession
+    ) -> None:
+        await _add_event(test_session, final=True)
+        await _place_home_bet(test_session, market="spreads")
+        test_session.add(_snapshot(CLOSING_SNAPSHOT_TIME, _book("pinnacle", -120, 300, 300)))
+        await test_session.flush()
+
+        (settled,) = await settle_trades(test_session)
+
+        assert settled.sharp_prob_at_close is None
+        assert settled.clv is None
+
+
+class TestPlacementLookbackWindow:
+    @pytest.mark.asyncio
+    async def test_fresh_fallback_beats_stale_primary(self, test_session) -> None:
+        await _add_event(test_session)
+        test_session.add(_snapshot(KICKOFF - timedelta(hours=3), _book("pinnacle", -110, 300, 300)))
+        test_session.add(
+            _snapshot(KICKOFF - timedelta(minutes=30), _book("betfair_exchange", 100, 300, 300))
+        )
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.sharp_bookmaker_at_bet == "betfair_exchange"
+
+    @pytest.mark.asyncio
+    async def test_only_stale_markets_leave_fields_null(self, test_session) -> None:
+        await _add_event(test_session)
+        test_session.add(_snapshot(KICKOFF - timedelta(hours=3), _book("pinnacle", -110, 300, 300)))
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.id is not None
+        assert trade.sharp_prob_at_bet is None
+
+    @pytest.mark.asyncio
+    async def test_closing_price_may_be_older_than_placement_window(self, test_session) -> None:
+        await _add_event(test_session, final=True)
+        await _place_home_bet(test_session)
+        test_session.add(_snapshot(KICKOFF - timedelta(hours=5), _book("pinnacle", -120, 300, 300)))
+        await test_session.flush()
+
+        (settled,) = await settle_trades(test_session)
+
+        assert settled.sharp_bookmaker_at_close == "pinnacle"
+
+
+class TestSharpContextAtSettlement:
+    @pytest.mark.asyncio
+    async def test_closing_price_and_clv_filled(self, test_session) -> None:
+        await _add_event(test_session, final=True)
+        test_session.add(_snapshot(PLACED_SNAPSHOT_TIME, _book("pinnacle", -110, 300, 300)))
+        await test_session.flush()
+        await _place_home_bet(test_session)
+        test_session.add(_snapshot(CLOSING_SNAPSHOT_TIME, _book("pinnacle", -120, 300, 300)))
+        # Post-kickoff snapshot must be ignored
+        test_session.add(
+            _snapshot(KICKOFF + timedelta(minutes=30), _book("pinnacle", -400, 600, 900))
+        )
+        await test_session.flush()
+
+        (settled,) = await settle_trades(test_session)
+
+        # Pinnacle -120/+300/+300: 0.54545 / 1.04545 devigged
+        assert settled.sharp_prob_at_close == pytest.approx(0.52174, abs=1e-5)
+        assert settled.sharp_bookmaker_at_close == "pinnacle"
+        assert settled.sharp_snapshot_time_at_close == CLOSING_SNAPSHOT_TIME
+        # CLV = close prob - bet implied prob (0.487805); positive = beat the close
+        assert settled.clv == pytest.approx(0.03393, abs=1e-5)
+
+    @pytest.mark.asyncio
+    async def test_fallback_book_at_close(self, test_session) -> None:
+        await _add_event(test_session, final=True)
+        await _place_home_bet(test_session)
+        test_session.add(
+            _snapshot(CLOSING_SNAPSHOT_TIME, _book("betfair_exchange", -120, 300, 300))
+        )
+        await test_session.flush()
+
+        (settled,) = await settle_trades(test_session)
+
+        assert settled.sharp_bookmaker_at_close == "betfair_exchange"
+        assert settled.clv == pytest.approx(0.03393, abs=1e-5)
+
+    @pytest.mark.asyncio
+    async def test_no_sharp_data_still_settles(self, test_session) -> None:
+        await _add_event(test_session, final=True)
+        await _place_home_bet(test_session)
+
+        (settled,) = await settle_trades(test_session)
+
+        assert settled.result == TradeResult.WIN
+        assert settled.sharp_prob_at_close is None
+        assert settled.sharp_bookmaker_at_close is None
+        assert settled.sharp_snapshot_time_at_close is None
+        assert settled.clv is None

@@ -70,7 +70,9 @@ Defined in `prediction_models.py`:
 `match_briefs` (`match_brief_models.py`), `paper_trades` (`paper_trade_models.py`) and
 `agent_wakeups` (`agent_wakeup_models.py`) back the betting agent; see
 [REPORTING.md](REPORTING.md#8-storage-backing-reports) for their writers and readers and
-[BETTING_AGENT.md](BETTING_AGENT.md#match_briefs-table) for the brief schema.
+[BETTING_AGENT.md](BETTING_AGENT.md#match_briefs-table) for the brief schema and
+[BETTING_AGENT.md](BETTING_AGENT.md#paper_trades-sharp-context) for the sharp price and CLV
+columns on `paper_trades`.
 
 ### Sport Context Tables
 
