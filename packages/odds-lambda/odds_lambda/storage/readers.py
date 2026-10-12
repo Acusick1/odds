@@ -19,6 +19,9 @@ from odds_lambda.fetch_tier import FetchTier
 
 logger = structlog.get_logger()
 
+# How far back the agent's sharp lookups search by default.
+DEFAULT_SHARP_LOOKBACK_HOURS = 2.0
+
 
 @dataclass
 class BookPriceMeta:
@@ -687,7 +690,7 @@ class OddsReader:
         event_id: str,
         market: str,
         sharp_bookmakers: Sequence[str],
-        lookback_hours: float = 2.0,
+        lookback_hours: float = DEFAULT_SHARP_LOOKBACK_HOURS,
         *,
         now: datetime | None = None,
     ) -> SharpPriceResult:

@@ -18,9 +18,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.betfair.constants import SPORT_CONFIG
-from odds_lambda.storage.readers import OddsReader
+from odds_lambda.storage.readers import DEFAULT_SHARP_LOOKBACK_HOURS, OddsReader
 
-SHARP_LOOKBACK_HOURS = 24.0
+# Settlement searches further back so a sparse pre-kickoff schedule still yields a close.
+CLOSING_LOOKBACK_HOURS = 24.0
 DRAW_OUTCOME = "Draw"
 # Same market, different key by source: Betfair writes EPL 3-way odds as "1x2".
 _MARKET_KEY_ALIASES: dict[str, tuple[str, ...]] = {"h2h": ("h2h", "1x2"), "1x2": ("1x2", "h2h")}
@@ -62,6 +63,7 @@ async def _read_sharp_probability(
     selection: str,
     *,
     as_of: datetime,
+    lookback_hours: float,
 ) -> SharpReading | None:
     """Devigged sharp probability of ``selection`` from snapshots at or before ``as_of``.
 
@@ -81,7 +83,7 @@ async def _read_sharp_probability(
         markets=_MARKET_KEY_ALIASES.get(market, (market,)),
         outcomes=outcomes,
         sharp_bookmakers=AGENT_SHARP_BOOKMAKERS,
-        lookback_hours=SHARP_LOOKBACK_HOURS,
+        lookback_hours=lookback_hours,
         now=as_of,
     )
     if sharp_market is None:
@@ -130,7 +132,12 @@ async def place_trade(
     event = await session.get(Event, event_id)
     if event is not None:
         reading = await _read_sharp_probability(
-            session, event, market, selection, as_of=min(datetime.now(UTC), event.commence_time)
+            session,
+            event,
+            market,
+            selection,
+            as_of=min(datetime.now(UTC), event.commence_time),
+            lookback_hours=DEFAULT_SHARP_LOOKBACK_HOURS,
         )
         if reading is not None:
             trade.sharp_prob_at_bet = reading.prob
@@ -177,7 +184,12 @@ async def settle_trades(session: AsyncSession) -> list[PaperTrade]:
         trade.settled_at = now
 
         closing = await _read_sharp_probability(
-            session, event, trade.market, trade.selection, as_of=event.commence_time
+            session,
+            event,
+            trade.market,
+            trade.selection,
+            as_of=event.commence_time,
+            lookback_hours=CLOSING_LOOKBACK_HOURS,
         )
         if closing is not None:
             trade.sharp_prob_at_close = closing.prob

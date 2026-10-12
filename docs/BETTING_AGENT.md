@@ -160,8 +160,11 @@ model's Pinnacle-only default is a separate setting.
 A reading is stored only when one sharp bookmaker, tried in priority order, quotes every
 outcome of the market in the same snapshot, because devigging a partial or mixed market
 misstates the selection's probability. The `h2h` and `1x2` market keys are both searched,
-since Betfair and OddsPortal write 3-way odds as `1x2`. Placement ignores snapshots after
-kickoff, and the closing price looks back at most 24 hours from kickoff. Existing trades are
+since Betfair and OddsPortal write 3-way odds as `1x2`. Placement searches the same
+lookback as the agent's tools (`DEFAULT_SHARP_LOOKBACK_HOURS`, 2 hours) and ignores
+snapshots after kickoff, so the recorded price is one the agent could see at bet time;
+priority order only decides between markets inside that window, and with none the fields
+stay null. The closing price looks back at most 24 hours from kickoff. Existing trades are
 not backfilled.
 
 ## Role of the XGBoost Model

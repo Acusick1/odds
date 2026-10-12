@@ -342,7 +342,7 @@ class TestToBetRecord:
 
 
 KICKOFF = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
-PLACED_SNAPSHOT_TIME = KICKOFF - timedelta(hours=3)
+PLACED_SNAPSHOT_TIME = KICKOFF - timedelta(minutes=90)
 CLOSING_SNAPSHOT_TIME = KICKOFF - timedelta(minutes=5)
 
 
@@ -556,6 +556,43 @@ class TestSharpMarketKeyAndConsistency:
         trade = await _place_home_bet(test_session)
 
         assert trade.sharp_prob_at_bet is None
+
+
+class TestPlacementLookbackWindow:
+    @pytest.mark.asyncio
+    async def test_fresh_fallback_beats_stale_primary(self, test_session) -> None:
+        await _add_event(test_session)
+        test_session.add(_snapshot(KICKOFF - timedelta(hours=3), _book("pinnacle", -110, 300, 300)))
+        test_session.add(
+            _snapshot(KICKOFF - timedelta(minutes=30), _book("betfair_exchange", 100, 300, 300))
+        )
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.sharp_bookmaker_at_bet == "betfair_exchange"
+
+    @pytest.mark.asyncio
+    async def test_only_stale_markets_leave_fields_null(self, test_session) -> None:
+        await _add_event(test_session)
+        test_session.add(_snapshot(KICKOFF - timedelta(hours=3), _book("pinnacle", -110, 300, 300)))
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session)
+
+        assert trade.id is not None
+        assert trade.sharp_prob_at_bet is None
+
+    @pytest.mark.asyncio
+    async def test_closing_price_may_be_older_than_placement_window(self, test_session) -> None:
+        await _add_event(test_session, final=True)
+        await _place_home_bet(test_session)
+        test_session.add(_snapshot(KICKOFF - timedelta(hours=5), _book("pinnacle", -120, 300, 300)))
+        await test_session.flush()
+
+        (settled,) = await settle_trades(test_session)
+
+        assert settled.sharp_bookmaker_at_close == "pinnacle"
 
 
 class TestSharpContextAtSettlement:
