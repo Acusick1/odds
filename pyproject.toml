@@ -57,6 +57,7 @@ dev = [
     "statsmodels>=0.14.6",
     # OddsPortal scraper
     "oddsharvester",
+    "pyyaml>=6.0.3",
 ]
 
 # Virtual workspace root - no build system needed
