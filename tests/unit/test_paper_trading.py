@@ -572,6 +572,22 @@ class TestSharpReadScope:
         assert trade.sharp_prob_at_bet is None
 
 
+class TestSharpReadAtSettlementScope:
+    @pytest.mark.asyncio
+    async def test_non_match_markets_get_no_closing_context(
+        self, test_session: AsyncSession
+    ) -> None:
+        await _add_event(test_session, final=True)
+        await _place_home_bet(test_session, market="spreads")
+        test_session.add(_snapshot(CLOSING_SNAPSHOT_TIME, _book("pinnacle", -120, 300, 300)))
+        await test_session.flush()
+
+        (settled,) = await settle_trades(test_session)
+
+        assert settled.sharp_prob_at_close is None
+        assert settled.clv is None
+
+
 class TestPlacementLookbackWindow:
     @pytest.mark.asyncio
     async def test_fresh_fallback_beats_stale_primary(self, test_session) -> None:

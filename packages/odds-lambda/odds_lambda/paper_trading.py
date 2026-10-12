@@ -70,6 +70,9 @@ async def _read_sharp_probability(
     Uses one sharp bookmaker's complete market from a single snapshot: devigging a partial or
     mixed market misstates the selection's probability.
     """
+    # Only match-result markets have a sharp reference; spreads and totals carry a point.
+    if market not in _MARKET_KEY_ALIASES:
+        return None
     sport = SPORT_CONFIG.get(event.sport_key)  # type: ignore[arg-type]
     outcomes = [event.home_team, event.away_team]
     if sport is not None and sport.has_draw:
@@ -130,8 +133,7 @@ async def place_trade(
         confidence=confidence,
     )
     event = await session.get(Event, event_id)
-    # Only 3-way/2-way match markets have a sharp reference; e.g. spreads carry a point.
-    if event is not None and market in _MARKET_KEY_ALIASES:
+    if event is not None:
         reading = await _read_sharp_probability(
             session,
             event,

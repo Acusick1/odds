@@ -930,8 +930,8 @@ async def find_retail_edges(
     Args:
         event_id: Event identifier.
         market: Market type — "h2h", "1x2", "totals", or "spreads".
-        sharp_bookmakers: Sharp bookmaker keys (default: AGENT_SHARP_BOOKMAKERS).
-        sharp_lookback_hours: How far back to search for sharp prices (default DEFAULT_SHARP_LOOKBACK_HOURS).
+        sharp_bookmakers: Sharp bookmaker keys (default: ["pinnacle", "betfair_exchange"]).
+        sharp_lookback_hours: How far back to search for sharp prices (default 2.0 h).
         lookback_hours: How far back to search for retail prices, per
             bookmaker (default 2.0 h).
 
