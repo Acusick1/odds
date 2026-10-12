@@ -31,7 +31,7 @@ from odds_lambda.paper_trading import (
     place_trade,
     settle_trades,
 )
-from odds_lambda.storage.readers import BookPriceEntry, OddsReader
+from odds_lambda.storage.readers import DEFAULT_SHARP_LOOKBACK_HOURS, BookPriceEntry, OddsReader
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -884,7 +884,7 @@ async def find_retail_edges(
     event_id: str,
     market: MarketKey,
     sharp_bookmakers: str | list[str] | None = None,
-    sharp_lookback_hours: float = 2.0,
+    sharp_lookback_hours: float = DEFAULT_SHARP_LOOKBACK_HOURS,
     lookback_hours: float = 2.0,
 ) -> dict[str, Any]:
     """Surface retail books pricing longer than sharp, with dispersion stats.
@@ -931,7 +931,7 @@ async def find_retail_edges(
         event_id: Event identifier.
         market: Market type — "h2h", "1x2", "totals", or "spreads".
         sharp_bookmakers: Sharp bookmaker keys (default: AGENT_SHARP_BOOKMAKERS).
-        sharp_lookback_hours: How far back to search for sharp prices (default 2.0 h).
+        sharp_lookback_hours: How far back to search for sharp prices (default DEFAULT_SHARP_LOOKBACK_HOURS).
         lookback_hours: How far back to search for retail prices, per
             bookmaker (default 2.0 h).
 

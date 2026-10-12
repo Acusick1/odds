@@ -130,7 +130,8 @@ async def place_trade(
         confidence=confidence,
     )
     event = await session.get(Event, event_id)
-    if event is not None:
+    # Only 3-way/2-way match markets have a sharp reference; e.g. spreads carry a point.
+    if event is not None and market in _MARKET_KEY_ALIASES:
         reading = await _read_sharp_probability(
             session,
             event,

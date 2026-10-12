@@ -1,6 +1,7 @@
 """Tests for paper trade model and settlement logic."""
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from odds_core.models import Event, EventStatus, OddsSnapshot
@@ -11,6 +12,7 @@ from odds_lambda.paper_trading import (
     place_trade,
     settle_trades,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class TestPlaceTrade:
@@ -346,7 +348,7 @@ PLACED_SNAPSHOT_TIME = KICKOFF - timedelta(minutes=90)
 CLOSING_SNAPSHOT_TIME = KICKOFF - timedelta(minutes=5)
 
 
-def _book(key: str, home: int, draw: int, away: int, market: str = "h2h") -> dict:
+def _book(key: str, home: int, draw: int, away: int, market: str = "h2h") -> dict[str, Any]:
     return {
         "key": key,
         "title": key,
@@ -373,7 +375,7 @@ def _snapshot(when: datetime, *books: dict) -> OddsSnapshot:
     )
 
 
-async def _add_event(session, *, final: bool = False) -> None:
+async def _add_event(session: AsyncSession, *, final: bool = False) -> None:
     session.add(
         Event(
             id="evt-sharp",
@@ -390,11 +392,11 @@ async def _add_event(session, *, final: bool = False) -> None:
     await session.flush()
 
 
-async def _place_home_bet(session) -> PaperTrade:
+async def _place_home_bet(session: AsyncSession, market: str = "h2h") -> PaperTrade:
     return await place_trade(
         session,
         event_id="evt-sharp",
-        market="h2h",
+        market=market,
         selection="home",
         bookmaker="bet365",
         odds=105,
@@ -554,6 +556,18 @@ class TestSharpMarketKeyAndConsistency:
         await test_session.flush()
 
         trade = await _place_home_bet(test_session)
+
+        assert trade.sharp_prob_at_bet is None
+
+
+class TestSharpReadScope:
+    @pytest.mark.asyncio
+    async def test_non_match_markets_get_no_sharp_context(self, test_session: AsyncSession) -> None:
+        await _add_event(test_session)
+        test_session.add(_snapshot(PLACED_SNAPSHOT_TIME, _book("pinnacle", -110, 300, 300)))
+        await test_session.flush()
+
+        trade = await _place_home_bet(test_session, market="spreads")
 
         assert trade.sharp_prob_at_bet is None
 

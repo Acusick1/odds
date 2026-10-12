@@ -1,17 +1,21 @@
 """OddsReader.get_sharp_market: newest snapshot where one sharp book quotes every outcome."""
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from odds_core.models import Event, OddsSnapshot
-from odds_lambda.storage.readers import OddsReader
+from odds_lambda.storage.readers import OddsReader, SharpMarket
+from sqlalchemy.ext.asyncio import AsyncSession
 
 CUTOFF = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
 OUTCOMES = ["Arsenal", "Chelsea", "Draw"]
 SHARP = ["pinnacle", "betfair_exchange"]
 
 
-def _book(key: str, market: str = "h2h", names: tuple[str, ...] = tuple(OUTCOMES)) -> dict:
+def _book(
+    key: str, market: str = "h2h", names: tuple[str, ...] = tuple(OUTCOMES)
+) -> dict[str, Any]:
     prices = {"Arsenal": -110, "Chelsea": 300, "Draw": 300}
     return {
         "key": key,
@@ -25,7 +29,7 @@ def _book(key: str, market: str = "h2h", names: tuple[str, ...] = tuple(OUTCOMES
     }
 
 
-async def _add(session, minutes_before_cutoff: int, *books: dict) -> int:
+async def _add(session: AsyncSession, minutes_before_cutoff: int, *books: dict) -> int:
     snapshot = OddsSnapshot(
         event_id="evt-1",
         snapshot_time=CUTOFF - timedelta(minutes=minutes_before_cutoff),
@@ -54,7 +58,7 @@ async def reader(test_session) -> OddsReader:
     return OddsReader(test_session)
 
 
-async def _lookup(reader: OddsReader, lookback_hours: float = 24.0):
+async def _lookup(reader: OddsReader, lookback_hours: float = 24.0) -> SharpMarket | None:
     return await reader.get_sharp_market(
         "evt-1",
         markets=["h2h", "1x2"],
