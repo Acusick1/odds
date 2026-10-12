@@ -83,7 +83,7 @@ async def _read_sharp_probability(
 
     sharp_market = await OddsReader(session).get_sharp_market(
         event.id,
-        markets=_MARKET_KEY_ALIASES.get(market, (market,)),
+        markets=_MARKET_KEY_ALIASES[market],
         outcomes=outcomes,
         sharp_bookmakers=AGENT_SHARP_BOOKMAKERS,
         lookback_hours=lookback_hours,
