@@ -1,5 +1,5 @@
 ---
-type: experiment
+type: explanation
 title: EPL feature ablation and principled search space
 description: "The April 2026 EPL runs: per-group and FPL ablations (match_stats helps, schedule and FPL hurt), the sliding-window collapse to constant predictors, and the revised Optuna space that produced the deployed model."
 sources:
@@ -8,13 +8,14 @@ sources:
   - experiments/configs/xgboost_epl_production_tabular_only.yaml
   - experiments/configs/xgboost_epl_lineup.yaml
   - experiments/configs/xgboost_epl_hybrid_sharp.yaml
+  - experiments/scripts/lineup_signal_check.py
   - odds_analytics.feature_groups
 status: stable
 ---
 
 # EPL feature ablation and principled search space
 
-Two linked questions on EPL, both answered in April 2026: which feature groups help CLV prediction, and why sliding-380:50 tuning produced identical, degenerate models. Answers: `match_stats` is the best single addition, `standings` is neutral, `epl_schedule` hurts slightly, `rest` produces nothing for EPL and FPL availability degrades results; and the original Optuna space, not the protocol, caused the collapse ([EPL context features](../modelling/epl-context-features.md), [feature pipeline](../modelling/feature-pipeline.md)).
+Two linked questions on EPL, both answered in April 2026: which feature groups help CLV prediction, and why sliding-380:50 tuning produced identical, degenerate models. Answers: `match_stats` is the best single addition, `standings` is neutral, `epl_schedule` hurts slightly, `rest` produces nothing for EPL and FPL availability degrades results; and the original Optuna space, not the protocol, caused the collapse ([EPL context features](../modelling/epl-context-features.md), [feature groups](../modelling/feature-groups.md)).
 
 ## Per-group ablation (2026-04-23)
 
@@ -39,7 +40,7 @@ Effect sizes are small against fold-to-fold standard deviation (±0.06-0.08). An
 
 ## Principled search space re-test
 
-Same day, 1,813 EPL events, hybrid sharp, 100 trials each. Under sliding-380:50 the original Optuna space produced byte-identical results for every feature set: each trial was a constant predictor (one unique prediction across the 50 validation examples, early-stopped at iteration 9; every config converged to the same trial 86 with identical val MSE to 16 decimals). A manual low-regularisation config (`min_child_weight` 5, `gamma` 0) did not degenerate and beat the tuner's best by about 12% MSE, so the search space, not the protocol, was at fault ([tuner](../modelling/hyperparameter-tuner.md), [walk-forward CV](../modelling/decision-walk-forward-cv.md)). The sliding-380:50 ablation therefore could not be reported alongside the table above, which is expanding-only.
+Same day, 1,813 EPL events, hybrid sharp, 100 trials each. Under sliding-380:50 the original Optuna space produced byte-identical results for every feature set: each trial was a constant predictor (one unique prediction across the 50 validation examples, early-stopped at iteration 9; every config converged to the same trial 86 with identical val MSE to 16 decimals). A manual low-regularisation config (`min_child_weight` 5, `gamma` 0) did not degenerate and beat the tuner's best by about 12% MSE, so the search space, not the protocol, was at fault ([tuner](../modelling/hyperparameter-tuner.md#production-search-space), [ADR-0004](../../docs/adr/0004-walk-forward-cv-protocol.md), [cross-validation](../modelling/cross-validation.md)). The sliding-380:50 ablation therefore could not be reported alongside the table above, which is expanding-only.
 
 ### Revised space
 
@@ -75,15 +76,27 @@ Reasons, all `(inferred)`:
 
 Under the principled space sliding-380:50 yields 48-50 unique predictions on 50 validation examples (best iteration 31-33, against 9) and slightly beats expanding:50 on MSE; the match_stats over tabular-only ranking holds under both protocols. Sliding-380:50 only works with this space.
 
+## Lineup signal check
+
+`experiments/scripts/lineup_signal_check.py` correlates lineup metrics with the devigged bet365 CLV target on 1,684-1,709 matched rows; output is `experiments/results/lineup_signal_check/` (`correlations.csv`, `joined_data.csv`). There is no FINDINGS file. From `correlations.csv`:
+
+- Strongest: `diff_cumulative_starts_lost`, r = -0.278 (n = 1,684, univariate R² 0.077); `diff_xi_changes` r = -0.184.
+- "Tendency" features that need no lineup announcement are weak: `diff_cumulative_starts_lost_tendency_3` r = -0.074; the xi-change tendencies are not significant (p above 0.08).
+- FPL-based `diff_expected_disruption` r = -0.104 (n = 1,498).
+- `*_roll3` columns include the current match, so they are look-ahead by construction (the script's own docstring says so).
+- The match-specific metrics need the starting XI, which the script docstring puts at about 75 minutes before kickoff and the agent's data-source notes at KO-60, while training samples at the sharp tier or 3-12 h out, so the strong signal is late information ([look-ahead bias](../modelling/look-ahead-bias.md#where-the-rule-breaks), [ADR-0006](../../docs/adr/0006-lineups-from-web-research.md)).
+
+`experiments/configs/xgboost_epl_lineup.yaml` trains `tabular + standings + match_stats + epl_lineup`; no result for it is recorded in the experiment log ([EPL context features](../modelling/epl-context-features.md)).
+
 ## Outcome
 
-Deployed as `epl-clv-home` `v308058c` (CV R² +0.058, MSE 0.000716), replacing the tabular-only model (+0.035) ([model hub](clv-model-findings.md#deployed-model), [publishing](../modelling/model-publishing-and-scoring.md)).
+Deployed as `epl-clv-home` `v308058c` (CV R² +0.058, MSE 0.000716), replacing the tabular-only model (+0.035) ([model hub](clv-model-findings.md#deployed-model), [publishing](../modelling/model-store.md)).
 
-## Hazards
+## Caveats
 
 - **Search spaces in older YAMLs.** Most older committed configs still carry the original space (`min_child_weight` up to 50, early stopping 15), for example `experiments/configs/xgboost_epl_lineup.yaml` and `experiments/configs/xgboost_epl_hybrid_sharp.yaml`; copy the search space from the `experiments/configs/xgboost_epl_production_*` configs when starting a new sliding-window run.
-- The 2026-03-18 sliding-380 feature-group numbers (#234) were a search-space artefact and should not be used ([hybrid sharp reference](../modelling/decision-hybrid-sharp-reference.md)).
-- **FPL is not reproducible.** The FPL tables and reader remain ([EPL context data](../collection/epl-context-data.md)) but `odds_analytics.feature_groups` has no `fpl_availability` group, so the run cannot be repeated as recorded.
+- The 2026-03-18 sliding-380 feature-group numbers (#234) were a search-space artefact and should not be used ([EPL sharp-reference experiments](exp-epl-sharp-reference.md)).
+- **FPL is not reproducible.** The FPL tables and reader remain ([EPL context data](../collection/epl-context-data.md)) but the run cannot be repeated as recorded.
 - The `min_child_weight` rule of thumb has no recorded source.
 - `rest` is a no-op for EPL by construction: its extractor needs NBA game logs, so the columns are NaN and the variance filter drops them.
 - Feature counts are as recorded: the tabular group had 7 columns then and has 6 now.

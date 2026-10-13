@@ -1,5 +1,5 @@
 ---
-type: component
+type: reference
 title: EPL context data (ESPN, FPL, FBref)
 description: "ESPN fixtures (the fetch-espn-fixtures job) and lineups, FPL availability and FBref stats, covering fetchers, scripts, tables and readers, and which of them any feature or tool actually consumes."
 sources:
@@ -38,25 +38,24 @@ Supplementary EPL data that feeds the `epl_schedule` and `epl_lineup` [feature g
 
 `odds_lambda.jobs.fetch_espn_fixtures.main` runs both (30-day lookahead), dedupes on `(date, team, opponent)` with the scoreboard row winning (fresher `state`), and upserts through `odds_lambda.storage.espn_fixture_writer.EspnFixtureWriter.upsert_fixtures`, idempotent on `(date, team, competition)`. It raises for any sport but `soccer_epl`. Each match is two rows, one per team.
 
-**Schedule**: `0 6 * * *`, EPL only, from `_JOB_CRON_MAP` in `odds_lambda.scheduling.jobs`, in the default local `odds_core.config.SchedulerConfig.bootstrap_jobs` (`odds_core.config`). It runs on the local scheduler only; no EventBridge rule exists in `deployment/aws/terraform/eventbridge.tf`. Deployed state cannot be verified from the repo: `odds scheduler list-jobs --backend aws` ([jobs-and-deployment-matrix](../scheduling/jobs-and-deployment-matrix.md)). The MCP `odds_mcp.tools.epl.get_team_context` tool reads `espn_fixtures`, so it goes stale if the local scheduler is not running this cron.
+**Schedule**: `0 6 * * *`, EPL only, from `_JOB_CRON_MAP` in `odds_lambda.scheduling.jobs`, in the default local `odds_core.config.SchedulerConfig.bootstrap_jobs` (`odds_core.config`). It runs on the local scheduler only; no EventBridge rule exists in `deployment/aws/terraform/eventbridge.tf`. Deployed state cannot be verified from the repo: `odds scheduler list-jobs --backend aws` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). The MCP `odds_mcp.tools.epl.get_team_context` tool reads `espn_fixtures`, so it goes stale if the local scheduler is not running this cron.
 
 ## Lineups, FPL, FBref
 
 All three are manual scripts writing CSVs under `data/`, with `--skip-db` on the lineup and FPL scripts to skip the upsert. Lineup coverage is 2020-21 onward, FPL 2021-22 onward (`scripts/ingest_espn_lineups.py`, `scripts/ingest_fpl_availability.py`). FBref pages must be saved by hand from a browser (Cloudflare) and parsed; there is no model or table.
 
-`epl_lineup` features use `espn_lineups`, with a look-ahead caveat: the XI is public about KO-60 while training samples 3-24 h out. FPL availability hurt in the ablation (R² -0.017 sliding) and has no feature group ([exp-epl-feature-ablation-and-search-space](../evaluation/exp-epl-feature-ablation-and-search-space.md)).
+`epl_lineup` features use `espn_lineups`, with a look-ahead caveat: the XI is public about KO-60 while training samples 3-24 h out ([look-ahead-bias](../modelling/look-ahead-bias.md)). FPL availability hurt in the ablation (R² -0.017 sliding) and has no feature group ([exp-epl-feature-ablation-and-search-space](../evaluation/exp-epl-feature-ablation-and-search-space.md)).
 
-No structured lineup API was usable for live pre-kickoff data; ESPN lineups were rejected for the agent (non-monotonic near KO-60/KO-45, 403 from cloud IPs) and the agent reads BBC Sport instead (inferred from manual probes on 2026-04-13/14; no results file; [agent-data-sources](../agent/agent-data-sources.md)). That is why no scheduled lineup job exists, though ESPN is still used for fixtures and a manual lineup script exists.
+No scheduled lineup job exists: lineups are sourced from live web research, and the manual lineup script feeds training data only ([ADR-0006](../../docs/adr/0006-lineups-from-web-research.md)). ESPN is still used for fixtures.
 
-## Hazards
+## Consumption and nullability
 
-- **Wrong cadence claim.** The `odds_lambda.jobs.fetch_espn_fixtures` module docstring says the cadence is "managed in Terraform"; it is local-cron only (`_JOB_CRON_MAP`, Terraform comment at `deployment/aws/terraform/eventbridge.tf`).
-- **FPL is stored but unused.** `odds_lambda.storage.fpl_availability_reader.FplAvailabilityReader` has no caller outside the module; no feature code in `packages/` consumes FPL data.
-- **Nullable `state`.** `espn_fixtures.state` is nullable; consumers fall back to `odds_core.epl_data_models.EspnFixture.status` strings (`odds_mcp.tools.epl._is_final`).
-- **Name pass-through.** Team names pass through `odds_core.team.normalize_team_name`, which passes unknown names through unchanged ([events](../storage/events.md#matchers)).
+- FPL is stored but unused: `odds_lambda.storage.fpl_availability_reader.FplAvailabilityReader` has no caller outside the module and no feature code in `packages/` consumes FPL data (#412).
+- `espn_fixtures.state` is nullable; consumers fall back to `odds_core.epl_data_models.EspnFixture.status` strings (`odds_mcp.tools.epl._is_final`).
+- Team names pass through `odds_core.team.normalize_team_name`, which passes unknown names through unchanged ([event-matching](../storage/event-matching.md)).
 
 ## Related
 
-- [Sources and keys](sources-and-keys.md), for where ESPN sits among feeds
+- [Data sources](data-sources.md), for where ESPN sits among feeds
 - [EPL context feature groups](../modelling/epl-context-features.md) and [feature pipeline](../modelling/feature-pipeline.md), the consumers
 - [MLB probable pitchers](mlb-probable-pitchers.md), the sibling daily-cron job

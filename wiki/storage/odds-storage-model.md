@@ -1,0 +1,36 @@
+---
+type: explanation
+title: How odds are stored
+description: Why odds are stored as raw snapshots plus normalized rows, which sources lack the normalized half, and which readers use which.
+sources:
+  - odds_core.models.OddsSnapshot
+  - odds_core.models.Odds
+  - odds_core.snapshot_utils.extract_odds_from_snapshot
+  - odds_lambda.storage.writers.OddsWriter._parse_and_store_odds
+  - odds_lambda.storage.readers.OddsReader
+  - scripts/ingest_oddsportal.py
+  - scripts/ingest_football_data_uk.py
+status: stable
+---
+
+# How odds are stored
+
+Odds are stored twice. Each fetch becomes one `odds_core.models.OddsSnapshot` row holding the complete payload as JSON in `raw_data`, plus one `odds_core.models.Odds` row per bookmaker, market and outcome. `odds_lambda.storage.writers.OddsWriter` writes both: raw for debugging, auditing and exact preservation, normalized for SQL filtering and time series `(inferred)`. Columns and indexes are on [Odds snapshot and odds tables](odds-tables.md).
+
+## The normalized half is not universal
+
+`raw_data` is the one complete record. The historical ingest scripts (`scripts/ingest_oddsportal.py`, `scripts/ingest_football_data_uk.py`) write `odds_core.models.Event` and `odds_core.models.OddsSnapshot` rows only, no `odds` rows (#435; [Historical ingest scripts](../collection/historical-ingest-scripts.md)). Anything that queries the normalized table therefore returns nothing for those events: `odds_lambda.storage.readers.OddsReader.get_odds_at_time` and the backtests built on it ([Backtest engine](../evaluation/backtest-engine.md)). Live fetches write both halves, so recent events work either way.
+
+## Which readers use which
+
+`odds_lambda.storage.readers.OddsReader` splits by path ([OddsReader](odds-reader.md#which-path-each-method-uses)): a few methods read normalized rows, while most price lookups rebuild `odds_core.models.Odds` objects from `raw_data` with `odds_core.snapshot_utils.extract_odds_from_snapshot` and never persist them. Those raw-based readers work for every source, including historical ones, which is why the sharp-price and latest-book queries behind the agent's tools do not depend on the normalized rows `(inferred)`.
+
+## Two parsers, two behaviours
+
+Two code paths turn `raw_data` into `odds_core.models.Odds`: the writer's `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` coerces with `int(outcome.get("price", 0))`, so an absent price is stored as 0, while `odds_core.snapshot_utils.extract_odds_from_snapshot` passes prices through unchanged (#464). The same snapshot can thus yield a 0 price from the normalized table and a missing or raw price from the raw-based readers. Provenance and uniqueness constraints are on [Odds snapshot and odds tables](odds-tables.md).
+
+## Related
+
+- [Odds snapshot and odds tables](odds-tables.md)
+- [OddsWriter](odds-writer.md)
+- [OddsReader](odds-reader.md)

@@ -11,10 +11,10 @@ Every code change keeps the wiki current. `uv run python scripts/wiki_lint.py` (
 ## Constraints
 
 - **Never point `DATABASE_URL` at production** from a local machine. That rules out migrations, fetches, test runs and `odds copy from-prod` without an explicit production URL. See [databases](wiki/foundations/databases-and-environments.md).
-- **Deployed AWS state is not in the repo.** `odds scheduler list-jobs --backend aws` is the only record of what runs on AWS. See [jobs and deployment](wiki/scheduling/jobs-and-deployment-matrix.md).
-- **The Odds API costs quota units.** Check `odds status quota` before bulk or historical fetches. See [quota](wiki/collection/odds-api-client-and-quota.md).
-- **Pass `--sport` and the sport's market key.** Several CLI defaults are NBA. EPL odds use `1x2` and MLB uses `h2h`. See [sources and keys](wiki/collection/sources-and-keys.md).
-- **Historical analysis uses only data at or before decision time.** `get_odds_at_time` searches both sides of the target time. See [look-ahead](wiki/modelling/decision-time-and-look-ahead.md).
+- **Deployed AWS state is not in the repo.** `odds scheduler list-jobs --backend aws` is the only record of what runs on AWS. See [jobs and deployment](wiki/scheduling/job-deployment-matrix.md).
+- **The Odds API costs quota units.** Check `odds status quota` before bulk or historical fetches. See [quota](wiki/collection/odds-api-quota.md).
+- **Pass `--sport` and the sport's market key.** Several CLI defaults are NBA. EPL odds use `1x2` and MLB uses `h2h`. See [sources and keys](wiki/collection/sport-and-market-keys.md).
+- **Historical analysis uses only data at or before decision time.** `get_odds_at_time` searches both sides of the target time. See [look-ahead](wiki/modelling/look-ahead-bias.md).
 - **Training configs set `target_type` and `target_bookmaker` explicitly.** The code defaults are not the production target. See [CLV target](wiki/modelling/clv-target.md).
 - **Use one `async with async_session_maker() as session` per task.** Lambda gets `NullPool` automatically. See [databases](wiki/foundations/databases-and-environments.md).
 

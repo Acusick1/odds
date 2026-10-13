@@ -8,13 +8,20 @@ description: AWS infrastructure and deployment, CI/CD workflows, Discord alerts,
 How the system is deployed, verified and watched: the two Lambdas and their Terraform, the GitHub Actions that deploy and check them, the alert and heartbeat machinery that tells an operator something stalled, and the reports the system produces. Deployed AWS state is not in the repo; pages say so and give the command that checks it.
 
 <!-- pages:start -->
-### Processes
+### Reference
 
-- [Reporting surfaces and the daily digest](reporting-and-daily-digest.md) — What the system reports and through which channel (Discord, odds status, MCP, traces), and the opt-in, local-only EPL daily-digest job with its single-model, home-side convention.
-
-### Components
-
-- [Alerts, heartbeats and the health monitor](alerts-and-health.md) — How alerts reach Discord, the alert-type taxonomy and severity-blind rate limiting in alert_history, heartbeats and their expectations, the check-health job's five checks, and which jobs have no heartbeat at all.
-- [AWS infrastructure and deployment](aws-infrastructure.md) — The two Lambda functions and images, Terraform and bootstrap layout and variables, IAM/SSM/logs and costs, and the manual first-deploy and per-deploy steps, including activating self-scheduling rules.
+- [Alerts and the alert_history table](alerts.md) — Discord delivery, the alert helpers and job_alert_context, AlertConfig, rate limiting and the alert_history taxonomy.
+- [AWS infrastructure and deployment](aws-infrastructure.md) — The two Lambda functions and images, Terraform and bootstrap layout and variables, IAM, SSM, logs, secrets, constraints and costs.
 - [CI/CD workflows](ci-cd-workflows.md) — What each GitHub Actions workflow runs and when — tests, lint, ephemeral dev deploy, gated prod deploy, daily validation, live-API and schedule health checks — and what they do not exercise.
+- [Health monitor, check-health job and odds status](health-monitor.md) — HealthMonitor, the check-health job's five checks, heartbeat purge, its own alert path, and what odds status show, quota and events print and read.
+- [The daily-digest job](daily-digest.md) — Queries, embed layout, delivery, schedule and heartbeat of odds_lambda.jobs.daily_digest.
+
+### Explanation
+
+- [How failures are detected](alerting-and-heartbeats.md) — How event-driven alerts, heartbeats and the polling health monitor fit together, which jobs each covers, and the blind spots.
+- [Reporting surfaces](reporting-surfaces.md) — What the system reports about itself and its outputs, through which channel, and what each surface cannot show.
+
+### How-to guides
+
+- [Deploy to AWS by hand](howto-deploy-aws.md) — First-deploy bootstrap, then build, apply, migrate, activate rules and verify.
 <!-- pages:end -->

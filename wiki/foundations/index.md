@@ -1,6 +1,6 @@
 ---
 title: Foundations
-description: What the system is, the five packages and the CLI, configuration, databases and migrations, code and doc conventions, odds arithmetic, and local development.
+description: What the system is, the five packages and the CLI, configuration, databases and migrations, code and doc conventions, odds arithmetic and devigging, local development and the test suite.
 ---
 
 # Foundations
@@ -8,20 +8,26 @@ description: What the system is, the five packages and the CLI, configuration, d
 Repo-wide material that every other area assumes: what the system is and which sports are live, how the workspace packages fit together, how settings and databases are wired, the conventions the code follows, and how to set up and test locally.
 
 <!-- pages:start -->
-### Concepts
+### Reference
 
-- [Code conventions, timezones and documentation](conventions.md) — The UTC rule and its remaining naive-datetime sites, async-only DB access, the mechanical gates (ruff, Vale, lychee, wiki lint) versus review-only conventions, logging setup, what is authoritative for what, and where the issue-tracker conventions live.
-- [Odds arithmetic and devigging](odds-math-and-devigging.md) — The shared price-conversion, implied-probability, proportional-devig and profit helpers, which consumers devig and which stay vig-inclusive, and the diverging converter copies that store prices one point apart.
-- [Project overview and pivots](project-overview.md) — What the system is, which sports are active, where the edge is meant to come from, what runs where, the repo layout and stack, and which NBA-era defaults still lurk in live code.
+- [Code conventions and lint gates](code-conventions.md) — The pre-commit hooks and lint workflow, review-only conventions (type hints, async DB, model types, job entry points), and logging setup.
+- [Configuration (Settings)](configuration.md) — The Settings sections and env names, what is read at import, and the variables read with os.getenv outside Settings.
+- [Databases and environments](databases-and-environments.md) — The session factory and engine (NullPool in Lambda, pool sizes), the test/local/dev/prod databases and which variable points where, and the --db override.
+- [Odds arithmetic helpers](odds-math.md) — The odds_core.odds_math functions, their edge cases, their consumers, and the other copies of the same conversions.
+- [Test suite](test-suite.md) — The test directories, pytest configuration, fixtures (py-pglite), markers, and which suites CI and the deploy workflows run.
+- [The odds CLI](odds-cli.md) — The Typer app, its command groups and owning pages, shared flags (--sport defaults per command, --db), and help-text facts.
+- [Timezones and time helpers](timezones.md) — The UTC rule, the odds_core.time helpers, which ruff DTZ rules apply, and the naive-datetime sites in current code.
+- [Workspace packages and repository layout](workspace-packages.md) — The five uv workspace packages, their modules and declared dependencies, the repo layout and stack.
 
-### Components
+### Explanation
 
-- [Configuration (Settings)](configuration.md) — The Pydantic Settings sections and env names, what is frozen at import, which variables bypass Settings, how .env.example breaks if copied, and how to add a setting.
-- [Databases, environments and copying production data](databases-and-environments.md) — How code gets sessions, NullPool in Lambda, the test/local/dev/prod databases and which env var points where, how to copy production data locally, and the fallbacks that can silently hit the wrong database.
-- [Packages and the odds CLI](packages-and-cli.md) — Which of the five workspace packages holds what, the dependency rule and the undeclared odds-lambda to odds-analytics cycle, misleading module names, and the odds CLI's command groups, owning pages and shared flags.
+- [About the system and its pivots](project-overview.md) — What the system is, which sports are live, where the edge is meant to come from, what runs where in outline, the three pivots and the NBA-era defaults they left.
+- [Devigging and vig-inclusive prices](devigging.md) — What vig and proportional devigging are here, which consumers devig and which stay vig-inclusive, and what that means for comparing prices.
+- [Documentation and issue tracking](documentation-and-issue-tracking.md) — Where documentation lives (wiki, ADRs, docs/agents), what is authoritative for what, how the wiki lint and Vale keep pages current, and the issue-tracker conventions.
 
-### How-tos
+### How-to guides
 
+- [Copy production data locally](howto-copy-production-data.md) — Steps to copy one sport and date range from production into the local database, with the command's options and copy behaviour.
 - [Create and apply a database migration](howto-database-migration.md) — How to change a model, autogenerate and review an Alembic migration, and promote it local, then CI dev, then prod without breaking the running release.
-- [Set up, run and test locally](howto-develop-locally.md) — How to install, write a working .env, start Docker Postgres, migrate, make a first fetch, and run unit and integration tests without touching the dev or production database.
+- [Set up and run locally](howto-develop-locally.md) — Install, write a working .env, start Postgres, migrate, make a first fetch, run the offline tests, and add a setting.
 <!-- pages:end -->

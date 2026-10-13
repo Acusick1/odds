@@ -1,5 +1,5 @@
 ---
-type: component
+type: reference
 title: MCP sport context tools
 description: EPL get_team_context (form, fixtures, standings from ESPN fixtures) and MLB get_probable_pitchers (live read-through with cached fallback), and their data dependencies.
 sources:
@@ -36,15 +36,14 @@ Rows with ESPN `state` `in` (live) are skipped from both lists. A row counts as 
 
 Each game carries `home_pitcher_name`/`id` and `away_pitcher_name`/`id`, nullable because MLBAM omits the pitcher until announced (null means "not yet announced"), and `hours_until_commence`. The tool cannot tell a starter from an opener; that needs a web search. The cache is written only by the fetch-mlb-probables job, which is local cron only ([MLB probable pitchers](../collection/mlb-probable-pitchers.md)).
 
-## Hazards
+## Behaviour to know
 
-- **Approximate standings.** They use a simplified tiebreak (points, goal difference, goals for, team name) without the official head-to-head step, so tied positions are approximate (`odds_mcp.tools.epl._derive_standings`). `odds_analytics.standings_features` derives a table with the same chain from `odds_core.models.Event` rows, a second implementation on different data ([EPL context features](../modelling/epl-context-features.md)).
-- **Unknown teams pass through.** `odds_core.team.normalize_team_name` returns an unknown name unchanged, so a misspelt team yields empty lists and `team_row: null`, not an error.
+- Standings use a simplified tiebreak (points, goal difference, goals for, team name) without the official head-to-head step, so tied positions are approximate (`odds_mcp.tools.epl._derive_standings`). `odds_analytics.standings_features` derives a table with the same chain from `odds_core.models.Event` rows, a second implementation on different data (#463, [EPL context features](../modelling/epl-context-features.md)).
+- `odds_core.team.normalize_team_name` returns an unknown name unchanged, so a misspelt team yields empty lists and `team_row: null`, not an error.
 - The `team` fixture query is not season-scoped; only standings filter by season label.
-- **Misleading cron comment.** A comment on `_JOB_CRON_MAP["fetch-mlb-probables"]` says the tool "writes through every call"; the tool never writes, and the cron is the only write path.
 - `odds_mcp.tools.epl.get_team_context` exists only for the EPL; MLB has no equivalent form or schedule tool.
 
 ## Related
 
-- [Wake-up workflow](agent-wakeup-workflow.md) — where the agent uses these
+- [Agent prompts](agent-prompts.md), where the agent uses these
 - [Betting agent](betting-agent.md)

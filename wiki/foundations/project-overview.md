@@ -1,11 +1,10 @@
 ---
-type: concept
-title: Project overview and pivots
-description: What the system is, which sports are active, where the edge is meant to come from, what runs where, the repo layout and stack, and which NBA-era defaults still lurk in live code.
+type: explanation
+title: About the system and its pivots
+description: What the system is, which sports are live, where the edge is meant to come from, what runs where in outline, the three pivots and the NBA-era defaults they left.
 sources:
   - odds_core.sports.SportKey
   - odds_lambda.scheduling.jobs._JOB_CRON_MAP
-  - odds_lambda.scheduling.jobs._JOB_MODULE_MAP
   - odds_core.config.SchedulerConfig
   - odds_core.config.PolymarketConfig
   - odds_cli.main.app
@@ -16,24 +15,22 @@ sources:
   - odds_analytics.strategies.BasicEVStrategy
   - odds_lambda.polymarket_fetcher.PolymarketClient
   - deployment/aws/terraform/eventbridge.tf
-  - pyproject.toml
-  - docker-compose.yml
 status: stable
 ---
 
-# Project overview and pivots
+# About the system and its pivots
 
-A single-user, sport-agnostic betting data pipeline with sport-specific LLM betting agents ([README](../../README.md), [AGENTS.md](../../AGENTS.md)). Shared infrastructure (odds collection, storage, paper trading, scheduling, alerting) is reused per sport; each sport adds its own data sources, feature extractors, agent prompts and MCP tools.
+A single-user, sport-agnostic betting data pipeline with sport-specific LLM betting agents ([README](../../README.md), [AGENTS.md](../../AGENTS.md)). Shared infrastructure (odds collection, storage, paper trading, scheduling, alerting) is reused per sport; each sport adds its own data sources, feature extractors, agent prompts and MCP tools. The repo layout and stack are in [Workspace packages and repository layout](workspace-packages.md).
 
-Design principles (inferred): robust collection and storage before analysis; a single-user system where simplicity beats scale; sports and markets as extension points; validation throughout the pipeline; all data preserved for backtesting.
+Design principles `(inferred)`: robust collection and storage before analysis; a single-user system where simplicity beats scale; sports and markets as extension points; validation throughout the pipeline; all data preserved for backtesting.
 
 ## Sports
 
-EPL and MLB are active, with agents in interactive evaluation, not autonomous production. NBA code (injuries, game logs, Polymarket targeting) exists but is deprioritized. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Data sources, sport keys and market keys](../collection/sources-and-keys.md).
+EPL and MLB are active, with agents in interactive evaluation, not autonomous production. NBA code (injuries, game logs, Polymarket targeting) exists but is deprioritized. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md).
 
 ## Where the edge is meant to come from
 
-Breadth and speed of information synthesis by an LLM agent, not the XGBoost CLV model. The deployed model is `epl-clv-home` `v308058c` with a CV R² of about 0.058: too weak to bet on alone, so it is a supplementary signal the agent treats as a sanity check. See [Pivot to information edge](../agent/decision-information-edge.md), [Betting agent](../agent/betting-agent.md) and [What the CLV model can and cannot do](../evaluation/clv-model-findings.md).
+Breadth and speed of information synthesis by an LLM agent, not the XGBoost CLV model ([ADR-0005](../../docs/adr/0005-information-edge.md)). The deployed model is `epl-clv-home` `v308058c` with a CV R² of about 0.058: too weak to bet on alone, so it is a supplementary signal the agent treats as a sanity check. See [The betting agent](../agent/betting-agent.md) and [What the CLV model can and cannot do](../evaluation/clv-model-findings.md).
 
 ## What runs where
 
@@ -43,68 +40,29 @@ Two AWS Lambdas (`odds-scheduler`, `odds-scheduler-scraper`) plus a local schedu
 - `agent-run` and `daily-digest` are also opt-in locally: both are commented out of the default `odds_core.config.SchedulerConfig` `bootstrap_jobs`.
 - The remaining fetch jobs may run on AWS, locally, or both.
 
-Design and per-job table: [Jobs: registry, context and where each runs](../scheduling/jobs-and-deployment-matrix.md#where-each-job-runs), [Local scheduler](../scheduling/local-scheduler.md).
-
-## Repository layout
-
-| Path | Contents |
-|---|---|
-| `packages/` | Five uv workspace members, see [Packages and the odds CLI](packages-and-cli.md) |
-| `docs/adr/`, `docs/agents/` | Decision records and agent tooling conventions, see [Conventions](conventions.md#documentation-authority) |
-| `experiments/` | `configs/`, `scripts/`, `results/` for modelling runs |
-| `scripts/` | Operational scripts (ingestion, tier checks, `ci/`, `wiki_lint.py`) |
-| `migrations/`, `alembic.ini` | Alembic, see [migrations](howto-database-migration.md) |
-| `tests/` | `unit/`, `integration/`, `migration/`, see [local development](howto-develop-locally.md#run-the-tests) |
-| `deployment/aws/` | Terraform, Dockerfiles, bootstrap, see [AWS infrastructure](../operations/aws-infrastructure.md) |
-| `.github/workflows/` | [CI/CD](../operations/ci-cd-workflows.md) |
-| `wiki/` | This wiki |
-
-`.claude/`, `worktrees/` and `logs/` are gitignored.
-
-## Stack
-
-Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in each `packages/<name>/pyproject.toml`:
-
-| Concern | Library | Declared in |
-|---|---|---|
-| ORM and driver | SQLModel, asyncpg, on PostgreSQL 15 (`docker-compose.yml`) | `packages/odds-core/pyproject.toml` |
-| Settings and logging | Pydantic Settings, structlog | `packages/odds-core/pyproject.toml` |
-| Local scheduler | APScheduler 4 (pinned alpha), tenacity retries | `packages/odds-lambda/pyproject.toml` |
-| Migrations | Alembic | `packages/odds-lambda/pyproject.toml` |
-| NBA stats and browser scraping | nba_api, Playwright | `packages/odds-lambda/pyproject.toml` |
-| CLI | Typer, Rich | `packages/odds-cli/pyproject.toml` |
-| MCP server | FastMCP | `packages/odds-mcp/pyproject.toml` |
-| Modelling | XGBoost | `packages/odds-analytics/pyproject.toml` |
-| Tests | pytest, pytest-asyncio, py-pglite | `pyproject.toml` |
- Conventions: [Conventions](conventions.md), [Configuration](configuration.md).
+Per-job table: [Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs); local backend: [Local scheduler](../scheduling/local-scheduler.md).
 
 ## The three pivots
 
 The repo carries the residue of three pivots (PRs `#214`, `#217`, `#267`, `#387`). Knowing which era a module comes from tells you whether its defaults match the active sports.
 
 1. **NBA to EPL and MLB.** The first experiments are NBA (February 2026); EPL work starts in March (`experiments/results/exp1_feature_correlations/FINDINGS.md`; PRs `#214`, `#217`). NBA code remains (injuries, game logs, Polymarket targeting).
-2. **Model edge to information edge**, in April 2026 (`#290`). The agent's synthesis of many sources is the hypothesised edge (see [Pivot to information edge](../agent/decision-information-edge.md)). Injury features add no signal (`experiments/results/exp6b_injury_closing_tier/`); see [NBA injury reports, game logs and player stats](../collection/nba-injuries-and-stats.md).
-3. **Structural consolidations**: alerts moved from odds-cli to odds-core (`#267`), self-scheduling unified into one decision module (`#387`), scoring inlined into the OddsPortal job. See [Alerts, heartbeats and the health monitor](../operations/alerts-and-health.md), [Self-scheduling](../scheduling/self-scheduling.md), [Publishing, loading and scoring the CLV model](../modelling/model-publishing-and-scoring.md).
+2. **Model edge to information edge**, in April 2026 (`#290`, [ADR-0005](../../docs/adr/0005-information-edge.md)). Injury features add no signal (`experiments/results/exp6b_injury_closing_tier/`); see [NBA injury reports, game logs and player stats](../collection/nba-injuries-and-stats.md).
+3. **Structural consolidations**: alerts moved from odds-cli to odds-core (`#267`), self-scheduling unified into one decision module (`#387`), scoring inlined into the OddsPortal job. See [Alerts and the alert_history table](../operations/alerts.md), [Self-scheduling](../scheduling/self-scheduling.md), [Prediction scoring](../modelling/prediction-scoring.md).
 
-## NBA assumptions still in live code
+## NBA-era defaults still in live code
 
-Each fails quietly on EPL and MLB data:
+Each fails quietly on EPL and MLB data: the symptom is an empty result (no events, zero opportunities), not an error, so an NBA default and an empty EPL window look alike. The reference page for each states the default:
 
-- `fetch current`, `fetch scores`, `odds_cli.commands.polymarket.discover` and `quality` default `--sport` to `basketball_nba` ([odds CLI](packages-and-cli.md#hazards)).
-- `backfill plan` and `backfill scores` hardcode `sport_key="basketball_nba"` (`odds_cli.commands.backfill`), as does `odds_analytics.backfill_executor.BackfillExecutor` (`odds_analytics.backfill_executor`). See [Load historical odds and scores](../collection/howto-load-historical-odds.md).
-- `odds_lambda.storage.tier_validator.TierCoverageValidator` checks the API fixture list with `sport="basketball_nba"` only (`odds_lambda.storage.tier_validator`); `odds_lambda.storage.readers.OddsReader.get_games_by_date` buckets days noon-to-noon UTC "to capture a full NBA game day", and the validator uses it for every sport ([Odds validation and coverage checks](../storage/data-validation.md), [OddsReader](../storage/odds-reader-and-storage-layer.md)).
+- CLI `--sport` defaults to `basketball_nba` in several commands ([Sport defaults](odds-cli.md#sport-defaults)); the root banner describes the tool as NBA (`odds_cli.main.app`).
+- `backfill plan` and `backfill scores` hardcode `sport_key="basketball_nba"` (`odds_cli.commands.backfill`), as does `odds_analytics.backfill_executor.BackfillExecutor` ([Odds API historical backfill](../collection/odds-api-backfill.md)).
+- Completeness checks discover NBA games only, and `odds_lambda.storage.readers.OddsReader.get_games_by_date` buckets days noon-to-noon UTC "to capture a full NBA game day" for every sport (`odds_lambda.storage.tier_validator.TierCoverageValidator`; [Coverage and completeness checks](../storage/coverage-checks.md), [OddsReader](../storage/odds-reader.md)).
 - `odds_analytics.strategies.BasicEVStrategy` defaults to markets `h2h`, `spreads`, `totals` and US retail books, which match nothing in OddsPortal EPL data (`1x2`, UK books) ([Backtest strategies](../evaluation/backtest-strategies.md)).
-- Polymarket code targets NBA (`odds_lambda.polymarket_fetcher.PolymarketClient.get_nba_events`, `odds_core.config.PolymarketConfig.nba_series_id`), and `odds_core.config.PolymarketConfig.enabled` is a separate gate ([Polymarket](../collection/polymarket.md)).
-- `.env.example` sets `SPORTS=basketball_nba` and writes list values as comma-separated text, which fails JSON parsing ([Configuration](configuration.md#hazards)).
-
-## Hazards
-
-- The mismatches above surface as empty results (no events, zero opportunities), not errors, so an NBA default and an empty EPL window look alike.
-- Root `pyproject.toml` still describes the project as "NBA betting odds data collection and analysis system", and the CLI banner reads "NBA odds collection and analysis" (`odds_cli.main.app`). Neither reflects the active sports.
-- Verify any claim about defaults against code ([Conventions](conventions.md#documentation-authority)).
+- Polymarket code targets NBA (`odds_lambda.polymarket_fetcher.PolymarketClient.get_nba_events`, `odds_core.config.PolymarketConfig.nba_series_id`) ([Polymarket pipeline and tables](../collection/polymarket.md)).
+- `.env.example` sets `SPORTS=basketball_nba` ([Configuration](configuration.md)).
 
 ## Related
 
-- [Packages and the odds CLI](packages-and-cli.md)
-- [Betting agent](../agent/betting-agent.md)
-- [Reporting surfaces and the daily digest](../operations/reporting-and-daily-digest.md) — how the system reports on itself
+- [Workspace packages and repository layout](workspace-packages.md)
+- [The betting agent](../agent/betting-agent.md)
+- [Reporting surfaces](../operations/reporting-surfaces.md) — how the system reports on itself

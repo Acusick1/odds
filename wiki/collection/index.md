@@ -5,29 +5,36 @@ description: "Every external feed and the job that collects it: The Odds API, Od
 
 # Data collection
 
-Each external source has a fetcher, a job (or manual script) that runs it, and a destination table. [sources-and-keys](sources-and-keys.md) is the inventory and the place to start; the other pages cover one feed each.
+Each external source has a fetcher, a job (or manual script) that runs it, and a destination table. [data-sources](data-sources.md) is the inventory and the place to start; the other pages cover one feed each, with a reference page for the code and an explanation page where the reasoning needs one.
 
 <!-- pages:start -->
-### Concepts
-
-- [Data sources, sport keys and market keys](sources-and-keys.md) — Every odds feed and what it supplies, the bookmaker coverage per source, SportKey and job-name suffixes, the h2h/1x2/OddsHarvester market-key dialects, and what adding a sport, bookmaker or market touches.
-
-### Processes
-
-- [Event status lifecycle and results jobs](event-lifecycle.md) — The five event statuses, which job or command sets each (update-status to LIVE; fetch-scores, fetch-oddsportal-results and CLI to FINAL), each job's cadence and failure modes, and what each status gates.
-- [Odds API ingestion and the fetch-odds job](odds-api-ingestion.md) — How one Odds API fetch becomes stored rows through OddsIngestionService, what the fetch-odds job adds (event sync, gate, scheduling, quota alerts), and what fetch_logs records and omits.
-
-### Components
+### Reference
 
 - [Betfair Exchange client and job](betfair-exchange.md) — The Betfair client, cert loading and adapter, the fetch-betfair-exchange job's cadence on AWS and locally, and what price is actually stored as betfair_exchange.
 - [EPL context data (ESPN, FPL, FBref)](epl-context-data.md) — ESPN fixtures (the fetch-espn-fixtures job) and lineups, FPL availability and FBref stats, covering fetchers, scripts, tables and readers, and which of them any feature or tool actually consumes.
+- [Historical ingest scripts](historical-ingest-scripts.md) — scripts/scrape_oddsportal.py, ingest_oddsportal.py, ingest_football_data_uk.py: inputs, matching, ids, snapshot shape, idempotency.
 - [MLB probable pitchers](mlb-probable-pitchers.md) — The MLB Stats API fetcher, the fetch-mlb-probables job, the append-only mlb_probable_pitchers table and its reader, and how the MCP tool reads it.
-- [NBA injury reports, game logs and player stats](nba-injuries-and-stats.md) — The deprioritized NBA feeds (injury PDFs, stats.nba.com game logs, PBPStats player stats), their manual CLIs and event matching, and the injury and rest features built on them, which carry no CLV value.
-- [OddsPortal scraper and fetch-oddsportal job](oddsportal.md) — OddsHarvester/Playwright scraping, LEAGUE_SPECS, the raw_data adapter and retries, the fetch-oddsportal job's cadence and alerts, and why its inline CLV scoring only works on a local scheduler.
-- [Polymarket pipeline and tables](polymarket.md) — The deprioritized, NBA-targeted Polymarket collection: client, ingestion, fetch and backfill jobs, manual event linking, the five polymarket_* tables and order-book metrics.
-- [The Odds API client, key rotation and quota](odds-api-client-and-quota.md) — TheOddsAPIClient endpoints, retry and key rotation with the SSM index, unit cost per endpoint, and where quota is logged, alerted and checked (and where those checks mislead).
+- [NBA injury reports, game logs and player stats](nba-injuries-and-stats.md) — The deprioritized NBA feeds (injury PDFs, stats.nba.com game logs, PBPStats player stats), their manual CLIs, writers and event matching.
+- [Odds API historical backfill](odds-api-backfill.md) — odds discover, odds backfill and the GameSelector, GapBackfillPlanner, BackfillExecutor modules.
+- [Odds API ingestion service](odds-ingestion-service.md) — OddsIngestionService steps and callbacks, the fetch_logs table, and odds fetch current / odds discover upcoming.
+- [OddsPortal scraper](oddsportal-scraper.md) — oddsportal_common, oddsportal_adapter, browser_lock, retries, and odds scrape upcoming.
+- [Polymarket pipeline and tables](polymarket.md) — Client, classifier, ingestion, fetch and backfill jobs, manual linking, CLI, AWS gate, the five tables and order-book metrics.
+- [Results and status jobs](results-jobs.md) — update-status, fetch-scores, fetch-oddsportal-results and odds fetch scores: cadence, flow, heartbeats, failure handling.
+- [Sport, market and bookmaker keys](sport-and-market-keys.md) — SportKey, job-name suffixes, the market-key dialects per writer, bookmaker key maps, and DataCollectionConfig defaults.
+- [The fetch-odds job](fetch-odds-job.md) — Event sync, gate, pre/post-schedule, quota alerts and log events of odds_lambda.jobs.fetch_odds.
+- [The fetch-oddsportal job](fetch-oddsportal-job.md) — LEAGUE_SPECS, flow, cadence, alerts, heartbeats and inline scoring of odds_lambda.jobs.fetch_oddsportal.
+- [The Odds API client and key rotation](odds-api-client.md) — TheOddsAPIClient methods, retry and key rotation with the SSM index, and unit cost per endpoint.
 
-### How-tos
+### Explanation
 
-- [Load historical odds and scores](howto-load-historical-odds.md) — How to load history two ways, OddsPortal/football-data.co.uk scripts (snapshots only, EPL) and the Odds API historical backfill (NBA-only, paid), and what each produces and breaks.
+- [Data sources](data-sources.md) — Every odds feed and what it supplies, bookmaker roles, the Pinnacle coverage gap, and where each feed runs.
+- [Event status lifecycle](event-status-lifecycle.md) — The five statuses, which job or command sets each, and what each status gates downstream.
+- [Odds API quota accounting](odds-api-quota.md) — How quota is spent, recorded in fetch_logs, alerted by fetch-odds and the health monitor, and checked with odds status quota, and where those disagree.
+- [Polymarket market character and data availability](polymarket-market-research.md) — Observed market depth by sport, series and tag ids from research, market richness, and how long the API keeps data.
+
+### How-to guides
+
+- [Add a sport](howto-add-sport.md) — Steps to add a sport: SportKey, suffix, overnight window, league spec, Betfair config, team aliases, cron allowlists, Terraform rules, heartbeat keys.
+- [Backfill Odds API history (NBA)](howto-backfill-odds-api-history.md) — Steps for discover, plan, execute, scores and status, and the tier-gap route.
+- [Load historical EPL odds](howto-load-historical-epl-odds.md) — Steps to scrape OddsPortal, ingest it, then ingest football-data.co.uk.
 <!-- pages:end -->

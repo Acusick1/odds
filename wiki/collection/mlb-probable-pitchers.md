@@ -1,5 +1,5 @@
 ---
-type: component
+type: reference
 title: MLB probable pitchers
 description: "The MLB Stats API fetcher, the fetch-mlb-probables job, the append-only mlb_probable_pitchers table and its reader, and how the MCP tool reads it."
 sources:
@@ -16,7 +16,7 @@ status: stable
 
 # MLB probable pitchers
 
-Point-in-time snapshots of MLBAM's announced probable starters, stored in `mlb_probable_pitchers` (`odds_core.mlb_data_models.MlbProbablePitchers`). MLBAM only exposes current state, so the announcement timeline exists only if every fetch is written. MLB odds themselves are `h2h` ([sources-and-keys](sources-and-keys.md)).
+Point-in-time snapshots of MLBAM's announced probable starters, stored in `mlb_probable_pitchers` (`odds_core.mlb_data_models.MlbProbablePitchers`). MLBAM only exposes current state, so the announcement timeline exists only if every fetch is written. MLB odds themselves are `h2h` ([sport-and-market-keys](sport-and-market-keys.md#market-key-dialects)).
 
 ## Flow
 
@@ -28,7 +28,7 @@ The job raises unless `ctx.sport` is `baseball_mlb`.
 
 ## Where it runs
 
-Schedule `0 6 * * *`, MLB only (`_JOB_CRON_MAP` in `odds_lambda.scheduling.jobs`), in the default local bootstrap. It never runs on AWS: Terraform `sport_configs` has MLB commented out and no rule exists ([jobs-and-deployment-matrix](../scheduling/jobs-and-deployment-matrix.md)). Deployed state is unverifiable from the repo: `odds scheduler list-jobs --backend aws`. The MLB overnight window (05:00-14:00 UTC) belongs to the self-scheduling jobs, not this cron ([self-scheduling](../scheduling/self-scheduling.md)).
+Schedule `0 6 * * *`, MLB only (`_JOB_CRON_MAP` in `odds_lambda.scheduling.jobs`), in the default local bootstrap. It never runs on AWS: Terraform `sport_configs` has MLB commented out and no rule exists ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Deployed state is unverifiable from the repo: `odds scheduler list-jobs --backend aws`. The MLB overnight window (05:00-14:00 UTC) belongs to the self-scheduling jobs, not this cron ([decision-engine](../scheduling/decision-engine.md#overnight-windows)).
 
 ## Reading
 
@@ -43,15 +43,15 @@ The MCP tool `odds_mcp.tools.mlb.get_probable_pitchers` ([mcp-sport-context-tool
 - **Null fields** mean the starter is not yet announced (kept deliberately), not a fetch failure. A game with no row at all was outside the 72 h window on every run.
 - **Joining to odds**: there is no foreign key to `events`; match on teams and `commence_time` yourself, remembering that MLBAM team names are not the pipeline's canonical aliases.
 
-## Hazards
+## Storage characteristics
 
-- **Misleading cron comment.** The comment on `fetch-mlb-probables` in `_JOB_CRON_MAP` says the MCP tool "writes through every call"; the tool and the job docstring say it never persists. Code: read-only. The daily cron is the sole writer.
-- **Unbounded growth.** The table grows by every game on every daily run (no dedup of unchanged state, no retention).
-- **Indexes.** `commence_time` and `fetched_at` are the only indexed columns besides the unique key; there is no standalone `game_pk` index (the unique key's prefix serves it).
-- **No event link.** MLB rows carry MLBAM team names, not `events` ids ([events](../storage/events.md#matchers)).
+- The daily cron is the only writer; the MCP tool and the job docstring both state that the tool never persists.
+- The table grows by every game on every daily run: there is no dedup of unchanged state and no retention.
+- `commence_time` and `fetched_at` are the only indexed columns besides the unique key; there is no standalone `game_pk` index (the unique key's prefix serves it).
+- MLB rows carry MLBAM team names, not `events` ids ([event-matching](../storage/event-matching.md)).
 
 ## Related
 
 - [EPL context data](epl-context-data.md), the sibling daily-cron job
 - [MCP sport context tools](../agent/mcp-sport-context-tools.md)
-- [Sources and keys](sources-and-keys.md)
+- [Data sources](data-sources.md)

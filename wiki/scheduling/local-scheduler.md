@@ -1,22 +1,29 @@
 ---
-type: component
-title: Local scheduler and always-on host
-description: The APScheduler-on-Postgres backend, odds scheduler start/run-once/smoke/list-jobs, bootstrap jobs and cron floors, and running it as a systemd service redeployed by deploy.sh.
+type: reference
+title: Local scheduler
+description: The APScheduler-on-Postgres backend, its scheduling primitives, the odds scheduler commands, bootstrap jobs and the cron table.
 sources:
   - odds_lambda.scheduling.backends.local.LocalSchedulerBackend
   - odds_cli.commands.scheduler.start_local
   - odds_cli.commands.scheduler.info
+  - odds_cli.commands.scheduler.smoke
+  - odds_cli.commands.scheduler.health
   - odds_core.config.SchedulerConfig
   - odds_lambda.scheduling.jobs._JOB_CRON_MAP
-  - deploy.sh
-  - odds-scheduler.service
-  - odds_cli.commands.scheduler.smoke
+  - odds_lambda.scheduling.jobs._SMOKE_UNSAFE_JOBS
+  - odds_lambda.jobs.agent_run.schedule_next
+  - odds_mcp.server.refresh_scrape
+  - odds_mcp.server.get_scheduled_jobs
+  - odds_lambda.jobs.fetch_oddsportal.ingest_league
+  - packages/odds-lambda/pyproject.toml
 status: stable
 ---
 
-# Local scheduler and always-on host
+# Local scheduler
 
-`odds_lambda.scheduling.backends.local.LocalSchedulerBackend` runs APScheduler 4 (pinned `4.0.0a6` in `packages/odds-lambda/pyproject.toml`) with `SQLAlchemyDataStore` and `AsyncpgEventBroker` on the project Postgres, so any process sharing the database can add a schedule and the running scheduler sees it via LISTEN/NOTIFY. It is the default backend (`SCHEDULER_BACKEND=local`) and the only home of jobs that have no EventBridge rule ([Jobs](jobs-and-deployment-matrix.md#where-each-job-runs)). The MCP tools `odds_mcp.server.refresh_scrape` and `odds_mcp.server.get_scheduled_jobs` use this store; `odds_mcp.server.refresh_scrape` queues `odds_lambda.jobs.fetch_oddsportal.ingest_league` jobs that wait if no scheduler process is running ([MCP server](../agent/mcp-server.md)).
+`odds_lambda.scheduling.backends.local.LocalSchedulerBackend` runs APScheduler 4 (pinned `4.0.0a6` in `packages/odds-lambda/pyproject.toml`) with `SQLAlchemyDataStore` and `AsyncpgEventBroker` on the project Postgres, so any process sharing the database can add a schedule and the running scheduler sees it via LISTEN/NOTIFY. It is the default backend (`SCHEDULER_BACKEND=local`) and the only home of jobs that have no EventBridge rule ([Where each job runs](job-deployment-matrix.md#where-each-job-runs)). The MCP tools `odds_mcp.server.refresh_scrape` and `odds_mcp.server.get_scheduled_jobs` use this store; `odds_mcp.server.refresh_scrape` queues `odds_lambda.jobs.fetch_oddsportal.ingest_league` jobs that wait if no scheduler process is running ([MCP scheduling tools](../agent/mcp-server.md#scrape-and-scheduling-tools)). To run it as a service, see [Run the scheduler as a systemd service](howto-run-scheduler-service.md).
+
+`odds_lambda.scheduling.backends.local.LocalSchedulerBackend.get_scheduled_jobs` returns `[]` only for a backend built with `dry_run=True`; `odds scheduler list-jobs` builds it without, so `SCHEDULER_DRY_RUN` does not empty the listing.
 
 ## Scheduling primitives
 
@@ -29,9 +36,9 @@ status: stable
 
 In `odds_cli.commands.scheduler`:
 
-- `start`: exits 1 unless `SCHEDULER_BACKEND=local`. With bootstrap on, it first removes stored schedules not in `expected_compound_job_names(bootstrap_jobs, sports)`, then for each job in `odds_core.config.SchedulerConfig.bootstrap_jobs` either installs its `_JOB_CRON_MAP` cron (re-applied on every start) or runs its bootstrap function once, skipping jobs that already have a `next_run_time`. `--db NAME` swaps the database name in `DATABASE_URL` and defaults bootstrap off; `--bootstrap` forces it on. Sidecar mode keeps a scheduler on a sandbox database from starting an agent run alongside one you are driving by hand. Invocations: `odds scheduler start` (prod-like, bootstrap on), `odds scheduler start --db odds_test` (dev sidecar, bootstrap off), `odds scheduler start --db odds_test --bootstrap` (dev full-loop smoke test); it runs until Ctrl+C. In-process sessions keep the original engine ([Configuration](../foundations/configuration.md#hazards)).
-- `run-once JOB`: runs one registered job, compound names allowed (`fetch-odds-epl`), on any backend. Its help text lists three jobs but any registered name works.
-- `odds_cli.commands.scheduler.smoke`: runs every bootstrapped job once and prints PASS/FAIL/SKIP; exit code is the failed count (max 255). `agent-run` is skipped unless `--include-agent` (`_SMOKE_UNSAFE_JOBS`); `--no-side-effects` drops `daily-digest`, which posts to Discord. `--only` and `--exclude` take base or compound names and may repeat. Gated jobs only run their body when `decision.should_execute` is true, so smoke otherwise exercises import, config, decision and schema paths.
+- `start`: exits 1 unless `SCHEDULER_BACKEND=local`. With bootstrap on, it first removes stored schedules not in `expected_compound_job_names(bootstrap_jobs, sports)`, then for each job in `odds_core.config.SchedulerConfig.bootstrap_jobs` either installs its `_JOB_CRON_MAP` cron (re-applied on every start) or runs its bootstrap function once, skipping jobs that already have a `next_run_time`. `--db NAME` swaps the database name in `DATABASE_URL` and defaults bootstrap off; `--bootstrap` forces it on. With `--db` set and bootstrap off, stale-schedule pruning is also skipped. Sidecar mode keeps a scheduler on a sandbox database from starting an agent run alongside one you are driving by hand. Invocations: `odds scheduler start` (prod-like, bootstrap on), `odds scheduler start --db odds_test` (dev sidecar, bootstrap off), `odds scheduler start --db odds_test --bootstrap` (dev full-loop smoke test); it runs until Ctrl+C. In-process sessions keep the original engine ([Databases and environments](../foundations/databases-and-environments.md#engine-creation)).
+- `run-once JOB`: runs one registered job, compound names allowed (`fetch-odds-epl`), on any backend.
+- `odds_cli.commands.scheduler.smoke`: runs every bootstrapped job once and prints PASS/FAIL/SKIP; exit code is the failed count (max 255). `agent-run` is skipped unless `--include-agent` (`_SMOKE_UNSAFE_JOBS`); `--no-side-effects` drops `daily-digest`, which posts to Discord. `--only` and `--exclude` take base or compound names and may repeat. Gated jobs run their body only when due, so smoke otherwise checks imports, config, decision and schema (#395).
 - `list-jobs [--backend aws]`, `odds_cli.commands.scheduler.info`, `odds_cli.commands.scheduler.health`, `test-backend`: inspection. A fresh `odds_cli.commands.scheduler.health` process has no running scheduler and reports "initialized (not started)".
 
 ## Bootstrap jobs and cron table
@@ -40,42 +47,14 @@ In `odds_cli.commands.scheduler`:
 
 `odds_lambda.scheduling.jobs._JOB_CRON_MAP`: `daily-digest` `0 8 * * *` (EPL), `fetch-espn-fixtures` `0 6 * * *` (EPL), `fetch-mlb-probables` `0 6 * * *` (MLB), `fetch-betfair-exchange` `*/30 * * * *` (every Betfair-supported sport).
 
-Inline CLV scoring inside `fetch-oddsportal` works only here: the scraper Lambda image lacks the analytics stack ([Publishing and scoring](../modelling/model-publishing-and-scoring.md)). Running the same job on AWS and locally double-scrapes ([OddsPortal](../collection/oddsportal.md)); check `odds scheduler list-jobs --backend aws` first.
+`fetch-betfair-exchange-<sport>` uses one schedule id for its cron and its self-schedule, both with `ConflictPolicy.replace`, so the first self-schedule replaces the `*/30` cron until the next `odds scheduler start` (#469).
 
-## Run as a systemd service
-
-The scheduler can run on a mini-PC under systemd and be redeployed by a script that proves changed jobs run before restarting.
-
-Install the unit:
-
-1. Edit `odds-scheduler.service` (repo root): set `User`, `WorkingDirectory`, `EnvironmentFile` (the repo `.env`) and the absolute `uv` path in `ExecStart` (`uv run odds scheduler start`). systemd needs an absolute executable path; `which uv` shows it.
-2. Install and start:
-   ```bash
-   sudo cp odds-scheduler.service /etc/systemd/system/odds-scheduler.service
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now odds-scheduler
-   ```
-   `Restart=always` with `RestartSec=5` restarts it after a crash or reboot.
-3. Check: `systemctl status odds-scheduler`, `journalctl -u odds-scheduler -f`.
-
-Redeploy by running `./deploy.sh` from the repo root on the host. In order it runs `git pull --ff-only`, `uv sync`, `uv run alembic upgrade head`, `SCHEDULER_DRY_RUN=true uv run odds scheduler smoke`, `sudo systemctl restart odds-scheduler`, then status and `odds scheduler list-jobs`.
-
-- `set -e` aborts before the restart if migration or smoke fails, so the old code keeps serving.
-- Dry-run makes self-scheduling a no-op, so the live schedule store is untouched.
-- `alembic upgrade head` runs before the restart, so the old scheduler briefly sees the new schema. That is safe for additive migrations. For a destructive one, `sudo systemctl stop odds-scheduler` first, migrate, then redeploy ([Create and apply a database migration](../foundations/howto-database-migration.md)).
-
-## Hazards
-
-- Cron and self-scheduling share one schedule id for `fetch-betfair-exchange-<sport>`, and both writes use `ConflictPolicy.replace`, so the first `odds_lambda.scheduling.helpers.self_schedule` call replaces the cron trigger with a one-shot trigger until the next `odds scheduler start`. Whether the "safety floor" comment in `_JOB_CRON_MAP` still holds after that is not verified.
-- `scheduler info` has no help text: its docstring sits after a statement (`odds_cli.commands.scheduler.info`).
-- With `--db` set and bootstrap off, stale-schedule pruning is also skipped.
-- `odds_lambda.scheduling.backends.local.LocalSchedulerBackend.get_scheduled_jobs` returns `[]` only for a backend built with `dry_run=True`; `odds scheduler list-jobs` builds it without, so `SCHEDULER_DRY_RUN` does not empty the listing.
-- Do not run this host's scheduler and an AWS scraper for the same jobs unless intended.
-- `deploy.sh` is not idempotent with local edits: `--ff-only` fails on a diverged checkout.
+Inline CLV scoring inside `fetch-oddsportal` works only here: the scraper Lambda image lacks the analytics stack ([Prediction scoring](../modelling/prediction-scoring.md)). Running the same job on AWS and locally double-scrapes ([OddsPortal job](../collection/fetch-oddsportal-job.md)); check `odds scheduler list-jobs --backend aws` first ([Deployed state](job-deployment-matrix.md#deployed-state)).
 
 ## Related
 
-- [Scheduler backends, EventBridge rules and the Lambda handler](scheduler-backends.md)
-- [Jobs: registry, context and where each runs](jobs-and-deployment-matrix.md)
-- [Self-scheduling and the decision engine](self-scheduling.md)
-- [Packages and the odds CLI](../foundations/packages-and-cli.md)
+- [Run the scheduler as a systemd service](howto-run-scheduler-service.md)
+- [Scheduler backends](scheduler-backends.md)
+- [Where each job runs](job-deployment-matrix.md)
+- [Decision engine](decision-engine.md)
+- [The odds CLI](../foundations/odds-cli.md)

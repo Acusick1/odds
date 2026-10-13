@@ -1,47 +1,24 @@
 ---
-type: component
-title: Betting agent runtime and the agent-run job
-description: How each agent wake-up runs as a claude subprocess over odds-mcp, how the opt-in, local-only agent-run job schedules wake-ups and honours agent_wakeups, the agent's database role, and the JSONL run traces.
+type: explanation
+title: The betting agent
+description: What the per-sport agent is, its three channels, why prompts are authoritative, the role of the CLV model, the EPL matchday timeline, and its evaluation status.
 sources:
-  - odds_lambda.jobs.agent_run._run_claude_agent
-  - odds_lambda.jobs.agent_run._build_agent_subprocess_env
-  - odds_lambda.jobs.agent_run.CADENCE
-  - odds_lambda.jobs.agent_run.schedule_next
-  - odds_lambda.jobs.agent_run.main
-  - odds_lambda.jobs.agent_run._check_agent_requested_wakeup
-  - odds_lambda.jobs.agent_run._log_stream_message
-  - odds_lambda.jobs.agent_run._prune_agent_run_logs
-  - odds_lambda.jobs.agent_run.AGENT_RUN_LOG_KEEP
-  - odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS
-  - odds_lambda.scheduling.jobs._SMOKE_UNSAFE_JOBS
-  - odds_lambda.scheduling.jobs._JOB_BOOTSTRAP_MAP
-  - odds_core.agent_wakeup_models.AgentWakeup
-  - odds_cli.commands.agent.run
   - odds_mcp.server.mcp
-  - odds_mcp.server.schedule_next_wakeup
-  - experiments/scripts/show_agent_summaries.py
-  - odds_lambda.jobs.agent_run.AGENT_STREAM_LINE_LIMIT
-  - odds_core.match_brief_models.MatchBrief
+  - odds_mcp.server.find_retail_edges
+  - odds_lambda.jobs.agent_run.CADENCE
+  - odds_core.models.Event
+  - odds_core.models.OddsSnapshot
   - odds_core.paper_trade_models.PaperTrade
+  - odds_core.match_brief_models.MatchBrief
+  - odds_core.agent_wakeup_models.AgentWakeup
   - packages/odds-mcp/agents/common.md
-  - .gitignore
+  - packages/odds-mcp/agents/epl/base.md
 status: stable
 ---
 
-# Betting agent runtime and the agent-run job
+# The betting agent
 
-An LLM agent per sport (EPL and MLB) synthesises odds, sharp-market prices and unstructured match context and records bets as paper trades. Both agents are in interactive evaluation: the prompt calls itself a "first-draft workflow" (`packages/odds-mcp/agents/common.md`, #290). Nothing in code enforces that they are not autonomous `(inferred)`. The thesis is breadth and speed of information synthesis ([pivot to information edge](decision-information-edge.md)). The runtime lives in `odds_lambda.jobs.agent_run`.
-
-## Runtime
-
-`odds_lambda.jobs.agent_run._run_claude_agent` spawns `claude -p "/agent {sport}"` with `--model claude-sonnet-4-6`, `--output-format stream-json --verbose` and `--dangerously-skip-permissions`, working directory the repo root, a 15-minute timeout (`odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS`). The subprocess:
-
-- reaches the pipeline through the `odds` MCP server registered in `.mcp.json` (`uv run fastmcp run odds_mcp.server`), see [odds-mcp server](mcp-server.md);
-- researches with web search and Playwright;
-- runs under `AGENT_DATABASE_URL` when set, otherwise inherits the parent DSN with a logged warning (`odds_lambda.jobs.agent_run._build_agent_subprocess_env`), see [database role](#database-role);
-- writes a JSONL trace per run ([run traces](#run-traces)).
-
-Two entry paths: the scheduled `agent-run` job, and `odds agent run --sport S` for one wake-up with no scheduling side effects. `agent-run` is in `_SMOKE_UNSAFE_JOBS` because it places paper bets, so `odds scheduler smoke` skips it unless `--include-agent` ([local scheduler](../scheduling/local-scheduler.md)).
+An LLM agent per sport (EPL and MLB) synthesises odds, sharp-market prices and unstructured match context and records bets as paper trades. Both agents are in interactive evaluation: the prompt calls itself a "first-draft workflow" (`packages/odds-mcp/agents/common.md`, #290). Nothing in code enforces that they are not autonomous `(inferred)`. The thesis is breadth and speed of information synthesis ([ADR-0005](../../docs/adr/0005-information-edge.md)). The thesis has no measured result: results exist only as paper trades, read through `odds_mcp.server.get_portfolio` and `odds paper`, and the [daily digest](../operations/daily-digest.md) does not read them ([paper trading](paper-trading.md)). The runtime is described in [Agent runtime and the agent-run job](agent-run-job.md).
 
 ## Architecture
 
@@ -53,80 +30,44 @@ The runtime is a `claude` subprocess; everything it touches goes through one of 
 | Web search | press conferences, injury news |
 | Playwright MCP (not in `.mcp.json`, so supplied by the user's Claude configuration) | club sites, lineup pages, BBC and ESPN |
 
-The MCP server reads and writes PostgreSQL: `events`, `odds_snapshots`, `paper_trades`, `match_briefs`, `predictions` and `agent_wakeups` (`odds_core.models.Event`, `odds_core.models.OddsSnapshot`, `odds_core.paper_trade_models.PaperTrade`, `odds_core.match_brief_models.MatchBrief`, `odds_core.agent_wakeup_models.AgentWakeup`; predictions are written by [scoring](../modelling/model-publishing-and-scoring.md)).
+The MCP server reads and writes PostgreSQL: `events`, `odds_snapshots`, `paper_trades`, `match_briefs`, `predictions` and `agent_wakeups` (`odds_core.models.Event`, `odds_core.models.OddsSnapshot`, `odds_core.paper_trade_models.PaperTrade`, `odds_core.match_brief_models.MatchBrief`, `odds_core.agent_wakeup_models.AgentWakeup`; predictions are written by [scoring](../modelling/prediction-scoring.md)). See [odds-mcp server](mcp-server.md) for the tools.
 
 ## Prompts
 
-The agent's behaviour is defined by prompt files in `packages/odds-mcp/agents/`: a common prompt (strategy and the wake-up workflow) plus one base prompt per sport (`epl` and `mlb` subdirectories). Those files are authoritative; this wiki summarises them ([wake-up workflow](agent-wakeup-workflow.md)).
-
-## The agent-run job
-
-The job is opt-in and local-only: no EventBridge rule exists for it, and the default `SCHEDULER_BOOTSTRAP_JOBS` has `agent-run` commented out, so the loop starts only when you add it ([jobs and deployment matrix](../scheduling/jobs-and-deployment-matrix.md#where-each-job-runs), [configuration](../foundations/configuration.md)). Its bootstrap function in `_JOB_BOOTSTRAP_MAP` is `odds_lambda.jobs.agent_run.schedule_next`, not `odds_lambda.jobs.agent_run.main`, so `odds scheduler start` never launches the agent itself.
-
-### Flow
-
-1. Requires `ctx.sport`; otherwise logs and returns.
-2. `schedule_next(sport)` pre-schedules the next wake-up before any work, so a crash does not break the chain ([self-scheduling](../scheduling/self-scheduling.md)). It calls `odds_lambda.scheduling.decision.decide_forward_resilient` with `odds_lambda.jobs.agent_run.CADENCE` and the sport's overnight window, and uses only `next_execution` (the run gate is ignored: the agent always wakes). It raises `ValueError` for a sport missing from `odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` (EPL 22:00-06:00 UTC, MLB 05:00-14:00).
-3. `_run_claude_agent(sport)` runs the subprocess; a non-zero exit is logged, not raised.
-4. `_check_agent_requested_wakeup(sport)` reads and consumes the `agent_wakeups` row; a failure is logged and swallowed.
-5. A requested time in the past is ignored; otherwise `odds_lambda.scheduling.helpers.self_schedule` overrides the pre-scheduled time.
-
-### Cadence
-
-| Hours to kickoff | Interval | Field |
-|---|---|---|
-| under 3 | 1h | `closing` |
-| 3 to 12, 12 to 24 | 4h | `pregame`, `sharp` |
-| 24 to 72 | 12h | `early` |
-| over 72 | 24h | `opening` |
-| no fixture within 7 days | 12h | `no_game` |
-
-Bands come from [fetch tier](../storage/fetch-tier.md) boundaries via the decision engine ([self-scheduling](../scheduling/self-scheduling.md)).
-
-### agent_wakeups
-
-`odds_core.agent_wakeup_models.AgentWakeup` has one row per sport (`uq_agent_wakeup_sport_key`). The MCP tool `odds_mcp.server.schedule_next_wakeup` upserts it, clamps the delay to 0.5-168 hours and resets `consumed_at` ([scheduling tools](mcp-server.md#scrape-and-scheduling-tools)). The job reads rows where `consumed_at IS NULL`. Any future requested time overrides the pre-scheduled one, later as well as sooner.
-
-### `odds agent run`
-
-`odds agent run --sport S [--db NAME]` calls `odds_lambda.jobs.agent_run._run_claude_agent` directly: no pre-schedule, no wake-up consumption, no reschedule. `--db` swaps the database name in `DATABASE_URL` (default `odds`); a timeout exits 1.
-
-## Database role
-
-If `AGENT_DATABASE_URL` is set, the subprocess gets it as `DATABASE_URL`. `.env.example` documents the restricted `odds_agent` role: `SELECT` everywhere, `INSERT, UPDATE` on `paper_trades`, `match_briefs` and `agent_wakeups`, and write access to the APScheduler tables (`(inferred)`: the tables `odds_mcp.server.refresh_scrape` writes through APScheduler). Unset, the agent runs with the parent's write-capable DSN and a warning is logged. `AGENT_DATABASE_URL` is read with `os.getenv`, not `odds_core.config.Settings`, so it must be exported in the shell, not only set in `.env` ([configuration](../foundations/configuration.md)).
-
-## Run traces
-
-Each run writes its full `stream-json` output to a file: the only durable record of the run's reasoning, with no database component (`odds_lambda.jobs.agent_run._run_claude_agent` writes the file only; the agent's persistent memory is `odds_core.match_brief_models.MatchBrief`).
-
-- Every line goes to `<project_root>/logs/agent_runs/{sport}_{YYYYMMDDTHHMMSSZ}_{pid}.jsonl`. The PID suffix avoids collisions when two runs start in the same second. `logs/` is gitignored.
-- The asyncio stream line limit is raised to 8 MiB (`odds_lambda.jobs.agent_run.AGENT_STREAM_LINE_LIMIT`), because one `tool_result` block can exceed the 64 KiB default.
-- Only some messages are teed to structlog by `odds_lambda.jobs.agent_run._log_stream_message`: assistant `tool_use` blocks become `agent_tool_use` (tool name and a 60-character-per-value input preview), and the `result` message becomes `agent_run_summary` (text, turns, duration, cost).
-- `odds_lambda.jobs.agent_run._prune_agent_run_logs` runs before writing and deletes all but the newest `odds_lambda.jobs.agent_run.AGENT_RUN_LOG_KEEP` (50) files matching `{sport}_*.jsonl`, so up to 51 files exist per sport after a run.
-- The subprocess is killed after `odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS`; the partial trace stays.
-
-The viewer `experiments/scripts/show_agent_summaries.py` prints the `result` summaries: `uv run python experiments/scripts/show_agent_summaries.py --sport epl --since 24h --limit 3`, or `--file <path>`. `--sport` takes the short names `epl` or `mlb`. One file can hold several sessions; the script tracks a session index per `result` line. The filename is the only schema linking producer and consumer: `FILENAME_RE` in the viewer expects `{sport_key}_{timestamp}_{pid}.jsonl`, so renaming either side breaks the other silently. Other report channels are in [reporting](../operations/reporting-and-daily-digest.md).
+The agent's behaviour is defined by prompt files in `packages/odds-mcp/agents/`: a common prompt (strategy and the wake-up workflow) plus one base prompt per sport (`epl` and `mlb` subdirectories). Those files are authoritative; the wiki summarises them in [Agent prompts](agent-prompts.md) and cannot verify them against code.
 
 ## Role of the CLV model
 
-A supplementary signal: weak, unprofitable alone, and its strongest feature is the sharp-retail spread the agent sees directly via `odds_mcp.server.find_retail_edges`. The prompt treats models as supplementary sanity checks (`packages/odds-mcp/agents/common.md`) ([CLV model findings](../evaluation/clv-model-findings.md), [sharp benchmark](../modelling/sharp-benchmark.md)).
+A supplementary signal: weak, unprofitable alone, and its strongest feature is the sharp-retail spread the agent sees directly via `odds_mcp.server.find_retail_edges`. The prompt treats models as supplementary sanity checks (`packages/odds-mcp/agents/common.md`) ([CLV model findings](../evaluation/clv-model-findings.md), [sharp benchmark](../modelling/sharp-benchmark.md), [ADR-0005](../../docs/adr/0005-information-edge.md)). Code and comments written before the pivot may still treat the CLV model as the edge ([project overview](../foundations/project-overview.md)).
+
+## EPL matchday timeline
+
+A Saturday 3pm kickoff:
+
+| Window | Market activity | Agent action |
+|---|---|---|
+| Mon-Thu | Lines open, early sharp money | Light research, pre-market read |
+| Fri evening | Press conferences, market firms up | Research, build briefs |
+| Sat morning | Team news leaks, odds move | Update briefs, early bets if edge found |
+| Sat ~14:00 | Confirmed lineups (about KO-60) | Deep research, final decisions |
+| Sat 14:00-15:00 | Final adjustments, late money | Bets placed, if any |
+| Sat evening | Matches complete | Settle bets, report P&L |
+
+The table is `(inferred)` from the wake-up cadence in `odds_lambda.jobs.agent_run.CADENCE` (24 h, 12 h, 4 h, then 1 h inside 3 hours, see [Cadence](../scheduling/decision-engine.md#cadence)) and the prompt's KO-60 lineup note (`packages/odds-mcp/agents/epl/base.md`); it is not a schedule in code. The cadence is what puts a wake-up inside the lineup window. Lineups come from web search because every structured lineup API was rejected ([ADR-0006](../../docs/adr/0006-lineups-from-web-research.md), [rejected sources](agent-data-sources.md#rejected-sources)). The timeline is an EPL example. MLB has its own overnight suppression window (05:00-14:00 UTC) and sport file, and no MLB timeline is recorded ([overnight windows](../scheduling/decision-engine.md#overnight-windows)).
 
 ## Design principles
 
 Recorded without a decision record, so the reasons are `(inferred)` (the sharp-price and breadth points match the Thesis in `packages/odds-mcp/agents/common.md`): sharp price is a strong reference, not gospel; breadth of information is the edge; MCP is the tool interface so the runtime can be swapped; tools return structured data; the database is shared state; local-first, never on AWS.
 
-## Hazards
+## Consequences of the pivot
 
-- The `/agent` slash command lives under the `.claude/` directory, which `.gitignore` excludes, so it is not in the repo. `odds_lambda.jobs.agent_run._run_claude_agent` passes the full sport key (`soccer_epl`, `baseball_mlb`), and what the command does with it cannot be reviewed from the repo.
-- The model id is hardcoded in `odds_lambda.jobs.agent_run._run_claude_agent`.
-- **Override docstrings are wrong.** The module docstring and the `odds_mcp.server.schedule_next_wakeup` docstring say the override applies "if it's sooner"; the code reschedules to any future time, so a later request delays the wake-up past the proximity schedule.
-- **`--db` has no effect when `AGENT_DATABASE_URL` is set**: the subprocess environment replaces `DATABASE_URL` with it (`odds_lambda.jobs.agent_run._build_agent_subprocess_env`).
-- `odds_cli.commands.agent` imports the underscore-private `odds_lambda.jobs.agent_run._run_claude_agent` across packages.
-- Deleting `logs/agent_runs/` loses the traces; the agent's own persistent memory is `match_briefs` ([briefs](match-briefs-and-paper-trades.md)).
-- The viewer's `--since` filters on the file's start time taken from its name, so every session in a file that started before the cutoff is dropped, although a code comment says later sessions are still walked (`load_summaries`).
+- Effort moved to agent tooling: [odds-mcp server](mcp-server.md), [match briefs](match-briefs.md), [paper trading](paper-trading.md), [agent data sources](agent-data-sources.md).
+- Do not cite the thesis as evidence that the agent is profitable.
 
 ## Related
 
-- [Wake-up workflow and staking rules](agent-wakeup-workflow.md), [Agent data sources](agent-data-sources.md)
-- [Match briefs and paper trades](match-briefs-and-paper-trades.md) — what the agent writes
-- [Project overview](../foundations/project-overview.md)
+- [Agent runtime and the agent-run job](agent-run-job.md)
+- [Agent prompts](agent-prompts.md)
+- [Agent data sources and rejected sources](agent-data-sources.md)
+- [Match briefs](match-briefs.md) and [paper trading](paper-trading.md), what the agent writes
+- [About the system and its pivots](../foundations/project-overview.md)
