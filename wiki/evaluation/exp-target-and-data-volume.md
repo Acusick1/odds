@@ -46,4 +46,4 @@ R² plateaus at about 1.5K events and oscillates between about 0 and +0.035 afte
 
 ## Related
 
-- [CLV model findings](clv-model-findings.md), [CLV target](../modelling/clv-target.md), [Training config](../modelling/training-config.md#choosing-data)
+- [CLV model findings](clv-model-findings.md), [CLV target](../modelling/clv-target.md), [Training config](../modelling/howto-train-and-publish-model.md#choose-data)

@@ -8,6 +8,7 @@ sources:
   - odds_core.alerts.job_alert_context
   - odds_lambda.scheduling.jobs._JOB_CRON_MAP
   - deployment/aws/terraform/eventbridge.tf
+  - deployment/aws/terraform/variables.tf
   - scripts/verify-schedules.sh
 status: stable
 ---
@@ -20,7 +21,7 @@ Jobs run on two targets: two AWS Lambdas driven by EventBridge rules, and the [l
 
 Gates:
 
-- **AWS**: in `deployment/aws/terraform/eventbridge.tf`, `local.sport_configs` (EPL only; MLB commented out), `enable_oddsportal_scraper`, `enable_polymarket` and `betfair_enabled`, plus the always-created `update-status` and `check-health`. These are Terraform variable defaults; see [AWS infrastructure](../operations/aws-infrastructure.md).
+- **AWS**: in `deployment/aws/terraform/eventbridge.tf`, `local.sport_configs` (EPL only; MLB commented out), plus the always-created `update-status` and `check-health`; and in `deployment/aws/terraform/variables.tf` the `enable_oddsportal_scraper`, `enable_polymarket` and `betfair_enabled` variables (each defaults to false). See [AWS infrastructure](../operations/aws-infrastructure.md).
 - **Local**: `odds_core.config.SchedulerConfig.bootstrap_jobs` (default `fetch-oddsportal`, `fetch-oddsportal-results`, `fetch-espn-fixtures`, `fetch-betfair-exchange`, `fetch-mlb-probables`; `agent-run` and `daily-digest` are commented out, so opt-in) and `_JOB_CRON_MAP`.
 
 The two sets of gates are independent, and no code checks for a job enabled in both places, so a job such as `fetch-oddsportal` or `fetch-betfair-exchange` can run on AWS and on a local scheduler at once and double-fetch.
@@ -47,7 +48,7 @@ Per-job pages: [fetch-odds](../collection/fetch-odds-job.md), [fetch-scores and 
 
 ## Heartbeats
 
-Which jobs write a heartbeat is a property of `odds_core.alerts.job_alert_context`, not of the registry. `odds_core.config.AlertConfig.heartbeat_expectations` expects `fetch-oddsportal-<sport>` every 2 h, `fetch-oddsportal-results-<sport>` every 26 h (EPL and MLB), `daily-digest-epl` every 26 h and `check-health` every 2 h. `fetch-odds`, `fetch-scores`, `update-status` and both Polymarket jobs write none ([Alerting and heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
+Which jobs write a heartbeat is a property of `odds_core.alerts.job_alert_context`, not of the registry. `fetch-odds`, `fetch-scores`, `update-status` and both Polymarket jobs write none. The jobs the health check expects a heartbeat from, and how often, are in [Health monitor](../operations/health-monitor.md#heartbeats).
 
 ## Deployed state
 
@@ -55,10 +56,11 @@ Deployed AWS state cannot be verified from the repo. Only `terraform.tfvars.exam
 
 Query the account with `odds scheduler list-jobs --backend aws` (needs `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX` and credentials). Compare it with `odds scheduler list-jobs` on the local host to find jobs running in both places.
 
-- An enabled rule whose cron year or time is in the past never fires again, and a rule still on the `rate(1 day)` placeholder or `DISABLED` was never self-scheduled; both mean the chain is dead. Look for a past or empty next-run time, or run `scripts/verify-schedules.sh`, which fails disabled, placeholder-rate and past-year rules. #383 tracks the current orphans.
+- An enabled rule whose cron year or time is in the past never fires again, and a rule still on the `rate(1 day)` placeholder or `DISABLED` was never self-scheduled; both mean the chain is dead. `scripts/verify-schedules.sh` fails disabled, placeholder-rate and past-year rules. #383 tracks the current orphans.
+- A chain dies when EventBridge did not trigger, when a Lambda error stopped the job before it booked the next run, or when a rule was edited by hand. The post-deploy invocations in `deploy-prod.yml` re-invoke jobs and re-activate chains ([AWS infrastructure](../operations/aws-infrastructure.md)).
 - A Lambda payload without `sport` runs every configured sport and reschedules under the bare name, which matches no rule ([Lambda handler](scheduler-backends.md#lambda-handler)).
 
-[Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md) covers the checks step by step.
+[Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md) covers the checks step by step, including the rule, target and permission commands.
 
 ## Related
 

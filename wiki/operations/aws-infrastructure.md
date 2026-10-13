@@ -26,7 +26,7 @@ Everything lives under `deployment/aws/`; region `eu-west-1`. Deployed state is 
 |---|---|---|
 | Name | `var.project_name` (prod `odds-scheduler`, default `odds-scheduler-dev`) | `{project_name}-scraper` |
 | Image | `Dockerfile.lambda`: `odds-core`, `odds-lambda`, `odds-analytics`, `odds-cli` wheels plus xgboost | `Dockerfile.scraper`: `odds-core`, `odds-lambda`, OddsHarvester fork, Playwright and Chromium |
-| Memory / timeout | `lambda_memory_size` 512 MB, `lambda_timeout` 300 s | 2048 MB, 900 s (hard-coded in `scraper.tf`) |
+| Memory / timeout | `lambda_memory_size` 512 MB, `lambda_timeout` 300 s (`deployment/aws/terraform/variables.tf`) | 2048 MB, 900 s (`deployment/aws/terraform/scraper.tf`) |
 | Created | always | only if `enable_oddsportal_scraper` |
 
 Both run the same handler and registry ([scheduler-backends](../scheduling/scheduler-backends.md), [lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)). The scraper's 900 s timeout applies to the results job, which has no pre-schedule ([results-jobs](../collection/results-jobs.md)). Log groups `/aws/lambda/<function>` keep 14 days. One IAM role covers both: S3 model read, EventBridge rule writes (restricted to `{rule_prefix}-*`; it lacks `events:ListRules`, so listing and health checks work only from a shell with broader credentials; #443), SSM read/write of `/{project_name}/active-api-key-index` (the [API key rotation](../collection/odds-api-client.md#retry-and-rotation) index, set through `SSM_API_KEY_INDEX`), and, if `betfair_enabled`, SSM read of the Betfair cert/key parameters ([Betfair client](../collection/betfair-exchange.md)).
@@ -45,15 +45,14 @@ EventBridge rules are named `{rule_prefix}-{job}[-{sport suffix}]` and `eventbri
 
 - Database connections use `NullPool` automatically when `AWS_LAMBDA_FUNCTION_NAME` is set, whatever the scheduler backend (`odds_core.database`; [databases-and-environments](../foundations/databases-and-environments.md#engine-creation)).
 - Stateless between invocations apart from the SSM key-rotation index (`SSM_API_KEY_INDEX` in `deployment/aws/terraform/lambda.tf`).
-- EventBridge allows 300 rules per event bus by default `(inferred)`: an AWS service quota with no source in this repo. Check with `aws service-quotas list-service-quotas --service-code events`.
 
 ## Costs and usage
 
-Spend cannot be verified from the repo; rough estimates are about $0.20/month for the scheduler Lambda, under $0.01 for S3, under $0.10 for logs and free SSM `(inferred)`; check real spend with `aws ce get-cost-and-usage` or the Billing console. The managed PostgreSQL provider is Neon (`deployment/aws/terraform/terraform.tfvars.example`); it is billed separately, its cost varies and it has a free tier `(inferred)`, so check its console. Log groups keep 14 days (`retention_in_days` in `deployment/aws/terraform/lambda.tf` and `deployment/aws/terraform/scraper.tf`). `scripts/lambda_usage.py` pulls `REPORT` lines from CloudWatch for both functions and prints GB-seconds against the 400,000 free tier, daily breakdown, retry analysis and an hourly heatmap (`--days`, `--start`, `--end`). Backups are the managed database provider's `(inferred)`; gaps are filled with [backfills](../collection/odds-api-backfill.md); alerts go to Discord ([alerts](alerts.md)). `scripts/lambda_usage.py` hard-codes memory sizes (0.5 and 2.0 GB), so a change in Terraform does not propagate (#463).
+Spend cannot be verified from the repo; check it with `aws ce get-cost-and-usage` or the Billing console. The managed PostgreSQL provider is Neon (`deployment/aws/terraform/terraform.tfvars.example`) and is billed separately; check its console. Log groups keep 14 days (`retention_in_days` in `deployment/aws/terraform/lambda.tf` and `deployment/aws/terraform/scraper.tf`). `scripts/lambda_usage.py` pulls `REPORT` lines from CloudWatch for both functions and prints GB-seconds against the 400,000 free tier, daily breakdown, retry analysis and an hourly heatmap (`--days`, `--start`, `--end`). Gaps are filled with [backfills](../collection/odds-api-backfill.md); alerts go to Discord ([alerts](alerts.md)). `scripts/lambda_usage.py` hard-codes memory sizes (0.5 and 2.0 GB), so a change in Terraform does not propagate (#463).
 
 ## Secrets
 
-API keys come from environment variables and Terraform variables (`odds_api_key`, `odds_api_keys`, `database_url` in `deployment/aws/terraform/variables.tf`), passed to the functions as environment variables in `deployment/aws/terraform/lambda.tf` and `deployment/aws/terraform/scraper.tf`; only the key-rotation index lives in SSM. Keep the tfvars file out of git.
+API keys come from environment variables and Terraform variables (`odds_api_key`, `odds_api_keys`, `database_url` in `deployment/aws/terraform/variables.tf`), passed to the functions as environment variables in `deployment/aws/terraform/lambda.tf` and `deployment/aws/terraform/scraper.tf`; only the key-rotation index lives in SSM.
 
 ## Related
 

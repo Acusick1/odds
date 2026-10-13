@@ -26,7 +26,7 @@ status: stable
 
 # odds-mcp server
 
-`odds_mcp.server` defines `mcp = FastMCP("odds-mcp", ...)`, the tool interface the [betting agent](betting-agent.md) uses. Tools are thin wrappers over `odds_lambda.storage.readers.OddsReader`, jobs and the paper-trading service; they return JSON-safe dicts, open their own sessions with `async_session_maker()` and report many failures as `{"error": ...}` dicts. All times are UTC. The `@mcp.tool()` definitions are the source of truth for the toolset (`odds_mcp.server.mcp`).
+`odds_mcp.server` defines `mcp = FastMCP("odds-mcp", ...)`, the tool interface the [betting agent](betting-agent.md) uses. Tools are thin wrappers over `odds_lambda.storage.readers.OddsReader`, jobs and the paper-trading service; they return JSON-safe dicts, open their own sessions with `odds_core.database.async_session_maker()` and report many failures as `{"error": ...}` dicts. All times are UTC. The `@mcp.tool()` definitions are the source of truth for the toolset (`odds_mcp.server.mcp`).
 
 ## Launch
 
@@ -67,7 +67,7 @@ Four tools in `odds_mcp.server`. The first three talk to the local APScheduler s
 
 **`odds_mcp.server.get_scheduled_jobs(sport=None)`** lists APScheduler schedules as `job_name`, `next_run_time` and a status field (always `"scheduled"`). The sport filter keeps names ending in `-{suffix}`, where the suffix comes from `odds_lambda.scheduling.jobs.sport_key_to_suffix` (`epl`, `mlb`) or falls back to the raw key. A scheduler failure returns an empty list with a message. The tool reads the local APScheduler store whatever `SCHEDULER_BACKEND` says, so it does not see AWS EventBridge rules (use `odds scheduler list-jobs --backend aws`), and its suffix filter matches nothing for NBA, which has no suffix (#449).
 
-**`odds_mcp.server.schedule_next_wakeup(sport, delay_hours, reason)`** upserts the single `agent_wakeups` row for the sport (`uq_agent_wakeup_sport_key`) with `requested_time = now + delay_hours`, clamping the delay to 0.5-168 hours, and resets `consumed_at`. It returns `sport`, `requested_time`, the clamped `delay_hours` and `reason`. The [agent-run job](agent-run-job.md#wake-up-requests) reads and consumes it after the agent exits; any future time, later as well as sooner, overrides the proximity schedule (#449).
+**`odds_mcp.server.schedule_next_wakeup(sport, delay_hours, reason)`** upserts the single `agent_wakeups` row for the sport (`uq_agent_wakeup_sport_key`) with `requested_time = now + delay_hours`, clamping the delay to 0.5-168 hours, and resets `consumed_at`. It returns `sport`, `requested_time`, the clamped `delay_hours` and `reason`. The [agent-run job](agent-run-job.md#wake-up-requests) reads and consumes it after the agent exits; any future time, later as well as sooner, overrides the proximity schedule. The tool's docstring says the job reschedules only if the requested time is sooner than the default, which the code does not check (#449).
 
 ## Related
 

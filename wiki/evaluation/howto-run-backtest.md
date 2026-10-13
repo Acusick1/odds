@@ -59,4 +59,4 @@ Imports: `odds_analytics.backtesting` (`odds_analytics.backtesting.config.Backte
 
 ## Reading results
 
-Conventional readings come from the original guide (2c0bc80) and were not derived from this engine: Sharpe above 1.0 good, above 2.0 excellent, above 3.0 exceptional; profit factor above 1.0 profitable, above 2.0 very good. Sortino reads higher than Sharpe for a profitable strategy because only downside is penalised. The Sharpe thresholds assume a return series, but the engine feeds dollar P&L, so they do not transfer ([metrics as computed](backtest-engine.md#metrics)). Numbers in the experiment record do not come from this engine ([betting simulation](exp-betting-simulation.md)).
+Interpretation of the metrics is on [Reading backtest-engine results](exp-betting-simulation.md#reading-backtest-engine-results); what each metric computes is on [backtest engine](backtest-engine.md#metrics).

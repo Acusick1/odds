@@ -13,6 +13,9 @@ sources:
   - odds_cli.commands.quality
   - odds_cli.commands.discover
   - odds_cli.commands.backtest
+  - odds_cli.commands.backtest.STRATEGIES
+  - odds_cli.commands.scheduler
+  - odds_cli.commands.validate
   - odds_cli.commands.train
   - odds_cli.commands.agent
   - packages/odds-cli/pyproject.toml
@@ -31,7 +34,7 @@ status: stable
 | `scrape` | [OddsPortal scraper](../collection/oddsportal-scraper.md) |
 | `odds_cli.commands.discover`, `odds_cli.commands.backfill` | [Odds API historical backfill](../collection/odds-api-backfill.md) |
 | `backtest` | [Backtest engine](../evaluation/backtest-engine.md), [Backtest strategies](../evaluation/backtest-strategies.md) |
-| `train` | [Training pipeline](../modelling/training-pipeline.md), [Hyperparameter tuner](../modelling/hyperparameter-tuner.md) |
+| `odds train` | [Training pipeline](../modelling/training-pipeline.md), [Hyperparameter tuner](../modelling/hyperparameter-tuner.md) |
 | `model` | [Model store](../modelling/model-store.md) |
 | `odds status` | [odds status](../operations/health-monitor.md#odds-status), [Odds API quota](../collection/odds-api-quota.md) |
 | `validate`, `quality` | [Coverage and completeness checks](../storage/coverage-checks.md) |
@@ -62,6 +65,16 @@ Pass `--sport` explicitly. [About the system and its pivots](project-overview.md
 
 - **Database override.** `scheduler start` and `agent run` accept `--db NAME`, which calls `odds_cli.db_override.override_database_url`: it swaps the dbname in `DATABASE_URL`, writes `os.environ`, and clears the settings cache (`odds_cli.db_override.swap_dbname` rejects names containing `/` or `?`). The engine already built in-process keeps the original URL; only subprocesses see the swap ([Engine creation](databases-and-environments.md#engine-creation), [Read at import](configuration.md#read-at-import)). On `odds agent run` it has no effect at all when `AGENT_DATABASE_URL` is set ([Database role](../agent/agent-run-job.md#database-role)).
 - **Async.** Commands wrap async code in `asyncio.run()`.
+- **Exit codes.** Most groups exit with `typer.Exit(code=...)`; `odds_cli.commands.validate` (10 sites) and `odds_cli.commands.quality` (3) call `sys.exit(1)`.
+
+## Help text
+
+The help text disagrees with the code in four places (#448, #466):
+
+- The root help, banner and callback docstring say "NBA" (`odds_cli.main.app`, `odds_cli.main.callback`).
+- `--strategy` on `odds backtest run` lists `lstm`, which is not a key of `odds_cli.commands.backtest.STRATEGIES`.
+- `odds scheduler run-once` help names three jobs (`fetch-odds`, `fetch-scores`, `update-status`) of the 14 in `odds_lambda.scheduling.jobs._JOB_MODULE_MAP` (`odds_cli.commands.scheduler.run_once`).
+- `odds scheduler info` has no help text, because its docstring follows a statement (`odds_cli.commands.scheduler.info`).
 
 ## Related
 

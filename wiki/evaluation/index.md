@@ -12,10 +12,11 @@ Backtests replay a strategy over stored events; experiments record what the CLV 
 
 - [Backtest engine](backtest-engine.md) — BacktestEngine event loop, sizing, settlement, metrics as computed, BacktestResult and its JSON and CSV forms.
 - [Backtest strategies](backtest-strategies.md) — The registered strategies, their constructor defaults and the STRATEGIES registry.
+- [Experiment scripts and artifacts](experiment-scripts.md) — Layout of experiments/, config and script conventions, the FINDINGS.md sections, the verification artifact files, and the inventory of scripts.
 
 ### Explanation
 
-- [Betting simulation (Exp 7, 7b)](exp-betting-simulation.md) — Whether the CLV signal survives the vig with flat stakes and with line shopping.
+- [Betting simulation (Exp 7, 7b)](exp-betting-simulation.md) — Whether the CLV signal survives the vig with flat stakes and with line shopping, and how to read backtest-engine metrics against it.
 - [CV protocol grid](exp-cv-protocol-grid.md) — The window-type by validation-step grid behind ADR-0004, the 32-feature rerun, and what the grid can and cannot show.
 - [Early NBA signal search and LSTM](exp-early-nba-signal-and-lstm.md) — February 2026 NBA runs (XGBoost v1, Exp 1, Exp 2, LSTM variants): no signal at about 230-1K events, sharp-retail divergence as the best correlate, the IN_PLAY leak, and why LSTM was ruled out.
 - [EPL feature ablation and principled search space](exp-epl-feature-ablation-and-search-space.md) — The April 2026 EPL runs: per-group and FPL ablations (match_stats helps, schedule and FPL hurt), the sliding-window collapse to constant predictors, and the revised Optuna space that produced the deployed model.
@@ -28,5 +29,5 @@ Backtests replay a strategy over stored events; experiments record what the CLV 
 
 - [Add a backtest strategy](howto-add-backtest-strategy.md) — Subclass BettingStrategy, implement evaluate_opportunity, register it, and test it.
 - [Run a backtest](howto-run-backtest.md) — Check data prerequisites, list strategies, run, show, compare and export, or run from code.
-- [Run and record a modelling experiment](howto-run-experiment.md) — Script conventions, the required FINDINGS.md and verification artifacts with their checks, and how to record the result in the wiki.
+- [Run and record a modelling experiment](howto-run-experiment.md) — Run an experiment script, check its verification artifacts and FINDINGS.md, and record the result in the wiki.
 <!-- pages:end -->

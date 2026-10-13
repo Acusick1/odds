@@ -23,7 +23,7 @@ status: stable
 Three NBA studies about when to decide and what information is available then. All are NBA-only; EPL timing and injuries are untested ([decision time](../modelling/look-ahead-bias.md), [tiers](../storage/fetch-tier.md)).
 
 - The sharp book posts lines 12-24 h before the game; soft books post days earlier ([line release](#bookmaker-line-release-timing)).
-- The pregame window (3-12 h) stays the default decision window; no evidence supports changing it ([Exp 4](#hours-to-game-exp-4)).
+- The pregame window stays the default decision window ([sampling defaults](../modelling/training-config.md)); no evidence supports changing it ([Exp 4](#hours-to-game-exp-4)).
 - Injury features add no predictive signal at any tier once both arms are tuned equally ([Exp 6, 6b](#nba-injury-features-exp-6-6b)).
 
 ## Bookmaker line release timing
@@ -77,7 +77,7 @@ Question: when before the game should a decision be made? Exp 4 (2026-02-28, git
 - Probability level correlates negatively with CLV close to the game (reversion) and positively far from it.
 - Per-bin XGBoost models were all R² < 0 (27-317 training samples per bin); the pooled model is -0.009, with 12-18 h and 18-24 h the only bins with MSE ratio below 1.
 
-**Conclusion.** The default sampler window is pregame 3-12 h, with no evidence to change it. The dataset is too small to name an optimal hour, and the 5K-event OddsPortal data (opening and closing snapshots only) cannot answer timing questions. The production model samples the `sharp` tier instead, and `odds_analytics.feature_groups.TierSampler` falls back to farther tiers when the requested one is absent: about 93% of "pregame" OddsPortal events used the sharp snapshot ([decision time](../modelling/look-ahead-bias.md)).
+**Conclusion.** The default sampler window is the pregame tier, with no evidence to change it. The dataset is too small to name an optimal hour, and the 5K-event OddsPortal data (opening and closing snapshots only) cannot answer timing questions. The production model samples the `sharp` tier instead, and `odds_analytics.feature_groups.TierSampler` falls back to farther tiers when the requested one is absent: about 93% of "pregame" OddsPortal events used the sharp snapshot ([decision time](../modelling/look-ahead-bias.md)).
 
 ## NBA injury features (Exp 6, 6b)
 

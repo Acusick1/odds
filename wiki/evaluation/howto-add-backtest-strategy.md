@@ -14,7 +14,7 @@ status: stable
 # Add a backtest strategy
 
 1. **Subclass.** Create the class in `odds_analytics.strategies` inheriting `odds_analytics.backtesting.services.BettingStrategy` (exported by `odds_analytics.backtesting`).
-   - Call `super().__init__(name=..., **params)`; the kwargs become `self.params`, are returned by `get_params()` and are stored in saved results.
+   - Call `super().__init__(name=..., **params)`; the kwargs become `self.params`, are returned by `odds_analytics.backtesting.services.BettingStrategy.get_params` and are stored in saved results.
    - Give every constructor argument a default, because `odds backtest list-strategies` instantiates each class with no arguments.
 2. **Implement** `async evaluate_opportunity(self, event, odds_snapshot, config, session=None) -> list[BetOpportunity]`.
    - `event` is a `odds_analytics.backtesting.models.BacktestEvent`; its scores are present during backtests.

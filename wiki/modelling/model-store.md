@@ -29,7 +29,7 @@ Trained CLV models are published to a shared, versioned S3 bucket and loaded by 
 
 ## Layout and loading
 
-The bucket holds `{model_name}/latest/` and `{model_name}/{version}/`, each with `model.pkl`, `config.yaml`, `metadata.json`. The loader reads only `latest/`, so `latest` is overwritten on every publish; keep the version label if a rollback may be needed.
+The bucket holds `{model_name}/latest/` and `{model_name}/{version}/`, each with `model.pkl`, `config.yaml`, `metadata.json`. The loader reads only `latest/`, which every publish overwrites.
 
 `odds_lambda.model_loader.load_model(model_name, bucket)`:
 

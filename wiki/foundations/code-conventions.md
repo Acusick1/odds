@@ -35,12 +35,11 @@ Ruff selects only `DTZ003` and `DTZ005` for timezone checks ([Timezones](timezon
 
 ## Conventions without tooling
 
-- **Hooks.** Run `uv run pre-commit install` once to enable the hooks on commit, and `uv run pre-commit run --all-files` to run every hook everywhere (`.pre-commit-config.yaml`).
 - **Type hints** on every signature. No type checker (mypy, ty, pyright) is configured in pre-commit or CI, so hints are not verified.
 - **Async only** for DB work: `AsyncSession` and `async with async_session_maker() as session`, never a sync `Session`, never a session shared across tasks ([Databases and environments](databases-and-environments.md)). The CLI wraps async code in `asyncio.run()`.
 - **Model types.** SQLModel for tables, Pydantic `BaseModel` for API responses and configs, `dataclass` for simple containers.
 - **Job entry points** are `async def main(ctx: JobContext)` in `odds_lambda/jobs/` ([Job registry](../scheduling/job-registry.md)).
-- **Dependencies.** A uv workspace of five packages ([Workspace packages](workspace-packages.md)); use `uv add` and `uv sync`, and commit `uv.lock` (workspace declared in `pyproject.toml`).
+- **Dependencies.** A uv workspace of five packages ([Workspace packages](workspace-packages.md)); dependencies are managed with `uv add` and `uv sync`, and `uv.lock` is committed (workspace declared in `pyproject.toml`). Enabling the hooks is a setup step ([Set up and run locally](howto-develop-locally.md)).
 
 ## Logging
 

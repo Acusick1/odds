@@ -38,7 +38,7 @@ The agent's behaviour is defined by prompt files in `packages/odds-mcp/agents/`:
 
 ## Role of the CLV model
 
-A supplementary signal: weak, unprofitable alone, and its strongest feature is the sharp-retail spread the agent sees directly via `odds_mcp.server.find_retail_edges`. The prompt treats models as supplementary sanity checks (`packages/odds-mcp/agents/common.md`) ([CLV model findings](../evaluation/clv-model-findings.md), [sharp benchmark](../modelling/sharp-benchmark.md), [ADR-0005](../../docs/adr/0005-information-edge.md)). Code and comments written before the pivot may still treat the CLV model as the edge ([project overview](../foundations/project-overview.md)).
+A supplementary signal: weak, unprofitable alone, and its strongest feature is the sharp-retail spread the agent sees directly via `odds_mcp.server.find_retail_edges`. The prompt treats models as supplementary sanity checks (`packages/odds-mcp/agents/common.md`) ([CLV model findings](../evaluation/clv-model-findings.md), [sharp benchmark](../modelling/sharp-benchmark.md), [ADR-0005](../../docs/adr/0005-information-edge.md)). Some code and comments still treat the CLV model as the edge ([project overview](../foundations/project-overview.md), [ADR-0005](../../docs/adr/0005-information-edge.md)).
 
 ## EPL matchday timeline
 
@@ -53,16 +53,15 @@ A Saturday 3pm kickoff:
 | Sat 14:00-15:00 | Final adjustments, late money | Bets placed, if any |
 | Sat evening | Matches complete | Settle bets, report P&L |
 
-The table is `(inferred)` from the wake-up cadence in `odds_lambda.jobs.agent_run.CADENCE` (24 h, 12 h, 4 h, then 1 h inside 3 hours, see [Cadence](../scheduling/decision-engine.md#cadence)) and the prompt's KO-60 lineup note (`packages/odds-mcp/agents/epl/base.md`); it is not a schedule in code. The cadence is what puts a wake-up inside the lineup window. Lineups come from web search because every structured lineup API was rejected ([ADR-0006](../../docs/adr/0006-lineups-from-web-research.md), [rejected sources](agent-data-sources.md#rejected-sources)). The timeline is an EPL example. MLB has its own overnight suppression window (05:00-14:00 UTC) and sport file, and no MLB timeline is recorded ([overnight windows](../scheduling/decision-engine.md#overnight-windows)).
+The table is `(inferred)` from the wake-up cadence in `odds_lambda.jobs.agent_run.CADENCE` (see [Cadence](../scheduling/decision-engine.md#cadence)) and the prompt's KO-60 lineup note (`packages/odds-mcp/agents/epl/base.md`); it is not a schedule in code. The cadence is what puts a wake-up inside the lineup window. Lineups come from web search because every structured lineup API was rejected ([ADR-0006](../../docs/adr/0006-lineups-from-web-research.md), [rejected sources](agent-data-sources.md#rejected-sources)). The timeline is an EPL example. MLB has its own overnight suppression window and sport file, and no MLB timeline is recorded ([overnight windows](../scheduling/decision-engine.md#overnight-windows)).
 
 ## Design principles
 
 Recorded without a decision record, so the reasons are `(inferred)` (the sharp-price and breadth points match the Thesis in `packages/odds-mcp/agents/common.md`): sharp price is a strong reference, not gospel; breadth of information is the edge; MCP is the tool interface so the runtime can be swapped; tools return structured data; the database is shared state; local-first, never on AWS.
 
-## Consequences of the pivot
+## Supporting code
 
-- Effort moved to agent tooling: [odds-mcp server](mcp-server.md), [match briefs](match-briefs.md), [paper trading](paper-trading.md), [agent data sources](agent-data-sources.md).
-- Do not cite the thesis as evidence that the agent is profitable.
+Under [ADR-0005](../../docs/adr/0005-information-edge.md) the agent's supporting code is the [odds-mcp server](mcp-server.md), [match briefs](match-briefs.md), [paper trading](paper-trading.md) and the [agent data sources](agent-data-sources.md). The thesis has no measured result (see the opening section).
 
 ## Related
 

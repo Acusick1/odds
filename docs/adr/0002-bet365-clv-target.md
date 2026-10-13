@@ -22,7 +22,7 @@ Train on the devigged bet365 close-minus-snapshot delta: `target_type: devigged_
 ## Consequences
 
 - bet365 reached CV R² 0.036 on about 5K NBA events (PR #164) and 0.058 on EPL, the deployed model (PRs #361, #362).
-- The target bookmaker must exist in the selected data source: OddsPortal for NBA; OddsPortal plus FDUK with `data_source: null` for EPL ([training config](../../wiki/modelling/training-config.md#choosing-data)).
+- The target bookmaker must exist in the selected data source: OddsPortal for NBA; OddsPortal plus FDUK with `data_source: null` for EPL ([training config](../../wiki/modelling/howto-train-and-publish-model.md#choose-data)).
 - Pinnacle, with Betfair as fallback, becomes the sharp reference feature instead ([ADR-0003](0003-hybrid-sharp-reference.md)).
 - The code defaults stay `raw` and `pinnacle`, so a YAML that omits them trains the rejected target (#434).
 - The Pinnacle and bet365 runs used different datasets (Odds API versus OddsPortal), so the comparison also changed the data source.

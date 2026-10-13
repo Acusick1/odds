@@ -1,7 +1,7 @@
 ---
 type: howto
 title: Debug the AWS self-scheduling jobs
-description: A read-only workflow for stale data or missing tiers on AWS covering rules, CloudWatch logs, database versus fixtures, tier coverage, common failures and a safe manual invoke.
+description: A read-only workflow for stale data or missing tiers on AWS covering rules, CloudWatch logs, database versus fixtures, tier coverage and a safe manual invoke.
 sources:
   - scripts/check_games_in_database.py
   - scripts/check_game_tier_coverage.py
@@ -44,17 +44,15 @@ Region `eu-west-1`. Scheduler function `odds-scheduler`, log group `/aws/lambda/
      --order-by LastEventTime --descending --limit 10 \
      | jq -r '.logStreams[] | "\(.lastEventTimestamp | tonumber / 1000 | strftime("%Y-%m-%d %H:%M:%S UTC")) | \(.logStreamName)"'
    ```
-   A self-scheduled rule shows a one-time `cron(... <year>)`; a rule still on `rate(1 day)` was never rescheduled.
-3. **Database vs fixtures.** `uv run python scripts/check_games_in_database.py [N]` lists the next scheduled games in the database, not the league's real fixtures. If games are missing, `fetch-odds` has not run; return to step 2. In code, `missing_games` in the tier validator means a completed game the Odds API returns that is absent from `events` (`odds_lambda.storage.tier_validator.TierCoverageValidator`). `validate daily` buckets days noon-to-noon UTC and compares against NBA discovery only ([Coverage checks](../storage/coverage-checks.md)). The three `check_*.py` scripts have no sport filter, and `check_games_in_database.py` prints NBA text (#465).
-4. **Tier coverage.** `check_game_tier_coverage.py --date D` or `--event ID`; `check_tier_distribution.py [days]`. Tiers should match hours before kickoff and each game should span several ([Fetch tier](../storage/fetch-tier.md)). Four boundary encodings disagree at 3/12/24/72 h, so a game on a boundary may legitimately differ between decision and storage.
+   A self-scheduled rule shows a one-time `cron(... <year>)`. A rule still on `rate(1 day)`, `DISABLED`, or with a past year is a dead chain ([Deployed state](job-deployment-matrix.md#deployed-state)); `scripts/verify-schedules.sh` lists them.
+   If a rule is missing or never fires, check its target and the function's invoke permission, then redeploy:
+   ```bash
+   aws events describe-rule --name odds-fetch-odds-epl
+   aws events list-targets-by-rule --rule odds-fetch-odds-epl
+   ```
+3. **Database vs fixtures.** `uv run python scripts/check_games_in_database.py [N]` lists the next scheduled games in the database, not the league's real fixtures. If games are missing, `fetch-odds` has not run; return to step 2. If a game is missing from the coverage report, see [Coverage checks](../storage/coverage-checks.md#tiercoveragevalidator) for what `missing_games` and `validate daily` compare, and note that the `check_*.py` scripts have no sport filter and `check_games_in_database.py` prints NBA text (#465).
+4. **Tier coverage.** `check_game_tier_coverage.py --date D` or `--event ID`; `check_tier_distribution.py [days]`. Tiers should match hours before kickoff and each game should span several ([Fetch tier](../storage/fetch-tier.md)). A game exactly on a tier boundary can legitimately differ between decision and storage ([Boundary encodings](../storage/fetch-tier.md#boundary-encodings)). If every event shows one tier, the tier is computed per event in `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` ([OddsWriter](../storage/odds-writer.md)), so check the stored rows rather than the job.
 5. **Logs.** `aws logs tail /aws/lambda/odds-scheduler --since 2h --format short | grep -i "fetch_odds\|tier"`. Look for `fetch_odds_job_started` (execution began), `fetch_odds_executing` (tier and reason, for example "Game in 7.5h: Team A vs Team B (pregame tier)"), `odds_snapshot_stored` (per-event `fetch_tier`), `fetch_odds_next_scheduled` and `eventbridge_rule_updated` ([fetch-odds job](../collection/fetch-odds-job.md)). Quota or alert failures do not appear in these logs: `fetch-odds` writes no heartbeat and its quota alerts are not rate limited, so only stale-data checks catch a stalled chain (#438, [Alerting and heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
-
-## Common issues
-
-- **Missing tier coverage.** Causes: EventBridge did not trigger; a Lambda error stopped the job before it scheduled the next run; a rule was edited by hand. Fix: wait for the next run, or redeploy; `deploy-prod.yml` re-invokes jobs and re-activates chains ([AWS infrastructure](../operations/aws-infrastructure.md)).
-- **All events one tier.** The tier is computed per event in `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` (`odds_lambda.storage.writers`); migration `9ff81f073e6b` recalculated older rows ([OddsWriter](../storage/odds-writer.md)).
-- **Lambda not running.** `aws events describe-rule --name odds-fetch-odds-epl`, `list-targets-by-rule`, then check the rule's invoke permission on the function. Fix by redeploying ([AWS infrastructure](../operations/aws-infrastructure.md)).
-- **Dead chain.** Past-year cron expressions are dead rules; `scripts/verify-schedules.sh` finds them.
 
 ## Invoke manually
 

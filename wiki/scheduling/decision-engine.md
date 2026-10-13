@@ -18,6 +18,7 @@ sources:
   - odds_lambda.jobs.fetch_oddsportal.CADENCE
   - odds_lambda.jobs.fetch_betfair_exchange.CADENCE
   - odds_lambda.jobs.agent_run.CADENCE
+  - odds_lambda.jobs.agent_run.schedule_next
   - odds_lambda.jobs.fetch_oddsportal.LeagueSpec
   - odds_core.config.SchedulerConfig
 status: stable
@@ -44,7 +45,7 @@ Used by odds, scrapes, Betfair and the agent.
 
 Used by scores and status.
 
-`odds_lambda.scheduling.decision.decide_backward` runs while a game that kicked off within `window` is not yet resolved; `odds_lambda.scheduling.decision.decide_backward_resilient` wraps it across sports with the same DB-failure fallback. Without `statuses_needing_update` any non-FINAL event counts; `update-status` passes `{SCHEDULED}`. Any non-FINAL event counts, so a postponed game keeps `fetch-scores` on its 6 h cadence for three days (#440). An idle result still returns a `next_execution` at `idle_interval` ([results jobs](../collection/results-jobs.md)).
+`odds_lambda.scheduling.decision.decide_backward` runs while a game that kicked off within `window` is not yet resolved; `odds_lambda.scheduling.decision.decide_backward_resilient` wraps it across sports with the same DB-failure fallback. Without `statuses_needing_update` any non-FINAL event counts; `update-status` passes `{SCHEDULED}`. Any non-FINAL event counts, so a game that never reaches FINAL keeps `fetch-scores` on its active cadence until it leaves the `window` (`odds_lambda.scheduling.decision.decide_backward`). An idle result still returns a `next_execution` at `idle_interval` ([results jobs](../collection/results-jobs.md)).
 
 ## Cadence
 
@@ -61,7 +62,7 @@ Values are each job module's cadence constant (`odds_lambda.jobs.fetch_odds.CADE
 
 ## Overnight windows
 
-`odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` suppresses runs in `soccer_epl` 22:00-06:00 UTC and `baseball_mlb` 05:00-14:00 UTC via `odds_lambda.scheduling.helpers.apply_overnight_skip`, which pushes a candidate time to the resume hour; a sport missing from the map raises. It applies only if the caller passes `overnight`: oddsportal passes its `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` window, Betfair passes `odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` for single-sport runs, and `fetch-odds`, scores and status pass none. The same windows are also kept in the `overnight_*_utc` fields of `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` (#463).
+`odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` suppresses runs in `soccer_epl` 22:00-06:00 UTC and `baseball_mlb` 05:00-14:00 UTC via `odds_lambda.scheduling.helpers.apply_overnight_skip`, which pushes a candidate time to the resume hour and never raises. It applies only if the caller passes `overnight`: oddsportal passes its `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` window, Betfair looks the sport up with `.get()` for single-sport runs (no window for a sport missing from the map), `agent-run` indexes the map and raises `ValueError` for a sport missing from it (`odds_lambda.jobs.agent_run.schedule_next`), and `fetch-odds`, scores and status pass none. The same windows are also kept in the `overnight_*_utc` fields of `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` (#463).
 
 `lookahead_days` comes from `odds_core.config.SchedulerConfig.lookahead_days` only in `fetch-odds`; the scrape and Betfair jobs use the function default of 7.
 

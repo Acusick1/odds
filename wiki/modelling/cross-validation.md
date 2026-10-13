@@ -33,7 +33,7 @@ The production protocol is `cv_method: walk_forward`, `window_type: sliding`, `m
 
 - `n_folds` is ignored for `walk_forward` and mandatory for the other methods, but only `odds_analytics.training.cross_validation.run_cv` enforces it.
 - `walk_forward` without `event_ids` logs a warning and runs `timeseries` with `n_folds` (default 5), changing the protocol and the metric meaning (#437).
-- Per fold it calls `train_from_config` and records train and validation MSE, MAE and R² (`odds_analytics.training.cross_validation.CVFoldResult`). `odds_analytics.training.cross_validation.CVResult` reports mean and population standard deviation. Each fold's R² is against that fold's own mean.
+- Per fold it calls `odds_analytics.training.cross_validation.TrainableStrategy.train_from_config` and records train and validation MSE, MAE and R² (`odds_analytics.training.cross_validation.CVFoldResult`). `odds_analytics.training.cross_validation.CVResult` reports mean and population standard deviation. Each fold's R² is against that fold's own mean.
 - The XGBoost strategy passes the fold as `eval_set` and XGBoost applies `early_stopping_rounds`, so early stopping sees the validation rows (#474).
 - `odds_analytics.training.cross_validation.train_with_cv` then fits a final model on all rows and merges the CV metrics into the history. Tuning optimises the mean CV metric ([tuner](hyperparameter-tuner.md)).
 

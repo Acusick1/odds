@@ -10,6 +10,7 @@ sources:
   - odds_mcp.server.save_match_brief
   - odds_mcp.server.get_match_brief
   - odds_mcp.server.get_slate_briefs
+  - odds_mcp.server._DEFAULT_SHARP_BOOKMAKERS
   - packages/odds-mcp/agents/common.md
 status: stable
 ---
@@ -43,7 +44,7 @@ In `odds_mcp.server`:
 
 ## Sharp-price stamp
 
-The stamp lets a later wake-up compare the price at brief time with the current price ([sharp benchmark](../modelling/sharp-benchmark.md)). Sharp prices are resolved per outcome, so the stamp can mix Pinnacle and Betfair prices across outcomes ([retail edges](mcp-market-tools.md#retail-edges)). The default sharp list is a literal in `odds_mcp.server`, not shared with the feature code, which defaults to Pinnacle only (#421, [code copies](../modelling/sharp-benchmark.md#code-copies)).
+The stamp lets a later wake-up compare the price at brief time with the current price ([sharp benchmark](../modelling/sharp-benchmark.md)). Sharp prices are resolved per outcome, so the stamp can mix Pinnacle and Betfair prices across outcomes ([retail edges](mcp-market-tools.md#retail-edges)). The default sharp list is the literal `odds_mcp.server._DEFAULT_SHARP_BOOKMAKERS` (`pinnacle`, `betfair_exchange`), not shared with the feature code, which defaults to Pinnacle only ([code copies](../modelling/sharp-benchmark.md#code-copies)).
 
 ## Related
 

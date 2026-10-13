@@ -1,7 +1,7 @@
 ---
 type: explanation
 title: Betting simulation (Exp 7, 7b)
-description: Whether the CLV signal survives the vig with flat stakes and with line shopping.
+description: Whether the CLV signal survives the vig with flat stakes and with line shopping, and how to read backtest-engine metrics against it.
 sources:
   - experiments/results/exp7_backtest_sim/FINDINGS.md
   - experiments/results/exp7b_line_shopping/FINDINGS.md
@@ -36,6 +36,10 @@ Same simulation, best price across bet365, Betway, Betfred and bwin. Effective o
 ## Conclusion
 
 Public sportsbook features alone are insufficient for profitable betting. Line shopping helps but is not enough; the source suggests cross-venue execution (Polymarket) as a further vig reduction, and the signal may suit settings with lower transaction costs. Findings: `experiments/results/exp7_backtest_sim/FINDINGS.md` (#170), `experiments/results/exp7b_line_shopping/FINDINGS.md` (#171). This result is part of the context of [ADR-0005](../../docs/adr/0005-information-edge.md).
+
+## Reading backtest-engine results
+
+The conventional readings come from the original backtest guide (2c0bc80) and were not derived from this engine: Sharpe above 1.0 good, above 2.0 excellent, above 3.0 exceptional; profit factor above 1.0 profitable, above 2.0 very good. Sortino reads higher than Sharpe for a profitable strategy because only downside is penalised. The Sharpe thresholds assume a return series, but the engine feeds dollar P&L per game date, so they do not transfer ([metrics as computed](backtest-engine.md#metrics)). The numbers on this page do not come from the engine either, so neither can be read against the other.
 
 ## Related
 

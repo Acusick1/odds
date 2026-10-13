@@ -28,6 +28,7 @@ Normal path: let GitHub Actions deploy ([ci-cd-workflows](ci-cd-workflows.md)). 
    - It creates the state bucket, lock table, ECR repository and model bucket.
    - Follow `deployment/aws/bootstrap/README.md` to write `backend.dev.hcl` and `backend.prod.hcl` in `deployment/aws/terraform/`.
 2. Set `database_url`, `odds_api_key` (or `odds_api_keys`) and any gates (`enable_oddsportal_scraper`, `enable_polymarket`, `betfair_enabled`) in your tfvars.
+   - Keep the tfvars file out of git: it holds the database URL and API keys, which Terraform passes to the functions as environment variables ([aws-infrastructure](aws-infrastructure.md#secrets)).
    - Keep the file out of git; it holds secrets.
 
 ## Each deployment

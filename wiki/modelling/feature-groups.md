@@ -48,6 +48,7 @@ The EPL groups are detailed on [EPL context features](epl-context-features.md) a
 
 - Per-player impact is `(on_off_rtg - on_def_rtg) * (minutes / games_played / 48)` from player stats, falling back to 1.0 when stats, ratings or games are missing.
 - QUESTIONABLE and DOUBTFUL count at 0.5x; PROBABLE and AVAILABLE are ignored (GTD weighted 0.5).
+- Player impact is looked up by exact `player_name`: `odds_lambda.storage.pbpstats_reader.PbpStatsReader.get_players_for_teams` keys stats by name, so a report name that differs from the stats name silently becomes a 1.0 headcount, and two players on the requested teams with the same name collide (the last row wins).
 - The group is enabled with `feature_groups` containing `injuries`; `odds_analytics.feature_groups.collect_event_data` loads reports and stats, and events without reports get NaN and are not dropped.
 - The impact weights use season-level player stats loaded once per event; nothing in the extractor checks they were known at the snapshot time (read from code).
 

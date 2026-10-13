@@ -25,7 +25,7 @@ Figures were observed from live markets, not computed by code in this repo. The 
 | NBA | (inferred) Deep: $178K-$2.5M USDC moneyline volume per game, about 1 cent spreads, 25-28 levels per side, top-of-book size about $1,100-$1,600. |
 | MLB | Deep: $152K median per game, up to $5.8M for playoff games, 1 cent spreads, 32-44 levels per side, median $567K total depth. Prices are collinear with devigged bet365 (mean delta about 1 cent on games with real volume) through arbitrage, not AMM seeding. Trading is discrete: 89% of 5-minute ticks show no movement and the rest jump by at least 1 cent. A sharp-reference candidate, not a mispricing venue. |
 
-Whether Polymarket works as an MLB sharp reference is an open question (#456), not part of the ADR.
+Use of Polymarket as an MLB sharp reference is untested and not part of the ADR.
 
 ## Series and tag ids
 

@@ -57,7 +57,7 @@ Each fails quietly on EPL and MLB data: the symptom is an empty result (no event
 - CLI `--sport` defaults to `basketball_nba` in several commands ([Sport defaults](odds-cli.md#sport-defaults)); the root banner describes the tool as NBA (`odds_cli.main.app`).
 - `backfill plan` and `backfill scores` hardcode `sport_key="basketball_nba"` (`odds_cli.commands.backfill`), as does `odds_analytics.backfill_executor.BackfillExecutor` ([Odds API historical backfill](../collection/odds-api-backfill.md)).
 - Completeness checks discover NBA games only, and `odds_lambda.storage.readers.OddsReader.get_games_by_date` buckets days noon-to-noon UTC "to capture a full NBA game day" for every sport (`odds_lambda.storage.tier_validator.TierCoverageValidator`; [Coverage and completeness checks](../storage/coverage-checks.md), [OddsReader](../storage/odds-reader.md)).
-- `odds_analytics.strategies.BasicEVStrategy` defaults to markets `h2h`, `spreads`, `totals` and US retail books, which match nothing in OddsPortal EPL data (`1x2`, UK books) ([Backtest strategies](../evaluation/backtest-strategies.md)).
+- `odds_analytics.strategies.BasicEVStrategy` defaults to NBA-style markets and US retail books, which match nothing in OddsPortal EPL data (`1x2`, UK books) ([Backtest strategies](../evaluation/backtest-strategies.md)).
 - Polymarket code targets NBA (`odds_lambda.polymarket_fetcher.PolymarketClient.get_nba_events`, `odds_core.config.PolymarketConfig.nba_series_id`) ([Polymarket pipeline and tables](../collection/polymarket.md)).
 - `.env.example` sets `SPORTS=basketball_nba` ([Configuration](configuration.md)).
 

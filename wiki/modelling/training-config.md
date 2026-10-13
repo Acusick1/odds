@@ -32,14 +32,15 @@ Every model forbids unknown keys (`extra="forbid"`). A file has `experiment` (na
 **`training.features`**
 
 - `target_type` (`raw` default, `devigged_bookmaker`), `target_bookmaker` (default `pinnacle`), `sharp_bookmakers` (priority order, default `["pinnacle"]`), `retail_bookmakers`, `closing_source_priority`, `outcome`, `markets`, `feature_groups`, `form_window`, `match_stats_window`, `variance_threshold`, `sampling` ([target functions](clv-target-functions.md), [sharp benchmark](sharp-benchmark.md), [decision time](look-ahead-bias.md), [feature pipeline](feature-pipeline.md)).
+- `odds_analytics.training.config.SamplingConfig`: `strategy` (`time_range` default, or `tier`), `decision_tier` (default `pregame`, used by `tier`), and `min_hours` 3.0, `max_hours` 12.0 and `max_samples_per_event` 5 (used by `time_range`). Production sets `strategy: tier` with `decision_tier: sharp` ([feature pipeline](feature-pipeline.md)).
 - A YAML that omits `target_type` and `target_bookmaker` trains the raw mean-implied-probability delta against Pinnacle (#434); the production target is devigged bet365 ([ADR-0002](../../docs/adr/0002-bet365-clv-target.md)).
 - `sharp_bookmakers` defaults to Pinnacle only, while the hybrid reference sets `[pinnacle, betfair_exchange]`; the MCP default differs on purpose (#421, [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md)).
 - The primary market is `markets[0]` by position (#475). `odds_analytics.training.config.FeatureConfig` carries bookmaker rosters, sampling, LSTM, Polymarket and EPL settings, so every committed YAML serialises about 30 unrelated fields.
 - The production YAML lists bet365 in `retail_bookmakers` as well as using it as the target bookmaker.
 
-## Choosing data
+## Data source and bookmaker
 
-`target_bookmaker` must belong to the selected source. EPL with the bet365 target and hybrid sharp uses `data_source: null`, `sharp_bookmakers: [pinnacle, betfair_exchange]` and `closing_source_priority: [football_data_uk]`. NBA bet365 needs `oddsportal`; NBA Pinnacle needs `oddsapi`. LSTM runs also set `min_snapshots: 5` or more. A target bookmaker absent from the source drops events, counted only in a log line.
+`target_bookmaker` must belong to the selected `data_source`; a target bookmaker absent from the source drops events, counted only in a log line. The data-source and bookmaker combinations used by the committed configs are set out in [Train and publish a model](howto-train-and-publish-model.md#choose-data).
 
 ## Values accepted but not trainable
 

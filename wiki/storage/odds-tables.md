@@ -33,7 +33,7 @@ The Odds API per-event object: `bookmakers[]`, each with `key`, `title`, `last_u
 
 ## Provenance
 
-Two free-text fields tag where a snapshot came from. Each producer sets them as literals; no enum defines them (#468).
+Two free-text fields tag where a snapshot came from. Each producer sets them as literals independently; no enum or registry defines the vocabularies (#468).
 
 | `raw_data["source"]` | Producer |
 |---|---|
@@ -54,7 +54,7 @@ Two free-text fields tag where a snapshot came from. Each producer sets them as 
 - Indexes: single-column `event_id`, `bookmaker_key`, `market_key`, `odds_timestamp`; composite `ix_event_bookmaker_market (event_id, bookmaker_key, market_key)` for lookups and line movement, and `ix_bookmaker_time (bookmaker_key, odds_timestamp)` for per-bookmaker analysis.
 - `odds` has no unique constraint beyond `id`, so storing a snapshot twice duplicates its rows (#448).
 
-Written by `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` and `odds_lambda.storage.writers.OddsWriter.bulk_insert_odds`; read by `odds_lambda.storage.readers.OddsReader.get_odds_at_time`, `get_line_movement` and `get_best_odds` ([OddsReader](odds-reader.md)).
+Written by `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` and `odds_lambda.storage.writers.OddsWriter.bulk_insert_odds`; read by `odds_lambda.storage.readers.OddsReader.get_odds_at_time`, `odds_lambda.storage.readers.OddsReader.get_line_movement` and `odds_lambda.storage.readers.OddsReader.get_best_odds` ([OddsReader](odds-reader.md)).
 
 ## Related
 

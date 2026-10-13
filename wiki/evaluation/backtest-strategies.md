@@ -15,7 +15,7 @@ status: stable
 
 # Backtest strategies
 
-Strategies subclass `odds_analytics.backtesting.services.BettingStrategy` and return `odds_analytics.backtesting.models.BetOpportunity` rows from `evaluate_opportunity` ([backtest engine](backtest-engine.md)). The CLI resolves `--strategy` through `odds_cli.commands.backtest.STRATEGIES`; the defaults below are constructor defaults in `odds_analytics.strategies`. To add one, see [Add a backtest strategy](howto-add-backtest-strategy.md).
+Strategies subclass `odds_analytics.backtesting.services.BettingStrategy` and return `odds_analytics.backtesting.models.BetOpportunity` rows from `odds_analytics.backtesting.services.BettingStrategy.evaluate_opportunity` ([backtest engine](backtest-engine.md)). The CLI resolves `--strategy` through `odds_cli.commands.backtest.STRATEGIES`; the defaults below are constructor defaults in `odds_analytics.strategies`. To add one, see [Add a backtest strategy](howto-add-backtest-strategy.md).
 
 ## Registered strategies
 

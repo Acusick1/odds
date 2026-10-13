@@ -26,7 +26,7 @@ status: stable
 ## Flow
 
 1. Pre-schedule using `odds_lambda.scheduling.decision.decide_forward_resilient` with `odds_lambda.jobs.fetch_oddsportal.CADENCE` ([decision-engine](../scheduling/decision-engine.md#cadence)). This job is always-run: only `next_execution` is used, not `should_execute`.
-2. Inside `job_alert_context(compound_name)`, `odds_lambda.jobs.fetch_oddsportal.ingest_league` per spec: scrape under the Playwright semaphore, `odds_lambda.oddsportal_adapter.convert_upcoming_matches` per market, `find_or_create_event` and `store_odds_snapshot` per match (tier assigned by the writer, see [fetch-tier](../storage/fetch-tier.md)), tagging `api_request_id` as `oddsportal_live_<time>`. A league failure is logged and the others continue.
+2. Inside `job_alert_context(compound_name)`, `odds_lambda.jobs.fetch_oddsportal.ingest_league` per spec: scrape under the Playwright semaphore, `odds_lambda.oddsportal_adapter.convert_upcoming_matches` per market, `odds_lambda.storage.writers.OddsWriter.find_or_create_event` and `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` per match (tier assigned by the writer, see [fetch-tier](../storage/fetch-tier.md)), tagging `api_request_id` as `oddsportal_live_<time>`. A league failure is logged and the others continue.
 3. If nothing was scraped, `send_job_warning("scrape_empty:<job>")`.
 4. Outside the alert context: if `model_supports_sport(ctx.sport)`, `score_events(sport=...)` runs inline ([prediction-scoring](../modelling/prediction-scoring.md)). Any exception there is logged as `fetch_oddsportal_scoring_failed` and swallowed so it cannot fire a scrape alert.
 5. Post-schedule only when at least one match was scraped. A zero-match run skips it, so the next run keeps the earlier computed time.

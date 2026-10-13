@@ -76,7 +76,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in
 | `odds_core.prediction_models`, `odds_core.match_brief_models`, `odds_core.paper_trade_models`, `odds_core.agent_wakeup_models` | Prediction and agent tables ([match briefs](../agent/match-briefs.md), [paper trading](../agent/paper-trading.md)) |
 | `odds_core.epl_data_models`, `odds_core.mlb_data_models`, `odds_core.injury_models`, `odds_core.game_log_models`, `odds_core.player_stats_models`, `odds_core.polymarket_models` | Sport-context and Polymarket tables |
 | `config.py` | Pydantic Settings, see [Configuration](configuration.md) |
-| `odds_core.database` | Engine and `async_session_maker`, see [Databases and environments](databases-and-environments.md) |
+| `odds_core.database` | Engine and `odds_core.database.async_session_maker`, see [Databases and environments](databases-and-environments.md) |
 | `odds_core.alerts` | `odds_core.alerts.AlertManager`, `odds_core.alerts.DiscordAlert`, see [Alerts](../operations/alerts.md) |
 | `odds_core.odds_math` | Price conversion, implied probability, devig, see [Odds arithmetic helpers](odds-math.md) |
 | `odds_core.snapshot_utils`, `utils.py` | `odds_core.snapshot_utils.extract_odds_from_snapshot` (parse `raw_data` into `odds_core.models.Odds`), `odds_core.utils.raw_data_has_market` |
@@ -128,7 +128,7 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 ## Dependency exceptions
 
 - `packages/odds-lambda/pyproject.toml` does not declare `odds-analytics`, but `odds_lambda.model_loader` imports `odds_analytics.training.config` and `odds_lambda.jobs.score_predictions` imports `odds_analytics.feature_groups` at module level (#454). Analytics declares a dependency on odds-lambda, so the cycle is undeclared on this side. The scraper-side consequence is on [Prediction scoring](../modelling/prediction-scoring.md).
-- `odds_core.paper_trade_models.PaperTrade` imports `odds_analytics.backtesting.models` (type-checking plus a lazy import inside `to_bet_record`), so odds-core depends on odds-analytics in practice (#459).
+- `odds_core.paper_trade_models.PaperTrade` imports `odds_analytics.backtesting.models` (type-checking plus a lazy import inside `odds_core.paper_trade_models.PaperTrade.to_bet_record`), so odds-core depends on odds-analytics in practice (#459).
 - `python-dotenv` is declared in core but nothing imports it; `.env` is read only by pydantic-settings (#459).
 
 ## Related

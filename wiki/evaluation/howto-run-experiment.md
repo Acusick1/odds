@@ -1,7 +1,7 @@
 ---
 type: howto
 title: Run and record a modelling experiment
-description: Script conventions, the required FINDINGS.md and verification artifacts with their checks, and how to record the result in the wiki.
+description: Run an experiment script, check its verification artifacts and FINDINGS.md, and record the result in the wiki.
 sources:
   - odds_analytics.training.data_preparation.save_verification_artifacts
   - experiments/scripts/cv_protocol_grid.py
@@ -10,50 +10,23 @@ status: stable
 
 # Run and record a modelling experiment
 
-Experiments are standalone scripts in `experiments/scripts/` writing to `experiments/results/<experiment_name>/`.
+Conventions, file formats and the script inventory are on [Experiment scripts and artifacts](experiment-scripts.md).
 
-## Conventions
-
-- Load data with the training pipeline (`odds_analytics.feature_groups.prepare_training_data`, `odds_analytics.training.config.MLTrainingConfig`) and reuse YAMLs from `experiments/configs/` ([training config](../modelling/training-config.md)).
-- Set the target and the CV protocol explicitly in the YAML. Code defaults are `target_type: raw` and `target_bookmaker: pinnacle`, not the production bet365 devigged target ([target functions](../modelling/clv-target-functions.md)), and the default protocol is not walk-forward ([ADR-0004](../../docs/adr/0004-walk-forward-cv-protocol.md), [cross-validation](../modelling/cross-validation.md)).
-- When starting a sliding-window run, copy the principled search space from the `experiments/configs/xgboost_epl_production_*` configs, because older YAMLs carry the original space that collapses to constant predictors ([search-space experiment](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test)).
-- The script must run as `uv run python experiments/scripts/<script>.py`.
-- Do not reuse the February 2026 scripts unchanged: they reference feature groups the code does not define and may not run ([early NBA signal search](exp-early-nba-signal-and-lstm.md#caveats)).
-- Commit the script before running it, then commit the results, so `FINDINGS.md` can record the git SHA of the code that produced them (convention set in #134).
-
-## Required outputs
-
-- **`FINDINGS.md`** (exemplar: `experiments/results/exp4_hours_to_game/FINDINGS.md`) with sections Setup (date, git SHA, dataset size, sampling, target, exact reproduce command), Key Results (numbers, tables, significance), Interpretation (meaning, caveats, alternatives) and Implications (next steps, go/no-go).
-- Plots as PNG and data artifacts (CSVs) in the same directory.
-
-## Verification artifacts
-
-`odds train run` and `odds train tune` write them automatically. Scripts call:
-
-```python
-save_verification_artifacts(X, y, feature_names, output_dir, event_ids=event_ids)
-```
-
-It writes `feature_stats.csv` (count, null_count, null_pct, mean, std, min, max, nunique), `feature_sample.csv` (first 20 rows with event ids and target) and `feature_target_corr.csv` (Pearson and Spearman against the target). Before reporting results, check that:
-
-- no feature is 100% NaN or constant unless expected;
-- the feature count matches the configured groups ([feature pipeline](../modelling/feature-groups.md));
-- correlations agree in sign with prior experiments.
-
-Zeroed features once hid an adapter bug, which is why these checks exist ([early NBA signal search](exp-early-nba-signal-and-lstm.md#the-in_play-leak)).
-
-## Record the result in the wiki
-
-Rules for wiki pages are in [SCHEMA.md](../SCHEMA.md).
-
-1. **Write the experiment page.** Put a new experiment page in the `evaluation` area, link the `FINDINGS.md` from it and cite the script and configs in `sources`.
+1. **Write the script and config.** Put the script in `experiments/scripts/` and reuse a YAML from `experiments/configs/` ([conventions](experiment-scripts.md#script-and-config-conventions)).
+   - Set `target_type`, `target_bookmaker` and the CV protocol explicitly, so the run matches production rather than the code defaults.
+   - For a sliding-window run, copy the search space from `experiments/configs/xgboost_epl_production_*`.
+2. **Commit the script.** Do this before the run, so `FINDINGS.md` can record the git SHA of the code that produced the results.
+3. **Run it.** `uv run python experiments/scripts/<script>.py`; outputs go to `experiments/results/<experiment_name>/`.
+   - Call `save_verification_artifacts(X, y, feature_names, output_dir, event_ids=event_ids)` from the script (`odds train run` and `odds train tune` already do) ([artifact files](experiment-scripts.md#verification-artifacts)).
+4. **Check the artifacts before reporting results.**
+   - No feature is 100% NaN or constant unless expected.
+   - The feature count matches the configured groups ([feature groups](../modelling/feature-groups.md)).
+   - Correlations agree in sign with prior experiments.
+5. **Write `FINDINGS.md` and commit the results.** Use the [section format](experiment-scripts.md#findingsmd) with the plots and CSVs beside it.
+6. **Write the experiment page.** Put a new explanation page in the `evaluation` area, link the `FINDINGS.md` from it and cite the script and configs in `sources`. Rules for wiki pages are in [SCHEMA.md](../SCHEMA.md).
    - When the result is a decision (for example a target or protocol choice), also write an ADR in `docs/adr/` ([ADR-0001](../../docs/adr/0001-wiki-replaces-docs.md) is the style reference); the experiment page holds the evidence and links the ADR.
-2. **Update the hub.** Update the current conclusions of [CLV model findings](clv-model-findings.md) in place if the result changes what is known, and add the dated index line.
-3. **Lint.** Run `uv run python scripts/wiki_lint.py --fix`, then the plain lint.
-
-## Existing scripts
-
-`experiments/results/` holds only some runs' outputs (verification CSVs for several configs, no `FINDINGS.md`), so a missing results directory does not mean the run did not happen. Documented results: `exp1_feature_correlations`, `exp2_feature_group_isolation`, `exp4_hours_to_game`, `exp6_learning_curve`, `exp6b_injury_closing_tier`, `exp7_backtest_simulation`, `exp7b_line_shopping`, `cv_protocol_grid`, `hybrid_sharp_validation`, `lineup_signal_check` ([EPL context features](../modelling/epl-context-features.md)). Undocumented exploration scripts: `betfair_historical_analysis` (parses Betfair historical NBA files), `betfair_nba_explore` (live Betfair NBA market survey), `sharp_feature_correlation` (Pinnacle vs Betfair sharp features on overlapping events), `sharp_regime_analysis` (Pinnacle vs Betfair sharp since 2024), `fold_diagnostics` (per-fold composition and drift for a CV protocol).
+7. **Update the hub.** Update the current conclusions of [CLV model findings](clv-model-findings.md) in place if the result changes what is known, and add the dated index line.
+8. **Lint.** Run `uv run python scripts/wiki_lint.py --fix`, then the plain lint.
 
 ## Related
 

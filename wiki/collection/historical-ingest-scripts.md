@@ -19,7 +19,7 @@ status: stable
 
 Three scripts under `scripts/` load OddsPortal scrapes and football-data.co.uk (FDUK) CSVs for EPL as `odds_core.models.Event` plus `odds_core.models.OddsSnapshot` rows in the live `raw_data` format. This is the history that trains models ([data-sources](data-sources.md), [clv-model-findings](../evaluation/clv-model-findings.md)). None is scheduled. The steps to run them are in [howto-load-historical-epl-odds](howto-load-historical-epl-odds.md).
 
-The scripts write `odds_core.models.Event` and `odds_core.models.OddsSnapshot` rows only, no `odds_core.models.Odds` rows, so backtests and `get_odds_at_time` skip these events (#435; [odds-tables](../storage/odds-tables.md)).
+The scripts write `odds_core.models.Event` and `odds_core.models.OddsSnapshot` rows only, no `odds_core.models.Odds` rows, so backtests and `odds_lambda.storage.readers.OddsReader.get_odds_at_time` skip these events (#435; [odds-tables](../storage/odds-tables.md)).
 
 ## Inputs
 

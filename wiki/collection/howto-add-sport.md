@@ -18,7 +18,7 @@ status: stable
 
 # Add a sport
 
-Derived from reading the code, not from a sport that was added this way. The Odds API bookmakers and markets are config lists (`bookmakers`, `markets` on `odds_core.config.DataCollectionConfig`) and need no code. A new sport needs the steps below; skip a step only when the sport has no feed or job of that kind.
+The Odds API bookmakers and markets are config lists (`bookmakers`, `markets` on `odds_core.config.DataCollectionConfig`) and need no code. A new sport needs the steps below; skip a step only when the sport has no feed or job of that kind.
 
 1. Add the sport to `odds_core.sports.SportKey`.
    - It becomes the `sport` argument of jobs, MCP tools and CLI commands ([sport-and-market-keys](sport-and-market-keys.md#sport-keys)).

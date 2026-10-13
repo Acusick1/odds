@@ -11,6 +11,8 @@ sources:
   - tests/conftest.py
   - docker-compose.yml
   - deployment/aws/terraform/terraform.tfvars.example
+  - odds_cli.commands.copy_from_prod.copy_from_production
+  - odds_lambda.copy_from_production
   - .env.example
   - .github/workflows/deploy-prod.yml
 status: stable
@@ -36,15 +38,12 @@ All code gets sessions from one module-level factory: `odds_core.database.async_
 |---|---|---|
 | Test | in-process PostgreSQL (py-pglite) on TCP port 5434 | `tests/conftest.py` creates tables once per session and truncates all tables before each test. Used by `tests/unit` and `tests/integration` ([Test suite](test-suite.md)). |
 | Local | `odds` in Docker Compose `postgres:15`, host port 5433 | `docker compose up -d postgres`; `postgres/postgres` (`docker-compose.yml`) |
-| Dev | remote managed Postgres, a Neon dev branch | CI/CD only, via `secrets.DATABASE_URL`; reset freely (inferred) |
+| Dev | remote managed Postgres, a Neon dev branch | CI/CD only, via `secrets.DATABASE_URL` |
 | Production | remote managed Postgres, the Neon main branch | production deployments only |
 
-`.env.example` defines `LOCAL_DATABASE_URL`, `DEV_DATABASE_URL`, `PROD_DATABASE_URL` and sets `DATABASE_URL=${DEV_DATABASE_URL}`, so a fresh copy of it points at the shared dev database; override it to `${LOCAL_DATABASE_URL}` for local work (#429, [local setup](howto-develop-locally.md)). Lambda gets `DATABASE_URL` from Terraform, which takes the dev or production Neon connection string per environment (`deployment/aws/terraform/terraform.tfvars.example`; the provider is not verifiable from the repo beyond that template).
+`.env.example` defines `LOCAL_DATABASE_URL`, `DEV_DATABASE_URL`, `PROD_DATABASE_URL` and sets `DATABASE_URL=${DEV_DATABASE_URL}`, so a fresh copy of it points at the shared dev database (#429). Lambda gets `DATABASE_URL` from Terraform, which takes the dev or production Neon connection string per environment (`deployment/aws/terraform/terraform.tfvars.example`; the provider is not verifiable from the repo beyond that template).
 
-> [!WARNING]
-> Never point `DATABASE_URL` at production from a local shell. Production is migrated and written only by `deploy-prod.yml`; inspect it only with the read-only `scripts/check_*.py`.
-
-- Production migrates only inside `.github/workflows/deploy-prod.yml` ([migrations](howto-database-migration.md)). To inspect production when debugging, use the read-only `scripts/check_*.py` scripts ([Debug the AWS self-scheduling jobs](../scheduling/howto-debug-aws-scheduler.md)).
+- Production migrates only inside `.github/workflows/deploy-prod.yml` ([migrations](howto-database-migration.md)). The read-only `scripts/check_*.py` scripts inspect it ([Debug the AWS self-scheduling jobs](../scheduling/howto-debug-aws-scheduler.md)).
 - Backups and point-in-time recovery are the managed provider's; that is not verifiable from the repo. Data gaps are filled with [historical loads](../collection/odds-api-backfill.md).
 - `tests/migration` connects to whatever `DATABASE_URL` points at and is run only by the deploy workflows ([Test suite](test-suite.md#migration-tests)).
 
@@ -54,7 +53,19 @@ The betting agent subprocess swaps in `AGENT_DATABASE_URL` when set (`odds_lambd
 
 ### The `--db` flag
 
-`odds scheduler start --db NAME` and `odds agent run --db NAME` swap the dbname in `DATABASE_URL` through `odds_cli.db_override.override_database_url`. The engine already built in this process keeps the original URL, so in-process `async_session_maker()` calls still hit the original database; only subprocesses and later `odds_core.config.get_settings()` calls see the swap ([The odds CLI](odds-cli.md#shared-conventions)).
+`odds scheduler start --db NAME` and `odds agent run --db NAME` swap the dbname in `DATABASE_URL` through `odds_cli.db_override.override_database_url`. The engine already built in this process keeps the original URL, so in-process `odds_core.database.async_session_maker()` calls still hit the original database; only subprocesses and later `odds_core.config.get_settings()` calls see the swap ([The odds CLI](odds-cli.md#shared-conventions)).
+
+## Copying production data
+
+`odds copy from-prod START END` ([how-to](howto-copy-production-data.md)). `START` and `END` are positional `YYYY-MM-DD` dates, where `odds backfill` and `odds quality` use `--start`/`--end`; `END` is inclusive through 23:59:59 UTC. Options (`odds_cli.commands.copy_from_prod.copy_from_production`): `--sport/-s` (default `soccer_epl`), `--dry-run`, `--skip-existing/--overwrite` (default skip existing), `--prod-url`, `--local-url`.
+
+- Source URL: `--prod-url`, else `PROD_DATABASE_URL`, else `DATABASE_URL`. Target URL: `--local-url`, else `LOCAL_DATABASE_URL` (required).
+- Events come from `odds_lambda.storage.readers.OddsReader.get_events_by_date_range` for the sport and window. With `--skip-existing`, an event already present locally is skipped.
+- A copied event is upserted with `odds_lambda.storage.writers.OddsWriter.upsert_event`; each snapshot not already present locally (within a 1 minute tolerance) is re-stored with `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot`, which recomputes the normalized odds and tier ([OddsWriter](../storage/odds-writer.md)).
+- Predictions are copied one by one; duplicates against `uq_prediction_event_snap_model` are skipped. Predictions keep production's `snapshot_id` while snapshots are re-created with new ids, so a copied prediction can point at a different local snapshot or fail the foreign key (#450).
+- A duplicate prediction rolls back the session that holds the event's upsert and snapshots, discarding them (#450).
+- Running `odds_lambda.copy_from_production` as a script bypasses the CLI: its `__main__` block reads only the two dates and `--dry-run`, so every other option is ignored.
+- `--dry-run` counts events and snapshots it would copy and writes nothing; its prediction count stays 0.
 
 ## Related
 

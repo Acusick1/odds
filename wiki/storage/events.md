@@ -49,7 +49,7 @@ Training's `data_source` filter matches these prefixes (`op_%`, `fduk_%`) in `od
 1. `odds_core.team.normalize_team_name`: whitespace collapse plus a lowercase alias map to the pipeline's canonical short names (EPL and MLB). Unknown names pass through unchanged.
 2. `odds_lambda.polymarket_matching.normalize_team`: NBA only (`odds_lambda.polymarket_matching.TEAM_ALIASES`), returns `None` for unknown names. The injury and game-log writers and injury features use it, not the core one.
 
-The two share no data. Alias gaps are fixed in the map for the sport in question.
+The two share no data.
 
 ## Upsert verbs
 

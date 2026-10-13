@@ -28,6 +28,8 @@ status: stable
 - `odds_core.odds_math.determine_h2h_winner(home_score, away_score)` returns `"home"`, `"away"` or `"draw"`.
 - `odds_core.odds_math.calculate_profit_from_odds(stake, american_odds, won)`.
 
+The docstring examples show rounded values (`1.909`, `0.524`), so a doctest runner would fail them against the exact returns.
+
 ## Consumers
 
 `odds_lambda.storage.readers` ([OddsReader](../storage/odds-reader.md)), `odds_lambda.paper_trading`, backtesting services, feature extraction and the MCP server. Analytics-side hold helpers (`odds_analytics.utils.calculate_market_hold`, `odds_analytics.utils.per_book_market_holds`) are built on `odds_core.odds_math.calculate_implied_probability`; `odds_analytics.utils.per_book_market_holds` drops books missing any required outcome rather than returning a partial hold. The training target maths built on these helpers is on [Target functions](../modelling/clv-target-functions.md).

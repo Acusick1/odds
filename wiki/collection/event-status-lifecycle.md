@@ -22,16 +22,16 @@ status: stable
 | Transition | Setter | Rule |
 |---|---|---|
 | (new) → SCHEDULED | event sync, `odds_lambda.storage.writers.OddsWriter`, `odds discover games` | default status |
-| SCHEDULED → LIVE | `odds_lambda.jobs.update_status._update_event_statuses` | events with `commence_time` in the last 4 hours (`odds_lambda.jobs.update_status.STATUS_WINDOW`) and already past; `reader.get_events_by_date_range(status=SCHEDULED)` |
-| → FINAL | `odds_lambda.jobs.fetch_scores._fetch_and_update_scores` | Odds API `/scores` (`days_from=3`), only when `completed` and both scores parse |
+| SCHEDULED → LIVE | `odds_lambda.jobs.update_status._update_event_statuses` | events already past `commence_time` within `odds_lambda.jobs.update_status.STATUS_WINDOW`; `reader.get_events_by_date_range(status=SCHEDULED)` |
+| → FINAL | `odds_lambda.jobs.fetch_scores._fetch_and_update_scores` | Odds API `/scores` ([results-jobs](results-jobs.md#fetch-scores)), only when `completed` and both scores parse |
 | → FINAL | `odds_lambda.jobs.fetch_oddsportal_results.process_results` | OddsPortal results for SCHEDULED/LIVE events already past kickoff (`odds_lambda.jobs.fetch_oddsportal_results.get_pending_events`) |
 | → FINAL | `odds fetch scores` (`odds_cli.commands.fetch.fetch_scores`), `odds backfill scores` | manual; `backfill scores` sets FINAL from NBA game logs ([odds-api-backfill](odds-api-backfill.md)) |
 
-No code sets `cancelled` or `postponed`. A cancelled game stays SCHEDULED or LIVE until a results job finalises it or it ages out of the 4-hour and 3-day windows (#440).
+No code sets `cancelled` or `postponed`. A cancelled game stays SCHEDULED or LIVE until a results job finalises it or it ages out of the status and scores windows ([results-jobs](results-jobs.md)) (#440).
 
-Re-discovery can move a status backwards: `bulk_upsert_events` overwrites status and scores, so a re-discovered FINAL event returns to SCHEDULED with null scores ([events](../storage/events.md), #440). Whether `/events` still returns started games, which would make event sync reset LIVE events, is not verified.
+Re-discovery can move a status backwards: `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` overwrites status and scores, so a re-discovered FINAL event returns to SCHEDULED with null scores ([events](../storage/events.md), #440). Whether `/events` still returns started games, which would make event sync reset LIVE events, is not verified.
 
-`update-status` and `fetch-scores` self-schedule with a backward decision. The status job counts only SCHEDULED events as needing work, the scores job any non-FINAL event in its 3-day window ([self-scheduling](../scheduling/self-scheduling.md)).
+`update-status` and `fetch-scores` self-schedule with a backward decision. The status job counts only SCHEDULED events as needing work, the scores job any non-FINAL event in its window ([self-scheduling](../scheduling/self-scheduling.md)).
 
 ## What each status gates
 

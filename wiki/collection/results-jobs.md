@@ -14,6 +14,7 @@ sources:
   - odds_lambda.jobs.fetch_oddsportal_results.get_pending_events
   - odds_lambda.jobs.fetch_oddsportal_results._match_record_to_event
   - odds_lambda.jobs.fetch_oddsportal_results._db_market_for_spec
+  - odds_lambda.scheduling.decision.decide_backward
   - odds_lambda.scheduling.decision.decide_backward_resilient
   - odds_cli.commands.fetch.fetch_scores
 status: stable
@@ -38,7 +39,7 @@ Three jobs and one command move events to LIVE and FINAL ([event-status-lifecycl
 
 `odds_lambda.jobs.fetch_scores.main(ctx)` is the Odds API `/scores` job, a per-sport rule on the scheduler Lambda.
 
-1. Gate with `odds_lambda.scheduling.decision.decide_backward_resilient` using `odds_lambda.jobs.fetch_scores.SCORES_WINDOW` (3 days), `odds_lambda.jobs.fetch_scores.SCORES_ACTIVE_INTERVAL` 6 h and `odds_lambda.jobs.fetch_scores.SCORES_IDLE_INTERVAL` 12 h: it runs while any event that kicked off in the last three days is not FINAL. Any non-FINAL event counts, so a postponed game keeps it on the 6 h cadence for three days (#440).
+1. Gate with `odds_lambda.scheduling.decision.decide_backward_resilient` using `odds_lambda.jobs.fetch_scores.SCORES_WINDOW` (3 days), `odds_lambda.jobs.fetch_scores.SCORES_ACTIVE_INTERVAL` 6 h and `odds_lambda.jobs.fetch_scores.SCORES_IDLE_INTERVAL` 12 h: it runs while any event that kicked off in the last three days is not FINAL. Any non-FINAL event counts (`odds_lambda.scheduling.decision.decide_backward`), including POSTPONED and CANCELLED ones.
 2. Pre-schedule, then skip if idle.
 3. `odds_lambda.jobs.fetch_scores._fetch_and_update_scores`: for each sport call `TheOddsAPIClient.get_scores(sport, days_from=3)`, and for every `completed` entry with parseable scores call `update_event_status(FINAL, home_score, away_score)`, committing per sport.
 4. Re-decide and post-schedule.
@@ -53,7 +54,7 @@ Per-event failures are logged and skipped. A whole-job failure sends `odds_core.
 
 1. **Read**: `odds_lambda.jobs.fetch_oddsportal_results.get_pending_events` returns plain `odds_lambda.jobs.fetch_oddsportal_results.PendingEvent` dataclasses for SCHEDULED or LIVE events of the sport with `commence_time` in the past. None means exit.
 2. **Scrape**: `run_harvester_historic(spec)` with no open session. The call does not take the Playwright semaphore.
-3. **Write**: for each record, `odds_lambda.jobs.fetch_oddsportal_results._match_record_to_event` matches on exact home and away team strings and a commence-time delta of at most 24 h; `update_event_status(FINAL, scores)`; `build_raw_data(... use_opening=False)` and `store_odds_snapshot` tagged `api_request_id="oddsportal_closing"`; commit per record with rollback on error. Records with no digit scores are skipped.
+3. **Write**: for each record, `odds_lambda.jobs.fetch_oddsportal_results._match_record_to_event` matches on exact home and away team strings and a commence-time delta of at most 24 h; `update_event_status(FINAL, scores)`; `build_raw_data(... use_opening=False)` and `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` tagged `api_request_id="oddsportal_closing"`; commit per record with rollback on error. Records with no digit scores are skipped.
 
 An unmatched scrape increments `events_not_matched` and nothing alerts ([event-matching](../storage/event-matching.md)). Rerunning is idempotent because finished events leave the pending query. `odds_lambda.jobs.fetch_oddsportal_results._db_market_for_spec` maps `home_away` to `h2h` and `1x2` to `1x2`, and raises for other primary markets.
 

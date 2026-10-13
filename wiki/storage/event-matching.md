@@ -1,7 +1,7 @@
 ---
-type: explanation
+type: reference
 title: Event matching across sources
-description: How each ingest path decides which event a row belongs to, and why duplicates and NULL event ids appear.
+description: The matcher each ingest path uses to find its events row (window, team comparison, ambiguity rule) and the duplicates and NULL event ids that follow.
 sources:
   - odds_lambda.oddsportal_common.find_existing_event
   - odds_lambda.storage.writers.OddsWriter.find_or_create_event
@@ -28,7 +28,7 @@ There is no shared matcher for deciding which `events` row a piece of incoming d
 | `odds_lambda.storage.game_log_writer.GameLogWriter._match_event` | [NBA game logs](../collection/nba-injuries-and-stats.md) | same ET window (a verbatim copy) | team is home or away | `None` |
 | `odds_lambda.polymarket_matching.match_polymarket_event` | `odds polymarket link` only | ticker date at 12:00 UTC ±24 h | exact, via `odds_lambda.polymarket_matching.NBA_ABBREV_MAP` | `None` |
 
-## Why duplicates and NULLs appear
+## Consequences of the differences
 
 - **Create on miss.** If `odds_lambda.storage.writers.OddsWriter.find_or_create_event` finds nothing it creates an event, so a name or window mismatch there yields a duplicate event rather than a miss. A game absent from `events` gets an `op_`/`fduk_` row from the historical scripts, so cross-source joins depend on the matchers agreeing.
 - **Different windows.** `odds_lambda.storage.writers.OddsWriter.find_or_create_event` uses ±2 h and `odds_lambda.oddsportal_common.find_existing_event` ±24 h; both reuse an existing event (including a hex-id one) on a team match.

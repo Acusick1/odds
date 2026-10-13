@@ -22,9 +22,9 @@ status: stable
 
 ## Delivery
 
-- `odds_core.alerts.AlertBase` is the channel interface (`send`, `send_embed`). `odds_core.alerts.DiscordAlert` posts to a webhook; severity colours are info blue, warning yellow, error red, critical dark red. Discord is the only channel. A non-204 response or exception is logged (`discord_alert_failed` / `_error`) and swallowed, so a rotated webhook silently disables alerting (#457, #384).
-- `odds_core.alerts.AlertManager` builds channels from `settings.alerts` at construction (Discord only, when `discord_webhook_url` is set). `alert(message, severity)` and `send_embed(embed)` no-op with a debug log if `alert_enabled` is false and warn if there are no channels.
-- `alert_manager = AlertManager()` is a module-level singleton created at import, so it snapshots `ALERT_ENABLED` and the webhook then; flipping `ALERT_ENABLED` later needs a new instance, and tests patch `alert_manager` (#457).
+- `odds_core.alerts.AlertBase` is the channel interface (`odds_core.alerts.AlertBase.send`, `odds_core.alerts.AlertBase.send_embed`). `odds_core.alerts.DiscordAlert` posts to a webhook; severity colours are info blue, warning yellow, error red, critical dark red. Discord is the only channel. A non-204 response or exception is logged (`discord_alert_failed` / `_error`) and swallowed, so a rotated webhook silently disables alerting (#457, #384).
+- `odds_core.alerts.AlertManager` builds channels from `settings.alerts` at construction (Discord only, when `discord_webhook_url` is set). `odds_core.alerts.AlertManager.alert` and `odds_core.alerts.AlertManager.send_embed` no-op with a debug log if `alert_enabled` is false and warn if there are no channels.
+- `odds_core.alerts.alert_manager` is a module-level singleton created at import, so it snapshots `ALERT_ENABLED` and the webhook then; flipping `ALERT_ENABLED` later needs a new instance, and tests patch `odds_core.alerts.alert_manager` (#457).
 
 Helpers:
 
@@ -36,7 +36,7 @@ Helpers:
 
 The Lambda handler also sends its own critical on any exception ([lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
 
-`odds_core.config.AlertConfig` (no env prefix): `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED` (default false), quota thresholds 0.2 and 0.1, `CONSECUTIVE_FAILURES_THRESHOLD` 3, `STALE_DATA_HOURS` 2, `ALERT_RATE_LIMIT_MINUTES` 30, `DATA_QUALITY_ERROR_THRESHOLD` 10, `heartbeat_expectations`, `heartbeat_retention_days` 7 ([configuration](../foundations/configuration.md)).
+`odds_core.config.AlertConfig` (no env prefix; its docstring says "infrastructure for future use", yet it drives deployed alerting): `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED` (default false), quota thresholds 0.2 and 0.1, `CONSECUTIVE_FAILURES_THRESHOLD` 3, `STALE_DATA_HOURS` 2, `ALERT_RATE_LIMIT_MINUTES` 30, `DATA_QUALITY_ERROR_THRESHOLD` 10, `heartbeat_expectations`, `heartbeat_retention_days` 7 ([configuration](../foundations/configuration.md)).
 
 ## Alert history
 

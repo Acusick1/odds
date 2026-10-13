@@ -25,7 +25,7 @@ About 1.7K combined OddsPortal + FDUK EPL events, devigged bet365 target, 100 tr
 
 - **Control** (03-10): combined data with bet365 as its own sharp reference, CV R² = -0.005 ± 0.008.
 - **Invalid run** (03-10): Pinnacle sharp, CV R² 0.031 ± 0.014, inflated by #231.
-- **#231 bug** (fixed 2026-03-15): `odds_analytics.feature_groups.TierSampler` chose the latest snapshot by wall-clock time, so OddsPortal snapshots without Pinnacle beat FDUK snapshots with it for about 37 of 150 events in the final fold, and `np.nan_to_num` turned missing Pinnacle probabilities into 0.0. `odds_analytics.feature_groups.TierSampler` now takes `required_bookmakers` and features stay NaN ([feature pipeline](../modelling/feature-pipeline.md)). Results from 2026-03-10 are invalid.
+- **#231 bug** (fixed 2026-03-15): `odds_analytics.feature_groups.TierSampler` chose the latest snapshot by wall-clock time, so OddsPortal snapshots without Pinnacle beat FDUK snapshots with it for about 37 of 150 events in the final fold, and `np.nan_to_num` turned missing Pinnacle probabilities into 0.0. `odds_analytics.feature_groups.TierSampler` takes `required_bookmakers` and missing Pinnacle features stay NaN ([feature pipeline](../modelling/feature-pipeline.md)). Results from 2026-03-10 are invalid.
 - **Post-fix, expanding:150** (03-15/16): tabular 0.019 ± 0.043; + standings 0.030 ± 0.040; + match_stats 0.025 ± 0.042; + standings + match_stats 0.052 ± 0.045 (reproduced 03-19).
 - The MSE drop against the OddsPortal-only baseline (0.0024 to 0.0007) reflects lower target variance with Pinnacle closing, not necessarily better prediction.
 
@@ -52,7 +52,7 @@ On 589 overlapping events Betfair Exchange `sharp_prob` correlates 0.9994 with P
 
 - A single training set mixes Pinnacle-based and Betfair-based `sharp_prob` values, and the model cannot tell which row is which except through the level shift ([sharp benchmark](../modelling/sharp-benchmark.md#code-copies)).
 - `experiments/configs/xgboost_epl_hybrid_sharp.yaml` predates the principled search space, and the 2026-03-18 sliding-380 feature-group numbers were a search-space artefact and should not be used.
-- The sliding-380 numbers above do not reproduce under current data and the hybrid reference; feature counts are as recorded (the tabular group now has 6 features, not 7).
+- The sliding-380 numbers above do not reproduce under current data and the hybrid reference; feature counts are as recorded (the results used a 7-column tabular group; the code defines 6).
 - Fold counts disagree between sources: the 2026-03-15/16 expanding:150 runs are logged as 6 folds (tabular, + standings) and 5 folds (+ match_stats, + standings + match_stats), while this page says about 7 for the same protocol; `experiments/results/xgboost_epl_production_expanding_150/verification` holds no fold metadata, so neither can be confirmed.
 
 ## Related

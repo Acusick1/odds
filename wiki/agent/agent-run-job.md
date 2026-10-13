@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Agent runtime and the agent-run job
-description: The claude subprocess, the agent-run job flow and cadence, agent_wakeups, odds agent run, the database role, and run traces with their viewer.
+description: The claude subprocess, the agent-run job flow and cadence, agent_wakeups, odds agent run and the database role.
 sources:
   - odds_lambda.jobs.agent_run._run_claude_agent
   - odds_lambda.jobs.agent_run._build_agent_subprocess_env
@@ -10,10 +10,6 @@ sources:
   - odds_lambda.jobs.agent_run.schedule_next
   - odds_lambda.jobs.agent_run.main
   - odds_lambda.jobs.agent_run._check_agent_requested_wakeup
-  - odds_lambda.jobs.agent_run._log_stream_message
-  - odds_lambda.jobs.agent_run._prune_agent_run_logs
-  - odds_lambda.jobs.agent_run.AGENT_RUN_LOG_KEEP
-  - odds_lambda.jobs.agent_run.AGENT_STREAM_LINE_LIMIT
   - odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS
   - odds_lambda.scheduling.jobs._SMOKE_UNSAFE_JOBS
   - odds_lambda.scheduling.jobs._JOB_BOOTSTRAP_MAP
@@ -22,7 +18,6 @@ sources:
   - odds_cli.commands.agent.run
   - odds_mcp.server.schedule_next_wakeup
   - odds_mcp.server.refresh_scrape
-  - experiments/scripts/show_agent_summaries.py
   - .mcp.json
   - .gitignore
 status: stable
@@ -39,7 +34,7 @@ The runtime of the [betting agent](betting-agent.md) lives in `odds_lambda.jobs.
 - reaches the pipeline through the `odds` MCP server registered in `.mcp.json` (`uv run fastmcp run odds_mcp.server`), see [odds-mcp server](mcp-server.md);
 - researches with web search and Playwright;
 - runs under `AGENT_DATABASE_URL` when set, otherwise inherits the parent DSN with a logged warning (`odds_lambda.jobs.agent_run._build_agent_subprocess_env`), see [database role](#database-role);
-- writes a JSONL trace per run ([run traces](#run-traces)).
+- writes a JSONL trace per run ([run traces](agent-run-traces.md)).
 
 Two entry paths: the scheduled `agent-run` job, and `odds agent run --sport S` for one wake-up with no scheduling side effects. `agent-run` is in `_SMOKE_UNSAFE_JOBS` because it places paper bets, so `odds scheduler smoke` skips it unless `--include-agent` ([local scheduler](../scheduling/local-scheduler.md#cli)).
 
@@ -76,18 +71,11 @@ If `AGENT_DATABASE_URL` is set, the subprocess gets it as `DATABASE_URL`. `.env.
 
 ## Run traces
 
-Each run writes its full `stream-json` output to a file: the only durable record of the run's reasoning, with no database component (`odds_lambda.jobs.agent_run._run_claude_agent` writes the file only; the agent's persistent memory is `odds_core.match_brief_models.MatchBrief`, see [match briefs](match-briefs.md)). Deleting `logs/agent_runs/` loses the traces.
-
-- Every line goes to `<project_root>/logs/agent_runs/{sport}_{YYYYMMDDTHHMMSSZ}_{pid}.jsonl`. The PID suffix avoids collisions when two runs start in the same second. `logs/` is gitignored.
-- The asyncio stream line limit is raised to 8 MiB (`odds_lambda.jobs.agent_run.AGENT_STREAM_LINE_LIMIT`), because one `tool_result` block can exceed the 64 KiB default.
-- Only some messages are teed to structlog by `odds_lambda.jobs.agent_run._log_stream_message`: assistant `tool_use` blocks become `agent_tool_use` (tool name and a 60-character-per-value input preview), and the `result` message becomes `agent_run_summary` (text, turns, duration, cost).
-- `odds_lambda.jobs.agent_run._prune_agent_run_logs` runs before writing and deletes all but the newest `odds_lambda.jobs.agent_run.AGENT_RUN_LOG_KEEP` (50) files matching `{sport}_*.jsonl`, so up to 51 files exist per sport after a run.
-- The subprocess is killed after `odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS`; the partial trace stays.
-
-The viewer `experiments/scripts/show_agent_summaries.py` prints the `result` summaries: `uv run python experiments/scripts/show_agent_summaries.py --sport epl --since 24h --limit 3`, or `--file <path>`. `--sport` takes the short names `epl` or `mlb`. One file can hold several sessions; the script tracks a session index per `result` line. The filename is the only schema linking producer and consumer: `FILENAME_RE` in the viewer expects `{sport_key}_{timestamp}_{pid}.jsonl`, so renaming either side breaks the other silently. `--since` filters on the file's start time taken from its name, so every session in a file that started before the cutoff is dropped (#479). Other report channels are in [reporting](../operations/reporting-surfaces.md).
+Each run writes its `stream-json` output to a JSONL file under `logs/agent_runs/`, described in [Agent run traces](agent-run-traces.md).
 
 ## Related
 
 - [The betting agent](betting-agent.md)
 - [Agent prompts](agent-prompts.md)
+- [Agent run traces](agent-run-traces.md)
 - [Match briefs](match-briefs.md) and [paper trading](paper-trading.md), what the agent writes

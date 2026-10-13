@@ -39,7 +39,7 @@ status: stable
 
 ## JobContext
 
-`odds_lambda.scheduling.jobs.JobContext` is the dataclass every `main(ctx)` receives: `sport`, `include_spreads`, `include_totals`, `dry_run`, `lookback_hours` (24), `lookahead_hours` (48). `odds_lambda.scheduling.jobs.JobContext.from_payload` keeps known keys and drops unknown ones with a debug log, so a typo in an EventBridge payload is silent. Jobs read dry-run from `settings.scheduler.dry_run`; only `backfill-polymarket` reads `ctx.dry_run`.
+`odds_lambda.scheduling.jobs.JobContext` is the dataclass every `main(ctx)` receives: `sport`, `include_spreads`, `include_totals`, `odds_lambda.scheduling.jobs.JobContext.dry_run`, `lookback_hours` (24), `lookahead_hours` (48). `odds_lambda.scheduling.jobs.JobContext.from_payload` keeps known keys and drops unknown ones with a debug log, so a typo in an EventBridge payload is silent. Jobs read dry-run from `settings.scheduler.dry_run`; only `backfill-polymarket` reads `ctx.dry_run`.
 
 ## Related
 

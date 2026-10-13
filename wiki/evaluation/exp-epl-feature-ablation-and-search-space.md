@@ -99,7 +99,7 @@ Deployed as `epl-clv-home` `v308058c` (CV R² +0.058, MSE 0.000716), replacing t
 - **FPL is not reproducible.** The FPL tables and reader remain ([EPL context data](../collection/epl-context-data.md)) but the run cannot be repeated as recorded.
 - The `min_child_weight` rule of thumb has no recorded source.
 - `rest` is a no-op for EPL by construction: its extractor needs NBA game logs, so the columns are NaN and the variance filter drops them.
-- Feature counts are as recorded: the tabular group had 7 columns then and has 6 now.
+- Feature counts are as recorded: the results used a 7-column tabular group; the code defines 6.
 
 ## Related
 

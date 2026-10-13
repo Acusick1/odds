@@ -40,6 +40,7 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 ### Reference
 
 - [Coverage and completeness checks](coverage-checks.md) — TierCoverageValidator, odds validate, odds quality, QualityMetrics, the daily-validation workflow and the read-only scripts/check_*.py.
+- [Event matching across sources](event-matching.md) — The matcher each ingest path uses to find its events row (window, team comparison, ambiguity rule) and the duplicates and NULL event ids that follow.
 - [Events table](events.md) — The events columns and statuses, id prefixes by source, team-name normalizers, and the upsert verbs that write events.
 - [Fetch tier](fetch-tier.md) — The FetchTier enum and bounds, where tiers are written and read, and the boundary encodings.
 - [Odds snapshot and odds tables](odds-tables.md) — The odds_snapshots and odds columns and indexes, the raw_data format, and the provenance tags.
@@ -50,6 +51,5 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 
 ### Explanation
 
-- [Event matching across sources](event-matching.md) — How each ingest path decides which event a row belongs to, and why duplicates and NULL event ids appear.
 - [How odds are stored](odds-storage-model.md) — Why odds are stored as raw snapshots plus normalized rows, which sources lack the normalized half, and which readers use which.
 <!-- pages:end -->

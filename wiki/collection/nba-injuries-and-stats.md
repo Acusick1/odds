@@ -46,7 +46,7 @@ League-wide injury report snapshots parsed from the official PDFs by `nbainjurie
 
 stats.nba.com blocks raw HTTP (Akamai), so `odds_lambda.game_log_fetcher.fetch_game_logs` is synchronous Playwright: headless Firefox loads nba.com for cookies, then calls the API from the page. Two rows per game, about 2,460 per regular season. Because Playwright's sync API cannot run inside an event loop, the CLI fetches all seasons first, then writes asynchronously.
 
-`odds_lambda.storage.game_log_reader.GameLogReader.get_game_logs_for_event` and `get_team_previous_game` serve the `rest` features, which are all-NaN for EPL and dropped by the variance filter ([feature-groups](../modelling/feature-groups.md)). `odds backfill scores` reads logs linked to events to fill missing scores ([odds-api-backfill](odds-api-backfill.md)).
+`odds_lambda.storage.game_log_reader.GameLogReader.get_game_logs_for_event` and `odds_lambda.storage.game_log_reader.GameLogReader.get_team_previous_game` serve the `rest` features, which are all-NaN for EPL and dropped by the variance filter ([feature-groups](../modelling/feature-groups.md)). `odds backfill scores` reads logs linked to events to fill missing scores ([odds-api-backfill](odds-api-backfill.md)).
 
 ## Player stats
 
@@ -54,7 +54,7 @@ stats.nba.com blocks raw HTTP (Akamai), so `odds_lambda.game_log_fetcher.fetch_g
 
 ## Event matching
 
-Both writers link rows to `events` with the same ET window rule: events whose `commence_time` is in game_date 10:00 ET to next day 06:00 ET with the team as home or away; exactly one candidate sets `event_id`, otherwise NULL (ambiguous logs a warning). Injury teams are canonicalised with `odds_lambda.polymarket_matching.normalize_team`, not the core normalizer; the game-log writer maps `team_abbreviation` through a hardcoded `_ABBREV_TO_CANONICAL`. Injury reports are league-wide, so non-playing teams stay `event_id = NULL`, and unmatched rows are invisible to per-event readers such as `get_injuries_for_event` ([event-matching](../storage/event-matching.md)).
+Both writers link rows to `events` with the same ET window rule: events whose `commence_time` is in game_date 10:00 ET to next day 06:00 ET with the team as home or away; exactly one candidate sets `event_id`, otherwise NULL (ambiguous logs a warning). Injury teams are canonicalised with `odds_lambda.polymarket_matching.normalize_team`, not the core normalizer; the game-log writer maps `team_abbreviation` through a hardcoded `_ABBREV_TO_CANONICAL`. Injury reports are league-wide, so non-playing teams stay `event_id = NULL`, and unmatched rows are invisible to per-event readers such as `odds_lambda.storage.injury_reader.InjuryReader.get_injuries_for_event` ([event-matching](../storage/event-matching.md)).
 
 ## Scope and known gaps
 

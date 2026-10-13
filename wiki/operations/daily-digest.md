@@ -26,7 +26,7 @@ status: stable
 - Completed: `odds_lambda.jobs.daily_digest._get_completed_events_with_predictions` selects FINAL events with `completed_at >= now - lookback`, joined to the prediction with the highest `snapshot_id` per event for `model_name`, ordered by kickoff.
 - Upcoming: `odds_lambda.jobs.daily_digest._get_upcoming_events_with_predictions` selects SCHEDULED events kicking off in `(now, now + lookahead]` with the same join, ordered by `|predicted_clv|` descending.
 - `odds_lambda.jobs.daily_digest.build_digest_embed` makes a green embed titled `<EPL|NBA|MLB> Daily Digest` with fields "Post-Match Results" (tick or cross, score, side and CLV, footer `X events | Y/X correct side`) and "Upcoming Predictions". Each field is truncated at `odds_lambda.jobs.daily_digest.MAX_FIELD_CHARS` (1024).
-- Delivery is `alert_manager.send_embed`. If both lists are empty nothing is sent and the log says `daily_digest_empty`. `sent` in the returned stats is 1 whenever an embed was built, including when alerts are disabled or the post failed (#384).
+- Delivery is `odds_core.alerts.AlertManager.send_embed`. If both lists are empty nothing is sent and the log says `daily_digest_empty`. `sent` in the returned stats is 1 whenever an embed was built, including when alerts are disabled or the post failed (#384).
 
 `model_name` defaults to `settings.model.name`, falling back to `"epl-clv-home"`.
 

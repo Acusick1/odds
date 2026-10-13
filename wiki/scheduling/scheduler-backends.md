@@ -7,6 +7,7 @@ sources:
   - odds_lambda.scheduling.backends.base.RetryConfig
   - odds_lambda.scheduling.backends.get_scheduler_backend
   - odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend
+  - odds_lambda.scheduling.backends.aws.AWS_SCHEDULE_FORMAT
   - odds_lambda.scheduling.backends.railway.RailwayBackend
   - odds_lambda.scheduling.exceptions.BackendUnavailableError
   - odds_lambda.scheduling.exceptions.ConfigurationError
@@ -34,11 +35,11 @@ status: stable
 
 `odds_lambda.scheduling.backends.base.SchedulerBackend` requires:
 
-- `schedule_next_execution(job_name, next_time, payload=None)`, a one-shot booking; `payload` is merged next to `{"job": job_name}`.
-- `cancel_scheduled_execution`, `odds_lambda.scheduling.backends.base.SchedulerBackend.get_scheduled_jobs`, `get_job_status`.
-- `health_check() -> BackendHealth`, `validate_configuration() -> ValidationResult`, `get_backend_name()`.
+- `odds_lambda.scheduling.backends.base.SchedulerBackend.schedule_next_execution(job_name, next_time, payload=None)`, a one-shot booking; `payload` is merged next to `{"job": job_name}`.
+- `odds_lambda.scheduling.backends.base.SchedulerBackend.cancel_scheduled_execution`, `odds_lambda.scheduling.backends.base.SchedulerBackend.get_scheduled_jobs`, `odds_lambda.scheduling.backends.base.SchedulerBackend.get_job_status`.
+- `odds_lambda.scheduling.backends.base.SchedulerBackend.health_check() -> BackendHealth`, `odds_lambda.scheduling.backends.base.SchedulerBackend.validate_configuration() -> ValidationResult`, `odds_lambda.scheduling.backends.base.SchedulerBackend.get_backend_name()`.
 
-The constructor takes `dry_run` and a `odds_lambda.scheduling.backends.base.RetryConfig`. In dry-run mode the AWS and local implementations log and return, and their listings return `[]`; `odds_lambda.scheduling.backends.railway.RailwayBackend.get_scheduled_jobs` raises regardless. `odds_lambda.scheduling.backends.get_scheduler_backend` defaults `dry_run` to false, so a listing built without it (as `odds scheduler list-jobs` does) is never emptied by dry-run. Return types are frozen dataclasses (`odds_lambda.scheduling.backends.base.ScheduledJob`, `odds_lambda.scheduling.backends.base.BackendHealth`, `odds_lambda.scheduling.backends.base.ValidationResult`).
+The constructor takes a dry-run flag and a `odds_lambda.scheduling.backends.base.RetryConfig`. In dry-run mode the AWS and local implementations log and return, and their listings return `[]`; `odds_lambda.scheduling.backends.railway.RailwayBackend.get_scheduled_jobs` raises regardless. `odds_lambda.scheduling.backends.get_scheduler_backend` defaults the dry-run flag to false, so a listing built without it (as `odds scheduler list-jobs` does) is never emptied by dry-run. Return types are frozen dataclasses (`odds_lambda.scheduling.backends.base.ScheduledJob`, `odds_lambda.scheduling.backends.base.BackendHealth`, `odds_lambda.scheduling.backends.base.ValidationResult`).
 
 `odds_lambda.scheduling.backends.base.RetryConfig` is consumed only by the AWS backend, and only `max_attempts`, `initial_delay_seconds` and `max_delay_seconds`; `exponential_base` and `jitter` are read by nothing (#473). Each `odds_lambda.scheduling.helpers.self_schedule` call builds a fresh backend (and boto3 clients on AWS); there is no shared instance.
 
@@ -46,26 +47,26 @@ The constructor takes `dry_run` and a `odds_lambda.scheduling.backends.base.Retr
 
 ## Health checks
 
-`odds_lambda.scheduling.health_check` provides `odds_lambda.scheduling.health_check.HealthCheckBuilder` (`pass_check`, `fail_check`, `check_condition`, `build`) and `odds_lambda.scheduling.health_check.ValidationBuilder`. A backend is healthy when no check failed. `odds scheduler health` and `odds scheduler test-backend` use the configured backend only; they do not accept `--backend`.
+`odds_lambda.scheduling.health_check` provides `odds_lambda.scheduling.health_check.HealthCheckBuilder` (`odds_lambda.scheduling.health_check.HealthCheckBuilder.pass_check`, `odds_lambda.scheduling.health_check.HealthCheckBuilder.fail_check`, `odds_lambda.scheduling.health_check.HealthCheckBuilder.check_condition`, `odds_lambda.scheduling.health_check.HealthCheckBuilder.build`) and `odds_lambda.scheduling.health_check.ValidationBuilder`. A backend is healthy when no check failed. `odds scheduler health` and `odds scheduler test-backend` use the configured backend only; they do not accept `--backend`.
 
 ## Railway shim
 
-`odds_lambda.scheduling.backends.railway.RailwayBackend` is not a deployment target. `schedule_next_execution` and `cancel_scheduled_execution` only log. `odds_lambda.scheduling.backends.railway.RailwayBackend.get_scheduled_jobs` and `get_job_status` raise `odds_lambda.scheduling.exceptions.BackendUnavailableError`, which `odds scheduler list-jobs` catches and prints as "not supported". Jobs still run their own gate logic under it, but cannot move their own cadence. Its `health_check` fails the "Running in Railway environment" check unless `RAILWAY_ENVIRONMENT` is set, so it reports unhealthy anywhere else.
+`odds_lambda.scheduling.backends.railway.RailwayBackend` is not a deployment target. `odds_lambda.scheduling.backends.railway.RailwayBackend.schedule_next_execution` and `odds_lambda.scheduling.backends.railway.RailwayBackend.cancel_scheduled_execution` only log. `odds_lambda.scheduling.backends.railway.RailwayBackend.get_scheduled_jobs` and `odds_lambda.scheduling.backends.railway.RailwayBackend.get_job_status` raise `odds_lambda.scheduling.exceptions.BackendUnavailableError`, which `odds scheduler list-jobs` catches and prints as "not supported". Jobs still run their own gate logic under it, but cannot move their own cadence. Its `odds_lambda.scheduling.backends.railway.RailwayBackend.health_check` fails the "Running in Railway environment" check unless `RAILWAY_ENVIRONMENT` is set, so it reports unhealthy anywhere else.
 
 ## AWS EventBridge backend
 
 `odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend` rewrites one pre-created EventBridge rule per job. Terraform owns rule creation; the Lambda owns the schedule.
 
-`schedule_next_execution` (retried with tenacity per `odds_lambda.scheduling.backends.base.RetryConfig`, default 3 attempts) does two calls on rule `{rule_prefix}-{job_name}`:
+`odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend.schedule_next_execution` (retried with tenacity per `odds_lambda.scheduling.backends.base.RetryConfig`, default 3 attempts) does two calls on rule `{rule_prefix}-{job_name}`:
 
 1. `put_rule` with `State="ENABLED"` and a one-time expression from `odds_lambda.scheduling.backends.aws._format_aws_schedule`: `cron(min hour day month ? year)` in UTC. Seconds are dropped.
 2. `put_targets` with Lambda ARN `self.lambda_arn` and `Input` = `{"job": job_name, **payload}`. The target retry policy is 0 attempts, 60 s max event age.
 
-`cancel_scheduled_execution` disables the rule. Failure after retries raises `odds_lambda.scheduling.exceptions.SchedulingFailedError`.
+`odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend.cancel_scheduled_execution` disables the rule. Failure after retries raises `odds_lambda.scheduling.exceptions.SchedulingFailedError`. `odds_lambda.scheduling.backends.aws.AWS_SCHEDULE_FORMAT` (`at({timestamp})`) is read by nothing and the class docstring mentions `at(...)`, but the backend only emits `cron(...)` (`odds_lambda.scheduling.backends.aws._format_aws_schedule`).
 
 `odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend.get_scheduled_jobs` lists rules by prefix with one `list_rules` call and does not follow `NextToken` (#443). It parses expressions with `odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend._parse_schedule_expression`; a `rate(...)` placeholder yields `next_run_time=None` plus a warning log, and `ENABLED` maps to `SCHEDULED`, everything else to `CANCELLED`. The parser builds naive datetimes ([Timezones](../foundations/timezones.md)). The MCP tool `odds_mcp.server.get_scheduled_jobs` never goes through this path: it reads only the local APScheduler store ([MCP scheduling tools](../agent/mcp-server.md#scrape-and-scheduling-tools)).
 
-The Lambda role in `deployment/aws/terraform/lambda.tf` grants `PutRule`, `PutTargets`, `DisableRule`, `EnableRule` and `DescribeRule` but not `events:ListRules`, which `odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend.get_scheduled_jobs` and `health_check` call. Listing and health checks therefore work only from a shell with broader credentials (#443).
+The Lambda role in `deployment/aws/terraform/lambda.tf` grants `PutRule`, `PutTargets`, `DisableRule`, `EnableRule` and `DescribeRule` but not `events:ListRules`, which `odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend.get_scheduled_jobs` and `odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend.health_check` call. Listing and health checks therefore work only from a shell with broader credentials (#443).
 
 ### Rules and Terraform
 
@@ -73,7 +74,7 @@ The Lambda role in `deployment/aws/terraform/lambda.tf` grants `PutRule`, `PutTa
 
 ### Env-var contract
 
-Constructor arguments win, then unprefixed env vars: `AWS_REGION`, `LAMBDA_ARN`, `RULE_PREFIX`. Terraform sets `LAMBDA_ARN` and `RULE_PREFIX` on each function (`deployment/aws/terraform/lambda.tf`); the scraper's `LAMBDA_ARN` is its own ARN, so scraper jobs reschedule onto the scraper. `odds_lambda.scheduling.backends.get_scheduler_backend` first passes `settings.aws.*` (`odds_core.config.AWSConfig`, prefix `AWS_`: `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX`), which is what a local `list-jobs --backend aws` uses ([Configuration](../foundations/configuration.md#variables-read-outside-settings)). Missing region, ARN or prefix raises `odds_lambda.scheduling.exceptions.ConfigurationError` in the constructor. `health_check` results are cached for 5 minutes.
+Constructor arguments win, then unprefixed env vars: `AWS_REGION`, `LAMBDA_ARN`, `RULE_PREFIX`. Terraform sets `LAMBDA_ARN` and `RULE_PREFIX` on each function (`deployment/aws/terraform/lambda.tf`); the scraper's `LAMBDA_ARN` is its own ARN, so scraper jobs reschedule onto the scraper. `odds_lambda.scheduling.backends.get_scheduler_backend` first passes `settings.aws.*` (`odds_core.config.AWSConfig`, prefix `AWS_`: `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX`), which is what a local `list-jobs --backend aws` uses ([Configuration](../foundations/configuration.md#variables-read-outside-settings)). Missing region, ARN or prefix raises `odds_lambda.scheduling.exceptions.ConfigurationError` in the constructor. `odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend.health_check` results are cached for 5 minutes.
 
 ## Lambda handler
 

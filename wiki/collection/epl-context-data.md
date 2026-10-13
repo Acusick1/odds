@@ -33,12 +33,12 @@ Supplementary EPL data that feeds the `epl_schedule` and `epl_lineup` [feature g
 
 `odds_lambda.espn_fixture_fetcher.EspnFixtureFetcher` wraps the free ESPN Site API over httpx (3 attempts, 1 s backoff). `odds_lambda.espn_fixture_fetcher.LEAGUE_SLUGS` covers the Premier League, FA Cup, League Cup and three European competitions (the `epl_schedule` group uses these all-competition fixtures). Two endpoints are combined:
 
-- `fetch_season` walks each EPL team's `teams/{id}/schedule` (completed matches only).
-- `fetch_upcoming` reads the date-range scoreboard, emitting two mirrored rows per match.
+- `odds_lambda.espn_fixture_fetcher.EspnFixtureFetcher.fetch_season` walks each EPL team's `teams/{id}/schedule` (completed matches only).
+- `odds_lambda.espn_fixture_fetcher.EspnFixtureFetcher.fetch_upcoming` reads the date-range scoreboard, emitting two mirrored rows per match.
 
 `odds_lambda.jobs.fetch_espn_fixtures.main` runs both (30-day lookahead), dedupes on `(date, team, opponent)` with the scoreboard row winning (fresher `state`), and upserts through `odds_lambda.storage.espn_fixture_writer.EspnFixtureWriter.upsert_fixtures`, idempotent on `(date, team, competition)`. It raises for any sport but `soccer_epl`. Each match is two rows, one per team.
 
-**Schedule**: `0 6 * * *`, EPL only, from `_JOB_CRON_MAP` in `odds_lambda.scheduling.jobs`, in the default local `odds_core.config.SchedulerConfig.bootstrap_jobs` (`odds_core.config`). It runs on the local scheduler only; no EventBridge rule exists in `deployment/aws/terraform/eventbridge.tf`. Deployed state cannot be verified from the repo: `odds scheduler list-jobs --backend aws` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). The MCP `odds_mcp.tools.epl.get_team_context` tool reads `espn_fixtures`, so it goes stale if the local scheduler is not running this cron.
+**Schedule**: `0 6 * * *`, EPL only, from `_JOB_CRON_MAP` in `odds_lambda.scheduling.jobs`, in the default local `odds_core.config.SchedulerConfig.bootstrap_jobs` (`odds_core.config`). `odds_lambda.jobs.fetch_espn_fixtures` states in its module docstring that the cadence is "managed in Terraform"; the cadence is the local cron above. It runs on the local scheduler only; no EventBridge rule exists in `deployment/aws/terraform/eventbridge.tf`. Deployed state cannot be verified from the repo: `odds scheduler list-jobs --backend aws` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). The MCP `odds_mcp.tools.epl.get_team_context` tool reads `espn_fixtures`, so it goes stale if the local scheduler is not running this cron.
 
 ## Lineups, FPL, FBref
 
@@ -50,7 +50,7 @@ No scheduled lineup job exists: lineups are sourced from live web research, and 
 
 ## Consumption and nullability
 
-- FPL is stored but unused: `odds_lambda.storage.fpl_availability_reader.FplAvailabilityReader` has no caller outside the module and no feature code in `packages/` consumes FPL data (#412).
+- FPL is stored but unused: `odds_lambda.storage.fpl_availability_reader.FplAvailabilityReader` has no caller outside the module and no feature code in `packages/` consumes FPL data (related: #412, a proposed MCP tool over it).
 - `espn_fixtures.state` is nullable; consumers fall back to `odds_core.epl_data_models.EspnFixture.status` strings (`odds_mcp.tools.epl._is_final`).
 - Team names pass through `odds_core.team.normalize_team_name`, which passes unknown names through unchanged ([event-matching](../storage/event-matching.md)).
 

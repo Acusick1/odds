@@ -42,11 +42,11 @@ Five different failure behaviours exist across the jobs, and no code states whic
 |---|---|---|
 | `fetch-odds`, `fetch-scores`, `update-status` | pre and post | log and `odds_core.alerts.send_error`, continue |
 | `fetch-oddsportal`, `fetch-betfair-exchange` | pre and post | pre-schedule failure raises; post logs only |
-| `fetch-oddsportal-results` | fixed 08:00 UTC next day in `finally`, no pre-schedule | log and `odds_core.alerts.send_critical` |
-| `check-health` | after the work only, +60 min, raw backend call | log and `odds_core.alerts.send_error` |
+| `fetch-oddsportal-results` | fixed next-day time in `finally`, no pre-schedule | log and `odds_core.alerts.send_critical` |
+| `check-health` | after the work only, raw backend call | log and `odds_core.alerts.send_error` |
 | `fetch-polymarket` | after the work only, raw backend call | log and `odds_core.alerts.send_error` |
 
-`fetch-oddsportal-results`, `check-health` and `fetch-polymarket` schedule only after their work, so a kill or exception ends the chain (#438). A hard kill skips the results job's `finally` (the scraper Lambda timeout is 900 s, `deployment/aws/terraform/scraper.tf`). An exception in `odds_lambda.health_monitor.check_system_health` or in Polymarket's fetch body skips the reschedule. A rule that was never rescheduled stays `DISABLED` on its `rate(1 day)` placeholder; see [Deployed state](job-deployment-matrix.md#deployed-state) for how to find those. The deploy workflows invoke every job after `terraform apply` to (re)start chains ([Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md), [CI/CD workflows](../operations/ci-cd-workflows.md)).
+`fetch-oddsportal-results`, `check-health` and `fetch-polymarket` schedule only after their work, so a kill or exception ends the chain (#438). A hard kill skips the results job's `finally` (the scraper Lambda has a timeout, `deployment/aws/terraform/scraper.tf`). An exception in `odds_lambda.health_monitor.check_system_health` or in Polymarket's fetch body skips the reschedule. A rule that was never rescheduled stays `DISABLED` on its `rate(1 day)` placeholder; see [Deployed state](job-deployment-matrix.md#deployed-state) for how to find those. The deploy workflows invoke every job after `terraform apply` to (re)start chains ([Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md), [CI/CD workflows](../operations/ci-cd-workflows.md)).
 
 `odds_lambda.jobs.fetch_odds.main`, `odds_lambda.jobs.fetch_scores.main` and `odds_lambda.jobs.update_status.main` each define their own copy of a `odds_lambda.jobs.fetch_polymarket._schedule` closure, and `odds_lambda.jobs.fetch_polymarket._schedule` is a module-level variant (#463).
 
