@@ -50,7 +50,7 @@ Region `eu-west-1`. Scheduler function `odds-scheduler`, log group `/aws/lambda/
 ## Common issues
 
 - **Missing tier coverage.** Causes: EventBridge did not trigger; a Lambda error stopped the job before it scheduled the next run; a rule was edited by hand. Fix: wait for the next run, or redeploy; `deploy-prod.yml` re-invokes jobs and re-activates chains ([AWS infrastructure](../operations/aws-infrastructure.md)).
-- **All events one tier.** The tier is computed per event in `OddsWriter.store_odds_snapshot` (`packages/odds-lambda/odds_lambda/storage/writers.py`); migration `9ff81f073e6b` recalculated older rows ([Odds snapshots and OddsWriter](../storage/odds-storage.md)).
+- **All events one tier.** The tier is computed per event in `packages/odds-lambda/odds_lambda/storage/writers.py::OddsWriter.store_odds_snapshot` (`packages/odds-lambda/odds_lambda/storage/writers.py`); migration `9ff81f073e6b` recalculated older rows ([Odds snapshots and OddsWriter](../storage/odds-storage.md)).
 - **Lambda not running.** `aws events describe-rule --name odds-fetch-odds-epl`, `list-targets-by-rule`, then check the rule's invoke permission on the function. Fix by redeploying ([AWS infrastructure](../operations/aws-infrastructure.md)).
 - **Dead chain.** Past-year cron expressions are dead rules; `scripts/verify-schedules.sh` finds them.
 

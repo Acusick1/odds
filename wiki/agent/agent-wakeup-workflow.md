@@ -41,7 +41,7 @@ The agent may ask for its next wake-up with `packages/odds-mcp/odds_mcp/server.p
 | Sat 14:00-15:00 | Final adjustments, late money | Bets placed, if any |
 | Sat evening | Matches complete | Settle bets, report P&L |
 
-The wake-up cadence in `CADENCE` (24h, 12h, 4h, then 1h inside 3 hours) is what puts a wake-up inside the lineup window; the table is `(inferred)` from that cadence and the prompt's KO-60 lineup note (`packages/odds-mcp/agents/epl/base.md`), not a schedule in code. Lineups come from web search because every structured lineup API was rejected ([rejected sources](agent-data-sources.md#rejected-sources)).
+The wake-up cadence in `packages/odds-lambda/odds_lambda/jobs/agent_run.py::CADENCE` (24h, 12h, 4h, then 1h inside 3 hours) is what puts a wake-up inside the lineup window; the table is `(inferred)` from that cadence and the prompt's KO-60 lineup note (`packages/odds-mcp/agents/epl/base.md`), not a schedule in code. Lineups come from web search because every structured lineup API was rejected ([rejected sources](agent-data-sources.md#rejected-sources)).
 
 ## Edge types
 
@@ -67,7 +67,7 @@ Higher conviction maps to a higher tier; the criteria per tier are in the prompt
 
 ## What code enforces
 
-`packages/odds-lambda/odds_lambda/paper_trading.py::place_trade` in `packages/odds-lambda/odds_lambda/paper_trading.py` checks only that the stake is positive, does not exceed the bankroll, and that the selection is `home`, `draw` or `away`. Settlement is h2h-only. Tier sizes, the four edge bases and the requirement to state a basis are prompt-level: `PaperTrade.reasoning` and `confidence` are free-form optional fields. The `bankroll` that `packages/odds-mcp/odds_mcp/server.py::paper_bet` uses for sizing defaults to the portfolio's current bankroll ([paper trades](match-briefs-and-paper-trades.md#paper-trades)).
+`packages/odds-lambda/odds_lambda/paper_trading.py::place_trade` in `packages/odds-lambda/odds_lambda/paper_trading.py` checks only that the stake is positive, does not exceed the bankroll, and that the selection is `home`, `draw` or `away`. Settlement is h2h-only. Tier sizes, the four edge bases and the requirement to state a basis are prompt-level: `packages/odds-core/odds_core/paper_trade_models.py::PaperTrade.reasoning` and `confidence` are free-form optional fields. The `bankroll` that `packages/odds-mcp/odds_mcp/server.py::paper_bet` uses for sizing defaults to the portfolio's current bankroll ([paper trades](match-briefs-and-paper-trades.md#paper-trades)).
 
 ## Hazards
 

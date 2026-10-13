@@ -76,7 +76,7 @@ This method is not a look-ahead guard: the backtester calls it with `tolerance_m
 ## Hazards
 
 - **Look-ahead.** The symmetric `get_odds_at_time` window above.
-- **Event matching is not shared.** `packages/odds-lambda/odds_lambda/storage/writers.py::OddsWriter.find_or_create_event` (±2 h, first candidate wins on ambiguity), `packages/odds-lambda/odds_lambda/storage/injury_writer.py::InjuryWriter._match_event` and `GameLogWriter._match_event` have independent windows and ambiguity handling ([events](events.md#matchers)).
+- **Event matching is not shared.** `packages/odds-lambda/odds_lambda/storage/writers.py::OddsWriter.find_or_create_event` (±2 h, first candidate wins on ambiguity), `packages/odds-lambda/odds_lambda/storage/injury_writer.py::InjuryWriter._match_event` and `packages/odds-lambda/odds_lambda/storage/game_log_writer.py::GameLogWriter._match_event` have independent windows and ambiguity handling ([events](events.md#matchers)).
 - **Two raw-to-`packages/odds-core/odds_core/models.py::Odds` parsers.** `packages/odds-lambda/odds_lambda/storage/writers.py::OddsWriter._parse_and_store_odds` coerces with `int(outcome.get("price", 0))` (an absent price becomes American odds 0), while `packages/odds-core/odds_core/snapshot_utils.py::extract_odds_from_snapshot` passes the price through unchanged.
 - **Naming.** `get_database_stats` is the only `*_stats` on this class; sibling readers use `get_pipeline_stats`. "Snapshot" means an `packages/odds-core/odds_core/models.py::OddsSnapshot` row here, a list of `packages/odds-core/odds_core/models.py::Odds` at a time in `get_odds_at_time`, and something else in Polymarket.
 - **`source` vocabulary** is documented only in [odds-storage](odds-storage.md#source-tags).

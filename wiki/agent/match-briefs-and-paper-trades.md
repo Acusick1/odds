@@ -45,7 +45,7 @@ The [betting agent](betting-agent.md) leaves two durable records in the database
 
 MCP tools in `packages/odds-mcp/odds_mcp/server.py`:
 
-- `save_match_brief(event_id, market, decision, summary, brief_text)` inserts a row. It anchors on the event's latest snapshot containing `market`, then calls `OddsReader.get_sharp_prices` with `["pinnacle", "betfair_exchange"]` and a 24-hour lookback to stamp `sharp_price_at_brief`; no snapshot gives `null`. Returns the saved row.
+- `save_match_brief(event_id, market, decision, summary, brief_text)` inserts a row. It anchors on the event's latest snapshot containing `market`, then calls `packages/odds-lambda/odds_lambda/storage/readers.py::OddsReader.get_sharp_prices` with `["pinnacle", "betfair_exchange"]` and a 24-hour lookback to stamp `sharp_price_at_brief`; no snapshot gives `null`. Returns the saved row.
 - `get_match_brief(event_id, limit=None)` returns briefs newest first, all of them unless `limit` is set, plus the event.
 - `get_slate_briefs(league="soccer_epl", days_ahead=7)` lists scheduled fixtures in the window (`days_ahead` clamped to 1-30), each with its latest brief's `decision`, summary and `created_at`, or `latest_brief: null`. It uses `DISTINCT ON (event_id)` ordered by newest.
 
@@ -55,7 +55,7 @@ The sharp stamp lets a later wake-up compare the price at brief time with the cu
 
 Table `paper_trades` (`packages/odds-core/odds_core/paper_trade_models.py::PaperTrade`); service `packages/odds-lambda/odds_lambda/paper_trading.py`.
 
-Columns: `event_id` (FK), `market`, `selection` (`home`/`draw`/`away`), `bookmaker` (default `best_available` from the MCP tool), `odds` (American int), `stake`, `reasoning`, `confidence` (0-1, optional), `bankroll_before`, `bankroll_after`, `placed_at`, `settled_at`, `result` (`packages/odds-core/odds_core/paper_trade_models.py::TradeResult`: win, loss, push, void), `pnl`. A partial index `ix_paper_trades_unsettled` covers `settled_at IS NULL`. Bankroll columns are per-trade snapshots: `bankroll_after` is `bankroll_before + pnl`, not a running balance. `PaperTrade.to_bet_record` converts a trade for backtest analysis tools by reusing `packages/odds-analytics/odds_analytics/backtesting/models.py::BetRecord` ([backtesting](../evaluation/backtesting.md)).
+Columns: `event_id` (FK), `market`, `selection` (`home`/`draw`/`away`), `bookmaker` (default `best_available` from the MCP tool), `odds` (American int), `stake`, `reasoning`, `confidence` (0-1, optional), `bankroll_before`, `bankroll_after`, `placed_at`, `settled_at`, `result` (`packages/odds-core/odds_core/paper_trade_models.py::TradeResult`: win, loss, push, void), `pnl`. A partial index `ix_paper_trades_unsettled` covers `settled_at IS NULL`. Bankroll columns are per-trade snapshots: `bankroll_after` is `bankroll_before + pnl`, not a running balance. `packages/odds-core/odds_core/paper_trade_models.py::PaperTrade.to_bet_record` converts a trade for backtest analysis tools by reusing `packages/odds-analytics/odds_analytics/backtesting/models.py::BetRecord` ([backtesting](../evaluation/backtesting.md)).
 
 Service functions:
 

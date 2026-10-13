@@ -38,18 +38,18 @@ Two unrelated systems share the word "quality". **Per-snapshot validation** (`pa
 
 ### What gets logged
 
-If there are any warnings, `OddsWriter.store_odds_snapshot` writes one `packages/odds-core/odds_core/models.py::DataQualityLog`: `issue_type="validation_warnings"`, `severity` `"warning"` when `is_valid` else `"error"`, `description` with the count, and `raw_data={"warnings": first 10}`. Columns: `event_id` (FK, nullable), `severity`, `issue_type`, `description`, JSON `raw_data`, indexed `created_at`.
+If there are any warnings, `packages/odds-lambda/odds_lambda/storage/writers.py::OddsWriter.store_odds_snapshot` writes one `packages/odds-core/odds_core/models.py::DataQualityLog`: `issue_type="validation_warnings"`, `severity` `"warning"` when `is_valid` else `"error"`, `description` with the count, and `raw_data={"warnings": first 10}`. Columns: `event_id` (FK, nullable), `severity`, `issue_type`, `description`, JSON `raw_data`, indexed `created_at`.
 
-`OddsReader.get_data_quality_logs` feeds `odds status` and the [health monitor](../operations/alerts-and-health.md), which alerts when `error` plus `critical` rows in 24 h reach `AlertConfig.data_quality_error_threshold` (10). The validator only emits `warning`/`error`, so `critical` never occurs.
+`packages/odds-lambda/odds_lambda/storage/readers.py::OddsReader.get_data_quality_logs` feeds `odds status` and the [health monitor](../operations/alerts-and-health.md), which alerts when `error` plus `critical` rows in 24 h reach `packages/odds-core/odds_core/config.py::AlertConfig.data_quality_error_threshold` (10). The validator only emits `warning`/`error`, so `critical` never occurs.
 
 ### Configuration
 
-`packages/odds-core/odds_core/config.py::DataQualityConfig` (env `ENABLE_VALIDATION`, default true; `REJECT_INVALID_ODDS`, default false) lives in `packages/odds-core/odds_core/config.py::DataQualityConfig` ([configuration](../foundations/configuration.md)). Only `OddsIngestionService.ingest_sport` reads `enable_validation` (as the `validate` argument).
+`packages/odds-core/odds_core/config.py::DataQualityConfig` (env `ENABLE_VALIDATION`, default true; `REJECT_INVALID_ODDS`, default false) lives in `packages/odds-core/odds_core/config.py::DataQualityConfig` ([configuration](../foundations/configuration.md)). Only `packages/odds-lambda/odds_lambda/ingestion.py::OddsIngestionService.ingest_sport` reads `enable_validation` (as the `validate` argument).
 
 ## Completeness and coverage checks
 
 - **`packages/odds-lambda/odds_lambda/storage/tier_validator.py::TierCoverageValidator`**: `packages/odds-cli/odds_cli/commands/validate.py::validate_game`, `validate_date`, `validate_date_range`. Per game it reads tier counts from OddsReader and builds a `packages/odds-lambda/odds_lambda/storage/tier_validator.py::TierCoverageReport`; per date a `packages/odds-lambda/odds_lambda/storage/tier_validator.py::DailyValidationReport`.
-  - `CRITICAL_TIERS` = PREGAME, CLOSING: missing makes a game incomplete (`is_complete`). They depend on tiers stored with `<=` boundaries ([fetch-tier](fetch-tier.md#four-boundary-encodings)). `WARNING_TIERS` = OPENING, EARLY, SHARP: counted in `games_with_warnings`. `DEFAULT_REQUIRED_TIERS` is all five.
+  - `packages/odds-lambda/odds_lambda/storage/tier_validator.py::CRITICAL_TIERS` = PREGAME, CLOSING: missing makes a game incomplete (`is_complete`). They depend on tiers stored with `<=` boundaries ([fetch-tier](fetch-tier.md#four-boundary-encodings)). `packages/odds-lambda/odds_lambda/storage/tier_validator.py::WARNING_TIERS` = OPENING, EARLY, SHARP: counted in `games_with_warnings`. `DEFAULT_REQUIRED_TIERS` is all five.
   - FINAL games without both scores get the issue `"Missing final scores for completed game"`.
   - `check_discovery=True` calls The Odds API `/scores` and flags `missing_games` (completed upstream, absent from `events`; error) and `missing_scores` (in DB, not FINAL or no score; warning).
 - **`odds validate`** (`packages/odds-cli/odds_cli/commands/validate.py`): `daily` (`--date`, `--strict/--no-strict`, `--check-scores`, `--check-discovery`, `--output-json`, `--verbose`), `game <event_id>`, `tier-coverage --start --end`. `--no-strict` requires only OPENING and CLOSING. With both scores and discovery checks on, exit code 1 on incomplete games, missing scores or missing games; otherwise only tier incompleteness fails.
@@ -64,14 +64,14 @@ Workflow for a failing validation: [howto-debug-aws-scheduler](../scheduling/how
 - **`REJECT_INVALID_ODDS` is inert.** `packages/odds-core/odds_core/config.py::DataQualityConfig` defines `reject_invalid_odds`, but nothing reads it; `packages/odds-lambda/odds_lambda/ingestion.py::OddsIngestionService` reads only `enable_validation`, so invalid data is always stored.
 - **Checks that are not wired.** `packages/odds-lambda/odds_lambda/storage/validators.py::OddsValidator.validate_line_movement` (spread over 10, total over 20 points) and `packages/odds-lambda/odds_lambda/storage/validators.py::OddsValidator.validate_event_data` (required fields) have no caller outside the module.
 - **Severities and issue types.** The only writer (`packages/odds-lambda/odds_lambda/storage/writers.py::OddsWriter.store_odds_snapshot`) emits `warning` or `error` with issue type `validation_warnings`; no other severity or issue type is written.
-- **`Odds.is_valid` is always true.** Validation results are not propagated to rows.
+- **`packages/odds-core/odds_core/models.py::Odds.is_valid` is always true.** Validation results are not propagated to rows.
 - **Third copy of the implied-probability conversion.** `packages/odds-lambda/odds_lambda/storage/validators.py::OddsValidator.american_to_probability` is a separate copy ([odds-math-and-devigging](../foundations/odds-math-and-devigging.md)).
 - **NBA-only pieces.** `_fetch_api_games` hardcodes `sport="basketball_nba"` and only works for dates 0 to 3 days back (else skipped); `quality coverage` defaults to NBA; `validate_date` reads `get_games_by_date`, which has no sport filter and uses a noon-to-noon UTC window. EPL and MLB days are validated against NBA discovery.
 - **Window mismatch.** `check_game_tier_coverage.py --date` filters on calendar date of `commence_time`, so counts differ from `validate daily` at day edges.
 - **Swallowed failures.** `validate_date` logs and skips games whose validation raises, so `total_games` can exceed `complete_games + incomplete_games`. A discovery failure re-raises.
 - **`missing_games` meaning.** `packages/odds-lambda/odds_lambda/storage/tier_validator.py::TierCoverageValidator._check_missing_games` flags games absent from `events` altogether, not games with zero snapshots.
 - **Missing scores overcount.** `packages/odds-analytics/odds_analytics/quality_metrics.py::QualityMetrics.get_games_missing_scores` has no status filter, so unplayed games in the range count as missing scores.
-- **Hard-coded tier ranges.** `packages/odds-analytics/odds_analytics/quality_metrics.py::QualityMetrics._get_tier_hours_range` hardcodes display strings rather than deriving them from `FetchTier.max_hours`.
+- **Hard-coded tier ranges.** `packages/odds-analytics/odds_analytics/quality_metrics.py::QualityMetrics._get_tier_hours_range` hardcodes display strings rather than deriving them from `packages/odds-lambda/odds_lambda/fetch_tier.py::FetchTier.max_hours`.
 
 ## Related
 

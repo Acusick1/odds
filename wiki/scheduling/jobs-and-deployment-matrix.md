@@ -35,14 +35,14 @@ status: stable
 
 ### JobContext
 
-`packages/odds-lambda/odds_lambda/scheduling/jobs.py::JobContext` is the dataclass every `main(ctx)` receives: `sport`, `include_spreads`, `include_totals`, `dry_run`, `lookback_hours` (24), `lookahead_hours` (48). `JobContext.from_payload` keeps known keys and drops unknown ones with a debug log, so a typo in an EventBridge payload is silent. Jobs read dry-run from `settings.scheduler.dry_run`; only `backfill-polymarket` reads `ctx.dry_run`.
+`packages/odds-lambda/odds_lambda/scheduling/jobs.py::JobContext` is the dataclass every `main(ctx)` receives: `sport`, `include_spreads`, `include_totals`, `dry_run`, `lookback_hours` (24), `lookahead_hours` (48). `packages/odds-lambda/odds_lambda/scheduling/jobs.py::JobContext.from_payload` keeps known keys and drops unknown ones with a debug log, so a typo in an EventBridge payload is silent. Jobs read dry-run from `settings.scheduler.dry_run`; only `backfill-polymarket` reads `ctx.dry_run`.
 
 ## Where each job runs
 
 Gates:
 
 - **AWS**: in `deployment/aws/terraform/eventbridge.tf`, `local.sport_configs` (EPL only; MLB commented out), `enable_oddsportal_scraper`, `enable_polymarket` and `betfair_enabled`, plus the always-created `update-status` and `check-health`. These are Terraform variable defaults; see [AWS infrastructure](../operations/aws-infrastructure.md).
-- **Local**: `SchedulerConfig.bootstrap_jobs` (default `fetch-oddsportal`, `fetch-oddsportal-results`, `fetch-espn-fixtures`, `fetch-betfair-exchange`, `fetch-mlb-probables`; `agent-run` and `daily-digest` are commented out, so opt-in) and `_JOB_CRON_MAP`.
+- **Local**: `packages/odds-core/odds_core/config.py::SchedulerConfig.bootstrap_jobs` (default `fetch-oddsportal`, `fetch-oddsportal-results`, `fetch-espn-fixtures`, `fetch-betfair-exchange`, `fetch-mlb-probables`; `agent-run` and `daily-digest` are commented out, so opt-in) and `_JOB_CRON_MAP`.
 
 | Job | AWS | Local default | Schedule |
 |---|---|---|---|
@@ -64,7 +64,7 @@ Per-job pages: [fetch-odds](../collection/odds-api-ingestion.md), [fetch-scores,
 
 ### Heartbeats
 
-Which jobs write a heartbeat is a property of `packages/odds-core/odds_core/alerts.py::job_alert_context`, not of the registry. `AlertConfig.heartbeat_expectations` (`packages/odds-core/odds_core/config.py::AlertConfig`) expects `fetch-oddsportal-<sport>` every 2 h, `fetch-oddsportal-results-<sport>` every 26 h (EPL and MLB), `daily-digest-epl` every 26 h and `check-health` every 2 h. `fetch-odds`, `fetch-scores`, `update-status` and both Polymarket jobs have none ([Alerts and health](../operations/alerts-and-health.md#heartbeats)).
+Which jobs write a heartbeat is a property of `packages/odds-core/odds_core/alerts.py::job_alert_context`, not of the registry. `packages/odds-core/odds_core/config.py::AlertConfig.heartbeat_expectations` (`packages/odds-core/odds_core/config.py::AlertConfig`) expects `fetch-oddsportal-<sport>` every 2 h, `fetch-oddsportal-results-<sport>` every 26 h (EPL and MLB), `daily-digest-epl` every 26 h and `check-health` every 2 h. `fetch-odds`, `fetch-scores`, `update-status` and both Polymarket jobs have none ([Alerts and health](../operations/alerts-and-health.md#heartbeats)).
 
 ## Deployed state is not in the repo
 
@@ -74,6 +74,8 @@ A Lambda payload without `sport` runs every configured sport and reschedules und
 
 ## Hazards
 
+- **Stale rules.** An enabled rule whose cron year or time is in the past never fires again, and a rule still on the `rate(1 day)` placeholder or `DISABLED` was never self-scheduled; both mean the chain is dead. Check with `odds scheduler list-jobs --backend aws` (look for a past or empty next-run time) or `scripts/verify-schedules.sh`, which fails disabled, placeholder-rate and past-year rules.
+- **A job running in both places.** The deploy-time gates (AWS) and `packages/odds-core/odds_core/config.py::SchedulerConfig.bootstrap_jobs` (local) are independent, so a job such as `fetch-oddsportal` or `fetch-betfair-exchange` can run on AWS and on a local scheduler at once and double-fetch. Compare `odds scheduler list-jobs --backend aws` with `odds scheduler list-jobs` on the local host; no code checks for it.
 - Heartbeats come from `packages/odds-core/odds_core/alerts.py::job_alert_context`; `fetch-odds`, `fetch-scores`, `fetch-polymarket` and `backfill-polymarket` do not, so they write no heartbeat.
 - `fixed_schedule_expressions` in Terraform is empty, so no Lambda job has a fixed cron except the Polymarket backfill rule (`{rule_prefix}-backfill-polymarket-bootstrap`).
 - The Betfair cron floor and its self-scheduling share one APScheduler id, so the first self-schedule replaces the cron ([Local scheduler](local-scheduler.md#hazards)).

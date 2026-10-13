@@ -58,7 +58,7 @@ Caveats recorded: CV R² from tuning is optimistically biased (best of N trials)
 - **`test_split: 0.0` still holds out one event** because the splitter uses `max(1, int(n * test_split))`; that event is excluded from `odds train run` CV and included in tuning CV. `odds train validate` also warns about `test_split < 0.1` although 0.0 is the protocol.
 - **Silent downgrade.** `walk_forward` without `event_ids` logs a warning and runs `timeseries` with `n_folds` (default 5), changing the protocol and the metric meaning (AUD A3/A4, re-verified).
 - **Early stopping sees the validation fold.** The XGBoost strategy passes the fold as an `eval_set` and `early_stopping_rounds` is applied by XGBoost; fold R² can therefore be mildly optimistic when early stopping is on (read from code, not measured).
-- **Chronological order is assumed, not checked.** Order comes from `OddsReader.get_events_by_date_range`; a caller passing shuffled data gets no error (AUD T4). See [feature pipeline](feature-pipeline.md).
+- **Chronological order is assumed, not checked.** Order comes from `packages/odds-lambda/odds_lambda/storage/readers.py::OddsReader.get_events_by_date_range`; a caller passing shuffled data gets no error (AUD T4). See [feature pipeline](feature-pipeline.md).
 - **`n_folds` is ignored for `walk_forward`** and mandatory for the other methods, but only `packages/odds-analytics/odds_analytics/training/cross_validation.py::run_cv` enforces it.
 
 ## Related

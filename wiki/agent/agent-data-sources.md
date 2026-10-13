@@ -25,8 +25,8 @@ Collected by jobs or ingestion scripts into the database and available through [
 
 | Source | Provides | Collection | Page |
 |---|---|---|---|
-| OddsPortal | UK multi-bookmaker odds (`BOOKMAKER_KEY_MAP`), upcoming and closing | Self-scheduling by kickoff proximity, 30 min to 2 h (`CADENCE`) | [OddsPortal](../collection/oddsportal.md) |
-| Betfair Exchange | Best back/lay Match Odds, the sharp reference | Self-scheduling, 15 min to 2 h (`CADENCE`) | [Betfair](../collection/betfair-exchange.md) |
+| OddsPortal | UK multi-bookmaker odds (`packages/odds-lambda/odds_lambda/oddsportal_common.py::BOOKMAKER_KEY_MAP`), upcoming and closing | Self-scheduling by kickoff proximity, 30 min to 2 h (`packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal.py::CADENCE`) | [OddsPortal](../collection/oddsportal.md) |
+| Betfair Exchange | Best back/lay Match Odds, the sharp reference | Self-scheduling, 15 min to 2 h (`packages/odds-lambda/odds_lambda/jobs/fetch_betfair_exchange.py::CADENCE`) | [Betfair](../collection/betfair-exchange.md) |
 | The Odds API | US bookmaker odds | Self-scheduling by fetch tier; 500 units per month per free key | [Odds API client](../collection/odds-api-client-and-quota.md) |
 | football-data.co.uk | Historical EPL, Pinnacle and Betfair closing odds | Manual script | [historical loads](../collection/howto-load-historical-odds.md) |
 | ESPN fixtures | All-competition EPL schedule | Daily job (cron in `_JOB_CRON_MAP`) | [EPL context](../collection/epl-context-data.md) |

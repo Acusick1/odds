@@ -70,8 +70,8 @@ odds copy from-prod 2025-08-01 2026-04-10 --sport soccer_epl --dry-run
 `START` and `END` are positional `YYYY-MM-DD` dates; `END` is inclusive through 23:59:59 UTC. Options (`packages/odds-cli/odds_cli/commands/copy_from_prod.py::copy_from_production`): `--sport/-s` (default `soccer_epl`), `--dry-run`, `--skip-existing/--overwrite` (default skip existing), `--prod-url`, `--local-url`.
 
 - Source URL: `--prod-url`, else `PROD_DATABASE_URL`, else `DATABASE_URL`. Target URL: `--local-url`, else `LOCAL_DATABASE_URL` (required).
-- Events come from `OddsReader.get_events_by_date_range` for the sport and window. With `--skip-existing`, an event already present locally is skipped.
-- A copied event is upserted with `OddsWriter.upsert_event`; each snapshot not already present locally (within a 1 minute tolerance) is re-stored with `OddsWriter.store_odds_snapshot`, which recomputes the normalized odds and tier ([Odds snapshots and OddsWriter](../storage/odds-storage.md)).
+- Events come from `packages/odds-lambda/odds_lambda/storage/readers.py::OddsReader.get_events_by_date_range` for the sport and window. With `--skip-existing`, an event already present locally is skipped.
+- A copied event is upserted with `packages/odds-lambda/odds_lambda/storage/writers.py::OddsWriter.upsert_event`; each snapshot not already present locally (within a 1 minute tolerance) is re-stored with `packages/odds-lambda/odds_lambda/storage/writers.py::OddsWriter.store_odds_snapshot`, which recomputes the normalized odds and tier ([Odds snapshots and OddsWriter](../storage/odds-storage.md)).
 - Predictions are copied one by one; duplicates against `uq_prediction_event_snap_model` are skipped.
 - `--dry-run` counts events and snapshots it would copy and writes nothing; its prediction count stays 0.
 - A per-event failure is logged and counted, and the run continues.

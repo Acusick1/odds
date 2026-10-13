@@ -31,7 +31,7 @@ The model predicts line movement: the devigged bet365 CLV delta between a snapsh
 - Sliding-380:50 is the protocol: [walk-forward CV](../modelling/decision-walk-forward-cv.md); it only works with the principled search space ([same experiment page](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test)).
 - NBA injury features add nothing: [NBA timing and injuries](exp-nba-timing-and-injuries.md#nba-injury-features-exp-6-6b) (untested on EPL).
 - LSTM adds nothing: [early NBA signal and LSTM](exp-early-nba-signal-and-lstm.md#lstm-sequence-models).
-- More NBA data will not help (plateau about 1.5K events); EPL has about 1.8K events and a plateau is likely but unconfirmed.
+- More NBA data will not help (plateau about 1.5K events; the log-fit marginal return at 4,524 events is dR²/dN = 6.7e-06, `experiments/results/exp6_learning_curve/FINDINGS.md`); EPL has about 1.8K events and a plateau is likely but unconfirmed.
 - Pregame (3-12 h) is the default window: [NBA timing](exp-nba-timing-and-injuries.md#hours-to-game-exp-4), [decision time](../modelling/decision-time-and-look-ahead.md). Timing on EPL is untested.
 - Polymarket features are untested at scale (230 events, no effect): [Polymarket](../collection/polymarket.md).
 - NBA bookmakers release lines at different times: [line release timing](exp-nba-timing-and-injuries.md#bookmaker-line-release-timing).

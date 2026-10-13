@@ -73,14 +73,14 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 | Sport context fetchers | `packages/odds-lambda/odds_lambda/espn_fixture_fetcher.py`, `packages/odds-lambda/odds_lambda/mlb_stats_fetcher.py`, `packages/odds-lambda/odds_lambda/injury_fetcher.py`, `packages/odds-lambda/odds_lambda/game_log_fetcher.py`, `packages/odds-lambda/odds_lambda/pbpstats_fetcher.py`, `packages/odds-lambda/odds_lambda/polymarket_fetcher.py` | [EPL](../collection/epl-context-data.md), [MLB](../collection/mlb-probable-pitchers.md), [NBA](../collection/nba-injuries-and-stats.md), [Polymarket](../collection/polymarket.md) |
 | Storage | `storage/` (one reader/writer pair per source) | [OddsReader and the storage layer](../storage/odds-reader-and-storage-layer.md) |
 | Scheduling | `scheduling/` (`packages/odds-lambda/odds_lambda/scheduling/jobs.py`, `packages/odds-lambda/odds_lambda/scheduling/decision.py`, `packages/odds-lambda/odds_lambda/scheduling/helpers.py`, `backends/`), `packages/odds-lambda/odds_lambda/lambda_handler.py`, `packages/odds-lambda/odds_lambda/fetch_tier.py`, `packages/odds-lambda/odds_lambda/tier_utils.py` | [Jobs](../scheduling/jobs-and-deployment-matrix.md), [Self-scheduling](../scheduling/self-scheduling.md), [Fetch tier](../storage/fetch-tier.md) |
-| Jobs | `jobs/*.py`, one `main` per file | `_JOB_MODULE_MAP` lists all 14 |
+| Jobs | `jobs/*.py`, one `main(ctx)` per file | `_JOB_MODULE_MAP` lists all 14 |
 | Services | `packages/odds-lambda/odds_lambda/paper_trading.py`, `packages/odds-lambda/odds_lambda/model_loader.py`, `packages/odds-lambda/odds_lambda/health_monitor.py`, `packages/odds-lambda/odds_lambda/copy_from_production.py` | [Paper trades](../agent/match-briefs-and-paper-trades.md), [model store](../modelling/model-publishing-and-scoring.md), [health monitor](../operations/alerts-and-health.md), [copy from production](databases-and-environments.md#copy-production-data-locally) |
 
 `packages/odds-lambda/odds_lambda/__init__.py` re-exports `packages/odds-lambda/odds_lambda/data_fetcher.py::TheOddsAPIClient`, `packages/odds-lambda/odds_lambda/ingestion.py::OddsIngestionService`, `packages/odds-lambda/odds_lambda/fetch_tier.py::FetchTier`, `packages/odds-lambda/odds_lambda/tier_utils.py::calculate_tier` and `packages/odds-lambda/odds_lambda/tier_utils.py::calculate_hours_until_commence`. Job modules are imported lazily by name from `_JOB_MODULE_MAP`, so a scraper-only Lambda never imports the analytics stack. `packages/odds-lambda/odds_lambda/paper_trading.py` and `packages/odds-lambda/odds_lambda/copy_from_production.py` are service code for the CLI and MCP server rather than Lambda code.
 
 ## odds-analytics
 
-`packages/odds-analytics/odds_analytics/` holds backtesting, strategies, feature extraction, model training and the backfill planner. It depends on core and odds-lambda (storage readers, `packages/odds-lambda/odds_lambda/fetch_tier.py::FetchTier`). Heavy dependencies (torch, mlflow, scikit-learn, optuna) sit behind the `training` extra; `packages/odds-analytics/odds_analytics/__init__.py` lazy-loads the modules that need them via `__getattr__`.
+`packages/odds-analytics/odds_analytics/` holds backtesting, strategies, feature extraction, model training and the backfill planner. It depends on core and odds-lambda (storage readers, `packages/odds-lambda/odds_lambda/fetch_tier.py::FetchTier`). Heavy dependencies (torch, mlflow, scikit-learn, optuna) sit behind the `training` extra; `packages/odds-analytics/odds_analytics/__init__.py` lazy-loads the modules that need them via `packages/odds-analytics/odds_analytics/__init__.py::__getattr__`.
 
 | Area | Modules | Page |
 |---|---|---|
@@ -96,7 +96,7 @@ Names that mislead:
 - `packages/odds-analytics/odds_analytics/sequence_loader.py` is not LSTM-only: it owns all target maths (`packages/odds-analytics/odds_analytics/sequence_loader.py::calculate_devigged_bookmaker_target`, `packages/odds-analytics/odds_analytics/sequence_loader.py::DeviggedProbs`), the label for every model ([CLV target](../modelling/clv-target.md), [Devigging](odds-math-and-devigging.md#devigging)).
 - `packages/odds-analytics/odds_analytics/quality_metrics.py` never touches `packages/odds-core/odds_core/models.py::DataQualityLog`; it counts game and odds coverage. Data-quality rows are a separate system ([Validation and coverage](../storage/data-validation.md)).
 - `packages/odds-analytics/odds_analytics/ml_strategy_example.py` (430 lines) is tested infrastructure for an XGBoost win-probability classifier, not the CLV regression the system uses ([Line-movement models](../modelling/line-movement-models.md)).
-- `utils.py::per_book_market_holds` is the hold maths the MCP screener calls ([find_retail_edges](../agent/mcp-market-tools.md)); it is the only reason `odds-mcp` imports analytics ([odds-mcp server](../agent/mcp-server.md)).
+- `packages/odds-analytics/odds_analytics/utils.py::per_book_market_holds` is the hold maths the MCP screener calls ([find_retail_edges](../agent/mcp-market-tools.md)); it is the only reason `odds-mcp` imports analytics ([odds-mcp server](../agent/mcp-server.md)).
 
 ## The odds CLI
 
@@ -104,13 +104,13 @@ Names that mislead:
 
 | Group | Page |
 |---|---|
-| `fetch` | [Odds API ingestion](../collection/odds-api-ingestion.md), [Event lifecycle](../collection/event-lifecycle.md) |
+| `odds fetch` | [Odds API ingestion](../collection/odds-api-ingestion.md), [Event lifecycle](../collection/event-lifecycle.md) |
 | `scrape` | [OddsPortal](../collection/oddsportal.md) |
-| `packages/odds-cli/odds_cli/commands/polymarket.py::discover`, `backfill` | [Historical loads](../collection/howto-load-historical-odds.md) |
+| `packages/odds-cli/odds_cli/commands/discover.py`, `packages/odds-cli/odds_cli/commands/backfill.py` | [Historical loads](../collection/howto-load-historical-odds.md) |
 | `backtest` | [Backtesting](../evaluation/backtesting.md), [Strategies](../evaluation/backtest-strategies.md) |
 | `train` | [Training pipeline](../modelling/training-pipeline.md), [Tuner](../modelling/hyperparameter-tuner.md) |
 | `model` | [Publishing and scoring](../modelling/model-publishing-and-scoring.md) |
-| `status` | [Reporting](../operations/reporting-and-daily-digest.md), [Odds API quota](../collection/odds-api-client-and-quota.md) |
+| `odds status` | [Reporting](../operations/reporting-and-daily-digest.md), [Odds API quota](../collection/odds-api-client-and-quota.md) |
 | `validate`, `quality` | [Validation and coverage](../storage/data-validation.md) |
 | `copy` | [Databases](databases-and-environments.md#copy-production-data-locally) |
 | `scheduler` | [Local scheduler](../scheduling/local-scheduler.md) |
@@ -130,11 +130,11 @@ Shared conventions:
 - **Undeclared cycle.** `packages/odds-lambda/pyproject.toml` does not list `odds-analytics`, but `packages/odds-lambda/odds_lambda/model_loader.py` imports `odds_analytics.training.config` at module level and `packages/odds-lambda/odds_lambda/jobs/score_predictions.py` imports `odds_analytics.feature_groups`. Analytics declares a dependency on odds-lambda, so the cycle is undeclared on this side. The scraper image lacks odds-analytics and xgboost, so inline scoring inside `fetch-oddsportal` fails there and the failure is swallowed ([Publishing and scoring](../modelling/model-publishing-and-scoring.md)).
 - **Reverse edge in core.** `packages/odds-core/odds_core/paper_trade_models.py::PaperTrade` imports `odds_analytics.backtesting.models` (type-checking plus a lazy import inside `to_bet_record`).
 - `python-dotenv` is declared in core but nothing imports it; `.env` is read only by pydantic-settings ([Configuration](configuration.md#hazards)).
-- `--sport` defaults to `basketball_nba` in `fetch current`, `fetch scores`, `packages/odds-cli/odds_cli/commands/polymarket.py::discover` and `quality`; `copy from-prod` defaults to `soccer_epl`; `backtest` and `train` take an optional filter; `agent run` requires it. Pass it explicitly ([Project overview](project-overview.md#nba-assumptions-still-in-live-code)).
+- `--sport` defaults to `basketball_nba` in `fetch current`, `fetch scores`, `odds discover` and `odds quality`; `copy from-prod` defaults to `soccer_epl`; `backtest` and `train` take an optional filter; `agent run` requires it. Pass it explicitly ([Project overview](project-overview.md#nba-assumptions-still-in-live-code)).
 - Two exit styles coexist: `typer.Exit(code=...)` in most groups and `sys.exit(1)` in `validate` (10 sites) and `quality` (3).
-- The root help text and callback docstring say "NBA". `backtest run --strategy` help lists `lstm`, which is not a key of `STRATEGIES`. `scheduler run-once` help names three of the 14 jobs, and `scheduler info` has no help text because its docstring follows a statement.
+- The root help text and callback docstring say "NBA". `backtest run --strategy` help lists `lstm`, which is not a key of `packages/odds-cli/odds_cli/commands/backtest.py::STRATEGIES`. `scheduler run-once` help names three of the 14 jobs, and `scheduler info` has no help text because its docstring follows a statement.
 - `train validate` warns "Very small test split" for `test_split < 0.1`, although `test_split: 0.0` is the protocol ([Walk-forward CV](../modelling/decision-walk-forward-cv.md)).
-- `copy from-prod` takes dates as positional arguments where `backfill` and `quality` use `--start`/`--end`.
+- `copy from-prod` takes dates as positional arguments where `odds backfill` and `odds quality` use `--start`/`--end`.
 - `odds agent run` imports the underscore-private `packages/odds-lambda/odds_lambda/jobs/agent_run.py::_run_claude_agent` from odds-lambda.
 
 ## Related

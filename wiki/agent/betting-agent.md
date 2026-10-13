@@ -34,7 +34,7 @@ An LLM agent per sport (EPL and MLB) synthesises odds, sharp-market prices and u
 
 ## Runtime
 
-`packages/odds-lambda/odds_lambda/jobs/agent_run.py::_run_claude_agent` spawns `claude -p "/agent {sport}"` with `--model claude-sonnet-4-6`, `--output-format stream-json --verbose` and `--dangerously-skip-permissions`, working directory the repo root, a 15-minute timeout (`AGENT_TIMEOUT_SECONDS`). The subprocess:
+`packages/odds-lambda/odds_lambda/jobs/agent_run.py::_run_claude_agent` spawns `claude -p "/agent {sport}"` with `--model claude-sonnet-4-6`, `--output-format stream-json --verbose` and `--dangerously-skip-permissions`, working directory the repo root, a 15-minute timeout (`packages/odds-lambda/odds_lambda/jobs/agent_run.py::AGENT_TIMEOUT_SECONDS`). The subprocess:
 
 - reaches the pipeline through the `odds` MCP server registered in `.mcp.json` (`uv run fastmcp run packages/odds-mcp/odds_mcp/server.py`), see [odds-mcp server](mcp-server.md);
 - researches with web search and Playwright;
@@ -61,12 +61,12 @@ The agent's behaviour is defined by prompt files in `packages/odds-mcp/agents/`:
 
 ## The agent-run job
 
-The job is opt-in and local-only: no EventBridge rule exists for it, and the default `SCHEDULER_BOOTSTRAP_JOBS` has `agent-run` commented out, so the loop starts only when you add it ([jobs and deployment matrix](../scheduling/jobs-and-deployment-matrix.md#where-each-job-runs), [configuration](../foundations/configuration.md)). Its bootstrap function in `_JOB_BOOTSTRAP_MAP` is `packages/odds-lambda/odds_lambda/jobs/agent_run.py::schedule_next`, not `main`, so `odds scheduler start` never launches the agent itself.
+The job is opt-in and local-only: no EventBridge rule exists for it, and the default `SCHEDULER_BOOTSTRAP_JOBS` has `agent-run` commented out, so the loop starts only when you add it ([jobs and deployment matrix](../scheduling/jobs-and-deployment-matrix.md#where-each-job-runs), [configuration](../foundations/configuration.md)). Its bootstrap function in `_JOB_BOOTSTRAP_MAP` is `packages/odds-lambda/odds_lambda/jobs/agent_run.py::schedule_next`, not `packages/odds-lambda/odds_lambda/jobs/agent_run.py::main`, so `odds scheduler start` never launches the agent itself.
 
-### Flow (`main`)
+### Flow
 
 1. Requires `ctx.sport`; otherwise logs and returns.
-2. `schedule_next(sport)` pre-schedules the next wake-up before any work, so a crash does not break the chain ([self-scheduling](../scheduling/self-scheduling.md)). It calls `packages/odds-lambda/odds_lambda/scheduling/decision.py::decide_forward_resilient` with `CADENCE` and the sport's overnight window, and uses only `next_execution` (the run gate is ignored: the agent always wakes). It raises `ValueError` for a sport missing from `OVERNIGHT_WINDOWS` (EPL 22:00-06:00 UTC, MLB 05:00-14:00).
+2. `schedule_next(sport)` pre-schedules the next wake-up before any work, so a crash does not break the chain ([self-scheduling](../scheduling/self-scheduling.md)). It calls `packages/odds-lambda/odds_lambda/scheduling/decision.py::decide_forward_resilient` with `packages/odds-lambda/odds_lambda/jobs/agent_run.py::CADENCE` and the sport's overnight window, and uses only `next_execution` (the run gate is ignored: the agent always wakes). It raises `ValueError` for a sport missing from `packages/odds-lambda/odds_lambda/scheduling/decision.py::OVERNIGHT_WINDOWS` (EPL 22:00-06:00 UTC, MLB 05:00-14:00).
 3. `_run_claude_agent(sport)` runs the subprocess; a non-zero exit is logged, not raised.
 4. `_check_agent_requested_wakeup(sport)` reads and consumes the `agent_wakeups` row; a failure is logged and swallowed.
 5. A requested time in the past is ignored; otherwise `packages/odds-lambda/odds_lambda/scheduling/helpers.py::self_schedule` overrides the pre-scheduled time.
@@ -102,8 +102,8 @@ Each run writes its full `stream-json` output to a file: the only durable record
 - Every line goes to `<project_root>/logs/agent_runs/{sport}_{YYYYMMDDTHHMMSSZ}_{pid}.jsonl`. The PID suffix avoids collisions when two runs start in the same second. `logs/` is gitignored.
 - The asyncio stream line limit is raised to 8 MiB (`packages/odds-lambda/odds_lambda/jobs/agent_run.py::AGENT_STREAM_LINE_LIMIT`), because one `tool_result` block can exceed the 64 KiB default.
 - Only some messages are teed to structlog by `packages/odds-lambda/odds_lambda/jobs/agent_run.py::_log_stream_message`: assistant `tool_use` blocks become `agent_tool_use` (tool name and a 60-character-per-value input preview), and the `result` message becomes `agent_run_summary` (text, turns, duration, cost).
-- `packages/odds-lambda/odds_lambda/jobs/agent_run.py::_prune_agent_run_logs` runs before writing and deletes all but the newest `AGENT_RUN_LOG_KEEP` (50) files matching `{sport}_*.jsonl`, so up to 51 files exist per sport after a run.
-- The subprocess is killed after `AGENT_TIMEOUT_SECONDS`; the partial trace stays.
+- `packages/odds-lambda/odds_lambda/jobs/agent_run.py::_prune_agent_run_logs` runs before writing and deletes all but the newest `packages/odds-lambda/odds_lambda/jobs/agent_run.py::AGENT_RUN_LOG_KEEP` (50) files matching `{sport}_*.jsonl`, so up to 51 files exist per sport after a run.
+- The subprocess is killed after `packages/odds-lambda/odds_lambda/jobs/agent_run.py::AGENT_TIMEOUT_SECONDS`; the partial trace stays.
 
 The viewer `experiments/scripts/show_agent_summaries.py` prints the `result` summaries: `uv run python experiments/scripts/show_agent_summaries.py --sport epl --since 24h --limit 3`, or `--file <path>`. `--sport` takes the short names `epl` or `mlb`. One file can hold several sessions; the script tracks a session index per `result` line. The filename is the only schema linking producer and consumer: `FILENAME_RE` in the viewer expects `{sport_key}_{timestamp}_{pid}.jsonl`, so renaming either side breaks the other silently. Other report channels are in [reporting](../operations/reporting-and-daily-digest.md).
 

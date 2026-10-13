@@ -53,7 +53,7 @@ EventBridge rules are named `{rule_prefix}-{job}[-{sport suffix}]` and `eventbri
 
 ## Deploying
 
-Normal path: let GitHub Actions deploy ([CI/CD workflows](ci-cd-workflows.md)). `ci-cd.yml` deploys an ephemeral dev stack on every relevant push to `main`; `deploy-prod.yml` is run manually from the Actions tab and waits for approval on the `production` environment. Use the manual steps for a first deploy or a debugging session.
+Normal path: let GitHub Actions deploy ([CI/CD workflows](ci-cd-workflows.md)). `ci-cd.yml` deploys an ephemeral dev stack on every relevant push to main; `deploy-prod.yml` is run manually from the Actions tab and waits for approval on the `production` environment. Use the manual steps for a first deploy or a debugging session.
 
 **First deployment only**
 

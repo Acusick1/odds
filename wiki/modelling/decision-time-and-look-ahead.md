@@ -23,7 +23,7 @@ Decision time is the instant a prediction or bet is assumed to be made. Everythi
 
 ## Backtests
 
-`packages/odds-analytics/odds_analytics/backtesting/config.py::BacktestConfig` field `decision_hours_before_game` defaults to 1.0. `BacktestEngine.run` computes `decision_time = commence_time - decision_hours_before_game` and calls `OddsReader.get_odds_at_time(..., tolerance_minutes=30)` ([backtesting](../evaluation/backtesting.md), [reader](../storage/odds-reader-and-storage-layer.md#get-odds-at-time)). The CLI exposes no flag for it, and the 30-minute tolerance is hard-coded.
+`packages/odds-analytics/odds_analytics/backtesting/config.py::BacktestConfig` field `decision_hours_before_game` defaults to 1.0. `packages/odds-analytics/odds_analytics/backtesting/services.py::BacktestEngine.run` computes `decision_time = commence_time - decision_hours_before_game` and calls `OddsReader.get_odds_at_time(..., tolerance_minutes=30)` ([backtesting](../evaluation/backtesting.md), [reader](../storage/odds-reader-and-storage-layer.md#get-odds-at-time)). The CLI exposes no flag for it, and the 30-minute tolerance is hard-coded.
 
 ## Training
 
@@ -49,7 +49,7 @@ The pregame window (3-12 h) is the documented default because sharp-retail diver
 - **Production uses the sharp tier.** `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml` sets `sampling.strategy: tier` with `decision_tier: sharp` (12-24 h), not the documented pregame window. For events that only have opening and closing snapshots, the candidate set is just the opening snapshot, so the effective decision time is wherever that snapshot was taken (read from code, not run).
 - **Tier fallback dilutes the window.** A `pregame` request also accepts sharp, early and opening snapshots, so about 93% of OddsPortal events fell back to the same sharp-tier snapshot as a `sharp` request (Exp 6, see [data volume and target](decision-bet365-target.md)).
 - **Backtest and training differ.** Backtests default to 1 h before kickoff; the model is trained at 3-24 h. A model-driven strategy evaluated at 1 h sees inputs unlike its training rows (inferred) ([line-movement models](line-movement-models.md)).
-- **LSTM backtests have no explicit cutoff.** `LSTMLineMovementStrategy.evaluate_opportunity` loads every snapshot for the event and resamples on a grid anchored to `commence_time` that ends `lookback_hours / timesteps` before kickoff (3 h at the 72/24 defaults), so it leaks only if half that interval is shorter than the decision lead time; the training adapter, by contrast, filters sequences to the snapshot time.
+- **LSTM backtests have no explicit cutoff.** `packages/odds-analytics/odds_analytics/lstm_line_movement.py::LSTMLineMovementStrategy.evaluate_opportunity` loads every snapshot for the event and resamples on a grid anchored to `commence_time` that ends `lookback_hours / timesteps` before kickoff (3 h at the 72/24 defaults), so it leaks only if half that interval is shorter than the decision lead time; the training adapter, by contrast, filters sequences to the snapshot time.
 - **EPL lineup features need the match's own XI**, announced about 60 minutes before kickoff, later than any decision tier used in training ([EPL context features](epl-context-features.md#hazards)).
 
 ## Related

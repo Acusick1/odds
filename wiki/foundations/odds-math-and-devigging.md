@@ -14,7 +14,7 @@ sources:
   - packages/odds-analytics/odds_analytics/training/config.py::FeatureConfig
   - packages/odds-analytics/odds_analytics/sequence_loader.py::calculate_devigged_bookmaker_target
   - packages/odds-lambda/odds_lambda/oddsportal_common.py::decimal_to_american
-  - packages/odds-lambda/odds_lambda/storage/validators.py::american_to_probability
+  - packages/odds-lambda/odds_lambda/storage/validators.py::OddsValidator.american_to_probability
   - packages/odds-lambda/odds_lambda/betfair/adapter.py
   - packages/odds-lambda/odds_lambda/oddsportal_adapter.py
   - packages/odds-mcp/odds_mcp/server.py::find_retail_edges
@@ -48,7 +48,7 @@ All production use is in `packages/odds-analytics/odds_analytics/sequence_loader
 - `packages/odds-analytics/odds_analytics/sequence_loader.py::extract_devigged_totals_probs` does the same for Over/Under (`packages/odds-analytics/odds_analytics/sequence_loader.py::DeviggedTotalsProbs`).
 - `packages/odds-analytics/odds_analytics/sequence_loader.py::calculate_devigged_bookmaker_target` is `fair_close_home - fair_snapshot_home`; the totals variant picks Over or Under. Both return `None` if the bookmaker is missing on either side.
 
-`packages/odds-analytics/odds_analytics/feature_groups.py` selects these only when `FeatureConfig.target_type == "devigged_bookmaker"`, using `FeatureConfig.target_bookmaker`; events with no closing data for that bookmaker are dropped. The code defaults are `target_type="raw"` and `target_bookmaker="pinnacle"`, so devigging applies only when the training YAML sets it (for example `experiments/configs/xgboost_epl_production_all_features.yaml`). Only h2h and totals are supported; spreads have no devigged target. For a 3-way market the target uses the home-win probability only (draw is computed but unused), and devigging is per bookmaker, with no cross-book consensus. The resulting target is described in [CLV and the training target](../modelling/clv-target.md) and [Feature pipeline](../modelling/feature-pipeline.md).
+`packages/odds-analytics/odds_analytics/feature_groups.py` selects these only when `FeatureConfig.target_type == "devigged_bookmaker"`, using `packages/odds-analytics/odds_analytics/training/config.py::FeatureConfig.target_bookmaker`; events with no closing data for that bookmaker are dropped. The code defaults are `target_type="raw"` and `target_bookmaker="pinnacle"`, so devigging applies only when the training YAML sets it (for example `experiments/configs/xgboost_epl_production_all_features.yaml`). Only h2h and totals are supported; spreads have no devigged target. For a 3-way market the target uses the home-win probability only (draw is computed but unused), and devigging is per bookmaker, with no cross-book consensus. The resulting target is described in [CLV and the training target](../modelling/clv-target.md) and [Feature pipeline](../modelling/feature-pipeline.md).
 
 ### Vig-inclusive consumers
 
@@ -62,9 +62,9 @@ These use raw `packages/odds-core/odds_core/odds_math.py::calculate_implied_prob
 
 ## Hazards
 
-- **Two `decimal_to_american` implementations.** `packages/odds-lambda/odds_lambda/oddsportal_common.py::decimal_to_american` rounds, and returns `-10000` for `d <= 1.0`. The core one truncates and raises `ZeroDivisionError` at `d == 1.0`. For `d = 1.91` the core copy gives `-109`, the OddsPortal copy `-110`.
-- **Which stored prices come from which copy.** [Betfair](../collection/betfair-exchange.md) snapshots use the core function (`packages/odds-lambda/odds_lambda/betfair/adapter.py`); OddsPortal snapshots (`packages/odds-lambda/odds_lambda/oddsportal_adapter.py`, `build_raw_data`) and `scripts/ingest_football_data_uk.py` use the `oddsportal_common` rounding copy ([OddsPortal](../collection/oddsportal.md)). Identical decimal prices can therefore be stored one point apart by source.
-- **Implied probability is reimplemented** in `OddsValidator.american_to_probability` (`packages/odds-lambda/odds_lambda/storage/validators.py`) with the same formula as core, not calling it ([Odds validation](../storage/data-validation.md)).
+- **Two implementations of decimal-to-American conversion.** `packages/odds-lambda/odds_lambda/oddsportal_common.py::decimal_to_american` rounds, and returns `-10000` for `d <= 1.0`. The core one (`packages/odds-core/odds_core/odds_math.py::decimal_to_american`) truncates and raises `ZeroDivisionError` at `d == 1.0`. For `d = 1.91` the core copy gives `-109`, the OddsPortal copy `-110`.
+- **Which stored prices come from which copy.** [Betfair](../collection/betfair-exchange.md) snapshots use the core function (`packages/odds-lambda/odds_lambda/betfair/adapter.py::build_raw_data`); OddsPortal snapshots (`packages/odds-lambda/odds_lambda/oddsportal_adapter.py`, `packages/odds-lambda/odds_lambda/oddsportal_common.py::build_raw_data`) and `scripts/ingest_football_data_uk.py` use the `oddsportal_common` rounding copy ([OddsPortal](../collection/oddsportal.md)). Identical decimal prices can therefore be stored one point apart by source.
+- **Implied probability is reimplemented** in `packages/odds-lambda/odds_lambda/storage/validators.py::OddsValidator.american_to_probability` with the same formula as core, not calling it ([Odds validation](../storage/data-validation.md)).
 - `packages/odds-core/odds_core/odds_math.py::calculate_implied_probability` divides by `packages/odds-core/odds_core/odds_math.py::american_to_decimal`, so `american_odds == 0` raises.
 - Docstring examples in `packages/odds-core/odds_core/odds_math.py` are rounded (`1.909`, `0.524`) and would not pass a doctest runner against the exact returns.
 - `packages/odds-core/odds_core/odds_math.py::devig_probabilities` accepts probabilities only; it does not validate they are in `[0, 1]`.

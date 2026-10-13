@@ -29,14 +29,14 @@ Odds are stored twice. `packages/odds-core/odds_core/models.py::OddsSnapshot` (t
 
 ### raw_data format
 
-The Odds API per-event object: `bookmakers[]`, each with `key`, `title`, `last_update`, and `markets[]` of `{key, outcomes[{name, price, point?}]}` (American prices). Other sources adapt to this shape (`packages/odds-lambda/odds_lambda/oddsportal_common.py::build_raw_data`, `packages/odds-lambda/odds_lambda/betfair/adapter.py`) and add a `source` key. `packages/odds-core/odds_core/snapshot_utils.py::extract_odds_from_snapshot` turns it back into `packages/odds-core/odds_core/models.py::Odds` objects, optionally filtered by market or outcome; it returns `[]` when `bookmakers` is absent and matches market keys exactly. Football is `h2h` (Odds API, FDUK) or `1x2` (OddsPortal, Betfair EPL), so a query with the wrong key finds nothing ([sources-and-keys](../collection/sources-and-keys.md)).
+The Odds API per-event object: `bookmakers[]`, each with `key`, `title`, `last_update`, and `markets[]` of `{key, outcomes[{name, price, point?}]}` (American prices). Other sources adapt to this shape (`packages/odds-lambda/odds_lambda/oddsportal_common.py::build_raw_data`, `packages/odds-lambda/odds_lambda/betfair/adapter.py::build_raw_data`) and add a `source` key. `packages/odds-core/odds_core/snapshot_utils.py::extract_odds_from_snapshot` turns it back into `packages/odds-core/odds_core/models.py::Odds` objects, optionally filtered by market or outcome; it returns `[]` when `bookmakers` is absent and matches market keys exactly. Football is `h2h` (Odds API, FDUK) or `1x2` (OddsPortal, Betfair EPL), so a query with the wrong key finds nothing ([sources-and-keys](../collection/sources-and-keys.md)).
 
 ### Source tags
 
 | `raw_data["source"]` | Producer |
 |---|---|
 | (absent) | The Odds API payloads |
-| `oddsportal` | OddsPortal historical/closing builds (`build_raw_data`) |
+| `oddsportal` | OddsPortal historical/closing builds (`packages/odds-lambda/odds_lambda/oddsportal_common.py::build_raw_data`) |
 | `oddsportal_live` | live-scrape adapter (`packages/odds-lambda/odds_lambda/oddsportal_adapter.py`) |
 | `betfair_api` | Betfair Exchange job (also adds `betfair_event_id`) |
 | `football_data_uk` | `scripts/ingest_football_data_uk.py` |
@@ -51,7 +51,7 @@ The Odds API per-event object: `bookmakers[]`, each with `key`, `title`, `last_u
 - `is_valid` (default true) and `validation_notes` (nullable).
 - Indexes: single-column `event_id`, `bookmaker_key`, `market_key`, `odds_timestamp`; composite `ix_event_bookmaker_market (event_id, bookmaker_key, market_key)` for lookups and line movement, and `ix_bookmaker_time (bookmaker_key, odds_timestamp)` for per-bookmaker analysis.
 
-Written by `packages/odds-lambda/odds_lambda/storage/writers.py::OddsWriter._parse_and_store_odds` and `packages/odds-lambda/odds_lambda/storage/writers.py::OddsWriter.bulk_insert_odds`; read by `OddsReader.get_odds_at_time`, `get_line_movement` and `get_best_odds`. Many readers instead rebuild `packages/odds-core/odds_core/models.py::Odds` objects from `raw_data` in memory and never persist them ([odds-reader-and-storage-layer](odds-reader-and-storage-layer.md)).
+Written by `packages/odds-lambda/odds_lambda/storage/writers.py::OddsWriter._parse_and_store_odds` and `packages/odds-lambda/odds_lambda/storage/writers.py::OddsWriter.bulk_insert_odds`; read by `packages/odds-lambda/odds_lambda/storage/readers.py::OddsReader.get_odds_at_time`, `get_line_movement` and `get_best_odds`. Many readers instead rebuild `packages/odds-core/odds_core/models.py::Odds` objects from `raw_data` in memory and never persist them ([odds-reader-and-storage-layer](odds-reader-and-storage-layer.md)).
 
 ## OddsWriter
 
@@ -88,8 +88,8 @@ Also `log_fetch` (adds a `packages/odds-core/odds_core/models.py::FetchLog`, see
 - **Tier is NULL when the event is missing** at write time. Tier boundaries: `packages/odds-lambda/odds_lambda/tier_utils.py::calculate_tier` uses `<=` at 3/12/24/72 h; `packages/odds-lambda/odds_lambda/oddsportal_common.py::hours_to_tier` (historical scripts) uses `<`, so snapshots at exactly those instants can get different tiers ([fetch-tier](fetch-tier.md#four-boundary-encodings)). Migration `9ff81f073e6b` (`migrations/versions/9ff81f073e6b_recalculate_historical_fetch_tiers.py`) recalculated rows stored before per-event tiering.
 - **Candidate tie-break.** With several matching events in the window, `find_or_create_event` logs `ambiguous_event_match` and returns the first row of an unordered query.
 - **Dead list branch.** `store_odds_snapshot` calls `raw_data.get("bookmakers")` before its `isinstance(raw_data, list)` check, so a list input raises `AttributeError`. Pass one event's dict.
-- **Validate flag.** Only `packages/odds-lambda/odds_lambda/ingestion.py::OddsIngestionService` passes `validate` (from `DataQualityConfig.enable_validation`); every other caller uses the default `True`.
-- **Extra keys.** Non-API sources can carry extra keys (`_snapshot_time` from `build_raw_data`); parsers must ignore unknown keys.
+- **Validate flag.** Only `packages/odds-lambda/odds_lambda/ingestion.py::OddsIngestionService` passes `validate` (from `packages/odds-core/odds_core/config.py::DataQualityConfig.enable_validation`); every other caller uses the default `True`.
+- **Extra keys.** Non-API sources can carry extra keys (`_snapshot_time` from `packages/odds-lambda/odds_lambda/oddsportal_common.py::build_raw_data`); parsers must ignore unknown keys.
 
 ## Related
 

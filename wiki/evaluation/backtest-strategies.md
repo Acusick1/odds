@@ -38,7 +38,7 @@ Strategies subclass `packages/odds-analytics/odds_analytics/backtesting/services
    - `event` is a `packages/odds-analytics/odds_analytics/backtesting/models.py::BacktestEvent`; its scores are present during backtests.
    - `odds_snapshot` is the list of `packages/odds-core/odds_core/models.py::Odds` rows at decision time ([decision time](../modelling/decision-time-and-look-ahead.md)); filter by `market_key`, `bookmaker_key` and `outcome_name` yourself.
    - Return `BetOpportunity(event_id, market, outcome, bookmaker, odds, line, confidence, rationale)`. The engine reads `confidence` as the win probability for Kelly sizing; `recommended_stake` is not consulted.
-3. **Register** it in the `STRATEGIES` dict in `packages/odds-cli/odds_cli/commands/backtest.py`; the key is the `--strategy` value.
+3. **Register** it in the `packages/odds-cli/odds_cli/commands/backtest.py::STRATEGIES` dict; the key is the `--strategy` value.
 4. **Test.** Add unit tests under `tests/unit/` next to `test_backtesting_engine.py`, and run `odds backtest run` on a small range ([running a backtest](backtesting.md#run-a-backtest)).
 5. **Document** it on this page if it is non-trivial.
 

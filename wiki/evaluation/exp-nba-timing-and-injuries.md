@@ -59,7 +59,7 @@ Implications:
 2. The sharp opening line is Pinnacle's first line ([sharp benchmark](../modelling/sharp-benchmark.md)).
 3. Most line movement occurs 12-24 h out, when sharp money enters via Pinnacle `(inferred)`.
 4. Early soft-book lines are less predictive because they are adjusted when the sharp book opens `(inferred)`.
-5. Opening-tier snapshots (72+ h) capture only soft-book lines; the sharp tier (12-24 h) is where Pinnacle first appears. These are the code's tier bounds: `FetchTier.max_hours` gives OPENING above 72 h, EARLY up to 72 h, SHARP up to 24 h, PREGAME up to 12 h, CLOSING up to 3 h (`packages/odds-lambda/odds_lambda/fetch_tier.py::FetchTier`).
+5. Opening-tier snapshots (72+ h) capture only soft-book lines; the sharp tier (12-24 h) is where Pinnacle first appears. These are the code's tier bounds: `packages/odds-lambda/odds_lambda/fetch_tier.py::FetchTier.max_hours` gives OPENING above 72 h, EARLY up to 72 h, SHARP up to 24 h, PREGAME up to 12 h, CLOSING up to 3 h (`packages/odds-lambda/odds_lambda/fetch_tier.py::FetchTier`).
 
 ## Hours to game (Exp 4)
 

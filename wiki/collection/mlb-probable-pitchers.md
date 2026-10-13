@@ -21,8 +21,8 @@ Point-in-time snapshots of MLBAM's announced probable starters, stored in `mlb_p
 ## Flow
 
 1. `packages/odds-lambda/odds_lambda/jobs/fetch_mlb_probables.py::main` computes `dates_for_window(now, 72h)`: UTC dates from today to D+3, padded one day each side because MLBAM resolves `date=` in US Eastern, not UTC.
-2. `MlbStatsFetcher.fetch_dates` calls `https://statsapi.mlb.com/api/v1/schedule` with `hydrate=probablePitcher` (httpx, 3 attempts, 0.25 s pacing). One `packages/odds-core/odds_core/mlb_data_models.py::MlbProbablePitchersRecord` per game; a missing `probablePitcher` yields null name/id fields, deliberately kept as the "not announced" signal.
-3. `MlbPitcherWriter.insert_snapshots` is append-only, `ON CONFLICT DO NOTHING` on `(game_pk, fetched_at)`. All records in one run share one `fetched_at`, and it returns the input count, not rows inserted.
+2. `packages/odds-lambda/odds_lambda/mlb_stats_fetcher.py::MlbStatsFetcher.fetch_dates` calls `https://statsapi.mlb.com/api/v1/schedule` with `hydrate=probablePitcher` (httpx, 3 attempts, 0.25 s pacing). One `packages/odds-core/odds_core/mlb_data_models.py::MlbProbablePitchersRecord` per game; a missing `probablePitcher` yields null name/id fields, deliberately kept as the "not announced" signal.
+3. `packages/odds-lambda/odds_lambda/storage/mlb_pitcher_writer.py::MlbPitcherWriter.insert_snapshots` is append-only, `ON CONFLICT DO NOTHING` on `(game_pk, fetched_at)`. All records in one run share one `fetched_at`, and it returns the input count, not rows inserted.
 
 The job raises unless `ctx.sport` is `baseball_mlb`.
 
@@ -38,7 +38,7 @@ The MCP tool `packages/odds-mcp/odds_mcp/tools/mlb.py::get_probable_pitchers` ([
 
 ## Using the data
 
-- **Current state**: use `MlbPitcherReader.get_latest_in_window`, which collapses the append-only history to the latest snapshot per `game_pk`; do not query the table directly for "the" probable starter, or you will see every historical snapshot.
+- **Current state**: use `packages/odds-lambda/odds_lambda/storage/mlb_pitcher_reader.py::MlbPitcherReader.get_latest_in_window`, which collapses the append-only history to the latest snapshot per `game_pk`; do not query the table directly for "the" probable starter, or you will see every historical snapshot.
 - **Announcement timeline**: group rows by `game_pk` and order by `fetched_at`. Resolution is one snapshot per daily run, so intra-day changes are invisible, and a pitcher change made between runs shows only as a differing name or id on consecutive snapshots.
 - **Null fields** mean the starter is not yet announced (kept deliberately), not a fetch failure. A game with no row at all was outside the 72 h window on every run.
 - **Joining to odds**: there is no foreign key to `events`; match on teams and `commence_time` yourself, remembering that MLBAM team names are not the pipeline's canonical aliases.

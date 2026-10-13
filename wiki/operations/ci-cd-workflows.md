@@ -24,9 +24,9 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `test.yml` | push to any branch but `main`; `workflow_call` | `uv run pytest tests/unit`, then `tests/integration -m "not live_api"` |
-| `lint.yml` | push to non-`main` branches | `uvx pre-commit run --all-files` (ruff, Vale, lychee) ([conventions](../foundations/conventions.md)) |
-| `ci-cd.yml` | push to `main` touching `packages/**/*.py`, `tests/**`, `migrations/**`, `deployment/aws/**`, workflows or lockfiles | calls `test.yml`, then `deploy-dev.yml` |
+| `test.yml` | push to any branch but main; `workflow_call` | `uv run pytest tests/unit`, then `tests/integration -m "not live_api"` |
+| `lint.yml` | push to non-main branches | `uvx pre-commit run --all-files` (ruff, Vale, lychee, wiki-lint) ([conventions](../foundations/conventions.md)) |
+| `ci-cd.yml` | push to main touching `packages/**/*.py`, `tests/**`, `migrations/**`, `deployment/aws/**`, workflows or lockfiles | calls `test.yml`, then `deploy-dev.yml` |
 | `deploy-dev.yml` | called by `ci-cd.yml` or manual | ephemeral dev stack |
 | `deploy-prod.yml` | manual, or a published release; `production` environment approval | persistent prod deploy |
 | `daily-validation.yml` | 09:00 UTC cron | `odds validate daily --check-discovery --output-json validation_<yesterday>.json`, artifact kept 30 days |
@@ -50,7 +50,7 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 ## Hazards
 
 - `test.yml` and `live-api.yml` set up Python 3.11 while every package requires `>=3.12` (`pyproject.toml`); `deploy-*` use 3.12.
-- `.github/workflows/README.md` says production deploys from `master` and uses a `-fetch-odds` log group; the workflows trigger on `main` and the log group is `/aws/lambda/odds-scheduler`.
+- `.github/workflows/README.md` says production deploys from `master` and uses a `-fetch-odds` log group; the workflows trigger on main and the log group is `/aws/lambda/odds-scheduler`.
 - The scraper test step in prod is `continue-on-error`, so a broken scraper does not fail a deploy.
 - Dev deploy exercises only `check-health` and Betfair; `fetch-odds` is not invoked there.
 - Daily validation's discovery check is NBA-only, so EPL and MLB days are checked against NBA discovery.

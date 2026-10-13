@@ -25,7 +25,7 @@ Every change to a model under `packages/odds-core/odds_core/` needs an Alembic m
 5. **Apply locally.** `uv run alembic upgrade head`. Roll back one with `uv run alembic downgrade -1`; inspect with `alembic history` and `alembic current`.
 6. **Update affected queries** in the storage layer ([OddsReader and the storage layer](../storage/odds-reader-and-storage-layer.md)) and run the tests ([Run the tests](howto-develop-locally.md#run-the-tests)).
 7. **Run migration tests locally.** `uv run pytest tests/migration/ -v`. These connect to `DATABASE_URL` and include write tests, so only do this against local.
-8. **Merge to `main`.** CI runs tests, then `.github/workflows/deploy-dev.yml` applies `alembic upgrade head` to the dev database and runs all of `tests/migration`. See [CI/CD workflows](../operations/ci-cd-workflows.md).
+8. **Merge to main.** CI runs tests, then `.github/workflows/deploy-dev.yml` applies `alembic upgrade head` to the dev database and runs all of `tests/migration`. See [CI/CD workflows](../operations/ci-cd-workflows.md).
 9. **Production.** `.github/workflows/deploy-prod.yml` is a manual dispatch or a published release, gated by the `production` environment approval. It runs `alembic upgrade head`, then only `test_schema_validation.py` and `test_cli_readonly.py`. Production migrates only inside this workflow; do not run migrations or `tests/migration` against it by hand.
 
 ## Always-on host

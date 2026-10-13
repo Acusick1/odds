@@ -38,7 +38,7 @@ Data feeding the groups: `fetch-espn-fixtures` is a local-only daily cron, while
 
 - **The strong lineup signal is late information.** The match-specific metrics need the starting XI, which the script docstring puts at about 75 minutes before kickoff and the agent's data-source notes at KO-60 ([agent data sources](../agent/agent-data-sources.md)), while training samples at the sharp tier or 3-12 h out ([decision time](decision-time-and-look-ahead.md)). Trained rows therefore use the XI before it is public ([look-ahead bias](decision-time-and-look-ahead.md#hazards)).
 - **Match stats lag.** football-data.co.uk is compiled by hand twice weekly after matches ([CLV model findings](../evaluation/clv-model-findings.md)); a live event's rolling window omits matches not yet ingested.
-- **Name matching.** Team strings must equal `Event.home_team`/`away_team` exactly; mismatches silently produce NaN.
+- **Name matching.** Team strings must equal `packages/odds-core/odds_core/models.py::Event.home_team`/`away_team` exactly; mismatches silently produce NaN.
 
 ## Related
 

@@ -51,7 +51,7 @@ Model and feature settings such as `target_type` and `sharp_bookmakers` are YAML
 3. **Build features.** `packages/odds-analytics/odds_analytics/feature_groups.py::prepare_training_data` samples snapshots, computes targets and features, and drops constant columns ([feature pipeline](feature-pipeline.md)).
 4. **Split.** With event ids, the last `max(1, int(n_events * test_split))` events become the test set; `validation_split` is cut the same way.
 5. **Verification artifacts.** `feature_stats.csv`, `feature_sample.csv` and `feature_target_corr.csv` are written to `experiments/results/<experiment.name>/verification/` from the concatenated splits ([run an experiment](../evaluation/howto-run-experiment.md)).
-6. **Train.** If `use_kfold` (default true), `packages/odds-analytics/odds_analytics/training/cross_validation.py::train_with_cv` runs [walk-forward CV](decision-walk-forward-cv.md) and then fits a final model on all training rows; otherwise a single `train_from_config`. Only `xgboost_line_movement` and `lstm_line_movement` are in `STRATEGY_CLASSES` ([line-movement models](line-movement-models.md)).
+6. **Train.** If `use_kfold` (default true), `packages/odds-analytics/odds_analytics/training/cross_validation.py::train_with_cv` runs [walk-forward CV](decision-walk-forward-cv.md) and then fits a final model on all training rows; otherwise a single `train_from_config`. Only `xgboost_line_movement` and `lstm_line_movement` are in `packages/odds-cli/odds_cli/commands/train.py::STRATEGY_CLASSES` ([line-movement models](line-movement-models.md)).
 7. **Save.** The model goes to `<output_path>/<strategy_type>_<experiment.name>.pkl` (or `model_name`), and the full config is written beside it as `.yaml`. Only `odds train run` writes the full `.yaml` the loader needs.
 
 `tune` ([hyperparameter tuner](hyperparameter-tuner.md)) prepares data once, pre-computes features per `feature_groups` choice if that is searched, runs Optuna (study `<experiment>_tuning`), writes the best config to `<config>_best.yaml`, and with `--train-best` trains and saves a model. Publishing the result is in [publishing and scoring](model-publishing-and-scoring.md).
@@ -63,7 +63,7 @@ Model and feature settings such as `target_type` and `sharp_bookmakers` are YAML
 Values the schema accepts without error:
 
 - **Unknown `feature_groups`.** The field is a free `tuple[str, ...]`; a typo is ignored. Its description still lists `trajectory`, which no code handles.
-- **`strategy_type: xgboost` / `lstm` validate but cannot train.** The schema accepts them, `STRATEGY_CLASSES` and `XGBoostLineMovementStrategy.train_from_config` reject them; in `tune` the resulting error is swallowed per trial ([tuner](hyperparameter-tuner.md#hazards)).
+- **`strategy_type: xgboost` / `lstm` validate but cannot train.** The schema accepts them, `packages/odds-cli/odds_cli/commands/train.py::STRATEGY_CLASSES` and `packages/odds-analytics/odds_analytics/xgboost_line_movement.py::XGBoostLineMovementStrategy.train_from_config` reject them; in `tune` the resulting error is swallowed per trial ([tuner](hyperparameter-tuner.md#hazards)).
 - **Search-space keys that match nothing** are dropped silently.
 - **`target_type` defaults to `raw`**, not the documented devigged target.
 - **Target bookmaker absent from the source** drops events, counted only in a log line.

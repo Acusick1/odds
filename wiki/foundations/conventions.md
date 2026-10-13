@@ -36,13 +36,13 @@ Mechanical gates come first; the rest is convention checked in review.
 
 ## Mechanical gates
 
-Pre-commit (`.pre-commit-config.yaml`) runs on every commit; the `Lint` workflow (`.github/workflows/lint.yml`) runs all hooks on every pushed branch except `main`.
+Pre-commit (`.pre-commit-config.yaml`) runs on every commit; the `Lint` workflow (`.github/workflows/lint.yml`) runs all hooks on every pushed branch except main.
 
 | Hook | Scope | Enforces |
 |---|---|---|
 | ruff `--fix`, ruff-format | all Python | Rules `E W F I B C4 UP DTZ003 DTZ005`, line length 100, target py312, `E501` ignored (root `pyproject.toml`). `UP` enforces `str | None` and `list[T]` |
-| vale | `README.md`, `AGENTS.md`, `wiki/` and the Markdown under `docs/adr/` and `docs/agents/` (hook `files` in `.pre-commit-config.yaml`; rules in `.vale.ini`) | `Temporal.Narration` (error on change narration) and `Temporal.TimeRelative` (warning on moment-in-time words) in `.vale/styles/Temporal/` |
-| wiki-lint | `wiki/`, `packages/`, `deployment/` | Frontmatter, links, citations, unqualified symbols, index blocks, coverage and staleness (`scripts/wiki_lint.py`; rules in [SCHEMA](../SCHEMA.md)) |
+| vale | `README.md`, `AGENTS.md`, `wiki/` and the Markdown under docs (hook `files` in `.pre-commit-config.yaml`; rules in `.vale.ini`) | `Temporal.Narration` (error on change narration) and `Temporal.TimeRelative` (warning on moment-in-time words) in `.vale/styles/Temporal/` |
+| wiki-lint | whole repo, every commit (`always_run`; `--no-write --fail-stale`) | Frontmatter, links, citations, unqualified symbols, index blocks, coverage and staleness (`scripts/wiki_lint.py`; rules in [SCHEMA](../SCHEMA.md)) |
 | lychee (Docker) | all `.md` | Links and `#heading` anchors, offline |
 
 ## Conventions without tooling
@@ -66,18 +66,18 @@ Helpers in `packages/odds-core/odds_core/time.py`:
 |---|---|
 | `packages/odds-core/odds_core/time.py::ensure_utc` | Naive input is assumed to be UTC (`replace`); aware input is converted with `astimezone` |
 | `packages/odds-core/odds_core/time.py::parse_api_datetime` | Parses The Odds API strings, rewriting a trailing `Z`, then `packages/odds-core/odds_core/time.py::ensure_utc` |
-| `packages/odds-core/odds_core/time.py::to_eastern`, `EASTERN` | America/New_York for NBA game days and injury reports |
+| `packages/odds-core/odds_core/time.py::to_eastern`, `packages/odds-core/odds_core/time.py::EASTERN` | America/New_York for NBA game days and injury reports |
 | `packages/odds-core/odds_core/time.py::utc_isoformat` | ISO 8601 with a trailing `Z` |
 
 Naive datetimes still produced by current code:
 
-- `AWSEventBridgeBackend._parse_schedule_expression` builds `datetime(year=..., ...)` with no tzinfo from a cron expression (`packages/odds-lambda/odds_lambda/scheduling/backends/aws.py`); the formatter next to it strips tzinfo deliberately after converting to UTC ([EventBridge backend](../scheduling/scheduler-backends.md#aws-eventbridge-backend)).
+- `packages/odds-lambda/odds_lambda/scheduling/backends/aws.py::AWSEventBridgeBackend._parse_schedule_expression` builds `datetime(year=..., ...)` with no tzinfo from a cron expression; the formatter next to it strips tzinfo deliberately after converting to UTC ([EventBridge backend](../scheduling/scheduler-backends.md#aws-eventbridge-backend)).
 - `packages/odds-cli/odds_cli/commands/backtest.py::parse_date` returns a naive datetime from `strptime`, so `odds backtest run --start/--end` are naive, while `packages/odds-cli/odds_cli/commands/quality.py` and `packages/odds-cli/odds_cli/commands/discover.py` attach `tzinfo=UTC` after the same call ([Backtesting](../evaluation/backtesting.md)).
 - `packages/odds-lambda/odds_lambda/oddsportal_common.py::parse_odds_timestamp` returns a naive datetime by design (OddsPortal odds-history stamps carry no zone and a wrong year); `packages/odds-lambda/odds_lambda/oddsportal_common.py::fix_odds_timestamp` repairs the year ([OddsPortal](../collection/oddsportal.md)).
 - `packages/odds-lambda/odds_lambda/injury_fetcher.py::_to_naive_et` converts to naive Eastern time on purpose because the `nbainjuries` API requires it ([NBA feeds](../collection/nba-injuries-and-stats.md)).
 - `packages/odds-cli/odds_cli/commands/pbpstats.py` and `packages/odds-cli/odds_cli/commands/nba_stats.py` derive the NBA season from `date.today()` (local date, not UTC).
 
-`Z`-suffix ISO parsing is inlined in `snapshot_utils`, `espn_fixture_fetcher`, `mlb_stats_fetcher`, `fetch_oddsportal_results`, the MCP EPL tools and `sequence_loader` instead of calling `packages/odds-core/odds_core/time.py::parse_api_datetime`. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/decision-time-and-look-ahead.md).
+`Z`-suffix ISO parsing is inlined in `packages/odds-core/odds_core/snapshot_utils.py`, `packages/odds-lambda/odds_lambda/espn_fixture_fetcher.py`, `packages/odds-lambda/odds_lambda/mlb_stats_fetcher.py`, `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py`, the MCP EPL tools and `packages/odds-analytics/odds_analytics/sequence_loader.py` instead of calling `packages/odds-core/odds_core/time.py::parse_api_datetime`. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/decision-time-and-look-ahead.md).
 
 ## Logging
 
