@@ -1,126 +1,117 @@
 # Wiki schema
 
-The wiki is this repo's documentation. Its pages explain what each subsystem does, why it does it, and where its hazards are, and they cite the code that does it. Code is authoritative: the wiki points into the code and never restates it as a second source. Readers start at `index.md`, open one area index, then the page, then the cited code. `README.md` is the entry point for humans, and decisions live in `docs/adr/`.
+The wiki is this repo's documentation. It follows [Diátaxis](https://diataxis.fr/): every page is reference, explanation or a how-to. Code is authoritative. Pages describe the code and cite it, and never act as a second copy of values or defaults. Decisions are recorded as ADRs in `docs/adr/`. `README.md` is the entry point for humans.
+
+Readers start at `index.md`, open the area index, then the page, then the code it cites.
 
 ## Layout
 
 ```
 wiki/
-├── index.md          # root: hand-written, ≤500 words
+├── index.md          # root: what the repo is, one line per area
 ├── SCHEMA.md
 └── <area>/
     ├── index.md      # area intro (hand-written) + page list (generated)
     └── <slug>.md
 ```
 
-- One directory per area. Areas follow the code's subsystems (for example ingestion, scheduling, training). Decisions, experiments and how-tos live in the area they concern.
-- No nesting below area level.
-- Slugs are lowercase, hyphenated and unique across the whole wiki.
-- History is in git. Pages describe the current state and never narrate changes.
+- **Areas** follow the code's subsystems (collection, storage, scheduling, …). Diátaxis structures reference "according to the structure of the machinery itself", and the same applies here.
+- **Nesting:** none below area level.
+- **Slugs** are lowercase, hyphenated, and unique across the whole wiki.
+- **History** lives in git. Pages describe the current state.
 
 ### Root index
 
-The root `index.md` has three parts:
-
 1. Two sentences on what the repo is.
 2. One line per area: `- [Area](area/index.md) — read when …`.
-3. A pointer to the hard constraints in `AGENTS.md`, which agents load on every turn and which is their single source.
+3. A pointer to the hard constraints in `AGENTS.md`, which agents load on every turn.
 
 ### Area index
 
-Each area `index.md` has YAML frontmatter with `title` and `description`, a short hand-written intro, and the page list between `<!-- pages:start -->` and `<!-- pages:end -->`. `scripts/wiki_lint.py --fix` generates that list from page frontmatter as `- [Title](slug.md) — description`, grouped by type. Never edit the generated block by hand.
+The frontmatter has a `title` and a `description`, followed by a short hand-written intro. The page list goes between `<!-- pages:start -->` and `<!-- pages:end -->`. `scripts/wiki_lint.py --fix` generates that list from page frontmatter, grouped by type, so never edit it by hand.
 
-## Pages
+## Page types
 
-### Granularity
+| Type | Diátaxis purpose | Contains | Excludes |
+|------|------------------|----------|----------|
+| `reference` | Describe the machinery: what it is, what it does, its inputs, outputs, defaults and behaviour | Facts, mirroring one module, job, table or command group | Rationale, instructions, opinion. Link to explanation instead. |
+| `explanation` | Discuss a subject: concepts, how parts fit together, why things are the way they are, experiment findings | Context, design reasoning, trade-offs, results | Step-by-step instructions, exhaustive facts. Link to reference instead. |
+| `howto` | Get a competent user through one task | Ordered steps, each with a short reason | Background. Link to explanation instead. |
 
-A page covers one subject a developer changes or reasons about as a unit: a job, a pipeline, a table and its writer, a model-training stage, a decision. Someone asking about that subject should find the answer on that one page, including its hazards and the conventions that touch it, without needing a sibling page. Target 400–1200 words. Split a page only when it passes ~1500 words or covers things that change independently. Repeat a one-line fact rather than force a hop, and link for depth.
+Decisions are not pages. A choice with alternatives and consequences is an ADR in `docs/adr/` (Nygard: context, decision, status, consequences). Explanation pages link to it.
 
-### Types
+There are no tutorials. This is a single-developer project, and the how-tos cover onboarding.
 
-| Type | Covers | Examples |
-|------|--------|----------|
-| `component` | a code unit and its behaviour | a job, the decision module, the odds writer and its tables |
-| `concept` | a term used across areas, with its single definition | fetch tier, CLV, sharp benchmark |
-| `process` | a flow spanning components | odds ingestion, self-scheduling, matchday wake-up |
-| `decision` | a choice, its rationale and evidence | bet365 target, walk-forward CV |
-| `experiment` | an experiment and its result | feature-group ablation |
-| `howto` | an operator task | deploy, add a scheduled job |
+One subject per page: one module, job, table, concept or task. Split a page along the code's structure when it covers parts that change independently.
 
-### Frontmatter
+## Frontmatter
 
 ```yaml
 ---
-type: component
+type: reference
 title: Fetch-tier classification
-description: How hours-to-kickoff maps to a fetch tier, which code paths assign tiers, and where they disagree.
+description: How hours-to-kickoff maps to a fetch tier and which code paths assign tiers.
 sources:
-  - packages/odds-lambda/odds_lambda/tier_utils.py::calculate_tier
+  - odds_lambda.tier_utils.calculate_tier
 status: stable
 ---
 ```
 
-- `description` is one sentence saying what questions the page answers. Agents see it in the area index, so write it to help them choose whether to open the page.
-- `sources` lists the code the page as a whole describes. Inline citations cover individual claims.
-- `status` is `draft`, `stable` or `deprecated`. A deprecated page carries `superseded_by: <slug>` and a one-line body pointing to its replacement. Delete it once nothing links to it.
+- `description` is one sentence saying which questions the page answers. Agents see it in the area index.
+- `sources` lists the code the page as a whole describes.
+- `status` is `draft`, `stable` or `deprecated`. A deprecated page carries `superseded_by: <slug>` and a single line pointing to its replacement. Delete it once nothing links to it.
 
-### Body
+## Warnings and known defects
 
-Lead with what the subject is and where it lives. Follow with its behaviour, then `## Hazards` (divergences, silent failures and traps, each cited), then `## Related` links.
+- State behaviour plainly, in prose, where it belongs. For example: "`reject_invalid_odds` is read by nothing, so invalid odds are always stored."
+- When the behaviour is a known defect, link its issue (`#438`). The issue tracks the fix. The page states only what the code does today, never a plan to change it.
+- Reserve an alert for real danger: irreversible actions, data loss, the production database, quota spend. Use `> [!WARNING]`, and never two in a row.
 
 ## Citations
 
-- Cite Python as `` `path/from/repo/root.py::symbol` `` (dotted for methods: `Class.method`). Cite other files by path: Terraform, workflows, shell scripts, `pyproject.toml`. Never cite by line number.
-- An identifier in backticks that names a definition in `packages/` must carry its path. A bare `` `decide_forward` `` hides the claim from the staleness check.
-- A hazard that spans two files cites both.
-- A claim about CLI behaviour cites the command's function.
-- Every non-obvious factual claim carries an inline citation or is covered by `sources`. Values, defaults and flags are cited, never restated bare.
-- Rationale cites its evidence: an ADR, a PR (`#123`), a commit (`abc1234`, for evidence that only survives in history), an experiment page, or a results file under `experiments/results/`. Rationale with no evidence is labelled `(inferred)`.
-- Deployed AWS state cannot be verified from the repo. Pages that mention it say so and give the command that checks it.
-- Pages do not cite `docs/`. The only exceptions are `docs/adr/` and `docs/agents/`.
+- **Python in the installed packages** (`odds_core`, `odds_lambda`, `odds_analytics`, `odds_mcp`, `odds_cli`): cite by dotted import path in backticks, the convention Sphinx, mkdocstrings and griffe share. Examples: `` `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` ``, and `` `odds_lambda.jobs.fetch_odds` `` for a whole module.
+- **Everything else:** cite by repo-relative path. That covers scripts, experiments, Terraform, workflows, `pyproject.toml`, and agent prompts under `packages/odds-mcp/agents/`.
+- **Bare identifiers:** an identifier in backticks that names a definition in the packages must be written as its dotted path. Short forms hide the claim from the staleness check.
+- **Coverage:** every non-obvious factual claim carries an inline citation or is covered by `sources`. Cite values, defaults and flags rather than restating them bare.
+- **Explanation evidence:** explanation cites its evidence, which can be an ADR, a PR (`#123`), a commit (`abc1234`), or a results file under `experiments/results/`. Reasoning with no evidence is labelled `(inferred)`.
+- **Deployed AWS state:** it cannot be verified from the repo. Pages that mention it say so and give the command that checks it.
+- **`docs/`:** pages do not cite it, apart from `docs/adr/` and `docs/agents/`.
 
 ## Links
 
-- Use relative markdown links (`[Text](slug.md)`, `[Text](../area/slug.md#heading)`). No wikilink syntax.
-- The first mention of another page's subject in a body links to that page.
-- Every page is listed in its area index and has at least one other inbound link.
+Use relative markdown links: `[Text](slug.md)` or `[Text](../area/slug.md#heading)`. The first mention of another page's subject links to it. Every page is listed in its area index and has at least one other inbound link.
 
 ## Staleness
 
-A page is stale when code it cites has changed since the page was last changed. Git supplies both sides, so pages carry no verification stamp:
+A page is stale when code it cites has changed since the page was last changed. Git supplies both sides:
 
-- For a `path::symbol` citation, the check looks for any commit after the page's last commit that touches the symbol's line range or adds or removes the symbol.
-- For a whole-file citation, any change to the file after the page's last commit counts.
-- Uncommitted changes count too. A cited symbol edited in the working tree marks the page stale unless the page is edited as well, so the check works as a pre-commit hook.
-- A renamed or deleted cited file is an error, not staleness.
+- **Dotted citations:** stale if any commit after the page's last commit (merge commits included, diffed against their first parent) touches the symbol's line range, or adds or removes the symbol.
+- **Path citations:** stale if any later commit changes the file.
+- **Uncommitted changes:** these count too, unless the page itself is edited.
+- **Renamed or deleted cited files:** these are errors, not staleness.
 
-The lint prints each stale page with the changed symbols and the page lines that cite them.
+The lint prints each stale page with the changed citations and the page lines that cite them.
 
 ## Coverage
 
-Every scheduled job module (`packages/odds-lambda/odds_lambda/jobs/*.py`), every CLI command module (`packages/odds-cli/odds_cli/commands/*.py`) and every MCP tool function must be cited by at least one page, so a new job, command or tool fails the lint until it is documented.
+Every scheduled job module (`odds_lambda.jobs.*`), every CLI command module (`odds_cli.commands.*`) and every MCP tool function must be cited by at least one page.
 
 ## Operations
 
-**Query.** Read `index.md`, then the matching area index, then the page, then the cited code when you need certainty or the page is silent.
+**Query.** Read `index.md`, then the area index, then the page, then the cited code when you need certainty or the page is silent.
 
-**Update (in the change that touches code).**
+**Update, in the same change as the code.**
 
 1. Run `uv run python scripts/wiki_lint.py`.
-2. For each stale page, re-check the listed claims against the new code and edit the page so it reads as current. Editing the page clears the flag.
+2. Edit each stale page so it reads as current. Editing the page clears the flag.
 3. Add pages for anything the coverage check reports.
 4. Run `uv run python scripts/wiki_lint.py --fix` to regenerate the area indexes.
 
 **Lint.** `uv run python scripts/wiki_lint.py` runs in pre-commit and CI. It checks:
 
-- frontmatter;
-- links and anchors;
-- that cited paths exist and cited symbols are defined;
-- that no identifiers are unqualified;
+- frontmatter, area index membership, orphan pages, and the generated index blocks;
+- that citations resolve (dotted paths via griffe, file paths on disk) and that no bare identifiers remain;
 - that no pages cite `docs/`;
-- area index membership and orphan pages;
-- that the generated index blocks are current;
-- coverage;
-- staleness.
+- coverage and staleness.
 
-It also writes `backlinks.json` (gitignored), which maps each page to its inbound pages and each code path to the pages that cite it.
+lychee checks links and anchors, and vale checks prose.
