@@ -5,6 +5,7 @@ description: How to install, write a working .env, start Docker Postgres, migrat
 sources:
   - migrations/env.py
   - docker-compose.yml
+  - pyproject.toml
   - packages/odds-core/odds_core/config.py::DataCollectionConfig
   - packages/odds-core/odds_core/config.py::SchedulerConfig
   - packages/odds-cli/odds_cli/commands/status.py::show_quota
@@ -15,11 +16,6 @@ sources:
   - .github/workflows/test.yml
   - .github/workflows/deploy-dev.yml
   - .github/workflows/deploy-prod.yml
-  - docs/DATABASE.md#local-database-odds
-  - docs/DATABASE.md#environment-variables
-  - docs/DATABASE.md#test-database
-  - docs/DEVELOPMENT.md#testing
-verified: "7887039"
 status: stable
 ---
 
@@ -50,7 +46,7 @@ uv run pytest tests/unit tests/integration
 uv run pytest tests/unit/test_paper_trading.py -v
 ```
 
-Run unit and integration tests together; leave `tests/migration` to the deploy workflows ([AGENTS.md](../../AGENTS.md#key-commands)).
+Run unit and integration tests together; leave `tests/migration` to the deploy workflows ([AGENTS.md](../../AGENTS.md#tests)).
 
 ### What the tests run against
 
@@ -73,8 +69,8 @@ tests/fixtures/     sample Odds API JSON
 ## Hazards
 
 - Any import of `odds_core` builds settings, so a missing `ODDS_API_KEY` or `DATABASE_URL` fails every command, not just those that use the API ([Packages and the odds CLI](packages-and-cli.md#odds-core)). Tests too: `tests/conftest.py` defaults only `ODDS_API_KEY`; CI supplies `DATABASE_URL` from a secret.
-- The `cp .env.example .env` step in the README fails at import because of the comma-separated list values in the template.
-- `uv run pytest` with no arguments collects `tests/migration` too, because `testpaths` is `tests`. `docs/DEVELOPMENT.md` lists it as "All tests"; with a production-looking `DATABASE_URL` that includes write tests against production.
+- `cp .env.example .env` fails at import because of the comma-separated list values in the template.
+- `uv run pytest` with no arguments collects `tests/migration` too, because `testpaths` is `tests`. With a production-looking `DATABASE_URL` that includes write tests against production (`pyproject.toml`, `tests/migration/conftest.py::pytest_configure`).
 - `.github/workflows/test.yml` sets up Python 3.11 while packages require `>=3.12`.
 
 ## Related

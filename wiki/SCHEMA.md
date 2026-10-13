@@ -24,7 +24,7 @@ The root `index.md` has three parts:
 
 1. Two sentences on what the repo is.
 2. One line per area: `- [Area](area/index.md) — read when …`.
-3. The handful of constraints an agent must not violate (timezones, production database, API cost), each linking to its page.
+3. A pointer to the hard constraints in `AGENTS.md`, which agents load on every turn and which is their single source.
 
 ### Area index
 

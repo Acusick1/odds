@@ -10,7 +10,7 @@ Repo-wide material that every other area assumes: what the system is and which s
 <!-- pages:start -->
 ### Concepts
 
-- [Code conventions, timezones and documentation](conventions.md) — The UTC rule and its remaining naive-datetime sites, async-only DB access, the mechanical gates (ruff, Vale, lychee) versus review-only conventions, logging setup, which doc is authoritative for what, and where the issue-tracker conventions live.
+- [Code conventions, timezones and documentation](conventions.md) — The UTC rule and its remaining naive-datetime sites, async-only DB access, the mechanical gates (ruff, Vale, lychee, wiki lint) versus review-only conventions, logging setup, what is authoritative for what, and where the issue-tracker conventions live.
 - [Odds arithmetic and devigging](odds-math-and-devigging.md) — The shared price-conversion, implied-probability, proportional-devig and profit helpers, which consumers devig and which stay vig-inclusive, and the diverging converter copies that store prices one point apart.
 - [Project overview and pivots](project-overview.md) — What the system is, which sports are active, where the edge is meant to come from, what runs where, the repo layout and stack, and which NBA-era defaults still lurk in live code.
 

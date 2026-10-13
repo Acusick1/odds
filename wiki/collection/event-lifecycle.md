@@ -13,30 +13,24 @@ sources:
   - packages/odds-lambda/odds_lambda/storage/writers.py::update_event_status
   - packages/odds-lambda/odds_lambda/scheduling/decision.py::decide_backward_resilient
   - packages/odds-cli/odds_cli/commands/fetch.py::fetch_scores
-  - docs/ARCHITECTURE.md#event-lifecycle
-  - docs/ARCHITECTURE.md#update-status-job
-  - docs/ARCHITECTURE.md#fetch-scores-job
-  - docs/ARCHITECTURE.md#oddsportal-results-job
-  - docs/CLI.md#fetch-scores
-verified: "7887039"
 status: stable
 ---
 
 # Event status lifecycle and results jobs
 
-`EventStatus` (`packages/odds-core/odds_core/models.py::EventStatus`) has five values: `scheduled`, `live`, `final`, `cancelled`, `postponed`. New [events](../storage/events.md) default to SCHEDULED. All transitions go through `OddsWriter.update_event_status` (`packages/odds-lambda/odds_lambda/storage/writers.py::update_event_status`), which stamps `updated_at` and, only for FINAL with both scores, sets `home_score`, `away_score` and `completed_at` ([odds-storage](../storage/odds-storage.md)). Three jobs and two commands write status; only LIVE and FINAL are ever written.
+`packages/odds-core/odds_core/models.py::EventStatus` has five values: `scheduled`, `live`, `final`, `cancelled`, `postponed`. New [events](../storage/events.md) default to SCHEDULED. All transitions go through `OddsWriter.update_event_status` (`packages/odds-lambda/odds_lambda/storage/writers.py::update_event_status`), which stamps `updated_at` and, only for FINAL with both scores, sets `home_score`, `away_score` and `completed_at` ([odds-storage](../storage/odds-storage.md)). Three jobs and two commands write status; only LIVE and FINAL are ever written.
 
 ## Who sets what
 
 | Transition | Setter | Rule |
 |---|---|---|
 | (new) → SCHEDULED | event sync, OddsWriter, `odds discover games` | default status |
-| SCHEDULED → LIVE | `update_status.py::_update_event_statuses` | events with `commence_time` in the last 4 hours (`STATUS_WINDOW`) and already past; `reader.get_events_by_date_range(status=SCHEDULED)` |
-| → FINAL | `fetch_scores.py::_fetch_and_update_scores` | Odds API `/scores` (`days_from=3`), only when `completed` and both scores parse |
-| → FINAL | `fetch_oddsportal_results.py::process_results` | OddsPortal results for SCHEDULED/LIVE events already past kickoff (`get_pending_events`) |
+| SCHEDULED → LIVE | `packages/odds-lambda/odds_lambda/jobs/update_status.py::_update_event_statuses` | events with `commence_time` in the last 4 hours (`STATUS_WINDOW`) and already past; `reader.get_events_by_date_range(status=SCHEDULED)` |
+| → FINAL | `packages/odds-lambda/odds_lambda/jobs/fetch_scores.py::_fetch_and_update_scores` | Odds API `/scores` (`days_from=3`), only when `completed` and both scores parse |
+| → FINAL | `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py::process_results` | OddsPortal results for SCHEDULED/LIVE events already past kickoff (`packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py::get_pending_events`) |
 | → FINAL | `odds fetch scores` (`packages/odds-cli/odds_cli/commands/fetch.py::fetch_scores`), `odds backfill scores` | manual; `backfill scores` sets FINAL from NBA game logs ([howto-load-historical-odds](howto-load-historical-odds.md)) |
 
-`update-status` and `fetch-scores` self-schedule via `decide_backward_resilient` (`packages/odds-lambda/odds_lambda/scheduling/decision.py`); the status job counts only SCHEDULED events as needing work, the scores job any non-FINAL event in its 3-day window. `fetch-oddsportal-results` reschedules for 08:00 UTC next day in a `finally` block. See [self-scheduling](../scheduling/self-scheduling.md).
+`update-status` and `fetch-scores` self-schedule via `packages/odds-lambda/odds_lambda/scheduling/decision.py::decide_backward_resilient` (`packages/odds-lambda/odds_lambda/scheduling/decision.py`); the status job counts only SCHEDULED events as needing work, the scores job any non-FINAL event in its 3-day window. `fetch-oddsportal-results` reschedules for 08:00 UTC next day in a `finally` block. See [self-scheduling](../scheduling/self-scheduling.md).
 
 ## Where each job runs
 
@@ -46,9 +40,9 @@ status: stable
 
 `packages/odds-lambda/odds_lambda/jobs/update_status.py::main(ctx)` flips SCHEDULED events whose `commence_time` has passed to LIVE. It is a global job (not per-sport): one rule `odds-update-status`, always created by Terraform. It runs for `data_collection.sports` when no sport is given.
 
-1. `_status_decision` calls `decide_backward_resilient` with a 4-hour window, 1 h active and 6 h idle intervals, counting only `{EventStatus.SCHEDULED}`.
+1. `packages/odds-lambda/odds_lambda/jobs/update_status.py::_status_decision` calls `packages/odds-lambda/odds_lambda/scheduling/decision.py::decide_backward_resilient` with a 4-hour window, 1 h active and 6 h idle intervals, counting only `{EventStatus.SCHEDULED}`.
 2. Pre-schedule under `update-status`, skip if idle.
-3. Inside `job_alert_context("update-status")`, `_update_event_statuses` reads SCHEDULED events with `commence_time` in the last four hours and calls `update_event_status(LIVE)` for each that has started.
+3. Inside `job_alert_context("update-status")`, `packages/odds-lambda/odds_lambda/jobs/update_status.py::_update_event_statuses` reads SCHEDULED events with `commence_time` in the last four hours and calls `update_event_status(LIVE)` for each that has started.
 4. Re-decide and post-schedule.
 
 Because the fetch-odds gate keys off SCHEDULED events, flipping to LIVE removes a started game from pre-game proximity decisions.
@@ -57,41 +51,41 @@ Because the fetch-odds gate keys off SCHEDULED events, flipping to LIVE removes 
 
 `packages/odds-lambda/odds_lambda/jobs/fetch_scores.py::main(ctx)` is the Odds API `/scores` job, a per-sport rule on the scheduler Lambda.
 
-1. Gate with `decide_backward_resilient` using `SCORES_WINDOW` (3 days), `SCORES_ACTIVE_INTERVAL` 6 h and `SCORES_IDLE_INTERVAL` 12 h: it runs while any event that kicked off in the last three days is not FINAL.
+1. Gate with `packages/odds-lambda/odds_lambda/scheduling/decision.py::decide_backward_resilient` using `SCORES_WINDOW` (3 days), `SCORES_ACTIVE_INTERVAL` 6 h and `SCORES_IDLE_INTERVAL` 12 h: it runs while any event that kicked off in the last three days is not FINAL.
 2. Pre-schedule, then skip if idle.
-3. `_fetch_and_update_scores`: for each sport call `TheOddsAPIClient.get_scores(sport, days_from=3)`, and for every `completed` entry with parseable scores call `update_event_status(FINAL, home_score, away_score)`, committing per sport ([odds-api-client-and-quota](odds-api-client-and-quota.md)).
+3. `packages/odds-lambda/odds_lambda/jobs/fetch_scores.py::_fetch_and_update_scores`: for each sport call `TheOddsAPIClient.get_scores(sport, days_from=3)`, and for every `completed` entry with parseable scores call `update_event_status(FINAL, home_score, away_score)`, committing per sport ([odds-api-client-and-quota](odds-api-client-and-quota.md)).
 4. Re-decide and post-schedule.
 
-Per-event failures are logged and skipped. A whole-job failure sends `send_critical` and re-raises. `odds fetch scores` repeats the same loop inline with `--sport` (default `basketball_nba`) and `--days` (default 3); it does not call the job and does not gate or reschedule.
+Per-event failures are logged and skipped. A whole-job failure sends `packages/odds-core/odds_core/alerts.py::send_critical` and re-raises. `odds fetch scores` repeats the same loop inline with `--sport` (default `basketball_nba`) and `--days` (default 3); it does not call the job and does not gate or reschedule.
 
 ## fetch-oddsportal-results
 
-`packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py::main(ctx)` scrapes OddsPortal's historic results page (one page, the spec's primary market) for past matches, sets events FINAL with scores and stores one closing snapshot per event. League config is `LeagueSpec` from [oddsportal](oddsportal.md). `process_results` uses three session scopes so no connection is held across the browser run (Neon closes idle connections):
+`packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py::main(ctx)` scrapes OddsPortal's historic results page (one page, the spec's primary market) for past matches, sets events FINAL with scores and stores one closing snapshot per event. League config is `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal.py::LeagueSpec` from [oddsportal](oddsportal.md). `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py::process_results` uses three session scopes so no connection is held across the browser run (Neon closes idle connections):
 
-1. **Read**: `get_pending_events` returns plain `PendingEvent` dataclasses for SCHEDULED or LIVE events of the sport with `commence_time` in the past. None means exit.
+1. **Read**: `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py::get_pending_events` returns plain `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py::PendingEvent` dataclasses for SCHEDULED or LIVE events of the sport with `commence_time` in the past. None means exit.
 2. **Scrape**: `run_harvester_historic(spec)` with no open session.
-3. **Write**: for each record, `_match_record_to_event` matches on exact home and away team strings and a commence-time delta of at most 24 h; `update_event_status(FINAL, scores)`; `build_raw_data(... use_opening=False)` and `store_odds_snapshot` tagged `api_request_id="oddsportal_closing"`; commit per record with rollback on error. Records with no digit scores are skipped.
+3. **Write**: for each record, `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py::_match_record_to_event` matches on exact home and away team strings and a commence-time delta of at most 24 h; `update_event_status(FINAL, scores)`; `build_raw_data(... use_opening=False)` and `store_odds_snapshot` tagged `api_request_id="oddsportal_closing"`; commit per record with rollback on error. Records with no digit scores are skipped.
 
-Rerunning is idempotent because finished events leave the pending query. `_db_market_for_spec` maps `home_away` to `h2h` and `1x2` to `1x2`, and raises for other primary markets.
+Rerunning is idempotent because finished events leave the pending query. `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py::_db_market_for_spec` maps `home_away` to `h2h` and `1x2` to `1x2`, and raises for other primary markets.
 
-`main` runs `process_results` inside `job_alert_context`, then in `finally` books tomorrow 08:00 UTC through `self_schedule`, ignoring overnight windows. A scheduling failure sends `send_critical` (wrapped so it cannot mask the original exception).
+`main` runs `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py::process_results` inside `packages/odds-core/odds_core/alerts.py::job_alert_context`, then in `finally` books tomorrow 08:00 UTC through `packages/odds-lambda/odds_lambda/scheduling/helpers.py::self_schedule`, ignoring overnight windows. A scheduling failure sends `packages/odds-core/odds_core/alerts.py::send_critical` (wrapped so it cannot mask the original exception).
 
 ## What each status gates
 
-- Schedule-driven readers filter on SCHEDULED: `get_next_kickoff` in `packages/odds-lambda/odds_lambda/scheduling/helpers.py`, `packages/odds-lambda/odds_lambda/jobs/score_predictions.py`, and the MCP tools in `packages/odds-mcp/odds_mcp/server.py` (`get_upcoming_fixtures` returns SCHEDULED only, so it depends on update-status running on AWS; [mcp-market-tools](../agent/mcp-market-tools.md)).
+- Schedule-driven readers filter on SCHEDULED: `packages/odds-lambda/odds_lambda/scheduling/helpers.py::get_next_kickoff` in `packages/odds-lambda/odds_lambda/scheduling/helpers.py`, `packages/odds-lambda/odds_lambda/jobs/score_predictions.py`, and the MCP tools in `packages/odds-mcp/odds_mcp/server.py` (`packages/odds-mcp/odds_mcp/server.py::get_upcoming_fixtures` returns SCHEDULED only, so it depends on update-status running on AWS; [mcp-market-tools](../agent/mcp-market-tools.md)).
 - Training, standings and paper-trade settlement read only FINAL events (`packages/odds-lambda/odds_lambda/paper_trading.py`). Paper trades settle only on FINAL with both scores, so stalled results jobs leave bets unsettled ([match-briefs-and-paper-trades](../agent/match-briefs-and-paper-trades.md#settlement)).
 - A status flip is not what stops pre-game fetching: the fetch job's gating is tier-based ([fetch-tier](../storage/fetch-tier.md)), not status-based (no status check in `packages/odds-lambda/odds_lambda/jobs/fetch_odds.py`).
 
 ## Heartbeats
 
-The results job's heartbeat expectation is 26 h per sport (`heartbeat:fetch-oddsportal-results-<suffix>`). `update-status` writes `heartbeat:update-status` but has no default expectation, and `fetch-scores` is not wrapped in `job_alert_context` so it writes none ([alerts-and-health](../operations/alerts-and-health.md#heartbeats)).
+The results job's heartbeat expectation is 26 h per sport (`heartbeat:fetch-oddsportal-results-<suffix>`). `update-status` writes `heartbeat:update-status` but has no default expectation, and `fetch-scores` is not wrapped in `packages/odds-core/odds_core/alerts.py::job_alert_context` so it writes none ([alerts-and-health](../operations/alerts-and-health.md#heartbeats)).
 
 ## Hazards
 
-- **CANCELLED and POSTPONED are never set.** Docs say they mean "no further data collection". No code in `packages` assigns either value. A cancelled game stays SCHEDULED/LIVE until a results job finalises it or it ages out of the 4-hour/3-day windows; `decide_backward` counts it as needing an update, keeping `fetch-scores` on its 6 h cadence for three days.
-- **Re-discovery resets status.** `OddsWriter.bulk_upsert_events` (used by `odds discover games` and `EventSyncService`, i.e. every fetch-odds run) overwrites every non-key column, including `status` and scores. Re-discovering a date range resets FINAL events to SCHEDULED with null scores; `upsert_event` does not. Whether `/events` still returns started games, which would make event sync reset LIVE events, is not verified ([events](../storage/events.md#hazards)).
-- **update-status doesn't stop fetching.** `docs/ARCHITECTURE.md#update-status-job` says the job "prevents fetching pre-game odds for started games"; code only flips the status.
-- **update-status scope and age limit.** `_update_event_statuses` does not filter by sport while the gate does; when a per-sport schedule fires it flips events of every sport. Only events that kicked off within the last 4 hours are eligible, so if the job was down longer, older SCHEDULED events can only reach FINAL via the scores or results jobs.
+- **CANCELLED and POSTPONED are never set.** `packages/odds-core/odds_core/models.py::EventStatus` defines both, but no code in `packages` assigns either value. A cancelled game stays SCHEDULED/LIVE until a results job finalises it or it ages out of the 4-hour/3-day windows; `packages/odds-lambda/odds_lambda/scheduling/decision.py::decide_backward` counts it as needing an update, keeping `fetch-scores` on its 6 h cadence for three days.
+- **Re-discovery resets status.** `OddsWriter.bulk_upsert_events` (used by `odds discover games` and `packages/odds-lambda/odds_lambda/event_sync.py::EventSyncService`, i.e. every fetch-odds run) overwrites every non-key column, including `status` and scores. Re-discovering a date range resets FINAL events to SCHEDULED with null scores; `upsert_event` does not. Whether `/events` still returns started games, which would make event sync reset LIVE events, is not verified ([events](../storage/events.md#hazards)).
+- **update-status doesn't stop fetching.** `packages/odds-lambda/odds_lambda/jobs/update_status.py::_update_event_statuses` only flips the status; nothing in it stops later odds fetches for a started game.
+- **update-status scope and age limit.** `packages/odds-lambda/odds_lambda/jobs/update_status.py::_update_event_statuses` does not filter by sport while the gate does; when a per-sport schedule fires it flips events of every sport. Only events that kicked off within the last 4 hours are eligible, so if the job was down longer, older SCHEDULED events can only reach FINAL via the scores or results jobs.
 - **Stale docstring.** The `update_status` function docstring cites a nonexistent scheduler jobs module.
 - **Results job has no pre-schedule.** If the process is killed before `finally` (scraper Lambda timeout 900 s), the chain breaks until something re-invokes the job.
 - **Results job bare-name reschedule.** `ctx.sport=None` processes `DEFAULT_SPORT_KEY` (`soccer_epl`) but reschedules under the bare job name, which matches no per-sport rule.

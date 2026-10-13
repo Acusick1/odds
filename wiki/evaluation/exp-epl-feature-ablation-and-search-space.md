@@ -3,18 +3,12 @@ type: experiment
 title: EPL feature ablation and principled search space
 description: "The April 2026 EPL runs: per-group and FPL ablations (match_stats helps, schedule and FPL hurt), the sliding-window collapse to constant predictors, and the revised Optuna space that produced the deployed model."
 sources:
-  - docs/MODELING.md#epl-feature-group-ablation
-  - docs/MODELING.md#principled-search-space-and-protocol-re-test
-  - docs/MODELING.md#deployed-model
-  - docs/MODELING.md#experiment-log
-  - docs/AGENT_DATA_SOURCES.md#evaluated-and-rejected
   - experiments/configs/xgboost_epl_production_all_features.yaml
   - experiments/configs/xgboost_epl_production_tabular_match_stats.yaml
   - experiments/configs/xgboost_epl_production_tabular_only.yaml
   - experiments/configs/xgboost_epl_lineup.yaml
   - experiments/configs/xgboost_epl_hybrid_sharp.yaml
   - packages/odds-analytics/odds_analytics/feature_groups.py
-verified: "7887039"
 status: stable
 ---
 
@@ -23,6 +17,8 @@ status: stable
 Two linked questions on EPL, both answered in April 2026: which feature groups help CLV prediction, and why sliding-380:50 tuning produced identical, degenerate models. Answers: `match_stats` is the best single addition, `standings` is neutral, `epl_schedule` hurts slightly, `rest` produces nothing for EPL and FPL availability degrades results; and the original Optuna space, not the protocol, caused the collapse ([EPL context features](../modelling/epl-context-features.md), [feature pipeline](../modelling/feature-pipeline.md)).
 
 ## Per-group ablation (2026-04-23)
+
+Recorded in #361; the results directories hold only verification CSVs (`experiments/results/xgboost_epl_production_all_features/verification`), so the metric tables below have no results file behind them.
 
 1,813 events through 2026-04-20, expanding:50 (22 folds, val step 50), hybrid sharp, 100 trials each, original search space. Config: `experiments/configs/xgboost_epl_production_all_features.yaml`.
 
@@ -37,7 +33,7 @@ Two linked questions on EPL, both answered in April 2026: which feature groups h
 
 Effect sizes are small against fold-to-fold standard deviation (±0.06-0.08). An offline comparison scored 17 upcoming events with the tabular-only and tabular + match_stats models (1,088 shared event-snapshot pairs): they agreed on direction for 86.9% of pairs, and match_stats was on average 0.4 pp more bearish on the home side (mean delta -0.0040, max 0.0220). Without realised closing lines this shows only that the models differ.
 
-## FPL availability (2026-03-20)
+## FPL availability (2026-03-20, #255)
 
 41 features (tabular 7 + standings 11 + match_stats 14 + fpl_availability 9), hybrid sharp: CV R² = -0.017 ± 0.031 under sliding-380:50 (28 folds) and 0.022 ± 0.037 under expanding:150 (9 folds), both below the baselines without it (0.026; 0.052). Reading in the log: the market already prices squad availability. The agent-data inventory rejects FPL ownership and transfer data on this evidence and because transfer spikes lag the news the agent searches directly ([rejected sources](../agent/agent-data-sources.md#rejected-sources)).
 
@@ -86,8 +82,9 @@ Deployed as `epl-clv-home` `v308058c` (CV R² +0.058, MSE 0.000716), replacing t
 ## Hazards
 
 - **Search spaces in older YAMLs.** Most older committed configs still carry the original space (`min_child_weight` up to 50, early stopping 15), for example `experiments/configs/xgboost_epl_lineup.yaml` and `experiments/configs/xgboost_epl_hybrid_sharp.yaml`; copy the search space from the `experiments/configs/xgboost_epl_production_*` configs when starting a new sliding-window run.
-- The 2026-03-18 sliding-380 feature-group numbers were a search-space artefact and should not be used ([hybrid sharp reference](../modelling/decision-hybrid-sharp-reference.md)).
+- The 2026-03-18 sliding-380 feature-group numbers (#234) were a search-space artefact and should not be used ([hybrid sharp reference](../modelling/decision-hybrid-sharp-reference.md)).
 - **FPL is not reproducible.** The FPL tables and reader remain ([EPL context data](../collection/epl-context-data.md)) but `packages/odds-analytics/odds_analytics/feature_groups.py` has no `fpl_availability` group, so the run cannot be repeated as recorded.
+- The `min_child_weight` rule of thumb has no recorded source.
 - `rest` is a no-op for EPL by construction: its extractor needs NBA game logs, so the columns are NaN and the variance filter drops them.
 - Feature counts are as recorded: the tabular group had 7 columns then and has 6 now.
 

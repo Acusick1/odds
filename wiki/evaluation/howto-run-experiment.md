@@ -5,12 +5,6 @@ description: Script conventions, the required FINDINGS.md and verification artif
 sources:
   - packages/odds-analytics/odds_analytics/training/data_preparation.py::save_verification_artifacts
   - experiments/scripts/cv_protocol_grid.py
-  - docs/DEVELOPMENT.md#running-experiments
-  - docs/DEVELOPMENT.md#conventions
-  - docs/DEVELOPMENT.md#required-outputs
-  - docs/DEVELOPMENT.md#verification-artifacts
-  - docs/DEVELOPMENT.md#after-running
-verified: "7887039"
 status: stable
 ---
 
@@ -20,15 +14,15 @@ Experiments are standalone scripts in `experiments/scripts/` writing to `experim
 
 ## Conventions
 
-- Load data with the training pipeline (`prepare_training_data`, `MLTrainingConfig`) and reuse YAMLs from `experiments/configs/` ([training pipeline](../modelling/training-pipeline.md)).
+- Load data with the training pipeline (`packages/odds-analytics/odds_analytics/feature_groups.py::prepare_training_data`, `packages/odds-analytics/odds_analytics/training/config.py::MLTrainingConfig`) and reuse YAMLs from `experiments/configs/` ([training pipeline](../modelling/training-pipeline.md)).
 - Set the target and the CV protocol explicitly in the YAML. Code defaults are `target_type: raw` and `target_bookmaker: pinnacle`, not the production bet365 devigged target ([CLV target](../modelling/clv-target.md)), and the default protocol is not walk-forward ([walk-forward CV](../modelling/decision-walk-forward-cv.md)).
 - When starting a sliding-window run, copy the principled search space from the `experiments/configs/xgboost_epl_production_*` configs; older YAMLs carry the original space that collapses to constant predictors ([search-space experiment](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test)).
 - The script must run as `uv run python experiments/scripts/<script>.py`.
-- Commit the script before running it, then commit the results, so `FINDINGS.md` can record the git SHA of the code that produced them.
+- Commit the script before running it, then commit the results, so `FINDINGS.md` can record the git SHA of the code that produced them (convention set in #134).
 
 ## Required outputs
 
-- **`FINDINGS.md`** with sections Setup (date, git SHA, dataset size, sampling, target, exact reproduce command), Key Results (numbers, tables, significance), Interpretation (meaning, caveats, alternatives) and Implications (next steps, go/no-go).
+- **`FINDINGS.md`** (exemplar: `experiments/results/exp4_hours_to_game/FINDINGS.md`) with sections Setup (date, git SHA, dataset size, sampling, target, exact reproduce command), Key Results (numbers, tables, significance), Interpretation (meaning, caveats, alternatives) and Implications (next steps, go/no-go).
 - Plots as PNG and data artifacts (CSVs) in the same directory.
 
 ## Verification artifacts
@@ -62,8 +56,7 @@ Documented results: `exp1_feature_correlations`, `exp2_feature_group_isolation`,
 
 ## Hazards
 
-- `docs/DEVELOPMENT.md#after-running` still tells authors to add a row to the `docs/MODELING.md` experiment log; the wiki is the record now.
-- Scripts from February 2026 reference feature groups that no longer exist and may not run unchanged ([early NBA signal search](exp-early-nba-signal-and-lstm.md#hazards)).
+- Scripts from February 2026 reference feature groups the code does not define and may not run unchanged ([early NBA signal search](exp-early-nba-signal-and-lstm.md#hazards)).
 - `experiments/results/` holds only some runs' outputs (verification CSVs for several configs, no `FINDINGS.md`).
 
 ## Related

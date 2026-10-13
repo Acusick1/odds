@@ -13,13 +13,8 @@ sources:
   - tests/conftest.py
   - tests/migration/conftest.py
   - docker-compose.yml
-  - docs/DATABASE.md#database-environments
-  - docs/DATABASE.md#connection-pooling
-  - docs/DEVELOPMENT.md#database-settings-databaseconfig
-  - docs/DEPLOYMENT.md#operations
-  - docs/CLI.md#copy-from-production
-  - docs/audits/comprehension-audit-2026-06-09.md#4-flagged-for-owner-decision-explicitly-not-prescribed
-verified: "7887039"
+  - deployment/aws/terraform/terraform.tfvars.example
+  - .env.example
 status: stable
 ---
 
@@ -29,13 +24,13 @@ All code gets sessions from one module-level factory: `packages/odds-core/odds_c
 
 ## Engine creation
 
-`database.py` builds the engine at import time from `get_settings().database`:
+`packages/odds-core/odds_core/database.py` builds the engine at import time from `get_settings().database`:
 
 - If `AWS_LAMBDA_FUNCTION_NAME` is set: `NullPool`. Each handler call runs `asyncio.run`, which makes a new event loop, and pooled asyncpg connections bound to an old loop fail. The switch keys on that env var, not on the scheduler backend.
 - Otherwise: `pool_size=DatabaseConfig.pool_size` (default 5, env `DATABASE_POOL_SIZE`) with hardcoded `max_overflow=10`.
 - Sessions use `expire_on_commit=False`.
 
-`DatabaseConfig` (`packages/odds-core/odds_core/config.py::DatabaseConfig`) uses prefix `DATABASE_`: `DATABASE_URL` (required, no default) and `DATABASE_POOL_SIZE` ([Configuration](configuration.md)). Importing any `odds_core` module therefore needs `DATABASE_URL` set.
+`packages/odds-core/odds_core/config.py::DatabaseConfig` (`packages/odds-core/odds_core/config.py::DatabaseConfig`) uses prefix `DATABASE_`: `DATABASE_URL` (required, no default) and `DATABASE_POOL_SIZE` ([Configuration](configuration.md)). Importing any `odds_core` module therefore needs `DATABASE_URL` set.
 
 ## Environments
 
@@ -43,10 +38,10 @@ All code gets sessions from one module-level factory: `packages/odds-core/odds_c
 |---|---|---|
 | Test | in-process PostgreSQL (py-pglite) on TCP port 5434 | `tests/conftest.py` creates tables once per session and truncates all tables before each test. Used by `tests/unit` and `tests/integration`. |
 | Local | `odds` in Docker Compose `postgres:15`, host port 5433 | `docker compose up -d postgres`; `postgres/postgres` (`docker-compose.yml`) |
-| Dev | remote managed Postgres | CI/CD only, via `secrets.DATABASE_URL` |
-| Production | remote managed Postgres | production deployments only |
+| Dev | remote managed Postgres, a Neon dev branch | CI/CD only, via `secrets.DATABASE_URL`; reset freely (inferred) |
+| Production | remote managed Postgres, the Neon main branch | production deployments only |
 
-`.env.example` defines `LOCAL_DATABASE_URL`, `DEV_DATABASE_URL`, `PROD_DATABASE_URL` and sets `DATABASE_URL=${DEV_DATABASE_URL}`; override it to `${LOCAL_DATABASE_URL}` for local work ([local setup](howto-develop-locally.md)). Never point `DATABASE_URL` at production locally. Lambda gets `DATABASE_URL` from Terraform.
+`.env.example` defines `LOCAL_DATABASE_URL`, `DEV_DATABASE_URL`, `PROD_DATABASE_URL` and sets `DATABASE_URL=${DEV_DATABASE_URL}`; override it to `${LOCAL_DATABASE_URL}` for local work ([local setup](howto-develop-locally.md)). Never point `DATABASE_URL` at production locally. Lambda gets `DATABASE_URL` from Terraform, which takes the dev or production Neon connection string per environment (`deployment/aws/terraform/terraform.tfvars.example`; the provider is not verifiable from the repo beyond that template).
 
 Rules for production:
 
@@ -58,21 +53,21 @@ Rules for production:
 
 ### The agent database role
 
-The betting agent subprocess swaps in `AGENT_DATABASE_URL` when set (`packages/odds-lambda/odds_lambda/jobs/agent_run.py::_build_agent_subprocess_env`). That `odds_agent` role has SELECT on everything, INSERT/UPDATE on `paper_trades`, `match_briefs` and `agent_wakeups`, and write access to the APScheduler tables (needed by `refresh_scrape`). When the variable is unset the agent inherits the write-capable DSN and only logs a warning ([Betting agent](../agent/betting-agent.md#database-role)).
+The betting agent subprocess swaps in `AGENT_DATABASE_URL` when set (`packages/odds-lambda/odds_lambda/jobs/agent_run.py::_build_agent_subprocess_env`). That `odds_agent` role has SELECT on everything, INSERT/UPDATE on `paper_trades`, `match_briefs` and `agent_wakeups`, and write access to the APScheduler tables (needed by `packages/odds-mcp/odds_mcp/server.py::refresh_scrape`). When the variable is unset the agent inherits the write-capable DSN and only logs a warning ([Betting agent](../agent/betting-agent.md#database-role)).
 
 ### The `--db` flag
 
-`odds scheduler start --db NAME` and `odds agent run --db NAME` swap the dbname in `DATABASE_URL` through `override_database_url`, but the engine already built in this process keeps the original URL; only subprocesses see the swap ([Configuration](configuration.md#hazards)).
+`odds scheduler start --db NAME` and `odds agent run --db NAME` swap the dbname in `DATABASE_URL` through `packages/odds-cli/odds_cli/db_override.py::override_database_url`, but the engine already built in this process keeps the original URL; only subprocesses see the swap ([Configuration](configuration.md#hazards)).
 
 ## Copy production data locally
 
-`odds copy from-prod START END` copies events, odds snapshots and predictions for one sport and date range from the production database into the local database, so local work runs on real data. The CLI wrapper is `packages/odds-cli/odds_cli/commands/copy_from_prod.py`; the logic is in `packages/odds-lambda/odds_lambda/copy_from_production.py` (`copy_from_prod`, `ProductionDataCopier`).
+`odds copy from-prod START END` copies events, odds snapshots and predictions for one sport and date range from the production database into the local database, so local work runs on real data. The CLI wrapper is `packages/odds-cli/odds_cli/commands/copy_from_prod.py`; the logic is in `packages/odds-lambda/odds_lambda/copy_from_production.py` (`packages/odds-lambda/odds_lambda/copy_from_production.py::copy_from_prod`, `packages/odds-lambda/odds_lambda/copy_from_production.py::ProductionDataCopier`).
 
 ```bash
 odds copy from-prod 2025-08-01 2026-04-10 --sport soccer_epl --dry-run
 ```
 
-`START` and `END` are positional `YYYY-MM-DD` dates; `END` is inclusive through 23:59:59 UTC. Options (`docs/CLI.md`, confirmed in code): `--sport/-s` (default `soccer_epl`), `--dry-run`, `--skip-existing/--overwrite` (default skip existing), `--prod-url`, `--local-url`.
+`START` and `END` are positional `YYYY-MM-DD` dates; `END` is inclusive through 23:59:59 UTC. Options (`packages/odds-cli/odds_cli/commands/copy_from_prod.py::copy_from_production`): `--sport/-s` (default `soccer_epl`), `--dry-run`, `--skip-existing/--overwrite` (default skip existing), `--prod-url`, `--local-url`.
 
 - Source URL: `--prod-url`, else `PROD_DATABASE_URL`, else `DATABASE_URL`. Target URL: `--local-url`, else `LOCAL_DATABASE_URL` (required).
 - Events come from `OddsReader.get_events_by_date_range` for the sport and window. With `--skip-existing`, an event already present locally is skipped.

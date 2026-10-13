@@ -3,19 +3,18 @@ type: component
 title: CI/CD workflows
 description: What each GitHub Actions workflow runs and when — tests, lint, ephemeral dev deploy, gated prod deploy, daily validation, live-API and schedule health checks — and what they do not exercise.
 sources:
-  - docs/DEPLOYMENT.md#deploying
-  - docs/DATABASE.md#migration-testing-workflow
-  - docs/DEVELOPMENT.md#code-quality
-  - docs/DEBUGGING_SCHEDULER.md#1-establish-context
   - .github/workflows/ci-cd.yml
   - .github/workflows/deploy-dev.yml
   - .github/workflows/deploy-prod.yml
   - .github/workflows/test.yml
+  - .github/workflows/lint.yml
+  - .github/workflows/daily-validation.yml
+  - .github/workflows/live-api.yml
+  - .pre-commit-config.yaml
   - .github/workflows/schedule-health-check.yml
   - scripts/ci/test_lambda.py
   - scripts/ci/verify_database.py
   - scripts/verify-schedules.sh
-verified: "7887039"
 status: stable
 ---
 

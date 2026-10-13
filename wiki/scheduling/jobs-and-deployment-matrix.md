@@ -3,10 +3,6 @@ type: component
 title: "Jobs: registry, context and where each runs"
 description: The 14 registered jobs, per-sport compound names and JobContext, and for each job where it can run (scheduler Lambda, scraper Lambda, local default or opt-in) and on what schedule, plus how to check the deployed state.
 sources:
-  - docs/ARCHITECTURE.md#job-registry
-  - docs/DEPLOYMENT.md#deployment-targets
-  - docs/DEPLOYMENT.md#job-deployment-matrix
-  - docs/DEVELOPMENT.md#adding-scheduler-jobs
   - packages/odds-lambda/odds_lambda/scheduling/jobs.py::_JOB_MODULE_MAP
   - packages/odds-lambda/odds_lambda/scheduling/jobs.py::_JOB_BOOTSTRAP_MAP
   - packages/odds-lambda/odds_lambda/scheduling/jobs.py::_PER_SPORT_JOBS
@@ -17,30 +13,29 @@ sources:
   - packages/odds-core/odds_core/config.py::SchedulerConfig
   - packages/odds-core/odds_core/config.py::AlertConfig
   - deployment/aws/terraform/eventbridge.tf
-verified: "7887039"
 status: stable
 ---
 
 # Jobs: registry, context and where each runs
 
-`packages/odds-lambda/odds_lambda/scheduling/jobs.py` is the source of truth for which jobs exist. Do not confuse it with the `odds_lambda/jobs/` package that holds the job modules, which makes "jobs" imports ambiguous (`update_status.py`'s docstring still cites a nonexistent old path, scheduler/jobs). Jobs run on two targets: two AWS Lambdas driven by EventBridge rules, and the [local scheduler](local-scheduler.md). Where a job *can* run is fixed by the gates below; where it *does* run is only knowable from the AWS account.
+`packages/odds-lambda/odds_lambda/scheduling/jobs.py` is the source of truth for which jobs exist. Do not confuse it with the `odds_lambda/jobs/` package that holds the job modules, which makes "jobs" imports ambiguous (`packages/odds-lambda/odds_lambda/jobs/update_status.py`'s docstring still cites a nonexistent old path, scheduler/jobs). Jobs run on two targets: two AWS Lambdas driven by EventBridge rules, and the [local scheduler](local-scheduler.md). Where a job *can* run is fixed by the gates below; where it *does* run is only knowable from the AWS account.
 
 ## Registry
 
 - `_JOB_MODULE_MAP`: job name to `(module path, "main")` for 14 jobs: `fetch-odds`, `fetch-scores`, `update-status`, `check-health`, `fetch-polymarket`, `backfill-polymarket`, `fetch-oddsportal`, `fetch-oddsportal-results`, `score-predictions`, `daily-digest`, `agent-run`, `fetch-espn-fixtures`, `fetch-betfair-exchange`, `fetch-mlb-probables`.
-- `get_job_function` imports the module on first use and caches it, so the scraper Lambda never imports xgboost-dependent modules unless asked.
-- `_JOB_BOOTSTRAP_MAP`: jobs whose local bootstrap uses a different function; only `agent-run` (`schedule_next`). `get_bootstrap_function` wraps it to the `(JobContext)` signature. As a result `odds scheduler start` never launches the agent run itself; it only books its next wake-up. `_SMOKE_UNSAFE_JOBS` (`agent-run`) and `_OUTWARD_POSTING_JOBS` (`daily-digest`) drive [`odds scheduler smoke`](local-scheduler.md#cli); smoke skips `agent-run` unless `--include-agent`.
+- `packages/odds-lambda/odds_lambda/scheduling/jobs.py::get_job_function` imports the module on first use and caches it, so the scraper Lambda never imports xgboost-dependent modules unless asked.
+- `_JOB_BOOTSTRAP_MAP`: jobs whose local bootstrap uses a different function; only `agent-run` (`packages/odds-lambda/odds_lambda/jobs/agent_run.py::schedule_next`). `packages/odds-lambda/odds_lambda/scheduling/jobs.py::get_bootstrap_function` wraps it to the `(JobContext)` signature. As a result `odds scheduler start` never launches the agent run itself; it only books its next wake-up. `_SMOKE_UNSAFE_JOBS` (`agent-run`) and `_OUTWARD_POSTING_JOBS` (`daily-digest`) drive [`odds scheduler smoke`](local-scheduler.md#cli); smoke skips `agent-run` unless `--include-agent`.
 - At import the registry asserts every `_JOB_CRON_MAP` key is a registered job.
 
 ### Per-sport jobs and compound names
 
 `_PER_SPORT_JOBS` lists jobs that take a sport: `fetch-odds`, `fetch-scores`, `fetch-oddsportal`, `fetch-oddsportal-results`, `score-predictions`, `daily-digest`, `agent-run`, `fetch-espn-fixtures`, `fetch-betfair-exchange`, `fetch-mlb-probables`. `update-status`, `check-health` and both Polymarket jobs are global.
 
-`_SPORT_SUFFIX_MAP` knows only `epl` (`soccer_epl`) and `mlb` (`baseball_mlb`). `make_compound_job_name("fetch-odds", "soccer_epl")` returns `fetch-odds-epl`, the EventBridge rule suffix and APScheduler schedule id; `resolve_job_name` reverses it. A sport with no suffix, such as NBA, yields the bare job name. The compound name must equal the rule name, or a reschedule goes nowhere ([Add a scheduler job](howto-add-scheduler-job.md)). Adding a sport touches several tables, listed in [Sources and keys](../collection/sources-and-keys.md).
+`_SPORT_SUFFIX_MAP` knows only `epl` (`soccer_epl`) and `mlb` (`baseball_mlb`). `make_compound_job_name("fetch-odds", "soccer_epl")` returns `fetch-odds-epl`, the EventBridge rule suffix and APScheduler schedule id; `packages/odds-lambda/odds_lambda/scheduling/jobs.py::resolve_job_name` reverses it. A sport with no suffix, such as NBA, yields the bare job name. The compound name must equal the rule name, or a reschedule goes nowhere ([Add a scheduler job](howto-add-scheduler-job.md)). Adding a sport touches several tables, listed in [Sources and keys](../collection/sources-and-keys.md).
 
 ### JobContext
 
-`JobContext` is the dataclass every `main(ctx)` receives: `sport`, `include_spreads`, `include_totals`, `dry_run`, `lookback_hours` (24), `lookahead_hours` (48). `JobContext.from_payload` keeps known keys and drops unknown ones with a debug log, so a typo in an EventBridge payload is silent. Jobs read dry-run from `settings.scheduler.dry_run`; only `backfill-polymarket` reads `ctx.dry_run`.
+`packages/odds-lambda/odds_lambda/scheduling/jobs.py::JobContext` is the dataclass every `main(ctx)` receives: `sport`, `include_spreads`, `include_totals`, `dry_run`, `lookback_hours` (24), `lookahead_hours` (48). `JobContext.from_payload` keeps known keys and drops unknown ones with a debug log, so a typo in an EventBridge payload is silent. Jobs read dry-run from `settings.scheduler.dry_run`; only `backfill-polymarket` reads `ctx.dry_run`.
 
 ## Where each job runs
 
@@ -69,7 +64,7 @@ Per-job pages: [fetch-odds](../collection/odds-api-ingestion.md), [fetch-scores,
 
 ### Heartbeats
 
-Which jobs write a heartbeat is a property of `job_alert_context`, not of the registry. `AlertConfig.heartbeat_expectations` (`packages/odds-core/odds_core/config.py::AlertConfig`) expects `fetch-oddsportal-<sport>` every 2 h, `fetch-oddsportal-results-<sport>` every 26 h (EPL and MLB), `daily-digest-epl` every 26 h and `check-health` every 2 h. `fetch-odds`, `fetch-scores`, `update-status` and both Polymarket jobs have none ([Alerts and health](../operations/alerts-and-health.md#heartbeats)).
+Which jobs write a heartbeat is a property of `packages/odds-core/odds_core/alerts.py::job_alert_context`, not of the registry. `AlertConfig.heartbeat_expectations` (`packages/odds-core/odds_core/config.py::AlertConfig`) expects `fetch-oddsportal-<sport>` every 2 h, `fetch-oddsportal-results-<sport>` every 26 h (EPL and MLB), `daily-digest-epl` every 26 h and `check-health` every 2 h. `fetch-odds`, `fetch-scores`, `update-status` and both Polymarket jobs have none ([Alerts and health](../operations/alerts-and-health.md#heartbeats)).
 
 ## Deployed state is not in the repo
 
@@ -79,7 +74,7 @@ A Lambda payload without `sport` runs every configured sport and reschedules und
 
 ## Hazards
 
-- `docs/DEVELOPMENT.md#adding-scheduler-jobs` says to wrap every job in `job_alert_context`; `fetch-odds`, `fetch-scores`, `fetch-polymarket` and `backfill-polymarket` do not, so they write no heartbeat.
+- Heartbeats come from `packages/odds-core/odds_core/alerts.py::job_alert_context`; `fetch-odds`, `fetch-scores`, `fetch-polymarket` and `backfill-polymarket` do not, so they write no heartbeat.
 - `fixed_schedule_expressions` in Terraform is empty, so no Lambda job has a fixed cron except the Polymarket backfill rule (`{rule_prefix}-backfill-polymarket-bootstrap`).
 - The Betfair cron floor and its self-scheduling share one APScheduler id, so the first self-schedule replaces the cron ([Local scheduler](local-scheduler.md#hazards)).
 - The `fetch-mlb-probables` comment in `_JOB_CRON_MAP` says the MCP tool "writes through every call"; the job is the only writer ([MLB probable pitchers](../collection/mlb-probable-pitchers.md)).

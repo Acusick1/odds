@@ -15,11 +15,6 @@ sources:
   - packages/odds-lambda/odds_lambda/polymarket_matching.py::normalize_team
   - packages/odds-lambda/odds_lambda/event_sync.py::EventSyncService
   - packages/odds-analytics/odds_analytics/training/data_preparation.py
-  - docs/DATABASE.md#core-tables
-  - docs/DATA_MODELS.md#sportsbook-odds
-  - docs/INJURIES.md#event-matching
-  - docs/POLYMARKET.md#event-matching
-verified: "7887039"
 status: stable
 ---
 
@@ -30,11 +25,11 @@ status: stable
 ## Columns
 
 - `id` (str PK), `sport_key`, `sport_title`, `commence_time` (tz-aware), `home_team`, `away_team`: `sport_key`, `commence_time` and both team columns are indexed.
-- `status`: `EventStatus` = scheduled, live, final, cancelled, postponed (`packages/odds-core/odds_core/models.py::EventStatus`). Which job sets which status is on [event-lifecycle](../collection/event-lifecycle.md). Only LIVE and FINAL are ever written; CANCELLED and POSTPONED are never set.
+- `status`: `packages/odds-core/odds_core/models.py::EventStatus` = scheduled, live, final, cancelled, postponed (`packages/odds-core/odds_core/models.py::EventStatus`). Which job sets which status is on [event-lifecycle](../collection/event-lifecycle.md). Only LIVE and FINAL are ever written; CANCELLED and POSTPONED are never set.
 - `home_score`, `away_score`, `completed_at`: set only on completion (`OddsWriter.update_event_status`, see [odds-storage](odds-storage.md#events-written-by-oddswriter)).
 - `created_at`, `updated_at`.
 
-`Event.model_post_init` runs `normalize_team_name` on both team names at construction, so ORM-built events hold canonical aliases (`packages/odds-core/odds_core/team.py::normalize_team_name`). `sport_key` is a plain string column; `SportKey` (`soccer_epl`, `baseball_mlb`, `basketball_nba`) is a typing `Literal` used by jobs and CLI, not a DB constraint ([sources-and-keys](../collection/sources-and-keys.md)).
+`packages/odds-core/odds_core/models.py::Event.model_post_init` runs `packages/odds-core/odds_core/team.py::normalize_team_name` on both team names at construction, so ORM-built events hold canonical aliases (`packages/odds-core/odds_core/team.py::normalize_team_name`). `sport_key` is a plain string column; `SportKey` (`soccer_epl`, `baseball_mlb`, `basketball_nba`) is a typing `Literal` used by jobs and CLI, not a DB constraint ([sources-and-keys](../collection/sources-and-keys.md)).
 
 ## Id prefix identifies the source
 
@@ -51,11 +46,11 @@ Training's `data_source` filter matches these prefixes (`op_%`, `fduk_%`) in `pa
 
 | Matcher | Used by | Window | Teams | Ambiguity |
 |---|---|---|---|---|
-| `find_existing_event` (`packages/odds-lambda/odds_lambda/oddsportal_common.py`) | historical OddsPortal and FDUK ingest scripts | commence time ±24 h | exact home and away as stored, no sport filter | logs, returns `None` |
-| `OddsWriter.find_or_create_event` (`packages/odds-lambda/odds_lambda/storage/writers.py::find_or_create_event`) | live OddsPortal scrape and Betfair jobs | ±2 h | `normalize_team_name` applied first; sport filter | logs, returns the first candidate |
+| `packages/odds-lambda/odds_lambda/oddsportal_common.py::find_existing_event` (`packages/odds-lambda/odds_lambda/oddsportal_common.py`) | historical OddsPortal and FDUK ingest scripts | commence time ±24 h | exact home and away as stored, no sport filter | logs, returns `None` |
+| `OddsWriter.find_or_create_event` (`packages/odds-lambda/odds_lambda/storage/writers.py::find_or_create_event`) | live OddsPortal scrape and Betfair jobs | ±2 h | `packages/odds-core/odds_core/team.py::normalize_team_name` applied first; sport filter | logs, returns the first candidate |
 | `InjuryWriter._match_event` | [NBA injury reports](../collection/nba-injuries-and-stats.md) | ET `game_date` 10:00 to next day 06:00, converted to UTC | team is home or away | `None` |
 | `GameLogWriter._match_event` | [NBA game logs](../collection/nba-injuries-and-stats.md) | same ET window (a verbatim copy) | team is home or away | `None` |
-| `match_polymarket_event` | `odds polymarket link` only | ticker date at 12:00 UTC ±24 h | exact, via `NBA_ABBREV_MAP` | `None` |
+| `packages/odds-lambda/odds_lambda/polymarket_matching.py::match_polymarket_event` | `odds polymarket link` only | ticker date at 12:00 UTC ±24 h | exact, via `NBA_ABBREV_MAP` | `None` |
 
 If `find_or_create_event` finds nothing it creates an event, so a name or window mismatch there yields a duplicate event rather than a miss. The other matchers return `None` and leave `event_id` NULL. Injury reports are league-wide, so unmatched pairs are expected for teams not playing that day. Unmatched NBA rows keep `event_id` NULL and are invisible to per-event readers. Polymarket linking is manual and is not called by the fetch job ([polymarket](../collection/polymarket.md)).
 
@@ -68,14 +63,14 @@ The two share no data. Alias gaps are fixed in the map for the sport in question
 
 ## Hazards
 
-- **Re-discovery resets status.** `bulk_upsert_events` (used by `odds discover games` and by `packages/odds-lambda/odds_lambda/event_sync.py::EventSyncService.sync_sport`, i.e. every fetch-odds run) overwrites every non-key column except `created_at` with the incoming `Event`, whose defaults are status `scheduled` and null scores. A FINAL event that is re-discovered goes back to SCHEDULED. `upsert_event` leaves status and scores alone on update.
-- **Matcher windows differ.** `find_or_create_event` uses ±2 h, `find_existing_event` ±24 h; both reuse an existing event (including a hex-id one) on a team match, and the latter takes no sport filter. A game absent from `events` gets an `op_`/`fduk_` row, so cross-source joins depend on the matchers agreeing.
+- **Re-discovery resets status.** `bulk_upsert_events` (used by `odds discover games` and by `packages/odds-lambda/odds_lambda/event_sync.py::EventSyncService.sync_sport`, i.e. every fetch-odds run) overwrites every non-key column except `created_at` with the incoming `packages/odds-core/odds_core/models.py::Event`, whose defaults are status `scheduled` and null scores. A FINAL event that is re-discovered goes back to SCHEDULED. `upsert_event` leaves status and scores alone on update.
+- **Matcher windows differ.** `find_or_create_event` uses ±2 h, `packages/odds-lambda/odds_lambda/oddsportal_common.py::find_existing_event` ±24 h; both reuse an existing event (including a hex-id one) on a team match, and the latter takes no sport filter. A game absent from `events` gets an `op_`/`fduk_` row, so cross-source joins depend on the matchers agreeing.
 - **Ambiguity policy differs.** `find_or_create_event` picks the first of several candidates; the rest refuse.
-- **`find_existing_event` does not normalize.** It compares names as stored, so the OddsPortal path depends on names already being canonical.
+- **`packages/odds-lambda/odds_lambda/oddsportal_common.py::find_existing_event` does not normalize.** It compares names as stored, so the OddsPortal path depends on names already being canonical.
 - **Live id embeds the start minute.** A rescheduled kickoff creates a new `op_live_` id unless the 2 h window matches an existing event.
 - **No unique key on teams plus time.** Duplicates are prevented only by application matching.
-- **Polymarket window.** `docs/POLYMARKET.md#event-matching` says "±24h date window"; code centres it on 12:00 UTC of the ticker date to cover US evening games that fall on the next UTC day. `match_polymarket_event(pm_start_date=...)` is accepted and ignored.
-- **Silent NULLs.** Injury and game-log matching fall back to the raw team name when `normalize_team` returns `None` (the game-log writer tries its abbreviation map first), so an alias gap shows up as a NULL `event_id`.
+- **Polymarket window.** `packages/odds-lambda/odds_lambda/polymarket_matching.py::match_polymarket_event` centres the window on 12:00 UTC of the ticker date to cover US evening games that fall on the next UTC day. `pm_start_date` is accepted and ignored.
+- **Silent NULLs.** Injury and game-log matching fall back to the raw team name when `packages/odds-lambda/odds_lambda/polymarket_matching.py::normalize_team` returns `None` (the game-log writer tries its abbreviation map first), so an alias gap shows up as a NULL `event_id`.
 
 ## Related
 

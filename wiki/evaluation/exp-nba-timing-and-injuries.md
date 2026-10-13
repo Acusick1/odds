@@ -3,14 +3,10 @@ type: experiment
 title: NBA timing and injury experiments
 description: When NBA books post lines, how CLV and divergence vary with hours to the game (Exp 4), and why injury features add nothing once tuned equally (Exp 6, 6b).
 sources:
-  - docs/MODELING.md#hours-to-game-effect
-  - docs/MODELING.md#injury-features-nba
-  - docs/MODELING.md#experiment-log
-  - docs/BOOKMAKER_LINE_RELEASE.md
-  - docs/INJURIES.md
   - experiments/results/exp4_hours_to_game/FINDINGS.md
   - experiments/results/exp6_learning_curve/FINDINGS.md
   - experiments/results/exp6b_injury_closing_tier/FINDINGS.md
+  - packages/odds-cli/odds_cli/commands/injuries.py::fetch
   - experiments/scripts/exp4_hours_to_game.py
   - experiments/configs/xgboost_bet365_injuries.yaml
   - experiments/configs/xgboost_bet365_tuning.yaml
@@ -19,7 +15,6 @@ sources:
   - packages/odds-lambda/odds_lambda/fetch_tier.py::FetchTier
   - packages/odds-lambda/odds_lambda/tier_utils.py::calculate_tier
   - packages/odds-lambda/odds_lambda/oddsportal_common.py::hours_to_tier
-verified: "7887039"
 status: stable
 ---
 
@@ -33,7 +28,7 @@ Three NBA studies about when to decide and what information is available then. A
 
 ## Bookmaker line release timing
 
-Measured from Odds API NBA snapshots: when each bookmaker first appears relative to game time. The analysis date and the query behind it are not recorded in `docs/BOOKMAKER_LINE_RELEASE.md`, so the numbers cannot be regenerated from the repo.
+Measured from Odds API NBA snapshots: when each bookmaker first appears relative to game time. The analysis date and the query behind it are not recorded and no results file holds the tables (they were added directly in 0cc694e), so the numbers cannot be regenerated from the repo and are unverified.
 
 **Key finding.** The sharp book (Pinnacle) releases lines 12-24 hours before game time; soft books (DraftKings, FanDuel) release them 2-3+ days earlier.
 
@@ -68,7 +63,7 @@ Implications:
 
 ## Hours to game (Exp 4)
 
-Question: when before the game should a decision be made? Exp 4 (2026-02-28, git `afab058`) used 1,593 samples from 477 Odds API NBA events, 1-48 h before the game, Pinnacle target, 13 features (tabular 6 + injury 6 + `hours_until_event`). Script: `experiments/scripts/exp4_hours_to_game.py`.
+Question: when before the game should a decision be made? Exp 4 (2026-02-28, git `afab058`, #166) used 1,593 samples from 477 Odds API NBA events, 1-48 h before the game, Pinnacle target, 13 features (tabular 6 + injury 6 + `hours_until_event`). Script: `experiments/scripts/exp4_hours_to_game.py`.
 
 | Hours before game | 0-3 | 3-6 | 6-9 | 9-12 | 12-18 | 18-24 | 24-36 |
 |---|---|---|---|---|---|---|---|
@@ -82,23 +77,23 @@ Question: when before the game should a decision be made? Exp 4 (2026-02-28, git
 - Probability level correlates negatively with CLV close to the game (reversion) and positively far from it.
 - Per-bin XGBoost models were all R² < 0 (27-317 training samples per bin); the pooled model is -0.009, with 12-18 h and 18-24 h the only bins with MSE ratio below 1.
 
-**Conclusion.** The default sampler window is pregame 3-12 h, with no evidence to change it. The dataset is too small to name an optimal hour, and the 5K-event OddsPortal data (opening and closing snapshots only) cannot answer timing questions. The production model samples the `sharp` tier instead, and `TierSampler` falls back to farther tiers when the requested one is absent: about 93% of "pregame" OddsPortal events used the sharp snapshot ([decision time](../modelling/decision-time-and-look-ahead.md)).
+**Conclusion.** The default sampler window is pregame 3-12 h, with no evidence to change it. The dataset is too small to name an optimal hour, and the 5K-event OddsPortal data (opening and closing snapshots only) cannot answer timing questions. The production model samples the `sharp` tier instead, and `packages/odds-analytics/odds_analytics/feature_groups.py::TierSampler` falls back to farther tiers when the requested one is absent: about 93% of "pregame" OddsPortal events used the sharp snapshot ([decision time](../modelling/decision-time-and-look-ahead.md)).
 
 ## NBA injury features (Exp 6, 6b)
 
-Conclusion: injury features add no predictive signal for CLV at any decision tier once models are tuned the same way. The pipeline still collects the data (manual CLI only, no scheduled job) and the feature group still exists, but the deployed model does not use it ([NBA injuries and stats](../collection/nba-injuries-and-stats.md), [feature pipeline](../modelling/feature-pipeline.md)).
+Conclusion: injury features add no predictive signal for CLV at any decision tier once models are tuned the same way. The pipeline still collects the data (manual CLI only, no scheduled job: `packages/odds-cli/odds_cli/commands/injuries.py::fetch`) and the feature group still exists, but the deployed model does not use it ([NBA injuries and stats](../collection/nba-injuries-and-stats.md), [feature pipeline](../modelling/feature-pipeline.md)).
 
-- **First positive result** (2026-02-20, 800 events, Pinnacle target, tabular + injury + rest + timing, 100-trial Optuna): val R² 0.050, CV R² = 0.020 ± 0.025, injuries 55% of feature importance, 6 dead features.
-- **bet365 at scale** (2026-02-27, about 5K OddsPortal events, 11-fold walk-forward): tabular + injuries CV R² 0.036 ± 0.033 against tabular-only 0.036 ± 0.028 once both were tuned. The earlier signal came from comparing a tuned model with an untuned baseline. Configs: `experiments/configs/xgboost_bet365_tuning.yaml`, `experiments/configs/xgboost_bet365_baseline_tuning.yaml`, `experiments/configs/xgboost_bet365_injuries.yaml`.
-- **Exp 6, timing diagnostic** (2026-03-01): sharp tier tabular R² +0.018 vs +0.006 with injuries; pregame +0.001 vs +0.0015. About 93% of "pregame" events fell back to the sharp snapshot, and OddsPortal has no 0-3 h snapshots ([bet365 target and data volume](../modelling/decision-bet365-target.md)).
-- **Exp 6b, closing tier** (2026-03-01, Odds API, bet365 target, 479 closing and 826 sharp events): at closing both arms give R² 0.5959 identical to 16 decimals, a measurement artefact because the target is almost zero (std 0.0016 against 0.054 at the sharp tier; MSE 0.000005). At the sharp tier injuries slightly hurt (-0.031 vs -0.020). The Exp 4 game-time-decision correlation (`inj_impact_gtd_away` r = 0.28, Pinnacle target) does not transfer: r = -0.01 (p = 0.81) on bet365. At the sharp tier `tab_retail_sharp_diff` dominates (r = 0.356). Source: `experiments/results/exp6b_injury_closing_tier/FINDINGS.md`.
+- **First positive result** (2026-02-20, #160, 800 events, Pinnacle target, tabular 4 + injury 6 + rest 5 + timing 3 features, 100-trial Optuna): val R² 0.050, CV R² = 0.020 ± 0.025, injuries 55% of feature importance, 6 dead features.
+- **bet365 at scale** (2026-02-27, #166, about 5K OddsPortal events, 11-fold walk-forward): tabular + injuries CV R² 0.036 ± 0.033 against tabular-only 0.036 ± 0.028 once both were tuned. The earlier signal came from comparing a tuned model with an untuned baseline. Configs: `experiments/configs/xgboost_bet365_tuning.yaml`, `experiments/configs/xgboost_bet365_baseline_tuning.yaml`, `experiments/configs/xgboost_bet365_injuries.yaml`.
+- **Exp 6, timing diagnostic** (2026-03-01, #168, `experiments/results/exp6_learning_curve/FINDINGS.md`): sharp tier tabular R² +0.018 vs +0.006 with injuries; pregame +0.001 vs +0.0015. About 93% of "pregame" events fell back to the sharp snapshot, and OddsPortal has no 0-3 h snapshots ([bet365 target and data volume](../modelling/decision-bet365-target.md)).
+- **Exp 6b, closing tier** (2026-03-01, #169, Odds API, bet365 target, 479 closing and 826 sharp events): at closing both arms give R² 0.5959 identical to 16 decimals, a measurement artefact because the target is almost zero (std 0.0016 against 0.054 at the sharp tier; MSE 0.000005). At the sharp tier injuries slightly hurt (-0.031 vs -0.020). The Exp 4 game-time-decision correlation (`inj_impact_gtd_away` r = 0.28, Pinnacle target) does not transfer: r = -0.01 (p = 0.81) on bet365. At the sharp tier `tab_retail_sharp_diff` dominates (r = 0.356). Source: `experiments/results/exp6b_injury_closing_tier/FINDINGS.md`.
 
 By the time game-time injury designations are public (0-3 h) the closing line has priced them, so the closing-tier target is near zero: a catch-22 for testing the hypothesis. The GTD hypothesis is falsified for bet365; the signal in this data is cross-sectional market state ([sharp benchmark](../modelling/sharp-benchmark.md)). The injury pipeline can be deprioritised.
 
 ## Hazards
 
 - **Closing-tier R² near 0.6 is an artefact** and must not be quoted as skill.
-- The injury weights come from season-level player stats and the group is NBA-only; EPL has no equivalent.
+- The injury weights come from season-level player stats (`packages/odds-analytics/odds_analytics/injury_features.py::extract_injury_features`) and the group is NBA-only; EPL has no equivalent.
 - Snapshot coverage is bimodal (peaks at 3-4 h and 8-10 h, secondary cluster 22-24 h), so the 12-18 h and 24-36 h Exp 4 bins have only 40 and 39 samples.
 - Exp 4 used 13 features including the injury group, which later runs found uninformative.
 - **Tier boundaries are encoded more than once and disagree** at exactly 3, 12, 24 and 72 h: `packages/odds-lambda/odds_lambda/tier_utils.py::calculate_tier` uses `<=` while `packages/odds-lambda/odds_lambda/oddsportal_common.py::hours_to_tier` uses `<` ([fetch tier](../storage/fetch-tier.md)).

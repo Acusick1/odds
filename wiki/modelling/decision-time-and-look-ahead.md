@@ -14,12 +14,6 @@ sources:
   - packages/odds-lambda/odds_lambda/storage/polymarket_reader.py::PolymarketReader
   - experiments/configs/xgboost_epl_production_tabular_match_stats.yaml
   - AGENTS.md
-  - docs/BACKTESTING_GUIDE.md#data-requirements
-  - docs/MODELING.md#hours-to-game-effect
-  - docs/MODELING.md#current-conclusions
-  - docs/MODELING.md#guards-against-known-failure-modes
-  - docs/INJURIES.md#feature-extraction
-verified: "7887039"
 status: stable
 ---
 
@@ -35,18 +29,18 @@ Decision time is the instant a prediction or bet is assumed to be made. Everythi
 
 `packages/odds-analytics/odds_analytics/training/config.py::SamplingConfig` selects the snapshot sampler ([feature pipeline](feature-pipeline.md)):
 
-- `strategy: time_range` (the default) uses `TimeRangeSampler`: snapshots between `min_hours` 3.0 and `max_hours` 12.0 before kickoff, at most `max_samples_per_event` 5, picked from equal-width time bins.
-- `strategy: tier` uses `TierSampler`: one row per event, the latest snapshot whose tier is the `decision_tier` (default `pregame`) or any tier further from kickoff. `IN_PLAY` is excluded ([fetch tier](../storage/fetch-tier.md): pregame is 3-12 h, sharp 12-24 h).
+- `strategy: time_range` (the default) uses `packages/odds-analytics/odds_analytics/feature_groups.py::TimeRangeSampler`: snapshots between `min_hours` 3.0 and `max_hours` 12.0 before kickoff, at most `max_samples_per_event` 5, picked from equal-width time bins.
+- `strategy: tier` uses `packages/odds-analytics/odds_analytics/feature_groups.py::TierSampler`: one row per event, the latest snapshot whose tier is the `decision_tier` (default `pregame`) or any tier further from kickoff. `IN_PLAY` is excluded ([fetch tier](../storage/fetch-tier.md): pregame is 3-12 h, sharp 12-24 h).
 
-The pregame window (3-12 h) is the documented default because sharp-retail divergence peaks 3-6 h before NBA games; timing on EPL is untested ([NBA timing and injuries](../evaluation/exp-nba-timing-and-injuries.md), [CLV model findings](../evaluation/clv-model-findings.md)).
+The pregame window (3-12 h) is the documented default because sharp-retail divergence peaks 3-6 h before NBA games (`experiments/results/exp4_hours_to_game/FINDINGS.md`, PR #166); timing on EPL is untested ([NBA timing and injuries](../evaluation/exp-nba-timing-and-injuries.md), [CLV model findings](../evaluation/clv-model-findings.md)).
 
 ## No future data, layer by layer
 
 - **Backtest odds.** As above: `get_odds_at_time` around `decision_time`.
 - **Polymarket odds.** `packages/odds-lambda/odds_lambda/storage/polymarket_reader.py::PolymarketReader.get_price_at_time` and `get_orderbook_at_time` only return snapshots at or before the target.
-- **Sampling.** `TierSampler` excludes `IN_PLAY` snapshots unless that is the decision tier. Including them leaked post-kickoff odds and produced a spurious R² of +0.45 before the fix ([early NBA signal](../evaluation/exp-early-nba-signal-and-lstm.md)).
+- **Sampling.** `packages/odds-analytics/odds_analytics/feature_groups.py::TierSampler` excludes `IN_PLAY` snapshots unless that is the decision tier. Including them leaked post-kickoff odds and produced a spurious R² of +0.45 before the fix (commit 2a84d88, `experiments/results/exp2_feature_group_isolation/FINDINGS.md`; [early NBA signal](../evaluation/exp-early-nba-signal-and-lstm.md)).
 - **Feature groups.** Injuries use only reports with `report_time <= snapshot_time` (`packages/odds-analytics/odds_analytics/injury_features.py::extract_injury_features`); standings, match stats and EPL schedule use matches strictly before `commence_time`; the LSTM adapter keeps sequences whose first entry is at or before the snapshot ([feature pipeline](feature-pipeline.md), [EPL context features](epl-context-features.md)).
-- **Cross-source contamination** (#231) is a related bug, not a time leak: see [hybrid sharp reference](decision-hybrid-sharp-reference.md).
+- **Cross-source contamination** (PR #231) is a related bug, not a time leak: see [hybrid sharp reference](decision-hybrid-sharp-reference.md).
 
 ## Hazards
 

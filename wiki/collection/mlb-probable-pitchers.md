@@ -10,23 +10,18 @@ sources:
   - packages/odds-core/odds_core/mlb_data_models.py::MlbProbablePitchers
   - packages/odds-lambda/odds_lambda/scheduling/jobs.py::_JOB_CRON_MAP
   - packages/odds-mcp/odds_mcp/tools/mlb.py::get_probable_pitchers
-  - docs/ARCHITECTURE.md#fixture-and-probables-jobs
-  - docs/DATABASE.md#sport-context-tables
-  - docs/AGENT_DATA_SOURCES.md#scheduled-collection
-  - docs/DEPLOYMENT.md#job-deployment-matrix
-  - docs/audits/comprehension-audit-2026-06-09.md#5-what-was-not-found-worth-saying
-verified: "7887039"
+  - deployment/aws/terraform/eventbridge.tf
 status: stable
 ---
 
 # MLB probable pitchers
 
-Point-in-time snapshots of MLBAM's announced probable starters, stored in `mlb_probable_pitchers` (`MlbProbablePitchers`, `packages/odds-core/odds_core/mlb_data_models.py`). MLBAM only exposes current state, so the announcement timeline exists only if every fetch is written. MLB odds themselves are `h2h` ([sources-and-keys](sources-and-keys.md)).
+Point-in-time snapshots of MLBAM's announced probable starters, stored in `mlb_probable_pitchers` (`packages/odds-core/odds_core/mlb_data_models.py::MlbProbablePitchers`). MLBAM only exposes current state, so the announcement timeline exists only if every fetch is written. MLB odds themselves are `h2h` ([sources-and-keys](sources-and-keys.md)).
 
 ## Flow
 
-1. `fetch_mlb_probables.py::main` computes `dates_for_window(now, 72h)`: UTC dates from today to D+3, padded one day each side because MLBAM resolves `date=` in US Eastern, not UTC.
-2. `MlbStatsFetcher.fetch_dates` calls `https://statsapi.mlb.com/api/v1/schedule` with `hydrate=probablePitcher` (httpx, 3 attempts, 0.25 s pacing). One `MlbProbablePitchersRecord` per game; a missing `probablePitcher` yields null name/id fields, deliberately kept as the "not announced" signal.
+1. `packages/odds-lambda/odds_lambda/jobs/fetch_mlb_probables.py::main` computes `dates_for_window(now, 72h)`: UTC dates from today to D+3, padded one day each side because MLBAM resolves `date=` in US Eastern, not UTC.
+2. `MlbStatsFetcher.fetch_dates` calls `https://statsapi.mlb.com/api/v1/schedule` with `hydrate=probablePitcher` (httpx, 3 attempts, 0.25 s pacing). One `packages/odds-core/odds_core/mlb_data_models.py::MlbProbablePitchersRecord` per game; a missing `probablePitcher` yields null name/id fields, deliberately kept as the "not announced" signal.
 3. `MlbPitcherWriter.insert_snapshots` is append-only, `ON CONFLICT DO NOTHING` on `(game_pk, fetched_at)`. All records in one run share one `fetched_at`, and it returns the input count, not rows inserted.
 
 The job raises unless `ctx.sport` is `baseball_mlb`.
@@ -39,7 +34,7 @@ Schedule `0 6 * * *`, MLB only (`_JOB_CRON_MAP` in `packages/odds-lambda/odds_la
 
 `MlbPitcherReader.get_latest_in_window(start, end)` returns domain records (not SQLModel rows), filtered by `commence_time`, latest `fetched_at` per `game_pk`, via `odds_core.mlb_data_models::select_latest_in_window`. The same function is applied to live records, so both read paths return identical shapes.
 
-The MCP tool `get_probable_pitchers` ([mcp-sport-context-tools](../agent/mcp-sport-context-tools.md)) live-fetches by default (`refresh=True`), never writes, and falls back to the reader when MLBAM fails. Its `fetch_status` is `live`, `stale_db_only` or `db_only`; a null pitcher means "not announced", and openers and starters are indistinguishable.
+The MCP tool `packages/odds-mcp/odds_mcp/tools/mlb.py::get_probable_pitchers` ([mcp-sport-context-tools](../agent/mcp-sport-context-tools.md)) live-fetches by default (`refresh=True`), never writes, and falls back to the reader when MLBAM fails. Its `fetch_status` is `live`, `stale_db_only` or `db_only`; a null pitcher means "not announced", and openers and starters are indistinguishable.
 
 ## Using the data
 

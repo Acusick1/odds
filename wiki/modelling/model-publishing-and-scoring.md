@@ -12,24 +12,17 @@ sources:
   - packages/odds-core/odds_core/prediction_models.py::Prediction
   - packages/odds-core/odds_core/config.py::ModelConfig
   - deployment/aws/bootstrap/s3_models.tf
-  - docs/DEPLOYMENT.md#s3-model-store
-  - docs/CLI.md#model-management
-  - docs/CLI.md#publish-model-to-s3
-  - docs/CLI.md#train-a-model
-  - docs/CLI.md#tune-hyperparameters
-  - docs/MODELING.md#deployed-model
-  - docs/ARCHITECTURE.md#score-predictions-inline
-  - docs/DATABASE.md#prediction-table
-  - docs/REPORTING.md#8-storage-backing-reports
-verified: "7887039"
+  - packages/odds-lambda/odds_lambda/jobs/daily_digest.py
+  - packages/odds-mcp/odds_mcp/server.py::get_predictions
+  - experiments/configs/xgboost_epl_production_tabular_match_stats.yaml
 status: stable
 ---
 
 # Publishing, loading and scoring the CLV model
 
-Trained CLV models are published to a shared, versioned S3 bucket and loaded by inline scoring, which writes `Prediction` rows. The bucket is created in `deployment/aws/bootstrap/s3_models.tf` (versioning on, AES256, public access blocked, `prevent_destroy`) so a dev `terraform destroy` cannot delete it ([AWS infrastructure](../operations/aws-infrastructure.md)).
+Trained CLV models are published to a shared, versioned S3 bucket and loaded by inline scoring, which writes `packages/odds-core/odds_core/prediction_models.py::Prediction` rows. The bucket is created in `deployment/aws/bootstrap/s3_models.tf` (versioning on, AES256, public access blocked, `prevent_destroy`) so a dev `terraform destroy` cannot delete it ([AWS infrastructure](../operations/aws-infrastructure.md)).
 
-The deployed model is `epl-clv-home` version `v308058c` (published 2026-04-23; CV R² +0.058, MSE 0.000716), from `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml` ([CLV model findings](../evaluation/clv-model-findings.md)). The live S3 object is the authority and cannot be verified from the repo; check with `aws s3 ls s3://<model-bucket>/epl-clv-home/`.
+The deployed model is `epl-clv-home` version `v308058c` (published 2026-04-23; CV R² +0.058, MSE 0.000716), from `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml` (config adopted in PR #362, findings in PR #361; [CLV model findings](../evaluation/clv-model-findings.md)). The live S3 object is the authority and cannot be verified from the repo; check with `aws s3 ls s3://<model-bucket>/epl-clv-home/`.
 
 ## Train, check and publish
 
@@ -46,33 +39,33 @@ The bucket holds `{model_name}/latest/` and `{model_name}/{version}/`, each with
 
 `packages/odds-lambda/odds_lambda/model_loader.py::load_model(model_name, bucket)`:
 
-1. Name and bucket default to `ModelConfig` (`MODEL_NAME`, `MODEL_BUCKET`; [configuration](../foundations/configuration.md)); missing values raise `ValueError`, a missing key raises `FileNotFoundError`.
+1. Name and bucket default to `packages/odds-core/odds_core/config.py::ModelConfig` (`MODEL_NAME`, `MODEL_BUCKET`; [configuration](../foundations/configuration.md)); missing values raise `ValueError`, a missing key raises `FileNotFoundError`.
 2. `head_object` on `latest/model.pkl` for the ETag. If it equals the module-level cached ETag and key, return the cached dict (warm Lambda or long-lived process).
-3. Otherwise download to the temp dir, `joblib.load`, then fetch `config.yaml` and build `FeatureConfig` (copying `training.data.sport_key` into it). A missing `config.yaml` gives `feature_config=None` with a warning.
+3. Otherwise download to the temp dir, `joblib.load`, then fetch `config.yaml` and build `packages/odds-analytics/odds_analytics/training/config.py::FeatureConfig` (copying `training.data.sport_key` into it). A missing `config.yaml` gives `feature_config=None` with a warning.
 
-`model_supports_sport(sport)` loads the model and compares its `sport_key`; load errors return false. `get_cached_version()` returns the ETag; `clear_cache()` resets it.
+`model_supports_sport(sport)` loads the model and compares its `sport_key`; load errors return false. `packages/odds-lambda/odds_lambda/model_loader.py::get_cached_version` returns the ETag; `packages/odds-lambda/odds_lambda/model_loader.py::clear_cache` resets it.
 
 ## Inline scoring
 
-`packages/odds-lambda/odds_lambda/jobs/score_predictions.py::score_events` scores snapshots of upcoming events and writes `Prediction` rows. It is not scheduled on its own: the [fetch-oddsportal job](../collection/oddsportal.md) calls it after ingest when `model_supports_sport(ctx.sport)`. `main(ctx)` is also registered as `score-predictions`, so `odds scheduler run-once score-predictions-epl` runs it by hand ([jobs](../scheduling/jobs-and-deployment-matrix.md)).
+`packages/odds-lambda/odds_lambda/jobs/score_predictions.py::score_events` scores snapshots of upcoming events (multi-feature-group models, including the standings, match_stats and epl_schedule caches, via `packages/odds-analytics/odds_analytics/feature_groups.py::XGBoostAdapter`; PR #359) and writes `packages/odds-core/odds_core/prediction_models.py::Prediction` rows. It is not scheduled on its own: the [fetch-oddsportal job](../collection/oddsportal.md) calls it after ingest when `model_supports_sport(ctx.sport)`. `main(ctx)` is also registered as `score-predictions`, so `odds scheduler run-once score-predictions-epl` runs it by hand ([jobs](../scheduling/jobs-and-deployment-matrix.md)).
 
-1. `load_model` fetches the model. `ValueError` or `FileNotFoundError` returns zero stats with an error log.
-2. The bundled `FeatureConfig` supplies `sport_key`. If the `sport` argument differs, the run aborts (`sport_mismatch`).
+1. `packages/odds-lambda/odds_lambda/model_loader.py::load_model` fetches the model. `ValueError` or `FileNotFoundError` returns zero stats with an error log.
+2. The bundled `packages/odds-analytics/odds_analytics/training/config.py::FeatureConfig` supplies `sport_key`. If the `sport` argument differs, the run aborts (`sport_mismatch`).
 3. `XGBoostAdapter().feature_names(config)` must equal the model's saved `feature_names`, else `feature_name_mismatch` and abort, so the variance filter's dropped columns matter ([feature pipeline](feature-pipeline.md)).
 4. For each SCHEDULED future event of that sport: select snapshots with no prediction yet for this `model_name`, collect event data once, then per snapshot `adapter.transform`, `model.predict`, and insert.
 5. Insert is `INSERT ... ON CONFLICT DO NOTHING` on constraint `uq_prediction_event_snap_model`, so reruns are safe. `snapshots_skipped` counts snapshots the adapter returns `None` for.
 
 Returned counts: `events_checked`, `snapshots_scored`, `snapshots_skipped`, `errors`.
 
-`packages/odds-core/odds_core/prediction_models.py::Prediction` (`predictions`): `event_id`, `snapshot_id` (both FKs), `model_name`, `model_version` (the S3 ETag from `get_cached_version`, or `"unknown"`), `predicted_clv`, `created_at`, unique on `(event_id, snapshot_id, model_name)`, indexed on `(model_name, created_at)`. Each snapshot is scored, so one event accumulates a prediction per snapshot; consumers pick the latest (the [daily digest](../operations/reporting-and-daily-digest.md) uses the highest `snapshot_id`), and the MCP `get_predictions` tool returns stored rows only ([MCP market tools](../agent/mcp-market-tools.md)). Predictions exist only where scoring runs.
+`packages/odds-core/odds_core/prediction_models.py::Prediction` (`predictions`): `event_id`, `snapshot_id` (both FKs), `model_name`, `model_version` (the S3 ETag from `packages/odds-lambda/odds_lambda/model_loader.py::get_cached_version`, or `"unknown"`), `predicted_clv`, `created_at`, unique on `(event_id, snapshot_id, model_name)`, indexed on `(model_name, created_at)`. Each snapshot is scored, so one event accumulates a prediction per snapshot; consumers pick the latest (the [daily digest](../operations/reporting-and-daily-digest.md) uses the highest `snapshot_id`), and the MCP `packages/odds-mcp/odds_mcp/server.py::get_predictions` tool returns stored rows only ([MCP market tools](../agent/mcp-market-tools.md)). Predictions exist only where scoring runs.
 
 ## Hazards
 
 - **Scoring runs only on a local scheduler.** It needs `odds_analytics` and xgboost; the scraper Lambda image has neither and `scraper.tf` sets no `MODEL_*`, so publishing a model does not enable scoring on AWS ([AWS infrastructure](../operations/aws-infrastructure.md), [local scheduler](../scheduling/local-scheduler.md)).
-- **Failures are silent.** Every failure path inside `score_events` returns normally and the call site in fetch-oddsportal also swallows exceptions, so a broken model load never fails the scrape job and raises no alert.
-- **Undeclared dependency.** `model_loader.py` imports `odds_analytics` and `boto3` at module level, so it cannot be imported in the scraper image ([packages and CLI](../foundations/packages-and-cli.md)).
-- **Bucket default is a literal.** `odds model publish` defaults `--bucket` to `odds-models-685946576110`, not `MODEL_BUCKET`; `docs/CLI.md` documents `odds-models-{account_id}`. Pass `--bucket` for any other account.
-- **`tune --train-best` artifacts are not scorable.** The sibling `.yaml` has no `training` key, so the loader builds a default `FeatureConfig` without `sport_key` and scoring refuses to run (read from code; not run).
+- **Failures are silent.** Every failure path inside `packages/odds-lambda/odds_lambda/jobs/score_predictions.py::score_events` returns normally and the call site in fetch-oddsportal also swallows exceptions, so a broken model load never fails the scrape job and raises no alert.
+- **Undeclared dependency.** `packages/odds-lambda/odds_lambda/model_loader.py` imports `odds_analytics` and `boto3` at module level, so it cannot be imported in the scraper image ([packages and CLI](../foundations/packages-and-cli.md)).
+- **Bucket default is a literal.** `odds model publish` defaults `--bucket` to `odds-models-685946576110`, not `MODEL_BUCKET`; it is not derived from the caller's account (`packages/odds-cli/odds_cli/commands/model.py::publish_model`). Pass `--bucket` for any other account.
+- **`tune --train-best` artifacts are not scorable.** The sibling `.yaml` has no `training` key, so the loader builds a default `packages/odds-analytics/odds_analytics/training/config.py::FeatureConfig` without `sport_key` and scoring refuses to run (read from code; not run).
 - **`model_version` is an ETag**, not the version label given to `odds model publish`.
 - **Scoring uses the bundled config.** Feature groups, sharp roster and `feature_names` must match what training produced.
 - **One model in memory.** The cache holds one model; loading a second model name evicts the first.

@@ -17,10 +17,4 @@ Read this page, then one area index, then the page, then the cited code. Code is
 
 ## Constraints
 
-- **UTC everywhere.** Use `datetime.now(UTC)`; ruff catches only `utcnow()` and bare `now()`. See [timezones](foundations/conventions.md#timezones).
-- **Never write to production.** No migrations, fetches or test runs against the production database from a laptop; `.env.example` points at the shared dev database, and `odds copy from-prod` falls back to `DATABASE_URL` as "production". See [databases](foundations/databases-and-environments.md#hazards).
-- **The Odds API costs units.** 500 per free key per month; `/odds` costs 1 per region per market, historical 10. See [quota](collection/odds-api-client-and-quota.md).
-- **Deployed state is not in the repo.** Which jobs run on AWS, and with what schedule, is only knowable via `odds scheduler list-jobs --backend aws`. See [jobs](scheduling/jobs-and-deployment-matrix.md).
-- **Pass `--sport` and the right market key.** Several CLI defaults are `basketball_nba`; EPL odds are `1x2`, MLB `h2h`. See [keys](collection/sources-and-keys.md).
-- **No look-ahead.** Historical analysis may use only data at or before decision time; `get_odds_at_time` is symmetric. See [look-ahead](modelling/decision-time-and-look-ahead.md).
-- **Training configs must set the target.** Code defaults are `target_type: raw` and `target_bookmaker: pinnacle`, not the production bet365 devigged target. See [CLV target](modelling/clv-target.md).
+The hard constraints every change must respect are in [AGENTS.md](../AGENTS.md#constraints).

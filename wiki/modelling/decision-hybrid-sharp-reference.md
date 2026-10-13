@@ -3,24 +3,18 @@ type: decision
 title: Pinnacle with Betfair Exchange fallback as sharp reference
 description: "Why sharp_bookmakers is [pinnacle, betfair_exchange] with first-available semantics, the EPL sharp-reference runs and #231 contamination bug behind it, and where the hybrid is and is not the default."
 sources:
-  - docs/MODELING.md#hybrid-sharp-reference
-  - docs/MODELING.md#epl-with-pinnacle-sharp-reference
-  - docs/MODELING.md#current-conclusions
-  - docs/MODELING.md#guards-against-known-failure-modes
-  - docs/MODELING.md#experiment-log
-  - docs/DATA_MODELS.md#choosing-data-for-an-experiment
   - packages/odds-analytics/odds_analytics/feature_extraction.py::TabularFeatureExtractor
   - packages/odds-analytics/odds_analytics/feature_groups.py::TierSampler
   - experiments/configs/xgboost_epl_hybrid_sharp.yaml
   - experiments/configs/xgboost_epl_combined_tuning.yaml
   - experiments/scripts/hybrid_sharp_validation.py
-verified: "7887039"
+  - packages/odds-analytics/odds_analytics/training/config.py::DataConfig
 status: stable
 ---
 
 # Pinnacle with Betfair Exchange fallback as sharp reference
 
-**Decision (2026-03-19).** EPL training uses `sharp_bookmakers: [pinnacle, betfair_exchange]`; the first bookmaker in the list that has odds wins ([sharp benchmark](sharp-benchmark.md)). No ADR exists; rationale is from `docs/MODELING.md`.
+**Decision (2026-03-19).** EPL training uses `sharp_bookmakers: [pinnacle, betfair_exchange]`; the first bookmaker in the list that has odds wins ([sharp benchmark](sharp-benchmark.md)). No ADR exists; the evidence is PRs #217, #231, #253 and #234, plus `experiments/configs/xgboost_epl_hybrid_sharp.yaml` and `experiments/scripts/hybrid_sharp_validation.py`. The result tables below are as recorded in those PRs; no results artefact holds them.
 
 ## Context
 
@@ -34,7 +28,7 @@ About 1.7K combined OddsPortal + FDUK EPL events, devigged bet365 target, 100 tr
 
 - **Control** (03-10): combined data with bet365 as its own sharp reference, CV R² = -0.005 ± 0.008.
 - **Invalid run** (03-10): Pinnacle sharp, CV R² 0.031 ± 0.014, inflated by #231.
-- **#231 bug** (fixed 2026-03-15): `TierSampler` chose the latest snapshot by wall-clock time, so OddsPortal snapshots without Pinnacle beat FDUK snapshots with it for about 37 of 150 events in the final fold, and `np.nan_to_num` turned missing Pinnacle probabilities into 0.0. Now `TierSampler` takes `required_bookmakers` and features stay NaN ([feature pipeline](feature-pipeline.md)). Results from 2026-03-10 are invalid.
+- **#231 bug** (fixed 2026-03-15): `packages/odds-analytics/odds_analytics/feature_groups.py::TierSampler` chose the latest snapshot by wall-clock time, so OddsPortal snapshots without Pinnacle beat FDUK snapshots with it for about 37 of 150 events in the final fold, and `np.nan_to_num` turned missing Pinnacle probabilities into 0.0. Now `packages/odds-analytics/odds_analytics/feature_groups.py::TierSampler` takes `required_bookmakers` and features stay NaN ([feature pipeline](feature-pipeline.md)). Results from 2026-03-10 are invalid.
 - **Post-fix, expanding:150** (03-15/16): tabular 0.019 ± 0.043; + standings 0.030 ± 0.040; + match_stats 0.025 ± 0.042; + standings + match_stats 0.052 ± 0.045 (reproduced 03-19).
 - The MSE drop against the OddsPortal-only baseline (0.0024 to 0.0007) reflects lower target variance with Pinnacle closing, not necessarily better prediction.
 
@@ -59,9 +53,9 @@ On 589 overlapping events Betfair Exchange `sharp_prob` correlates 0.9994 with P
 
 ## Consequences
 
-- The semantics changed from all-of to any-of: `TierSampler.required_bookmakers`, the event filter in `prepare_training_data` and `TabularFeatureExtractor` all try bookmakers in priority order.
+- The semantics changed from all-of to any-of: `TierSampler.required_bookmakers`, the event filter in `packages/odds-analytics/odds_analytics/feature_groups.py::prepare_training_data` and `packages/odds-analytics/odds_analytics/feature_extraction.py::TabularFeatureExtractor` all try bookmakers in priority order.
 - The EPL production setup is `data_source: null`, `sharp_bookmakers: [pinnacle, betfair_exchange]`, `closing_source_priority: [football_data_uk]` ([training pipeline](training-pipeline.md)).
-- The agent's MCP screener defaults to the same list, and `save_match_brief` stamps it ([MCP market tools](../agent/mcp-market-tools.md)).
+- The agent's MCP screener defaults to the same list, and `packages/odds-mcp/odds_mcp/server.py::save_match_brief` stamps it ([MCP market tools](../agent/mcp-market-tools.md)).
 
 ## Hazards
 

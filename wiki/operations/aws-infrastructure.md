@@ -3,15 +3,6 @@ type: component
 title: AWS infrastructure and deployment
 description: The two Lambda functions and images, Terraform and bootstrap layout and variables, IAM/SSM/logs and costs, and the manual first-deploy and per-deploy steps, including activating self-scheduling rules.
 sources:
-  - docs/DEPLOYMENT.md#aws-lambda
-  - docs/DEPLOYMENT.md#functions
-  - docs/DEPLOYMENT.md#constraints
-  - docs/DEPLOYMENT.md#terraform-layout
-  - docs/DEPLOYMENT.md#terraform-variables
-  - docs/DEPLOYMENT.md#aws
-  - docs/DEPLOYMENT.md#operations
-  - docs/DEPLOYMENT.md#deploying
-  - docs/DEBUGGING_SCHEDULER.md#where-to-look
   - deployment/aws/terraform/lambda.tf
   - deployment/aws/terraform/scraper.tf
   - deployment/aws/terraform/variables.tf
@@ -21,7 +12,11 @@ sources:
   - deployment/aws/build_and_push.sh
   - deployment/aws/build_and_push_scraper.sh
   - scripts/lambda_usage.py
-verified: "7887039"
+  - packages/odds-core/odds_core/database.py
+  - .github/workflows/deploy-prod.yml
+  - .github/workflows/deploy-dev.yml
+  - scripts/ci/test_lambda.py
+  - scripts/verify-schedules.sh
 status: stable
 ---
 
@@ -52,9 +47,9 @@ EventBridge rules are named `{rule_prefix}-{job}[-{sport suffix}]` and `eventbri
 
 ## Constraints
 
-- Database connections use `NullPool` automatically when `AWS_LAMBDA_FUNCTION_NAME` is set, whatever the scheduler backend ([databases and environments](../foundations/databases-and-environments.md)).
-- Stateless between invocations apart from the SSM index.
-- EventBridge limit of 300 rules per region (AWS limit as stated in `docs/DEPLOYMENT.md#constraints`).
+- Database connections use `NullPool` automatically when `AWS_LAMBDA_FUNCTION_NAME` is set, whatever the scheduler backend (`packages/odds-core/odds_core/database.py`; [databases and environments](../foundations/databases-and-environments.md)).
+- Stateless between invocations apart from the SSM key-rotation index (`SSM_API_KEY_INDEX` in `deployment/aws/terraform/lambda.tf`).
+- EventBridge allows 300 rules per event bus by default `(inferred)`: an AWS service quota with no source in this repo. Check with `aws service-quotas list-service-quotas --service-code events`.
 
 ## Deploying
 
@@ -93,7 +88,11 @@ Never run migrations or `odds fetch` against production from a laptop; deploy th
 
 ## Costs and usage
 
-`docs/DEPLOYMENT.md#aws` estimates ~$0.20/month for the scheduler Lambda, under $0.01 for S3, under $0.10 for logs, free SSM (estimates, not measured here). `scripts/lambda_usage.py` pulls `REPORT` lines from CloudWatch for both functions and prints GB-seconds against the 400,000 free tier, daily breakdown, retry analysis and an hourly heatmap (`--days`, `--start`, `--end`). Backups are the managed database provider's; gaps are filled with [backfills](../collection/howto-load-historical-odds.md); alerts go to Discord ([alerts and health](alerts-and-health.md)).
+Spend cannot be verified from the repo; rough estimates are about $0.20/month for the scheduler Lambda, under $0.01 for S3, under $0.10 for logs and free SSM `(inferred)`; check real spend with `aws ce get-cost-and-usage` or the Billing console. The managed PostgreSQL provider is Neon (`deployment/aws/terraform/terraform.tfvars.example`); it is billed separately, its cost varies and it has a free tier `(inferred)`, so check its console. Log groups keep 14 days (`retention_in_days` in `deployment/aws/terraform/lambda.tf` and `deployment/aws/terraform/scraper.tf`). `scripts/lambda_usage.py` pulls `REPORT` lines from CloudWatch for both functions and prints GB-seconds against the 400,000 free tier, daily breakdown, retry analysis and an hourly heatmap (`--days`, `--start`, `--end`). Backups are the managed database provider's `(inferred)`; gaps are filled with [backfills](../collection/howto-load-historical-odds.md); alerts go to Discord ([alerts and health](alerts-and-health.md)).
+
+## Secrets
+
+API keys come from environment variables and Terraform variables (`odds_api_key`, `odds_api_keys`, `database_url` in `deployment/aws/terraform/variables.tf`), passed to the functions as environment variables in `deployment/aws/terraform/lambda.tf` and `deployment/aws/terraform/scraper.tf`; only the key-rotation index lives in SSM. Keep the tfvars file out of git.
 
 ## Hazards
 
