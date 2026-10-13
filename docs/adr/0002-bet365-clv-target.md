@@ -4,7 +4,7 @@ status: proposed
 
 # Predict bet365 line movement as the CLV target
 
-The CLV model trains on the devigged bet365 close-minus-snapshot delta, not Pinnacle's. The experiments behind it are on [Target bookmaker and data volume experiments](../../wiki/evaluation/exp-target-and-data-volume.md); the rationale is only what those pages and the linked PRs record.
+The CLV model trains on the devigged bet365 close-minus-snapshot delta, not Pinnacle's. The experiments behind it are on [Target bookmaker and data volume experiments](../../wiki/evaluation/exp-target-and-data-volume.md).
 
 ## Context
 
@@ -26,7 +26,6 @@ Train on the devigged bet365 close-minus-snapshot delta: `target_type: devigged_
 - Pinnacle, with Betfair as fallback, becomes the sharp reference feature instead ([ADR-0003](0003-hybrid-sharp-reference.md)).
 - The code defaults stay `raw` and `pinnacle`, so a YAML that omits them trains the rejected target (#434).
 - The Pinnacle and bet365 runs used different datasets (Odds API versus OddsPortal), so the comparison also changed the data source.
-- That bet365 is a retail book a bettor can actually use is a plausible reason but is not stated in the sources `(inferred)`.
 
 ## Evidence
 

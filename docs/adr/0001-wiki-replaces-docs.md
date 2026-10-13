@@ -20,3 +20,10 @@ status: accepted
 - The main measured gain came from having verified documentation at all. The wiki's own advantage was small.
 - In a replay over 10 PRs, about 3 pages per PR needed edits.
 - A change to a cited symbol blocks the commit until the citing page is edited, and that cost is accepted.
+
+## Evidence
+
+- Prior `docs/` text: `git show origin/main:docs/` (replaced in 9b3ae09).
+- Comprehension audit findings: #434-#454.
+- docrot: <https://pypi.org/project/docrot/>, <https://github.com/dager23/docrot>.
+- Swimm: <https://docs.swimm.io/continuous-integration/github-app>, <https://swimm.io/pricing>. Both tools researched 2026-10-13.

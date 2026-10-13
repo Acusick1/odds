@@ -14,12 +14,15 @@ The hypothesised edge is breadth and speed of information synthesis by an LLM ag
 
 ## Consequences
 
-- That the model's weakness caused the pivot is `(inferred)`: the sources state the thesis and the evidence side by side but do not link them. The discussion behind #290 is not recorded.
+- That the model's weakness caused the pivot is `(inferred)` in the prior wiki text (f2a0862): the sources state the thesis and the evidence side by side but do not link them. The discussion behind #290 is not recorded.
 - Effort moves to agent tooling: the MCP server, match briefs, paper trades and data sources.
-- The thesis has no measured result. Results exist only as paper trades, read through `get_portfolio` and `odds paper`. Evaluation against baselines is open (#422).
+- The thesis has no measured result. Results exist only as paper trades, read through `get_portfolio` and `odds paper`. 
 - Code written before the pivot may still treat the model as the edge, and NBA-era defaults remain in live code (#465).
 - Reversing the decision would need the model to beat the vig on its own, which the recorded simulation did not show.
 
-## References
+## Evidence
 
-- Explanation: [The betting agent](../../wiki/agent/betting-agent.md), [About the system and its pivots](../../wiki/foundations/project-overview.md), [CLV model findings](../../wiki/evaluation/clv-model-findings.md), [Betting simulation](../../wiki/evaluation/exp-betting-simulation.md), [Agent data sources](../../wiki/agent/agent-data-sources.md)
+- PRs and issues: #170, #171, #287, #290, #361, #465.
+- Results: `experiments/results/exp6_learning_curve/FINDINGS.md`, `experiments/results/exp7_backtest_sim/FINDINGS.md`, `experiments/results/exp7b_line_shopping/FINDINGS.md`.
+- Prior text: `wiki/agent/decision-information-edge.md` at f2a0862; `AGENTS.md` at `9b3ae09^`; `packages/odds-mcp/agents/common.md`.
+- Wiki: [The betting agent](../../wiki/agent/betting-agent.md), [About the system and its pivots](../../wiki/foundations/project-overview.md), [CLV model findings](../../wiki/evaluation/clv-model-findings.md), [Betting simulation](../../wiki/evaluation/exp-betting-simulation.md), [Agent data sources](../../wiki/agent/agent-data-sources.md).

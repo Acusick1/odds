@@ -4,7 +4,7 @@ status: proposed
 
 # Evaluate with walk-forward CV: sliding 380 events, 50-event steps, no test split
 
-Walk-forward CV with a sliding 380-event window and 50-event steps is the primary evaluation, and there is no held-out test set. The grid behind it is on [CV protocol grid](../../wiki/evaluation/exp-cv-protocol-grid.md); the rationale is only what that page and the linked PRs record.
+Walk-forward CV with a sliding 380-event window and 50-event steps is the primary evaluation, and there is no held-out test set. The grid behind it is on [CV protocol grid](../../wiki/evaluation/exp-cv-protocol-grid.md).
 
 ## Context
 
@@ -19,11 +19,11 @@ Walk-forward CV with a sliding 380-event window and 50-event steps is the primar
 - **Expanding windows.** Lowest MSE in no cell of the grid at steps 10 and 50; under the original search space they favoured more features, a weakness later traced to the search space (PRs #253, #361).
 - **Other sliding windows (95, 190, 760).** Higher MSE than sliding-380 at steps 10 and 50.
 - **Validation step 10.** Lowest MSE, but the tuner picks identical hyperparameters for every feature set.
-- **A fixed chronological test split** (the code default `test_split: 0.2`). A fixed split wastes training data and does not reflect deployment, which retrains on all available data `(inferred)`.
+- **A fixed chronological test split** (the code default `test_split: 0.2`). Rejected for the reason under Consequences.
 
 ## Consequences
 
-- Walk-forward simulating the production retrain cycle, and dropping the test split because deployment retrains on all data, are `(inferred)`.
+- Walk-forward CV simulates the production retrain cycle (train on past, predict the next chunk, roll forward). A fixed chronological test split wastes training data and does not reflect deployment, which retrains on all available data before predicting new events (maintainer's recorded reasons, `AGENTS.md` "Model Evaluation").
 - Sliding-380 being "about one season" and shorter windows starving the model are stated in PR #234 but not measured by the CSV.
 - The protocol only works with the principled search space (PR #361).
 - The code defaults stay `cv_method: timeseries` and `test_split: 0.2`, so the protocol exists only where a YAML sets it.
@@ -34,4 +34,4 @@ Walk-forward CV with a sliding 380-event window and 50-event steps is the primar
 
 ## Evidence
 
-PRs #230, #234, #253, #361; `experiments/results/cv_protocol_grid/grid_results.csv`; `experiments/scripts/cv_protocol_grid.py`; #452. Wiki: [Cross-validation](../../wiki/modelling/cross-validation.md), [Training config](../../wiki/modelling/training-config.md).
+`AGENTS.md` "Model Evaluation" section (added in 4b116fd, removed in 9b3ae09; text at `9b3ae09^`); PRs #230, #234, #253, #361; `experiments/results/cv_protocol_grid/grid_results.csv`; `experiments/scripts/cv_protocol_grid.py`; #452. Wiki: [Cross-validation](../../wiki/modelling/cross-validation.md), [Training config](../../wiki/modelling/training-config.md).

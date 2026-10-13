@@ -4,7 +4,7 @@ status: proposed
 
 # Use Pinnacle with Betfair Exchange fallback as the sharp reference
 
-`sharp_bookmakers` is `[pinnacle, betfair_exchange]` for EPL, and the first bookmaker with odds in the market wins. The runs behind it are on [EPL sharp-reference experiments](../../wiki/evaluation/exp-epl-sharp-reference.md); the rationale is only what that page and the linked PRs record.
+`sharp_bookmakers` is `[pinnacle, betfair_exchange]` for EPL, and the first bookmaker with odds in the market wins. The runs behind it are on [EPL sharp-reference experiments](../../wiki/evaluation/exp-epl-sharp-reference.md).
 
 ## Context
 
@@ -12,7 +12,7 @@ Pinnacle's public API stopped covering EPL in January 2026, so 71 of about 1.8K 
 
 ## Decision
 
-Decided 2026-03-19. `sharp_bookmakers: [pinnacle, betfair_exchange]`, first bookmaker with odds in the market wins; `required_bookmakers` is any-of. EPL production uses `data_source: null` and `closing_source_priority: [football_data_uk]`. The agent's MCP screener and brief stamp use the same list; the model code default stays Pinnacle-only, and the two lists differ on purpose (maintainer decision recorded in #421).
+Decided 2026-03-19 (#253 merged). `sharp_bookmakers: [pinnacle, betfair_exchange]`, first bookmaker with odds in the market wins; `required_bookmakers` is any-of. EPL production uses `data_source: null` and `closing_source_priority: [football_data_uk]`. The agent's MCP screener and brief stamp use the same list; the model code default stays Pinnacle-only, and the two lists differ on purpose (maintainer decision recorded in #421).
 
 ## Considered options
 
@@ -30,4 +30,4 @@ Decided 2026-03-19. `sharp_bookmakers: [pinnacle, betfair_exchange]`, first book
 
 ## Evidence
 
-PRs #217, #231, #234, #253; `experiments/configs/xgboost_epl_hybrid_sharp.yaml`; `experiments/scripts/hybrid_sharp_validation.py`; #421. Wiki: [Sharp benchmark](../../wiki/modelling/sharp-benchmark.md), [Betfair Exchange](../../wiki/collection/betfair-exchange.md), [Data sources](../../wiki/collection/data-sources.md).
+PRs #217, #231, #234, #253; prior wiki text `wiki/modelling/decision-hybrid-sharp-reference.md` at f2a0862, which labels the XGBoost split-point explanation `(inferred)`; `experiments/configs/xgboost_epl_hybrid_sharp.yaml`; `experiments/scripts/hybrid_sharp_validation.py`; #421. Wiki: [Sharp benchmark](../../wiki/modelling/sharp-benchmark.md), [Betfair Exchange](../../wiki/collection/betfair-exchange.md), [Data sources](../../wiki/collection/data-sources.md).
