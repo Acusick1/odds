@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import subprocess
 import sys
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -23,13 +25,20 @@ TYPE_HEADINGS = {
     "howto": "How-tos",
 }
 PAGE_STATUSES = {"draft", "stable", "deprecated"}
-REQUIRED_KEYS = ("type", "title", "description", "sources", "verified", "status")
+REQUIRED_KEYS = ("type", "title", "description", "sources", "status")
 INDEX_REQUIRED_KEYS = ("title", "description")
 PAGES_START = "<!-- pages:start -->"
 PAGES_END = "<!-- pages:end -->"
-SHA_RE = re.compile(r"\A[0-9a-f]{4,40}\Z")
 PAGES_BLOCK_RE = re.compile(re.escape(PAGES_START) + r"(.*?)" + re.escape(PAGES_END), re.DOTALL)
-CITE_EXTENSIONS = (".py", ".md", ".yaml", ".yml", ".toml", ".tf", ".json", ".sh")
+DOCS_ALLOWED = ("docs/adr/", "docs/agents/")
+DEFAULT_MODULE_DIRS = (
+    "packages/odds-lambda/odds_lambda/jobs",
+    "packages/odds-cli/odds_cli/commands",
+)
+DEFAULT_MCP_DIR = "packages/odds-mcp/odds_mcp"
+DEFAULT_SYMBOL_ROOT = "packages"
+SKIP_DIRS = {"__pycache__", ".venv", "node_modules", ".git"}
+UNBOUNDED = 10**9
 
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.DOTALL)
 FENCE_RE = re.compile(r"^(```|~~~).*?^\1[ \t]*$", re.DOTALL | re.MULTILINE)
@@ -37,21 +46,10 @@ LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)")
 WIKILINK_RE = re.compile(r"\[\[[^\]]+\]\]")
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 CITE_RE = re.compile(r"^([\w.\-/]+?)(?:::([\w.]+))?(?:#([\w\-]+))?$")
+IDENT_RE = re.compile(r"^([A-Za-z_]\w*)(?:\(\))?$")
+HAS_EXT_RE = re.compile(r"\.[A-Za-z]\w*$")
+HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*#*\s*$", re.MULTILINE)
-
-
-class _StringLoader(yaml.SafeLoader):
-    """SafeLoader that keeps numeric-looking scalars (``verified: 7887039``) as strings."""
-
-
-_StringLoader.yaml_implicit_resolvers = {
-    ch: [
-        (tag, rx)
-        for tag, rx in resolvers
-        if tag not in ("tag:yaml.org,2002:int", "tag:yaml.org,2002:float")
-    ]
-    for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
-}
 
 
 def github_slug(heading: str) -> str:
@@ -77,19 +75,88 @@ def symbol_defined(text: str, symbol: str) -> bool:
     return re.search(pattern, text, re.MULTILINE) is not None
 
 
-def parse_citation(raw: str, root_files: bool = False) -> tuple[str, str | None, str | None] | None:
-    """Return (path, symbol, anchor) if raw is a code citation, else None.
+def mask_fences(text: str) -> str:
+    """Blank fenced code blocks, keeping line numbers intact."""
+    return FENCE_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
 
-    Bare root-level names (``AGENTS.md``) count only where root_files is set, since
-    prose often names files by basename.
-    """
-    match = CITE_RE.match(raw.strip())
-    if not match:
-        return None
-    path, symbol, anchor = match.groups()
-    if ("/" not in path and not root_files) or not path.endswith(CITE_EXTENSIONS):
-        return None
-    return path, symbol, anchor
+
+def docs_citation_forbidden(path: str) -> bool:
+    return path.startswith("docs/") and not path.startswith(DOCS_ALLOWED)
+
+
+def _span(node: ast.AST) -> tuple[int, int]:
+    decorators = getattr(node, "decorator_list", [])
+    start = min([node.lineno, *(d.lineno for d in decorators)])  # type: ignore[attr-defined]
+    return start, node.end_lineno  # type: ignore[attr-defined, return-value]
+
+
+def _find_def(scope: list[ast.stmt], name: str) -> ast.stmt | None:
+    for node in scope:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            if node.name == name:
+                return node
+        elif isinstance(node, ast.Assign):
+            if any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+                return node
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+        ):
+            return node
+    return None
+
+
+def symbol_range(tree: ast.Module, symbol: str) -> tuple[int, int] | None:
+    """Line range of a (dotted) symbol; falls back to its last segment defined anywhere."""
+    parts = symbol.split(".")
+    scope: list[ast.stmt] = tree.body
+    node: ast.stmt | None = None
+    for part in parts:
+        node = _find_def(scope, part)
+        if node is None:
+            break
+        scope = getattr(node, "body", [])
+    if node is not None:
+        return _span(node)
+    for candidate in ast.walk(tree):
+        if (
+            isinstance(candidate, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+            and candidate.name == parts[-1]
+        ):
+            return _span(candidate)
+    return None
+
+
+def hunk_overlaps(start: int, count: int, span: tuple[int, int]) -> bool:
+    return count > 0 and start <= span[1] and start + count - 1 >= span[0]
+
+
+@dataclass
+class _Source:
+    """One version of a file; tree is None when it does not parse."""
+
+    tree: ast.Module | None
+
+    @classmethod
+    def parse(cls, text: str) -> _Source:
+        try:
+            return cls(ast.parse(text))
+        except SyntaxError:
+            return cls(None)
+
+    def range(self, symbol: str) -> tuple[int, int] | None:
+        if self.tree is None:
+            return (1, UNBOUNDED)
+        return symbol_range(self.tree, symbol)
+
+
+@dataclass
+class _FileChange:
+    old: _Source | None
+    new: _Source | None
+    old_hunks: list[tuple[int, int]]
+    new_hunks: list[tuple[int, int]]
 
 
 def generate_page_list(
@@ -116,17 +183,40 @@ def generate_page_list(
 
 
 class WikiLinter:
-    def __init__(self, wiki_dir: Path, root: Path, fix: bool = False) -> None:
+    def __init__(
+        self,
+        wiki_dir: Path,
+        root: Path,
+        fix: bool = False,
+        module_dirs: tuple[str, ...] = DEFAULT_MODULE_DIRS,
+        mcp_dir: str = DEFAULT_MCP_DIR,
+        symbol_root: str = DEFAULT_SYMBOL_ROOT,
+    ) -> None:
         self.wiki_dir = wiki_dir.resolve()
         self.root = root.resolve()
         self.fix = fix
+        self.module_dirs = module_dirs
+        self.mcp_dir = mcp_dir
+        self.symbol_root = symbol_root
         self.errors: dict[str, list[str]] = defaultdict(list)
         self.stale: dict[str, list[str]] = defaultdict(list)
+        self.coverage: list[str] = []
         self.inbound: dict[str, set[str]] = {}
         self.cites: dict[str, set[str]] = defaultdict(set)
-        self._page_paths: dict[str, set[str]] = defaultdict(set)
-        self._commit_ok: dict[str, bool] = {}
-        self._changes: dict[tuple[str, str], list[str]] = {}
+        self._cite_symbols: set[tuple[str, str]] = set()
+        # slug -> (path, symbol) -> page line numbers where the citation appears
+        self._citations: dict[str, dict[tuple[str, str | None], set[int]]] = defaultdict(
+            lambda: defaultdict(set)
+        )
+        self._page_files: dict[str, Path] = {}
+        self._texts: dict[str, str] = {}
+        self._offsets: dict[str, int] = {}
+        self._symbol_index: dict[str, list[str]] | None = None
+        self._basename_index: dict[str, list[str]] | None = None
+        self._page_commits: dict[str, str | None] = {}
+        self._renames: dict[str, dict[str, str]] = {}
+        self._path_commits: dict[tuple[str, str], list[str]] = {}
+        self._changes: dict[tuple[str, str], _FileChange | None] = {}
 
     def run(self) -> None:
         areas = self._areas()
@@ -145,7 +235,11 @@ class WikiLinter:
                     continue
                 pages[slug] = path
                 page_area[slug] = area
-                page_meta, bodies[slug] = self._parse_frontmatter(slug, path.read_text())
+                text = path.read_text()
+                self._page_files[slug] = path
+                self._texts[slug] = text
+                page_meta, bodies[slug] = self._parse_frontmatter(slug, text)
+                self._offsets[slug] = text[: len(text) - len(bodies[slug])].count("\n")
                 if page_meta is not None:
                     meta[slug] = page_meta
         self.inbound = {slug: set() for slug in pages}
@@ -164,8 +258,10 @@ class WikiLinter:
             for target in self._check_links(slug, path, bodies[slug]):
                 if target in by_path and by_path[target] != slug:
                     self.inbound[by_path[target]].add(slug)
-            self._check_citations(slug, bodies[slug])
-            self._check_staleness(slug, meta.get(slug))
+            self._check_citations(slug, bodies[slug], self._offsets[slug])
+        for slug in pages:
+            self._check_staleness(slug)
+        self._check_coverage()
 
         for slug in pages:
             if not self.inbound[slug]:
@@ -187,7 +283,7 @@ class WikiLinter:
             return None, text
         raw, body = match.groups()
         try:
-            meta = yaml.load(raw, Loader=_StringLoader)  # noqa: S506 - SafeLoader subclass
+            meta = yaml.safe_load(raw)
         except yaml.YAMLError as exc:
             self.errors[key].append(f"invalid frontmatter YAML: {exc}")
             return None, body
@@ -207,6 +303,8 @@ class WikiLinter:
         if meta is None:
             return
         self._missing_keys(slug, meta, REQUIRED_KEYS)
+        if "verified" in meta:
+            self.errors[slug].append("verified is obsolete; staleness comes from git")
         if meta.get("type") not in (None, "") and meta["type"] not in TYPE_HEADINGS:
             self.errors[slug].append(f"invalid type: {meta['type']!r}")
         status = meta.get("status")
@@ -277,74 +375,245 @@ class WikiLinter:
             self.errors[key].append("generated page list is stale: run --fix")
         self._check_links(key, path, body)
 
-    def _check_staleness(self, slug: str, meta: dict[str, object] | None) -> None:
-        if meta is None or meta.get("verified") in (None, ""):
-            return
-        verified = str(meta["verified"])
-        if not self._valid_commit(verified):
-            self.errors[slug].append(f"verified is not a valid commit: {verified}")
-            return
-        for path in sorted(self._page_paths[slug]):
-            shas = self._changes_since(verified, path)
-            if shas:
-                self.stale[slug].append(
-                    f"stale: {path} changed in {', '.join(shas)} since {verified}"
-                )
-
     def _git(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["git", "-C", str(self.root), *args], capture_output=True, text=True, check=False
         )
 
-    def _valid_commit(self, sha: str) -> bool:
-        if sha not in self._commit_ok:
-            self._commit_ok[sha] = bool(SHA_RE.match(sha)) and (
-                self._git("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}").returncode == 0
-            )
-        return self._commit_ok[sha]
+    def _rel(self, path: Path) -> str:
+        return path.resolve().relative_to(self.root).as_posix()
 
-    def _changes_since(self, verified: str, path: str) -> list[str]:
-        cache_key = (verified, path)
-        if cache_key not in self._changes:
-            result = self._git("log", "--format=%h", f"{verified}..HEAD", "--", path)
-            self._changes[cache_key] = result.stdout.split() if result.returncode == 0 else []
-        return self._changes[cache_key]
+    def _page_commit(self, slug: str) -> str | None:
+        rel = self._rel(self._page_files[slug])
+        if rel not in self._page_commits:
+            result = self._git("log", "-1", "--format=%H", "--", rel)
+            self._page_commits[rel] = result.stdout.strip() or None
+        return self._page_commits[rel]
+
+    def _renamed_to(self, slug: str, path: str) -> str | None:
+        base = self._page_commit(slug)
+        if base is None:
+            return None
+        if base not in self._renames:
+            result = self._git("diff", "-M", "--name-status", base, "HEAD")
+            renames: dict[str, str] = {}
+            for line in result.stdout.splitlines():
+                fields = line.split("\t")
+                if fields[0].startswith("R") and len(fields) == 3:
+                    renames[fields[1]] = fields[2]
+            self._renames[base] = renames
+        return self._renames[base].get(path)
+
+    def _commits_after(self, base: str, path: str) -> list[str]:
+        key = (base, path)
+        if key not in self._path_commits:
+            result = self._git("log", "--no-merges", "--format=%H", f"{base}..HEAD", "--", path)
+            self._path_commits[key] = result.stdout.split() if result.returncode == 0 else []
+        return self._path_commits[key]
+
+    def _show(self, rev: str, path: str) -> _Source | None:
+        result = self._git("show", f"{rev}:{path}")
+        return _Source.parse(result.stdout) if result.returncode == 0 else None
+
+    def _file_change(self, path: str, old_rev: str, new_rev: str | None) -> _FileChange | None:
+        """Parsed old and new versions plus -U0 hunks; new_rev None means the working tree."""
+        key = (path, new_rev or "working tree")
+        if key not in self._changes:
+            old = self._show(old_rev, path)
+            if new_rev is None:
+                target = self.root / path
+                new = (
+                    _Source.parse(target.read_text(errors="replace")) if target.is_file() else None
+                )
+                diff_args = ["diff", "-U0", "--no-color", old_rev, "--", path]
+            else:
+                new = self._show(new_rev, path)
+                diff_args = ["diff", "-U0", "--no-color", old_rev, new_rev, "--", path]
+            if new_rev is None and old is None:
+                self._changes[key] = None
+            else:
+                diff = self._git(*diff_args).stdout
+                old_hunks: list[tuple[int, int]] = []
+                new_hunks: list[tuple[int, int]] = []
+                for m in HUNK_RE.finditer(diff):
+                    old_hunks.append((int(m.group(1)), int(m.group(2) or 1)))
+                    new_hunks.append((int(m.group(3)), int(m.group(4) or 1)))
+                self._changes[key] = _FileChange(old, new, old_hunks, new_hunks)
+        return self._changes[key]
+
+    def _symbol_changed(
+        self, path: str, symbol: str | None, old_rev: str, new_rev: str | None
+    ) -> bool:
+        change = self._file_change(path, old_rev, new_rev)
+        if change is None:
+            return False
+        if symbol is None:
+            return bool(change.old_hunks)
+        old_range = change.old.range(symbol) if change.old else None
+        new_range = change.new.range(symbol) if change.new else None
+        if (old_range is None) != (new_range is None):
+            return True
+        if old_range is None or new_range is None:
+            return False
+        return any(hunk_overlaps(*h, old_range) for h in change.old_hunks) or any(
+            hunk_overlaps(*h, new_range) for h in change.new_hunks
+        )
+
+    def _check_staleness(self, slug: str) -> None:
+        rel = self._rel(self._page_files[slug])
+        # Any uncommitted change to the page (including a new page) counts as re-checked.
+        if self._git("status", "--porcelain", "--", rel).stdout.strip():
+            return
+        base = self._page_commit(slug)
+        head_ok = self._git("rev-parse", "--verify", "--quiet", "HEAD").returncode == 0
+        for (path, symbol), lines in sorted(
+            self._citations[slug].items(), key=lambda kv: (kv[0][0], kv[0][1] or "")
+        ):
+            if not (self.root / path).is_file():
+                continue
+            # Whole-file semantics for non-Python files and citations without a symbol.
+            tracked = symbol if path.endswith(".py") else None
+            changed: list[str] = []
+            if base:
+                for commit in self._commits_after(base, path):
+                    if tracked is None or self._symbol_changed(path, tracked, f"{commit}^", commit):
+                        changed.append(commit[:7])
+            if head_ok and self._symbol_changed(path, tracked, "HEAD", None):
+                changed.append("working tree")
+            if changed:
+                label = f"{path}::{symbol}" if symbol else path
+                where = ", ".join(str(n) for n in sorted(lines))
+                self.stale[slug].append(
+                    f"{label} changed in {', '.join(changed)} (page lines {where})"
+                )
+
+    def _symbols(self) -> dict[str, list[str]]:
+        """Names of top-level functions and classes under symbol_root, with defining paths."""
+        if self._symbol_index is None:
+            index: dict[str, list[str]] = defaultdict(list)
+            for file in sorted((self.root / self.symbol_root).rglob("*.py")):
+                if SKIP_DIRS & set(file.parts):
+                    continue
+                try:
+                    tree = ast.parse(file.read_text(errors="replace"))
+                except SyntaxError:
+                    continue
+                for node in tree.body:
+                    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                        index[node.name].append(self._rel(file))
+            self._symbol_index = index
+        return self._symbol_index
+
+    def _basenames(self) -> dict[str, list[str]]:
+        if self._basename_index is None:
+            index: dict[str, list[str]] = defaultdict(list)
+            for file in sorted((self.root / self.symbol_root).rglob("*")):
+                if file.is_file() and not SKIP_DIRS & set(file.parts):
+                    index[file.name].append(self._rel(file))
+            self._basename_index = index
+        return self._basename_index
+
+    def _check_coverage(self) -> None:
+        for directory in self.module_dirs:
+            for file in sorted((self.root / directory).glob("*.py")):
+                rel = self._rel(file)
+                if file.name != "__init__.py" and rel not in self.cites:
+                    self.coverage.append(f"module not cited by any page: {rel}")
+        for file in sorted((self.root / self.mcp_dir).rglob("*.py")):
+            if SKIP_DIRS & set(file.parts):
+                continue
+            rel = self._rel(file)
+            try:
+                tree = ast.parse(file.read_text(errors="replace"))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and any(
+                    isinstance(d.func if isinstance(d, ast.Call) else d, ast.Attribute)
+                    and (d.func if isinstance(d, ast.Call) else d).attr == "tool"  # type: ignore[union-attr]
+                    for d in node.decorator_list
+                ):
+                    if not any(
+                        p == rel and sym.split(".")[-1] == node.name
+                        for p, sym in self._cite_symbols
+                    ):
+                        self.coverage.append(f"MCP tool not cited by any page: {rel}::{node.name}")
 
     def _check_source(self, slug: str, source: str) -> None:
         if source.startswith(("http://", "https://")):
             return
-        citation = parse_citation(source, root_files=True)
-        if citation is None:
-            self.errors[slug].append(f"source is not a code citation: {source}")
-            return
-        self._check_citation(slug, source, citation)
+        frontmatter = self._texts[slug].splitlines()[: self._offsets[slug]]
+        lines = {i for i, line in enumerate(frontmatter, 1) if source in line}
+        self._check_citation(slug, source, lines, source=True)
 
-    def _check_citations(self, slug: str, body: str) -> None:
-        for match in INLINE_CODE_RE.finditer(FENCE_RE.sub("", body)):
+    def _check_citations(self, slug: str, body: str, offset: int) -> None:
+        masked = mask_fences(body)
+        for match in INLINE_CODE_RE.finditer(masked):
             raw = match.group(1)
-            citation = parse_citation(raw)
-            if citation is not None:
-                self._check_citation(slug, raw, citation)
+            line = offset + masked.count("\n", 0, match.start()) + 1
+            ident = IDENT_RE.match(raw.strip())
+            if ident and not (self.root / ident.group(1)).is_file():
+                defined = self._symbols().get(ident.group(1), [])
+                if len(defined) == 1:
+                    name = ident.group(1)
+                    self.errors[slug].append(
+                        f"unqualified symbol {name}: cite as {defined[0]}::{name}"
+                    )
+                continue
+            self._check_citation(slug, raw, {line})
 
-    def _check_citation(
-        self, slug: str, raw: str, citation: tuple[str, str | None, str | None]
-    ) -> None:
-        path, symbol, anchor = citation
-        target = self.root / path
-        if not target.is_file():
-            self.errors[slug].append(f"cited path does not exist: {raw}")
+    def _check_citation(self, slug: str, raw: str, lines: set[int], source: bool = False) -> None:
+        text = raw.strip()
+        while text.startswith("./"):
+            text = text[2:]
+        match = CITE_RE.match(text)
+        if not match:
+            if source:
+                self.errors[slug].append(f"source is not a code citation: {raw}")
             return
+        path, symbol, anchor = match.groups()
+        if docs_citation_forbidden(path):
+            self.errors[slug].append(f"pages do not cite docs/: {raw}")
+            return
+        target = (self.root / path).resolve()
+        if target.is_file() and target.is_relative_to(self.root):
+            self._register(slug, path, symbol, anchor, raw, target, lines)
+        elif HAS_EXT_RE.search(path) and ("/" in path or source):
+            renamed = self._renamed_to(slug, path)
+            if renamed:
+                self.errors[slug].append(f"cited path renamed to {renamed}: {raw}")
+            else:
+                self.errors[slug].append(f"cited path does not exist: {raw}")
+        elif HAS_EXT_RE.search(path):
+            matches = self._basenames().get(path, [])
+            if len(matches) == 1:
+                self.errors[slug].append(f"qualify path: {raw} is {matches[0]}")
+        elif source:
+            self.errors[slug].append(f"cited path does not exist: {raw}")
+
+    def _register(
+        self,
+        slug: str,
+        path: str,
+        symbol: str | None,
+        anchor: str | None,
+        raw: str,
+        target: Path,
+        lines: set[int],
+    ) -> None:
         self.cites[path].add(slug)
-        self._page_paths[slug].add(path)
+        self._citations[slug][(path, symbol)] |= lines
+        if symbol:
+            self._cite_symbols.add((path, symbol))
         text = target.read_text(errors="replace")
-        if symbol and not symbol_defined(text, symbol.split(".")[-1]):
+        if symbol and path.endswith(".py") and not symbol_defined(text, symbol.split(".")[-1]):
             self.errors[slug].append(f"cited symbol not defined: {raw}")
         if anchor and path.endswith(".md") and anchor not in heading_slugs(text):
             self.errors[slug].append(f"cited anchor not found: {raw}")
 
     def _check_links(self, slug: str, path: Path, text: str) -> list[Path]:
         """Validate links in text; return resolved paths of the files linked to."""
-        text = FENCE_RE.sub("", text)
+        text = mask_fences(text)
         for match in WIKILINK_RE.finditer(text):
             self.errors[slug].append(f"wikilink syntax not allowed: {match.group(0)}")
         text = INLINE_CODE_RE.sub("", text)
@@ -355,6 +624,10 @@ class WikiLinter:
                 continue
             file_part, _, anchor = href.partition("#")
             target = (path.parent / file_part).resolve()
+            if target.is_file() and target.is_relative_to(self.root):
+                if docs_citation_forbidden(self._rel(target)):
+                    self.errors[slug].append(f"pages do not link into docs/: {href}")
+                    continue
             if not target.is_file():
                 self.errors[slug].append(f"broken link (file not found): {href}")
                 continue
@@ -385,16 +658,21 @@ def lint(
         print(f"{slug}:")
         for error in linter.errors[slug]:
             print(f"  {error}")
+    if linter.coverage:
+        print("Coverage:")
+        for line in linter.coverage:
+            print(f"  {line}")
     if linter.stale:
         print("Stale pages:")
         for slug in sorted(linter.stale):
             print(f"{slug}:")
             for line in linter.stale[slug]:
-                print(f"  {line}")
+                print(f"  stale: {line}")
     if write:
         out = wiki_dir / "backlinks.json"
         out.write_text(json.dumps(linter.backlinks(), indent=2, sort_keys=True) + "\n")
-    return 1 if linter.errors or (fail_stale and linter.stale) else 0
+    failed = bool(linter.errors or linter.coverage)
+    return 1 if failed or (fail_stale and linter.stale) else 0
 
 
 def main(argv: list[str] | None = None) -> int:

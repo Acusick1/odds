@@ -13,9 +13,15 @@ repos:
         entry: vale
         language: python
         additional_dependencies: [vale==3.22.0.0]
-        files: ^(README\.md|AGENTS\.md|docs/.*\.md)$
+        files: ^(README\.md|AGENTS\.md|docs/.*\.md|wiki/.*\.md)$
         # Parallel invocations race to install the binary on first run.
         require_serial: true
+      - id: wiki-lint
+        name: wiki-lint
+        entry: uv run python scripts/wiki_lint.py --no-write --fail-stale
+        language: system
+        pass_filenames: false
+        files: ^(wiki/|packages/|scripts/wiki_lint\.py$|deployment/)
   - repo: https://github.com/lycheeverse/lychee
     rev: lychee-v0.24.2
     hooks:
