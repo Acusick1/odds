@@ -35,6 +35,29 @@ DEFAULT_MCP_DIR = "packages/odds-mcp/odds_mcp"
 DEFAULT_PACKAGES_DIR = "packages"
 DEFAULT_SYMBOL_ROOT = DEFAULT_PACKAGES_DIR
 ALLOWED_WORDS = frozenset({"main", "master"})
+# Common English words and config keys: a bare mention is prose unless it names a function or class.
+GENERIC_VARIABLE_NAMES = frozenset(
+    {
+        "main",
+        "master",
+        "status",
+        "name",
+        "id",
+        "type",
+        "data",
+        "config",
+        "session",
+        "settings",
+        "logger",
+        "app",
+        "key",
+        "value",
+        "result",
+        "path",
+        "url",
+        "model",
+    }
+)
 SKIP_DIRS = {"__pycache__", ".venv", "node_modules", ".git"}
 COVERAGE_KEY = "coverage"
 
@@ -175,6 +198,10 @@ def mask_fences(text: str) -> str:
     return FENCE_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
 
 
+def _is_dunder(name: str) -> bool:
+    return name.startswith("__") and name.endswith("__")
+
+
 def docs_citation_forbidden(path: str) -> bool:
     return path.startswith("docs/") and not path.startswith(DOCS_ALLOWED)
 
@@ -202,13 +229,56 @@ def bound_names(node: ast.stmt) -> list[str]:
     return []
 
 
+def _flatten(body: Iterable[ast.stmt]) -> Iterable[ast.stmt]:
+    """Statements of a scope, descending into `if`/`try`/`with` blocks."""
+    for node in body:
+        yield node
+        if isinstance(node, ast.If):
+            yield from _flatten([*node.body, *node.orelse])
+        elif isinstance(node, ast.Try | ast.TryStar):
+            handlers = [stmt for handler in node.handlers for stmt in handler.body]
+            yield from _flatten([*node.body, *handlers, *node.orelse, *node.finalbody])
+        elif isinstance(node, ast.With | ast.AsyncWith):
+            yield from _flatten(node.body)
+
+
+def _self_attribute(node: ast.expr) -> str | None:
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+    ):
+        return node.attr
+    return None
+
+
+def _instance_attribute(cls: ast.ClassDef, name: str) -> ast.stmt | None:
+    """The first `self.<name> = ...` statement in the class's `__init__`."""
+    for method in _flatten(cls.body):
+        if isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef) and method.name == "__init__":
+            for stmt in _flatten(method.body):
+                targets = (
+                    stmt.targets
+                    if isinstance(stmt, ast.Assign)
+                    else [stmt.target]
+                    if isinstance(stmt, ast.AnnAssign)
+                    else []
+                )
+                if any(_self_attribute(t) == name for t in targets):
+                    return stmt
+    return None
+
+
 def resolve_symbol(tree: ast.Module, symbol: str) -> ast.stmt | None:
-    """Resolve `A.B` as A at module level, then B in A's class body."""
-    scope = tree.body
+    """Resolve `A.B` as A at module level, then B in A's class body or `__init__`."""
+    scope: list[ast.stmt] = tree.body
     parts = symbol.split(".")
     node: ast.stmt | None = None
     for index, part in enumerate(parts):
-        node = next((n for n in scope if part in bound_names(n)), None)
+        parent = node
+        node = next((n for n in _flatten(scope) if part in bound_names(n)), None)
+        if node is None and isinstance(parent, ast.ClassDef):
+            node = _instance_attribute(parent, part)
         if node is None:
             return None
         if index < len(parts) - 1:
@@ -401,13 +471,20 @@ class GitHistory:
 
 @dataclass
 class SymbolIndex:
-    """Top-level names and `Class.member` names across the packages, with dotted paths."""
+    """Top-level names, `Class.member` names and bare method names, with dotted paths."""
 
     names: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
     members: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
+    methods: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
+    variables: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
 
     def lookup(self, token: str) -> list[str]:
-        return self.members.get(token) or self.names.get(token) or []
+        if "." in token:
+            return self.members.get(token) or []
+        defined = [*self.names.get(token, []), *self.methods.get(token, [])]
+        if defined:
+            return [*defined, *self.variables.get(token, [])]
+        return [] if token in GENERIC_VARIABLE_NAMES else list(self.variables.get(token, []))
 
 
 class Target(NamedTuple):
@@ -504,12 +581,16 @@ class Packages:
                 self._index_module(index, member)
             elif member.is_function or member.is_class or CONSTANT_RE.match(member.name):
                 index.names[member.name].append(member.path)
+            elif member.is_attribute and member.name.islower():
+                index.variables[member.name].append(member.path)
             if isinstance(member, griffe.Class):
                 for child in member.members.values():
-                    if not isinstance(child, griffe.Alias) and (
-                        child.is_function or child.is_attribute
-                    ):
+                    if isinstance(child, griffe.Alias):
+                        continue
+                    if child.is_function or child.is_attribute:
                         index.members[f"{member.name}.{child.name}"].append(child.path)
+                    if child.is_function:
+                        index.methods[child.name].append(child.path)
 
 
 def generate_page_list(area: str, pages: Iterable[Page]) -> str:
@@ -598,6 +679,7 @@ class WikiLinter:
         for page in self.pages.values():
             self._check_staleness(page)
         self._check_coverage()
+        self.findings = merge_duplicates(self.findings)
 
         for slug in self.pages:
             if not self.inbound[slug]:
@@ -827,6 +909,7 @@ class WikiLinter:
             or name.split(".")[0] in self.packages.names
             or keyword.iskeyword(name)
             or hasattr(builtins, name)
+            or ("." not in name and (len(name) == 1 or _is_dunder(name)))
         ):
             return False
         defined = sorted(self.packages.symbol_index().lookup(name))
@@ -917,9 +1000,37 @@ class WikiLinter:
     def _check_dotted(self, page: Page, dotted: str, raw: str, lines: set[int]) -> None:
         target = self.packages.resolve(dotted)
         if target is None:
-            self._add(page.slug, Kind.SYMBOL_UNDEFINED, f"cited symbol not defined: {raw}", lines)
+            renamed = self._renamed_module(page, dotted)
+            if renamed:
+                self._add(
+                    page.slug,
+                    Kind.PATH_RENAMED,
+                    f"cited module renamed: {dotted} -> {renamed}",
+                    lines,
+                )
+            else:
+                self._add(
+                    page.slug, Kind.SYMBOL_UNDEFINED, f"cited symbol not defined: {dotted}", lines
+                )
             return
         self._register(page, Citation(dotted, target.path, target.symbol), lines)
+
+    def _renamed_module(self, page: Page, dotted: str) -> str | None:
+        """New dotted path when the cited module's file was renamed since the page's last commit."""
+        base = self.history.last_commit(page.rel)
+        if base is None:
+            return None
+        parts = dotted.split(".")
+        search_root = self.packages.names[parts[0]]
+        for end in range(len(parts), 0, -1):
+            stem = search_root.joinpath(*parts[:end])
+            for old in (stem.with_suffix(".py"), stem / "__init__.py"):
+                rel = old.relative_to(self.root).as_posix()
+                new_rel = self.history.renamed_to(base, rel)
+                module = self.packages.module_name(new_rel) if new_rel else None
+                if module:
+                    return ".".join([module, *parts[end:]])
+        return None
 
     def _is_repo_path(self, path: str) -> bool:
         # Absolute paths and object-store keys (`latest/model.pkl`) are prose, not citations.
@@ -958,6 +1069,17 @@ class WikiLinter:
             "pages": {slug: sorted(src) for slug, src in sorted(self.inbound.items())},
             "cites": {path: sorted(src) for path, src in sorted(self.cites.items())},
         }
+
+
+def merge_duplicates(findings: list[Finding]) -> list[Finding]:
+    """One finding per page, kind and message, with the line numbers of every occurrence."""
+    merged: dict[tuple[str, Kind, str], set[int]] = {}
+    for f in findings:
+        merged.setdefault((f.slug, f.kind, f.message), set()).update(f.lines)
+    return [
+        Finding(slug, kind, message, tuple(sorted(lines)))
+        for (slug, kind, message), lines in merged.items()
+    ]
 
 
 def render(findings: list[Finding]) -> list[str]:

@@ -522,8 +522,8 @@ class TestUnqualifiedIdentifiers:
         put_a(packages, "`decide_forward` and `decide_forward()`")
         expected = "unqualified symbol decide_forward: cite as pkg.decision.decide_forward"
         findings = run(packages)
-        assert kinds(findings, "a") == [Kind.UNQUALIFIED_SYMBOL] * 2
-        assert messages(findings, "a") == [expected, expected]
+        assert messages(findings, "a") == [expected]
+        assert findings[0].lines == (line_of(packages, "`decide_forward`"),)
 
     def test_class_member_and_constant_are_flagged(self, packages: Path) -> None:
         put_a(packages, "`Decider.pick()` `Decider.rate` `MAX_TIER` `Box`")
@@ -547,11 +547,61 @@ class TestUnqualifiedIdentifiers:
             )
         ]
 
-    def test_parameters_fields_and_lowercase_variables_are_not_flagged(
-        self, packages: Path
-    ) -> None:
-        put_a(packages, "`limit` `choice` `rate` `logger` `self` `pick`")
+    def test_parameters_and_class_fields_are_not_flagged(self, packages: Path) -> None:
+        put_a(packages, "`limit` `choice` `rate` `self`")
         assert run(packages) == []
+
+    def test_bare_method_name_is_flagged_with_its_dotted_path(self, packages: Path) -> None:
+        put_a(packages, "`pick` and `pick()`")
+        assert messages(run(packages), "a") == [
+            "unqualified symbol pick: cite as pkg.decision.Decider.pick"
+        ]
+
+    def test_method_name_in_several_classes_is_ambiguous(self, packages: Path) -> None:
+        put_a(packages, "`run`")
+        write_file(packages, f"{PKG}/two.py", "class A:\n    def run(self) -> None: ...\n")
+        findings = run(packages)
+        assert kinds(findings, "a") == [Kind.AMBIGUOUS_SYMBOL]
+        assert "pkg.mod.Box.run, pkg.two.A.run" in messages(findings, "a")[0]
+
+    def test_lowercase_module_variable_is_flagged(self, packages: Path) -> None:
+        write_file(packages, f"{PKG}/db.py", "async_session_maker = object()\n")
+        put_a(packages, "`async_session_maker`")
+        assert messages(run(packages), "a") == [
+            "unqualified symbol async_session_maker: cite as pkg.db.async_session_maker"
+        ]
+
+    def test_variable_in_conditional_block_is_flagged(self, packages: Path) -> None:
+        write_file(
+            packages, f"{PKG}/cond.py", "try:\n    engine_pool = 1\nexcept Exception:\n    pass\n"
+        )
+        put_a(packages, "`engine_pool`")
+        assert kinds(run(packages), "a") == [Kind.UNQUALIFIED_SYMBOL]
+
+    def test_generic_words_matching_only_variables_are_not_flagged(self, packages: Path) -> None:
+        write_file(packages, f"{PKG}/gen.py", "status = 1\nname = 2\nlogger = 3\n")
+        put_a(packages, "`status` `name` `logger`")
+        assert run(packages) == []
+
+    def test_generic_word_naming_a_function_is_still_flagged(self, packages: Path) -> None:
+        write_file(packages, f"{PKG}/gen.py", "def status() -> None: ...\n")
+        put_a(packages, "`status`")
+        assert kinds(run(packages), "a") == [Kind.UNQUALIFIED_SYMBOL]
+
+    def test_single_character_and_dunder_names_are_not_flagged(self, packages: Path) -> None:
+        write_file(
+            packages, f"{PKG}/tiny.py", "x = 1\n\n\nclass K:\n    def __call__(self) -> None: ...\n"
+        )
+        put_a(packages, "`x` `__call__` `__all__`")
+        assert run(packages) == []
+
+    def test_identical_findings_merge_line_numbers(self, packages: Path) -> None:
+        put_a(packages, "`decide_forward`\n\n`decide_forward()`\n\n`pkg.mod.nope` `pkg.mod.nope()`")
+        findings = run(packages)
+        assert [(f.kind, len(f.lines)) for f in findings if f.slug == "a"] == [
+            (Kind.UNQUALIFIED_SYMBOL, 2),
+            (Kind.SYMBOL_UNDEFINED, 1),
+        ]
 
     def test_builtins_keywords_and_branch_names_are_not_flagged(self, repo: Path) -> None:
         write_file(
@@ -676,6 +726,31 @@ class TestStaleness:
         _, found = stale(committed)
         assert [f.message for f in found if f.slug == "a"] == [
             f"pkg.mod.Box.limit changed in {sha}"
+        ]
+
+    def test_symbols_in_conditional_blocks_and_init_track_their_ranges(
+        self, committed: Path
+    ) -> None:
+        write_file(
+            committed,
+            f"{PKG}/cond.py",
+            "import sys\n\nif sys.platform == 'x':\n    def f() -> int:\n        return 1\nelse:\n"
+            "    def g() -> int:\n        return 2\n\n\nclass K:\n    def __init__(self) -> None:\n"
+            "        self.a = 1\n        self.b = 2\n",
+        )
+        commit(committed, "packages")
+        put_a(committed, "`pkg.cond.f` `pkg.cond.g` `pkg.cond.K.a` `pkg.cond.K.b`")
+        commit(committed, "wiki", message="cite cond")
+        assert stale(committed) == ([], [])
+        cond = committed / PKG / "cond.py"
+        cond.write_text(
+            cond.read_text().replace("return 2", "return 3").replace("self.a = 1", "self.a = 5")
+        )
+        sha = commit(committed, "packages")
+        _, found = stale(committed)
+        assert sorted(messages(found, "a")) == [
+            f"pkg.cond.K.a changed in {sha}",
+            f"pkg.cond.g changed in {sha}",
         ]
 
     def test_added_or_removed_symbol_is_stale(self, committed: Path) -> None:
@@ -847,13 +922,21 @@ class TestMissingFiles:
         findings, _ = stale(cited_script)
         assert Kind.PATH_DELETED in kinds(findings, "a")
 
-    def test_renamed_or_deleted_module_makes_the_dotted_citation_undefined(
-        self, committed: Path
-    ) -> None:
+    def test_renamed_module_names_its_new_dotted_path(self, committed: Path) -> None:
         git(committed, "mv", MOD, f"{PKG}/renamed.py")
         commit(committed, "packages")
         findings, _ = stale(committed)
+        assert "cited module renamed: pkg.mod.Box.run -> pkg.renamed.Box.run" in messages(
+            findings, "a"
+        )
+        assert Kind.SYMBOL_UNDEFINED not in kinds(findings, "a")
+
+    def test_deleted_module_makes_the_dotted_citation_undefined(self, committed: Path) -> None:
+        git(committed, "rm", "-q", MOD)
+        git(committed, "commit", "-q", "-m", "delete")
+        findings, _ = stale(committed)
         assert Kind.SYMBOL_UNDEFINED in kinds(findings, "a")
+        assert Kind.PATH_RENAMED not in kinds(findings, "a")
 
     def test_deleted_top_level_files_are_errors_without_a_slash(self, cited_toml: Path) -> None:
         git(cited_toml, "rm", "-q", "notes.toml", "Makefile")
