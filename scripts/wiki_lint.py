@@ -80,14 +80,23 @@ def mask_fences(text: str) -> str:
     return FENCE_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
 
 
+def _is_tool_decorator(node: ast.expr) -> bool:
+    target = node.func if isinstance(node, ast.Call) else node
+    return isinstance(target, ast.Attribute) and target.attr == "tool"
+
+
 def docs_citation_forbidden(path: str) -> bool:
     return path.startswith("docs/") and not path.startswith(DOCS_ALLOWED)
 
 
-def _span(node: ast.AST) -> tuple[int, int]:
-    decorators = getattr(node, "decorator_list", [])
-    start = min([node.lineno, *(d.lineno for d in decorators)])  # type: ignore[attr-defined]
-    return start, node.end_lineno  # type: ignore[attr-defined, return-value]
+def _span(node: ast.stmt) -> tuple[int, int]:
+    decorators = (
+        node.decorator_list
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        else []
+    )
+    start = min([node.lineno, *(d.lineno for d in decorators)])
+    return start, node.end_lineno or node.lineno
 
 
 def _find_def(scope: list[ast.stmt], name: str) -> ast.stmt | None:
@@ -529,9 +538,7 @@ class WikiLinter:
                 continue
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and any(
-                    isinstance(d.func if isinstance(d, ast.Call) else d, ast.Attribute)
-                    and (d.func if isinstance(d, ast.Call) else d).attr == "tool"  # type: ignore[union-attr]
-                    for d in node.decorator_list
+                    _is_tool_decorator(d) for d in node.decorator_list
                 ):
                     if not any(
                         p == rel and sym.split(".")[-1] == node.name
