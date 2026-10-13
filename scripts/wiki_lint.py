@@ -578,7 +578,7 @@ class WikiLinter:
         target = (self.root / path).resolve()
         if target.is_file() and target.is_relative_to(self.root):
             self._register(slug, path, symbol, anchor, raw, target, lines)
-        elif HAS_EXT_RE.search(path) and ("/" in path or source):
+        elif HAS_EXT_RE.search(path) and (source or self._is_repo_path(path)):
             renamed = self._renamed_to(slug, path)
             if renamed:
                 self.errors[slug].append(f"cited path renamed to {renamed}: {raw}")
@@ -590,6 +590,11 @@ class WikiLinter:
                 self.errors[slug].append(f"qualify path: {raw} is {matches[0]}")
         elif source:
             self.errors[slug].append(f"cited path does not exist: {raw}")
+
+    def _is_repo_path(self, path: str) -> bool:
+        # Absolute paths and object-store keys (`latest/model.pkl`) are prose, not citations.
+        head = path.split("/", 1)[0]
+        return "/" in path and bool(head) and (self.root / head).exists()
 
     def _register(
         self,

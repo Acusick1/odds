@@ -1,22 +1,22 @@
 # Wiki schema
 
-The wiki is the agent-facing map of this repo: pages that explain what each subsystem does, why, and where its hazards are, and cite the code that does it. Code is authoritative; the wiki points into it and never replaces it. Agents read `index.md`, open one area index, then the page, then the cited code.
+The wiki is this repo's documentation. Its pages explain what each subsystem does, why it does it, and where its hazards are, and they cite the code that does it. Code is authoritative: the wiki points into the code and never restates it as a second source. Readers start at `index.md`, open one area index, then the page, then the cited code. `README.md` is the entry point for humans, and decisions live in `docs/adr/`.
 
 ## Layout
 
 ```
 wiki/
 ├── index.md          # root: hand-written, ≤500 words
-├── log.md            # append-only change log
 ├── SCHEMA.md
 └── <area>/
     ├── index.md      # area intro (hand-written) + page list (generated)
     └── <slug>.md
 ```
 
-- One directory per area. Areas follow the code's subsystems (for example ingestion, scheduling, training), not the old docs' boundaries. Decisions, experiments and how-tos live in the area they concern.
+- One directory per area. Areas follow the code's subsystems (for example ingestion, scheduling, training). Decisions, experiments and how-tos live in the area they concern.
 - No nesting below area level.
 - Slugs are lowercase, hyphenated and unique across the whole wiki.
+- History is in git. Pages describe the current state and never narrate changes.
 
 ### Root index
 
@@ -34,7 +34,7 @@ Each area `index.md` has YAML frontmatter with `title` and `description`, a shor
 
 ### Granularity
 
-A page covers one subject a developer changes or reasons about as a unit: a job, a pipeline, a table and its writer, a model-training stage, a decision. Someone asking about that subject should find the answer on that one page, including its hazards and the conventions that touch it, without needing a sibling page. Target 400–1200 words. Split only when a page passes ~1500 words or covers things that change independently. Repeat a one-line fact rather than force a hop; link for depth.
+A page covers one subject a developer changes or reasons about as a unit: a job, a pipeline, a table and its writer, a model-training stage, a decision. Someone asking about that subject should find the answer on that one page, including its hazards and the conventions that touch it, without needing a sibling page. Target 400–1200 words. Split a page only when it passes ~1500 words or covers things that change independently. Repeat a one-line fact rather than force a hop, and link for depth.
 
 ### Types
 
@@ -56,27 +56,28 @@ title: Fetch-tier classification
 description: How hours-to-kickoff maps to a fetch tier, which code paths assign tiers, and where they disagree.
 sources:
   - packages/odds-lambda/odds_lambda/tier_utils.py::calculate_tier
-  - docs/ARCHITECTURE.md#fetch-tiers
-verified: 7887039
 status: stable
 ---
 ```
 
-- `description` is one sentence saying what questions the page answers. It is what agents see in the area index, so write it for choosing whether to open the page.
-- `verified` is the short commit SHA at which every claim was last checked against the code.
-- `status` is `draft`, `stable` or `deprecated`. A deprecated page carries `superseded_by: <slug>` and a one-line body pointing to it. Delete it once nothing links to it.
+- `description` is one sentence saying what questions the page answers. Agents see it in the area index, so write it to help them choose whether to open the page.
+- `sources` lists the code the page as a whole describes. Inline citations cover individual claims.
+- `status` is `draft`, `stable` or `deprecated`. A deprecated page carries `superseded_by: <slug>` and a one-line body pointing to its replacement. Delete it once nothing links to it.
 
 ### Body
 
-Lead with what it is and where it lives. Follow with behaviour, then `## Hazards` (divergences, silent failures and traps, each cited), then `## Related` links.
+Lead with what the subject is and where it lives. Follow with its behaviour, then `## Hazards` (divergences, silent failures and traps, each cited), then `## Related` links.
 
 ## Citations
 
-- Cite code as `` `path/from/repo/root.py::symbol` ``. Use the symbol, never a line number. A bare path is allowed for whole files and for non-Python files.
-- Every non-obvious factual claim carries a citation inline or is covered by `sources`. Values, defaults and flags are cited, never restated bare.
-- Rationale needs a source (a PR, an ADR, an experiment page or a doc). Rationale without one is labelled `(inferred)`.
+- Cite Python as `` `path/from/repo/root.py::symbol` `` (dotted for methods: `Class.method`). Cite other files by path: Terraform, workflows, shell scripts, `pyproject.toml`. Never cite by line number.
+- An identifier in backticks that names a definition in `packages/` must carry its path. A bare `` `decide_forward` `` hides the claim from the staleness check.
+- A hazard that spans two files cites both.
+- A claim about CLI behaviour cites the command's function.
+- Every non-obvious factual claim carries an inline citation or is covered by `sources`. Values, defaults and flags are cited, never restated bare.
+- Rationale cites its evidence: an ADR, a PR (`#123`), a commit (`abc1234`, for evidence that only survives in history), an experiment page, or a results file under `experiments/results/`. Rationale with no evidence is labelled `(inferred)`.
 - Deployed AWS state cannot be verified from the repo. Pages that mention it say so and give the command that checks it.
-- When docs and code disagree, the page states what the code does and records the disagreement under `## Hazards`.
+- Pages do not cite `docs/`. The only exceptions are `docs/adr/` and `docs/agents/`.
 
 ## Links
 
@@ -84,26 +85,42 @@ Lead with what it is and where it lives. Follow with behaviour, then `## Hazards
 - The first mention of another page's subject in a body links to that page.
 - Every page is listed in its area index and has at least one other inbound link.
 
+## Staleness
+
+A page is stale when code it cites has changed since the page was last changed. Git supplies both sides, so pages carry no verification stamp:
+
+- For a `path::symbol` citation, the check looks for any commit after the page's last commit that touches the symbol's line range or adds or removes the symbol.
+- For a whole-file citation, any change to the file after the page's last commit counts.
+- Uncommitted changes count too. A cited symbol edited in the working tree marks the page stale unless the page is edited as well, so the check works as a pre-commit hook.
+- A renamed or deleted cited file is an error, not staleness.
+
+The lint prints each stale page with the changed symbols and the page lines that cite them.
+
+## Coverage
+
+Every scheduled job module (`packages/odds-lambda/odds_lambda/jobs/*.py`), every CLI command module (`packages/odds-cli/odds_cli/commands/*.py`) and every MCP tool function must be cited by at least one page, so a new job, command or tool fails the lint until it is documented.
+
 ## Operations
 
 **Query.** Read `index.md`, then the matching area index, then the page, then the cited code when you need certainty or the page is silent.
 
-**Update (in the PR that changes code).** `scripts/wiki_lint.py` flags every page whose cited files changed since its `verified` commit.
+**Update (in the change that touches code).**
 
-1. For each flagged page, re-check the claims that cite the changed files.
-2. Edit the page so it reads as current.
-3. Set `verified` to the PR's base commit or later.
-4. Create pages for new subjects.
-5. Run `scripts/wiki_lint.py --fix` to regenerate the area indexes.
-6. Append a line to `log.md`.
+1. Run `uv run python scripts/wiki_lint.py`.
+2. For each stale page, re-check the listed claims against the new code and edit the page so it reads as current. Editing the page clears the flag.
+3. Add pages for anything the coverage check reports.
+4. Run `uv run python scripts/wiki_lint.py --fix` to regenerate the area indexes.
 
-**Lint** (`uv run python scripts/wiki_lint.py`). It checks:
+**Lint.** `uv run python scripts/wiki_lint.py` runs in pre-commit and CI. It checks:
 
-- frontmatter fields and values;
+- frontmatter;
 - links and anchors;
 - that cited paths exist and cited symbols are defined;
-- that every page is listed in its area index and none are orphans;
+- that no identifiers are unqualified;
+- that no pages cite `docs/`;
+- area index membership and orphan pages;
 - that the generated index blocks are current;
-- staleness (cited paths changed since `verified`).
+- coverage;
+- staleness.
 
-It also writes `backlinks.json`, which maps each page to its inbound pages and each code path to the pages that cite it.
+It also writes `backlinks.json` (gitignored), which maps each page to its inbound pages and each code path to the pages that cite it.
