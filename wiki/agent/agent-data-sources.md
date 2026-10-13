@@ -17,7 +17,7 @@ status: stable
 
 # Agent data sources and rejected sources
 
-The [betting agent](betting-agent.md) draws on two kinds of source. The split decides where a new source belongs: stable structured data is collected and queried through MCP, while qualitative and fast-changing context is researched live. The reasons below are external facts the repo cannot verify, as of the dates given (April 2026); prices and tier names in the rejected-source table are likewise external. Only FPL (#255) and API-Football (#295, #296, closed unmerged) have repo evidence. The lineup decision is [ADR-0006](../../docs/adr/0006-lineups-from-web-research.md) and the Polymarket decision is [ADR-0007](../../docs/adr/0007-deprioritise-polymarket.md).
+The [betting agent](betting-agent.md) draws on two kinds of source. The split decides where a new source belongs: stable structured data is collected and queried through MCP, while qualitative and fast-changing context is researched live. The reasons below are external facts the repo cannot verify, as of the dates given (April 2026); prices and tier names in the rejected-source table are likewise external. The reasons were recorded in the agent data-sources doc this wiki replaced (added in 3f74022 on 2026-04-13, ESPN row revised in c0ecdf5 on 2026-04-14); only FPL (#255) has a repo experiment behind it. #295 and #296 record the attempted API-Football lineup tool (#296 closed unmerged), not the reasons it was rejected. The lineup decision is [ADR-0006](../../docs/adr/0006-lineups-from-web-research.md) and the Polymarket decision is [ADR-0007](../../docs/adr/0007-deprioritise-polymarket.md).
 
 ## Scheduled collection
 
@@ -66,9 +66,9 @@ Not collected on a schedule; the agent searches and browses these each wake-up w
 
 ### Lineup sourcing (2026-04-13)
 
-Evidence is limited to #296 (an API-Football lineup tool, closed unmerged) and the base prompt's "Lineup drops land roughly 60 minutes before kick-off" (`packages/odds-mcp/agents/epl/base.md`). The ESPN timing probes of 2026-04-13/14 have no results file.
+The record is the agent data-sources doc this wiki replaced, at 3f74022 (2026-04-13) and c0ecdf5 (the ESPN timing tests of 2026-04-13/14), plus the base prompt's "Lineup drops land roughly 60 minutes before kick-off" (`packages/odds-mcp/agents/epl/base.md`). #296, an API-Football lineup tool, was closed unmerged. No probe script or results file records the API or ESPN tests.
 
-Every structured lineup API investigated is paywalled, blocks current-season data on its free tier, or has unconfirmed pre-kickoff timing. The agent's web search and Playwright are the lineup source: BBC Sport publishes confirmed lineups within minutes of the official team sheet (KO-60), and the agent reads them directly ([agent prompts](agent-prompts.md)). That is why no scheduled lineup job exists, and why the `epl_lineup` training features come only from manually ingested historical lineups ([EPL context data](../collection/epl-context-data.md)). The decision is recorded in [ADR-0006](../../docs/adr/0006-lineups-from-web-research.md).
+Every structured lineup API investigated is paywalled, blocks current-season data on its free tier, or has unconfirmed pre-kickoff timing. The agent's web search and Playwright are the lineup source: BBC Sport publishes confirmed lineups within minutes of the official team sheet (KO-60), and the agent reads them directly ([agent prompts](agent-prompts.md)). The record concludes "No new infrastructure needed", and no scheduled lineup job exists; the `epl_lineup` training features come only from manually ingested historical lineups ([EPL context data](../collection/epl-context-data.md)). The decision is recorded in [ADR-0006](../../docs/adr/0006-lineups-from-web-research.md).
 
 ## Related
 

@@ -30,7 +30,7 @@ EPL and MLB are active, with agents in interactive evaluation, not autonomous pr
 
 ## Where the edge is meant to come from
 
-Breadth and speed of information synthesis by an LLM agent, not the XGBoost CLV model ([ADR-0005](../../docs/adr/0005-information-edge.md)). The deployed model is `epl-clv-home` `v308058c` with a CV R² of about 0.058: too weak to bet on alone, so it is a supplementary signal the agent treats as a sanity check. See [The betting agent](../agent/betting-agent.md) and [What the CLV model can and cannot do](../evaluation/clv-model-findings.md).
+Breadth and speed of information synthesis by an LLM agent, not the XGBoost CLV model ([ADR-0005](../../docs/adr/0005-information-edge.md)). The deployed model is `epl-clv-home` `v308058c` with a CV R² of about 0.058. It is a supplementary signal the agent treats as a sanity check. See [The betting agent](../agent/betting-agent.md) and [What the CLV model can and cannot do](../evaluation/clv-model-findings.md).
 
 ## What runs where
 

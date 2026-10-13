@@ -13,7 +13,7 @@ status: stable
 
 # Polymarket market character and data availability
 
-Polymarket was collected for NBA and is deprioritised as a trading venue ([ADR-0007](../../docs/adr/0007-deprioritise-polymarket.md)). UK trading is blocked for all sports (inferred; external fact, no repo evidence). In the early NBA experiments Polymarket correlated 0.9978 with sportsbook prices and the Polymarket features (a 16-column, NBA-only group) changed nothing ([exp-early-nba-signal-and-lstm](../evaluation/exp-early-nba-signal-and-lstm.md)). The pipeline that exists is described on [polymarket](polymarket.md).
+Polymarket was collected for NBA and is deprioritised as a trading venue ([ADR-0007](../../docs/adr/0007-deprioritise-polymarket.md)). UK trading is blocked for all sports (an external fact recorded on 2026-03-09 and 2026-04-17, which the repo cannot verify). In a February 2026 NBA cross-source check over 228 events, Polymarket correlated 0.9978 with sportsbook probabilities (#134), and at 230 events the Polymarket features (a 16-column, NBA-only group) showed no measurable effect (#136, [exp-early-nba-signal-and-lstm](../evaluation/exp-early-nba-signal-and-lstm.md)). The pipeline that exists is described on [polymarket](polymarket.md).
 
 ## Market character by sport
 

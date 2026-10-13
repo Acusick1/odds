@@ -13,11 +13,11 @@ status: stable
 
 # EPL sharp-reference experiments
 
-These runs are the evidence for [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md): PRs #217, #231, #253 and #234, plus `experiments/configs/xgboost_epl_hybrid_sharp.yaml` and `experiments/scripts/hybrid_sharp_validation.py`. The result tables below are as recorded in those PRs; no results artefact holds them.
+These runs are the evidence for [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md): PRs #217, #231, #253 and #234, plus `experiments/configs/xgboost_epl_hybrid_sharp.yaml` and `experiments/scripts/hybrid_sharp_validation.py`. The result tables below are as recorded in those PRs; no results artefact holds them (PR #253's MODELING.md entry points to `experiments/results/hybrid_sharp_validation/`, which was never committed).
 
 ## Context
 
-Pinnacle's public API stopped covering EPL events in January 2026, so 71 of about 1.8K events had no Pinnacle closing odds and were excluded. Betfair Exchange closing odds exist in football-data.co.uk from 2024-25 and as live snapshots from the Betfair job ([Betfair Exchange](../collection/betfair-exchange.md)). `betfair_exchange` has three writers: that job, FDUK `BFE*` columns and OddsPortal's Betfair row ([market-key dialects](../collection/sport-and-market-keys.md#market-key-dialects)).
+FDUK sources its Pinnacle odds from Pinnacle's public API. PR #217 recorded that the API became unreliable after July 2025 (81 events in 2025-26 without Pinnacle closing odds); PR #253 recorded a Pinnacle API shutdown in January 2026 that excluded 71 of about 1.8K events from training. Betfair Exchange closing odds exist in football-data.co.uk from 2024-25 and as live snapshots from the Betfair job ([Betfair Exchange](../collection/betfair-exchange.md)). `betfair_exchange` has three writers: that job, FDUK `BFE*` columns and OddsPortal's Betfair row ([market-key dialects](../collection/sport-and-market-keys.md#market-key-dialects)).
 
 ## Pinnacle as sharp reference (March 2026)
 
@@ -46,7 +46,7 @@ Expanding, step 150 (about 7 folds): tabular 0.000793, R² 0.019 ± 0.043; tabul
 
 ## Hybrid reference (2026-03-19)
 
-On 589 overlapping events Betfair Exchange `sharp_prob` correlates 0.9994 with Pinnacle, with a roughly 1.1 pp level shift that XGBoost absorbs through split points `(inferred)`. The hybrid recovers all 71 events (1,800 vs 1,729); folds 0-19 match Pinnacle-only and the two new folds score R² +7.4% and +2.7%; fixed-parameter run (expanding:50) R² 0.060 ± 0.080. Config: `experiments/configs/xgboost_epl_hybrid_sharp.yaml`; script: `experiments/scripts/hybrid_sharp_validation.py`.
+On 589 overlapping events Betfair Exchange `sharp_prob` correlates 0.9994 with Pinnacle, with a roughly 1.1 pp level shift. PR #253's MODELING.md entry states that XGBoost handles the shift through split-point adjustment; no run measures it. The hybrid recovers all 71 events (1,800 vs 1,729); folds 0-19 match Pinnacle-only and the two new folds score R² +7.4% and +2.7%; fixed-parameter run (expanding:50) R² 0.060 ± 0.080. Config: `experiments/configs/xgboost_epl_hybrid_sharp.yaml`; script: `experiments/scripts/hybrid_sharp_validation.py`.
 
 ## Caveats
 

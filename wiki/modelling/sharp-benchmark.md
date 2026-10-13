@@ -19,7 +19,7 @@ status: stable
 
 # Sharp benchmark and retail-sharp divergence
 
-The sharp benchmark is the price treated as closest to fair: Pinnacle, with Betfair Exchange as the fallback after Pinnacle's API stopped covering EPL in January 2026 (71 events lost; Betfair `sharp_prob` correlates 0.9994 with Pinnacle, about a 1.1 pp level shift). The decision and its evidence are [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md) and [EPL sharp-reference experiments](../evaluation/exp-epl-sharp-reference.md). FDUK's Pinnacle odds are also unreliable after July 2025 ([data sources](../collection/data-sources.md)).
+The sharp benchmark is the price treated as closest to fair: Pinnacle, with Betfair Exchange as the fallback after the Pinnacle API shutdown in January 2026 (71 EPL events lost, PR #253; Betfair `sharp_prob` correlates 0.9994 with Pinnacle, about a 1.1 pp level shift). The decision and its evidence are [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md) and [EPL sharp-reference experiments](../evaluation/exp-epl-sharp-reference.md). FDUK's Pinnacle odds are also unreliable after July 2025 ([data sources](../collection/data-sources.md)).
 
 It anchors the model's strongest feature, the retail-sharp divergence, and the agent's retail screener ([MCP market tools](../agent/mcp-market-tools.md#retail-edges)). Because the agent sees the same quantity directly through `odds_mcp.server.find_retail_edges`, the model adds little for it ([betting agent](../agent/betting-agent.md)).
 

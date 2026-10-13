@@ -38,7 +38,7 @@ The agent's behaviour is defined by prompt files in `packages/odds-mcp/agents/`:
 
 ## Role of the CLV model
 
-A supplementary signal: weak, unprofitable alone, and its strongest feature is the sharp-retail spread the agent sees directly via `odds_mcp.server.find_retail_edges`. The prompt treats models as supplementary sanity checks (`packages/odds-mcp/agents/common.md`) ([CLV model findings](../evaluation/clv-model-findings.md), [sharp benchmark](../modelling/sharp-benchmark.md), [ADR-0005](../../docs/adr/0005-information-edge.md)). Some code and comments still treat the CLV model as the edge ([project overview](../foundations/project-overview.md), [ADR-0005](../../docs/adr/0005-information-edge.md)).
+A supplementary signal: weak, unprofitable alone, and its strongest feature is the sharp-retail spread the agent sees directly via `odds_mcp.server.find_retail_edges`. The prompt treats models as supplementary sanity checks (`packages/odds-mcp/agents/common.md`) ([CLV model findings](../evaluation/clv-model-findings.md), [sharp benchmark](../modelling/sharp-benchmark.md), [ADR-0005](../../docs/adr/0005-information-edge.md)).
 
 ## EPL matchday timeline
 
