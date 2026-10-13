@@ -7,17 +7,17 @@ sources:
   - scripts/check_game_tier_coverage.py
   - scripts/check_tier_distribution.py
   - scripts/verify-schedules.sh
-  - packages/odds-lambda/odds_lambda/scheduling/decision.py
-  - packages/odds-lambda/odds_lambda/scheduling/backends/aws.py
-  - packages/odds-lambda/odds_lambda/lambda_handler.py::lambda_handler
+  - odds_lambda.scheduling.decision
+  - odds_lambda.scheduling.backends.aws
+  - odds_lambda.lambda_handler.lambda_handler
   - deployment/aws/terraform/lambda.tf
   - deployment/aws/terraform/scraper.tf
   - deployment/aws/terraform/eventbridge.tf
-  - packages/odds-lambda/odds_lambda/fetch_tier.py
-  - packages/odds-lambda/odds_lambda/tier_utils.py
-  - packages/odds-lambda/odds_lambda/storage/tier_validator.py::TierCoverageValidator
-  - packages/odds-lambda/odds_lambda/jobs/fetch_odds.py
-  - packages/odds-lambda/odds_lambda/storage/writers.py
+  - odds_lambda.fetch_tier
+  - odds_lambda.tier_utils
+  - odds_lambda.storage.tier_validator.TierCoverageValidator
+  - odds_lambda.jobs.fetch_odds
+  - odds_lambda.storage.writers
 status: stable
 ---
 
@@ -43,14 +43,14 @@ Region `eu-west-1`. Scheduler function `odds-scheduler`, log group `/aws/lambda/
      | jq -r '.logStreams[] | "\(.lastEventTimestamp | tonumber / 1000 | strftime("%Y-%m-%d %H:%M:%S UTC")) | \(.logStreamName)"'
    ```
    A self-scheduled rule shows a one-time `cron(... <year>)`; a rule still on `rate(1 day)` was never rescheduled.
-3. **Database vs fixtures.** `uv run python scripts/check_games_in_database.py [N]` lists the next scheduled games in the database, not the league's real fixtures. If games are missing, `fetch-odds` has not run; return to step 2. In code, `missing_games` in the tier validator means a completed game the Odds API returns that is absent from `events` (`packages/odds-lambda/odds_lambda/storage/tier_validator.py::TierCoverageValidator`). `validate daily` buckets days noon-to-noon UTC and compares against NBA discovery only ([Validation and coverage](../storage/data-validation.md)).
+3. **Database vs fixtures.** `uv run python scripts/check_games_in_database.py [N]` lists the next scheduled games in the database, not the league's real fixtures. If games are missing, `fetch-odds` has not run; return to step 2. In code, `missing_games` in the tier validator means a completed game the Odds API returns that is absent from `events` (`odds_lambda.storage.tier_validator.TierCoverageValidator`). `validate daily` buckets days noon-to-noon UTC and compares against NBA discovery only ([Validation and coverage](../storage/data-validation.md)).
 4. **Tier coverage.** `check_game_tier_coverage.py --date D` or `--event ID`; `check_tier_distribution.py [days]`. Tiers should match hours before kickoff and each game should span several ([Fetch tier](../storage/fetch-tier.md)). Four boundary encodings disagree at 3/12/24/72 h, so a game on a boundary may legitimately differ between decision and storage.
 5. **Logs.** `aws logs tail /aws/lambda/odds-scheduler --since 2h --format short | grep -i "fetch_odds\|tier"`. Look for `fetch_odds_job_started` (execution began), `fetch_odds_executing` (tier and reason, for example "Game in 7.5h: Team A vs Team B (pregame tier)"), `odds_snapshot_stored` (per-event `fetch_tier`), `fetch_odds_next_scheduled` and `eventbridge_rule_updated` ([Odds API ingestion](../collection/odds-api-ingestion.md)).
 
 ## Common issues
 
 - **Missing tier coverage.** Causes: EventBridge did not trigger; a Lambda error stopped the job before it scheduled the next run; a rule was edited by hand. Fix: wait for the next run, or redeploy; `deploy-prod.yml` re-invokes jobs and re-activates chains ([AWS infrastructure](../operations/aws-infrastructure.md)).
-- **All events one tier.** The tier is computed per event in `packages/odds-lambda/odds_lambda/storage/writers.py::OddsWriter.store_odds_snapshot` (`packages/odds-lambda/odds_lambda/storage/writers.py`); migration `9ff81f073e6b` recalculated older rows ([Odds snapshots and OddsWriter](../storage/odds-storage.md)).
+- **All events one tier.** The tier is computed per event in `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` (`odds_lambda.storage.writers`); migration `9ff81f073e6b` recalculated older rows ([Odds snapshots and OddsWriter](../storage/odds-storage.md)).
 - **Lambda not running.** `aws events describe-rule --name odds-fetch-odds-epl`, `list-targets-by-rule`, then check the rule's invoke permission on the function. Fix by redeploying ([AWS infrastructure](../operations/aws-infrastructure.md)).
 - **Dead chain.** Past-year cron expressions are dead rules; `scripts/verify-schedules.sh` finds them.
 

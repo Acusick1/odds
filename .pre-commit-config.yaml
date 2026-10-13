@@ -20,7 +20,7 @@ repos:
         name: wiki-lint
         entry: python scripts/wiki_lint.py --no-write --fail-stale
         language: python
-        additional_dependencies: [pyyaml, pydantic]
+        additional_dependencies: [pyyaml, pydantic, griffe]
         pass_filenames: false
         always_run: true
   - repo: https://github.com/lycheeverse/lychee

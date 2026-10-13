@@ -7,16 +7,18 @@ import ast
 import builtins
 import json
 import keyword
+import logging
 import re
 import subprocess
 import sys
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from pathlib import Path
 from typing import NamedTuple, TypeVar
 
+import griffe
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -30,7 +32,9 @@ DEFAULT_MODULE_DIRS = (
     "packages/odds-cli/odds_cli/commands",
 )
 DEFAULT_MCP_DIR = "packages/odds-mcp/odds_mcp"
-DEFAULT_SYMBOL_ROOT = "packages"
+DEFAULT_PACKAGES_DIR = "packages"
+DEFAULT_SYMBOL_ROOT = DEFAULT_PACKAGES_DIR
+ALLOWED_WORDS = frozenset({"main", "master"})
 SKIP_DIRS = {"__pycache__", ".venv", "node_modules", ".git"}
 COVERAGE_KEY = "coverage"
 
@@ -39,8 +43,10 @@ FENCE_RE = re.compile(r"^(```|~~~).*?^\1[ \t]*$", re.DOTALL | re.MULTILINE)
 LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)")
 WIKILINK_RE = re.compile(r"\[\[[^\]]+\]\]")
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
-CITE_RE = re.compile(r"^([\w.\-/]+?)(?:::([\w.]+))?(?:#[\w\-]+)?$")
-IDENT_RE = re.compile(r"^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)(?:\(\))?$")
+PATH_RE = re.compile(r"^([\w.\-/]+?)(?:#[\w\-]+)?$")
+PATH_SYMBOL_RE = re.compile(r"^([\w.\-/]+?\.\w+)::([\w.]+)$")
+DOTTED_RE = re.compile(r"^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(?:\(\))?$")
+BARE_RE = re.compile(r"^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)(?:\(\))?$")
 CONSTANT_RE = re.compile(r"^[A-Z][A-Z0-9_]+$")
 HAS_EXT_RE = re.compile(r"\.[A-Za-z]\w*$")
 HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
@@ -51,11 +57,8 @@ M = TypeVar("M", bound=BaseModel)
 
 class PageType(StrEnum):
     # Declaration order is the group order of the generated area index.
-    CONCEPT = "concept"
-    PROCESS = "process"
-    COMPONENT = "component"
-    DECISION = "decision"
-    EXPERIMENT = "experiment"
+    REFERENCE = "reference"
+    EXPLANATION = "explanation"
     HOWTO = "howto"
 
     @property
@@ -64,12 +67,9 @@ class PageType(StrEnum):
 
 
 TYPE_HEADINGS = {
-    PageType.CONCEPT: "Concepts",
-    PageType.PROCESS: "Processes",
-    PageType.COMPONENT: "Components",
-    PageType.DECISION: "Decisions",
-    PageType.EXPERIMENT: "Experiments",
-    PageType.HOWTO: "How-tos",
+    PageType.REFERENCE: "Reference",
+    PageType.EXPLANATION: "Explanation",
+    PageType.HOWTO: "How-to guides",
 }
 
 
@@ -116,6 +116,8 @@ class Kind(Enum):
     PATH_DELETED = "path deleted"
     PATH_RENAMED = "path renamed"
     QUALIFY_PATH = "qualify path"
+    PYTHON_PATH = "python cited by path"
+    PATH_SYMBOL = "path::symbol syntax"
     SYMBOL_UNDEFINED = "symbol undefined"
     UNQUALIFIED_SYMBOL = "unqualified symbol"
     AMBIGUOUS_SYMBOL = "ambiguous symbol"
@@ -141,6 +143,9 @@ class Finding:
 
 
 class Citation(NamedTuple):
+    """A cited target: `label` is what the page wrote, `path`/`symbol` locate it in the repo."""
+
+    label: str
     path: str
     symbol: str | None
 
@@ -396,34 +401,115 @@ class GitHistory:
 
 @dataclass
 class SymbolIndex:
-    """Top-level names and `Class.member` names under the symbol root, with defining paths."""
+    """Top-level names and `Class.member` names across the packages, with dotted paths."""
 
     names: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
     members: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
 
-    @classmethod
-    def build(cls, root: Path, symbol_root: str) -> SymbolIndex:
-        index = cls()
-        for file in sorted((root / symbol_root).rglob("*.py")):
-            if SKIP_DIRS & set(file.parts):
-                continue
-            try:
-                tree = ast.parse(file.read_text(errors="replace"))
-            except SyntaxError:
-                continue
-            rel = file.relative_to(root).as_posix()
-            for node in tree.body:
-                for name in bound_names(node):
-                    if isinstance(node, FunctionOrClass) or CONSTANT_RE.match(name):
-                        index.names[name].append(rel)
-                if isinstance(node, ast.ClassDef):
-                    for child in node.body:
-                        for name in bound_names(child):
-                            index.members[f"{node.name}.{name}"].append(rel)
-        return index
-
     def lookup(self, token: str) -> list[str]:
         return self.members.get(token) or self.names.get(token) or []
+
+
+class Target(NamedTuple):
+    """Where a dotted citation lives: a repo file, and a symbol path within it (None: whole file)."""
+
+    path: str
+    symbol: str | None
+
+
+@dataclass
+class Packages:
+    """Installed Python packages, loaded statically with griffe (nothing is imported)."""
+
+    root: Path
+    search_roots: tuple[Path, ...]
+    names: dict[str, Path] = field(default_factory=dict)
+    _collection: griffe.ModulesCollection | None = None
+    _index: SymbolIndex | None = None
+
+    @classmethod
+    def discover(cls, root: Path, package_roots: Sequence[str] | None) -> Packages:
+        """Package roots hold importable packages: dirs with an `__init__.py` directly inside."""
+        if package_roots is None:
+            base = root / DEFAULT_PACKAGES_DIR
+            search = tuple(sorted(d for d in base.glob("*") if d.is_dir())) if base.is_dir() else ()
+        else:
+            search = tuple(root / r for r in package_roots)
+        packages = cls(root, search)
+        for search_root in search:
+            for init in sorted(search_root.glob("*/__init__.py")):
+                if not SKIP_DIRS & set(init.parts):
+                    packages.names.setdefault(init.parent.name, search_root)
+        return packages
+
+    def module_name(self, rel: str) -> str | None:
+        """Dotted module of a repo-relative `.py` path inside a package, else None."""
+        path = self.root / rel
+        for name, search_root in self.names.items():
+            package_dir = search_root / name
+            if path.suffix == ".py" and path.is_relative_to(package_dir):
+                parts = [name, *path.relative_to(package_dir).with_suffix("").parts]
+                return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+        return None
+
+    def _modules(self) -> griffe.ModulesCollection:
+        if self._collection is None:
+            logging.getLogger("griffe").setLevel(logging.CRITICAL)
+            loader = griffe.GriffeLoader(
+                search_paths=list(self.search_roots), allow_inspection=False
+            )
+            for name in self.names:
+                loader.load(name)
+            loader.resolve_aliases(implicit=False, external=False)
+            self._collection = loader.modules_collection
+        return self._collection
+
+    def _final(self, obj: griffe.Object | griffe.Alias) -> griffe.Object | None:
+        if not isinstance(obj, griffe.Alias):
+            return obj
+        try:
+            return obj.final_target
+        except griffe.AliasResolutionError:
+            return None
+
+    def resolve(self, dotted: str) -> Target | None:
+        """Aliases (re-exports) resolve to their definition; unresolved imports do not resolve."""
+        if dotted.split(".")[0] not in self.names:
+            return None
+        try:
+            found = self._modules()[dotted]
+        except KeyError:
+            return None
+        obj = self._final(found)
+        if obj is None or obj.filepath is None or isinstance(obj.filepath, list):
+            return None
+        path = Path(obj.filepath).resolve().relative_to(self.root).as_posix()
+        if obj.is_module:
+            return Target(path, None)
+        return Target(path, obj.path[len(obj.module.path) + 1 :])
+
+    def symbol_index(self) -> SymbolIndex:
+        if self._index is None:
+            index = SymbolIndex()
+            for name in self.names:
+                self._index_module(index, self._modules()[name])
+            self._index = index
+        return self._index
+
+    def _index_module(self, index: SymbolIndex, module: griffe.Module) -> None:
+        for member in module.members.values():
+            if isinstance(member, griffe.Alias):
+                continue
+            if isinstance(member, griffe.Module):
+                self._index_module(index, member)
+            elif member.is_function or member.is_class or CONSTANT_RE.match(member.name):
+                index.names[member.name].append(member.path)
+            if isinstance(member, griffe.Class):
+                for child in member.members.values():
+                    if not isinstance(child, griffe.Alias) and (
+                        child.is_function or child.is_attribute
+                    ):
+                        index.members[f"{member.name}.{child.name}"].append(child.path)
 
 
 def generate_page_list(area: str, pages: Iterable[Page]) -> str:
@@ -454,6 +540,7 @@ class WikiLinter:
         module_dirs: tuple[str, ...] = DEFAULT_MODULE_DIRS,
         mcp_dir: str = DEFAULT_MCP_DIR,
         symbol_root: str = DEFAULT_SYMBOL_ROOT,
+        package_roots: Sequence[str] | None = None,
     ) -> None:
         self.wiki_dir = wiki_dir.resolve()
         self.root = root.resolve()
@@ -466,7 +553,7 @@ class WikiLinter:
         self.pages: dict[str, Page] = {}
         self.inbound: dict[str, set[str]] = {}
         self.cites: dict[str, set[str]] = defaultdict(set)
-        self._symbol_index: SymbolIndex | None = None
+        self.packages = Packages.discover(self.root, package_roots)
         self._basename_index: dict[str, list[str]] | None = None
         self._sources: dict[str, Source] = {}
 
@@ -653,21 +740,17 @@ class WikiLinter:
         if self.history.is_modified(page.rel):
             return
         base = self.history.last_commit(page.rel)
-        for citation, lines in sorted(
-            page.citations.items(), key=lambda kv: (kv[0].path, kv[0].symbol or "")
-        ):
+        for citation, lines in sorted(page.citations.items(), key=lambda kv: kv[0].label):
             if not (self.root / citation.path).is_file():
                 continue
-            symbol = citation.symbol if citation.path.endswith(".py") else None
-            changes = self.history.changes_since(base, citation.path, symbol)
+            changes = self.history.changes_since(base, citation.path, citation.symbol)
             if changes:
-                label = f"{citation.path}::{citation.symbol}" if citation.symbol else citation.path
-                self._add(page.slug, Kind.STALE, f"{label} changed in {changes.describe()}", lines)
-
-    def _symbols(self) -> SymbolIndex:
-        if self._symbol_index is None:
-            self._symbol_index = SymbolIndex.build(self.root, self.symbol_root)
-        return self._symbol_index
+                self._add(
+                    page.slug,
+                    Kind.STALE,
+                    f"{citation.label} changed in {changes.describe()}",
+                    lines,
+                )
 
     def _basenames(self) -> dict[str, list[str]]:
         if self._basename_index is None:
@@ -683,19 +766,21 @@ class WikiLinter:
             self._sources[path] = Source.parse((self.root / path).read_text(errors="replace"))
         return self._sources[path]
 
+    def _dotted(self, rel: str) -> str:
+        return self.packages.module_name(rel) or rel
+
     def _check_coverage(self) -> None:
         cited_symbols = {
-            (c.path, c.symbol.split(".")[-1])
-            for page in self.pages.values()
-            for c in page.citations
-            if c.symbol
+            (c.path, c.symbol) for page in self.pages.values() for c in page.citations if c.symbol
         }
         for directory in self.module_dirs:
             for file in sorted((self.root / directory).glob("*.py")):
                 rel = self._rel(file)
                 if file.name != "__init__.py" and rel not in self.cites:
                     self._add(
-                        COVERAGE_KEY, Kind.COVERAGE_MODULE, f"module not cited by any page: {rel}"
+                        COVERAGE_KEY,
+                        Kind.COVERAGE_MODULE,
+                        f"module not cited by any page: {self._dotted(rel)}",
                     )
         for file in sorted((self.root / self.mcp_dir).rglob("*.py")):
             if SKIP_DIRS & set(file.parts):
@@ -713,7 +798,7 @@ class WikiLinter:
                     self._add(
                         COVERAGE_KEY,
                         Kind.COVERAGE_MCP_TOOL,
-                        f"MCP tool not cited by any page: {rel}::{node.name}",
+                        f"MCP tool not cited by any page: {self._dotted(rel)}.{node.name}",
                     )
 
     def _check_source(self, page: Page, source: str) -> None:
@@ -733,26 +818,30 @@ class WikiLinter:
             self._check_citation(page, raw, {line})
 
     def _flag_unqualified(self, page: Page, token: str, line: int) -> bool:
-        ident = IDENT_RE.match(token)
+        ident = BARE_RE.match(token)
         if not ident or (self.root / token).is_file():
             return False
         name = ident.group(1)
-        if keyword.iskeyword(name) or hasattr(builtins, name):
+        if (
+            name in ALLOWED_WORDS
+            or name.split(".")[0] in self.packages.names
+            or keyword.iskeyword(name)
+            or hasattr(builtins, name)
+        ):
             return False
-        defined = self._symbols().lookup(name)
+        defined = sorted(self.packages.symbol_index().lookup(name))
         if len(defined) == 1:
             self._add(
                 page.slug,
                 Kind.UNQUALIFIED_SYMBOL,
-                f"unqualified symbol {name}: cite as {defined[0]}::{name}",
+                f"unqualified symbol {name}: cite as {defined[0]}",
                 [line],
             )
         elif defined:
-            options = ", ".join(f"{path}::{name}" for path in defined)
             self._add(
                 page.slug,
                 Kind.AMBIGUOUS_SYMBOL,
-                f"ambiguous symbol {name}: cite as one of {options}",
+                f"ambiguous symbol {name}: cite as one of {', '.join(defined)}",
                 [line],
             )
         return bool(defined)
@@ -763,7 +852,23 @@ class WikiLinter:
         text = raw.strip()
         while text.startswith("./"):
             text = text[2:]
-        match = CITE_RE.match(text)
+        dotted = DOTTED_RE.match(text)
+        if dotted and dotted.group(1).split(".")[0] in self.packages.names:
+            self._check_dotted(page, dotted.group(1), raw, lines)
+            return
+        symbol_syntax = PATH_SYMBOL_RE.match(text)
+        if symbol_syntax:
+            path, symbol = symbol_syntax.groups()
+            module = self.packages.module_name(path)
+            hint = f"{module}.{symbol}" if module else "<dotted path>"
+            self._add(
+                page.slug,
+                Kind.PATH_SYMBOL,
+                f"use dotted path, not path::symbol: {raw} -> {hint}",
+                lines,
+            )
+            return
+        match = PATH_RE.match(text)
         if not match:
             if is_source:
                 self._add(
@@ -773,13 +878,22 @@ class WikiLinter:
                     lines,
                 )
             return
-        path, symbol = match.groups()
+        path = match.group(1)
         if docs_citation_forbidden(path):
             self._add(page.slug, Kind.DOCS_CITATION, f"pages do not cite docs/: {raw}", lines)
             return
         target = (self.root / path).resolve()
         if target.is_file() and target.is_relative_to(self.root):
-            self._register(page, path, symbol, raw, lines)
+            module = self.packages.module_name(path)
+            if module:
+                self._add(
+                    page.slug,
+                    Kind.PYTHON_PATH,
+                    f"cite as dotted path {module}: {raw}",
+                    lines,
+                )
+                return
+            self._register(page, Citation(path, path, None), lines)
             return
         base = self.history.last_commit(page.rel)
         if path in self.history.tracked_at(base):
@@ -795,24 +909,26 @@ class WikiLinter:
         elif HAS_EXT_RE.search(path):
             matches = self._basenames().get(path, [])
             if len(matches) == 1:
-                self._add(
-                    page.slug, Kind.QUALIFY_PATH, f"qualify path: {raw} is {matches[0]}", lines
-                )
+                hint = self.packages.module_name(matches[0]) or matches[0]
+                self._add(page.slug, Kind.QUALIFY_PATH, f"qualify path: {raw} is {hint}", lines)
         elif is_source:
             self._add(page.slug, Kind.PATH_MISSING, f"cited path does not exist: {raw}", lines)
+
+    def _check_dotted(self, page: Page, dotted: str, raw: str, lines: set[int]) -> None:
+        target = self.packages.resolve(dotted)
+        if target is None:
+            self._add(page.slug, Kind.SYMBOL_UNDEFINED, f"cited symbol not defined: {raw}", lines)
+            return
+        self._register(page, Citation(dotted, target.path, target.symbol), lines)
 
     def _is_repo_path(self, path: str) -> bool:
         # Absolute paths and object-store keys (`latest/model.pkl`) are prose, not citations.
         head = path.split("/", 1)[0]
         return "/" in path and bool(head) and (self.root / head).exists()
 
-    def _register(
-        self, page: Page, path: str, symbol: str | None, raw: str, lines: set[int]
-    ) -> None:
-        self.cites[path].add(page.slug)
-        page.citations.setdefault(Citation(path, symbol), set()).update(lines)
-        if symbol and path.endswith(".py") and self._source(path).extent(symbol) is None:
-            self._add(page.slug, Kind.SYMBOL_UNDEFINED, f"cited symbol not defined: {raw}", lines)
+    def _register(self, page: Page, citation: Citation, lines: set[int]) -> None:
+        self.cites[citation.path].add(page.slug)
+        page.citations.setdefault(citation, set()).update(lines)
 
     def _check_links(self, slug: str, path: Path, text: str) -> list[Path]:
         """Report wikilinks and docs/ links; return the existing files linked to.
@@ -874,8 +990,9 @@ def lint(
     write: bool = True,
     fix: bool = False,
     fail_stale: bool = False,
+    package_roots: Sequence[str] | None = None,
 ) -> int:
-    linter = WikiLinter(wiki_dir, root, fix=fix)
+    linter = WikiLinter(wiki_dir, root, fix=fix, package_roots=package_roots)
     linter.run()
     for line in render(linter.findings):
         print(line)

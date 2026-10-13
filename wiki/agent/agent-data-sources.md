@@ -3,11 +3,11 @@ type: concept
 title: Agent data sources and rejected sources
 description: Which sources are collected on a schedule and exposed through MCP versus researched live each wake-up, why lineups come from web search, and why each evaluated source was rejected.
 sources:
-  - packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal.py::CADENCE
-  - packages/odds-lambda/odds_lambda/jobs/fetch_betfair_exchange.py::CADENCE
-  - packages/odds-lambda/odds_lambda/scheduling/jobs.py::_JOB_CRON_MAP
-  - packages/odds-lambda/odds_lambda/oddsportal_common.py::BOOKMAKER_KEY_MAP
-  - packages/odds-lambda/odds_lambda/espn_fixture_fetcher.py::EspnFixtureFetcher
+  - odds_lambda.jobs.fetch_oddsportal.CADENCE
+  - odds_lambda.jobs.fetch_betfair_exchange.CADENCE
+  - odds_lambda.scheduling.jobs._JOB_CRON_MAP
+  - odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP
+  - odds_lambda.espn_fixture_fetcher.EspnFixtureFetcher
   - scripts/ingest_football_data_uk.py
   - scripts/ingest_espn_lineups.py
   - packages/odds-mcp/agents/epl/base.md
@@ -25,8 +25,8 @@ Collected by jobs or ingestion scripts into the database and available through [
 
 | Source | Provides | Collection | Page |
 |---|---|---|---|
-| OddsPortal | UK multi-bookmaker odds (`packages/odds-lambda/odds_lambda/oddsportal_common.py::BOOKMAKER_KEY_MAP`), upcoming and closing | Self-scheduling by kickoff proximity, 30 min to 2 h (`packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal.py::CADENCE`) | [OddsPortal](../collection/oddsportal.md) |
-| Betfair Exchange | Best back/lay Match Odds, the sharp reference | Self-scheduling, 15 min to 2 h (`packages/odds-lambda/odds_lambda/jobs/fetch_betfair_exchange.py::CADENCE`) | [Betfair](../collection/betfair-exchange.md) |
+| OddsPortal | UK multi-bookmaker odds (`odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP`), upcoming and closing | Self-scheduling by kickoff proximity, 30 min to 2 h (`odds_lambda.jobs.fetch_oddsportal.CADENCE`) | [OddsPortal](../collection/oddsportal.md) |
+| Betfair Exchange | Best back/lay Match Odds, the sharp reference | Self-scheduling, 15 min to 2 h (`odds_lambda.jobs.fetch_betfair_exchange.CADENCE`) | [Betfair](../collection/betfair-exchange.md) |
 | The Odds API | US bookmaker odds | Self-scheduling by fetch tier; 500 units per month per free key | [Odds API client](../collection/odds-api-client-and-quota.md) |
 | football-data.co.uk | Historical EPL, Pinnacle and Betfair closing odds | Manual script | [historical loads](../collection/howto-load-historical-odds.md) |
 | ESPN fixtures | All-competition EPL schedule | Daily job (cron in `_JOB_CRON_MAP`) | [EPL context](../collection/epl-context-data.md) |
@@ -72,10 +72,10 @@ Every structured lineup API investigated is paywalled, blocks current-season dat
 
 ## Hazards
 
-- The cadence column above summarises code; the `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal.py::CADENCE` and `packages/odds-lambda/odds_lambda/scheduling/jobs.py::_JOB_CRON_MAP` values win.
+- The cadence column above summarises code; the `odds_lambda.jobs.fetch_oddsportal.CADENCE` and `odds_lambda.scheduling.jobs._JOB_CRON_MAP` values win.
 - The on-demand table is not backed by code: nothing in the repo fetches those sites, and what the agent does with them is defined in the prompt files under `packages/odds-mcp/agents/` ([betting agent](betting-agent.md#prompts)).
-- Only the 500-unit quota is a code default (`packages/odds-core/odds_core/config.py::APIConfig`); a paid key changes it ([quota](../collection/odds-api-client-and-quota.md)).
-- ESPN is still used in the pipeline for fixtures (`packages/odds-lambda/odds_lambda/espn_fixture_fetcher.py::EspnFixtureFetcher`) and a manual lineup ingestion script exists (`scripts/ingest_espn_lineups.py`); the rejection applies to lineup timing for the agent, not to those feeds ([EPL context data](../collection/epl-context-data.md)).
+- Only the 500-unit quota is a code default (`odds_core.config.APIConfig`); a paid key changes it ([quota](../collection/odds-api-client-and-quota.md)).
+- ESPN is still used in the pipeline for fixtures (`odds_lambda.espn_fixture_fetcher.EspnFixtureFetcher`) and a manual lineup ingestion script exists (`scripts/ingest_espn_lineups.py`); the rejection applies to lineup timing for the agent, not to those feeds ([EPL context data](../collection/epl-context-data.md)).
 - Prices and tier names in the rejected-source table are external facts the repo cannot verify.
 
 ## Related

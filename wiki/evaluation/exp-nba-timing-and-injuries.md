@@ -6,15 +6,15 @@ sources:
   - experiments/results/exp4_hours_to_game/FINDINGS.md
   - experiments/results/exp6_learning_curve/FINDINGS.md
   - experiments/results/exp6b_injury_closing_tier/FINDINGS.md
-  - packages/odds-cli/odds_cli/commands/injuries.py::fetch
+  - odds_cli.commands.injuries.fetch
   - experiments/scripts/exp4_hours_to_game.py
   - experiments/configs/xgboost_bet365_injuries.yaml
   - experiments/configs/xgboost_bet365_tuning.yaml
   - experiments/configs/xgboost_bet365_baseline_tuning.yaml
-  - packages/odds-analytics/odds_analytics/injury_features.py::extract_injury_features
-  - packages/odds-lambda/odds_lambda/fetch_tier.py::FetchTier
-  - packages/odds-lambda/odds_lambda/tier_utils.py::calculate_tier
-  - packages/odds-lambda/odds_lambda/oddsportal_common.py::hours_to_tier
+  - odds_analytics.injury_features.extract_injury_features
+  - odds_lambda.fetch_tier.FetchTier
+  - odds_lambda.tier_utils.calculate_tier
+  - odds_lambda.oddsportal_common.hours_to_tier
 status: stable
 ---
 
@@ -59,7 +59,7 @@ Implications:
 2. The sharp opening line is Pinnacle's first line ([sharp benchmark](../modelling/sharp-benchmark.md)).
 3. Most line movement occurs 12-24 h out, when sharp money enters via Pinnacle `(inferred)`.
 4. Early soft-book lines are less predictive because they are adjusted when the sharp book opens `(inferred)`.
-5. Opening-tier snapshots (72+ h) capture only soft-book lines; the sharp tier (12-24 h) is where Pinnacle first appears. These are the code's tier bounds: `packages/odds-lambda/odds_lambda/fetch_tier.py::FetchTier.max_hours` gives OPENING above 72 h, EARLY up to 72 h, SHARP up to 24 h, PREGAME up to 12 h, CLOSING up to 3 h (`packages/odds-lambda/odds_lambda/fetch_tier.py::FetchTier`).
+5. Opening-tier snapshots (72+ h) capture only soft-book lines; the sharp tier (12-24 h) is where Pinnacle first appears. These are the code's tier bounds: `odds_lambda.fetch_tier.FetchTier.max_hours` gives OPENING above 72 h, EARLY up to 72 h, SHARP up to 24 h, PREGAME up to 12 h, CLOSING up to 3 h (`odds_lambda.fetch_tier.FetchTier`).
 
 ## Hours to game (Exp 4)
 
@@ -77,11 +77,11 @@ Question: when before the game should a decision be made? Exp 4 (2026-02-28, git
 - Probability level correlates negatively with CLV close to the game (reversion) and positively far from it.
 - Per-bin XGBoost models were all R² < 0 (27-317 training samples per bin); the pooled model is -0.009, with 12-18 h and 18-24 h the only bins with MSE ratio below 1.
 
-**Conclusion.** The default sampler window is pregame 3-12 h, with no evidence to change it. The dataset is too small to name an optimal hour, and the 5K-event OddsPortal data (opening and closing snapshots only) cannot answer timing questions. The production model samples the `sharp` tier instead, and `packages/odds-analytics/odds_analytics/feature_groups.py::TierSampler` falls back to farther tiers when the requested one is absent: about 93% of "pregame" OddsPortal events used the sharp snapshot ([decision time](../modelling/decision-time-and-look-ahead.md)).
+**Conclusion.** The default sampler window is pregame 3-12 h, with no evidence to change it. The dataset is too small to name an optimal hour, and the 5K-event OddsPortal data (opening and closing snapshots only) cannot answer timing questions. The production model samples the `sharp` tier instead, and `odds_analytics.feature_groups.TierSampler` falls back to farther tiers when the requested one is absent: about 93% of "pregame" OddsPortal events used the sharp snapshot ([decision time](../modelling/decision-time-and-look-ahead.md)).
 
 ## NBA injury features (Exp 6, 6b)
 
-Conclusion: injury features add no predictive signal for CLV at any decision tier once models are tuned the same way. The pipeline still collects the data (manual CLI only, no scheduled job: `packages/odds-cli/odds_cli/commands/injuries.py::fetch`) and the feature group still exists, but the deployed model does not use it ([NBA injuries and stats](../collection/nba-injuries-and-stats.md), [feature pipeline](../modelling/feature-pipeline.md)).
+Conclusion: injury features add no predictive signal for CLV at any decision tier once models are tuned the same way. The pipeline still collects the data (manual CLI only, no scheduled job: `odds_cli.commands.injuries.fetch`) and the feature group still exists, but the deployed model does not use it ([NBA injuries and stats](../collection/nba-injuries-and-stats.md), [feature pipeline](../modelling/feature-pipeline.md)).
 
 - **First positive result** (2026-02-20, #160, 800 events, Pinnacle target, tabular 4 + injury 6 + rest 5 + timing 3 features, 100-trial Optuna): val R² 0.050, CV R² = 0.020 ± 0.025, injuries 55% of feature importance, 6 dead features.
 - **bet365 at scale** (2026-02-27, #166, about 5K OddsPortal events, 11-fold walk-forward): tabular + injuries CV R² 0.036 ± 0.033 against tabular-only 0.036 ± 0.028 once both were tuned. The earlier signal came from comparing a tuned model with an untuned baseline. Configs: `experiments/configs/xgboost_bet365_tuning.yaml`, `experiments/configs/xgboost_bet365_baseline_tuning.yaml`, `experiments/configs/xgboost_bet365_injuries.yaml`.
@@ -93,10 +93,10 @@ By the time game-time injury designations are public (0-3 h) the closing line ha
 ## Hazards
 
 - **Closing-tier R² near 0.6 is an artefact** and must not be quoted as skill.
-- The injury weights come from season-level player stats (`packages/odds-analytics/odds_analytics/injury_features.py::extract_injury_features`) and the group is NBA-only; EPL has no equivalent.
+- The injury weights come from season-level player stats (`odds_analytics.injury_features.extract_injury_features`) and the group is NBA-only; EPL has no equivalent.
 - Snapshot coverage is bimodal (peaks at 3-4 h and 8-10 h, secondary cluster 22-24 h), so the 12-18 h and 24-36 h Exp 4 bins have only 40 and 39 samples.
 - Exp 4 used 13 features including the injury group, which later runs found uninformative.
-- **Tier boundaries are encoded more than once and disagree** at exactly 3, 12, 24 and 72 h: `packages/odds-lambda/odds_lambda/tier_utils.py::calculate_tier` uses `<=` while `packages/odds-lambda/odds_lambda/oddsportal_common.py::hours_to_tier` uses `<` ([fetch tier](../storage/fetch-tier.md)).
+- **Tier boundaries are encoded more than once and disagree** at exactly 3, 12, 24 and 72 h: `odds_lambda.tier_utils.calculate_tier` uses `<=` while `odds_lambda.oddsportal_common.hours_to_tier` uses `<` ([fetch tier](../storage/fetch-tier.md)).
 - Line-release numbers are NBA and Odds API only.
 
 ## Related

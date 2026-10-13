@@ -3,18 +3,18 @@ type: concept
 title: Code conventions, timezones and documentation
 description: The UTC rule and its remaining naive-datetime sites, async-only DB access, the mechanical gates (ruff, Vale, lychee, wiki lint) versus review-only conventions, logging setup, what is authoritative for what, and where the issue-tracker conventions live.
 sources:
-  - packages/odds-core/odds_core/logging_setup.py::configure_logging
-  - packages/odds-core/odds_core/time.py::ensure_utc
-  - packages/odds-core/odds_core/time.py::parse_api_datetime
-  - packages/odds-core/odds_core/time.py::utc_isoformat
-  - packages/odds-core/odds_core/time.py::EASTERN
-  - packages/odds-core/odds_core/models.py::utc_now
-  - packages/odds-lambda/odds_lambda/lambda_handler.py::lambda_handler
-  - packages/odds-lambda/odds_lambda/scheduling/backends/aws.py::AWSEventBridgeBackend
-  - packages/odds-lambda/odds_lambda/oddsportal_common.py::parse_odds_timestamp
-  - packages/odds-lambda/odds_lambda/injury_fetcher.py::_to_naive_et
-  - packages/odds-cli/odds_cli/main.py::callback
-  - packages/odds-cli/odds_cli/commands/backtest.py::parse_date
+  - odds_core.logging_setup.configure_logging
+  - odds_core.time.ensure_utc
+  - odds_core.time.parse_api_datetime
+  - odds_core.time.utc_isoformat
+  - odds_core.time.EASTERN
+  - odds_core.models.utc_now
+  - odds_lambda.lambda_handler.lambda_handler
+  - odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend
+  - odds_lambda.oddsportal_common.parse_odds_timestamp
+  - odds_lambda.injury_fetcher._to_naive_et
+  - odds_cli.main.callback
+  - odds_cli.commands.backtest.parse_date
   - .pre-commit-config.yaml
   - .vale/styles/Temporal/Narration.yml
   - .github/workflows/lint.yml
@@ -56,34 +56,34 @@ Pre-commit (`.pre-commit-config.yaml`) runs on every commit; the `Lint` workflow
 
 ## Timezones
 
-Rule: use `datetime.now(UTC)` (`from datetime import UTC`), store UTC in the database, convert only for display. Datetime columns are `DateTime(timezone=True)`; the default factory is `packages/odds-core/odds_core/models.py::utc_now`.
+Rule: use `datetime.now(UTC)` (`from datetime import UTC`), store UTC in the database, convert only for display. Datetime columns are `DateTime(timezone=True)`; the default factory is `odds_core.models.utc_now`.
 
 Ruff selects only `DTZ003` (`utcnow()`) and `DTZ005` (`now()` without tz). Other naive constructors (`datetime(...)`, `strptime`, `date.today()`, `fromtimestamp`) pass lint, which is how the sites below survive. Review, not tooling, catches them.
 
-Helpers in `packages/odds-core/odds_core/time.py`:
+Helpers in `odds_core.time`:
 
 | Helper | Behaviour |
 |---|---|
-| `packages/odds-core/odds_core/time.py::ensure_utc` | Naive input is assumed to be UTC (`replace`); aware input is converted with `astimezone` |
-| `packages/odds-core/odds_core/time.py::parse_api_datetime` | Parses The Odds API strings, rewriting a trailing `Z`, then `packages/odds-core/odds_core/time.py::ensure_utc` |
-| `packages/odds-core/odds_core/time.py::to_eastern`, `packages/odds-core/odds_core/time.py::EASTERN` | America/New_York for NBA game days and injury reports |
-| `packages/odds-core/odds_core/time.py::utc_isoformat` | ISO 8601 with a trailing `Z` |
+| `odds_core.time.ensure_utc` | Naive input is assumed to be UTC (`replace`); aware input is converted with `astimezone` |
+| `odds_core.time.parse_api_datetime` | Parses The Odds API strings, rewriting a trailing `Z`, then `odds_core.time.ensure_utc` |
+| `odds_core.time.to_eastern`, `odds_core.time.EASTERN` | America/New_York for NBA game days and injury reports |
+| `odds_core.time.utc_isoformat` | ISO 8601 with a trailing `Z` |
 
 Naive datetimes still produced by current code:
 
-- `packages/odds-lambda/odds_lambda/scheduling/backends/aws.py::AWSEventBridgeBackend._parse_schedule_expression` builds `datetime(year=..., ...)` with no tzinfo from a cron expression; the formatter next to it strips tzinfo deliberately after converting to UTC ([EventBridge backend](../scheduling/scheduler-backends.md#aws-eventbridge-backend)).
-- `packages/odds-cli/odds_cli/commands/backtest.py::parse_date` returns a naive datetime from `strptime`, so `odds backtest run --start/--end` are naive, while `packages/odds-cli/odds_cli/commands/quality.py` and `packages/odds-cli/odds_cli/commands/discover.py` attach `tzinfo=UTC` after the same call ([Backtesting](../evaluation/backtesting.md)).
-- `packages/odds-lambda/odds_lambda/oddsportal_common.py::parse_odds_timestamp` returns a naive datetime by design (OddsPortal odds-history stamps carry no zone and a wrong year); `packages/odds-lambda/odds_lambda/oddsportal_common.py::fix_odds_timestamp` repairs the year ([OddsPortal](../collection/oddsportal.md)).
-- `packages/odds-lambda/odds_lambda/injury_fetcher.py::_to_naive_et` converts to naive Eastern time on purpose because the `nbainjuries` API requires it ([NBA feeds](../collection/nba-injuries-and-stats.md)).
-- `packages/odds-cli/odds_cli/commands/pbpstats.py` and `packages/odds-cli/odds_cli/commands/nba_stats.py` derive the NBA season from `date.today()` (local date, not UTC).
+- `odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend._parse_schedule_expression` builds `datetime(year=..., ...)` with no tzinfo from a cron expression; the formatter next to it strips tzinfo deliberately after converting to UTC ([EventBridge backend](../scheduling/scheduler-backends.md#aws-eventbridge-backend)).
+- `odds_cli.commands.backtest.parse_date` returns a naive datetime from `strptime`, so `odds backtest run --start/--end` are naive, while `odds_cli.commands.quality` and `odds_cli.commands.discover` attach `tzinfo=UTC` after the same call ([Backtesting](../evaluation/backtesting.md)).
+- `odds_lambda.oddsportal_common.parse_odds_timestamp` returns a naive datetime by design (OddsPortal odds-history stamps carry no zone and a wrong year); `odds_lambda.oddsportal_common.fix_odds_timestamp` repairs the year ([OddsPortal](../collection/oddsportal.md)).
+- `odds_lambda.injury_fetcher._to_naive_et` converts to naive Eastern time on purpose because the `nbainjuries` API requires it ([NBA feeds](../collection/nba-injuries-and-stats.md)).
+- `odds_cli.commands.pbpstats` and `odds_cli.commands.nba_stats` derive the NBA season from `date.today()` (local date, not UTC).
 
-`Z`-suffix ISO parsing is inlined in `packages/odds-core/odds_core/snapshot_utils.py`, `packages/odds-lambda/odds_lambda/espn_fixture_fetcher.py`, `packages/odds-lambda/odds_lambda/mlb_stats_fetcher.py`, `packages/odds-lambda/odds_lambda/jobs/fetch_oddsportal_results.py`, the MCP EPL tools and `packages/odds-analytics/odds_analytics/sequence_loader.py` instead of calling `packages/odds-core/odds_core/time.py::parse_api_datetime`. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/decision-time-and-look-ahead.md).
+`Z`-suffix ISO parsing is inlined in `odds_core.snapshot_utils`, `odds_lambda.espn_fixture_fetcher`, `odds_lambda.mlb_stats_fetcher`, `odds_lambda.jobs.fetch_oddsportal_results`, the MCP EPL tools and `odds_analytics.sequence_loader` instead of calling `odds_core.time.parse_api_datetime`. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/decision-time-and-look-ahead.md).
 
 ## Logging
 
-structlog configured by `packages/odds-core/odds_core/logging_setup.py::configure_logging(settings, json_output)`. Console output is human-readable; the file handler rotates at 10 MB with 5 backups; `json_output=True` renders JSON. An invalid `LOG_LEVEL` falls back to INFO, and an uncreatable log directory falls back to console-only. Config: `LOG_LEVEL`, `LOG_FILE` ([Configuration](configuration.md)).
+structlog configured by `odds_core.logging_setup.configure_logging(settings, json_output)`. Console output is human-readable; the file handler rotates at 10 MB with 5 backups; `json_output=True` renders JSON. An invalid `LOG_LEVEL` falls back to INFO, and an uncreatable log directory falls back to console-only. Config: `LOG_LEVEL`, `LOG_FILE` ([Configuration](configuration.md)).
 
-It is called only from the CLI callback (`packages/odds-cli/odds_cli/main.py::callback`, text) and the Lambda module (`packages/odds-lambda/odds_lambda/lambda_handler.py`, JSON). The MCP server is launched with `fastmcp run` and standalone scripts never call it, so they get structlog defaults and no log file ([odds-mcp server](../agent/mcp-server.md)).
+It is called only from the CLI callback (`odds_cli.main.callback`, text) and the Lambda module (`odds_lambda.lambda_handler`, JSON). The MCP server is launched with `fastmcp run` and standalone scripts never call it, so they get structlog defaults and no log file ([odds-mcp server](../agent/mcp-server.md)).
 
 ## Documentation authority
 
@@ -91,14 +91,14 @@ The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README
 
 | Topic | Authoritative source |
 |---|---|
-| Settings and defaults | `packages/odds-core/odds_core/config.py` ([Configuration](configuration.md)); `.env.example` is the template |
+| Settings and defaults | `odds_core.config` ([Configuration](configuration.md)); `.env.example` is the template |
 | CLI flags and defaults | each command's `--help` ([odds CLI](packages-and-cli.md#the-odds-cli)) |
-| Job and schedule matrix | `deployment/aws/terraform/eventbridge.tf` and `packages/odds-lambda/odds_lambda/scheduling/jobs.py::_JOB_CRON_MAP` ([Jobs](../scheduling/jobs-and-deployment-matrix.md)); deployed state only via `odds scheduler list-jobs --backend aws` |
-| Alerting and reporting | `packages/odds-core/odds_core/alerts.py` ([Alerts and health](../operations/alerts-and-health.md), [Reporting](../operations/reporting-and-daily-digest.md)) |
-| MCP toolset | the `@mcp.tool()` definitions in `packages/odds-mcp/odds_mcp/server.py` ([odds-mcp server](../agent/mcp-server.md)) |
+| Job and schedule matrix | `deployment/aws/terraform/eventbridge.tf` and `odds_lambda.scheduling.jobs._JOB_CRON_MAP` ([Jobs](../scheduling/jobs-and-deployment-matrix.md)); deployed state only via `odds scheduler list-jobs --backend aws` |
+| Alerting and reporting | `odds_core.alerts` ([Alerts and health](../operations/alerts-and-health.md), [Reporting](../operations/reporting-and-daily-digest.md)) |
+| MCP toolset | the `@mcp.tool()` definitions in `odds_mcp.server` ([odds-mcp server](../agent/mcp-server.md)) |
 | Agent behaviour | the prompt files in `packages/odds-mcp/agents/` ([Betting agent](../agent/betting-agent.md)) |
-| Schema and storage | the model files, chiefly `packages/odds-core/odds_core/models.py` ([Storage](../storage/index.md)) |
-| Training data, target, features | `packages/odds-analytics/odds_analytics/training/config.py::FeatureConfig` and `packages/odds-analytics/odds_analytics/feature_groups.py`; evidence in `experiments/results/` ([CLV model findings](../evaluation/clv-model-findings.md)) |
+| Schema and storage | the model files, chiefly `odds_core.models` ([Storage](../storage/index.md)) |
+| Training data, target, features | `odds_analytics.training.config.FeatureConfig` and `odds_analytics.feature_groups`; evidence in `experiments/results/` ([CLV model findings](../evaluation/clv-model-findings.md)) |
 | Agent data sources | [Agent data sources](../agent/agent-data-sources.md) |
 | Issue and triage workflow | `docs/agents/` (below) |
 

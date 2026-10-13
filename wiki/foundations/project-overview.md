@@ -3,18 +3,18 @@ type: concept
 title: Project overview and pivots
 description: What the system is, which sports are active, where the edge is meant to come from, what runs where, the repo layout and stack, and which NBA-era defaults still lurk in live code.
 sources:
-  - packages/odds-core/odds_core/sports.py::SportKey
-  - packages/odds-lambda/odds_lambda/scheduling/jobs.py::_JOB_CRON_MAP
-  - packages/odds-lambda/odds_lambda/scheduling/jobs.py::_JOB_MODULE_MAP
-  - packages/odds-core/odds_core/config.py::SchedulerConfig
-  - packages/odds-core/odds_core/config.py::PolymarketConfig
-  - packages/odds-cli/odds_cli/main.py::app
-  - packages/odds-cli/odds_cli/commands/backfill.py
-  - packages/odds-analytics/odds_analytics/backfill_executor.py::BackfillExecutor
-  - packages/odds-lambda/odds_lambda/storage/tier_validator.py::TierCoverageValidator
-  - packages/odds-lambda/odds_lambda/storage/readers.py::OddsReader
-  - packages/odds-analytics/odds_analytics/strategies.py::BasicEVStrategy
-  - packages/odds-lambda/odds_lambda/polymarket_fetcher.py::PolymarketClient
+  - odds_core.sports.SportKey
+  - odds_lambda.scheduling.jobs._JOB_CRON_MAP
+  - odds_lambda.scheduling.jobs._JOB_MODULE_MAP
+  - odds_core.config.SchedulerConfig
+  - odds_core.config.PolymarketConfig
+  - odds_cli.main.app
+  - odds_cli.commands.backfill
+  - odds_analytics.backfill_executor.BackfillExecutor
+  - odds_lambda.storage.tier_validator.TierCoverageValidator
+  - odds_lambda.storage.readers.OddsReader
+  - odds_analytics.strategies.BasicEVStrategy
+  - odds_lambda.polymarket_fetcher.PolymarketClient
   - deployment/aws/terraform/eventbridge.tf
   - pyproject.toml
   - docker-compose.yml
@@ -29,7 +29,7 @@ Design principles (inferred): robust collection and storage before analysis; a s
 
 ## Sports
 
-EPL and MLB are active, with agents in interactive evaluation, not autonomous production. NBA code (injuries, game logs, Polymarket targeting) exists but is deprioritized. `packages/odds-core/odds_core/sports.py::SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Data sources, sport keys and market keys](../collection/sources-and-keys.md).
+EPL and MLB are active, with agents in interactive evaluation, not autonomous production. NBA code (injuries, game logs, Polymarket targeting) exists but is deprioritized. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Data sources, sport keys and market keys](../collection/sources-and-keys.md).
 
 ## Where the edge is meant to come from
 
@@ -39,8 +39,8 @@ Breadth and speed of information synthesis by an LLM agent, not the XGBoost CLV 
 
 Two AWS Lambdas (`odds-scheduler`, `odds-scheduler-scraper`) plus a local scheduler. The repo does not record the deployed state; the only check is `odds scheduler list-jobs --backend aws`.
 
-- The agent, daily digest, ESPN fixtures and MLB probables jobs never run on AWS: Terraform declares no fixed-schedule EventBridge rules for them (`deployment/aws/terraform/eventbridge.tf`), and their local cron table is `packages/odds-lambda/odds_lambda/scheduling/jobs.py::_JOB_CRON_MAP`.
-- `agent-run` and `daily-digest` are also opt-in locally: both are commented out of the default `packages/odds-core/odds_core/config.py::SchedulerConfig` `bootstrap_jobs`.
+- The agent, daily digest, ESPN fixtures and MLB probables jobs never run on AWS: Terraform declares no fixed-schedule EventBridge rules for them (`deployment/aws/terraform/eventbridge.tf`), and their local cron table is `odds_lambda.scheduling.jobs._JOB_CRON_MAP`.
+- `agent-run` and `daily-digest` are also opt-in locally: both are commented out of the default `odds_core.config.SchedulerConfig` `bootstrap_jobs`.
 - The remaining fetch jobs may run on AWS, locally, or both.
 
 Design and per-job table: [Jobs: registry, context and where each runs](../scheduling/jobs-and-deployment-matrix.md#where-each-job-runs), [Local scheduler](../scheduling/local-scheduler.md).
@@ -90,17 +90,17 @@ The repo carries the residue of three pivots (PRs `#214`, `#217`, `#267`, `#387`
 
 Each fails quietly on EPL and MLB data:
 
-- `fetch current`, `fetch scores`, `packages/odds-cli/odds_cli/commands/polymarket.py::discover` and `quality` default `--sport` to `basketball_nba` ([odds CLI](packages-and-cli.md#hazards)).
-- `backfill plan` and `backfill scores` hardcode `sport_key="basketball_nba"` (`packages/odds-cli/odds_cli/commands/backfill.py`), as does `packages/odds-analytics/odds_analytics/backfill_executor.py::BackfillExecutor` (`packages/odds-analytics/odds_analytics/backfill_executor.py`). See [Load historical odds and scores](../collection/howto-load-historical-odds.md).
-- `packages/odds-lambda/odds_lambda/storage/tier_validator.py::TierCoverageValidator` checks the API fixture list with `sport="basketball_nba"` only (`packages/odds-lambda/odds_lambda/storage/tier_validator.py`); `packages/odds-lambda/odds_lambda/storage/readers.py::OddsReader.get_games_by_date` buckets days noon-to-noon UTC "to capture a full NBA game day", and the validator uses it for every sport ([Odds validation and coverage checks](../storage/data-validation.md), [OddsReader](../storage/odds-reader-and-storage-layer.md)).
-- `packages/odds-analytics/odds_analytics/strategies.py::BasicEVStrategy` defaults to markets `h2h`, `spreads`, `totals` and US retail books, which match nothing in OddsPortal EPL data (`1x2`, UK books) ([Backtest strategies](../evaluation/backtest-strategies.md)).
-- Polymarket code targets NBA (`packages/odds-lambda/odds_lambda/polymarket_fetcher.py::PolymarketClient.get_nba_events`, `packages/odds-core/odds_core/config.py::PolymarketConfig.nba_series_id`), and `packages/odds-core/odds_core/config.py::PolymarketConfig.enabled` is a separate gate ([Polymarket](../collection/polymarket.md)).
+- `fetch current`, `fetch scores`, `odds_cli.commands.polymarket.discover` and `quality` default `--sport` to `basketball_nba` ([odds CLI](packages-and-cli.md#hazards)).
+- `backfill plan` and `backfill scores` hardcode `sport_key="basketball_nba"` (`odds_cli.commands.backfill`), as does `odds_analytics.backfill_executor.BackfillExecutor` (`odds_analytics.backfill_executor`). See [Load historical odds and scores](../collection/howto-load-historical-odds.md).
+- `odds_lambda.storage.tier_validator.TierCoverageValidator` checks the API fixture list with `sport="basketball_nba"` only (`odds_lambda.storage.tier_validator`); `odds_lambda.storage.readers.OddsReader.get_games_by_date` buckets days noon-to-noon UTC "to capture a full NBA game day", and the validator uses it for every sport ([Odds validation and coverage checks](../storage/data-validation.md), [OddsReader](../storage/odds-reader-and-storage-layer.md)).
+- `odds_analytics.strategies.BasicEVStrategy` defaults to markets `h2h`, `spreads`, `totals` and US retail books, which match nothing in OddsPortal EPL data (`1x2`, UK books) ([Backtest strategies](../evaluation/backtest-strategies.md)).
+- Polymarket code targets NBA (`odds_lambda.polymarket_fetcher.PolymarketClient.get_nba_events`, `odds_core.config.PolymarketConfig.nba_series_id`), and `odds_core.config.PolymarketConfig.enabled` is a separate gate ([Polymarket](../collection/polymarket.md)).
 - `.env.example` sets `SPORTS=basketball_nba` and writes list values as comma-separated text, which fails JSON parsing ([Configuration](configuration.md#hazards)).
 
 ## Hazards
 
 - The mismatches above surface as empty results (no events, zero opportunities), not errors, so an NBA default and an empty EPL window look alike.
-- Root `pyproject.toml` still describes the project as "NBA betting odds data collection and analysis system", and the CLI banner reads "NBA odds collection and analysis" (`packages/odds-cli/odds_cli/main.py::app`). Neither reflects the active sports.
+- Root `pyproject.toml` still describes the project as "NBA betting odds data collection and analysis system", and the CLI banner reads "NBA odds collection and analysis" (`odds_cli.main.app`). Neither reflects the active sports.
 - Verify any claim about defaults against code ([Conventions](conventions.md#documentation-authority)).
 
 ## Related

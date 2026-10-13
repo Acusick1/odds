@@ -12,7 +12,7 @@ sources:
   - deployment/aws/build_and_push.sh
   - deployment/aws/build_and_push_scraper.sh
   - scripts/lambda_usage.py
-  - packages/odds-core/odds_core/database.py
+  - odds_core.database
   - .github/workflows/deploy-prod.yml
   - .github/workflows/deploy-dev.yml
   - scripts/ci/test_lambda.py
@@ -47,7 +47,7 @@ EventBridge rules are named `{rule_prefix}-{job}[-{sport suffix}]` and `eventbri
 
 ## Constraints
 
-- Database connections use `NullPool` automatically when `AWS_LAMBDA_FUNCTION_NAME` is set, whatever the scheduler backend (`packages/odds-core/odds_core/database.py`; [databases and environments](../foundations/databases-and-environments.md)).
+- Database connections use `NullPool` automatically when `AWS_LAMBDA_FUNCTION_NAME` is set, whatever the scheduler backend (`odds_core.database`; [databases and environments](../foundations/databases-and-environments.md)).
 - Stateless between invocations apart from the SSM key-rotation index (`SSM_API_KEY_INDEX` in `deployment/aws/terraform/lambda.tf`).
 - EventBridge allows 300 rules per event bus by default `(inferred)`: an AWS service quota with no source in this repo. Check with `aws service-quotas list-service-quotas --service-code events`.
 

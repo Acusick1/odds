@@ -3,12 +3,12 @@ type: decision
 title: Walk-forward CV (sliding-380:50, no test split)
 description: Why the CV protocol is walk-forward, sliding 380 events with 50-event steps and no test split; the grid evidence; how cross_validation.py builds folds and metrics; and the traps (one-event holdout, silent downgrade, early stopping).
 sources:
-  - packages/odds-analytics/odds_analytics/training/cross_validation.py::make_walk_forward_splits
-  - packages/odds-analytics/odds_analytics/training/cross_validation.py::run_cv
-  - packages/odds-analytics/odds_analytics/training/cross_validation.py::train_with_cv
-  - packages/odds-analytics/odds_analytics/training/cross_validation.py::CVResult
-  - packages/odds-analytics/odds_analytics/training/config.py::DataConfig
-  - packages/odds-analytics/odds_analytics/training/data_preparation.py::prepare_training_data_from_config
+  - odds_analytics.training.cross_validation.make_walk_forward_splits
+  - odds_analytics.training.cross_validation.run_cv
+  - odds_analytics.training.cross_validation.train_with_cv
+  - odds_analytics.training.cross_validation.CVResult
+  - odds_analytics.training.config.DataConfig
+  - odds_analytics.training.data_preparation.prepare_training_data_from_config
   - experiments/configs/xgboost_epl_production_tabular_match_stats.yaml
   - experiments/scripts/cv_protocol_grid.py
 status: stable
@@ -45,21 +45,21 @@ Caveats recorded: CV R² from tuning is optimistically biased (best of N trials)
 
 ## How folds are built
 
-`packages/odds-analytics/odds_analytics/training/cross_validation.py::make_walk_forward_splits(event_ids, min_train_events, val_step_events, window_type, max_train_events)` takes row-level event ids in chronological order and works on unique events:
+`odds_analytics.training.cross_validation.make_walk_forward_splits(event_ids, min_train_events, val_step_events, window_type, max_train_events)` takes row-level event ids in chronological order and works on unique events:
 
 - The first validation block starts after `min_train_events`; each block holds exactly `val_step_events` events; the last partial block is dropped. Fold count is `floor((n_events - min_train_events) / val_step_events)`; fewer than `min + step` events raises `ValueError`. That gives about 26 folds on 1.73K events and 28 on 1,813 events (earlier docs said about 26 for the latter).
 - `expanding` trains on every earlier event; `sliding` trains on the previous `max_train_events` only.
 - Splits are row indices, so multi-row events (time-range sampling) stay whole in one side.
 
-`packages/odds-analytics/odds_analytics/training/cross_validation.py::run_cv` switches on `data.cv_method`: `walk_forward`, `timeseries` (sklearn `TimeSeriesSplit(n_folds)`, row-level, requires sorted data) or `kfold`. Per fold it calls `train_from_config` and records train and validation MSE, MAE and R² (`packages/odds-analytics/odds_analytics/training/cross_validation.py::CVFoldResult`); `packages/odds-analytics/odds_analytics/training/cross_validation.py::CVResult` reports mean and population standard deviation. Each fold's R² is against that fold's own mean. `packages/odds-analytics/odds_analytics/training/cross_validation.py::train_with_cv` then fits a final model on all rows and merges the CV metrics into the history. Tuning optimises the mean CV metric ([tuner](hyperparameter-tuner.md)).
+`odds_analytics.training.cross_validation.run_cv` switches on `data.cv_method`: `walk_forward`, `timeseries` (sklearn `TimeSeriesSplit(n_folds)`, row-level, requires sorted data) or `kfold`. Per fold it calls `train_from_config` and records train and validation MSE, MAE and R² (`odds_analytics.training.cross_validation.CVFoldResult`); `odds_analytics.training.cross_validation.CVResult` reports mean and population standard deviation. Each fold's R² is against that fold's own mean. `odds_analytics.training.cross_validation.train_with_cv` then fits a final model on all rows and merges the CV metrics into the history. Tuning optimises the mean CV metric ([tuner](hyperparameter-tuner.md)).
 
 ## Hazards
 
 - **`test_split: 0.0` still holds out one event** because the splitter uses `max(1, int(n * test_split))`; that event is excluded from `odds train run` CV and included in tuning CV. `odds train validate` also warns about `test_split < 0.1` although 0.0 is the protocol.
 - **Silent downgrade.** `walk_forward` without `event_ids` logs a warning and runs `timeseries` with `n_folds` (default 5), changing the protocol and the metric meaning (AUD A3/A4, re-verified).
 - **Early stopping sees the validation fold.** The XGBoost strategy passes the fold as an `eval_set` and `early_stopping_rounds` is applied by XGBoost; fold R² can therefore be mildly optimistic when early stopping is on (read from code, not measured).
-- **Chronological order is assumed, not checked.** Order comes from `packages/odds-lambda/odds_lambda/storage/readers.py::OddsReader.get_events_by_date_range`; a caller passing shuffled data gets no error (AUD T4). See [feature pipeline](feature-pipeline.md).
-- **`n_folds` is ignored for `walk_forward`** and mandatory for the other methods, but only `packages/odds-analytics/odds_analytics/training/cross_validation.py::run_cv` enforces it.
+- **Chronological order is assumed, not checked.** Order comes from `odds_lambda.storage.readers.OddsReader.get_events_by_date_range`; a caller passing shuffled data gets no error (AUD T4). See [feature pipeline](feature-pipeline.md).
+- **`n_folds` is ignored for `walk_forward`** and mandatory for the other methods, but only `odds_analytics.training.cross_validation.run_cv` enforces it.
 
 ## Related
 

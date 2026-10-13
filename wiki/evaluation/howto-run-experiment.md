@@ -3,7 +3,7 @@ type: howto
 title: Run and record a modelling experiment
 description: Script conventions, the required FINDINGS.md and verification artifacts with their checks, and how to record the result in the wiki.
 sources:
-  - packages/odds-analytics/odds_analytics/training/data_preparation.py::save_verification_artifacts
+  - odds_analytics.training.data_preparation.save_verification_artifacts
   - experiments/scripts/cv_protocol_grid.py
 status: stable
 ---
@@ -14,7 +14,7 @@ Experiments are standalone scripts in `experiments/scripts/` writing to `experim
 
 ## Conventions
 
-- Load data with the training pipeline (`packages/odds-analytics/odds_analytics/feature_groups.py::prepare_training_data`, `packages/odds-analytics/odds_analytics/training/config.py::MLTrainingConfig`) and reuse YAMLs from `experiments/configs/` ([training pipeline](../modelling/training-pipeline.md)).
+- Load data with the training pipeline (`odds_analytics.feature_groups.prepare_training_data`, `odds_analytics.training.config.MLTrainingConfig`) and reuse YAMLs from `experiments/configs/` ([training pipeline](../modelling/training-pipeline.md)).
 - Set the target and the CV protocol explicitly in the YAML. Code defaults are `target_type: raw` and `target_bookmaker: pinnacle`, not the production bet365 devigged target ([CLV target](../modelling/clv-target.md)), and the default protocol is not walk-forward ([walk-forward CV](../modelling/decision-walk-forward-cv.md)).
 - When starting a sliding-window run, copy the principled search space from the `experiments/configs/xgboost_epl_production_*` configs; older YAMLs carry the original space that collapses to constant predictors ([search-space experiment](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test)).
 - The script must run as `uv run python experiments/scripts/<script>.py`.

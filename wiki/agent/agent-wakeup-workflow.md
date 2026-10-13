@@ -3,13 +3,13 @@ type: process
 title: Wake-up workflow and staking rules
 description: The steps of each wake-up (orient, settle, triage, read, research, brief, decide), the EPL matchday timeline, the 0-3% conviction tiers and four edge types, and what code does not enforce.
 sources:
-  - packages/odds-lambda/odds_lambda/jobs/agent_run.py::CADENCE
-  - packages/odds-lambda/odds_lambda/paper_trading.py::place_trade
-  - packages/odds-core/odds_core/paper_trade_models.py::PaperTrade
-  - packages/odds-mcp/odds_mcp/server.py::get_slate_briefs
-  - packages/odds-mcp/odds_mcp/server.py::save_match_brief
-  - packages/odds-mcp/odds_mcp/server.py::paper_bet
-  - packages/odds-mcp/odds_mcp/server.py::settle_bets
+  - odds_lambda.jobs.agent_run.CADENCE
+  - odds_lambda.paper_trading.place_trade
+  - odds_core.paper_trade_models.PaperTrade
+  - odds_mcp.server.get_slate_briefs
+  - odds_mcp.server.save_match_brief
+  - odds_mcp.server.paper_bet
+  - odds_mcp.server.settle_bets
   - packages/odds-mcp/agents/common.md
 status: stable
 ---
@@ -20,15 +20,15 @@ Every [agent](betting-agent.md) wake-up follows the same steps, defined in the p
 
 ## Steps
 
-1. **Orient.** Check the date, weekday and UTC time (`date -u`), then load upcoming fixtures with `packages/odds-mcp/odds_mcp/server.py::get_upcoming_fixtures`.
-2. **Settle.** Settle finished bets (`packages/odds-mcp/odds_mcp/server.py::settle_bets`, see [paper trades](match-briefs-and-paper-trades.md#settlement)).
-3. **Triage.** Read the latest brief per upcoming match (`packages/odds-mcp/odds_mcp/server.py::get_slate_briefs`) and choose what to research ([match briefs](match-briefs-and-paper-trades.md#match-briefs)). Briefs are append-only and do not store the market.
+1. **Orient.** Check the date, weekday and UTC time (`date -u`), then load upcoming fixtures with `odds_mcp.server.get_upcoming_fixtures`.
+2. **Settle.** Settle finished bets (`odds_mcp.server.settle_bets`, see [paper trades](match-briefs-and-paper-trades.md#settlement)).
+3. **Triage.** Read the latest brief per upcoming match (`odds_mcp.server.get_slate_briefs`) and choose what to research ([match briefs](match-briefs-and-paper-trades.md#match-briefs)). Briefs are append-only and do not store the market.
 4. **Pre-market read**, for new fixtures only.
 5. **Research.** Web search and Playwright; depth scales with kickoff proximity ([data sources](agent-data-sources.md)). Lineups come from BBC Sport at about KO-60, not an API.
-6. **Brief.** Append a brief per researched match with a decision of `bet`, `skip` or `watching` (`packages/odds-mcp/odds_mcp/server.py::save_match_brief`).
-7. **Decide.** Place bets when there is an edge (`packages/odds-mcp/odds_mcp/server.py::paper_bet`); bets can be placed at any time if the edge is clear. Stakes follow the conviction tiers below.
+6. **Brief.** Append a brief per researched match with a decision of `bet`, `skip` or `watching` (`odds_mcp.server.save_match_brief`).
+7. **Decide.** Place bets when there is an edge (`odds_mcp.server.paper_bet`); bets can be placed at any time if the edge is clear. Stakes follow the conviction tiers below.
 
-The agent may ask for its next wake-up with `packages/odds-mcp/odds_mcp/server.py::schedule_next_wakeup` ([scheduling tools](mcp-server.md#scrape-and-scheduling-tools)); otherwise the job's cadence applies. The cadence (`packages/odds-lambda/odds_lambda/jobs/agent_run.py::CADENCE`) is 1 h inside 3 h to kickoff and 4, 12 and 24 h further out, and a requested wake-up overrides it ([agent-run job](betting-agent.md#cadence)).
+The agent may ask for its next wake-up with `odds_mcp.server.schedule_next_wakeup` ([scheduling tools](mcp-server.md#scrape-and-scheduling-tools)); otherwise the job's cadence applies. The cadence (`odds_lambda.jobs.agent_run.CADENCE`) is 1 h inside 3 h to kickoff and 4, 12 and 24 h further out, and a requested wake-up overrides it ([agent-run job](betting-agent.md#cadence)).
 
 ## EPL timeline (Saturday 3pm kickoff)
 
@@ -41,14 +41,14 @@ The agent may ask for its next wake-up with `packages/odds-mcp/odds_mcp/server.p
 | Sat 14:00-15:00 | Final adjustments, late money | Bets placed, if any |
 | Sat evening | Matches complete | Settle bets, report P&L |
 
-The wake-up cadence in `packages/odds-lambda/odds_lambda/jobs/agent_run.py::CADENCE` (24h, 12h, 4h, then 1h inside 3 hours) is what puts a wake-up inside the lineup window; the table is `(inferred)` from that cadence and the prompt's KO-60 lineup note (`packages/odds-mcp/agents/epl/base.md`), not a schedule in code. Lineups come from web search because every structured lineup API was rejected ([rejected sources](agent-data-sources.md#rejected-sources)).
+The wake-up cadence in `odds_lambda.jobs.agent_run.CADENCE` (24h, 12h, 4h, then 1h inside 3 hours) is what puts a wake-up inside the lineup window; the table is `(inferred)` from that cadence and the prompt's KO-60 lineup note (`packages/odds-mcp/agents/epl/base.md`), not a schedule in code. Lineups come from web search because every structured lineup API was rejected ([rejected sources](agent-data-sources.md#rejected-sources)).
 
 ## Edge types
 
 The agent does not bet on qualitative team assessment. Every bet needs one of four specific bases:
 
 1. an information gap;
-2. retail or cross-venue dispersion ([`packages/odds-mcp/odds_mcp/server.py::find_retail_edges`](mcp-market-tools.md#retail-edges));
+2. retail or cross-venue dispersion ([`odds_mcp.server.find_retail_edges`](mcp-market-tools.md#retail-edges));
 3. a structural bias (bookmaker liability management, accumulator distortion, public money on popular teams);
 4. fundamental value.
 
@@ -67,12 +67,12 @@ Higher conviction maps to a higher tier; the criteria per tier are in the prompt
 
 ## What code enforces
 
-`packages/odds-lambda/odds_lambda/paper_trading.py::place_trade` in `packages/odds-lambda/odds_lambda/paper_trading.py` checks only that the stake is positive, does not exceed the bankroll, and that the selection is `home`, `draw` or `away`. Settlement is h2h-only. Tier sizes, the four edge bases and the requirement to state a basis are prompt-level: `packages/odds-core/odds_core/paper_trade_models.py::PaperTrade.reasoning` and `confidence` are free-form optional fields. The `bankroll` that `packages/odds-mcp/odds_mcp/server.py::paper_bet` uses for sizing defaults to the portfolio's current bankroll ([paper trades](match-briefs-and-paper-trades.md#paper-trades)).
+`odds_lambda.paper_trading.place_trade` in `odds_lambda.paper_trading` checks only that the stake is positive, does not exceed the bankroll, and that the selection is `home`, `draw` or `away`. Settlement is h2h-only. Tier sizes, the four edge bases and the requirement to state a basis are prompt-level: `odds_core.paper_trade_models.PaperTrade.reasoning` and `confidence` are free-form optional fields. The `bankroll` that `odds_mcp.server.paper_bet` uses for sizing defaults to the portfolio's current bankroll ([paper trades](match-briefs-and-paper-trades.md#paper-trades)).
 
 ## Hazards
 
 - A stake above 3% of bankroll, a matchday over the 10% exposure cap, or a bet with no stated edge, is accepted by the tool; only the prompt prevents it.
-- `bankroll` for the 1-3% sizing is whatever `packages/odds-mcp/odds_mcp/server.py::paper_bet` computes from the portfolio summary (initial 1000 plus settled P&L minus open stakes), unless the agent passes its own value.
+- `bankroll` for the 1-3% sizing is whatever `odds_mcp.server.paper_bet` computes from the portfolio summary (initial 1000 plus settled P&L minus open stakes), unless the agent passes its own value.
 - The timeline is an EPL example. MLB has its own overnight suppression window (05:00-14:00 UTC) and sport file, and no MLB timeline is recorded ([self-scheduling](../scheduling/self-scheduling.md)).
 - The tool-to-step mapping above comes from the prompt; nothing in code ties a tool to a step.
 

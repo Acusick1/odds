@@ -3,9 +3,9 @@ type: decision
 title: bet365 as the CLV target
 description: Why the model predicts bet365 rather than Pinnacle line movement, with the NBA target and learning-curve evidence and what the choice requires of the data source.
 sources:
-  - packages/odds-analytics/odds_analytics/training/config.py::FeatureConfig
-  - packages/odds-analytics/odds_analytics/feature_groups.py::_compute_target
-  - packages/odds-analytics/odds_analytics/sequence_loader.py::calculate_devigged_bookmaker_target
+  - odds_analytics.training.config.FeatureConfig
+  - odds_analytics.feature_groups._compute_target
+  - odds_analytics.sequence_loader.calculate_devigged_bookmaker_target
   - experiments/configs/xgboost_epl_production_tabular_match_stats.yaml
   - experiments/results/exp6_learning_curve/FINDINGS.md
   - experiments/configs/xgboost_bet365_tuning.yaml
@@ -50,7 +50,7 @@ R² plateaus at about 1.5K events and oscillates between about 0 and +0.035 afte
 
 ## Hazards
 
-- The code default is `target_bookmaker: pinnacle` (and `target_type: raw`), so a config that omits them trains the rejected target (`packages/odds-analytics/odds_analytics/training/config.py::FeatureConfig`).
+- The code default is `target_bookmaker: pinnacle` (and `target_type: raw`), so a config that omits them trains the rejected target (`odds_analytics.training.config.FeatureConfig`).
 - The production YAML lists bet365 in `retail_bookmakers` as well, so the target bookmaker's snapshot price is also an input to `retail_sharp_diff` ([sharp benchmark](sharp-benchmark.md)).
 - The extrapolation to 20K events (+0.07) sits uneasily with "more data will not help"; the decision rests on the small marginal slope.
 - Tuned CV R² is optimistically biased (best of N trials); comparisons between equally tuned runs are fair ([walk-forward CV](decision-walk-forward-cv.md)).

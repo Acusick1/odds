@@ -6,12 +6,12 @@ sources:
   - migrations/env.py
   - docker-compose.yml
   - pyproject.toml
-  - packages/odds-core/odds_core/config.py::DataCollectionConfig
-  - packages/odds-core/odds_core/config.py::SchedulerConfig
-  - packages/odds-cli/odds_cli/commands/status.py::show_quota
-  - tests/conftest.py::pglite_config
-  - tests/conftest.py::pglite_async_session
-  - tests/migration/conftest.py::pytest_configure
+  - odds_core.config.DataCollectionConfig
+  - odds_core.config.SchedulerConfig
+  - odds_cli.commands.status.show_quota
+  - tests/conftest.py
+  - tests/conftest.py
+  - tests/migration/conftest.py
   - tests/integration/conftest.py
   - .github/workflows/test.yml
   - .github/workflows/deploy-dev.yml
@@ -35,7 +35,7 @@ Prerequisites: Python 3.12+, [uv](https://github.com/astral-sh/uv), Docker, and 
 4. **Migrate.** `uv run alembic upgrade head`. `migrations/env.py` overwrites the `alembic.ini` URL with `DATABASE_URL`, so the 5432 URL in the ini is never used. Details: [Create and apply a database migration](howto-database-migration.md).
 5. **Check.** `uv run odds status show`, then `uv run odds status quota`. The free tier is 500 units per month per key, and each `fetch current` costs 1 unit per region per market (3 by default) ([Odds API client and quota](../collection/odds-api-client-and-quota.md)).
 6. **First fetch.** `uv run odds fetch current --sport soccer_epl`. Pass `--sport`: the default is `basketball_nba` ([odds CLI](packages-and-cli.md#hazards)). Each fetch costs units.
-7. **Run the scheduler** (optional). `uv run odds scheduler start` ([Local scheduler](../scheduling/local-scheduler.md)). It bootstraps only the default jobs; `agent-run` and `daily-digest` are opt-in and must be added to `SCHEDULER_BOOTSTRAP_JOBS` (`packages/odds-core/odds_core/config.py::SchedulerConfig`, [Jobs](../scheduling/jobs-and-deployment-matrix.md#where-each-job-runs)).
+7. **Run the scheduler** (optional). `uv run odds scheduler start` ([Local scheduler](../scheduling/local-scheduler.md)). It bootstraps only the default jobs; `agent-run` and `daily-digest` are opt-in and must be added to `SCHEDULER_BOOTSTRAP_JOBS` (`odds_core.config.SchedulerConfig`, [Jobs](../scheduling/jobs-and-deployment-matrix.md#where-each-job-runs)).
 
 Never point `DATABASE_URL` at production ([Databases](databases-and-environments.md)). To seed local data from production see [copying production data](databases-and-environments.md#copy-production-data-locally). Tests need none of this database.
 
@@ -50,7 +50,7 @@ Run unit and integration tests together; leave `tests/migration` to the deploy w
 
 ### What the tests run against
 
-- `tests/unit` and `tests/integration` use an in-process PostgreSQL (py-pglite) on TCP port 5434. `tests/conftest.py::pglite_config` forces TCP; the session fixture creates all SQLModel tables once; `pglite_async_session` truncates every table (`RESTART IDENTITY CASCADE`) before each test and yields an `AsyncSession` with `expire_on_commit=False`. Aliases `test_engine` and `test_session` exist for older tests.
+- `tests/unit` and `tests/integration` use an in-process PostgreSQL (py-pglite) on TCP port 5434. `tests/conftest.py` forces TCP; the session fixture creates all SQLModel tables once; `pglite_async_session` truncates every table (`RESTART IDENTITY CASCADE`) before each test and yields an `AsyncSession` with `expire_on_commit=False`. Aliases `test_engine` and `test_session` exist for older tests.
 - `tests/migration` connects to whatever `DATABASE_URL` points at and replaces `odds_core.database.engine` with a `NullPool` engine in `pytest_configure`. Only the deploy workflows run it: dev runs all of it, prod runs `test_schema_validation.py` and `test_cli_readonly.py` ([CI/CD workflows](../operations/ci-cd-workflows.md)).
 - Markers: `integration` (live external APIs, may be skipped offline) and `live_api` (third-party HTTP, run only by the scheduled live-API workflow). CI runs integration with `-m "not live_api"` (`.github/workflows/test.yml`).
 
@@ -70,7 +70,7 @@ tests/fixtures/     sample Odds API JSON
 
 - Any import of `odds_core` builds settings, so a missing `ODDS_API_KEY` or `DATABASE_URL` fails every command, not just those that use the API ([Packages and the odds CLI](packages-and-cli.md#odds-core)). Tests too: `tests/conftest.py` defaults only `ODDS_API_KEY`; CI supplies `DATABASE_URL` from a secret.
 - `cp .env.example .env` fails at import because of the comma-separated list values in the template.
-- `uv run pytest` with no arguments collects `tests/migration` too, because `testpaths` is `tests`. With a production-looking `DATABASE_URL` that includes write tests against production (`pyproject.toml`, `tests/migration/conftest.py::pytest_configure`).
+- `uv run pytest` with no arguments collects `tests/migration` too, because `testpaths` is `tests`. With a production-looking `DATABASE_URL` that includes write tests against production (`pyproject.toml`, `tests/migration/conftest.py`).
 - `.github/workflows/test.yml` sets up Python 3.11 while packages require `>=3.12`.
 
 ## Related

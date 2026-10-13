@@ -8,19 +8,19 @@ sources:
   - experiments/results/exp7b_line_shopping/FINDINGS.md
   - experiments/scripts/exp7_backtest_simulation.py
   - experiments/scripts/exp7b_line_shopping.py
-  - packages/odds-cli/odds_cli/commands/model.py::publish_model
-  - packages/odds-mcp/odds_mcp/server.py::find_retail_edges
+  - odds_cli.commands.model.publish_model
+  - odds_mcp.server.find_retail_edges
   - experiments/results/exp6_learning_curve/FINDINGS.md
 status: stable
 ---
 
 # What the CLV model can and cannot do
 
-The model predicts line movement: the devigged bet365 CLV delta between a snapshot and the close ([CLV target](../modelling/clv-target.md)). The signal is weak but real: best EPL CV R² about 0.058, NBA plateau about 0.036. It cannot be bet alone: flat betting on NBA loses at every useful threshold ([betting simulation](#betting-simulation-exp-7-7b)). The agent treats it as a supplementary sanity check (`packages/odds-mcp/agents/common.md`); its strongest feature is the sharp-retail spread the agent already sees through `packages/odds-mcp/odds_mcp/server.py::find_retail_edges` ([sharp benchmark](../modelling/sharp-benchmark.md), [pivot to information edge](../agent/decision-information-edge.md)).
+The model predicts line movement: the devigged bet365 CLV delta between a snapshot and the close ([CLV target](../modelling/clv-target.md)). The signal is weak but real: best EPL CV R² about 0.058, NBA plateau about 0.036. It cannot be bet alone: flat betting on NBA loses at every useful threshold ([betting simulation](#betting-simulation-exp-7-7b)). The agent treats it as a supplementary sanity check (`packages/odds-mcp/agents/common.md`); its strongest feature is the sharp-retail spread the agent already sees through `odds_mcp.server.find_retail_edges` ([sharp benchmark](../modelling/sharp-benchmark.md), [pivot to information edge](../agent/decision-information-edge.md)).
 
 ## Deployed model
 
-`epl-clv-home` version `v308058c`, published 2026-04-23: XGBoost on tabular + match_stats, sliding-380:50 walk-forward CV, principled search space, hybrid sharp reference; CV val_R² +0.058, val_MSE 0.000716, replacing a tabular-only model (+0.035) (#361). Source config (#362): `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`. The live S3 version is the authority and cannot be verified from the repo; check with `aws s3 ls s3://<model-bucket>/epl-clv-home/` ([publishing and scoring](../modelling/model-publishing-and-scoring.md)). The production scorer handles models trained on several feature groups, including the standings, match_stats and `epl_schedule` cache preload (#359). Publishing uses `packages/odds-cli/odds_cli/commands/model.py::publish_model`. Predictions exist only where inline scoring runs, which is a local scheduler, one row per snapshot.
+`epl-clv-home` version `v308058c`, published 2026-04-23: XGBoost on tabular + match_stats, sliding-380:50 walk-forward CV, principled search space, hybrid sharp reference; CV val_R² +0.058, val_MSE 0.000716, replacing a tabular-only model (+0.035) (#361). Source config (#362): `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`. The live S3 version is the authority and cannot be verified from the repo; check with `aws s3 ls s3://<model-bucket>/epl-clv-home/` ([publishing and scoring](../modelling/model-publishing-and-scoring.md)). The production scorer handles models trained on several feature groups, including the standings, match_stats and `epl_schedule` cache preload (#359). Publishing uses `odds_cli.commands.model.publish_model`. Predictions exist only where inline scoring runs, which is a local scheduler, one row per snapshot.
 
 ## Current conclusions
 

@@ -3,25 +3,25 @@ type: component
 title: Line-movement models (XGBoost, LSTM)
 description: The XGBoost and LSTM strategy classes that train the CLV regressor and bet on it in backtests, their confidence-to-Kelly mapping, LSTM's ruled-out status, and the misleading ml_strategy_example.
 sources:
-  - packages/odds-analytics/odds_analytics/xgboost_line_movement.py::XGBoostLineMovementStrategy
-  - packages/odds-analytics/odds_analytics/lstm_line_movement.py::LSTMLineMovementStrategy
-  - packages/odds-analytics/odds_analytics/ml_strategy_example.py::XGBoostStrategy
-  - packages/odds-analytics/odds_analytics/sequence_loader.py::load_sequences_for_event
-  - packages/odds-analytics/odds_analytics/training/config.py::TrainingConfig
+  - odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy
+  - odds_analytics.lstm_line_movement.LSTMLineMovementStrategy
+  - odds_analytics.ml_strategy_example.XGBoostStrategy
+  - odds_analytics.sequence_loader.load_sequences_for_event
+  - odds_analytics.training.config.TrainingConfig
 status: stable
 ---
 
 # Line-movement models (XGBoost, LSTM)
 
-Two `packages/odds-analytics/odds_analytics/backtesting/services.py::BettingStrategy` subclasses wrap a trained CLV regressor so the [backtest engine](../evaluation/backtesting.md) can bet on it; they are also the trainers behind `odds train` ([training pipeline](training-pipeline.md)). Registry names are `xgb_line_movement` and `lstm_line_movement` ([backtest strategies](../evaluation/backtest-strategies.md)); config `strategy_type` values are `xgboost_line_movement` and `lstm_line_movement`.
+Two `odds_analytics.backtesting.services.BettingStrategy` subclasses wrap a trained CLV regressor so the [backtest engine](../evaluation/backtesting.md) can bet on it; they are also the trainers behind `odds train` ([training pipeline](training-pipeline.md)). Registry names are `xgb_line_movement` and `lstm_line_movement` ([backtest strategies](../evaluation/backtest-strategies.md)); config `strategy_type` values are `xgboost_line_movement` and `lstm_line_movement`.
 
 ## Shared behaviour
 
 `evaluate_opportunity` predicts a movement delta for the home and away outcome, skips any below `min_predicted_movement` (0.02), takes the best price among its bookmakers, and sets `confidence = base_confidence + (predicted - min) * movement_confidence_scale`, clamped to 0.5-0.95 (defaults 0.52 and 5.0). The engine passes `confidence` to Kelly sizing as the win probability, and zero or negative Kelly is floored to `min_bet_size` ([backtesting](../evaluation/backtesting.md)). Draws are never bet.
 
-- **XGBoost** (`packages/odds-analytics/odds_analytics/xgboost_line_movement.py`). `train` fits an `XGBRegressor` with the train set and validation set as `eval_set`; `train_from_config` requires `strategy_type == "xgboost_line_movement"` and an `packages/odds-analytics/odds_analytics/training/config.py::XGBoostConfig`, and adds an Optuna pruning callback when given a trial. `save_model` writes joblib `{model, feature_names, params}` plus a `.yaml` of metadata beside it; `packages/odds-analytics/odds_analytics/xgboost_line_movement.py::XGBoostLineMovementStrategy.load_model` falls back to pickle when joblib fails.
-- **LSTM** (`packages/odds-analytics/odds_analytics/lstm_line_movement.py`). Needs torch (training extra). Defaults: 72 h lookback, 24 timesteps, hidden 64, 2 layers, dropout 0.2, MSE loss. Inputs come from `packages/odds-analytics/odds_analytics/sequence_loader.py::load_sequences_for_event` through `packages/odds-analytics/odds_analytics/feature_extraction.py::SequenceFeatureExtractor` ([feature pipeline](feature-pipeline.md)); packed sequences handle padding (`packages/odds-analytics/odds_analytics/lstm_line_movement.py::_compact_sequences`, the 2026-02-27 mask fix, #162). The module docstring does not state the status below and duplicates the XGBoost training scaffold (AUD B5, re-verified).
-- **`packages/odds-analytics/odds_analytics/ml_strategy_example.py`.** `packages/odds-analytics/odds_analytics/ml_strategy_example.py::XGBoostStrategy` is an XGBoost win-probability classifier kept as a reference implementation; it is not in any registry and is referenced only by tests, so do not copy it as the model strategy.
+- **XGBoost** (`odds_analytics.xgboost_line_movement`). `train` fits an `XGBRegressor` with the train set and validation set as `eval_set`; `train_from_config` requires `strategy_type == "xgboost_line_movement"` and an `odds_analytics.training.config.XGBoostConfig`, and adds an Optuna pruning callback when given a trial. `save_model` writes joblib `{model, feature_names, params}` plus a `.yaml` of metadata beside it; `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.load_model` falls back to pickle when joblib fails.
+- **LSTM** (`odds_analytics.lstm_line_movement`). Needs torch (training extra). Defaults: 72 h lookback, 24 timesteps, hidden 64, 2 layers, dropout 0.2, MSE loss. Inputs come from `odds_analytics.sequence_loader.load_sequences_for_event` through `odds_analytics.feature_extraction.SequenceFeatureExtractor` ([feature pipeline](feature-pipeline.md)); packed sequences handle padding (`odds_analytics.lstm_line_movement._compact_sequences`, the 2026-02-27 mask fix, #162). The module docstring does not state the status below and duplicates the XGBoost training scaffold (AUD B5, re-verified).
+- **`odds_analytics.ml_strategy_example`.** `odds_analytics.ml_strategy_example.XGBoostStrategy` is an XGBoost win-probability classifier kept as a reference implementation; it is not in any registry and is referenced only by tests, so do not copy it as the model strategy.
 
 ## LSTM status: ruled out
 
@@ -37,7 +37,7 @@ Config: `experiments/configs/lstm_pinnacle_tuning.yaml` (also `experiments/confi
 
 ## Hazards
 
-- **Backtest vectors may not match trained models.** The XGBoost strategy builds `packages/odds-analytics/odds_analytics/feature_extraction.py::TabularFeatures.to_array` (6 values). Models trained by `packages/odds-analytics/odds_analytics/feature_groups.py::prepare_training_data` add `hours_until_event` and any other configured groups, so a trained model would receive a different width (not run). Model strategies need `--model-path`; check the feature width before relying on it.
+- **Backtest vectors may not match trained models.** The XGBoost strategy builds `odds_analytics.feature_extraction.TabularFeatures.to_array` (6 values). Models trained by `odds_analytics.feature_groups.prepare_training_data` add `hours_until_event` and any other configured groups, so a trained model would receive a different width (not run). Model strategies need `--model-path`; check the feature width before relying on it.
 - **EPL needs a market override.** Both strategies default to `market="h2h"`, while EPL odds use `1x2`; the CLI constructs them with defaults and cannot override ([sources and keys](../collection/sources-and-keys.md)).
 - **Bookmaker roster is US-flavoured.** XGBoost defaults to eight bookmakers (Pinnacle plus seven US books); the extractor's sharp and retail rosters default to `pinnacle` and `fanduel/draftkings/betmgm`, ignoring the hybrid sharp reference ([sharp benchmark](sharp-benchmark.md)).
 - **LSTM backtests load all snapshots** for the event ([look-ahead bias](decision-time-and-look-ahead.md#hazards), which also covers the cutoff arithmetic).
