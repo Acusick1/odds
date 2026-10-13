@@ -18,10 +18,11 @@ repos:
         require_serial: true
       - id: wiki-lint
         name: wiki-lint
-        entry: uv run python scripts/wiki_lint.py --no-write --fail-stale
-        language: system
+        entry: python scripts/wiki_lint.py --no-write --fail-stale
+        language: python
+        additional_dependencies: [pyyaml, pydantic]
         pass_filenames: false
-        files: ^(wiki/|packages/|scripts/wiki_lint\.py$|deployment/)
+        always_run: true
   - repo: https://github.com/lycheeverse/lychee
     rev: lychee-v0.24.2
     hooks:

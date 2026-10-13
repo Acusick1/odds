@@ -4,29 +4,23 @@ from __future__ import annotations
 
 import argparse
 import ast
+import builtins
 import json
+import keyword
 import re
 import subprocess
 import sys
 from collections import defaultdict
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from enum import Enum, StrEnum
 from pathlib import Path
+from typing import NamedTuple, TypeVar
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-# Fixed order of the generated area-index groups, with their plural headings.
-TYPE_HEADINGS = {
-    "concept": "Concepts",
-    "process": "Processes",
-    "component": "Components",
-    "decision": "Decisions",
-    "experiment": "Experiments",
-    "howto": "How-tos",
-}
-PAGE_STATUSES = {"draft", "stable", "deprecated"}
-REQUIRED_KEYS = ("type", "title", "description", "sources", "status")
-INDEX_REQUIRED_KEYS = ("title", "description")
 PAGES_START = "<!-- pages:start -->"
 PAGES_END = "<!-- pages:end -->"
 PAGES_BLOCK_RE = re.compile(re.escape(PAGES_START) + r"(.*?)" + re.escape(PAGES_END), re.DOTALL)
@@ -38,41 +32,137 @@ DEFAULT_MODULE_DIRS = (
 DEFAULT_MCP_DIR = "packages/odds-mcp/odds_mcp"
 DEFAULT_SYMBOL_ROOT = "packages"
 SKIP_DIRS = {"__pycache__", ".venv", "node_modules", ".git"}
-UNBOUNDED = 10**9
+COVERAGE_KEY = "coverage"
 
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.DOTALL)
 FENCE_RE = re.compile(r"^(```|~~~).*?^\1[ \t]*$", re.DOTALL | re.MULTILINE)
 LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)")
 WIKILINK_RE = re.compile(r"\[\[[^\]]+\]\]")
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
-CITE_RE = re.compile(r"^([\w.\-/]+?)(?:::([\w.]+))?(?:#([\w\-]+))?$")
-IDENT_RE = re.compile(r"^([A-Za-z_]\w*)(?:\(\))?$")
+CITE_RE = re.compile(r"^([\w.\-/]+?)(?:::([\w.]+))?(?:#[\w\-]+)?$")
+IDENT_RE = re.compile(r"^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)(?:\(\))?$")
+CONSTANT_RE = re.compile(r"^[A-Z][A-Z0-9_]+$")
 HAS_EXT_RE = re.compile(r"\.[A-Za-z]\w*$")
 HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
-HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*#*\s*$", re.MULTILINE)
+
+FunctionOrClass = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+M = TypeVar("M", bound=BaseModel)
 
 
-def github_slug(heading: str) -> str:
-    text = re.sub(r"[`*]", "", heading.strip().lower())
-    text = re.sub(r"[^\w\- ]", "", text)
-    return text.replace(" ", "-")
+class PageType(StrEnum):
+    # Declaration order is the group order of the generated area index.
+    CONCEPT = "concept"
+    PROCESS = "process"
+    COMPONENT = "component"
+    DECISION = "decision"
+    EXPERIMENT = "experiment"
+    HOWTO = "howto"
+
+    @property
+    def heading(self) -> str:
+        return TYPE_HEADINGS[self]
 
 
-def heading_slugs(text: str) -> set[str]:
-    seen: dict[str, int] = {}
-    slugs: set[str] = set()
-    for match in HEADING_RE.finditer(FENCE_RE.sub("", text)):
-        base = github_slug(match.group(1))
-        count = seen.get(base, 0)
-        seen[base] = count + 1
-        slugs.add(base if count == 0 else f"{base}-{count}")
-    return slugs
+TYPE_HEADINGS = {
+    PageType.CONCEPT: "Concepts",
+    PageType.PROCESS: "Processes",
+    PageType.COMPONENT: "Components",
+    PageType.DECISION: "Decisions",
+    PageType.EXPERIMENT: "Experiments",
+    PageType.HOWTO: "How-tos",
+}
 
 
-def symbol_defined(text: str, symbol: str) -> bool:
-    name = re.escape(symbol)
-    pattern = rf"^(?:\s*(?:async\s+def|def|class)\s+{name}\b|{name}\s*[:=])"
-    return re.search(pattern, text, re.MULTILINE) is not None
+class PageStatus(StrEnum):
+    DRAFT = "draft"
+    STABLE = "stable"
+    DEPRECATED = "deprecated"
+
+
+class PageMeta(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: PageType
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    sources: list[str]
+    status: PageStatus
+    superseded_by: str | None = None
+
+
+class IndexMeta(BaseModel):
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+
+
+class Kind(Enum):
+    MISSING_FRONTMATTER = "missing frontmatter"
+    INVALID_FRONTMATTER = "invalid frontmatter"
+    MISSING_KEY = "missing key"
+    OBSOLETE_KEY = "obsolete key"
+    UNKNOWN_KEY = "unknown key"
+    INVALID_TYPE = "invalid type"
+    INVALID_STATUS = "invalid status"
+    INVALID_FIELD = "invalid field"
+    SUPERSEDED_MISSING = "superseded_by missing"
+    SUPERSEDED_UNKNOWN = "superseded_by unknown"
+    SUPERSEDED_NOT_DEPRECATED = "superseded_by on non-deprecated page"
+    DUPLICATE_SLUG = "duplicate slug"
+    SOURCE_NOT_CITATION = "source is not a citation"
+    DOCS_CITATION = "docs citation"
+    DOCS_LINK = "docs link"
+    WIKILINK = "wikilink"
+    PATH_MISSING = "path missing"
+    PATH_DELETED = "path deleted"
+    PATH_RENAMED = "path renamed"
+    QUALIFY_PATH = "qualify path"
+    SYMBOL_UNDEFINED = "symbol undefined"
+    UNQUALIFIED_SYMBOL = "unqualified symbol"
+    AMBIGUOUS_SYMBOL = "ambiguous symbol"
+    ORPHAN = "orphan"
+    INDEX_MISSING = "index missing"
+    AREA_NOT_LINKED = "area not linked"
+    INDEX_MARKERS = "index markers missing"
+    INDEX_STALE = "index list stale"
+    COVERAGE_MODULE = "uncovered module"
+    COVERAGE_MCP_TOOL = "uncovered MCP tool"
+    STALE = "stale"
+
+
+COVERAGE_KINDS = {Kind.COVERAGE_MODULE, Kind.COVERAGE_MCP_TOOL}
+
+
+@dataclass(frozen=True)
+class Finding:
+    slug: str
+    kind: Kind
+    message: str
+    lines: tuple[int, ...] = ()
+
+
+class Citation(NamedTuple):
+    path: str
+    symbol: str | None
+
+
+@dataclass
+class Page:
+    slug: str
+    area: str
+    path: Path
+    rel: str
+    text: str
+    body_offset: int
+    meta: PageMeta | None
+    citations: dict[Citation, set[int]] = field(default_factory=dict)
+
+    @property
+    def body(self) -> str:
+        return body_from(self.text, self.body_offset)
+
+
+def body_from(text: str, offset: int) -> str:
+    return "".join(text.splitlines(keepends=True)[offset:])
 
 
 def mask_fences(text: str) -> str:
@@ -80,114 +170,278 @@ def mask_fences(text: str) -> str:
     return FENCE_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
 
 
+def docs_citation_forbidden(path: str) -> bool:
+    return path.startswith("docs/") and not path.startswith(DOCS_ALLOWED)
+
+
 def _is_tool_decorator(node: ast.expr) -> bool:
     target = node.func if isinstance(node, ast.Call) else node
     return isinstance(target, ast.Attribute) and target.attr == "tool"
 
 
-def docs_citation_forbidden(path: str) -> bool:
-    return path.startswith("docs/") and not path.startswith(DOCS_ALLOWED)
+def _target_names(target: ast.expr) -> list[str]:
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, ast.Tuple | ast.List):
+        return [name for element in target.elts for name in _target_names(element)]
+    return []
 
 
-def _span(node: ast.stmt) -> tuple[int, int]:
-    decorators = (
-        node.decorator_list
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-        else []
-    )
-    start = min([node.lineno, *(d.lineno for d in decorators)])
-    return start, node.end_lineno or node.lineno
+def bound_names(node: ast.stmt) -> list[str]:
+    if isinstance(node, FunctionOrClass):
+        return [node.name]
+    if isinstance(node, ast.Assign):
+        return [name for target in node.targets for name in _target_names(target)]
+    if isinstance(node, ast.AnnAssign):
+        return _target_names(node.target)
+    return []
 
 
-def _find_def(scope: list[ast.stmt], name: str) -> ast.stmt | None:
-    for node in scope:
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            if node.name == name:
-                return node
-        elif isinstance(node, ast.Assign):
-            if any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
-                return node
-        elif (
-            isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and node.target.id == name
-        ):
-            return node
-    return None
-
-
-def symbol_range(tree: ast.Module, symbol: str) -> tuple[int, int] | None:
-    """Line range of a (dotted) symbol; falls back to its last segment defined anywhere."""
+def resolve_symbol(tree: ast.Module, symbol: str) -> ast.stmt | None:
+    """Resolve `A.B` as A at module level, then B in A's class body."""
+    scope = tree.body
     parts = symbol.split(".")
-    scope: list[ast.stmt] = tree.body
     node: ast.stmt | None = None
-    for part in parts:
-        node = _find_def(scope, part)
+    for index, part in enumerate(parts):
+        node = next((n for n in scope if part in bound_names(n)), None)
         if node is None:
-            break
-        scope = getattr(node, "body", [])
-    if node is not None:
-        return _span(node)
-    for candidate in ast.walk(tree):
-        if (
-            isinstance(candidate, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-            and candidate.name == parts[-1]
-        ):
-            return _span(candidate)
-    return None
+            return None
+        if index < len(parts) - 1:
+            if not isinstance(node, ast.ClassDef):
+                return None
+            scope = node.body
+    return node
 
 
-def hunk_overlaps(start: int, count: int, span: tuple[int, int]) -> bool:
-    return count > 0 and start <= span[1] and start + count - 1 >= span[0]
+@dataclass(frozen=True)
+class Span:
+    start: int
+    end: int
+
+    def overlaps(self, start: int, count: int) -> bool:
+        return count > 0 and start <= self.end and start + count - 1 >= self.start
 
 
-@dataclass
-class _Source:
-    """One version of a file; tree is None when it does not parse."""
+@dataclass(frozen=True)
+class WholeFile:
+    """Extent of a symbol in a file that does not parse: any change counts."""
+
+    def overlaps(self, start: int, count: int) -> bool:
+        return count > 0
+
+
+Extent = Span | WholeFile
+
+
+def _span(node: ast.stmt) -> Span:
+    decorators = node.decorator_list if isinstance(node, FunctionOrClass) else []
+    start = min([node.lineno, *(d.lineno for d in decorators)])
+    return Span(start, node.end_lineno or node.lineno)
+
+
+@dataclass(frozen=True)
+class Source:
+    """One version of a Python file; tree is None when it does not parse."""
 
     tree: ast.Module | None
 
     @classmethod
-    def parse(cls, text: str) -> _Source:
+    def parse(cls, text: str) -> Source:
         try:
             return cls(ast.parse(text))
         except SyntaxError:
             return cls(None)
 
-    def range(self, symbol: str) -> tuple[int, int] | None:
+    def extent(self, symbol: str) -> Extent | None:
+        """None when the symbol is not defined."""
         if self.tree is None:
-            return (1, UNBOUNDED)
-        return symbol_range(self.tree, symbol)
+            return WholeFile()
+        node = resolve_symbol(self.tree, symbol)
+        return None if node is None else _span(node)
 
 
 @dataclass
-class _FileChange:
-    old: _Source | None
-    new: _Source | None
+class FileChange:
+    old: Source | None
+    new: Source | None
     old_hunks: list[tuple[int, int]]
     new_hunks: list[tuple[int, int]]
 
+    def touches(self, symbol: str | None) -> bool:
+        if symbol is None:
+            return bool(self.old_hunks)
+        old = self.old.extent(symbol) if self.old else None
+        new = self.new.extent(symbol) if self.new else None
+        if old is None and new is None:
+            return False
+        if old is None or new is None:
+            return True
+        return any(old.overlaps(*h) for h in self.old_hunks) or any(
+            new.overlaps(*h) for h in self.new_hunks
+        )
 
-def generate_page_list(
-    area: str, meta: dict[str, dict[str, object]], page_area: dict[str, str]
-) -> str:
-    """Return the generated area-index content: pages grouped by type, sorted by title."""
-    groups: dict[str, list[tuple[str, str, str]]] = {t: [] for t in TYPE_HEADINGS}
-    for slug, page_meta in meta.items():
-        page_type = page_meta.get("type")
-        if page_area[slug] != area or page_type not in groups:
-            continue
-        title = str(page_meta.get("title") or slug)
-        groups[str(page_type)].append((title, slug, str(page_meta.get("description") or "")))
+
+@dataclass(frozen=True)
+class Changes:
+    commits: tuple[str, ...]
+    working_tree: bool
+
+    def __bool__(self) -> bool:
+        return bool(self.commits) or self.working_tree
+
+    def describe(self) -> str:
+        return ", ".join([*self.commits, *(["working tree"] if self.working_tree else [])])
+
+
+class GitHistory:
+    """Git-backed page and citation history; every query is cached per commit."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self._last_commits: dict[str, str | None] = {}
+        self._tracked: dict[str, frozenset[str]] = {}
+        self._renames: dict[str, dict[str, str]] = {}
+        self._path_commits: dict[tuple[str, str], list[str]] = {}
+        self._changes: dict[tuple[str, str | None], FileChange | None] = {}
+        self._has_head: bool | None = None
+
+    def _git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(self.root), *args], capture_output=True, text=True, check=False
+        )
+
+    def is_modified(self, rel: str) -> bool:
+        return bool(self._git("status", "--porcelain", "--", rel).stdout.strip())
+
+    def last_commit(self, rel: str) -> str | None:
+        if rel not in self._last_commits:
+            result = self._git("log", "-1", "--format=%H", "--", rel)
+            self._last_commits[rel] = result.stdout.strip() or None
+        return self._last_commits[rel]
+
+    def tracked_at(self, rev: str | None) -> frozenset[str]:
+        if rev is None:
+            return frozenset()
+        if rev not in self._tracked:
+            result = self._git("ls-tree", "-r", "--name-only", rev)
+            self._tracked[rev] = frozenset(result.stdout.splitlines())
+        return self._tracked[rev]
+
+    def renamed_to(self, rev: str, path: str) -> str | None:
+        if rev not in self._renames:
+            result = self._git("diff", "-M", "--name-status", rev, "HEAD")
+            renames: dict[str, str] = {}
+            for line in result.stdout.splitlines():
+                fields = line.split("\t")
+                if fields[0].startswith("R") and len(fields) == 3:
+                    renames[fields[1]] = fields[2]
+            self._renames[rev] = renames
+        return self._renames[rev].get(path)
+
+    def changes_since(self, base: str | None, path: str, symbol: str | None) -> Changes:
+        """Commits after `base` (and uncommitted edits) that touch the symbol, or the whole file."""
+        commits = [] if base is None else self._commits_after(base, path)
+        touching = tuple(
+            commit[:7]
+            for commit in commits
+            if symbol is None or self._touches(path, symbol, f"{commit}^1", commit)
+        )
+        return Changes(touching, self._head_exists() and self._touches(path, symbol, "HEAD", None))
+
+    def _head_exists(self) -> bool:
+        if self._has_head is None:
+            self._has_head = self._git("rev-parse", "--verify", "--quiet", "HEAD").returncode == 0
+        return self._has_head
+
+    def _commits_after(self, base: str, path: str) -> list[str]:
+        key = (base, path)
+        if key not in self._path_commits:
+            result = self._git("log", "--format=%H", f"{base}..HEAD", "--", path)
+            self._path_commits[key] = result.stdout.split() if result.returncode == 0 else []
+        return self._path_commits[key]
+
+    def _show(self, rev: str, path: str) -> Source | None:
+        result = self._git("show", f"{rev}:{path}")
+        return Source.parse(result.stdout) if result.returncode == 0 else None
+
+    def _touches(self, path: str, symbol: str | None, old_rev: str, new_rev: str | None) -> bool:
+        change = self._file_change(path, old_rev, new_rev)
+        return change is not None and change.touches(symbol)
+
+    def _file_change(self, path: str, old_rev: str, new_rev: str | None) -> FileChange | None:
+        """new_rev None compares against the working tree."""
+        key = (path, new_rev)
+        if key not in self._changes:
+            self._changes[key] = self._compute_change(path, old_rev, new_rev)
+        return self._changes[key]
+
+    def _compute_change(self, path: str, old_rev: str, new_rev: str | None) -> FileChange | None:
+        old = self._show(old_rev, path)
+        if new_rev is None:
+            if old is None:
+                return None
+            target = self.root / path
+            new = Source.parse(target.read_text(errors="replace")) if target.is_file() else None
+            diff = self._git("diff", "-U0", "--no-color", old_rev, "--", path).stdout
+        else:
+            new = self._show(new_rev, path)
+            diff = self._git("diff", "-U0", "--no-color", old_rev, new_rev, "--", path).stdout
+        old_hunks: list[tuple[int, int]] = []
+        new_hunks: list[tuple[int, int]] = []
+        for m in HUNK_RE.finditer(diff):
+            old_hunks.append((int(m.group(1)), int(m.group(2) or 1)))
+            new_hunks.append((int(m.group(3)), int(m.group(4) or 1)))
+        return FileChange(old, new, old_hunks, new_hunks)
+
+
+@dataclass
+class SymbolIndex:
+    """Top-level names and `Class.member` names under the symbol root, with defining paths."""
+
+    names: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
+    members: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
+
+    @classmethod
+    def build(cls, root: Path, symbol_root: str) -> SymbolIndex:
+        index = cls()
+        for file in sorted((root / symbol_root).rglob("*.py")):
+            if SKIP_DIRS & set(file.parts):
+                continue
+            try:
+                tree = ast.parse(file.read_text(errors="replace"))
+            except SyntaxError:
+                continue
+            rel = file.relative_to(root).as_posix()
+            for node in tree.body:
+                for name in bound_names(node):
+                    if isinstance(node, FunctionOrClass) or CONSTANT_RE.match(name):
+                        index.names[name].append(rel)
+                if isinstance(node, ast.ClassDef):
+                    for child in node.body:
+                        for name in bound_names(child):
+                            index.members[f"{node.name}.{name}"].append(rel)
+        return index
+
+    def lookup(self, token: str) -> list[str]:
+        return self.members.get(token) or self.names.get(token) or []
+
+
+def generate_page_list(area: str, pages: Iterable[Page]) -> str:
+    """Generated area-index content: pages grouped by type, sorted by title."""
+    groups: dict[PageType, list[Page]] = {t: [] for t in PageType}
+    for page in pages:
+        if page.area == area and page.meta is not None:
+            groups[page.meta.type].append(page)
     sections: list[str] = []
-    for page_type, entries in groups.items():
+    for page_type, members in groups.items():
+        entries = [(p.meta.title, p) for p in members if p.meta is not None]
         if not entries:
             continue
         lines = [
-            f"- [{title}]({slug}.md) — {description}"
-            for title, slug, description in sorted(entries, key=lambda e: (e[0].casefold(), e[1]))
+            f"- [{title}]({p.slug}.md) — {p.meta.description if p.meta else ''}"
+            for title, p in sorted(entries, key=lambda e: (e[0].casefold(), e[1].slug))
         ]
-        sections.append(f"### {TYPE_HEADINGS[page_type]}\n\n" + "\n".join(lines))
+        sections.append(f"### {page_type.heading}\n\n" + "\n".join(lines))
     return "\n\n".join(sections)
 
 
@@ -207,75 +461,63 @@ class WikiLinter:
         self.module_dirs = module_dirs
         self.mcp_dir = mcp_dir
         self.symbol_root = symbol_root
-        self.errors: dict[str, list[str]] = defaultdict(list)
-        self.stale: dict[str, list[str]] = defaultdict(list)
-        self.coverage: list[str] = []
+        self.history = GitHistory(self.root)
+        self.findings: list[Finding] = []
+        self.pages: dict[str, Page] = {}
         self.inbound: dict[str, set[str]] = {}
         self.cites: dict[str, set[str]] = defaultdict(set)
-        self._cite_symbols: set[tuple[str, str]] = set()
-        # slug -> (path, symbol) -> page line numbers where the citation appears
-        self._citations: dict[str, dict[tuple[str, str | None], set[int]]] = defaultdict(
-            lambda: defaultdict(set)
-        )
-        self._page_files: dict[str, Path] = {}
-        self._texts: dict[str, str] = {}
-        self._offsets: dict[str, int] = {}
-        self._symbol_index: dict[str, list[str]] | None = None
+        self._symbol_index: SymbolIndex | None = None
         self._basename_index: dict[str, list[str]] | None = None
-        self._page_commits: dict[str, str | None] = {}
-        self._renames: dict[str, dict[str, str]] = {}
-        self._path_commits: dict[tuple[str, str], list[str]] = {}
-        self._changes: dict[tuple[str, str], _FileChange | None] = {}
+        self._sources: dict[str, Source] = {}
+
+    @property
+    def errors(self) -> list[Finding]:
+        return [
+            f for f in self.findings if f.kind is not Kind.STALE and f.kind not in COVERAGE_KINDS
+        ]
+
+    @property
+    def stale(self) -> list[Finding]:
+        return [f for f in self.findings if f.kind is Kind.STALE]
+
+    @property
+    def coverage(self) -> list[Finding]:
+        return [f for f in self.findings if f.kind in COVERAGE_KINDS]
+
+    def _add(self, slug: str, kind: Kind, message: str, lines: Iterable[int] = ()) -> None:
+        self.findings.append(Finding(slug, kind, message, tuple(sorted(lines))))
 
     def run(self) -> None:
         areas = self._areas()
-        pages: dict[str, Path] = {}
-        meta: dict[str, dict[str, object]] = {}
-        bodies: dict[str, str] = {}
-        page_area: dict[str, str] = {}
         for area in areas:
-            for path in sorted((self.wiki_dir / area).glob("*.md")):
-                slug = path.stem
-                if path.name == "index.md" or slug.startswith("_"):
-                    continue
-                if slug in pages:
-                    other = pages[slug].relative_to(self.wiki_dir)
-                    self.errors[slug].append(f"duplicate slug: also at {other}")
-                    continue
-                pages[slug] = path
-                page_area[slug] = area
-                text = path.read_text()
-                self._page_files[slug] = path
-                self._texts[slug] = text
-                page_meta, bodies[slug] = self._parse_frontmatter(slug, text)
-                self._offsets[slug] = text[: len(text) - len(bodies[slug])].count("\n")
-                if page_meta is not None:
-                    meta[slug] = page_meta
-        self.inbound = {slug: set() for slug in pages}
-        by_path = {path.resolve(): slug for slug, path in pages.items()}
+            self._load_area(area)
+        self.inbound = {slug: set() for slug in self.pages}
+        by_path = {page.path.resolve(): slug for slug, page in self.pages.items()}
 
         if self.fix:
             for area in areas:
-                self._fix_area_index(area, meta, page_area)
+                self._fix_area_index(area)
 
         self._check_root_index(areas)
         for area in areas:
-            self._check_area_index(area, meta, page_area)
+            self._check_area_index(area)
 
-        for slug, path in pages.items():
-            self._validate_meta(slug, meta.get(slug), pages)
-            for target in self._check_links(slug, path, bodies[slug]):
+        for slug, page in self.pages.items():
+            self._validate_meta(page)
+            for target in self._check_links(slug, page.path, page.body):
                 if target in by_path and by_path[target] != slug:
                     self.inbound[by_path[target]].add(slug)
-            self._check_citations(slug, bodies[slug], self._offsets[slug])
-        for slug in pages:
-            self._check_staleness(slug)
+            self._check_citations(page)
+        for page in self.pages.values():
+            self._check_staleness(page)
         self._check_coverage()
 
-        for slug in pages:
+        for slug in self.pages:
             if not self.inbound[slug]:
-                self.errors[slug].append(
-                    "orphan: no inbound link from a page other than its area index"
+                self._add(
+                    slug,
+                    Kind.ORPHAN,
+                    "orphan: no inbound link from a page other than its area index",
                 )
 
     def _areas(self) -> list[str]:
@@ -285,59 +527,83 @@ class WikiLinter:
             if d.is_dir() and not d.name.startswith(("_", "."))
         )
 
-    def _parse_frontmatter(self, key: str, text: str) -> tuple[dict[str, object] | None, str]:
+    def _load_area(self, area: str) -> None:
+        for path in sorted((self.wiki_dir / area).glob("*.md")):
+            slug = path.stem
+            if path.name == "index.md" or slug.startswith("_"):
+                continue
+            if slug in self.pages:
+                other = self.pages[slug].path.relative_to(self.wiki_dir)
+                self._add(slug, Kind.DUPLICATE_SLUG, f"duplicate slug: also at {other}")
+                continue
+            text = path.read_text()
+            meta, offset = self._parse_frontmatter(slug, text, PageMeta)
+            self.pages[slug] = Page(slug, area, path, self._rel(path), text, offset, meta)
+
+    def _parse_frontmatter(self, key: str, text: str, model: type[M]) -> tuple[M | None, int]:
+        """Parse and validate frontmatter; returns the model and the body's line offset."""
         match = FRONTMATTER_RE.match(text)
         if not match:
-            self.errors[key].append("missing YAML frontmatter")
-            return None, text
+            self._add(key, Kind.MISSING_FRONTMATTER, "missing YAML frontmatter")
+            return None, 0
         raw, body = match.groups()
+        offset = text[: len(text) - len(body)].count("\n")
         try:
-            meta = yaml.safe_load(raw)
+            data = yaml.safe_load(raw)
         except yaml.YAMLError as exc:
-            self.errors[key].append(f"invalid frontmatter YAML: {exc}")
-            return None, body
-        if not isinstance(meta, dict):
-            self.errors[key].append("frontmatter is not a mapping")
-            return None, body
-        return meta, body
+            self._add(key, Kind.INVALID_FRONTMATTER, f"invalid frontmatter YAML: {exc}")
+            return None, offset
+        if not isinstance(data, dict):
+            self._add(key, Kind.INVALID_FRONTMATTER, "frontmatter is not a mapping")
+            return None, offset
+        try:
+            return model.model_validate(data), offset
+        except ValidationError as exc:
+            self._report_validation(key, exc)
+            return None, offset
 
-    def _missing_keys(self, key: str, meta: dict[str, object], required: tuple[str, ...]) -> None:
-        for name in required:
-            if meta.get(name) in (None, "") and not (name == "sources" and meta.get(name) == []):
-                self.errors[key].append(f"frontmatter missing key: {name}")
+    def _report_validation(self, key: str, exc: ValidationError) -> None:
+        for err in exc.errors():
+            name = str(err["loc"][0]) if err["loc"] else ""
+            value = err["input"]
+            if err["type"] == "missing" or value is None or value == "":
+                self._add(key, Kind.MISSING_KEY, f"frontmatter missing key: {name}")
+            elif err["type"] == "extra_forbidden" and name == "verified":
+                self._add(key, Kind.OBSOLETE_KEY, "verified is obsolete; staleness comes from git")
+            elif err["type"] == "extra_forbidden":
+                self._add(key, Kind.UNKNOWN_KEY, f"unknown frontmatter key: {name}")
+            elif name == "type":
+                self._add(key, Kind.INVALID_TYPE, f"invalid type: {value!r}")
+            elif name == "status":
+                self._add(key, Kind.INVALID_STATUS, f"invalid status: {value!r}")
+            else:
+                self._add(key, Kind.INVALID_FIELD, f"invalid {name}: {err['msg']}")
 
-    def _validate_meta(
-        self, slug: str, meta: dict[str, object] | None, pages: dict[str, Path]
-    ) -> None:
+    def _validate_meta(self, page: Page) -> None:
+        meta = page.meta
         if meta is None:
             return
-        self._missing_keys(slug, meta, REQUIRED_KEYS)
-        if "verified" in meta:
-            self.errors[slug].append("verified is obsolete; staleness comes from git")
-        if meta.get("type") not in (None, "") and meta["type"] not in TYPE_HEADINGS:
-            self.errors[slug].append(f"invalid type: {meta['type']!r}")
-        status = meta.get("status")
-        if status not in (None, "") and status not in PAGE_STATUSES:
-            self.errors[slug].append(f"invalid status: {status!r}")
-        superseded = meta.get("superseded_by")
-        if status == "deprecated":
-            if superseded in (None, ""):
-                self.errors[slug].append("deprecated page missing superseded_by")
-            elif superseded not in pages:
-                self.errors[slug].append(f"superseded_by names unknown slug: {superseded}")
-        elif superseded not in (None, ""):
-            self.errors[slug].append("superseded_by is only allowed when status is deprecated")
-        sources = meta.get("sources")
-        if sources is not None:
-            if not isinstance(sources, list):
-                self.errors[slug].append("sources must be a list")
-            else:
-                for source in sources:
-                    self._check_source(slug, str(source))
+        if meta.status is PageStatus.DEPRECATED:
+            if meta.superseded_by is None:
+                self._add(
+                    page.slug, Kind.SUPERSEDED_MISSING, "deprecated page missing superseded_by"
+                )
+            elif meta.superseded_by not in self.pages:
+                self._add(
+                    page.slug,
+                    Kind.SUPERSEDED_UNKNOWN,
+                    f"superseded_by names unknown slug: {meta.superseded_by}",
+                )
+        elif meta.superseded_by is not None:
+            self._add(
+                page.slug,
+                Kind.SUPERSEDED_NOT_DEPRECATED,
+                "superseded_by is only allowed when status is deprecated",
+            )
+        for source in meta.sources:
+            self._check_source(page, source)
 
-    def _fix_area_index(
-        self, area: str, meta: dict[str, dict[str, object]], page_area: dict[str, str]
-    ) -> None:
+    def _fix_area_index(self, area: str) -> None:
         path = self.wiki_dir / area / "index.md"
         if not path.is_file():
             return
@@ -345,7 +611,7 @@ class WikiLinter:
         match = PAGES_BLOCK_RE.search(text)
         if not match:
             return
-        generated = generate_page_list(area, meta, page_area)
+        generated = generate_page_list(area, self.pages.values())
         block = (
             f"{PAGES_START}\n{generated}\n{PAGES_END}"
             if generated
@@ -356,161 +622,51 @@ class WikiLinter:
     def _check_root_index(self, areas: list[str]) -> None:
         path = self.wiki_dir / "index.md"
         if not path.is_file():
-            self.errors["index"].append("index.md is missing")
+            self._add("index", Kind.INDEX_MISSING, "index.md is missing")
             return
         linked = set(self._check_links("index", path, path.read_text()))
         for area in areas:
             if (self.wiki_dir / area / "index.md").resolve() not in linked:
-                self.errors["index"].append(f"area index not linked: {area}/index.md")
+                self._add("index", Kind.AREA_NOT_LINKED, f"area index not linked: {area}/index.md")
 
-    def _check_area_index(
-        self,
-        area: str,
-        meta: dict[str, dict[str, object]],
-        page_area: dict[str, str],
-    ) -> None:
+    def _check_area_index(self, area: str) -> None:
         key = f"{area}/index"
         path = self.wiki_dir / area / "index.md"
         if not path.is_file():
-            self.errors[key].append("index.md is missing")
+            self._add(key, Kind.INDEX_MISSING, "index.md is missing")
             return
-        index_meta, body = self._parse_frontmatter(key, path.read_text())
-        if index_meta is not None:
-            self._missing_keys(key, index_meta, INDEX_REQUIRED_KEYS)
+        text = path.read_text()
+        _, offset = self._parse_frontmatter(key, text, IndexMeta)
+        body = body_from(text, offset)
         match = PAGES_BLOCK_RE.search(body)
         if not match:
-            self.errors[key].append(f"missing {PAGES_START} / {PAGES_END} block")
-        elif match.group(1).strip() != generate_page_list(area, meta, page_area).strip():
-            self.errors[key].append("generated page list is stale: run --fix")
+            self._add(key, Kind.INDEX_MARKERS, f"missing {PAGES_START} / {PAGES_END} block")
+        elif match.group(1).strip() != generate_page_list(area, self.pages.values()).strip():
+            self._add(key, Kind.INDEX_STALE, "generated page list is stale: run --fix")
         self._check_links(key, path, body)
-
-    def _git(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", "-C", str(self.root), *args], capture_output=True, text=True, check=False
-        )
 
     def _rel(self, path: Path) -> str:
         return path.resolve().relative_to(self.root).as_posix()
 
-    def _page_commit(self, slug: str) -> str | None:
-        rel = self._rel(self._page_files[slug])
-        if rel not in self._page_commits:
-            result = self._git("log", "-1", "--format=%H", "--", rel)
-            self._page_commits[rel] = result.stdout.strip() or None
-        return self._page_commits[rel]
-
-    def _renamed_to(self, slug: str, path: str) -> str | None:
-        base = self._page_commit(slug)
-        if base is None:
-            return None
-        if base not in self._renames:
-            result = self._git("diff", "-M", "--name-status", base, "HEAD")
-            renames: dict[str, str] = {}
-            for line in result.stdout.splitlines():
-                fields = line.split("\t")
-                if fields[0].startswith("R") and len(fields) == 3:
-                    renames[fields[1]] = fields[2]
-            self._renames[base] = renames
-        return self._renames[base].get(path)
-
-    def _commits_after(self, base: str, path: str) -> list[str]:
-        key = (base, path)
-        if key not in self._path_commits:
-            result = self._git("log", "--no-merges", "--format=%H", f"{base}..HEAD", "--", path)
-            self._path_commits[key] = result.stdout.split() if result.returncode == 0 else []
-        return self._path_commits[key]
-
-    def _show(self, rev: str, path: str) -> _Source | None:
-        result = self._git("show", f"{rev}:{path}")
-        return _Source.parse(result.stdout) if result.returncode == 0 else None
-
-    def _file_change(self, path: str, old_rev: str, new_rev: str | None) -> _FileChange | None:
-        """Parsed old and new versions plus -U0 hunks; new_rev None means the working tree."""
-        key = (path, new_rev or "working tree")
-        if key not in self._changes:
-            old = self._show(old_rev, path)
-            if new_rev is None:
-                target = self.root / path
-                new = (
-                    _Source.parse(target.read_text(errors="replace")) if target.is_file() else None
-                )
-                diff_args = ["diff", "-U0", "--no-color", old_rev, "--", path]
-            else:
-                new = self._show(new_rev, path)
-                diff_args = ["diff", "-U0", "--no-color", old_rev, new_rev, "--", path]
-            if new_rev is None and old is None:
-                self._changes[key] = None
-            else:
-                diff = self._git(*diff_args).stdout
-                old_hunks: list[tuple[int, int]] = []
-                new_hunks: list[tuple[int, int]] = []
-                for m in HUNK_RE.finditer(diff):
-                    old_hunks.append((int(m.group(1)), int(m.group(2) or 1)))
-                    new_hunks.append((int(m.group(3)), int(m.group(4) or 1)))
-                self._changes[key] = _FileChange(old, new, old_hunks, new_hunks)
-        return self._changes[key]
-
-    def _symbol_changed(
-        self, path: str, symbol: str | None, old_rev: str, new_rev: str | None
-    ) -> bool:
-        change = self._file_change(path, old_rev, new_rev)
-        if change is None:
-            return False
-        if symbol is None:
-            return bool(change.old_hunks)
-        old_range = change.old.range(symbol) if change.old else None
-        new_range = change.new.range(symbol) if change.new else None
-        if (old_range is None) != (new_range is None):
-            return True
-        if old_range is None or new_range is None:
-            return False
-        return any(hunk_overlaps(*h, old_range) for h in change.old_hunks) or any(
-            hunk_overlaps(*h, new_range) for h in change.new_hunks
-        )
-
-    def _check_staleness(self, slug: str) -> None:
-        rel = self._rel(self._page_files[slug])
-        # Any uncommitted change to the page (including a new page) counts as re-checked.
-        if self._git("status", "--porcelain", "--", rel).stdout.strip():
+    def _check_staleness(self, page: Page) -> None:
+        # An uncommitted edit to the page (or a new page) counts as re-checked.
+        if self.history.is_modified(page.rel):
             return
-        base = self._page_commit(slug)
-        head_ok = self._git("rev-parse", "--verify", "--quiet", "HEAD").returncode == 0
-        for (path, symbol), lines in sorted(
-            self._citations[slug].items(), key=lambda kv: (kv[0][0], kv[0][1] or "")
+        base = self.history.last_commit(page.rel)
+        for citation, lines in sorted(
+            page.citations.items(), key=lambda kv: (kv[0].path, kv[0].symbol or "")
         ):
-            if not (self.root / path).is_file():
+            if not (self.root / citation.path).is_file():
                 continue
-            # Whole-file semantics for non-Python files and citations without a symbol.
-            tracked = symbol if path.endswith(".py") else None
-            changed: list[str] = []
-            if base:
-                for commit in self._commits_after(base, path):
-                    if tracked is None or self._symbol_changed(path, tracked, f"{commit}^", commit):
-                        changed.append(commit[:7])
-            if head_ok and self._symbol_changed(path, tracked, "HEAD", None):
-                changed.append("working tree")
-            if changed:
-                label = f"{path}::{symbol}" if symbol else path
-                where = ", ".join(str(n) for n in sorted(lines))
-                self.stale[slug].append(
-                    f"{label} changed in {', '.join(changed)} (page lines {where})"
-                )
+            symbol = citation.symbol if citation.path.endswith(".py") else None
+            changes = self.history.changes_since(base, citation.path, symbol)
+            if changes:
+                label = f"{citation.path}::{citation.symbol}" if citation.symbol else citation.path
+                self._add(page.slug, Kind.STALE, f"{label} changed in {changes.describe()}", lines)
 
-    def _symbols(self) -> dict[str, list[str]]:
-        """Names of top-level functions and classes under symbol_root, with defining paths."""
+    def _symbols(self) -> SymbolIndex:
         if self._symbol_index is None:
-            index: dict[str, list[str]] = defaultdict(list)
-            for file in sorted((self.root / self.symbol_root).rglob("*.py")):
-                if SKIP_DIRS & set(file.parts):
-                    continue
-                try:
-                    tree = ast.parse(file.read_text(errors="replace"))
-                except SyntaxError:
-                    continue
-                for node in tree.body:
-                    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-                        index[node.name].append(self._rel(file))
-            self._symbol_index = index
+            self._symbol_index = SymbolIndex.build(self.root, self.symbol_root)
         return self._symbol_index
 
     def _basenames(self) -> dict[str, list[str]]:
@@ -522,81 +678,128 @@ class WikiLinter:
             self._basename_index = index
         return self._basename_index
 
+    def _source(self, path: str) -> Source:
+        if path not in self._sources:
+            self._sources[path] = Source.parse((self.root / path).read_text(errors="replace"))
+        return self._sources[path]
+
     def _check_coverage(self) -> None:
+        cited_symbols = {
+            (c.path, c.symbol.split(".")[-1])
+            for page in self.pages.values()
+            for c in page.citations
+            if c.symbol
+        }
         for directory in self.module_dirs:
             for file in sorted((self.root / directory).glob("*.py")):
                 rel = self._rel(file)
                 if file.name != "__init__.py" and rel not in self.cites:
-                    self.coverage.append(f"module not cited by any page: {rel}")
+                    self._add(
+                        COVERAGE_KEY, Kind.COVERAGE_MODULE, f"module not cited by any page: {rel}"
+                    )
         for file in sorted((self.root / self.mcp_dir).rglob("*.py")):
             if SKIP_DIRS & set(file.parts):
                 continue
             rel = self._rel(file)
-            try:
-                tree = ast.parse(file.read_text(errors="replace"))
-            except SyntaxError:
+            tree = self._source(rel).tree
+            if tree is None:
                 continue
             for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and any(
-                    _is_tool_decorator(d) for d in node.decorator_list
+                if (
+                    isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+                    and any(_is_tool_decorator(d) for d in node.decorator_list)
+                    and (rel, node.name) not in cited_symbols
                 ):
-                    if not any(
-                        p == rel and sym.split(".")[-1] == node.name
-                        for p, sym in self._cite_symbols
-                    ):
-                        self.coverage.append(f"MCP tool not cited by any page: {rel}::{node.name}")
+                    self._add(
+                        COVERAGE_KEY,
+                        Kind.COVERAGE_MCP_TOOL,
+                        f"MCP tool not cited by any page: {rel}::{node.name}",
+                    )
 
-    def _check_source(self, slug: str, source: str) -> None:
+    def _check_source(self, page: Page, source: str) -> None:
         if source.startswith(("http://", "https://")):
             return
-        frontmatter = self._texts[slug].splitlines()[: self._offsets[slug]]
+        frontmatter = page.text.splitlines()[: page.body_offset]
         lines = {i for i, line in enumerate(frontmatter, 1) if source in line}
-        self._check_citation(slug, source, lines, source=True)
+        self._check_citation(page, source, lines, is_source=True)
 
-    def _check_citations(self, slug: str, body: str, offset: int) -> None:
-        masked = mask_fences(body)
+    def _check_citations(self, page: Page) -> None:
+        masked = mask_fences(page.body)
         for match in INLINE_CODE_RE.finditer(masked):
             raw = match.group(1)
-            line = offset + masked.count("\n", 0, match.start()) + 1
-            ident = IDENT_RE.match(raw.strip())
-            if ident and not (self.root / ident.group(1)).is_file():
-                defined = self._symbols().get(ident.group(1), [])
-                if len(defined) == 1:
-                    name = ident.group(1)
-                    self.errors[slug].append(
-                        f"unqualified symbol {name}: cite as {defined[0]}::{name}"
-                    )
+            line = page.body_offset + masked.count("\n", 0, match.start()) + 1
+            if self._flag_unqualified(page, raw.strip(), line):
                 continue
-            self._check_citation(slug, raw, {line})
+            self._check_citation(page, raw, {line})
 
-    def _check_citation(self, slug: str, raw: str, lines: set[int], source: bool = False) -> None:
+    def _flag_unqualified(self, page: Page, token: str, line: int) -> bool:
+        ident = IDENT_RE.match(token)
+        if not ident or (self.root / token).is_file():
+            return False
+        name = ident.group(1)
+        if keyword.iskeyword(name) or hasattr(builtins, name):
+            return False
+        defined = self._symbols().lookup(name)
+        if len(defined) == 1:
+            self._add(
+                page.slug,
+                Kind.UNQUALIFIED_SYMBOL,
+                f"unqualified symbol {name}: cite as {defined[0]}::{name}",
+                [line],
+            )
+        elif defined:
+            options = ", ".join(f"{path}::{name}" for path in defined)
+            self._add(
+                page.slug,
+                Kind.AMBIGUOUS_SYMBOL,
+                f"ambiguous symbol {name}: cite as one of {options}",
+                [line],
+            )
+        return bool(defined)
+
+    def _check_citation(
+        self, page: Page, raw: str, lines: set[int], is_source: bool = False
+    ) -> None:
         text = raw.strip()
         while text.startswith("./"):
             text = text[2:]
         match = CITE_RE.match(text)
         if not match:
-            if source:
-                self.errors[slug].append(f"source is not a code citation: {raw}")
+            if is_source:
+                self._add(
+                    page.slug,
+                    Kind.SOURCE_NOT_CITATION,
+                    f"source is not a code citation: {raw}",
+                    lines,
+                )
             return
-        path, symbol, anchor = match.groups()
+        path, symbol = match.groups()
         if docs_citation_forbidden(path):
-            self.errors[slug].append(f"pages do not cite docs/: {raw}")
+            self._add(page.slug, Kind.DOCS_CITATION, f"pages do not cite docs/: {raw}", lines)
             return
         target = (self.root / path).resolve()
         if target.is_file() and target.is_relative_to(self.root):
-            self._register(slug, path, symbol, anchor, raw, target, lines)
-        elif HAS_EXT_RE.search(path) and (source or self._is_repo_path(path)):
-            renamed = self._renamed_to(slug, path)
+            self._register(page, path, symbol, raw, lines)
+            return
+        base = self.history.last_commit(page.rel)
+        if path in self.history.tracked_at(base):
+            renamed = self.history.renamed_to(base, path) if base else None
             if renamed:
-                self.errors[slug].append(f"cited path renamed to {renamed}: {raw}")
+                self._add(
+                    page.slug, Kind.PATH_RENAMED, f"cited path renamed to {renamed}: {raw}", lines
+                )
             else:
-                self.errors[slug].append(f"cited path does not exist: {raw}")
+                self._add(page.slug, Kind.PATH_DELETED, f"cited path was deleted: {raw}", lines)
+        elif HAS_EXT_RE.search(path) and (is_source or self._is_repo_path(path)):
+            self._add(page.slug, Kind.PATH_MISSING, f"cited path does not exist: {raw}", lines)
         elif HAS_EXT_RE.search(path):
             matches = self._basenames().get(path, [])
             if len(matches) == 1:
-                self.errors[slug].append(f"qualify path: {raw} is {matches[0]}")
-        elif source:
-            self.errors[slug].append(f"cited path does not exist: {raw}")
+                self._add(
+                    page.slug, Kind.QUALIFY_PATH, f"qualify path: {raw} is {matches[0]}", lines
+                )
+        elif is_source:
+            self._add(page.slug, Kind.PATH_MISSING, f"cited path does not exist: {raw}", lines)
 
     def _is_repo_path(self, path: str) -> bool:
         # Absolute paths and object-store keys (`latest/model.pkl`) are prose, not citations.
@@ -604,49 +807,33 @@ class WikiLinter:
         return "/" in path and bool(head) and (self.root / head).exists()
 
     def _register(
-        self,
-        slug: str,
-        path: str,
-        symbol: str | None,
-        anchor: str | None,
-        raw: str,
-        target: Path,
-        lines: set[int],
+        self, page: Page, path: str, symbol: str | None, raw: str, lines: set[int]
     ) -> None:
-        self.cites[path].add(slug)
-        self._citations[slug][(path, symbol)] |= lines
-        if symbol:
-            self._cite_symbols.add((path, symbol))
-        text = target.read_text(errors="replace")
-        if symbol and path.endswith(".py") and not symbol_defined(text, symbol.split(".")[-1]):
-            self.errors[slug].append(f"cited symbol not defined: {raw}")
-        if anchor and path.endswith(".md") and anchor not in heading_slugs(text):
-            self.errors[slug].append(f"cited anchor not found: {raw}")
+        self.cites[path].add(page.slug)
+        page.citations.setdefault(Citation(path, symbol), set()).update(lines)
+        if symbol and path.endswith(".py") and self._source(path).extent(symbol) is None:
+            self._add(page.slug, Kind.SYMBOL_UNDEFINED, f"cited symbol not defined: {raw}", lines)
 
     def _check_links(self, slug: str, path: Path, text: str) -> list[Path]:
-        """Validate links in text; return resolved paths of the files linked to."""
+        """Report wikilinks and docs/ links; return the existing files linked to.
+
+        Broken links and anchors are lychee's job (see .pre-commit-config.yaml).
+        """
         text = mask_fences(text)
         for match in WIKILINK_RE.finditer(text):
-            self.errors[slug].append(f"wikilink syntax not allowed: {match.group(0)}")
+            self._add(slug, Kind.WIKILINK, f"wikilink syntax not allowed: {match.group(0)}")
         text = INLINE_CODE_RE.sub("", text)
         targets: list[Path] = []
         for match in LINK_RE.finditer(text):
             href = match.group(1)
             if re.match(r"^[a-z][a-z0-9+.\-]*:", href, re.IGNORECASE) or href.startswith("#"):
                 continue
-            file_part, _, anchor = href.partition("#")
-            target = (path.parent / file_part).resolve()
-            if target.is_file() and target.is_relative_to(self.root):
-                if docs_citation_forbidden(self._rel(target)):
-                    self.errors[slug].append(f"pages do not link into docs/: {href}")
-                    continue
+            target = (path.parent / href.partition("#")[0]).resolve()
             if not target.is_file():
-                self.errors[slug].append(f"broken link (file not found): {href}")
                 continue
-            if anchor and target.suffix == ".md":
-                if anchor not in heading_slugs(target.read_text()):
-                    self.errors[slug].append(f"broken link (anchor not found): {href}")
-                    continue
+            if target.is_relative_to(self.root) and docs_citation_forbidden(self._rel(target)):
+                self._add(slug, Kind.DOCS_LINK, f"pages do not link into docs/: {href}")
+                continue
             targets.append(target)
         return targets
 
@@ -655,6 +842,30 @@ class WikiLinter:
             "pages": {slug: sorted(src) for slug, src in sorted(self.inbound.items())},
             "cites": {path: sorted(src) for path, src in sorted(self.cites.items())},
         }
+
+
+def render(findings: list[Finding]) -> list[str]:
+    out: list[str] = []
+    by_slug: dict[str, list[Finding]] = defaultdict(list)
+    for f in findings:
+        if f.kind is not Kind.STALE and f.kind not in COVERAGE_KINDS:
+            by_slug[f.slug].append(f)
+    for slug in sorted(by_slug):
+        out.append(f"{slug}:")
+        out.extend(f"  {f.message}" for f in by_slug[slug])
+    coverage = [f for f in findings if f.kind in COVERAGE_KINDS]
+    if coverage:
+        out.append("Coverage:")
+        out.extend(f"  {f.message}" for f in coverage)
+    stale = [f for f in findings if f.kind is Kind.STALE]
+    if stale:
+        out.append("Stale pages:")
+        for slug in sorted({f.slug for f in stale}):
+            out.append(f"{slug}:")
+            for f in (f for f in stale if f.slug == slug):
+                where = ", ".join(str(n) for n in f.lines)
+                out.append(f"  stale: {f.message} (page lines {where})")
+    return out
 
 
 def lint(
@@ -666,20 +877,8 @@ def lint(
 ) -> int:
     linter = WikiLinter(wiki_dir, root, fix=fix)
     linter.run()
-    for slug in sorted(linter.errors):
-        print(f"{slug}:")
-        for error in linter.errors[slug]:
-            print(f"  {error}")
-    if linter.coverage:
-        print("Coverage:")
-        for line in linter.coverage:
-            print(f"  {line}")
-    if linter.stale:
-        print("Stale pages:")
-        for slug in sorted(linter.stale):
-            print(f"{slug}:")
-            for line in linter.stale[slug]:
-                print(f"  stale: {line}")
+    for line in render(linter.findings):
+        print(line)
     if write:
         out = wiki_dir / "backlinks.json"
         out.write_text(json.dumps(linter.backlinks(), indent=2, sort_keys=True) + "\n")
