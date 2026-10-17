@@ -20,7 +20,7 @@ sources:
   - odds_lambda.jobs.agent_run.CADENCE
   - odds_lambda.jobs.agent_run.schedule_next
   - odds_lambda.jobs.fetch_oddsportal.LeagueSpec
-  - odds_core.config.SchedulerConfig
+  - odds_core.config.SchedulerConfig.lookahead_days
 status: stable
 ---
 

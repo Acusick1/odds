@@ -14,7 +14,8 @@ sources:
   - odds_cli.commands.discover
   - odds_cli.commands.backtest
   - odds_cli.commands.backtest.STRATEGIES
-  - odds_cli.commands.scheduler
+  - odds_cli.commands.scheduler.run_once
+  - odds_cli.commands.scheduler.info
   - odds_cli.commands.validate
   - odds_cli.commands.train
   - odds_cli.commands.agent

@@ -88,6 +88,10 @@ class SchedulerConfig(BaseSettings):
     bootstrap_jobs: list[str] = Field(
         default=[
             # "agent-run",
+            "fetch-odds",
+            "fetch-scores",
+            "update-status",
+            "check-health",
             "fetch-oddsportal",
             "fetch-oddsportal-results",
             # "daily-digest",
@@ -196,7 +200,6 @@ class AlertConfig(BaseSettings):
         default={
             "fetch-oddsportal-epl": 2,
             "fetch-oddsportal-results-epl": 26,
-            "daily-digest-epl": 26,
             "fetch-oddsportal-mlb": 2,
             "fetch-oddsportal-results-mlb": 26,
             "check-health": 2,

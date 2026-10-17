@@ -33,7 +33,8 @@ fetch-odds, fetch-scores and the Polymarket jobs send hand-rolled criticals on f
 
 ## Blind spots
 
-- Delivery depends on deployed environment: the scraper function's Terraform sets neither `ALERT_ENABLED` nor `DISCORD_WEBHOOK_URL`, so its alerts are off (#443; [aws-infrastructure](aws-infrastructure.md)). Check the deployed function with `aws lambda get-function-configuration --function-name odds-scheduler-scraper`.
+- All three mechanisms run on the mini-PC, the only production host. If the host or its WSL guest stops, nothing runs to raise an alert; #489 tracks an external dead-man's switch ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)).
+- Delivery depends on the environment that runs the job: on the dormant AWS stack, the scraper function's Terraform sets neither `ALERT_ENABLED` nor `DISCORD_WEBHOOK_URL`, so its alerts are off (#443; [aws-infrastructure](aws-infrastructure.md)).
 - The fetch-failure streak reads `fetch_logs`, which records no failed API call ([health-monitor](health-monitor.md)).
 - Discord is the only channel and a failed post is still recorded, so a failed delivery suppresses retries for the window ([alerts](alerts.md#delivery)).
 - The Lambda handler adds a second critical on top of the job's own ([lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).

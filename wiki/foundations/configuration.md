@@ -43,7 +43,7 @@ Eight sections carry an env prefix and three are bare (`SPORTS`, `ALERT_ENABLED`
 
 ## List fields and the template
 
-List fields (`SPORTS`, `BOOKMAKERS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are parsed as JSON arrays. `.env.example` writes them comma-separated and sets `SPORTS=basketball_nba`, so copying it unchanged makes `odds_core.config.get_settings()` raise `SettingsError` on `sports` (#444). The code default for `SCHEDULER_BOOTSTRAP_JOBS` is `odds_core.config.SchedulerConfig`'s, which has `agent-run` and `daily-digest` commented out.
+List fields (`SPORTS`, `BOOKMAKERS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are parsed as JSON arrays. `.env.example` writes them comma-separated and sets `SPORTS=basketball_nba`, so copying it unchanged makes `odds_core.config.get_settings()` raise `SettingsError` on `sports` (#444). The code default for `SCHEDULER_BOOTSTRAP_JOBS` is `odds_core.config.SchedulerConfig`'s: the production job set, with `agent-run` and `daily-digest` commented out ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
 
 ## Read at import
 

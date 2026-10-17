@@ -1,7 +1,7 @@
 ---
 type: reference
 title: AWS infrastructure and deployment
-description: The two Lambda functions and images, Terraform and bootstrap layout and variables, IAM, SSM, logs, secrets, constraints and costs.
+description: The dormant AWS stack — the two Lambda functions and images, Terraform and bootstrap layout and variables, IAM, SSM, logs, secrets, constraints and costs.
 sources:
   - deployment/aws/terraform/lambda.tf
   - deployment/aws/terraform/scraper.tf
@@ -18,7 +18,7 @@ status: stable
 
 # AWS infrastructure
 
-Everything lives under `deployment/aws/`; region `eu-west-1`. Deployed state is not in the repo, and Terraform does not show the live schedule (see [Terraform](#terraform)); the live view is `odds scheduler list-jobs --backend aws` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). The manual deploy steps are on [howto-deploy-aws](howto-deploy-aws.md).
+Everything lives under `deployment/aws/`; region `eu-west-1`. The stack is dormant: its EventBridge rules are disabled and production runs on the mini-PC, while the Lambdas, ECR images, Terraform state and the S3 model bucket stay in place ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md), [Where each job runs](../scheduling/job-deployment-matrix.md#dormant-aws-rules)). Local scoring on the mini-PC still loads the model from that bucket ([model-store](../modelling/model-store.md)). Deployed state is not in the repo, and Terraform does not show the live schedule (see [Terraform](#terraform)); the live view is `odds scheduler list-jobs --backend aws` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). The manual deploy steps are on [howto-deploy-aws](howto-deploy-aws.md).
 
 ## Functions
 
@@ -48,7 +48,7 @@ EventBridge rules are named `{rule_prefix}-{job}[-{sport suffix}]` and `eventbri
 
 ## Costs and usage
 
-Spend cannot be verified from the repo; check it with `aws ce get-cost-and-usage` or the Billing console. The managed PostgreSQL provider is Neon (`deployment/aws/terraform/terraform.tfvars.example`) and is billed separately; check its console. Log groups keep 14 days (`retention_in_days` in `deployment/aws/terraform/lambda.tf` and `deployment/aws/terraform/scraper.tf`). `scripts/lambda_usage.py` pulls `REPORT` lines from CloudWatch for both functions and prints GB-seconds against the 400,000 free tier, daily breakdown, retry analysis and an hourly heatmap (`--days`, `--start`, `--end`). Gaps are filled with [backfills](../collection/odds-api-backfill.md); alerts go to Discord ([alerts](alerts.md)). `scripts/lambda_usage.py` hard-codes memory sizes (0.5 and 2.0 GB), so a change in Terraform does not propagate (#463).
+Spend cannot be verified from the repo; check it with `aws ce get-cost-and-usage` or the Billing console. The managed PostgreSQL provider is Neon (`deployment/aws/terraform/terraform.tfvars.example`), now a frozen archive ([databases-and-environments](../foundations/databases-and-environments.md#environments)), and is billed separately; check its console. Log groups keep 14 days (`retention_in_days` in `deployment/aws/terraform/lambda.tf` and `deployment/aws/terraform/scraper.tf`). `scripts/lambda_usage.py` pulls `REPORT` lines from CloudWatch for both functions and prints GB-seconds against the 400,000 free tier, daily breakdown, retry analysis and an hourly heatmap (`--days`, `--start`, `--end`). Gaps are filled with [backfills](../collection/odds-api-backfill.md); alerts go to Discord ([alerts](alerts.md)). `scripts/lambda_usage.py` hard-codes memory sizes (0.5 and 2.0 GB), so a change in Terraform does not propagate (#463).
 
 ## Secrets
 

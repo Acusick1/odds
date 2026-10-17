@@ -80,7 +80,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in
 | `odds_core.alerts` | `odds_core.alerts.AlertManager`, `odds_core.alerts.DiscordAlert`, see [Alerts](../operations/alerts.md) |
 | `odds_core.odds_math` | Price conversion, implied probability, devig, see [Odds arithmetic helpers](odds-math.md) |
 | `odds_core.snapshot_utils`, `utils.py` | `odds_core.snapshot_utils.extract_odds_from_snapshot` (parse `raw_data` into `odds_core.models.Odds`), `odds_core.utils.raw_data_has_market` |
-| `odds_core.sports`, `odds_core.team`, `odds_core.time`, `odds_core.logging_setup` | [Sport keys](../collection/sport-and-market-keys.md), team-name normalization, [timezone helpers](timezones.md), structlog setup |
+| `odds_core.sports`, `odds_core.team`, `odds_core.time`, `odds_core.logging_setup` | [Sport keys](../collection/sport-and-market-keys.md), [team-name normalization](../storage/event-matching.md), [timezone helpers](timezones.md), structlog setup |
 | `odds_core.api_models` | The Odds API response models and event factories |
 
 `odds_core.snapshot_utils.extract_odds_from_snapshot` matches market keys exactly, so `h2h` and `1x2` snapshots are different markets to every reader that uses it.

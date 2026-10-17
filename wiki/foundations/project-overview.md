@@ -4,8 +4,7 @@ title: About the system and its pivots
 description: What the system is, which sports are live, where the edge is meant to come from, what runs where in outline, the three pivots and the NBA-era defaults they left.
 sources:
   - odds_core.sports.SportKey
-  - odds_lambda.scheduling.jobs._JOB_CRON_MAP
-  - odds_core.config.SchedulerConfig
+  - odds_core.config.SchedulerConfig.bootstrap_jobs
   - odds_core.config.PolymarketConfig
   - odds_cli.main.app
   - odds_cli.commands.backfill
@@ -14,7 +13,6 @@ sources:
   - odds_lambda.storage.readers.OddsReader
   - odds_analytics.strategies.BasicEVStrategy
   - odds_lambda.polymarket_fetcher.PolymarketClient
-  - deployment/aws/terraform/eventbridge.tf
 status: stable
 ---
 
@@ -26,7 +24,7 @@ Design principles `(inferred)`: robust collection and storage before analysis; a
 
 ## Sports
 
-EPL and MLB are active, with agents in interactive evaluation, not autonomous production. NBA code (injuries, game logs, Polymarket targeting) exists but is deprioritized. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md).
+EPL and MLB data collection is active. The agents are in interactive evaluation, not autonomous production: they are run by hand on the production host. NBA code (injuries, game logs, Polymarket targeting) exists but is deprioritized. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md).
 
 ## Where the edge is meant to come from
 
@@ -34,11 +32,7 @@ Breadth and speed of information synthesis by an LLM agent, not the XGBoost CLV 
 
 ## What runs where
 
-Two AWS Lambdas (`odds-scheduler`, `odds-scheduler-scraper`) plus a local scheduler. The repo does not record the deployed state; the only check is `odds scheduler list-jobs --backend aws`.
-
-- The agent, daily digest, ESPN fixtures and MLB probables jobs never run on AWS: Terraform declares no fixed-schedule EventBridge rules for them (`deployment/aws/terraform/eventbridge.tf`), and their local cron table is `odds_lambda.scheduling.jobs._JOB_CRON_MAP`.
-- `agent-run` and `daily-digest` are also opt-in locally: both are commented out of the default `odds_core.config.SchedulerConfig` `bootstrap_jobs`.
-- The remaining fetch jobs may run on AWS, locally, or both.
+One host, the mini-PC, runs every scheduled job under its local scheduler and holds the production database ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The job set is `odds_core.config.SchedulerConfig.bootstrap_jobs`, with `agent-run` and `daily-digest` commented out. The two AWS Lambdas (`odds-scheduler`, `odds-scheduler-scraper`) and their Terraform remain but are dormant, and the Neon database they wrote to is a frozen archive. The repo does not record the deployed AWS state; the only check is `odds scheduler list-jobs --backend aws`.
 
 Per-job table: [Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs); local backend: [Local scheduler](../scheduling/local-scheduler.md).
 

@@ -7,7 +7,7 @@ sources:
   - docker-compose.yml
   - pyproject.toml
   - odds_core.config.DataCollectionConfig
-  - odds_core.config.SchedulerConfig
+  - odds_core.config.SchedulerConfig.bootstrap_jobs
   - odds_cli.commands.status.show_quota
   - tests/conftest.py
   - .pre-commit-config.yaml
@@ -31,12 +31,12 @@ Prerequisites: Python 3.12+, [uv](https://github.com/astral-sh/uv), Docker, and 
 5. **Check.** `uv run odds status show`, then `uv run odds status quota`. The free tier is 500 units per month per key, and each `fetch current` costs 1 unit per region per market (3 by default) ([Odds API client](../collection/odds-api-client.md)).
 6. **First fetch.** `uv run odds fetch current --sport soccer_epl`. Pass `--sport`: the default is `basketball_nba` ([Sport defaults](odds-cli.md#sport-defaults)). Each fetch costs units.
 7. **Enable the hooks** (before committing). `uv run pre-commit install` runs the lint hooks on every commit; `uv run pre-commit run --all-files` runs them everywhere ([Code conventions](code-conventions.md#mechanical-gates)).
-8. **Run the scheduler** (optional). `uv run odds scheduler start` ([Local scheduler](../scheduling/local-scheduler.md)). It bootstraps only the default jobs; `agent-run` and `daily-digest` are opt-in and must be added to `SCHEDULER_BOOTSTRAP_JOBS` (`odds_core.config.SchedulerConfig`, [Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
+8. **Run the scheduler** (optional). Set `SCHEDULER_BOOTSTRAP_JOBS` to the jobs you need, then `uv run odds scheduler start` ([Local scheduler](../scheduling/local-scheduler.md)). The default in `odds_core.config.SchedulerConfig.bootstrap_jobs` is the production job set, including `fetch-odds` and `fetch-scores`, which spend Odds API quota ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
 
 Any import of `odds_core` builds settings, so a missing `ODDS_API_KEY` or `DATABASE_URL` fails every command ([Workspace packages](workspace-packages.md#odds-core)). To seed local data from production see [Copy production data locally](howto-copy-production-data.md). Tests need none of this database.
 
 > [!WARNING]
-> Never point `DATABASE_URL` at production from a local shell. Production is migrated and written only by `deploy-prod.yml` ([Databases and environments](databases-and-environments.md#environments)).
+> Never point `DATABASE_URL` at production from a development machine. Production is the mini-PC's database, migrated only by `deploy.sh` on that host ([Databases and environments](databases-and-environments.md#environments)).
 
 ## Run the tests
 

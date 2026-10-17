@@ -1,7 +1,7 @@
 ---
 type: howto
 title: Deploy to AWS by hand
-description: First-deploy bootstrap, then build, apply, migrate, activate rules and verify.
+description: Deploy the dormant AWS stack by hand — first-deploy bootstrap, then build, apply, migrate, activate rules and verify.
 sources:
   - deployment/aws/bootstrap/main.tf
   - deployment/aws/bootstrap/README.md
@@ -17,10 +17,10 @@ status: stable
 
 # Deploy to AWS by hand
 
-Normal path: let GitHub Actions deploy ([ci-cd-workflows](ci-cd-workflows.md)). `ci-cd.yml` deploys an ephemeral dev stack on every relevant push to main; `deploy-prod.yml` is run manually from the Actions tab and waits for approval on the `production` environment. Use these manual steps for a first deploy or a debugging session. What the infrastructure contains is on [aws-infrastructure](aws-infrastructure.md).
+The AWS stack is dormant and production runs on the mini-PC ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). `ci-cd.yml` still deploys and destroys an ephemeral dev stack on every relevant push to main ([ci-cd-workflows](ci-cd-workflows.md)). Use these manual steps for a dev stack, a debugging session, or to reverse the move. What the infrastructure contains is on [aws-infrastructure](aws-infrastructure.md).
 
 > [!WARNING]
-> Do not run migrations or `odds fetch` against production from a laptop; production changes go through `deploy-prod.yml`.
+> Step 4 against the production stack re-enables its rules, so the Lambdas collect alongside the mini-PC and write to the Neon archive. Do it only to move production back to AWS, after stopping the mini-PC's jobs. Never run migrations or `odds fetch` against the mini-PC database from a development machine ([databases-and-environments](../foundations/databases-and-environments.md#environments)).
 
 ## First deployment only
 
@@ -52,7 +52,7 @@ Normal path: let GitHub Actions deploy ([ci-cd-workflows](ci-cd-workflows.md)). 
    - Pass the pushed tags through `image_tag` and `scraper_image_tag`.
 3. Run migrations against the dev database: `uv run alembic upgrade head` ([howto-database-migration](../foundations/howto-database-migration.md)).
    - The deploy workflows apply Terraform before `alembic upgrade head`, so new code can briefly run against the old schema (#443); keep migrations backward-compatible with the running release `(inferred)`.
-   - Production migrations run only inside `deploy-prod.yml`.
+   - The production Terraform stack's database is the Neon archive; the production database itself migrates only through `deploy.sh` on the mini-PC.
 4. Activate self-scheduling: invoke each scheduler and scraper job once.
    ```bash
    uv run python scripts/ci/test_lambda.py --lambda-name <function> --jobs <csv>

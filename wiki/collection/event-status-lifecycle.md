@@ -35,7 +35,7 @@ Re-discovery can move a status backwards: `odds_lambda.storage.writers.OddsWrite
 
 ## What each status gates
 
-- Schedule-driven readers filter on SCHEDULED: `odds_lambda.scheduling.helpers.get_next_kickoff`, `odds_lambda.jobs.score_predictions`, and the MCP tools in `odds_mcp.server`. `odds_mcp.server.get_upcoming_fixtures` returns SCHEDULED only, so it depends on update-status running on AWS ([mcp-market-tools](../agent/mcp-market-tools.md)).
+- Schedule-driven readers filter on SCHEDULED: `odds_lambda.scheduling.helpers.get_next_kickoff`, `odds_lambda.jobs.score_predictions`, and the MCP tools in `odds_mcp.server`. `odds_mcp.server.get_upcoming_fixtures` returns SCHEDULED only, so it depends on update-status running on the mini-PC ([mcp-market-tools](../agent/mcp-market-tools.md)).
 - Training, standings and paper-trade settlement read only FINAL events (`odds_lambda.paper_trading`). Paper trades settle only on FINAL with both scores, so stalled results jobs leave bets unsettled ([paper-trading](../agent/paper-trading.md#settlement)).
 - Flipping to LIVE removes a started game from pre-game proximity decisions, because the fetch-odds gate keys off SCHEDULED events.
 - A status flip is not what stops pre-game fetching: the fetch job's gating is tier-based ([fetch-tier](../storage/fetch-tier.md)), and `odds_lambda.jobs.fetch_odds` has no status check. `odds_lambda.jobs.update_status._update_event_statuses` only flips the status; nothing in it stops later odds fetches for a started game.

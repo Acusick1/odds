@@ -1,13 +1,13 @@
 ---
 type: howto
 title: Add a sport
-description: "Steps to add a sport: SportKey, suffix, overnight window, league spec, Betfair config, team aliases, cron allowlists, Terraform rules, heartbeat keys."
+description: "Steps to add a sport: SportKey, suffix, overnight window, league spec, Betfair config, team aliases, job sport allowlists, Terraform rules, heartbeat keys."
 sources:
   - odds_core.sports.SportKey
   - odds_core.config.DataCollectionConfig
   - odds_core.config.AlertConfig.heartbeat_expectations
   - odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP
-  - odds_lambda.scheduling.jobs._JOB_CRON_MAP
+  - odds_lambda.scheduling.jobs._JOB_SPORTS
   - odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS
   - odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPECS
   - odds_lambda.betfair.constants.SPORT_CONFIG
@@ -29,13 +29,13 @@ The Odds API bookmakers and markets are config lists (`bookmakers`, `markets` on
 4. If OddsPortal covers it, add a `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` to `odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPECS`.
    - The spec carries its own overnight fields, so keep them equal to step 3 ([fetch-oddsportal-job](fetch-oddsportal-job.md#leagues)).
 5. If Betfair lists it, add an entry to `odds_lambda.betfair.constants.SPORT_CONFIG`.
-   - The Betfair cron allowlist in `odds_lambda.scheduling.jobs._JOB_CRON_MAP` is derived from that map, so no cron edit is needed ([betfair-exchange](betfair-exchange.md)).
+   - The Betfair allowlist in `odds_lambda.scheduling.jobs._JOB_SPORTS` is derived from that map, so no allowlist edit is needed ([betfair-exchange](betfair-exchange.md)).
 6. Add team aliases in `odds_core.team`.
    - Event matching compares normalised names; unknown names pass through unchanged and surface as duplicate events or NULL `event_id` ([event-matching](../storage/event-matching.md)).
-7. Add the sport to the allowlist of each cron job in `odds_lambda.scheduling.jobs._JOB_CRON_MAP` that should run for it.
-   - Allowlists are explicit per job, so a new sport gets no cron by default.
-8. Add the sport to `sport_configs` in `deployment/aws/terraform/eventbridge.tf` if the jobs should run on AWS.
-   - Rules are created per `sport_configs` entry; MLB is commented out there, so nothing runs on AWS for it ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
+7. Add the sport to each allowlist in `odds_lambda.scheduling.jobs._JOB_SPORTS` whose job should run for it.
+   - A job with an allowlist skips every sport not on it, so a new sport gets none of those jobs by default; per-sport jobs without an allowlist run for every sport in `data_collection.sports` ([local-scheduler](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
+8. Skip `sport_configs` in `deployment/aws/terraform/eventbridge.tf` while AWS is dormant.
+   - Rules are created per `sport_configs` entry, and production runs on the mini-PC ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#dormant-aws-rules)).
 9. Add heartbeat expectations to `odds_core.config.AlertConfig.heartbeat_expectations` for each job that uses `odds_core.alerts.job_alert_context`.
    - Keys are compound names (`fetch-oddsportal-<suffix>`), and a key with no history is never alerted ([alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
 10. Pass `--sport` and the sport's market key (`1x2` or `h2h`) in every manual command and check the first fetch.

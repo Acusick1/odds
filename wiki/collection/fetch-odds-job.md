@@ -10,13 +10,14 @@ sources:
   - odds_lambda.storage.writers.OddsWriter.store_odds_snapshot
   - odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend
   - odds_core.config.SchedulerConfig
+  - odds_lambda.scheduling.jobs._JOB_SPORTS
   - deployment/aws/terraform/eventbridge.tf
 status: stable
 ---
 
 # The fetch-odds job
 
-`odds_lambda.jobs.fetch_odds.main(ctx)` is the scheduled caller of [the ingestion service](odds-ingestion-service.md). On AWS it is a per-sport rule on the scheduler Lambda (`fetch-odds-epl`); it is not in the default local `bootstrap_jobs`. The deployed schedule is not verifiable from the repo: `odds scheduler list-jobs --backend aws` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
+`odds_lambda.jobs.fetch_odds.main(ctx)` is the scheduled caller of [the ingestion service](odds-ingestion-service.md). It is in the default local `bootstrap_jobs` and runs on the mini-PC as `fetch-odds-epl`: the `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist limits it to EPL to save Odds API quota ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs), [odds-api-quota](odds-api-quota.md)). Its AWS rule is dormant.
 
 ## Flow
 
@@ -32,8 +33,8 @@ It runs `sports` as `[ctx.sport]` or `data_collection.sports`:
 ## Failure behaviour
 
 - The job is not wrapped in `odds_core.alerts.job_alert_context`, so it writes no heartbeat and `heartbeat_expectations` has no `fetch-odds` entry (#438; [alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
-- On failure it sends an unrate-limited `odds_core.alerts.send_critical` and re-raises, and the Lambda handler sends a second critical (#442; [lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
-- Invoked without a `sport`, the job runs all configured sports and reschedules under the bare `fetch-odds` name, which matches no EventBridge rule (#470).
+- On failure it sends an unrate-limited `odds_core.alerts.send_critical` and re-raises; on AWS the Lambda handler sends a second critical (#442; [lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
+- Invoked without a `sport` (for example `odds scheduler run-once fetch-odds`), the job runs all configured sports, MLB included, and reschedules under the bare `fetch-odds` name, which matches no bootstrapped schedule or EventBridge rule (#470).
 
 ## Log events
 

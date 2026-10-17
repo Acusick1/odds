@@ -12,12 +12,13 @@ sources:
   - odds_lambda.jobs.daily_digest._result_hit
   - odds_lambda.jobs.daily_digest.MAX_FIELD_CHARS
   - odds_lambda.scheduling.jobs._JOB_CRON_MAP
+  - odds_lambda.scheduling.jobs._JOB_SPORTS
 status: stable
 ---
 
 # The daily-digest job
 
-`odds_lambda.jobs.daily_digest` posts one Discord embed per sport with model predictions. It is opt-in and local-only: no EventBridge rule exists, it is commented out of the default `bootstrap_jobs`, and when listed in `SCHEDULER_BOOTSTRAP_JOBS` it runs from `_JOB_CRON_MAP` at `0 8 * * *` for EPL only. `odds scheduler smoke --no-side-effects` drops it ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs), [local-scheduler](../scheduling/local-scheduler.md)). Its heartbeat key `daily-digest-epl` is expected every 26 h ([alerting-and-heartbeats](alerting-and-heartbeats.md#heartbeats)).
+`odds_lambda.jobs.daily_digest` posts one Discord embed per sport with model predictions. It is opt-in and local-only: no EventBridge rule exists, it is commented out of the default `bootstrap_jobs`, and when listed in `SCHEDULER_BOOTSTRAP_JOBS` it runs from `_JOB_CRON_MAP` at `0 8 * * *`, for EPL only through its `_JOB_SPORTS` allowlist. `odds scheduler smoke --no-side-effects` drops it ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs), [local-scheduler](../scheduling/local-scheduler.md)). It writes heartbeat key `daily-digest-epl`, but `heartbeat_expectations` has no entry for it, so a missed digest does not alert ([alerting-and-heartbeats](alerting-and-heartbeats.md#heartbeats)).
 
 ## Flow
 
@@ -33,7 +34,7 @@ status: stable
 ## Conventions
 
 - The digest is single-model and home-side: `odds_lambda.jobs.daily_digest._value_side` treats positive predicted CLV as "Home" and negative as "Away", and `odds_lambda.jobs.daily_digest._result_hit` counts a draw as a miss for both sides. There is no draw side and no multi-model digest.
-- It is EPL-only by allowlist: `_SPORT_DISPLAY_NAMES` is hard-coded for EPL, NBA, MLB, and the cron allowlist limits the job to EPL, matching the EPL-only heartbeat expectation.
+- It is EPL-only by allowlist: `_SPORT_DISPLAY_NAMES` is hard-coded for EPL, NBA, MLB, and the `_JOB_SPORTS` allowlist limits the job to EPL.
 - It never reads paper trades or P&L ([reporting-surfaces](reporting-surfaces.md)).
 
 ## Related

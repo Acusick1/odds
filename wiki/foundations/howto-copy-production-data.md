@@ -18,7 +18,7 @@ status: stable
 
 ## Steps
 
-1. **Export both URLs in the shell.** `PROD_DATABASE_URL` and `LOCAL_DATABASE_URL`; they are `os.getenv` lookups, so `.env` is not read ([variables read outside Settings](configuration.md#variables-read-outside-settings)). With `PROD_DATABASE_URL` unset the command reads `DATABASE_URL` as the source and still prints "Production" (#450); in the standard local setup that copies the local database into itself.
+1. **Export both URLs in the shell.** `PROD_DATABASE_URL` and `LOCAL_DATABASE_URL`; they are `os.getenv` lookups, so `.env` is not read ([variables read outside Settings](configuration.md#variables-read-outside-settings)). On existing machines `PROD_DATABASE_URL` names the Neon archive, which holds no data collected after the move to the mini-PC; to copy current data, point it (or `--prod-url`) at the mini-PC database ([environments](databases-and-environments.md#environments)). With `PROD_DATABASE_URL` unset the command reads `DATABASE_URL` as the source and still prints "Production" (#450); in the standard local setup that copies the local database into itself.
 2. **Dry-run first.** Counts what would be copied and writes nothing.
 
    ```bash

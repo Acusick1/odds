@@ -216,17 +216,19 @@ def start_local(
             for job_name in bootstrap_jobs:
                 cron_expr = get_job_cron(job_name)
                 per_sport = is_per_sport_job(job_name)
+                target_sports = (
+                    resolve_target_sports(job_name, configured_sports) if per_sport else []
+                )
+                for skipped in (
+                    s for s in configured_sports if per_sport and s not in target_sports
+                ):
+                    console.print(
+                        f"[dim]  {make_compound_job_name(job_name, skipped)} skipped — "
+                        f"{job_name} is not enabled for {skipped}[/dim]"
+                    )
 
                 if cron_expr is not None:
                     if per_sport:
-                        target_sports = resolve_target_sports(job_name, configured_sports)
-                        skipped_sports = [s for s in configured_sports if s not in target_sports]
-                        for skipped in skipped_sports:
-                            skipped_compound = make_compound_job_name(job_name, skipped)
-                            console.print(
-                                f"[dim]  {skipped_compound} skipped — "
-                                f"{job_name} does not support {skipped}[/dim]"
-                            )
                         for sport_key in target_sports:
                             await _bootstrap_cron(
                                 make_compound_job_name(job_name, sport_key), cron_expr
@@ -238,7 +240,7 @@ def start_local(
                 bootstrap_fn = get_bootstrap_function(job_name)
 
                 if per_sport:
-                    for sport_key in configured_sports:
+                    for sport_key in target_sports:
                         await _bootstrap_dynamic(
                             make_compound_job_name(job_name, sport_key),
                             JobContext(sport=sport_key),

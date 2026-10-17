@@ -199,8 +199,8 @@ class TestSmokeCommand:
         assert "FAIL" in result.output
 
     def test_exit_code_counts_failures(self) -> None:
-        settings = _settings(["fetch-scores"], ["soccer_epl", "baseball_mlb"])
-        recorder = _JobRecorder(fail_bases={"fetch-scores"})
+        settings = _settings(["fetch-oddsportal"], ["soccer_epl", "baseball_mlb"])
+        recorder = _JobRecorder(fail_bases={"fetch-oddsportal"})
         result = _invoke_smoke([], settings, recorder)
 
         # Both per-sport expansions fail -> exit code equals the failure count.

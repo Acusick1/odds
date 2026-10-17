@@ -34,7 +34,7 @@ Helpers:
 - `job_alert_context(job_name)`: async context manager. On exception: if the manager is enabled and `job_failure:<job_name>` is not rate limited, send a critical and record it; always re-raise. On clean exit: record `heartbeat:<job_name>` (silent; failures to record are logged only).
 - `send_job_warning(alert_type, message)`: rate-limited warning for soft failures (empty scrape); returns whether it sent. Used by the [OddsPortal](../collection/fetch-oddsportal-job.md) and [Betfair](../collection/betfair-exchange.md) jobs.
 
-The Lambda handler also sends its own critical on any exception ([lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
+On AWS, the Lambda handler also sends its own critical on any exception ([lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
 
 `odds_core.config.AlertConfig` (no env prefix; its docstring says "infrastructure for future use", yet it drives deployed alerting): `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED` (default false), quota thresholds 0.2 and 0.1, `CONSECUTIVE_FAILURES_THRESHOLD` 3, `STALE_DATA_HOURS` 2, `ALERT_RATE_LIMIT_MINUTES` 30, `DATA_QUALITY_ERROR_THRESHOLD` 10, `heartbeat_expectations`, `heartbeat_retention_days` 7 ([configuration](../foundations/configuration.md)).
 

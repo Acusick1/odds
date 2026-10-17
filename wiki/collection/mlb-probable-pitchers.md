@@ -9,6 +9,7 @@ sources:
   - odds_lambda.storage.mlb_pitcher_reader.MlbPitcherReader
   - odds_core.mlb_data_models.MlbProbablePitchers
   - odds_lambda.scheduling.jobs._JOB_CRON_MAP
+  - odds_lambda.scheduling.jobs._JOB_SPORTS
   - odds_mcp.tools.mlb.get_probable_pitchers
   - deployment/aws/terraform/eventbridge.tf
 status: stable
@@ -28,7 +29,7 @@ The job raises unless `ctx.sport` is `baseball_mlb`.
 
 ## Where it runs
 
-Schedule `0 6 * * *`, MLB only (`_JOB_CRON_MAP` in `odds_lambda.scheduling.jobs`), in the default local bootstrap. It never runs on AWS: Terraform `sport_configs` has MLB commented out and no rule exists ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Deployed state is unverifiable from the repo: `odds scheduler list-jobs --backend aws`. The MLB overnight window (05:00-14:00 UTC) belongs to the self-scheduling jobs, not this cron ([decision-engine](../scheduling/decision-engine.md#overnight-windows)).
+Schedule `0 6 * * *` (`odds_lambda.scheduling.jobs._JOB_CRON_MAP`), MLB only through `odds_lambda.scheduling.jobs._JOB_SPORTS`, in the default local bootstrap, so it runs on the mini-PC ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Terraform declares no rule for it. It keeps running through the MLB off-season (#487). The MLB overnight window (05:00-14:00 UTC) belongs to the self-scheduling jobs, not this cron ([decision-engine](../scheduling/decision-engine.md#overnight-windows)).
 
 ## Reading
 

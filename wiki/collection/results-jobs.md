@@ -22,11 +22,11 @@ status: stable
 
 # Results and status jobs
 
-Three jobs and one command move events to LIVE and FINAL ([event-status-lifecycle](event-status-lifecycle.md)). `update-status` and `fetch-scores` run only on the scheduler Lambda (not in the local default bootstrap); the OddsPortal results job runs on the scraper Lambda or in the local default bootstrap. Deployed state: `odds scheduler list-jobs --backend aws` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
+Three jobs and one command move events to LIVE and FINAL ([event-status-lifecycle](event-status-lifecycle.md)). All three jobs are in the default local `bootstrap_jobs` and run on the mini-PC ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)); their AWS rules are dormant.
 
 ## update-status
 
-`odds_lambda.jobs.update_status.main(ctx)` flips SCHEDULED events whose `commence_time` has passed to LIVE. It is a global job (not per-sport): one rule `odds-update-status`, always created by Terraform. It runs for `data_collection.sports` when no sport is given.
+`odds_lambda.jobs.update_status.main(ctx)` flips SCHEDULED events whose `commence_time` has passed to LIVE. It is a global job (not per-sport): one schedule `update-status` (on AWS the always-created rule `odds-update-status`). It runs for `data_collection.sports` when no sport is given.
 
 1. `odds_lambda.jobs.update_status._status_decision` calls `odds_lambda.scheduling.decision.decide_backward_resilient` with a 4-hour window, 1 h active and 6 h idle intervals, counting only `{EventStatus.SCHEDULED}`.
 2. Pre-schedule under `update-status`, skip if idle.
@@ -37,7 +37,7 @@ Three jobs and one command move events to LIVE and FINAL ([event-status-lifecycl
 
 ## fetch-scores
 
-`odds_lambda.jobs.fetch_scores.main(ctx)` is the Odds API `/scores` job, a per-sport rule on the scheduler Lambda.
+`odds_lambda.jobs.fetch_scores.main(ctx)` is the Odds API `/scores` job. It is per sport, and the `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist limits its schedules to EPL to save quota, so no scheduled job fetches MLB scores from the Odds API; MLB events reach FINAL through the OddsPortal results job.
 
 1. Gate with `odds_lambda.scheduling.decision.decide_backward_resilient` using `odds_lambda.jobs.fetch_scores.SCORES_WINDOW` (3 days), `odds_lambda.jobs.fetch_scores.SCORES_ACTIVE_INTERVAL` 6 h and `odds_lambda.jobs.fetch_scores.SCORES_IDLE_INTERVAL` 12 h: it runs while any event that kicked off in the last three days is not FINAL. Any non-FINAL event counts (`odds_lambda.scheduling.decision.decide_backward`), including POSTPONED and CANCELLED ones.
 2. Pre-schedule, then skip if idle.

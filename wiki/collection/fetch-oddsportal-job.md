@@ -17,7 +17,7 @@ status: stable
 
 # The fetch-oddsportal job
 
-`odds_lambda.jobs.fetch_oddsportal.main(ctx)` scrapes pre-match odds ([oddsportal-scraper](oddsportal-scraper.md)), converts them to the canonical shape and stores snapshots through `odds_lambda.storage.writers.OddsWriter`. It runs on the scraper Lambda (per-sport rules, gated by `enable_oddsportal_scraper`) and in the default local `bootstrap_jobs` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). If the scraper is enabled on AWS and bootstrapped locally, both run and scrape twice; no code checks for a job enabled in both places. Deployed state: `odds scheduler list-jobs --backend aws`.
+`odds_lambda.jobs.fetch_oddsportal.main(ctx)` scrapes pre-match odds ([oddsportal-scraper](oddsportal-scraper.md)), converts them to the canonical shape and stores snapshots through `odds_lambda.storage.writers.OddsWriter`. It is in the default local `bootstrap_jobs` and runs on the mini-PC ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Its scraper Lambda rules (gated by `enable_oddsportal_scraper`) are dormant; a re-enabled rule would scrape alongside the mini-PC, and no code checks for a job enabled in both places. Deployed state: `odds scheduler list-jobs --backend aws`. On the mini-PC, scrapes return 0 matches (#484), and one hung run ends the local chains (#485).
 
 ## Leagues
 
@@ -32,6 +32,8 @@ status: stable
 5. Post-schedule only when at least one match was scraped. A zero-match run skips it, so the next run keeps the earlier computed time.
 
 ## Scraper Lambda limits
+
+These apply only if the dormant scraper Lambda runs again.
 
 - The scraper image installs only `odds-core` and `odds-lambda`; `odds_lambda.model_loader` imports `odds_analytics` at module top and `xgboost` is not installed there (`deployment/aws/Dockerfile.scraper`). On the scraper Lambda the scoring import fails and is logged as `fetch_oddsportal_scoring_failed` (#454).
 - `deployment/aws/terraform/scraper.tf` sets no `MODEL_*` or alert variables, so scraper-side alerts are off ([aws-infrastructure](../operations/aws-infrastructure.md)). Check the deployed function with `aws lambda get-function-configuration --function-name odds-scheduler-scraper`.
