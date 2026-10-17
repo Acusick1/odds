@@ -1,0 +1,47 @@
+---
+type: howto
+title: Load historical EPL odds
+description: Steps to scrape OddsPortal, ingest it, then ingest football-data.co.uk.
+sources:
+  - scripts/scrape_oddsportal.py
+  - scripts/ingest_oddsportal.py
+  - scripts/ingest_football_data_uk.py
+status: stable
+---
+
+# Load historical EPL odds
+
+The scripts load `odds_core.models.Event` and `odds_core.models.OddsSnapshot` rows only, so the loaded events have no normalized `odds` rows and backtests skip them (#435). What each script reads, matches and writes is on [historical-ingest-scripts](historical-ingest-scripts.md). Run against the local database only: never set `DATABASE_URL` to production ([databases-and-environments](../foundations/databases-and-environments.md#environments)).
+
+1. Scrape OddsPortal history.
+   ```bash
+   uv run python scripts/scrape_oddsportal.py <league and season options>
+   ```
+   - `--help` lists the options.
+   - It writes `data/external/oddsportal/<prefix>_<season>.json`.
+   - A rerun resumes per match, scraping only missing or incomplete ones, so an interrupted run is safe to repeat.
+   - Pass `--proxy-url` for books that are geo-restricted.
+2. Ingest the OddsPortal files first.
+   ```bash
+   uv run python scripts/ingest_oddsportal.py --sport soccer --seasons 2023-2024 --dry-run
+   ```
+   - `--sport soccer` is required: the default sport is basketball.
+   - Pass `--seasons` with one or more seasons, or `--all` for the script's full season list.
+   - Check the dry-run counts, then run without `--dry-run`.
+   - OddsPortal goes first because it creates the `op_<season>_*` events that the FDUK ingest attaches to.
+3. Ingest football-data.co.uk.
+   ```bash
+   uv run python scripts/ingest_football_data_uk.py --seasons 2023-2024 --dry-run
+   ```
+   - Use the same seasons as step 2, or `--all`. Check the dry-run counts, then run without `--dry-run`.
+   - It downloads `E0.csv` per season and writes an opening and a closing snapshot per match.
+   - Matches that already have an `op_` event get no new event, and only `match_stats` is back-filled for them.
+4. Rerun any step to fill gaps.
+   - A snapshot is skipped if one with the same `api_request_id` already exists, so reruns do not duplicate.
+5. Check the load with the database, not the repo: event and snapshot counts per season are data facts.
+
+## Related
+
+- [Historical ingest scripts](historical-ingest-scripts.md)
+- [Backfill Odds API history](howto-backfill-odds-api-history.md), the NBA-only paid route
+- [Train and publish a CLV model](../modelling/howto-train-and-publish-model.md)

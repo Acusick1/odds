@@ -1,0 +1,49 @@
+---
+type: reference
+title: Historical ingest scripts
+description: "scripts/scrape_oddsportal.py, ingest_oddsportal.py, ingest_football_data_uk.py: inputs, matching, ids, snapshot shape, idempotency."
+sources:
+  - scripts/scrape_oddsportal.py
+  - scripts/ingest_oddsportal.py
+  - scripts/ingest_football_data_uk.py
+  - scripts/team_names.py
+  - odds_core.team.normalize_team_name
+  - odds_lambda.oddsportal_common.find_existing_event
+  - odds_lambda.oddsportal_common.build_raw_data
+  - odds_lambda.oddsportal_common.fix_odds_timestamp
+  - odds_lambda.oddsportal_common.hours_to_tier
+status: stable
+---
+
+# Historical ingest scripts
+
+Three scripts under `scripts/` load OddsPortal scrapes and football-data.co.uk (FDUK) CSVs for EPL as `odds_core.models.Event` plus `odds_core.models.OddsSnapshot` rows in the live `raw_data` format. This is the history that trains models ([data-sources](data-sources.md), [clv-model-findings](../evaluation/clv-model-findings.md)). None is scheduled. The steps to run them are in [howto-load-historical-epl-odds](howto-load-historical-epl-odds.md).
+
+The scripts write `odds_core.models.Event` and `odds_core.models.OddsSnapshot` rows only, no `odds_core.models.Odds` rows, so backtests and `odds_lambda.storage.readers.OddsReader.get_odds_at_time` skip these events (#435; [odds-tables](../storage/odds-tables.md)).
+
+## Inputs
+
+- `scripts/scrape_oddsportal.py` runs OddsHarvester `historic` via `uvx` (a fork branch pinned in `FORK_SPEC`, separate from the live jobs' dependency) and writes `data/external/oddsportal/<prefix>_<season>.json`. Resume is per match: it discovers links, then scrapes only missing or incomplete ones in batches of `BATCH_SIZE`, saving after each. It supports `--proxy-url` and `--output-dir` for geo-restricted books.
+- `scripts/ingest_oddsportal.py` loads those JSON files (`--data-dirs` unions bookmakers across directories), matches or creates `odds_core.models.Event` rows, and inserts opening and closing `odds_core.models.OddsSnapshot` rows via `odds_lambda.oddsportal_common.build_raw_data`. `--relink` re-links game logs and injuries (basketball).
+- `scripts/ingest_football_data_uk.py` downloads `E0.csv` for the seasons listed in the script (2015-2016 to 2025-2026) and writes two snapshots per match. FDUK is compiled by hand roughly twice weekly; its Pinnacle odds are unreliable after July 2025 (81 events; #217) and Betfair Exchange closing odds exist from 2024-25 (#253) ([ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md)). Event counts are data properties; check the database, not the repo.
+- Team names go through `scripts/team_names.py`, which delegates to `odds_core.team.normalize_team_name`.
+
+## Matching, ids and idempotency
+
+- Both ingesters first call `odds_lambda.oddsportal_common.find_existing_event` (±24 h, no sport filter, exact names, no normalization), so a game seen by one source attaches to the other's event ([event-matching](../storage/event-matching.md)).
+- New ids are `op_<season>_<HOME>_<AWAY>_<date>` and `fduk_<season>_<HOME>_<AWAY>_<date>`.
+- All scripts support `--dry-run`. Idempotency: a snapshot is skipped if one with the same `api_request_id` exists (`oddsportal` for h2h, `oddsportal_<market>` otherwise, `football_data_uk`).
+- FDUK events matched to existing `op_` events get no new event, and their snapshots are skipped if any `football_data_uk` snapshot exists; only `match_stats` is back-filled (`snapshots_updated`).
+
+## Snapshot shape
+
+- The FDUK opening snapshot is stamped 24 h before kickoff and the closing one 1 h before: synthetic times, not observed ones. The bookmaker set is `BOOKMAKER_PREFIXES` plus `market_max` / `market_avg`; `raw_data.match_stats` carries post-match stats. The `match_stats` feature group reads only these FDUK snapshots ([epl-context-features](../modelling/epl-context-features.md)).
+- OddsPortal snapshots use real timestamps with the year corrected (`odds_lambda.oddsportal_common.fix_odds_timestamp`) and `raw_data.source = "oddsportal"`.
+- `fetch_tier` comes from `odds_lambda.oddsportal_common.hours_to_tier`, whose `<` boundaries differ from the live writer's `<=`; FDUK's synthetic 24 h opening snapshot is tiered `early` where the live writer would give `sharp` (#446; [fetch-tier](../storage/fetch-tier.md#boundary-encodings)).
+- The football three-way market key differs by source: FDUK writes `h2h`, OddsPortal ingest writes `1x2` for the `1x2` market (`MARKET_CONFIGS`) ([sport-and-market-keys](sport-and-market-keys.md#market-key-dialects)).
+
+## Related
+
+- [Load historical EPL odds](howto-load-historical-epl-odds.md)
+- [Odds API historical backfill](odds-api-backfill.md)
+- [OddsPortal scraper](oddsportal-scraper.md)

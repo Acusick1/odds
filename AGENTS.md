@@ -1,188 +1,28 @@
 # Betting Odds Pipeline & Agent
 
-## Strategic Goal
-
-Identify and exploit structural mispricing in betting markets across multiple sports. The edge is **breadth and speed of information synthesis** — an LLM agent that simultaneously monitors bookmaker odds, exchange orderbooks, public sentiment signals, lineup announcements, press conferences, and fixture context can reason across all of it to identify mispricings that no individual bettor can. Structural biases (bookmaker liability shading, accumulator distortion, public money loading) and information gaps are both valid edge types. Execute on whichever venue offers the best price relative to estimated fair value. See [docs/BETTING_AGENT.md](docs/BETTING_AGENT.md) for the agent architecture.
-
-## Project Overview
-
-Sport-agnostic betting data pipeline with sport-specific LLM agents. Infrastructure (odds collection, storage, paper trading, scheduling, alerting) is shared; each sport adds its own data sources, feature extractors, agent prompts, and MCP tools. The agent researches matches via web search and Playwright, consumes pipeline data through MCP tools, and places paper trades with explicit reasoning.
-
-**Sports:** EPL and MLB are active, with agents in interactive evaluation; NBA code exists but is deprioritized.
-
-**Shared data sources:** The Odds API (US bookmakers), OddsPortal (UK bookmakers, headless scraper). **Sport-specific sources:** football-data.co.uk (historical EPL with Pinnacle + Betfair Exchange closing odds). An XGBoost CLV model produces supplementary predictions, but the agent's primary edge comes from information synthesis, not the model. See [docs/AGENT_DATA_SOURCES.md](docs/AGENT_DATA_SOURCES.md) for the full data source inventory.
-
-### What runs where (deployed vs local)
-
-Two AWS Lambdas (`odds-scheduler`, `odds-scheduler-scraper`) plus a local scheduler
-(`odds scheduler start`). **The repo does not record the deployed state** (only `terraform.tfvars.example` is
-committed) — the live account has been applied with gate/sport values that differ from the
-variable defaults, and Terraform `ignore_changes` the self-scheduling rules. The betting
-agent, daily digest, ESPN fixtures, and MLB probables are **always local-only** (no
-EventBridge rule exists for them); the agent is in interactive evaluation, not autonomous
-production. Most data-fetching jobs (odds, scores, OddsPortal scraper, Betfair) *may* run
-on AWS, locally, or both. For the design see the
-[Job Deployment Matrix](docs/DEPLOYMENT.md#job-deployment-matrix); for the **live** deployed
-schedule run `odds scheduler list-jobs --backend aws`.
-
-## Package Structure
-
-```
-packages/
-├── odds-core/      # Shared models, config, database (odds_core/)
-│   ├── models.py              # Event, OddsSnapshot, Odds, FetchLog, DataQualityLog
-│   ├── prediction_models.py   # Prediction table (CLV scoring output)
-│   ├── alerts.py              # AlertManager + DiscordAlert (webhook delivery)
-│   └── config.py              # Pydantic Settings (API, DB, scheduler, alerts)
-├── odds-lambda/    # Data fetching, storage, scheduling (odds_lambda/)
-│   ├── data_fetcher.py        # TheOddsAPIClient (with key rotation)
-│   ├── event_sync.py          # EventSyncService (free /events endpoint)
-│   ├── oddsportal_common.py   # Shared: bookmaker mapping, odds conversion, tier classification
-│   ├── model_loader.py        # S3 model loading with ETag caching
-│   ├── storage/               # Readers + writers per data source (see ARCHITECTURE.md#storage-modules)
-│   ├── scheduling/            # Multi-backend scheduler (AWS/Railway/local)
-│   └── jobs/                  # All scheduled job entry points (see ARCHITECTURE.md)
-├── odds-analytics/ # Backtesting, strategies, ML (odds_analytics/)
-├── odds-mcp/       # MCP server — agent tool interface (odds_mcp/)
-│   └── agents/                # Sport-specific agent prompts (epl/, mlb/, common.md), outside odds_mcp/
-└── odds-cli/       # CLI commands (odds_cli/)
-    └── commands/              # CLI command groups (see CLI.md)
-```
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the system architecture and storage module index, and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#job-deployment-matrix) for the authoritative job/schedule matrix.
-
-## Critical Constraints
-
-### Timezone Handling (CRITICAL)
-
-- Use `datetime.now(UTC)` (from `datetime import UTC`); ruff `DTZ003`/`DTZ005` reject `utcnow()` and naive `now()`
-- Store UTC in database, convert only for display
-
-### AWS Lambda
-
-- Two Lambda functions, scheduler and scraper; memory and timeouts are in [DEPLOYMENT.md](docs/DEPLOYMENT.md#functions)
-- Must use NullPool for DB connections (automatic in Lambda — keyed on the `AWS_LAMBDA_FUNCTION_NAME` env var, not the scheduler backend)
-- Stateless between invocations; API key rotation state in SSM Parameter Store
-
-### API Cost
-
-- `/odds` endpoint: 1 unit per region × per market per call (returns all games in one call — cost does not scale with number of games). The defaults (`regions`, `markets` in `odds_core/config.py`) give 1 region × 3 markets = 3 units per fetch.
-- `/events` endpoint: free (no quota cost) — returns game metadata (IDs, teams, times) without odds
-- `/scores` endpoint: 1 unit without `daysFrom`, 2 units with `daysFrom`
-- `/historical/odds` endpoint: 10 units per region × per market
-- Bookmakers do not affect cost (server-side filter only)
-- Multiple API keys rotated via `ODDS_API_KEYS` (comma-separated), active index tracked in SSM
-- Check quota: `odds status quota`
-
-### Database Connections
-
-- ALWAYS use async context manager: `async with async_session_maker() as session`
-- NEVER share sessions across async tasks
-- No wrapper functions — use `async_session_maker()` directly everywhere
-- Lambda uses NullPool automatically. Local/Railway use pool of 5
-
-### Model Evaluation
-
-- Walk-forward CV is the primary evaluation metric — it simulates the production retrain cycle (train on past, predict next chunk, roll forward)
-- Set `test_split: 0.0` for walk-forward CV experiments — a fixed chronological test split wastes training data and doesn't reflect deployment (we retrain on all available data before predicting new events)
-- CV R² from tuning is optimistically biased (best of N trials), but relative comparisons between experiments are fair when both are tuned
-
-### Look-Ahead Bias (Backtesting)
-
-- ALWAYS use `get_odds_at_time()` for historical analysis
-- NEVER use current odds when backtesting
-- Backtesting enforces `decision_time` (hours before game)
-
-### Data Quality
-
-- Validation logs issues by default, does not reject data
-- Set `REJECT_INVALID_ODDS=true` for strict validation
-- Review `DataQualityLog` table for patterns
-
-## Polymarket Integration (deprioritized for trading; sharp reference candidate)
-
-Full pipeline built (API client, 5 DB tables, storage, ingestion, feature extractors). UK trading access is blocked across all sports. Liquidity varies sharply by sport:
-
-- **EPL**: thin ($10K-$100K/match), AMM-driven — orderbook reflects market maker params, not public sentiment.
-- **NBA** / **MLB**: deep real orderbook (median $152K/MLB game, 1¢ spreads, 30+ levels, $500K+ total depth). MLB prices are collinear with bet365 devigged via arbitrage — viable as sharp reference / alternate to Pinnacle, not a mispricing venue.
-
-The pipeline code targets NBA via `polymarket_fetcher.get_nba_events()`. See [docs/POLYMARKET.md](docs/POLYMARKET.md) for technical details (series/tag IDs per sport, ticker formats, market richness).
-
-## Code Style
-
-### Type Hints (Required)
-
-- Modern syntax (`str | None`, `list[T]`) is enforced by ruff `UP`
-- All functions must have type hints for parameters and return values
-
-### Async/Await (Required)
-
-- All DB operations must be async
-- Use `AsyncSession`, never sync `Session`
-- CLI uses `asyncio.run()` for async functions
-
-### Conventions
-
-- Job entry points are `async def main()` functions in `odds_lambda/jobs/`
-- `EventSyncService` syncs games from free `/events` endpoint as first step in `fetch_odds` job
-- OddsPortal jobs share utilities via `oddsportal_common.py` (bookmaker key mapping, decimal→American conversion, tier classification)
-- Scoring pipeline: `score_events()` (`jobs/score_predictions.py`) runs inline at the end of the `fetch-oddsportal` job, not on its own schedule. It loads the model from S3 via `model_loader.load_model()` (ETag-cached), extracts features, stores to `Prediction` table with idempotent upsert (`ON CONFLICT DO NOTHING` on event_id + snapshot_id + model_name)
-- Discord alerts: `AlertManager.send_embed()` is generic delivery; each job owns its embed formatting
-- Training pipeline: features NaN-fill when optional data unavailable — rows kept, not dropped
-
-### Model Types
-
-| Type | Use Case |
-|------|----------|
-| SQLModel | Database models |
-| Pydantic BaseModel | API responses, configs |
-| dataclass | Simple containers |
-
-## Key Commands
-
-**Full reference:** [docs/CLI.md](docs/CLI.md)
-
-```bash
-# Fetch data
-uv run odds fetch current --sport soccer_epl
-uv run odds fetch scores
-
-# Scrape OddsPortal
-uv run odds scrape upcoming --league england-premier-league --market 1x2
-
-# Check status
-uv run odds status show
-uv run odds status quota
-
-# ML training and model publishing
-uv run odds train run --config experiments/configs/my_config.yaml
-uv run odds train tune --config experiments/configs/my_config.yaml --train-best
-uv run odds model publish --name epl-clv-home --path models/model.pkl
-
-# Run backtest
-uv run odds backtest run --strategy basic_ev --start 2024-10-01 --end 2024-12-31
-
-# Run tests (tests/migration hits DATABASE_URL; leave it to the deploy workflows)
-uv run pytest tests/unit tests/integration
-
-# Database migrations
-uv run alembic revision --autogenerate -m "description"
-uv run alembic upgrade head
-
-# Local development
-docker compose up -d
-uv run odds scheduler start
-```
-
-## Database Environments
-
-Unit and integration tests run against an in-process PostgreSQL (py-pglite). `tests/migration` connects to whatever `DATABASE_URL` points at and is run only by the deploy workflows. The environments and their rules are in [DATABASE.md](docs/DATABASE.md#database-environments).
-
-**CRITICAL:** NEVER set `DATABASE_URL` to production during local development.
+Single-user, sport-agnostic betting odds pipeline with per-sport LLM betting agents (EPL and MLB active, in interactive evaluation; NBA code is deprioritized). The edge being tested is the agent's synthesis of odds, exchange prices, team news and context; an XGBoost CLV model is a supplementary signal.
 
 ## Documentation
 
-The documentation index lives in [README.md](README.md#documentation).
+The wiki is the documentation. Before changing a subsystem, read [wiki/index.md](wiki/index.md), then the area index, then the page, then the code it cites. `uv run python scripts/wiki_lint.py --locate <page slug or dotted path>` prints the file and line range of each citation. Page rules are in [wiki/SCHEMA.md](wiki/SCHEMA.md); decisions are in `docs/adr/`.
+
+Every code change keeps the wiki current. `uv run python scripts/wiki_lint.py` (also a pre-commit hook and CI check) lists stale pages, with the changed symbols and the page lines that cite them. Edit those pages to match the new code. A new scheduled job, CLI command or MCP tool needs a page that cites it.
+
+## Constraints
+
+- **Never point `DATABASE_URL` at production** from a local machine. That rules out migrations, fetches, test runs and `odds copy from-prod` without an explicit production URL. See [databases](wiki/foundations/databases-and-environments.md).
+- **Deployed AWS state is not in the repo.** `odds scheduler list-jobs --backend aws` is the only record of what runs on AWS. See [jobs and deployment](wiki/scheduling/job-deployment-matrix.md).
+- **The Odds API costs quota units.** Check `odds status quota` before bulk or historical fetches. See [quota](wiki/collection/odds-api-quota.md).
+- **Pass `--sport` and the sport's market key.** Several CLI defaults are NBA. EPL odds use `1x2` and MLB uses `h2h`. See [sources and keys](wiki/collection/sport-and-market-keys.md).
+- **Historical analysis uses only data at or before decision time.** `get_odds_at_time` searches both sides of the target time. See [look-ahead](wiki/modelling/look-ahead-bias.md).
+- **Training configs set `target_type` and `target_bookmaker` explicitly.** The code defaults are not the production target. See [CLV target](wiki/modelling/clv-target.md).
+- **Use one `async with async_session_maker() as session` per task.** Lambda gets `NullPool` automatically. See [databases](wiki/foundations/databases-and-environments.md).
+
+## Tests
+
+- `uv run pytest tests/unit tests/integration` runs the unit and integration tests. `tests/migration` writes to whatever `DATABASE_URL` points at, so only the deploy workflows run it.
+- Unit and integration tests run on in-process PostgreSQL (py-pglite) on a fixed port. Run one pytest process at a time.
+- Settings need some `DATABASE_URL` to import. Export a placeholder when no `.env` is present.
 
 ## Agent skills
 
@@ -196,4 +36,4 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 
 ### Domain docs
 
-Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root, created when first needed. See `docs/agents/domain.md`.
+Concept pages in the wiki carry the domain vocabulary, and `docs/adr/` carries decisions. See `docs/agents/domain.md`.
