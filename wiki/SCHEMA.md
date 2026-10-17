@@ -99,7 +99,7 @@ Every scheduled job module (`odds_lambda.jobs.*`), every CLI command module (`od
 
 ## Operations
 
-**Query.** Read `index.md`, then the area index, then the page, then the cited code when you need certainty or the page is silent.
+**Query.** Read `index.md`, then the area index, then the page. Skip straight to a page whose slug you already know. When you need certainty or the page is silent, read the cited code: `uv run python scripts/wiki_lint.py --locate <slug or dotted path>` prints each citation's file and line range.
 
 **Update, in the same change as the code.**
 

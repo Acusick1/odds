@@ -1111,3 +1111,59 @@ class TestCoverage:
     def test_default_roots_cover_real_layout_and_fail_the_lint(self, repo: Path) -> None:
         write_file(repo, "packages/odds-lambda/odds_lambda/jobs/fetch.py", "")
         assert wiki_lint.lint(repo / "wiki", repo, write=False) == 1
+
+
+class TestLocate:
+    def locate(
+        self, repo: Path, capsys: pytest.CaptureFixture[str], *args: str
+    ) -> tuple[int, list[str], str]:
+        status = wiki_lint.locate(args, repo / "wiki", repo)
+        captured = capsys.readouterr()
+        return status, captured.out.splitlines(), captured.err
+
+    def test_function_prints_its_extent(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        status, out, _ = self.locate(repo, capsys, "pkg.mod.calculate")
+        assert (status, out) == (0, [f"pkg.mod.calculate  {MOD}:4-5"])
+
+    def test_method_prints_its_extent(self, repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        _, out, _ = self.locate(repo, capsys, "pkg.mod.Box.run")
+        assert out == [f"pkg.mod.Box.run  {MOD}:16-16"]
+
+    def test_module_prints_just_the_path(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _, out, _ = self.locate(repo, capsys, "pkg.mod")
+        assert out == [f"pkg.mod  {MOD}"]
+
+    def test_reexport_prints_definition_and_hop(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _, out, _ = self.locate(repo, capsys, "pkg.Crate")
+        assert out == [f"pkg.Crate  {MOD}:12-18", f"  via {PKG}/__init__.py:1-1"]
+
+    def test_unknown_name_fails_at_the_end(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        status, out, err = self.locate(repo, capsys, "pkg.mod.nope", "pkg.mod.other")
+        assert status == 1
+        assert out == [f"pkg.mod.other  {MOD}:8-9"]
+        assert err == "pkg.mod.nope  not found\n"
+
+    def test_slug_lists_citations_in_page_order(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        write_file(repo, "scripts/tool.py", "x = 1\n")
+        put_a(repo, "`pkg.mod.Box.run` and `scripts/tool.py`", sources="  - pkg.mod.calculate")
+        status, out, _ = self.locate(repo, capsys, "a")
+        assert status == 0
+        assert out == [
+            f"pkg.mod.calculate  {MOD}:4-5",
+            f"pkg.mod.Box.run  {MOD}:16-16",
+            "scripts/tool.py",
+        ]
+
+    def test_unknown_slug_fails(self, repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        status, out, err = self.locate(repo, capsys, "no-such-page")
+        assert (status, out, err) == (1, [], "no-such-page  not found\n")

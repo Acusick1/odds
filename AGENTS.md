@@ -4,7 +4,7 @@ Single-user, sport-agnostic betting odds pipeline with per-sport LLM betting age
 
 ## Documentation
 
-The wiki is the documentation. Before changing a subsystem, read [wiki/index.md](wiki/index.md), then the area index, then the page, then the code it cites. Page rules are in [wiki/SCHEMA.md](wiki/SCHEMA.md); decisions are in `docs/adr/`.
+The wiki is the documentation. Before changing a subsystem, read [wiki/index.md](wiki/index.md), then the area index, then the page, then the code it cites. `uv run python scripts/wiki_lint.py --locate <page slug or dotted path>` prints the file and line range of each citation. Page rules are in [wiki/SCHEMA.md](wiki/SCHEMA.md); decisions are in `docs/adr/`.
 
 Every code change keeps the wiki current. `uv run python scripts/wiki_lint.py` (also a pre-commit hook and CI check) lists stale pages, with the changed symbols and the page lines that cite them. Edit those pages to match the new code. A new scheduled job, CLI command or MCP tool needs a page that cites it.
 

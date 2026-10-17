@@ -1027,7 +1027,7 @@ class WikiLinter:
                     lines,
                 )
                 return
-            self._register(page, Citation(path, path, None), lines)
+            self._register(page, Citation(text, path, None), lines)
             return
         base = self.history.last_commit(page.rel)
         if path in self.history.tracked_at(base):
@@ -1067,6 +1067,46 @@ class WikiLinter:
         for hop in resolved.hops:
             self._register(page, Citation(dotted, hop.path, hop.symbol), lines, backlink=False)
         self._register(page, Citation(dotted, resolved.final.path, resolved.final.symbol), lines)
+
+    def _where(self, target: Target) -> str:
+        """`path:start-end` for a symbol (the extent staleness tracks), else the bare path."""
+        extent = self._source(target.path).extent(target.symbol) if target.symbol else None
+        if isinstance(extent, Span):
+            return f"{target.path}:{extent.start}-{extent.end}"
+        return target.path
+
+    def locate_dotted(self, dotted: str) -> list[str] | None:
+        resolved = self.packages.resolve(dotted)
+        if resolved is None:
+            return None
+        return [
+            f"{dotted}  {self._where(resolved.final)}",
+            *(f"  via {self._where(hop)}" for hop in resolved.hops),
+        ]
+
+    def locate_page(self, slug: str) -> list[str] | None:
+        """Every citation on the page, frontmatter sources first, then body."""
+        for area in self._areas():
+            self._load_area(area)
+        page = self.pages.get(slug)
+        if page is None:
+            return None
+        if page.meta:
+            for source in page.meta.sources:
+                self._check_source(page, source)
+        self._check_citations(page)
+        out: list[str] = []
+        for label in dict.fromkeys(c.label for c in page.citations):
+            lines = self.locate_dotted(label) if self._is_dotted(label) else None
+            out.extend(lines if lines is not None else [label])
+        return out
+
+    def _is_dotted(self, text: str) -> bool:
+        match = DOTTED_RE.match(text)
+        return bool(match) and match.group(1).split(".")[0] in self.packages.names
+
+    def locate(self, arg: str) -> list[str] | None:
+        return self.locate_dotted(arg) if self._is_dotted(arg) else self.locate_page(arg)
 
     def _renamed_module(self, page: Page, dotted: str) -> str | None:
         """New dotted path when the cited module's file was renamed since the page's last commit."""
@@ -1181,13 +1221,35 @@ def lint(
     return 1 if failed or (fail_stale and linter.stale) else 0
 
 
+def locate(args: Sequence[str], wiki_dir: Path, root: Path = REPO_ROOT) -> int:
+    linter = WikiLinter(wiki_dir, root)
+    status = 0
+    for arg in args:
+        lines = linter.locate(arg)
+        if lines is None:
+            print(f"{arg}  not found", file=sys.stderr)
+            status = 1
+        else:
+            print("\n".join(lines))
+    return status
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wiki-dir", type=Path, default=Path("wiki"))
     parser.add_argument("--no-write", action="store_true", help="skip writing backlinks.json")
     parser.add_argument("--fix", action="store_true", help="regenerate area index page lists")
     parser.add_argument("--fail-stale", action="store_true", help="exit 1 when pages are stale")
+    parser.add_argument(
+        "--locate",
+        nargs="+",
+        metavar="ARG",
+        help="print code locations (path:start-end) for dotted citations, or every citation on "
+        "a page slug, then exit; no linting, no writes",
+    )
     args = parser.parse_args(argv)
+    if args.locate:
+        return locate(args.locate, args.wiki_dir)
     return lint(args.wiki_dir, write=not args.no_write, fix=args.fix, fail_stale=args.fail_stale)
 
 

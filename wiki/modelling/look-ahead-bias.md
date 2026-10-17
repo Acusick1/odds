@@ -13,13 +13,12 @@ sources:
   - odds_lambda.storage.readers.OddsReader
   - odds_lambda.storage.polymarket_reader.PolymarketReader
   - experiments/configs/xgboost_epl_production_tabular_match_stats.yaml
-  - AGENTS.md
 status: stable
 ---
 
 # Decision time and look-ahead bias
 
-Decision time is the instant a prediction or bet is assumed to be made. Everything after it is off limits; the target is measured from it to the close ([CLV target](clv-target.md)). It is set separately for backtests and for training. The repo rule is: use `odds_lambda.storage.readers.OddsReader.get_odds_at_time` for historical analysis, never current odds, and let backtests enforce `decision_time` (`AGENTS.md`). Enforcement is by convention at each layer, not by one shared mechanism.
+Decision time is the instant a prediction or bet is assumed to be made. Everything after it is off limits; the target is measured from it to the close ([CLV target](clv-target.md)). It is set separately for backtests and for training. The repo rule is: use `odds_lambda.storage.readers.OddsReader.get_odds_at_time` for historical analysis, never current odds, and let backtests enforce `decision_time` ([AGENTS.md constraints](../../AGENTS.md#constraints)). Enforcement is by convention at each layer, not by one shared mechanism.
 
 ## Backtests
 
