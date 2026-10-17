@@ -49,7 +49,7 @@ In `odds_cli.commands.scheduler`:
 
 `odds_lambda.scheduling.jobs._JOB_CRON_MAP` holds the cron expressions: `daily-digest` `0 8 * * *`, `fetch-espn-fixtures` `0 6 * * *`, `fetch-mlb-probables` `0 6 * * *`, `fetch-betfair-exchange` `*/30 * * * *`.
 
-`odds_lambda.scheduling.jobs._JOB_SPORTS` holds the sport allowlists for cron and self-scheduling jobs alike: `daily-digest`, `fetch-espn-fixtures`, `fetch-odds` and `fetch-scores` are EPL only, `fetch-mlb-probables` is MLB only, and `fetch-betfair-exchange` covers every sport in `odds_lambda.betfair.constants.SPORT_CONFIG`. An allowlist keeps a job whose `main()` raises on other sports from alerting on every fire, or keeps a job from spending quota on every configured sport. A sport in an allowlist but absent from `data_collection.sports` is not scheduled.
+`odds_lambda.scheduling.jobs._JOB_SPORTS` holds the sport allowlists for cron and self-scheduling jobs alike; [Where each job runs](job-deployment-matrix.md#where-each-job-runs) lists each job's sports. An allowlist keeps a job whose `main()` raises on other sports from alerting on every fire, or keeps a job from spending quota on every configured sport. A sport in an allowlist but absent from `data_collection.sports` is not scheduled.
 
 `fetch-betfair-exchange-<sport>` uses one schedule id for its cron and its self-schedule, both with `ConflictPolicy.replace`, so the first self-schedule replaces the `*/30` cron until the next `odds scheduler start` (#469).
 

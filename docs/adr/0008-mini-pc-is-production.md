@@ -35,7 +35,7 @@ The mini-PC is the only production host, and its Postgres is the production data
 - The defaults in `odds_core.config.SchedulerConfig` `bootstrap_jobs` include the jobs that moved from AWS: `fetch-odds`, `fetch-scores`, `update-status` and `check-health`.
 - The AWS EventBridge rules are disabled.
   - The Lambdas, ECR images and Terraform stay in place, so the move is reversible.
-  - `deploy-prod.yml` is not run, by dispatch or by a published release, because its post-deploy invocations re-arm every rule.
+  - The Deploy to Production workflow (`deploy-prod.yml`) is disabled in GitHub, because its post-deploy invocations re-arm every rule.
 - The Neon database is a frozen archive. Its EPL and MLB events, snapshots and odds were merged into the mini-PC database on 2026-10-17 (#483).
 - The agent runs on the mini-PC, by hand, as the restricted `odds_agent` role (`AGENT_DATABASE_URL`, `odds_lambda.jobs.agent_run`).
 
@@ -48,7 +48,7 @@ The mini-PC is the only production host, and its Postgres is the production data
 - `odds copy from-prod` reads `PROD_DATABASE_URL`, which on existing machines still names the Neon archive.
 - Odds API quota is spent from the mini-PC's key pool. `fetch-odds` and `fetch-scores` stay EPL-only, matching the AWS deployment, through the sport allowlist in `odds_lambda.scheduling.jobs`.
 - Collection jobs keep running a sport through its off-season (#487).
-- The AWS-facing workflows lose their target: `schedule-health-check.yml` fails every disabled rule, and `daily-validation.yml` reads the `production` environment's `DATABASE_URL`, the Neon archive.
+- The AWS-facing workflows lose their target: `schedule-health-check.yml` fails every disabled rule, and `daily-validation.yml` reads the `production` environment's `DATABASE_URL`, the Neon archive. Both are disabled in GitHub alongside `deploy-prod.yml`.
 
 ## Evidence
 

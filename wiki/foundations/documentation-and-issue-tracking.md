@@ -36,7 +36,7 @@ The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README
 
 ## How the docs stay current
 
-The wiki lint (`scripts/wiki_lint.py`) runs as the `wiki-lint` pre-commit hook and in the `Lint` workflow ([Code conventions](code-conventions.md#mechanical-gates)). It checks that cited paths and symbols exist and flags a page as stale when a symbol it cites, or an import that re-exports it, changes after the page does. `--locate` prints the file and line range behind a page's citations or a dotted path. Rationale with no recorded source is labelled `(inferred)`. `AGENTS.md` and `README.md` sit at the repo root outside the citation forms, so wiki pages link to them instead of citing them.
+The wiki lint (`scripts/wiki_lint.py`) runs as the `wiki-lint` pre-commit hook and in the `Lint` workflow ([Code conventions](code-conventions.md#mechanical-gates)). It checks that cited paths and symbols exist and flags a page as stale when a symbol it cites, or an import that re-exports it, changes after the page does. A comment-only edit inside a cited symbol counts as a change, so it marks every page citing that symbol. `--locate` prints the file and line range behind a page's citations or a dotted path. Rationale with no recorded source is labelled `(inferred)`. `AGENTS.md` and `README.md` sit at the repo root outside the citation forms, so wiki pages link to them instead of citing them.
 
 Vale rejects change-narrating words in `README.md`, `AGENTS.md`, `docs/adr/`, `docs/agents/` and `wiki/`; `.vale.ini` turns both rules off for `docs/adr/*.md` because ADRs are point-in-time records. Pages describe the current state.
 

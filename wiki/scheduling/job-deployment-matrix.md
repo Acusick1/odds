@@ -51,7 +51,7 @@ Known defects on the production host: OddsPortal scrapes return 0 matches (#484)
 Terraform still declares the AWS jobs: in `deployment/aws/terraform/eventbridge.tf`, `local.sport_configs` (EPL only; MLB commented out) plus the always-created `update-status` and `check-health`, and in `deployment/aws/terraform/variables.tf` the `enable_oddsportal_scraper`, `enable_polymarket` and `betfair_enabled` gates. The rules are disabled in the account, and the Lambdas, ECR images and Terraform state are left in place so the move can be reversed ([AWS infrastructure](../operations/aws-infrastructure.md)).
 
 > [!WARNING]
-> Do not run `deploy-prod.yml`. Its post-deploy invocations make every job reschedule itself, which re-enables every rule, so both hosts would collect and the Lambdas would write to the Neon archive ([CI/CD workflows](../operations/ci-cd-workflows.md#prod-deploy)).
+> The Deploy to Production workflow (`deploy-prod.yml`) is disabled in GitHub; keep it disabled while AWS is dormant (`gh workflow list --all` shows the state). Its post-deploy invocations make every job reschedule itself, which re-enables every rule, so both hosts would collect and the Lambdas would write to the Neon archive ([CI/CD workflows](../operations/ci-cd-workflows.md#prod-deploy)).
 
 No code checks for a job enabled on both hosts, so a re-enabled rule double-fetches alongside the mini-PC.
 
