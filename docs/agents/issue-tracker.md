@@ -5,7 +5,13 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 ## Conventions
 
 - **Create an issue**: `gh issue create --project "Personal" --title "..." --body "..."`. Use a heredoc for multi-line bodies. `--project` puts the issue on the `Personal` board; never omit it.
-- **Start work on an issue**: open a draft PR whose body contains `Closes #<number>` as soon as the branch has its first commit. Linking the PR moves the issue to In Progress on the board; merging moves it to Done.
+- **Find unclaimed work**: `gh issue list --state open --search "no:assignee"`.
+- **Start work on an issue**:
+  1. Confirm the issue is unassigned: `gh issue view <number> --json assignees`. If it is assigned and you are not resuming your own stopped work, stop and ask: another session may hold it, since sessions share one GitHub account.
+  2. Create the branch or worktree as `<number>-<slug>` or `issue-<number>-<slug>`; branch names starting with a number are reserved for issues. The `claim-issue` git hook assigns the issue to you and prints `claim-issue: claimed issue #<number>`. If it warns that the issue is closed, or assigned when you did not assign it yourself, stop and ask. If it prints nothing or another warning, run `gh issue edit <number> --add-assignee @me`.
+  3. Open a draft PR whose body contains `Closes #<number>` as soon as the branch has its first commit. Linking the PR moves the issue to In Progress on the board; merging moves it to Done.
+  4. Once the work is complete and an agent that did not write it has reviewed the diff and its findings are fixed, mark the PR ready: `gh pr ready <pr>`.
+- **Stop work before finishing**: comment the reason on the issue and keep the assignment, so the issue shows who stopped and why. Unassign (`gh issue edit <number> --remove-assignee @me`) only when the issue is free for anyone to take.
 - **Read an issue**: `gh issue view <number> --json number,title,body,labels,comments`.
 - **List issues**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
 - **Make an issue a sub-issue of a parent**: `gh issue create --parent <parent> ...`, or `gh issue edit <parent> --add-sub-issue <child>` afterwards (`gh` 2.94+). Older `gh`: `gh api --method POST repos/<owner>/<repo>/issues/<parent>/sub_issues -F sub_issue_id=<child-db-id>` (database id, as in **Blocking** below). Without sub-issues, put `Part of #<parent>` at the top of the child body.
@@ -17,15 +23,7 @@ Infer the repo from `git remote -v`; `gh` does this automatically when run insid
 
 ## Pull requests as a triage surface
 
-**PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
-
-When set to `yes`, PRs run through the same labels and states as issues, using the `gh pr` equivalents:
-
-- **Read a PR**: `gh pr view <number> --comments` and `gh pr diff <number>` for the diff.
-- **List external PRs for triage**: `gh api --paginate 'repos/{owner}/{repo}/pulls?state=open' --jq '.[] | select(.author_association | IN("OWNER","MEMBER","COLLABORATOR") | not) | {number, title, author: .user.login, author_association, labels: [.labels[].name]}'`.
-- **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`, `gh pr close`.
-
-GitHub shares one number space across issues and PRs, so a bare `#42` may be either: resolve with `gh pr view 42` and fall back to `gh issue view 42`.
+**PRs as a request surface: no.** External PRs are not triaged as feature requests.
 
 ## When a skill says "publish to the issue tracker"
 

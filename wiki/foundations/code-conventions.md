@@ -7,6 +7,7 @@ sources:
   - odds_lambda.lambda_handler.lambda_handler
   - odds_cli.main.callback
   - .pre-commit-config.yaml
+  - .githooks/claim-issue.sh
   - .vale/styles/Temporal/Narration.yml
   - .github/workflows/lint.yml
   - pyproject.toml
@@ -30,6 +31,8 @@ Pre-commit (`.pre-commit-config.yaml`) runs on every commit; the `Lint` workflow
 | vale | [README.md](../../README.md), [AGENTS.md](../../AGENTS.md), `wiki/` and the Markdown under docs (hook `files` in `.pre-commit-config.yaml`; rules in `.vale.ini`) | `Temporal.Narration` (error on change narration) and `Temporal.TimeRelative` (warning on moment-in-time words) in `.vale/styles/Temporal/` |
 | wiki-lint | whole repo, every commit (`always_run`; `--no-write --fail-stale`) | Frontmatter, links, citations, unqualified symbols, index blocks, coverage and staleness of cited symbols, re-export imports and files (`scripts/wiki_lint.py`; rules in [SCHEMA](../SCHEMA.md)) |
 | lychee (Docker) | all `.md` | Links and `#heading` anchors, offline |
+
+The `claim-issue` hook (`.githooks/claim-issue.sh`) is a plain `post-checkout` git hook outside pre-commit, installed as in [Set up and run locally](howto-develop-locally.md#set-up).
 
 Ruff selects only `DTZ003` and `DTZ005` for timezone checks ([Timezones](timezones.md)).
 
