@@ -18,7 +18,7 @@ Several results below used feature sets the code does not define, for example th
 
 ## Deployed model
 
-`epl-clv-home` version `v308058c`, published 2026-04-23: XGBoost on tabular + match_stats, sliding-380:50 walk-forward CV, principled search space, hybrid sharp reference; CV val_R² +0.058, val_MSE 0.000716, replacing a tabular-only model (+0.035) (#361). Source config (#362): `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`. The live S3 version is the authority and cannot be verified from the repo; check with `aws s3 ls s3://<model-bucket>/epl-clv-home/` ([model store](../modelling/model-store.md)). The production scorer handles models trained on several feature groups, including the standings, match_stats and `epl_schedule` cache preload (#359). Publishing uses `odds_cli.commands.model.publish_model`. Predictions exist only where inline scoring runs, which is a local scheduler, one row per snapshot ([prediction scoring](../modelling/prediction-scoring.md)).
+`epl-clv-home` version `v308058c`, published 2026-04-23: XGBoost on tabular + match_stats, sliding-380:50 walk-forward CV, principled search space, hybrid sharp reference; CV val_R² +0.058, val_MSE 0.000716, replacing a tabular-only model (+0.035) (#361). Source config (#362): `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`; `v308058c` was trained from that YAML as at commit `2bf3712`, which set `early_stopping_rounds: 50` on the validation fold (see [Caveats](#caveats)). The live S3 version is the authority and cannot be verified from the repo; check with `aws s3 ls s3://<model-bucket>/epl-clv-home/` ([model store](../modelling/model-store.md)). The production scorer handles models trained on several feature groups, including the standings, match_stats and `epl_schedule` cache preload (#359). Publishing uses `odds_cli.commands.model.publish_model`. Predictions exist only where inline scoring runs, which is a local scheduler, one row per snapshot ([prediction scoring](../modelling/prediction-scoring.md)).
 
 ## Current conclusions
 
@@ -56,6 +56,10 @@ Several results below used feature sets the code does not define, for example th
 - 2026-03-16, 03-19: [CV protocol grid](exp-cv-protocol-grid.md).
 - 2026-03-20 (#255), 04-23 (#361): [EPL feature ablation](exp-epl-feature-ablation-and-search-space.md).
 - 2026-04-23: [principled search space](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test).
+
+## Caveats
+
+- XGBoost runs through `odds train`, including the deployed model, set `early_stopping_rounds`, which XGBoost evaluated on the validation fold, so their fold metrics are optimistically biased (#474). Script-based experiments that fit without an `eval_set` are not affected.
 
 ## Related
 

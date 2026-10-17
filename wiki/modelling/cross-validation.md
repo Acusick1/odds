@@ -16,7 +16,7 @@ status: stable
 
 # Cross-validation
 
-The production protocol is `cv_method: walk_forward`, `window_type: sliding`, `min_train_events = max_train_events = 380`, `val_step_events: 50`, `test_split: 0.0`, set in the training YAML (`experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`); the code defaults are `cv_method: timeseries` and `test_split: 0.2` ([training config](training-config.md)). The decision and its evidence are [ADR-0004](../../docs/adr/0004-walk-forward-cv-protocol.md) and [CV protocol grid](../evaluation/exp-cv-protocol-grid.md).
+The production protocol is `cv_method: walk_forward`, `window_type: sliding`, `min_train_events = max_train_events = 380`, `val_step_events: 50`, `test_split: 0.0`, set in the training YAML (`experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`, whose metrics are on [CLV model findings](../evaluation/clv-model-findings.md#deployed-model)); the code defaults are `cv_method: timeseries` and `test_split: 0.2` ([training config](training-config.md)). The decision and its evidence are [ADR-0004](../../docs/adr/0004-walk-forward-cv-protocol.md) and [CV protocol grid](../evaluation/exp-cv-protocol-grid.md).
 
 ## How folds are built
 
@@ -34,7 +34,7 @@ The production protocol is `cv_method: walk_forward`, `window_type: sliding`, `m
 - `n_folds` is ignored for `walk_forward` and mandatory for the other methods, but only `odds_analytics.training.cross_validation.run_cv` enforces it.
 - `walk_forward` without `event_ids` logs a warning and runs `timeseries` with `n_folds` (default 5), changing the protocol and the metric meaning (#437).
 - Per fold it calls `odds_analytics.training.cross_validation.TrainableStrategy.train_from_config` and records train and validation MSE, MAE and R² (`odds_analytics.training.cross_validation.CVFoldResult`). `odds_analytics.training.cross_validation.CVResult` reports mean and population standard deviation. Each fold's R² is against that fold's own mean.
-- The XGBoost strategy passes the fold as `eval_set` and XGBoost applies `early_stopping_rounds`, so early stopping sees the validation rows (#474).
+- XGBoost has no early stopping: every fold builds all `n_estimators` trees. The strategy passes the fold as `eval_set` for metrics and Optuna pruning only, so the validation rows never influence the fitted model (#474).
 - `odds_analytics.training.cross_validation.train_with_cv` then fits a final model on all rows and merges the CV metrics into the history. Tuning optimises the mean CV metric ([tuner](hyperparameter-tuner.md)).
 
 ## Test split

@@ -44,7 +44,7 @@ Vale rejects change-narrating words in `README.md`, `AGENTS.md`, `docs/adr/`, `d
 
 ## Issue tracker
 
-Issues live in GitHub Issues on `Acusick1/odds`, added to the `Personal` project board. Open a draft PR whose body contains `Closes #<n>` as soon as the branch has its first commit; linking moves the issue to In Progress and merging moves it to Done. Triage labels, the `gh` command table, and the sub-issue and wayfinding procedures are in `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`, which are authoritative and loaded through [AGENTS.md](../../AGENTS.md#agent-skills). External PRs are not a triage surface: `docs/agents/issue-tracker.md` sets "PRs as a request surface" to `no`.
+Issues live in GitHub Issues on `Acusick1/odds`, added to the `Personal` project board. Claiming an issue (branches `<n>-<slug>` or `issue-<n>-<slug>`) is in `docs/agents/issue-tracker.md`. Open a draft PR whose body contains `Closes #<n>` as soon as the branch has its first commit; linking moves the issue to In Progress and merging moves it to Done. Triage labels, the `gh` command table, and the sub-issue and wayfinding procedures are in `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`, which are authoritative and loaded through [AGENTS.md](../../AGENTS.md#agent-skills). External PRs are not a triage surface: `docs/agents/issue-tracker.md` sets "PRs as a request surface" to `no`.
 
 ## Related
 
