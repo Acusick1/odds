@@ -21,7 +21,7 @@ How to run the tests is in [Set up and run locally](howto-develop-locally.md#run
 ## Layout
 
 ```
-tests/unit/         ~90 flat files across all five packages, no conftest of its own
+tests/unit/         ~90 flat files across all five packages; `conftest.py` holds the OddsPortal feed fixtures
 tests/integration/  shared fixtures in conftest.py (e.g. events with opening and closing snapshots, an `op_live_` event with child rows)
 tests/migration/    schema and CLI checks against a real database
 tests/fixtures/     sample Odds API JSON
@@ -30,7 +30,7 @@ tests/fixtures/     sample Odds API JSON
 ## Configuration
 
 - Class-based tests: pytest is configured with `python_classes = Test*`, `asyncio_mode = "auto"`, `testpaths = ["tests"]` and `pythonpath = ["scripts"]` (root `pyproject.toml`).
-- Shared fixtures go in `conftest.py`; unit tests have none, so fixtures are repeated or imported.
+- Shared fixtures go in `conftest.py`; `tests/unit/conftest.py` provides `oddsportal_fixtures` (the directory of captured OddsPortal pages under `tests/fixtures/oddsportal/`) and `encrypt_payload` (encrypts JSON as the feed does, for synthetic responses). Other unit tests repeat or import their fixtures.
 - Markers: `integration` (live external APIs, may be skipped offline) and `live_api` (third-party HTTP, run only by the scheduled live-API workflow). CI runs integration with `-m "not live_api"` (`.github/workflows/test.yml`).
 - Any `odds_core` import builds settings, so tests need a `DATABASE_URL`: `tests/conftest.py` defaults only `ODDS_API_KEY`, and CI supplies `DATABASE_URL` from a secret ([Workspace packages](workspace-packages.md#odds-core)).
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_lambda.jobs.fetch_oddsportal import (
@@ -32,8 +32,6 @@ def _event(event_id: str, start: datetime) -> ListingEvent:
         away_team=f"Away {event_id}",
         start_time=start,
         url=f"https://www.oddsportal.com/football/h2h/a/b/#{event_id}",
-        tournament_name="Premier League",
-        venue="",
     )
 
 
@@ -100,7 +98,7 @@ class TestScrapeLeague:
         scrape = await scrape_league(EPL)
 
         assert scrape.events_listed == 2
-        assert [m for m, _ in scrape.matches] == ["1x2", "over_under_2_5"] * 2
+        assert [m.market for m in scrape.matches] == ["1x2", "over_under_2_5"] * 2
         assert scrape.errors == []
 
     async def test_past_events_are_dropped_and_skip_context(self, fake_client: Any) -> None:
@@ -122,11 +120,22 @@ class TestScrapeLeague:
         assert "Home a vs Away a (1x2)" in scrape.errors[0]
         assert len(scrape.matches) == 3
 
+    async def test_all_market_fetches_failing_raises(self, fake_client: Any) -> None:
+        future = datetime.now(UTC) + timedelta(days=1)
+        fake_client(
+            [_event("a", future)],
+            failing={("a", "1x2"), ("a", "over_under_2_5")},
+        )
+
+        with pytest.raises(OddsPortalError, match="every market fetch failed.*boom"):
+            await scrape_league(EPL)
+
 
 class TestIngestLeague:
-    def _match(self, event_id: str) -> MatchOdds:
+    def _match(self, event_id: str, market: str = "1x2") -> MatchOdds:
         now = datetime.now(UTC)
         return MatchOdds(
+            market=market,
             home_team=f"Home {event_id}",
             away_team=f"Away {event_id}",
             match_date=now + timedelta(days=1),
@@ -136,19 +145,30 @@ class TestIngestLeague:
             bookmaker_count=1,
         )
 
-    async def test_dry_run_counts_distinct_events(self) -> None:
+    async def test_stores_one_snapshot_per_market_and_counts_distinct_events(self) -> None:
         scraped = LeagueScrape(
-            matches=[("1x2", self._match("a")), ("over_under_2_5", self._match("a"))],
+            matches=[self._match("a"), self._match("a", "over_under_2_5")],
             events_listed=3,
             errors=["x"],
         )
 
-        stats = await ingest_league(EPL, scraped=scraped, dry_run=True)
+        session = MagicMock()
+        session.commit = AsyncMock()
+        writer = MagicMock()
+        writer.find_or_create_event = AsyncMock(return_value=(1, True))
+        writer.store_odds_snapshot = AsyncMock(return_value=(MagicMock(), True))
+        with (
+            patch("odds_lambda.jobs.fetch_oddsportal.async_session_maker") as maker,
+            patch("odds_lambda.jobs.fetch_oddsportal.OddsWriter", return_value=writer),
+        ):
+            maker.return_value.__aenter__ = AsyncMock(return_value=session)
+            maker.return_value.__aexit__ = AsyncMock(return_value=None)
+            stats = await ingest_league(EPL, scraped=scraped)
 
         assert stats.matches_scraped == 1
         assert stats.matches_converted == 2
         assert stats.errors == ["x"]
-        assert stats.snapshots_stored == 0
+        assert stats.snapshots_stored == 2
 
     async def test_empty_scrape_returns_zero_stats(self) -> None:
         stats = await ingest_league(EPL, scraped=LeagueScrape(events_listed=0))
@@ -165,12 +185,12 @@ class TestIngestLeague:
         )
         with patch(
             "odds_lambda.jobs.fetch_oddsportal.scrape_league",
-            return_value=LeagueScrape(matches=[("1x2", self._match("a"))]),
+            return_value=LeagueScrape(events_listed=1),
         ) as mock_scrape:
-            stats = await ingest_league(spec, dry_run=True)
+            stats = await ingest_league(spec)
 
         mock_scrape.assert_awaited_once_with(spec)
-        assert stats.matches_scraped == 1
+        assert stats.matches_scraped == 0
 
 
 class TestApplyOvernightSkip:

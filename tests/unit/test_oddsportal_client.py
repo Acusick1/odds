@@ -34,10 +34,11 @@ EVENT = ListingEvent(
     away_team="Chelsea",
     start_time=datetime(2026, 10, 17, 11, 30, tzinfo=UTC),
     url="https://www.oddsportal.com/football/h2h/chelsea-x/everton-y/#2wo3m634",
-    tournament_name="Premier League",
-    venue="",
 )
 KEY_1X2 = "E-1-2-0-0-0"
+EMPTY_LISTING = (
+    '<script>self.__next_f.push([1,"1:{\\"productErrorType\\":\\"no_data_now\\"}\\n"])</script>'
+)
 
 
 def _feed(market: dict[str, Any], key: str = KEY_1X2) -> dict[str, Any]:
@@ -114,7 +115,6 @@ class TestFixtures:
         assert first.start_time.tzinfo is not None
         assert first.url.startswith("https://www.oddsportal.com/football/h2h/")
         assert first.url.endswith(f"#{first.event_id}")
-        assert first.tournament_name == "Premier League"
 
     def test_mlb_listing(self, oddsportal_fixtures: Path) -> None:
         events = parse_listing(_read(oddsportal_fixtures, "mlb_listing.html"))
@@ -132,6 +132,17 @@ class TestFixtures:
             and log["product_error_type"] == "no_data_now"
             for log in logs
         )
+
+    @pytest.mark.parametrize(
+        "html",
+        [
+            "<html><body>no push scripts</body></html>",
+            '<script>self.__next_f.push([1,"1:{\\"foo\\":1}\\n"])</script>',
+        ],
+    )
+    def test_listing_without_events_or_marker_raises(self, html: str) -> None:
+        with pytest.raises(OddsPortalError, match="page format may have changed"):
+            parse_listing(html)
 
     def test_listing_events_are_unique(self, oddsportal_fixtures: Path) -> None:
         events = parse_listing(_read(oddsportal_fixtures, "epl_listing.html"))
@@ -174,6 +185,32 @@ class TestExtractMarket:
         feed = _feed({"odds": {"16": [2.0, 2.0]}}, key="E-2-2-0-2.5-0")
 
         assert extract_market(feed, FEED_MARKETS["1x2"], NAMES) == []
+
+    @pytest.mark.parametrize(
+        "feed",
+        [
+            {"d": {}},
+            {"d": {"oddsdata": None}},
+            {"d": {"oddsdata": []}},
+            {"d": {"oddsdata": {"back": None}}},
+            {"d": {"oddsdata": {"back": []}}},
+        ],
+    )
+    def test_no_odds_posted_yet_is_empty(self, feed: dict[str, Any]) -> None:
+        assert extract_market(feed, FEED_MARKETS["1x2"], NAMES) == []
+
+    @pytest.mark.parametrize(
+        "feed",
+        [
+            {"d": None},
+            {"d": []},
+            {"d": {"oddsdata": "x"}},
+            {"d": {"oddsdata": {"back": 3}}},
+        ],
+    )
+    def test_structurally_wrong_feed_raises(self, feed: dict[str, Any]) -> None:
+        with pytest.raises(OddsPortalError, match="unexpected feed shape"):
+            extract_market(feed, FEED_MARKETS["1x2"], NAMES)
 
     @pytest.mark.parametrize(
         "prices", [[2.0, 3.0], [2.0, 0, 4.0], [2.0, None, 4.0], {"0": 2.0, "1": 3.0}, None]
@@ -231,7 +268,7 @@ def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     async def fake_sleep(seconds: float) -> None:
         recorded.append(seconds)
 
-    monkeypatch.setattr(oddsportal_client.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(oddsportal_client, "_sleep", fake_sleep)
     return recorded
 
 
@@ -309,7 +346,7 @@ class TestClientRequests:
             await FakeClient([]).fetch_market(EVENT, "spreads", CONTEXT)
 
     async def test_503_is_retried(self, sleeps: list[float]) -> None:
-        client = FakeClient([(503, ""), (503, ""), (200, "<html></html>")])
+        client = FakeClient([(503, ""), (503, ""), (200, EMPTY_LISTING)])
 
         assert await client.fetch_listing("/football/england/premier-league/") == []
         assert len(client.requests) == 3
@@ -321,14 +358,16 @@ class TestClientRequests:
             await client.fetch_listing("/x/")
 
     async def test_connection_errors_are_retried(self, sleeps: list[float]) -> None:
-        client = FakeClient([aiohttp.ClientConnectionError("boom"), TimeoutError(), (200, "")])
+        client = FakeClient(
+            [aiohttp.ClientConnectionError("boom"), TimeoutError(), (200, EMPTY_LISTING)]
+        )
 
         await client.fetch_listing("/x/")
 
         assert len(client.requests) == 3
 
     async def test_429_is_retried(self, sleeps: list[float]) -> None:
-        client = FakeClient([(429, ""), (200, "")])
+        client = FakeClient([(429, ""), (200, EMPTY_LISTING)])
 
         await client.fetch_listing("/x/")
 

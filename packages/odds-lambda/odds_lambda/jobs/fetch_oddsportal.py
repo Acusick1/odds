@@ -113,7 +113,7 @@ class IngestionStats:
 class LeagueScrape:
     """Converted output of one league scrape."""
 
-    matches: list[tuple[str, MatchOdds]] = field(default_factory=list)  # (market, match)
+    matches: list[MatchOdds] = field(default_factory=list)
     events_listed: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -134,6 +134,7 @@ async def scrape_league(spec: LeagueSpec) -> LeagueScrape:
             return scrape
 
         context = await client.fetch_bookmaker_context()
+        fetched = 0
         for event in upcoming:
             for market in spec.markets:
                 try:
@@ -143,9 +144,15 @@ async def scrape_league(spec: LeagueSpec) -> LeagueScrape:
                     scrape.errors.append(msg)
                     logger.warning("oddsportal_market_failed", error=msg)
                     continue
+                fetched += 1
                 match = convert_market(event, market, bookmakers, datetime.now(UTC))
                 if match is not None:
-                    scrape.matches.append((market, match))
+                    scrape.matches.append(match)
+    if fetched == 0 and scrape.errors:
+        raise OddsPortalError(
+            f"every market fetch failed for {len(upcoming)} upcoming events "
+            f"({len(scrape.errors)} errors); first: {scrape.errors[0]}"
+        )
     return scrape
 
 
@@ -153,14 +160,12 @@ async def ingest_league(
     spec: LeagueSpec,
     *,
     scraped: LeagueScrape | None = None,
-    dry_run: bool = False,
 ) -> IngestionStats:
     """Scrape and ingest a single league.
 
     Args:
         spec: League configuration.
         scraped: Pre-scraped data (skips the network). For testing.
-        dry_run: If True, convert but don't write to DB.
 
     Returns:
         Ingestion statistics.
@@ -174,7 +179,7 @@ async def ingest_league(
     all_converted = scraped.matches
     stats.errors.extend(scraped.errors)
     stats.matches_converted = len(all_converted)
-    stats.matches_scraped = len({m.match_link for _, m in all_converted})
+    stats.matches_scraped = len({m.match_link for m in all_converted})
 
     if not all_converted:
         logger.warning(
@@ -189,15 +194,6 @@ async def ingest_league(
         events_listed=scraped.events_listed,
     )
 
-    if dry_run:
-        logger.info(
-            "dry_run_complete",
-            league=spec.league,
-            matches_scraped=stats.matches_scraped,
-            matches_converted=stats.matches_converted,
-        )
-        return stats
-
     # Ingest to database
     scraped_date = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M")
     api_request_id = f"oddsportal_live_{scraped_date}"
@@ -205,7 +201,7 @@ async def ingest_league(
     async with async_session_maker() as session:
         writer = OddsWriter(session)
 
-        for market, match in all_converted:
+        for match in all_converted:
             try:
                 event_id, created = await writer.find_or_create_event(
                     home_team=match.home_team,
@@ -230,7 +226,7 @@ async def ingest_league(
                 stats.snapshots_stored += 1
 
             except Exception as e:
-                msg = f"{match.home_team} vs {match.away_team} ({market}): {e}"
+                msg = f"{match.home_team} vs {match.away_team} ({match.market}): {e}"
                 stats.errors.append(msg)
                 logger.error("match_ingestion_failed", error=msg, exc_info=True)
 

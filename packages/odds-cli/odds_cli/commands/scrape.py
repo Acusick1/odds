@@ -65,7 +65,7 @@ async def _scrape_upcoming(
         console.print(f"  Listed {scraped.events_listed} events")
 
         for mkt in spec.markets:
-            converted = [m for market_key, m in scraped.matches if market_key == mkt]
+            converted = [m for m in scraped.matches if m.market == mkt]
             console.print(f"\n[bold]{mkt}[/bold]: {len(converted)} matches converted")
 
             if converted:

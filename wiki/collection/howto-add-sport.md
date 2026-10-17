@@ -26,7 +26,7 @@ The Odds API bookmakers and markets are config lists (`bookmakers`, `markets` on
    - The suffix names EventBridge rules, heartbeat keys and `odds_mcp.server.get_scheduled_jobs` filters; without one, compound job names stay bare as for NBA ([job-registry](../scheduling/job-registry.md#compound-job-names)).
 3. Add an entry to `odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS`.
    - The decision engine skips runs inside the window ([decision-engine](../scheduling/decision-engine.md#overnight-windows)).
-4. If OddsPortal covers it, add a `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` to `odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPECS`, with the sport's OddsPortal `listing_path` and markets that are keys of `odds_lambda.oddsportal_client.FEED_MARKETS`.
+4. If OddsPortal covers it, add a `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` to `odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPECS`, with the sport's OddsPortal `listing_path` and markets that are keys of `odds_lambda.oddsportal_client.FEED_MARKETS` (a market not in that table needs a new `odds_lambda.oddsportal_client.FeedMarketSpec` row first).
    - The spec carries its own overnight fields, so keep them equal to step 3 ([fetch-oddsportal-job](fetch-oddsportal-job.md#leagues)).
 5. If Betfair lists it, add an entry to `odds_lambda.betfair.constants.SPORT_CONFIG`.
    - The Betfair allowlist in `odds_lambda.scheduling.jobs._JOB_SPORTS` is derived from that map, so no allowlist edit is needed ([betfair-exchange](betfair-exchange.md)).

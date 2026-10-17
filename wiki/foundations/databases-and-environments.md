@@ -53,7 +53,7 @@ Production is the local database of one host: on the mini-PC, `DATABASE_URL` nam
 
 ### The agent database role
 
-The betting agent subprocess swaps in `AGENT_DATABASE_URL` when set (`odds_lambda.jobs.agent_run._build_agent_subprocess_env`). That `odds_agent` role has SELECT on everything, INSERT/UPDATE on `paper_trades`, `match_briefs` and `agent_wakeups`, and write access to the APScheduler tables (needed by `odds_mcp.server.refresh_scrape`). When the variable is unset the agent inherits the write-capable DSN and only logs a warning ([Database role](../agent/agent-run-job.md#database-role)).
+The betting agent subprocess swaps in `AGENT_DATABASE_URL` when set (`odds_lambda.jobs.agent_run._build_agent_subprocess_env`). That `odds_agent` role has SELECT on everything, INSERT/UPDATE on `paper_trades`, `match_briefs` and `agent_wakeups`, and write access to the APScheduler tables (needed by the MCP tool `odds_mcp.server.refresh_scrape`). When the variable is unset the agent inherits the write-capable DSN and only logs a warning ([Database role](../agent/agent-run-job.md#database-role)).
 
 ### The `--db` flag
 

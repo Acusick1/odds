@@ -41,7 +41,7 @@ Two implementations of decimal-to-American conversion exist (#446): `odds_lambda
 Which stored prices come from which copy:
 
 - [Betfair](../collection/betfair-exchange.md) snapshots use the core function (`odds_lambda.betfair.adapter.build_raw_data`).
-- OddsPortal live and historical snapshots (`odds_lambda.oddsportal_adapter`, `odds_lambda.oddsportal_common.build_raw_data`) and `scripts/ingest_football_data_uk.py` use the `odds_lambda.oddsportal_common` rounding copy ([OddsPortal scraper](../collection/oddsportal-scraper.md)).
+- OddsPortal live and historical snapshots (`odds_lambda.oddsportal_adapter.convert_market`, `odds_lambda.oddsportal_common.build_raw_data`) and `scripts/ingest_football_data_uk.py` use the `odds_lambda.oddsportal_common` rounding copy ([OddsPortal scraper](../collection/oddsportal-scraper.md)).
 
 Identical decimal prices can therefore be stored one point apart by source (#446). `odds_lambda.storage.validators.OddsValidator.american_to_probability` is a third copy of the implied-probability conversion ([Odds validation](../storage/odds-validator.md)).
 

@@ -20,8 +20,6 @@ def event() -> ListingEvent:
         away_team="Everton",
         start_time=datetime(2026, 10, 18, 15, 0, tzinfo=UTC),
         url="https://www.oddsportal.com/football/h2h/arsenal-x/everton-y/#abc12345",
-        tournament_name="Premier League",
-        venue="Emirates Stadium",
     )
 
 
@@ -72,8 +70,7 @@ class TestConvertMarket:
         assert match.away_team == "Everton"
         assert match.match_date == event.start_time
         assert match.match_link == event.url
-        assert match.league_name == "Premier League"
-        assert match.venue == "Emirates Stadium"
+        assert match.market == "1x2"
         assert match.scraped_date == SCRAPED_AT
         assert match.bookmaker_count == 1
 

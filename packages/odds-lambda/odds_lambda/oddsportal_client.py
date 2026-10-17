@@ -80,8 +80,6 @@ class ListingEvent:
     away_team: str
     start_time: datetime
     url: str
-    tournament_name: str
-    venue: str
 
 
 @dataclass(frozen=True)
@@ -93,10 +91,18 @@ class BookmakerContext:
 
 @dataclass(frozen=True)
 class FeedMarketSpec:
+    """One market's feed coordinates and its pipeline representation.
+
+    ``handicap`` is the string as it appears in the feed key. ``outcomes`` are
+    labels in feed order: home, draw, away, over, under.
+    """
+
     betting_type: int
     scope: int
     handicap: str
-    num_outcomes: int
+    pipeline_key: str
+    outcomes: tuple[str, ...]
+    point: float | None = None
 
 
 @dataclass(frozen=True)
@@ -110,9 +116,28 @@ class BookmakerPrices:
 
 # Keys are the LeagueSpec market keys.
 FEED_MARKETS: dict[str, FeedMarketSpec] = {
-    "1x2": FeedMarketSpec(betting_type=1, scope=2, handicap="0", num_outcomes=3),
-    "over_under_2_5": FeedMarketSpec(betting_type=2, scope=2, handicap="2.5", num_outcomes=2),
-    "home_away": FeedMarketSpec(betting_type=3, scope=1, handicap="0", num_outcomes=2),
+    "1x2": FeedMarketSpec(
+        betting_type=1,
+        scope=2,
+        handicap="0",
+        pipeline_key="1x2",
+        outcomes=("home", "draw", "away"),
+    ),
+    "over_under_2_5": FeedMarketSpec(
+        betting_type=2,
+        scope=2,
+        handicap="2.5",
+        pipeline_key="totals",
+        outcomes=("over", "under"),
+        point=2.5,
+    ),
+    "home_away": FeedMarketSpec(
+        betting_type=3,
+        scope=1,
+        handicap="0",
+        pipeline_key="h2h",
+        outcomes=("home", "away"),
+    ),
 }
 
 
@@ -199,14 +224,15 @@ def parse_listing(html: str) -> list[ListingEvent]:
                 away_team=str(node["away-name"]),
                 start_time=datetime.fromtimestamp(int(node["date-start-timestamp"]), tz=UTC),
                 url=BASE_URL + str(node["url"]),
-                tournament_name=str(node.get("tournament-name") or ""),
-                venue=str(node.get("venue") or ""),
             )
 
     if not events:
         error_match = re.search(r'"productErrorType"\s*:\s*"([^"]*)"', payload)
-        if error_match:
-            logger.warning("oddsportal_listing_empty", product_error_type=error_match.group(1))
+        if error_match is None:
+            raise OddsPortalError(
+                "listing has no events and no empty-state marker; page format may have changed"
+            )
+        logger.warning("oddsportal_listing_empty", product_error_type=error_match.group(1))
     return list(events.values())
 
 
@@ -263,8 +289,21 @@ def extract_market(
     with missing, non-positive or wrongly sized prices.
     """
     key = f"E-{spec.betting_type}-{spec.scope}-0-{spec.handicap}-0"
-    back = feed.get("d", {}).get("oddsdata", {}).get("back", {})
-    market = back.get(key) if isinstance(back, dict) else None
+    data = feed.get("d")
+    if not isinstance(data, dict):
+        raise OddsPortalError("unexpected feed shape: 'd' is not an object")
+    # The site encodes an empty map as [] (or omits it) before any odds are posted.
+    oddsdata = data.get("oddsdata")
+    if oddsdata in (None, []):
+        return []
+    if not isinstance(oddsdata, dict):
+        raise OddsPortalError("unexpected feed shape: 'd.oddsdata' is not an object")
+    back = oddsdata.get("back")
+    if back in (None, []):
+        return []
+    if not isinstance(back, dict):
+        raise OddsPortalError("unexpected feed shape: 'd.oddsdata.back' is not an object")
+    market = back.get(key)
     if not isinstance(market, dict):
         return []
 
@@ -282,7 +321,7 @@ def extract_market(
         if name is None:
             logger.debug("oddsportal_unknown_bookmaker", bookmaker_id=bookmaker_id)
             continue
-        prices = _positive_floats(raw_prices, spec.num_outcomes)
+        prices = _positive_floats(raw_prices, len(spec.outcomes))
         if prices is None:
             continue
         raw_volume = volume.get(bookmaker_id)
@@ -291,7 +330,7 @@ def extract_market(
                 bookmaker_id=bookmaker_id,
                 name=name,
                 prices=prices,
-                volumes=_volumes(raw_volume, spec.num_outcomes) if raw_volume else None,
+                volumes=_volumes(raw_volume, len(spec.outcomes)) if raw_volume else None,
                 last_change=_last_change(change_time.get(bookmaker_id)),
             )
         )
@@ -400,7 +439,7 @@ class OddsPortalClient:
         headers = {**_XHR_HEADERS, "Referer": urldefrag(event.url).url}
 
         for attempt in range(_FEED_ERROR_MAX_RETRIES + 1):
-            await asyncio.sleep(self._request_delay)
+            await _sleep(self._request_delay)
             feed = await self._get_json(url, headers)
             data = feed.get("d") if isinstance(feed, dict) else None
             if not isinstance(data, dict):
@@ -422,7 +461,7 @@ class OddsPortalClient:
                 attempt=attempt + 1,
             )
             if attempt < _FEED_ERROR_MAX_RETRIES:
-                await asyncio.sleep(delay)
+                await _sleep(delay)
         raise OddsPortalError(
             f"feed error '{data['E']}' persisted after {_FEED_ERROR_MAX_RETRIES} retries for {url}"
         )
