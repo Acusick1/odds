@@ -29,7 +29,7 @@ The runtime of the [betting agent](betting-agent.md) lives in `odds_lambda.jobs.
 
 ## Runtime
 
-`odds_lambda.jobs.agent_run._run_claude_agent` spawns `claude -p "/agent {sport}"` with `--model claude-sonnet-4-6` (hard-coded in the function, #414), `--output-format stream-json --verbose` and `--dangerously-skip-permissions`, working directory the repo root, a 15-minute timeout (`odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS`). The `/agent` slash command is not in the repository; `.claude/` is gitignored (`.gitignore`, #479). The function passes the full sport key (`soccer_epl`, `baseball_mlb`), and what the command does with it cannot be reviewed from the repo. The subprocess:
+`odds_lambda.jobs.agent_run._run_claude_agent` spawns `claude -p "/agent {sport}"` with `--model claude-sonnet-4-6` (hard-coded in the function, #414), `--output-format stream-json --verbose` and `--dangerously-skip-permissions`, working directory the repo root, a 15-minute timeout (`odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS`). The `/agent` slash command is not in the repository; `.gitignore` excludes the whole `.claude/` directory (#479). The function passes the full sport key (`soccer_epl`, `baseball_mlb`), and what the command does with it cannot be reviewed from the repo. The subprocess:
 
 - reaches the pipeline through the `odds` MCP server registered in `.mcp.json` (`uv run fastmcp run odds_mcp.server`), see [odds-mcp server](mcp-server.md);
 - researches with web search and Playwright;
@@ -67,7 +67,7 @@ The wake-up interval is the `agent-run` row of the [cadence table](../scheduling
 > [!WARNING]
 > Without `AGENT_DATABASE_URL` exported in the shell, the agent subprocess runs with `--dangerously-skip-permissions` against the parent's write-capable `DATABASE_URL` (#444).
 
-If `AGENT_DATABASE_URL` is set, the subprocess gets it as `DATABASE_URL`. `.env.example` documents the restricted `odds_agent` role: `SELECT` everywhere, `INSERT, UPDATE` on `paper_trades`, `match_briefs` and `agent_wakeups`, and write access to the APScheduler tables (`(inferred)`: the tables `odds_mcp.server.refresh_scrape` writes through APScheduler). Unset, the agent runs with the parent's write-capable DSN and a warning is logged. `AGENT_DATABASE_URL` is read with `os.getenv`, not `odds_core.config.Settings`, so it must be exported in the shell, not only set in `.env` ([configuration](../foundations/configuration.md#variables-read-outside-settings)). When it is set, `--db` has no effect, because the subprocess environment replaces `DATABASE_URL` with it (`odds_lambda.jobs.agent_run._build_agent_subprocess_env`, #445).
+If `AGENT_DATABASE_URL` is set, the subprocess gets it as `DATABASE_URL`. `.env.example` documents the restricted `odds_agent` role: `SELECT` everywhere, `INSERT, UPDATE` on `paper_trades`, `match_briefs` and `agent_wakeups`, and write access to the APScheduler tables (`(inferred)`: the tables `odds_mcp.server.refresh_scrape` writes to through APScheduler). Unset, the agent runs with the parent's write-capable DSN and a warning is logged. `AGENT_DATABASE_URL` is read with `os.getenv`, not `odds_core.config.Settings`, so it must be exported in the shell, not only set in `.env` ([configuration](../foundations/configuration.md#variables-read-outside-settings)). When it is set, `--db` has no effect, because the subprocess environment replaces `DATABASE_URL` with it (`odds_lambda.jobs.agent_run._build_agent_subprocess_env`, #445).
 
 ## Run traces
 

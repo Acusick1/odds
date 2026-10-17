@@ -257,6 +257,15 @@ class TestRefreshScrapeUnknownLeague:
         assert result["error_type"] == "ValueError"
 
     @pytest.mark.asyncio
+    async def test_unknown_market_returns_error(self) -> None:
+        from odds_mcp.server import refresh_scrape
+
+        result = await refresh_scrape(league="mlb", market="moneyline")
+        assert "Unknown market" in result["error"]
+        assert "home_away" in result["error"]
+        assert result["error_type"] == "ValueError"
+
+    @pytest.mark.asyncio
     async def test_known_league_uses_correct_sport(self) -> None:
         from uuid import uuid4
 

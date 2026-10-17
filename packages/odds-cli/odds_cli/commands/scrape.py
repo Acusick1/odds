@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -17,35 +16,34 @@ console = Console()
 @app.command("upcoming")
 def scrape_upcoming(
     league: str = typer.Option(
-        "england-premier-league", "--league", "-l", help="OddsHarvester league name"
+        "england-premier-league", "--league", "-l", help="League name (as in LEAGUE_SPECS)"
     ),
     market: Annotated[
-        list[str] | None, typer.Option("--market", "-m", help="Markets to scrape (repeatable)")
+        list[str] | None,
+        typer.Option(
+            "--market", "-m", help="Markets to scrape (repeatable): 1x2, over_under_2_5, home_away"
+        ),
     ] = None,
     dry_run: bool = typer.Option(False, "--dry-run", help="Scrape and convert but don't store"),
-    from_file: str | None = typer.Option(
-        None, "--from-file", help="Load matches from JSON file instead of scraping"
-    ),
 ) -> None:
     """Scrape upcoming match odds from OddsPortal and ingest into the pipeline."""
-    asyncio.run(_scrape_upcoming(league, market, dry_run, from_file))
+    asyncio.run(_scrape_upcoming(league, market, dry_run))
 
 
 async def _scrape_upcoming(
     league: str,
     markets: list[str] | None,
     dry_run: bool,
-    from_file: str | None,
 ) -> None:
     import dataclasses
 
     from odds_lambda.jobs.fetch_oddsportal import (
         LEAGUE_SPEC_BY_NAME,
         ingest_league,
+        scrape_league,
     )
-    from odds_lambda.oddsportal_adapter import convert_upcoming_matches
+    from odds_lambda.oddsportal_client import FEED_MARKETS
 
-    # Look up known league spec
     if league not in LEAGUE_SPEC_BY_NAME:
         known_names = sorted(LEAGUE_SPEC_BY_NAME.keys())
         console.print(f"[red]Unknown league '{league}'. Known leagues: {known_names}[/red]")
@@ -53,26 +51,21 @@ async def _scrape_upcoming(
 
     spec = LEAGUE_SPEC_BY_NAME[league]
     if markets:
+        unknown = sorted(set(markets) - FEED_MARKETS.keys())
+        if unknown:
+            console.print(
+                f"[red]Unknown market(s) {unknown}. Known markets: {sorted(FEED_MARKETS)}[/red]"
+            )
+            raise typer.Exit(code=1)
         spec = dataclasses.replace(spec, markets=markets)
 
-    raw_matches: list[dict[str, Any]] | None = None
-    if from_file:
-        console.print(f"Loading matches from [cyan]{from_file}[/cyan]")
-        with open(from_file) as f:
-            loaded: list[dict[str, Any]] = json.load(f)
-        raw_matches = loaded
-        console.print(f"  Loaded {len(loaded)} matches")
-
     if dry_run:
-        if raw_matches is None:
-            from odds_lambda.jobs.fetch_oddsportal import run_harvester_upcoming
-
-            console.print(f"Scraping [bold]{spec.league}[/bold] ({spec.sport})...")
-            raw_matches = await run_harvester_upcoming(spec)
-            console.print(f"  Scraped {len(raw_matches)} matches")
+        console.print(f"Scraping [bold]{spec.league}[/bold] ({spec.listing_path})...")
+        scraped = await scrape_league(spec)
+        console.print(f"  Listed {scraped.events_listed} events")
 
         for mkt in spec.markets:
-            converted = convert_upcoming_matches(raw_matches, mkt)
+            converted = [m for m in scraped.matches if m.market == mkt]
             console.print(f"\n[bold]{mkt}[/bold]: {len(converted)} matches converted")
 
             if converted:
@@ -89,10 +82,13 @@ async def _scrape_upcoming(
                     )
 
                 console.print(table)
+
+        for err in scraped.errors[:5]:
+            console.print(f"[yellow]{err}[/yellow]")
         return
 
-    console.print(f"Scraping and ingesting [bold]{spec.league}[/bold] ({spec.sport})...")
-    stats = await ingest_league(spec, raw_matches=raw_matches, dry_run=False)
+    console.print(f"Scraping and ingesting [bold]{spec.league}[/bold] ({spec.listing_path})...")
+    stats = await ingest_league(spec)
 
     console.print("\n[bold green]Done[/bold green]")
     console.print(f"  Matches scraped:  {stats.matches_scraped}")

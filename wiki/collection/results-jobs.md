@@ -50,7 +50,7 @@ Per-event failures are logged and skipped. A whole-job failure sends `odds_core.
 
 ## fetch-oddsportal-results
 
-`odds_lambda.jobs.fetch_oddsportal_results.main(ctx)` scrapes OddsPortal's historic results page (one page, the spec's primary market) for past matches, sets events FINAL with scores and stores one closing snapshot per event. League config is `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` ([fetch-oddsportal-job](fetch-oddsportal-job.md#leagues)). `odds_lambda.jobs.fetch_oddsportal_results.process_results` uses three session scopes so no connection is held across the browser run (Neon closes idle connections):
+`odds_lambda.jobs.fetch_oddsportal_results.main(ctx)` scrapes OddsPortal's historic results page (one page, the spec's primary market) for past matches, sets events FINAL with scores and stores one closing snapshot per event. League config is `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` ([fetch-oddsportal-job](fetch-oddsportal-job.md#leagues)); only its `sport` and `league` names are used, since the live job's `listing_path` is HTTP-only. `odds_lambda.jobs.fetch_oddsportal_results.process_results` uses three session scopes so no connection is held across the browser run (Neon closes idle connections):
 
 1. **Read**: `odds_lambda.jobs.fetch_oddsportal_results.get_pending_events` returns plain `odds_lambda.jobs.fetch_oddsportal_results.PendingEvent` dataclasses for SCHEDULED or LIVE events of the sport with `commence_time` in the past. None means exit.
 2. **Scrape**: `run_harvester_historic(spec)` with no open session. The call does not take the Playwright semaphore.

@@ -1,10 +1,10 @@
-"""Fetch upcoming odds from OddsPortal via OddsHarvester.
+"""Fetch upcoming odds from OddsPortal over HTTP.
 
 Scrapes pre-match odds for configured leagues, converts to pipeline format,
 and stores via OddsWriter. Self-schedules based on proximity to next kickoff.
 
 Scheduling strategy: query DB for next kickoff, compute interval from game
-proximity, pre-schedule before any browser work so the chain survives Lambda
+proximity, pre-schedule before scraping so the chain survives Lambda
 timeouts. After a successful scrape, re-query (scrape may have created new
 events) and reschedule at the updated interval.
 
@@ -20,16 +20,12 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
 
 import structlog
 from odds_core.database import async_session_maker
 
-from odds_lambda.oddsportal_adapter import (
-    MatchOdds,
-    convert_upcoming_matches,
-)
-from odds_lambda.oddsportal_common import run_scraper_with_retry
+from odds_lambda.oddsportal_adapter import MatchOdds, convert_market
+from odds_lambda.oddsportal_client import OddsPortalClient, OddsPortalError
 from odds_lambda.scheduling.decision import (
     CadenceConfig,
     ScheduleDecision,
@@ -41,7 +37,7 @@ from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-# Proximity-based polling cadence (hours): browser scrape — moderate cadence.
+# Proximity-based polling cadence (hours): feed scrape — moderate cadence.
 # 12h+ to kickoff (and no-game) all poll at 2h, matching the previous "far" band.
 CADENCE = CadenceConfig(
     closing=0.5,
@@ -58,8 +54,9 @@ CADENCE = CadenceConfig(
 class LeagueSpec:
     """Configuration for a single league to scrape."""
 
-    sport: str  # OddsHarvester sport name (e.g. "football")
+    sport: str  # OddsHarvester sport name (e.g. "football"), used by the results job
     league: str  # OddsHarvester league name (e.g. "england-premier-league")
+    listing_path: str  # OddsPortal listing page (e.g. "/football/england/premier-league/")
     sport_key: str  # Pipeline sport key (e.g. "soccer_epl")
     sport_title: str  # Display name (e.g. "EPL")
     markets: list[str] = field(default_factory=lambda: ["1x2"])
@@ -73,6 +70,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
     LeagueSpec(
         sport="football",
         league="england-premier-league",
+        listing_path="/football/england/premier-league/",
         sport_key="soccer_epl",
         sport_title="EPL",
         markets=["1x2", "over_under_2_5"],
@@ -80,6 +78,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
     LeagueSpec(
         sport="baseball",
         league="mlb",
+        listing_path="/baseball/usa/mlb/",
         sport_key="baseball_mlb",
         sport_title="MLB",
         markets=["home_away"],
@@ -110,71 +109,90 @@ class IngestionStats:
     errors: list[str] = field(default_factory=list)
 
 
-async def run_harvester_upcoming(spec: LeagueSpec) -> list[dict[str, Any]]:
-    """Scrape upcoming matches for a league via ``run_scraper_with_retry``.
+@dataclass
+class LeagueScrape:
+    """Converted output of one league scrape."""
 
-    Acquires the Playwright semaphore so only one browser instance runs at a time.
+    matches: list[MatchOdds] = field(default_factory=list)
+    events_listed: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+async def scrape_league(spec: LeagueSpec) -> LeagueScrape:
+    """Read upcoming events and their odds for a league from OddsPortal.
+
+    Listing and bookmaker-context failures propagate. A failure for one event
+    and market is recorded in ``errors`` and the scrape continues.
     """
-    from oddsharvester.utils.command_enum import CommandEnum
+    scrape = LeagueScrape()
+    async with OddsPortalClient() as client:
+        events = await client.fetch_listing(spec.listing_path)
+        scrape.events_listed = len(events)
+        now = datetime.now(UTC)
+        upcoming = [e for e in events if e.start_time > now]
+        if not upcoming:
+            return scrape
 
-    from odds_lambda.browser_lock import playwright_semaphore
-
-    async with playwright_semaphore:
-        result = await run_scraper_with_retry(
-            command=CommandEnum.UPCOMING_MATCHES,
-            sport=spec.sport,
-            leagues=[spec.league],
-            markets=spec.markets,
-            headless=True,
+        context = await client.fetch_bookmaker_context()
+        fetched = 0
+        for event in upcoming:
+            for market in spec.markets:
+                try:
+                    bookmakers = await client.fetch_market(event, market, context)
+                except OddsPortalError as e:
+                    msg = f"{event.home_team} vs {event.away_team} ({market}): {e}"
+                    scrape.errors.append(msg)
+                    logger.warning("oddsportal_market_failed", error=msg)
+                    continue
+                fetched += 1
+                match = convert_market(event, market, bookmakers, datetime.now(UTC))
+                if match is not None:
+                    scrape.matches.append(match)
+    if fetched == 0 and scrape.errors:
+        raise OddsPortalError(
+            f"every market fetch failed for {len(upcoming)} upcoming events "
+            f"({len(scrape.errors)} errors); first: {scrape.errors[0]}"
         )
-    return result.success
+    return scrape
 
 
 async def ingest_league(
     spec: LeagueSpec,
     *,
-    raw_matches: list[dict[str, Any]] | None = None,
-    dry_run: bool = False,
+    scraped: LeagueScrape | None = None,
 ) -> IngestionStats:
     """Scrape and ingest a single league.
 
     Args:
         spec: League configuration.
-        raw_matches: Pre-scraped data (skips harvester call). For testing.
-        dry_run: If True, convert but don't write to DB.
+        scraped: Pre-scraped data (skips the network). For testing.
 
     Returns:
         Ingestion statistics.
     """
     stats = IngestionStats(league=spec.league)
 
-    if raw_matches is None:
+    if scraped is None:
         logger.info("scraping_league", league=spec.league, sport=spec.sport)
-        raw_matches = await run_harvester_upcoming(spec)
+        scraped = await scrape_league(spec)
 
-    stats.matches_scraped = len(raw_matches)
+    all_converted = scraped.matches
+    stats.errors.extend(scraped.errors)
+    stats.matches_converted = len(all_converted)
+    stats.matches_scraped = len({m.match_link for m in all_converted})
 
-    if not raw_matches:
-        logger.warning("no_matches_scraped", league=spec.league)
-        return stats
-
-    logger.info("matches_scraped", league=spec.league, count=len(raw_matches))
-
-    # Convert all markets
-    all_converted: list[tuple[str, MatchOdds]] = []
-    for market in spec.markets:
-        converted = convert_upcoming_matches(raw_matches, market)
-        all_converted.extend((market, m) for m in converted)
-        stats.matches_converted += len(converted)
-
-    if dry_run:
-        logger.info(
-            "dry_run_complete",
-            league=spec.league,
-            matches_scraped=stats.matches_scraped,
-            matches_converted=stats.matches_converted,
+    if not all_converted:
+        logger.warning(
+            "no_matches_scraped", league=spec.league, events_listed=scraped.events_listed
         )
         return stats
+
+    logger.info(
+        "matches_scraped",
+        league=spec.league,
+        count=stats.matches_scraped,
+        events_listed=scraped.events_listed,
+    )
 
     # Ingest to database
     scraped_date = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M")
@@ -183,7 +201,7 @@ async def ingest_league(
     async with async_session_maker() as session:
         writer = OddsWriter(session)
 
-        for market, match in all_converted:
+        for match in all_converted:
             try:
                 event_id, created = await writer.find_or_create_event(
                     home_team=match.home_team,
@@ -208,7 +226,7 @@ async def ingest_league(
                 stats.snapshots_stored += 1
 
             except Exception as e:
-                msg = f"{match.home_team} vs {match.away_team} ({market}): {e}"
+                msg = f"{match.home_team} vs {match.away_team} ({match.market}): {e}"
                 stats.errors.append(msg)
                 logger.error("match_ingestion_failed", error=msg, exc_info=True)
 
@@ -231,7 +249,7 @@ async def main(ctx: JobContext) -> None:
     """Main job execution — scrapes configured league(s), then self-schedules.
 
     Scheduling strategy: query DB for next kickoff, compute proximity-based
-    interval, pre-schedule before browser work. After successful scrape,
+    interval, pre-schedule before scraping. After successful scrape,
     re-query (new events may have appeared) and reschedule.
     """
     from odds_core.alerts import job_alert_context, send_job_warning
@@ -276,8 +294,8 @@ async def main(ctx: JobContext) -> None:
                 raise
         return decision
 
-    # Pre-schedule before any browser work so the chain survives Lambda
-    # timeouts or browser crashes.
+    # Pre-schedule before scraping so the chain survives Lambda timeouts
+    # or a hung scrape.
     await _reschedule("pre-schedule")
 
     async with job_alert_context(compound_job_name):
