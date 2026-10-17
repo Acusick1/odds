@@ -31,6 +31,8 @@ Pre-commit (`.pre-commit-config.yaml`) runs on every commit; the `Lint` workflow
 | wiki-lint | whole repo, every commit (`always_run`; `--no-write --fail-stale`) | Frontmatter, links, citations, unqualified symbols, index blocks, coverage and staleness of cited symbols, re-export imports and files (`scripts/wiki_lint.py`; rules in [SCHEMA](../SCHEMA.md)) |
 | lychee (Docker) | all `.md` | Links and `#heading` anchors, offline |
 
+The `claim-issue` hook (`.githooks/claim-issue.sh`) is a plain `post-checkout` git hook outside pre-commit, installed as in [Set up and run locally](howto-develop-locally.md).
+
 Ruff selects only `DTZ003` and `DTZ005` for timezone checks ([Timezones](timezones.md)).
 
 ## Conventions without tooling
