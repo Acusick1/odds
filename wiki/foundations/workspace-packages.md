@@ -93,7 +93,7 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 
 | Area | Modules | Page |
 |---|---|---|
-| Odds API | `odds_lambda.data_fetcher`, `odds_lambda.api_key_manager`, `odds_lambda.event_sync` | [Odds API client](../collection/odds-api-client.md) |
+| Odds API | `odds_lambda.data_fetcher`, `odds_lambda.api_key_manager`, `odds_lambda.event_sync` (event discovery and `op_live_` twin merge) | [Odds API client](../collection/odds-api-client.md) |
 | Ingestion | `odds_lambda.ingestion`, `odds_lambda.storage.validators` | [Odds API ingestion service](../collection/odds-ingestion-service.md) |
 | Scrapers | `odds_lambda.oddsportal_common`, `odds_lambda.oddsportal_adapter`, `odds_lambda.browser_lock` | [OddsPortal scraper](../collection/oddsportal-scraper.md) |
 | Exchange | `betfair/` | [Betfair Exchange](../collection/betfair-exchange.md) |

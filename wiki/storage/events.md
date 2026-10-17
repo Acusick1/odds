@@ -12,6 +12,7 @@ sources:
   - odds_lambda.storage.writers.OddsWriter.upsert_event
   - odds_lambda.storage.writers.OddsWriter.update_event_status
   - odds_lambda.storage.writers.OddsWriter.bulk_upsert_events
+  - odds_lambda.storage.writers.OddsWriter.adopt_live_twins
   - odds_lambda.storage.writers.OddsWriter._build_event_id
   - odds_lambda.event_sync.EventSyncService.sync_sport
   - odds_analytics.training.data_preparation
@@ -37,7 +38,7 @@ status: stable
 
 | Source | Pattern | Built by |
 |---|---|---|
-| The Odds API | hex id from the API | API response |
+| The Odds API | hex id from the API; canonical, because score and status jobs match on it | API response |
 | OddsPortal historical ingest | `op_{season}_{HOME}_{AWAY}_{date}` | `scripts/ingest_oddsportal.py` |
 | OddsPortal live scrape | `op_live_{HOME}_{AWAY}_{YYYY-MM-DDTHHMM}` | `odds_lambda.storage.writers.OddsWriter._build_event_id` |
 | football-data.co.uk | `fduk_{season}_{HOME}_{AWAY}_{date}` | `scripts/ingest_football_data_uk.py` |
@@ -55,7 +56,7 @@ The two share no data.
 
 - `odds_lambda.storage.writers.OddsWriter.upsert_event`: select-then-update. On an existing row it overwrites sport, teams, `commence_time` and `updated_at` only; status and scores are untouched.
 - `odds_lambda.storage.writers.OddsWriter.update_event_status`: sets scores and `completed_at` only when status is `FINAL` and both scores are given; scores passed with any other status are ignored.
-- `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events`: dedupes by id, then `ON CONFLICT (id) DO UPDATE` over every column except the key and `created_at`; returns approximate inserted/updated counts. It is used by `odds discover games` and by `odds_lambda.event_sync.EventSyncService.sync_sport`, i.e. every fetch-odds run. The incoming `odds_core.models.Event` has status `scheduled` and null scores, so a re-discovered FINAL event returns to SCHEDULED with null scores (#440).
+- `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events`: dedupes by id, then `ON CONFLICT (id) DO UPDATE` over every column except the key and `created_at`; returns approximate inserted/updated counts. It is used by `odds discover games` and by `odds_lambda.event_sync.EventSyncService.sync_sport`, i.e. every fetch-odds run, which then runs `odds_lambda.storage.writers.OddsWriter.adopt_live_twins` ([OddsWriter](odds-writer.md#adopt_live_twins)). The incoming `odds_core.models.Event` has status `scheduled` and null scores, so a re-discovered FINAL event returns to SCHEDULED with null scores (#440).
 - `odds_lambda.storage.writers.OddsWriter.find_or_create_event` creates `op_live_` events: [OddsWriter](odds-writer.md#find_or_create_event).
 
 ## Related

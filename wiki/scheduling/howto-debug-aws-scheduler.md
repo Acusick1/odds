@@ -17,7 +17,7 @@ sources:
   - odds_lambda.tier_utils
   - odds_lambda.storage.tier_validator.TierCoverageValidator
   - odds_lambda.jobs.fetch_odds
-  - odds_lambda.storage.writers
+  - odds_lambda.storage.writers.OddsWriter.store_odds_snapshot
 status: stable
 ---
 

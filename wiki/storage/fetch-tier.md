@@ -10,7 +10,7 @@ sources:
   - odds_lambda.tier_utils.calculate_tier_from_timestamps
   - odds_lambda.oddsportal_common.hours_to_tier
   - odds_lambda.scheduling.decision._classify
-  - odds_lambda.storage.writers.OddsWriter
+  - odds_lambda.storage.writers.OddsWriter.store_odds_snapshot
   - odds_lambda.storage.tier_validator.TierCoverageValidator
   - odds_lambda.storage.tier_validator.CRITICAL_TIERS
   - odds_analytics.feature_groups.TierSampler

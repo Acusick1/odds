@@ -15,7 +15,7 @@ status: stable
 
 # How odds are stored
 
-Odds are stored twice. Each fetch becomes one `odds_core.models.OddsSnapshot` row holding the complete payload as JSON in `raw_data`, plus one `odds_core.models.Odds` row per bookmaker, market and outcome. `odds_lambda.storage.writers.OddsWriter` writes both: raw for debugging, auditing and exact preservation, normalized for SQL filtering and time series `(inferred)`. Columns and indexes are on [Odds snapshot and odds tables](odds-tables.md).
+Odds are stored twice. Each fetch becomes one `odds_core.models.OddsSnapshot` row holding the complete payload as JSON in `raw_data`, plus one `odds_core.models.Odds` row per bookmaker, market and outcome. `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` writes both: raw for debugging, auditing and exact preservation, normalized for SQL filtering and time series `(inferred)`. Columns and indexes are on [Odds snapshot and odds tables](odds-tables.md).
 
 ## The normalized half is not universal
 

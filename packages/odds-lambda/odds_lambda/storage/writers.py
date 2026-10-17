@@ -8,9 +8,10 @@ import structlog
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 from odds_core.team import normalize_team_name, team_abbrev
 from odds_core.time import ensure_utc, parse_api_datetime
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import SQLModel
 
 from odds_lambda.storage.validators import OddsValidator
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
@@ -23,6 +24,7 @@ class OddsWriter:
 
     LIVE_EVENT_ID_PREFIX = "op_live_"
     LIVE_EVENT_STALE_THRESHOLD = timedelta(hours=1)
+    EVENT_MATCH_WINDOW = timedelta(hours=2)
 
     def __init__(self, session: AsyncSession):
         """
@@ -105,8 +107,8 @@ class OddsWriter:
         home_team = normalize_team_name(home_team)
         away_team = normalize_team_name(away_team)
 
-        window_start = match_date - timedelta(hours=2)
-        window_end = match_date + timedelta(hours=2)
+        window_start = match_date - self.EVENT_MATCH_WINDOW
+        window_end = match_date + self.EVENT_MATCH_WINDOW
 
         query = select(Event.id).where(
             and_(
@@ -118,7 +120,7 @@ class OddsWriter:
             )
         )
         result = await self.session.execute(query)
-        candidates = list(result.scalars().all())
+        candidates = sorted(result.scalars().all())
 
         if len(candidates) == 1:
             return candidates[0], False
@@ -131,7 +133,8 @@ class OddsWriter:
                 date=match_date.isoformat(),
                 count=len(candidates),
             )
-            return candidates[0], False
+            canonical = [c for c in candidates if not c.startswith(self.LIVE_EVENT_ID_PREFIX)]
+            return (canonical or candidates)[0], False
 
         # Create new event
         event_id = self._build_event_id(home_team, away_team, match_date)
@@ -161,6 +164,81 @@ class OddsWriter:
         )
         self.session.add(event)
         return event_id, True
+
+    async def adopt_live_twins(self, events: list[Event]) -> int:
+        """Merge ``op_live_`` twins into the given Odds API events.
+
+        A twin is an ``op_live_`` event with the same sport and teams whose
+        commence time is within ``EVENT_MATCH_WINDOW``. Every ``event_id``
+        foreign key is re-pointed at the API event, results the API event lacks
+        are carried over, and the twin is deleted. The Odds API id stays
+        canonical because score and status jobs match on it.
+
+        The ``predictions`` unique key ``(event_id, snapshot_id, model_name)``
+        cannot collide: snapshot ids are per-row and a twin's snapshots are
+        moved with its predictions.
+
+        Returns:
+            Number of twins merged. Runs in the caller's transaction.
+        """
+        adopted = 0
+        for api_event in events:
+            if api_event.id.startswith(self.LIVE_EVENT_ID_PREFIX):
+                continue
+
+            commence = ensure_utc(api_event.commence_time)
+            result = await self.session.execute(
+                select(Event).where(
+                    and_(
+                        Event.id.startswith(self.LIVE_EVENT_ID_PREFIX, autoescape=True),
+                        Event.sport_key == api_event.sport_key,
+                        Event.home_team == api_event.home_team,
+                        Event.away_team == api_event.away_team,
+                        Event.commence_time >= commence - self.EVENT_MATCH_WINDOW,
+                        Event.commence_time <= commence + self.EVENT_MATCH_WINDOW,
+                    )
+                )
+            )
+            twins = list(result.scalars().all())
+            if not twins:
+                continue
+
+            stored = await self.session.get(Event, api_event.id, populate_existing=True)
+            if stored is None:
+                continue
+
+            for twin in twins:
+                moved = await self._repoint_event_references(twin.id, stored.id)
+                if stored.home_score is None and stored.away_score is None:
+                    if twin.home_score is not None or twin.away_score is not None:
+                        stored.status = twin.status
+                        stored.home_score = twin.home_score
+                        stored.away_score = twin.away_score
+                        stored.completed_at = twin.completed_at
+                await self.session.delete(twin)
+                adopted += 1
+                logger.info(
+                    "live_twin_adopted",
+                    api_event_id=stored.id,
+                    twin_event_id=twin.id,
+                    rows_moved=moved,
+                )
+        return adopted
+
+    async def _repoint_event_references(self, from_id: str, to_id: str) -> dict[str, int]:
+        """Re-point ``event_id`` in every table with a foreign key to ``events.id``."""
+        moved: dict[str, int] = {}
+        for table in SQLModel.metadata.sorted_tables:
+            for fk in table.foreign_keys:
+                if fk.column.table is not Event.__table__:
+                    continue
+                column = fk.parent
+                result = await self.session.execute(
+                    update(table).where(column == from_id).values({column.name: to_id})
+                )
+                if result.rowcount:
+                    moved[table.name] = moved.get(table.name, 0) + result.rowcount
+        return moved
 
     async def store_odds_snapshot(
         self,

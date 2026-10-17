@@ -17,7 +17,7 @@ status: stable
 
 # The fetch-oddsportal job
 
-`odds_lambda.jobs.fetch_oddsportal.main(ctx)` scrapes pre-match odds ([oddsportal-scraper](oddsportal-scraper.md)), converts them to the canonical shape and stores snapshots through `odds_lambda.storage.writers.OddsWriter`. It is in the default local `bootstrap_jobs` and runs on the mini-PC ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Its scraper Lambda rules (gated by `enable_oddsportal_scraper`) are dormant; a re-enabled rule would scrape alongside the mini-PC, and no code checks for a job enabled in both places. Deployed state: `odds scheduler list-jobs --backend aws`. On the mini-PC, scrapes return 0 matches (#484), and one hung run ends the local chains (#485).
+`odds_lambda.jobs.fetch_oddsportal.main(ctx)` scrapes pre-match odds ([oddsportal-scraper](oddsportal-scraper.md)), converts them to the canonical shape and stores snapshots through `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot`. It is in the default local `bootstrap_jobs` and runs on the mini-PC ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Its scraper Lambda rules (gated by `enable_oddsportal_scraper`) are dormant; a re-enabled rule would scrape alongside the mini-PC, and no code checks for a job enabled in both places. Deployed state: `odds scheduler list-jobs --backend aws`. On the mini-PC, scrapes return 0 matches (#484), and one hung run ends the local chains (#485).
 
 ## Leagues
 
@@ -26,7 +26,7 @@ status: stable
 ## Flow
 
 1. Pre-schedule using `odds_lambda.scheduling.decision.decide_forward_resilient` with `odds_lambda.jobs.fetch_oddsportal.CADENCE` ([decision-engine](../scheduling/decision-engine.md#cadence)). This job is always-run: only `next_execution` is used, not `should_execute`.
-2. Inside `job_alert_context(compound_name)`, `odds_lambda.jobs.fetch_oddsportal.ingest_league` per spec: scrape under the Playwright semaphore, `odds_lambda.oddsportal_adapter.convert_upcoming_matches` per market, `odds_lambda.storage.writers.OddsWriter.find_or_create_event` and `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` per match (tier assigned by the writer, see [fetch-tier](../storage/fetch-tier.md)), tagging `api_request_id` as `oddsportal_live_<time>`. A league failure is logged and the others continue.
+2. Inside `job_alert_context(compound_name)`, `odds_lambda.jobs.fetch_oddsportal.ingest_league` per spec: scrape under the Playwright semaphore, `odds_lambda.oddsportal_adapter.convert_upcoming_matches` per market, `odds_lambda.storage.writers.OddsWriter.find_or_create_event` (which returns the Odds API event when one matches) and `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` per match (tier assigned by the writer, see [fetch-tier](../storage/fetch-tier.md)), tagging `api_request_id` as `oddsportal_live_<time>`. A league failure is logged and the others continue.
 3. If nothing was scraped, `send_job_warning("scrape_empty:<job>")`.
 4. Outside the alert context: if `model_supports_sport(ctx.sport)`, `score_events(sport=...)` runs inline ([prediction-scoring](../modelling/prediction-scoring.md)). Any exception there is logged as `fetch_oddsportal_scoring_failed` and swallowed so it cannot fire a scrape alert.
 5. Post-schedule only when at least one match was scraped. A zero-match run skips it, so the next run keeps the earlier computed time.

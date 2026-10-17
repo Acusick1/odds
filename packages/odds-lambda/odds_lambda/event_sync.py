@@ -56,6 +56,7 @@ class EventSyncService:
         async with self._session_factory() as session:
             writer = OddsWriter(session)
             counts = await writer.bulk_upsert_events(response.events)
+            await writer.adopt_live_twins(response.events)
             await session.commit()
 
         logger.info(

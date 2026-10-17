@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from odds_core.api_models import EventsResponse, HistoricalOddsResponse, OddsResponse
+from odds_core.models import Event, EventStatus
 
 
 class StubOddsClient:
@@ -116,3 +117,27 @@ class StubHistoricalOddsClient:
     def reset_call_count(self):
         """Reset the call counter to 0 (useful for test isolation)."""
         self._call_count = 0
+
+
+TWIN_KICKOFF = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
+API_EVENT_ID = "zz9hexapievent"
+TWIN_EVENT_ID = "op_live_ARS_CHE_2026-04-15T1500"
+
+
+def make_epl_event(
+    event_id: str,
+    commence_time: datetime = TWIN_KICKOFF,
+    home_team: str = "Arsenal",
+    away_team: str = "Chelsea",
+    **fields,
+) -> Event:
+    fields.setdefault("status", EventStatus.SCHEDULED)
+    return Event(
+        id=event_id,
+        sport_key="soccer_epl",
+        sport_title="EPL",
+        commence_time=commence_time,
+        home_team=home_team,
+        away_team=away_team,
+        **fields,
+    )
