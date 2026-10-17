@@ -13,7 +13,6 @@ from odds_core.prediction_models import Prediction
 from odds_lambda.event_sync import EventSyncService
 from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
-from sqlmodel import SQLModel
 
 from tests.test_helpers import (
     API_EVENT_ID,
@@ -46,14 +45,12 @@ class TestAdoptLiveTwins:
         assert await session.get(Event, TWIN_EVENT_ID) is None
 
     @pytest.mark.asyncio
-    async def test_covers_every_table_referencing_events(self) -> None:
-        referencing = {
-            table.name
-            for table in SQLModel.metadata.tables.values()
-            for fk in table.foreign_keys
-            if fk.column.table is Event.__table__
-        }
-        assert {m.__tablename__ for m in CHILD_MODELS} <= referencing
+    async def test_reads_every_table_referencing_events_from_the_catalog(
+        self, live_twin_with_rows
+    ) -> None:
+        columns = await OddsWriter(live_twin_with_rows)._event_reference_columns()
+        tables = {table for _, table, _ in columns}
+        assert {m.__tablename__ for m in CHILD_MODELS} <= tables
 
     @pytest.mark.asyncio
     async def test_carries_result_when_api_event_has_none(self, live_twin_with_rows) -> None:

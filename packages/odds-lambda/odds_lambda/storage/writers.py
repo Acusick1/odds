@@ -8,10 +8,9 @@ import structlog
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 from odds_core.team import normalize_team_name, team_abbrev
 from odds_core.time import ensure_utc, parse_api_datetime
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import SQLModel
 
 from odds_lambda.storage.validators import OddsValidator
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
@@ -225,19 +224,39 @@ class OddsWriter:
                 )
         return adopted
 
+    async def _event_reference_columns(self) -> list[tuple[str, str, str]]:
+        """``(schema, table, column)`` for every foreign key to ``events.id``.
+
+        Read from the database catalog rather than ``SQLModel.metadata``, which
+        only holds models the running process has imported.
+        """
+        result = await self.session.execute(
+            text(
+                "SELECT n.nspname, r.relname, a.attname"
+                " FROM pg_constraint c"
+                " JOIN pg_class r ON r.oid = c.conrelid"
+                " JOIN pg_namespace n ON n.oid = r.relnamespace"
+                " JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)"
+                " WHERE c.contype = 'f' AND c.confrelid = 'events'::regclass"
+                " ORDER BY r.relname, a.attname"
+            )
+        )
+        return [(row[0], row[1], row[2]) for row in result.all()]
+
     async def _repoint_event_references(self, from_id: str, to_id: str) -> dict[str, int]:
-        """Re-point ``event_id`` in every table with a foreign key to ``events.id``."""
+        """Re-point every foreign key to ``events.id`` from one event to another."""
+        quote = self.session.get_bind().dialect.identifier_preparer.quote
         moved: dict[str, int] = {}
-        for table in SQLModel.metadata.sorted_tables:
-            for fk in table.foreign_keys:
-                if fk.column.table is not Event.__table__:
-                    continue
-                column = fk.parent
-                result = await self.session.execute(
-                    update(table).where(column == from_id).values({column.name: to_id})
-                )
-                if result.rowcount:
-                    moved[table.name] = moved.get(table.name, 0) + result.rowcount
+        for schema, table, column in await self._event_reference_columns():
+            result = await self.session.execute(
+                text(
+                    f"UPDATE {quote(schema)}.{quote(table)} SET {quote(column)} = :to_id"
+                    f" WHERE {quote(column)} = :from_id"
+                ),
+                {"to_id": to_id, "from_id": from_id},
+            )
+            if result.rowcount:
+                moved[table] = moved.get(table, 0) + result.rowcount
         return moved
 
     async def store_odds_snapshot(
