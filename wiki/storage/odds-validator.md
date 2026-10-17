@@ -13,7 +13,7 @@ sources:
   - odds_lambda.ingestion.OddsIngestionService.ingest_sport
   - odds_core.models.DataQualityLog
   - odds_core.config.DataQualityConfig
-  - odds_core.config.AlertConfig
+  - odds_core.config.AlertConfig.data_quality_error_threshold
 status: stable
 ---
 

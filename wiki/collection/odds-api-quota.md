@@ -5,7 +5,9 @@ description: How quota is spent, recorded in fetch_logs, alerted by fetch-odds a
 sources:
   - odds_core.models.FetchLog
   - odds_core.config.APIConfig
-  - odds_core.config.AlertConfig
+  - odds_core.config.AlertConfig.quota_warning_threshold
+  - odds_core.config.AlertConfig.quota_critical_threshold
+  - odds_lambda.scheduling.jobs._JOB_SPORTS
   - odds_lambda.ingestion.OddsIngestionService.ingest_sport
   - odds_lambda.jobs.fetch_odds.main
   - odds_lambda.health_monitor.HealthMonitor.check_api_quota
@@ -32,6 +34,10 @@ Quota is a per-key monthly balance that only [the client](odds-api-client.md#cos
 - `fetch-odds` sends a warning below `odds_core.config.AlertConfig.quota_warning_threshold` and a critical below `odds_core.config.AlertConfig.quota_critical_threshold`. It uses `odds_core.alerts.send_warning`/`odds_core.alerts.send_critical` without an `alert_type`, so the alert repeats on every run below threshold (as often as the closing tier fetches) and is never recorded ([fetch-odds-job](fetch-odds-job.md)).
 - The health monitor applies the same fractions as `quota_low` and `quota_critical` and rate-limits them through `alert_history` ([health-monitor](../operations/health-monitor.md)).
 - Both thresholds divide the active key's balance by `odds_core.config.APIConfig.quota`, so with a larger paid key they are meaningless until it is set (#441).
+
+## Scheduled spend
+
+The scheduled jobs that spend units are `fetch-odds` and `fetch-scores`, both on the mini-PC and both limited to EPL by the `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). `odds scheduler smoke`, which `deploy.sh` runs, calls their real `main()`, so a deploy spends units whenever either job is due ([local-scheduler](../scheduling/local-scheduler.md#cli)).
 
 ## Where the views disagree
 

@@ -6,11 +6,13 @@ import pytest
 from odds_lambda.scheduling.jobs import (
     _JOB_CRON_MAP,
     _JOB_MODULE_MAP,
+    _JOB_SPORTS,
+    _PER_SPORT_JOBS,
     JobContext,
     expected_compound_job_names,
     get_bootstrap_function,
     get_job_cron,
-    get_job_cron_sports,
+    get_job_sports,
     make_compound_job_name,
     resolve_job_name,
     resolve_target_sports,
@@ -208,22 +210,26 @@ class TestJobCronRegistry:
     def test_get_job_cron_returns_none_for_unknown_job(self) -> None:
         assert get_job_cron("totally-made-up") is None
 
-    def test_get_job_cron_sports_returns_allowlist_when_restricted(self) -> None:
+    def test_get_job_sports_returns_allowlist_when_restricted(self) -> None:
         # daily-digest and fetch-espn-fixtures are EPL-only — the sport
         # allowlist is load-bearing (prevents the MLB digest from crashing
         # inside job_alert_context each morning).
-        sports = get_job_cron_sports("daily-digest")
-        assert sports == ("soccer_epl",)
+        assert get_job_sports("daily-digest") == ("soccer_epl",)
+        assert get_job_sports("fetch-espn-fixtures") == ("soccer_epl",)
 
-    def test_get_job_cron_sports_restricted_for_fetch_espn_fixtures(self) -> None:
-        sports = get_job_cron_sports("fetch-espn-fixtures")
-        assert sports == ("soccer_epl",)
+    @pytest.mark.parametrize("job", ["fetch-odds", "fetch-scores"])
+    def test_get_job_sports_restricts_event_driven_jobs_to_epl(self, job: str) -> None:
+        assert get_job_cron(job) is None
+        assert get_job_sports(job) == ("soccer_epl",)
 
-    def test_get_job_cron_sports_returns_none_for_event_driven_job(self) -> None:
-        assert get_job_cron_sports("fetch-odds") is None
+    def test_get_job_sports_returns_none_for_unrestricted_job(self) -> None:
+        assert get_job_sports("fetch-oddsportal") is None
 
-    def test_get_job_cron_sports_returns_none_for_unknown_job(self) -> None:
-        assert get_job_cron_sports("totally-made-up") is None
+    def test_get_job_sports_returns_none_for_unknown_job(self) -> None:
+        assert get_job_sports("totally-made-up") is None
+
+    def test_sport_allowlists_only_cover_per_sport_jobs(self) -> None:
+        assert set(_JOB_SPORTS) <= _PER_SPORT_JOBS
 
     def test_every_cron_job_is_in_module_map(self) -> None:
         """Cron jobs must be registered as importable — the import-time
@@ -235,8 +241,8 @@ class TestJobCronRegistry:
 class TestResolveTargetSports:
     """Tests for resolve_target_sports()."""
 
-    def test_event_driven_job_targets_all_configured_sports(self) -> None:
-        assert resolve_target_sports("fetch-odds", ["soccer_epl", "baseball_mlb"]) == [
+    def test_unrestricted_job_targets_all_configured_sports(self) -> None:
+        assert resolve_target_sports("fetch-oddsportal", ["soccer_epl", "baseball_mlb"]) == [
             "soccer_epl",
             "baseball_mlb",
         ]
@@ -247,8 +253,15 @@ class TestResolveTargetSports:
             "soccer_epl"
         ]
 
+    @pytest.mark.parametrize("job", ["fetch-odds", "fetch-scores"])
+    def test_event_driven_job_with_allowlist_ignores_unlisted_sports(self, job: str) -> None:
+        assert resolve_target_sports(job, ["soccer_epl", "baseball_mlb"]) == ["soccer_epl"]
+
+    def test_allowlisted_sport_not_configured_is_dropped(self) -> None:
+        assert resolve_target_sports("fetch-odds", ["baseball_mlb"]) == []
+
     def test_empty_configured_sports_yields_empty(self) -> None:
-        assert resolve_target_sports("fetch-odds", []) == []
+        assert resolve_target_sports("fetch-oddsportal", []) == []
 
 
 class TestExpectedCompoundJobNames:
@@ -256,23 +269,27 @@ class TestExpectedCompoundJobNames:
 
     def test_expands_per_sport_and_keeps_global_jobs(self) -> None:
         expected = expected_compound_job_names(
-            ["fetch-odds", "daily-digest", "check-health"],
+            ["fetch-oddsportal", "daily-digest", "check-health"],
             ["soccer_epl", "baseball_mlb"],
         )
         assert expected == {
-            "fetch-odds-epl",
-            "fetch-odds-mlb",
-            "daily-digest-epl",  # cron allowlist drops MLB
+            "fetch-oddsportal-epl",
+            "fetch-oddsportal-mlb",
+            "daily-digest-epl",  # sport allowlist drops MLB
             "check-health",  # global job kept as-is
         }
 
     def test_prune_drops_compound_for_unconfigured_sport(self) -> None:
         # When MLB is removed from config, its compound becomes stale while
         # the configured EPL schedule is preserved.
-        expected = expected_compound_job_names(["fetch-odds"], ["soccer_epl"])
-        existing = ["fetch-odds-epl", "fetch-odds-mlb"]
+        expected = expected_compound_job_names(["fetch-oddsportal"], ["soccer_epl"])
+        existing = ["fetch-oddsportal-epl", "fetch-oddsportal-mlb"]
         stale = [name for name in existing if name not in expected]
-        assert stale == ["fetch-odds-mlb"]
+        assert stale == ["fetch-oddsportal-mlb"]
+
+    def test_allowlisted_event_driven_job_drops_unlisted_sport(self) -> None:
+        expected = expected_compound_job_names(["fetch-odds"], ["soccer_epl", "baseball_mlb"])
+        assert expected == {"fetch-odds-epl"}
 
     def test_no_bootstrap_jobs_yields_empty(self) -> None:
         assert expected_compound_job_names([], ["soccer_epl"]) == set()

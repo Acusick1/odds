@@ -29,7 +29,7 @@ status: stable
 
 # Scheduler backends
 
-`packages/odds-lambda/odds_lambda/scheduling/backends/` holds one ABC and three implementations (AWS EventBridge, local APScheduler, a Railway shim). Jobs never import a concrete backend; they call `odds_lambda.scheduling.backends.get_scheduler_backend`, usually through [self-scheduling](self-scheduling.md). The Lambda handler is the entry point EventBridge invokes.
+`packages/odds-lambda/odds_lambda/scheduling/backends/` holds one ABC and three implementations (AWS EventBridge, local APScheduler, a Railway shim). Jobs never import a concrete backend; they call `odds_lambda.scheduling.backends.get_scheduler_backend`, usually through [self-scheduling](self-scheduling.md). The Lambda handler is the entry point EventBridge invokes. Production runs on the local backend; the AWS backend's rules are disabled and its Lambdas dormant ([Where each job runs](job-deployment-matrix.md#dormant-aws-rules), [ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)).
 
 ## The ABC
 
@@ -70,7 +70,7 @@ The Lambda role in `deployment/aws/terraform/lambda.tf` grants `PutRule`, `PutTa
 
 ### Rules and Terraform
 
-`deployment/aws/terraform/eventbridge.tf` pre-creates each self-scheduling rule `DISABLED` with a `rate(1 day)` placeholder and `lifecycle { ignore_changes = [schedule_expression, state] }`, so `terraform plan` never shows live cadences. A rule is named `{rule_prefix}-{job}[-{sport suffix}]`, which is why jobs use [compound names](job-registry.md#compound-job-names). The post-deploy Lambda invocations in the deploy workflows activate the placeholders (prod invocations of the scraper are `continue-on-error`) ([CI/CD workflows](../operations/ci-cd-workflows.md)). Live state is not in the repo: run `odds scheduler list-jobs --backend aws` ([Deployed state](job-deployment-matrix.md#deployed-state)).
+`deployment/aws/terraform/eventbridge.tf` pre-creates each self-scheduling rule `DISABLED` with a `rate(1 day)` placeholder and `lifecycle { ignore_changes = [schedule_expression, state] }`, so `terraform plan` never shows live cadences. A rule is named `{rule_prefix}-{job}[-{sport suffix}]`, which is why jobs use [compound names](job-registry.md#compound-job-names). The post-deploy Lambda invocations in the deploy workflows activate the placeholders (prod invocations of the scraper are `continue-on-error`), so a run of `deploy-prod.yml` re-enables every dormant rule ([CI/CD workflows](../operations/ci-cd-workflows.md)). Live state is not in the repo: run `odds scheduler list-jobs --backend aws` ([Deployed state](job-deployment-matrix.md#deployed-state)).
 
 ### Env-var contract
 

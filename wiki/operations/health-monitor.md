@@ -13,6 +13,7 @@ sources:
   - odds_lambda.health_monitor.HealthStatus
   - odds_lambda.jobs.check_health.main
   - odds_core.config.AlertConfig
+  - odds_core.config.SchedulerConfig.bootstrap_jobs
   - odds_core.models.FetchLog
   - odds_cli.commands.status
   - odds_cli.commands.status._show_quota
@@ -24,7 +25,7 @@ status: stable
 
 # Health monitor, check-health job and odds status
 
-`odds_lambda.jobs.check_health.main` runs `odds_lambda.health_monitor.check_system_health` inside `job_alert_context("check-health")` and then books itself 60 minutes ahead through a raw backend call (no pre-schedule; see [self-scheduling](../scheduling/self-scheduling.md)). It is global, created by Terraform on AWS, and not in the default local `bootstrap_jobs` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). `odds_lambda.health_monitor.check_system_health` collects `odds_lambda.health_monitor.HealthMetrics`, then runs, in order:
+`odds_lambda.jobs.check_health.main` runs `odds_lambda.health_monitor.check_system_health` inside `job_alert_context("check-health")` and then books itself 60 minutes ahead through a raw backend call (no pre-schedule; see [self-scheduling](../scheduling/self-scheduling.md)). It is global and in the default `odds_core.config.SchedulerConfig.bootstrap_jobs`, so it runs on the mini-PC against the production database, where every job's heartbeat lands ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Nothing alerts when the host itself stops (#489). `odds_lambda.health_monitor.check_system_health` collects `odds_lambda.health_monitor.HealthMetrics`, then runs, in order:
 
 1. `odds_lambda.health_monitor.HealthMonitor.check_stale_data`: hours since `max(OddsSnapshot.snapshot_time)` over all sources versus `stale_data_hours` (2). An empty table is unhealthy.
 2. `odds_lambda.health_monitor.HealthMonitor.check_consecutive_failures`: leading run of `success=False` among the latest 10 `odds_core.models.FetchLog` rows versus `consecutive_failures_threshold` (3). It reads rows of any sport or source; API outages write no row (#472) and `odds_lambda.jobs.fetch_betfair_exchange` writes `success=False` when a run stores no snapshots, so those runs count as failures ([fetch logs](../collection/odds-ingestion-service.md#fetch-logs)).
@@ -42,7 +43,7 @@ A job inside `odds_core.alerts.job_alert_context` inserts `heartbeat:<name>` on 
 |---|---|---|
 | fetch-oddsportal (per sport) | yes | 2 h (EPL, MLB) |
 | fetch-oddsportal-results (per sport) | yes | 26 h (EPL, MLB) |
-| daily-digest (EPL) | yes | 26 h |
+| daily-digest (EPL) | yes | none |
 | check-health | yes | 2 h |
 | update-status | yes | none |
 | fetch-betfair-exchange | yes | none |

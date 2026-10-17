@@ -6,7 +6,9 @@ sources:
   - odds_lambda.ingestion.OddsIngestionService
   - odds_lambda.ingestion.OddsIngestionCallbacks
   - odds_lambda.ingestion.SportIngestionResult
-  - odds_lambda.storage.writers.OddsWriter
+  - odds_lambda.storage.writers.OddsWriter.upsert_event
+  - odds_lambda.storage.writers.OddsWriter.store_odds_snapshot
+  - odds_lambda.storage.writers.OddsWriter.log_fetch
   - odds_lambda.storage.readers.OddsReader.get_database_stats
   - odds_lambda.health_monitor.HealthMonitor.check_consecutive_failures
   - odds_core.models.FetchLog

@@ -12,7 +12,7 @@ Repo-wide material that every other area assumes: what the system is and which s
 
 - [Code conventions and lint gates](code-conventions.md) — The pre-commit hooks and lint workflow, review-only conventions (type hints, async DB, model types, job entry points), and logging setup.
 - [Configuration (Settings)](configuration.md) — The Settings sections and env names, what is read at import, and the variables read with os.getenv outside Settings.
-- [Databases and environments](databases-and-environments.md) — The session factory and engine (NullPool in Lambda, pool sizes), the test/local/dev/prod databases and which variable points where, and the --db override.
+- [Databases and environments](databases-and-environments.md) — The session factory and engine (NullPool in Lambda, pool sizes), the test, local, dev and production databases and the Neon archive, which variable points where, and the --db override.
 - [Odds arithmetic helpers](odds-math.md) — The odds_core.odds_math functions, their edge cases, their consumers, and the other copies of the same conversions.
 - [Test suite](test-suite.md) — The test directories, pytest configuration, fixtures (py-pglite), markers, and which suites CI and the deploy workflows run.
 - [The odds CLI](odds-cli.md) — The Typer app, its command groups and owning pages, shared flags (--sport defaults per command, --db), and help-text facts.
@@ -27,8 +27,8 @@ Repo-wide material that every other area assumes: what the system is and which s
 
 ### How-to guides
 
-- [Add a setting](howto-add-setting.md) — Steps to add a configuration setting so it loads from .env and reaches the Lambdas.
+- [Add a setting](howto-add-setting.md) — Steps to add a configuration setting so it loads from .env and reaches the production host.
 - [Copy production data locally](howto-copy-production-data.md) — Steps to copy one sport and date range from production into the local database, with the command's options and copy behaviour.
-- [Create and apply a database migration](howto-database-migration.md) — How to change a model, autogenerate and review an Alembic migration, and promote it local, then CI dev, then prod without breaking the running release.
+- [Create and apply a database migration](howto-database-migration.md) — How to change a model, autogenerate and review an Alembic migration, and promote it local, then CI dev, then production on the mini-PC without breaking the running release.
 - [Set up and run locally](howto-develop-locally.md) — Install, write a working .env, start Postgres, migrate, make a first fetch, enable the pre-commit hooks, and run the offline tests.
 <!-- pages:end -->

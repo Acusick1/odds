@@ -25,7 +25,7 @@ The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README
 |---|---|
 | Settings and defaults | `odds_core.config` ([Configuration](configuration.md)); `.env.example` is the template |
 | CLI flags and defaults | each command's `--help` ([The odds CLI](odds-cli.md)) |
-| Job and schedule matrix | `deployment/aws/terraform/eventbridge.tf` and `odds_lambda.scheduling.jobs._JOB_CRON_MAP` ([Where each job runs](../scheduling/job-deployment-matrix.md)); deployed state only via `odds scheduler list-jobs --backend aws` |
+| Job and schedule matrix | `odds_core.config.SchedulerConfig.bootstrap_jobs`, `odds_lambda.scheduling.jobs._JOB_CRON_MAP` and `odds_lambda.scheduling.jobs._JOB_SPORTS` for production on the mini-PC; `deployment/aws/terraform/eventbridge.tf` for the dormant AWS rules ([Where each job runs](../scheduling/job-deployment-matrix.md)); deployed AWS state only via `odds scheduler list-jobs --backend aws` |
 | Alerting and reporting | `odds_core.alerts` ([Alerts](../operations/alerts.md), [Reporting surfaces](../operations/reporting-surfaces.md)) |
 | MCP toolset | the `@mcp.tool()` definitions in `odds_mcp.server` ([odds-mcp server](../agent/mcp-server.md)) |
 | Agent behaviour | the prompt files in `packages/odds-mcp/agents/` ([The betting agent](../agent/betting-agent.md)) |
@@ -36,7 +36,7 @@ The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README
 
 ## How the docs stay current
 
-The wiki lint (`scripts/wiki_lint.py`) runs as the `wiki-lint` pre-commit hook and in the `Lint` workflow ([Code conventions](code-conventions.md#mechanical-gates)). It checks that cited paths and symbols exist and flags a page as stale when a symbol it cites, or an import that re-exports it, changes after the page does. `--locate` prints the file and line range behind a page's citations or a dotted path. Rationale with no recorded source is labelled `(inferred)`. `AGENTS.md` and `README.md` sit at the repo root outside the citation forms, so wiki pages link to them instead of citing them.
+The wiki lint (`scripts/wiki_lint.py`) runs as the `wiki-lint` pre-commit hook and in the `Lint` workflow ([Code conventions](code-conventions.md#mechanical-gates)). It checks that cited paths and symbols exist and flags a page as stale when a symbol it cites, or an import that re-exports it, changes after the page does. A comment-only edit inside a cited symbol counts as a change, so it marks every page citing that symbol. `--locate` prints the file and line range behind a page's citations or a dotted path. Rationale with no recorded source is labelled `(inferred)`. `AGENTS.md` and `README.md` sit at the repo root outside the citation forms, so wiki pages link to them instead of citing them.
 
 Vale rejects change-narrating words in `README.md`, `AGENTS.md`, `docs/adr/`, `docs/agents/` and `wiki/`; `.vale.ini` turns both rules off for `docs/adr/*.md` because ADRs are point-in-time records. Pages describe the current state.
 

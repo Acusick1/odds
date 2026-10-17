@@ -117,62 +117,55 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
     }
 )
 
-# Jobs with fixed cron schedules when run locally. Mirrors terraform's
-# ``fixed_schedule_expressions`` for the jobs that have moved out of
-# Lambda and into the local scheduler. Keys are base job names (no sport
-# suffix); the scheduler CLI expands per-sport jobs into one schedule per
-# allowed sport, each with its own compound job name.
-#
-# Values are ``(cron_expression, allowed_sports_or_None)``. When the second
-# element is ``None`` the job runs for every sport in
-# ``data_collection.sports``; otherwise it runs only for the listed sport
-# keys. Use an allowlist for jobs whose ``main()`` raises on unsupported
-# sports (e.g. ``fetch-espn-fixtures`` is EPL-only) — otherwise the daily
-# cron fire on an unsupported sport would raise inside ``job_alert_context``
-# and spam critical Discord alerts.
-_JOB_CRON_MAP: dict[str, tuple[str, tuple[SportKey, ...] | None]] = {
-    # daily-digest is gated to EPL because the digest formatter and
-    # heartbeat_expectations entry are EPL-only today.
-    "daily-digest": ("0 8 * * *", ("soccer_epl",)),
-    "fetch-espn-fixtures": ("0 6 * * *", ("soccer_epl",)),
+# Jobs with fixed cron schedules in the local scheduler. Keys are base job
+# names (no sport suffix); the scheduler CLI expands per-sport jobs into one
+# schedule per target sport, each with its own compound job name.
+_JOB_CRON_MAP: dict[str, str] = {
+    "daily-digest": "0 8 * * *",
+    "fetch-espn-fixtures": "0 6 * * *",
     # Betfair Exchange direct ingestion. The job self-schedules a tighter
     # cadence near kickoff; this cron is the safety floor that catches
-    # cold-start gaps and backfills if self-scheduling stalls. Allowlist
-    # is derived from the BFE adapter's supported-sports map so adding a
-    # new sport requires only a SPORT_CONFIG entry.
-    "fetch-betfair-exchange": ("*/30 * * * *", tuple(BETFAIR_SPORT_CONFIG)),
+    # cold-start gaps and backfills if self-scheduling stalls.
+    "fetch-betfair-exchange": "*/30 * * * *",
     # MLB probable pitchers — once daily at 06:00 UTC. Backstop only:
     # the MCP ``get_probable_pitchers`` tool writes through every call.
-    "fetch-mlb-probables": ("0 6 * * *", ("baseball_mlb",)),
+    "fetch-mlb-probables": "0 6 * * *",
+}
+
+# Sport allowlists for per-sport jobs, cron or event-driven. A job absent
+# here runs for every sport in ``data_collection.sports``. Use an allowlist
+# for jobs whose ``main()`` raises on unsupported sports (a fire on one would
+# raise inside ``job_alert_context`` and spam critical Discord alerts) or
+# that should not spend resources on every configured sport.
+_JOB_SPORTS: dict[str, tuple[SportKey, ...]] = {
+    # The digest formatter and heartbeat_expectations are EPL-only today.
+    "daily-digest": ("soccer_epl",),
+    "fetch-espn-fixtures": ("soccer_epl",),
+    # Allowlist derived from the BFE adapter's supported-sports map so adding
+    # a new sport requires only a SPORT_CONFIG entry.
+    "fetch-betfair-exchange": tuple(BETFAIR_SPORT_CONFIG),
+    "fetch-mlb-probables": ("baseball_mlb",),
+    # Odds API quota is spent on EPL only.
+    "fetch-odds": ("soccer_epl",),
+    "fetch-scores": ("soccer_epl",),
 }
 
 
 def get_job_cron(job_name: str) -> str | None:
     """Return the cron expression for a job, or None if it is event-driven."""
-    entry = _JOB_CRON_MAP.get(job_name)
-    if entry is None:
-        return None
-    cron_expr, _ = entry
-    return cron_expr
+    return _JOB_CRON_MAP.get(job_name)
 
 
-def get_job_cron_sports(job_name: str) -> tuple[SportKey, ...] | None:
-    """Return the allowlist of sports for a cron job, or ``None`` for all sports.
-
-    Returns:
-        A tuple of ``SportKey`` values when the job's cron schedule is
-        restricted, ``None`` when it runs for every configured sport, and
-        ``None`` for event-driven (non-cron) jobs.
-    """
-    entry = _JOB_CRON_MAP.get(job_name)
-    if entry is None:
-        return None
-    _, sports = entry
-    return sports
+def get_job_sports(job_name: str) -> tuple[SportKey, ...] | None:
+    """Return the sport allowlist for a job, or ``None`` for all configured sports."""
+    return _JOB_SPORTS.get(job_name)
 
 
 assert set(_JOB_CRON_MAP) <= set(_JOB_MODULE_MAP), (
     f"Unknown jobs in _JOB_CRON_MAP: {set(_JOB_CRON_MAP) - set(_JOB_MODULE_MAP)}"
+)
+assert set(_JOB_SPORTS) <= _PER_SPORT_JOBS, (
+    f"Non-per-sport jobs in _JOB_SPORTS: {set(_JOB_SPORTS) - _PER_SPORT_JOBS}"
 )
 
 
@@ -283,13 +276,13 @@ def is_outward_posting(job_name: str) -> bool:
 
 
 def resolve_target_sports(job_name: str, configured_sports: Sequence[SportKey]) -> list[SportKey]:
-    """Sports a per-sport job actually schedules for, honoring any cron allowlist.
+    """Sports a per-sport job actually schedules for, honoring any allowlist.
 
-    A cron job may restrict itself to a subset of sports via ``_JOB_CRON_MAP``;
-    event-driven and unrestricted jobs run for every configured sport.
+    A job may restrict itself to a subset of sports via ``_JOB_SPORTS``;
+    unrestricted jobs run for every configured sport.
     """
-    allowed = get_job_cron_sports(job_name) if get_job_cron(job_name) is not None else None
-    return list(allowed) if allowed is not None else list(configured_sports)
+    allowed = get_job_sports(job_name)
+    return [s for s in configured_sports if allowed is None or s in allowed]
 
 
 def expected_compound_job_names(

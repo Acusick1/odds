@@ -11,6 +11,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 
+from tests.test_helpers import TWIN_EVENT_ID, TWIN_KICKOFF, make_epl_event
+
 
 @pytest.fixture
 async def test_events_with_odds(pglite_async_session):
@@ -214,3 +216,63 @@ async def test_events_with_odds(pglite_async_session):
         await pglite_async_session.refresh(event)
 
     return events
+
+
+@pytest.fixture
+async def live_twin_with_rows(pglite_async_session):
+    """An op_live_ event owning a snapshot, odds, prediction, paper trade and match brief."""
+    from odds_core.match_brief_models import BriefDecision, MatchBrief
+    from odds_core.paper_trade_models import PaperTrade
+    from odds_core.prediction_models import Prediction
+
+    session = pglite_async_session
+    session.add(make_epl_event(TWIN_EVENT_ID))
+    await session.flush()
+
+    snapshot = OddsSnapshot(
+        event_id=TWIN_EVENT_ID,
+        snapshot_time=TWIN_KICKOFF - timedelta(hours=3),
+        raw_data={},
+        bookmaker_count=1,
+    )
+    session.add(snapshot)
+    await session.flush()
+
+    session.add_all(
+        [
+            Odds(
+                event_id=TWIN_EVENT_ID,
+                bookmaker_key="bet365",
+                bookmaker_title="bet365",
+                market_key="1x2",
+                outcome_name="Arsenal",
+                price=150,
+                odds_timestamp=snapshot.snapshot_time,
+                last_update=snapshot.snapshot_time,
+            ),
+            Prediction(
+                event_id=TWIN_EVENT_ID,
+                snapshot_id=snapshot.id,
+                model_name="m",
+                model_version="1",
+                predicted_clv=0.01,
+            ),
+            PaperTrade(
+                event_id=TWIN_EVENT_ID,
+                market="h2h",
+                selection="home",
+                bookmaker="bet365",
+                odds=150,
+                stake=10.0,
+                bankroll_before=100.0,
+            ),
+            MatchBrief(
+                event_id=TWIN_EVENT_ID,
+                decision=BriefDecision.WATCHING,
+                summary="s",
+                brief_text="t",
+            ),
+        ]
+    )
+    await session.flush()
+    return session

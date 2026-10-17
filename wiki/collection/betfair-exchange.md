@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Betfair Exchange client and job
-description: "The Betfair client, cert loading and adapter, the fetch-betfair-exchange job's cadence on AWS and locally, and what price is actually stored as betfair_exchange."
+description: "The Betfair client, cert loading and adapter, the fetch-betfair-exchange job's cadence and where it runs, and what price is actually stored as betfair_exchange."
 sources:
   - odds_lambda.betfair.client.BetfairExchangeClient
   - odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry
@@ -11,6 +11,7 @@ sources:
   - odds_lambda.jobs.fetch_betfair_exchange.ingest_sport
   - odds_lambda.jobs.fetch_betfair_exchange.CADENCE
   - odds_lambda.scheduling.jobs._JOB_CRON_MAP
+  - odds_lambda.scheduling.jobs._JOB_SPORTS
   - odds_core.config.BetfairConfig
   - deployment/aws/terraform/lambda.tf
   - deployment/aws/terraform/eventbridge.tf
@@ -35,15 +36,15 @@ Package `packages/odds-lambda/odds_lambda/betfair/`, driven by the fetch-betfair
 
 ### Where it runs
 
-- AWS: per-sport rule on the scheduler Lambda, created only when Terraform `betfair_enabled` is true (default false); Betfair credentials and SSM cert parameter names are set in `deployment/aws/terraform/lambda.tf` ([aws-infrastructure](../operations/aws-infrastructure.md)). The dev deploy invokes `fetch-betfair-exchange-epl` as a smoke test ([ci-cd-workflows](../operations/ci-cd-workflows.md)).
-- Local: in default `bootstrap_jobs`, installed as cron `*/30 * * * *` for every sport in `odds_lambda.betfair.constants.SPORT_CONFIG` (`odds_lambda.scheduling.jobs._JOB_CRON_MAP` is the source). How the cron and the self-schedule interact is on [local-scheduler](../scheduling/local-scheduler.md).
+- Production (mini-PC): in default `bootstrap_jobs`, installed as cron `*/30 * * * *` (`odds_lambda.scheduling.jobs._JOB_CRON_MAP`) for every sport in `odds_lambda.betfair.constants.SPORT_CONFIG` (the `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist is derived from it). How the cron and the self-schedule interact is on [local-scheduler](../scheduling/local-scheduler.md).
+- AWS (dormant): per-sport rule on the scheduler Lambda, created only when Terraform `betfair_enabled` is true (default false); Betfair credentials and SSM cert parameter names are set in `deployment/aws/terraform/lambda.tf` ([aws-infrastructure](../operations/aws-infrastructure.md)). The dev deploy invokes `fetch-betfair-exchange-epl` as a smoke test ([ci-cd-workflows](../operations/ci-cd-workflows.md)).
 
 ### Flow
 
 1. Resolve target sports: `ctx.sport`, else `settings.betfair.sports` or every `odds_lambda.betfair.constants.SPORT_CONFIG` key.
 2. Pre-schedule with `odds_lambda.scheduling.decision.decide_forward_resilient` and `odds_lambda.jobs.fetch_betfair_exchange.CADENCE`: 15 min under 3 h, 30 min at 3-12 h, 2 h beyond or with no games, 1 h database fallback. Always-run (no gate); the overnight window applies only to single-sport runs ([decision-engine](../scheduling/decision-engine.md#cadence)).
 3. Inside `odds_core.alerts.job_alert_context`, login, `odds_lambda.jobs.fetch_betfair_exchange.ingest_sport` per sport, logout in `finally`. Blocking client calls run in `asyncio.to_thread`; the job tags `api_request_id` `betfair_api_<time>`.
-4. `odds_lambda.jobs.fetch_betfair_exchange.ingest_sport` skips in-play, CLOSED/INACTIVE and under-populated books, resolves team names (`odds_lambda.betfair.adapter.resolve_teams`), calls `odds_lambda.storage.writers.OddsWriter.find_or_create_event` and stores the snapshot, then adds one sport-level `odds_core.models.FetchLog` row without quota ([fetch logs](odds-ingestion-service.md#fetch-logs)).
+4. `odds_lambda.jobs.fetch_betfair_exchange.ingest_sport` skips in-play, CLOSED/INACTIVE and under-populated books, resolves team names (`odds_lambda.betfair.adapter.resolve_teams`), calls `odds_lambda.storage.writers.OddsWriter.find_or_create_event` (which returns the Odds API event when one matches) and stores the snapshot, then adds one sport-level `odds_core.models.FetchLog` row without quota ([fetch logs](odds-ingestion-service.md#fetch-logs)).
 5. If events were seen but zero snapshots stored, `send_job_warning("job_empty:<job>")`. An empty event list is treated as a venue gap and does not alert.
 6. Post-schedule.
 

@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Databases and environments
-description: The session factory and engine (NullPool in Lambda, pool sizes), the test/local/dev/prod databases and which variable points where, and the --db override.
+description: The session factory and engine (NullPool in Lambda, pool sizes), the test, local, dev and production databases and the Neon archive, which variable points where, and the --db override.
 sources:
   - odds_core.database
   - odds_core.database.async_session_maker
@@ -15,6 +15,7 @@ sources:
   - odds_lambda.copy_from_production
   - .env.example
   - .github/workflows/deploy-prod.yml
+  - deploy.sh
 status: stable
 ---
 
@@ -39,12 +40,15 @@ All code gets sessions from one module-level factory: `odds_core.database.async_
 | Test | in-process PostgreSQL (py-pglite) on TCP port 5434 | `tests/conftest.py` creates tables once per session and truncates all tables before each test. Used by `tests/unit` and `tests/integration` ([Test suite](test-suite.md)). |
 | Local | `odds` in Docker Compose `postgres:15`, host port 5433 | `docker compose up -d postgres`; `postgres/postgres` (`docker-compose.yml`) |
 | Dev | remote managed Postgres, a Neon dev branch | CI/CD only, via `secrets.DATABASE_URL` |
-| Production | remote managed Postgres, the Neon main branch | production deployments only |
+| Production | `odds` in the mini-PC's Docker Compose `postgres:15`, host port 5433 | written by the mini-PC's scheduler and by the agent as `odds_agent` ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)) |
+| Neon archive | remote managed Postgres, the Neon main branch | frozen; the database the AWS Lambdas wrote to. Its EPL and MLB data was merged into production on 2026-10-17 (#483). |
 
-`.env.example` defines `LOCAL_DATABASE_URL`, `DEV_DATABASE_URL`, `PROD_DATABASE_URL` and sets `DATABASE_URL=${DEV_DATABASE_URL}`, so a fresh copy of it points at the shared dev database (#429). Lambda gets `DATABASE_URL` from Terraform, which takes the dev or production Neon connection string per environment (`deployment/aws/terraform/terraform.tfvars.example`; the provider is not verifiable from the repo beyond that template).
+Production is the local database of one host: on the mini-PC, `DATABASE_URL` names its own Compose Postgres. A development machine never points `DATABASE_URL` at it ([AGENTS.md](../../AGENTS.md#constraints)).
 
-- Production migrates only inside `.github/workflows/deploy-prod.yml` ([migrations](howto-database-migration.md)). The read-only `scripts/check_*.py` scripts inspect it ([Debug the AWS self-scheduling jobs](../scheduling/howto-debug-aws-scheduler.md)).
-- Backups and point-in-time recovery are the managed provider's; that is not verifiable from the repo. Data gaps are filled with [historical loads](../collection/odds-api-backfill.md).
+`.env.example` defines `LOCAL_DATABASE_URL`, `DEV_DATABASE_URL`, `PROD_DATABASE_URL` and sets `DATABASE_URL=${DEV_DATABASE_URL}`, so a fresh copy of it points at the shared dev database (#429). On existing machines `PROD_DATABASE_URL` names the Neon archive, not the mini-PC database. Lambda gets `DATABASE_URL` from Terraform, which takes the dev or production Neon connection string per environment (`deployment/aws/terraform/terraform.tfvars.example`; the provider is not verifiable from the repo beyond that template).
+
+- Production migrates only through `deploy.sh` on the mini-PC, which runs `alembic upgrade head` before restarting the scheduler ([migrations](howto-database-migration.md), [Redeploy](../scheduling/howto-run-scheduler-service.md#redeploy)). `.github/workflows/deploy-prod.yml` migrates the Neon archive and must not be run ([Where each job runs](../scheduling/job-deployment-matrix.md#dormant-aws-rules)).
+- No backup of the production database is configured in the repo. Data gaps are filled with [historical loads](../collection/odds-api-backfill.md).
 - `tests/migration` connects to whatever `DATABASE_URL` points at and is run only by the deploy workflows ([Test suite](test-suite.md#migration-tests)).
 
 ### The agent database role
@@ -59,7 +63,7 @@ The betting agent subprocess swaps in `AGENT_DATABASE_URL` when set (`odds_lambd
 
 `odds copy from-prod START END` ([how-to](howto-copy-production-data.md)). `START` and `END` are positional `YYYY-MM-DD` dates, where `odds backfill` and `odds quality` use `--start`/`--end`; `END` is inclusive through 23:59:59 UTC. Options (`odds_cli.commands.copy_from_prod.copy_from_production`): `--sport/-s` (default `soccer_epl`), `--dry-run`, `--skip-existing/--overwrite` (default skip existing), `--prod-url`, `--local-url`.
 
-- Source URL: `--prod-url`, else `PROD_DATABASE_URL`, else `DATABASE_URL`. Target URL: `--local-url`, else `LOCAL_DATABASE_URL` (required).
+- Source URL: `--prod-url`, else `PROD_DATABASE_URL`, else `DATABASE_URL`. Target URL: `--local-url`, else `LOCAL_DATABASE_URL` (required). On existing machines `PROD_DATABASE_URL` names the Neon archive, so without `--prod-url` the copy reads frozen data, not the mini-PC database.
 - Events come from `odds_lambda.storage.readers.OddsReader.get_events_by_date_range` for the sport and window. With `--skip-existing`, an event already present locally is skipped.
 - A copied event is upserted with `odds_lambda.storage.writers.OddsWriter.upsert_event`; each snapshot not already present locally (within a 1 minute tolerance) is re-stored with `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot`, which recomputes the normalized odds and tier ([OddsWriter](../storage/odds-writer.md)).
 - Predictions are copied one by one; duplicates against `uq_prediction_event_snap_model` are skipped. Predictions keep production's `snapshot_id` while snapshots are re-created with new ids, so a copied prediction can point at a different local snapshot or fail the foreign key (#450).

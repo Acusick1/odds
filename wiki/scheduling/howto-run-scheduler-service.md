@@ -1,7 +1,7 @@
 ---
 type: howto
 title: Run the scheduler as a systemd service
-description: Install the scheduler's systemd unit on an always-on host, start it at Windows boot on a WSL host, and redeploy it with deploy.sh.
+description: Install the scheduler's systemd unit on the production mini-PC, start it at Windows boot under WSL, and redeploy production with deploy.sh.
 sources:
   - odds-scheduler.service
   - deploy.sh
@@ -10,9 +10,9 @@ status: stable
 
 # Run the scheduler as a systemd service
 
-Run the [local scheduler](local-scheduler.md) on a mini-PC under systemd and redeploy it with a script that proves changed jobs run before restarting.
+Run the [local scheduler](local-scheduler.md) on the mini-PC under systemd and redeploy it with a script that proves changed jobs run before restarting. This host is production: its scheduler runs every scheduled job and its Postgres is the production database ([Where each job runs](job-deployment-matrix.md), [ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)).
 
-Before you start, check that no AWS scraper runs the same jobs (`odds scheduler list-jobs --backend aws`), or both will scrape ([Deployed state](job-deployment-matrix.md#deployed-state)).
+The AWS rules must stay disabled, or both hosts collect. `odds scheduler list-jobs --backend aws` shows their state ([Deployed state](job-deployment-matrix.md#deployed-state)).
 
 ## Install the unit
 
@@ -40,10 +40,10 @@ On a Windows host the unit runs inside WSL, which starts only when something cal
 
 ## Redeploy
 
-Run `./deploy.sh` from the repo root on the host. In order it runs `git pull --ff-only`, `uv sync`, `uv run alembic upgrade head`, `SCHEDULER_DRY_RUN=true uv run odds scheduler smoke`, `sudo systemctl restart odds-scheduler`, then status and `odds scheduler list-jobs`.
+Run `./deploy.sh` from the repo root on the mini-PC; it is the only path to production. In order it runs `git pull --ff-only`, `uv sync`, `uv run alembic upgrade head`, `SCHEDULER_DRY_RUN=true uv run odds scheduler smoke`, `sudo systemctl restart odds-scheduler`, then status and `odds scheduler list-jobs`.
 
 - `set -e` aborts before the restart if migration or smoke fails, so the old code keeps serving.
-- Dry-run makes self-scheduling a no-op, so the live schedule store is untouched.
+- Dry-run makes self-scheduling a no-op, so the live schedule store is untouched. It does not stop the jobs' own work: smoke runs each job's real `main()`, so a due `fetch-odds` or `fetch-scores` spends Odds API quota ([CLI](local-scheduler.md#cli)).
 - `--ff-only` fails on a diverged checkout, so discard or commit local edits on the host first.
 - `alembic upgrade head` runs before the restart, so the old scheduler briefly sees the new schema. That is safe for additive migrations. For a destructive one, `sudo systemctl stop odds-scheduler` first, migrate, then redeploy ([Create and apply a database migration](../foundations/howto-database-migration.md)).
 

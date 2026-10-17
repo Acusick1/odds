@@ -38,6 +38,10 @@ class TestSettings:
             assert settings.scheduler.lookahead_days == 7
             assert settings.scheduler.bootstrap_jobs == [
                 # "agent-run",
+                "fetch-odds",
+                "fetch-scores",
+                "update-status",
+                "check-health",
                 "fetch-oddsportal",
                 "fetch-oddsportal-results",
                 # "daily-digest",

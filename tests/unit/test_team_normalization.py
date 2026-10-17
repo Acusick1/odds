@@ -49,6 +49,8 @@ class TestNormalizeTeamName:
             ("Nott'm Forest", "Nottingham"),
             ("West Bromwich Albion", "West Brom"),
             ("Spurs", "Tottenham"),
+            ("Coventry City", "Coventry"),
+            ("Coventry", "Coventry"),
         ],
     )
     def test_normalize(self, raw: str, expected: str) -> None:

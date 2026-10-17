@@ -9,7 +9,7 @@ from __future__ import annotations
 
 # Pipeline canonical EPL names (from The Odds API / events table):
 #   Arsenal, Aston Villa, Bournemouth, Brentford, Brighton, Burnley, Cardiff,
-#   Chelsea, Crystal Palace, Everton, Fulham, Huddersfield, Hull, Ipswich,
+#   Chelsea, Coventry, Crystal Palace, Everton, Fulham, Huddersfield, Hull, Ipswich,
 #   Leeds, Leicester, Liverpool, Luton, Manchester City, Manchester Utd,
 #   Middlesbrough, Newcastle, Norwich, Nottingham, Sheffield Utd, Southampton,
 #   Stoke, Sunderland, Swansea, Tottenham, Watford, West Brom, West Ham, Wolves
@@ -33,6 +33,7 @@ _TEAM_ALIASES: dict[str, str] = {
     "brighton & hove albion": "Brighton",
     "brighton and hove albion": "Brighton",
     "cardiff city": "Cardiff",
+    "coventry city": "Coventry",
     "huddersfield town": "Huddersfield",
     "hull city": "Hull",
     "ipswich town": "Ipswich",

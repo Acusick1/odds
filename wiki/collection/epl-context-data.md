@@ -11,6 +11,7 @@ sources:
   - odds_lambda.storage.fpl_availability_reader.FplAvailabilityReader
   - odds_core.epl_data_models.EspnFixture
   - odds_lambda.scheduling.jobs._JOB_CRON_MAP
+  - odds_lambda.scheduling.jobs._JOB_SPORTS
   - odds_mcp.tools.epl._is_final
   - scripts/ingest_espn_lineups.py
   - scripts/ingest_fbref_player_stats.py
@@ -38,7 +39,7 @@ Supplementary EPL data that feeds the `epl_schedule` and `epl_lineup` [feature g
 
 `odds_lambda.jobs.fetch_espn_fixtures.main` runs both (30-day lookahead), dedupes on `(date, team, opponent)` with the scoreboard row winning (fresher `state`), and upserts through `odds_lambda.storage.espn_fixture_writer.EspnFixtureWriter.upsert_fixtures`, idempotent on `(date, team, competition)`. It raises for any sport but `soccer_epl`. Each match is two rows, one per team.
 
-**Schedule**: `0 6 * * *`, EPL only, from `_JOB_CRON_MAP` in `odds_lambda.scheduling.jobs`, in the default local `odds_core.config.SchedulerConfig.bootstrap_jobs` (`odds_core.config`). `odds_lambda.jobs.fetch_espn_fixtures` states in its module docstring that the cadence is "managed in Terraform"; the cadence is the local cron above. It runs on the local scheduler only; no EventBridge rule exists in `deployment/aws/terraform/eventbridge.tf`. Deployed state cannot be verified from the repo: `odds scheduler list-jobs --backend aws` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). The MCP `odds_mcp.tools.epl.get_team_context` tool reads `espn_fixtures`, so it goes stale if the local scheduler is not running this cron.
+**Schedule**: `0 6 * * *` from `odds_lambda.scheduling.jobs._JOB_CRON_MAP`, EPL only through `odds_lambda.scheduling.jobs._JOB_SPORTS`, in the default `odds_core.config.SchedulerConfig.bootstrap_jobs`, so it runs on the mini-PC ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). `odds_lambda.jobs.fetch_espn_fixtures` states in its module docstring that the cadence is "managed in Terraform"; the cadence is the local cron above, and no EventBridge rule exists for it in `deployment/aws/terraform/eventbridge.tf`. The ESPN request fails with HTTP 400 (#486). The MCP `odds_mcp.tools.epl.get_team_context` tool reads `espn_fixtures`, so it goes stale whenever this cron does not succeed.
 
 ## Lineups, FPL, FBref
 
