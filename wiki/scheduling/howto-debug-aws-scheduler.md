@@ -35,7 +35,7 @@ Region `eu-west-1`. Scheduler function `odds-scheduler`, log group `/aws/lambda/
 
 ## Workflow
 
-1. **Context.** `date -u` and `grep "^DATABASE_URL=" .env`. The daily validation file for the previous day is dated the day it ran: the file dated D covers D-1 ([CI/CD workflows](../operations/ci-cd-workflows.md)).
+1. **Context.** `date -u` and `grep "^DATABASE_URL=" .env`. Daily validation checks the previous day and names its file after the day it checked, so the file dated D covers D ([CI/CD workflows](../operations/ci-cd-workflows.md)).
 2. **Last and next run.** The last run should fall within the interval of the nearest game's tier ([Fetch tier](../storage/fetch-tier.md)).
    ```bash
    aws events list-rules --name-prefix odds- | jq -r '.Rules[] | "\(.Name) | \(.State) | \(.ScheduleExpression)"'

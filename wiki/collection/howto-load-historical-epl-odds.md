@@ -23,14 +23,17 @@ The scripts load `odds_core.models.Event` and `odds_core.models.OddsSnapshot` ro
    - Pass `--proxy-url` for books that are geo-restricted.
 2. Ingest the OddsPortal files first.
    ```bash
-   uv run python scripts/ingest_oddsportal.py --dry-run
+   uv run python scripts/ingest_oddsportal.py --sport soccer --seasons 2023-2024 --dry-run
    ```
+   - `--sport soccer` is required: the default sport is basketball.
+   - Pass `--seasons` with one or more seasons, or `--all` for the script's full season list.
    - Check the dry-run counts, then run without `--dry-run`.
    - OddsPortal goes first because it creates the `op_<season>_*` events that the FDUK ingest attaches to.
 3. Ingest football-data.co.uk.
    ```bash
-   uv run python scripts/ingest_football_data_uk.py --dry-run
+   uv run python scripts/ingest_football_data_uk.py --seasons 2023-2024 --dry-run
    ```
+   - Use the same seasons as step 2, or `--all`. Check the dry-run counts, then run without `--dry-run`.
    - It downloads `E0.csv` per season and writes an opening and a closing snapshot per match.
    - Matches that already have an `op_` event get no new event, and only `match_stats` is back-filled for them.
 4. Rerun any step to fill gaps.

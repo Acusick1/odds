@@ -32,7 +32,7 @@ Train on the devigged bet365 close-minus-snapshot delta: `target_type: devigged_
 
 ## Evidence
 
-- `docs/MODELING.md` commits 2840086 (PR #164), b950dc5 (PR #166) and d7c6621 (PR #167); text at `git show origin/main:docs/MODELING.md`.
+- `docs/MODELING.md` commits 2840086 (PR #164), b950dc5 (PR #166) and d7c6621 (PR #167); text at `git show 7887039:docs/MODELING.md`.
 - PRs #161, #168, #361, #362; issues #434, #482.
 - `experiments/results/exp6_learning_curve/FINDINGS.md`; `experiments/scripts/exp6_learning_curve.py`.
 - Configs: `experiments/configs/xgboost_bet365_tuning.yaml`, `experiments/configs/xgboost_bet365_baseline_tuning.yaml`, `experiments/configs/xgboost_pinnacle_tuning.yaml`, `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`.

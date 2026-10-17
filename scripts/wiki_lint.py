@@ -229,6 +229,14 @@ def bound_names(node: ast.stmt) -> list[str]:
     return []
 
 
+def import_bindings(node: ast.stmt) -> list[str]:
+    if isinstance(node, ast.Import):
+        return [a.asname or a.name.split(".")[0] for a in node.names]
+    if isinstance(node, ast.ImportFrom):
+        return [a.asname or a.name for a in node.names]
+    return []
+
+
 def _flatten(body: Iterable[ast.stmt]) -> Iterable[ast.stmt]:
     """Statements of a scope, descending into `if`/`try`/`with` blocks."""
     for node in body:
@@ -270,13 +278,19 @@ def _instance_attribute(cls: ast.ClassDef, name: str) -> ast.stmt | None:
 
 
 def resolve_symbol(tree: ast.Module, symbol: str) -> ast.stmt | None:
-    """Resolve `A.B` as A at module level, then B in A's class body or `__init__`."""
+    """Resolve `A.B` as A at module level, then B in A's class body or `__init__`.
+
+    A module-level name that is only imported resolves to its import statement.
+    """
     scope: list[ast.stmt] = tree.body
     parts = symbol.split(".")
     node: ast.stmt | None = None
     for index, part in enumerate(parts):
         parent = node
-        node = next((n for n in _flatten(scope) if part in bound_names(n)), None)
+        nodes = list(_flatten(scope))
+        node = next((n for n in nodes if part in bound_names(n)), None)
+        if node is None and scope is tree.body:
+            node = next((n for n in nodes if part in import_bindings(n)), None)
         if node is None and isinstance(parent, ast.ClassDef):
             node = _instance_attribute(parent, part)
         if node is None:
@@ -377,7 +391,7 @@ class GitHistory:
         self._tracked: dict[str, frozenset[str]] = {}
         self._renames: dict[str, dict[str, str]] = {}
         self._path_commits: dict[tuple[str, str], list[str]] = {}
-        self._changes: dict[tuple[str, str | None], FileChange | None] = {}
+        self._changes: dict[tuple[str, str, str | None], FileChange | None] = {}
         self._has_head: bool | None = None
 
     def _git(self, *args: str) -> subprocess.CompletedProcess[str]:
@@ -417,9 +431,7 @@ class GitHistory:
         """Commits after `base` (and uncommitted edits) that touch the symbol, or the whole file."""
         commits = [] if base is None else self._commits_after(base, path)
         touching = tuple(
-            commit[:7]
-            for commit in commits
-            if symbol is None or self._touches(path, symbol, f"{commit}^1", commit)
+            commit[:7] for commit in commits if self._commit_touches(path, symbol, commit)
         )
         return Changes(touching, self._head_exists() and self._touches(path, symbol, "HEAD", None))
 
@@ -431,7 +443,8 @@ class GitHistory:
     def _commits_after(self, base: str, path: str) -> list[str]:
         key = (base, path)
         if key not in self._path_commits:
-            result = self._git("log", "--format=%H", f"{base}..HEAD", "--", path)
+            # Without simplification a merge TREESAME to one parent is still listed.
+            result = self._git("log", "--full-history", "--format=%H", f"{base}..HEAD", "--", path)
             self._path_commits[key] = result.stdout.split() if result.returncode == 0 else []
         return self._path_commits[key]
 
@@ -439,13 +452,24 @@ class GitHistory:
         result = self._git("show", f"{rev}:{path}")
         return Source.parse(result.stdout) if result.returncode == 0 else None
 
+    def _commit_touches(self, path: str, symbol: str | None, commit: str) -> bool:
+        """A merge counts only for what it introduced itself: a change against every parent.
+
+        Changes it brought in are counted via their own commits, when those follow the base.
+        """
+        parents = self._git("rev-list", "--parents", "-n", "1", commit).stdout.split()[1:]
+        return all(
+            self._touches(path, symbol, f"{commit}^{n}", commit)
+            for n in range(1, max(len(parents), 1) + 1)
+        )
+
     def _touches(self, path: str, symbol: str | None, old_rev: str, new_rev: str | None) -> bool:
         change = self._file_change(path, old_rev, new_rev)
         return change is not None and change.touches(symbol)
 
     def _file_change(self, path: str, old_rev: str, new_rev: str | None) -> FileChange | None:
         """new_rev None compares against the working tree."""
-        key = (path, new_rev)
+        key = (path, old_rev, new_rev)
         if key not in self._changes:
             self._changes[key] = self._compute_change(path, old_rev, new_rev)
         return self._changes[key]
@@ -492,6 +516,13 @@ class Target(NamedTuple):
 
     path: str
     symbol: str | None
+
+
+class Resolved(NamedTuple):
+    """`hops` are the import bindings an alias citation passes through; `final` is the definition."""
+
+    hops: tuple[Target, ...]
+    final: Target
 
 
 @dataclass
@@ -549,21 +580,41 @@ class Packages:
         except griffe.AliasResolutionError:
             return None
 
-    def resolve(self, dotted: str) -> Target | None:
-        """Aliases (re-exports) resolve to their definition; unresolved imports do not resolve."""
-        if dotted.split(".")[0] not in self.names:
+    def _rel(self, obj: griffe.Object | griffe.Alias) -> str | None:
+        if obj.filepath is None or isinstance(obj.filepath, list):
             return None
-        try:
-            found = self._modules()[dotted]
-        except KeyError:
+        path = Path(obj.filepath).resolve()
+        return path.relative_to(self.root).as_posix() if path.is_relative_to(self.root) else None
+
+    def resolve(self, dotted: str) -> Resolved | None:
+        """Aliases (re-exports) resolve to their definition, recording each import binding passed.
+
+        Unresolved imports do not resolve.
+        """
+        parts = dotted.split(".")
+        if parts[0] not in self.names:
             return None
-        obj = self._final(found)
-        if obj is None or obj.filepath is None or isinstance(obj.filepath, list):
+        modules = self._modules()
+        hops: list[Target] = []
+        for end in range(1, len(parts) + 1):
+            try:
+                obj: griffe.Object | griffe.Alias = modules[".".join(parts[:end])]
+            except KeyError:
+                return None
+            while isinstance(obj, griffe.Alias):
+                if isinstance(obj.parent, griffe.Module) and (rel := self._rel(obj.parent)):
+                    hops.append(Target(rel, obj.name))
+                try:
+                    obj = obj.target
+                except griffe.AliasResolutionError:
+                    return None
+        final = self._final(modules[dotted])
+        rel = self._rel(final) if final else None
+        if final is None or rel is None:
             return None
-        path = Path(obj.filepath).resolve().relative_to(self.root).as_posix()
-        if obj.is_module:
-            return Target(path, None)
-        return Target(path, obj.path[len(obj.module.path) + 1 :])
+        if final.is_module:
+            return Resolved(tuple(hops), Target(rel, None))
+        return Resolved(tuple(hops), Target(rel, final.path[len(final.module.path) + 1 :]))
 
     def symbol_index(self) -> SymbolIndex:
         if self._index is None:
@@ -998,8 +1049,8 @@ class WikiLinter:
             self._add(page.slug, Kind.PATH_MISSING, f"cited path does not exist: {raw}", lines)
 
     def _check_dotted(self, page: Page, dotted: str, raw: str, lines: set[int]) -> None:
-        target = self.packages.resolve(dotted)
-        if target is None:
+        resolved = self.packages.resolve(dotted)
+        if resolved is None:
             renamed = self._renamed_module(page, dotted)
             if renamed:
                 self._add(
@@ -1013,7 +1064,9 @@ class WikiLinter:
                     page.slug, Kind.SYMBOL_UNDEFINED, f"cited symbol not defined: {dotted}", lines
                 )
             return
-        self._register(page, Citation(dotted, target.path, target.symbol), lines)
+        for hop in resolved.hops:
+            self._register(page, Citation(dotted, hop.path, hop.symbol), lines, backlink=False)
+        self._register(page, Citation(dotted, resolved.final.path, resolved.final.symbol), lines)
 
     def _renamed_module(self, page: Page, dotted: str) -> str | None:
         """New dotted path when the cited module's file was renamed since the page's last commit."""
@@ -1037,8 +1090,11 @@ class WikiLinter:
         head = path.split("/", 1)[0]
         return "/" in path and bool(head) and (self.root / head).exists()
 
-    def _register(self, page: Page, citation: Citation, lines: set[int]) -> None:
-        self.cites[citation.path].add(page.slug)
+    def _register(
+        self, page: Page, citation: Citation, lines: set[int], backlink: bool = True
+    ) -> None:
+        if backlink:
+            self.cites[citation.path].add(page.slug)
         page.citations.setdefault(citation, set()).update(lines)
 
     def _check_links(self, slug: str, path: Path, text: str) -> list[Path]:

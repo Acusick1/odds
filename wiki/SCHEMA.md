@@ -85,7 +85,8 @@ Use relative markdown links: `[Text](slug.md)` or `[Text](../area/slug.md#headin
 
 A page is stale when code it cites has changed since the page was last changed. Git supplies both sides:
 
-- **Dotted citations:** stale if any commit after the page's last commit (merge commits included, diffed against their first parent) touches the symbol's line range, or adds or removes the symbol.
+- **Dotted citations:** stale if any commit after the page's last commit touches the symbol's line range, or adds or removes the symbol. A citation of a re-export also tracks each import statement that binds it, so retargeting the alias counts.
+- **Merges:** a merge commit counts only for what it changes relative to every parent, such as a conflict resolution. Changes it brings in from a branch count through that branch's own commits.
 - **Path citations:** stale if any later commit changes the file.
 - **Uncommitted changes:** these count too, unless the page itself is edited.
 - **Renamed or deleted cited files:** these are errors, not staleness.

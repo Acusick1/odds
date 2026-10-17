@@ -48,9 +48,9 @@ Using Polymarket as an MLB sharp reference is outside this decision and is still
 - PRs and issues: #134, #136, #451, #456.
 - Commits: 9591f7b (AWS gate), 1ebb99b and 19851af (deprioritisation recorded, 2026-03-09), 3f74022 (EPL liquidity), dff040d (MLB probes).
 - Prior text:
-  - `git show 1ebb99b:docs/POLYMARKET.md` ("Status") and `git show origin/main:docs/POLYMARKET.md` ("Status", "Backfill Job").
-  - `git show origin/main:docs/MODELING.md` ("Polymarket vs sportsbook cross-source validation").
-  - The `AGENTS.md` "Polymarket Integration" section at `9b3ae09^`, which was removed in 9b3ae09.
+  - `git show 1ebb99b:docs/POLYMARKET.md` ("Status") and `git show 7887039:docs/POLYMARKET.md` ("Status", "Backfill Job").
+  - `git show 7887039:docs/MODELING.md` ("Polymarket vs sportsbook cross-source validation").
+  - The `AGENTS.md` "Polymarket Integration" section at `7887039`, which was removed in #458.
 - Results: `experiments/results/exp2_feature_group_isolation/FINDINGS.md`.
 - Scripts: `experiments/scripts/polymarket_mlb_discover.py`, `experiments/scripts/polymarket_mlb_orderbooks.py`, `experiments/scripts/polymarket_mlb_volume.py`, `experiments/scripts/polymarket_mlb_sentiment.py`.
 - Code: `deployment/aws/terraform/variables.tf`, `odds_core.config.SchedulerConfig`, `odds_core.config.PolymarketConfig`, `odds_lambda.storage.polymarket_writer.PolymarketWriter.store_price_snapshot`.

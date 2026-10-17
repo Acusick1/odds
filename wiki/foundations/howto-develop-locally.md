@@ -23,7 +23,7 @@ Prerequisites: Python 3.12+, [uv](https://github.com/astral-sh/uv), Docker, and 
 1. **Install.** `uv sync`. This installs the five workspace packages and the OddsHarvester fork from git ([Workspace packages](workspace-packages.md)).
 2. **Create `.env`.** Start from `.env.example` but do not copy it unchanged: `odds_core.config.get_settings` raises on its comma-separated lists ([List fields and the template](configuration.md#list-fields-and-the-template)):
    - `ODDS_API_KEY=<your key>`
-   - `DATABASE_URL=${LOCAL_DATABASE_URL}` and `LOCAL_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/odds`. The template's `DATABASE_URL=${DEV_DATABASE_URL}` points at the shared dev database, so a fresh copy writes to dev (#429).
+   - `DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/odds`, written literally. `${LOCAL_DATABASE_URL}` would expand to an empty string, because the template defines `LOCAL_DATABASE_URL` below `DATABASE_URL`. The template's `DATABASE_URL=${DEV_DATABASE_URL}` points at the shared dev database, so a fresh copy writes to dev (#429).
    - Write list values as JSON arrays: `SPORTS=["soccer_epl"]`, and the same for `BOOKMAKERS`, `MARKETS`, `REGIONS` if set. `SPORTS=basketball_nba` in the template is NBA.
    - Export `LOCAL_DATABASE_URL`, `PROD_DATABASE_URL` and `AGENT_DATABASE_URL` in the shell if you use them: they are read with `os.getenv`, and `.env` is never exported to the process environment ([variables read outside Settings](configuration.md#variables-read-outside-settings)).
 3. **Start Postgres.** `docker compose up -d postgres` runs `postgres:15` (database `odds`, `postgres`/`postgres`) on host port 5433, chosen to avoid a system Postgres on 5432 (`docker-compose.yml`).

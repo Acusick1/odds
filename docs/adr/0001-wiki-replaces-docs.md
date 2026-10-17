@@ -23,7 +23,7 @@ status: accepted
 
 ## Evidence
 
-- Prior `docs/` text: `git show origin/main:docs/` (replaced in 9b3ae09).
+- Prior `docs/` text: `git show 7887039:docs/` (replaced in #458).
 - Comprehension audit findings: #434-#454.
 - docrot: <https://pypi.org/project/docrot/>, <https://github.com/dager23/docrot>.
 - Swimm: <https://docs.swimm.io/continuous-integration/github-app>, <https://swimm.io/pricing>. Both tools researched 2026-10-13.

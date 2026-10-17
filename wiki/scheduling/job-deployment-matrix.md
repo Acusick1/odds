@@ -48,7 +48,7 @@ Per-job pages: [fetch-odds](../collection/fetch-odds-job.md), [fetch-scores and 
 
 ## Heartbeats
 
-Which jobs write a heartbeat is a property of `odds_core.alerts.job_alert_context`, not of the registry. `fetch-odds`, `fetch-scores`, `update-status` and both Polymarket jobs write none. The jobs the health check expects a heartbeat from, and how often, are in [Health monitor](../operations/health-monitor.md#heartbeats).
+Which jobs write a heartbeat is a property of `odds_core.alerts.job_alert_context`, not of the registry. `fetch-odds`, `fetch-scores` and both Polymarket jobs write none. `update-status` writes one only on runs that execute (`odds_lambda.jobs.update_status.main`); skipped runs write none. Producing a heartbeat is separate from the health check expecting one. The jobs the health check expects a heartbeat from, and how often, are in [Health monitor](../operations/health-monitor.md#heartbeats).
 
 ## Deployed state
 

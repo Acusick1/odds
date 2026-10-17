@@ -48,7 +48,7 @@ These checks confirm that every game was collected across the [fetch tiers](fetc
 
 ## Daily-validation workflow
 
-`.github/workflows/daily-validation.yml`: 09:00 UTC runs `odds validate daily --check-discovery --verbose --output-json validation_<yesterday>.json` against the `production` environment and uploads it (kept 30 days). The file dated D covers D-1 ([CI/CD workflows](../operations/ci-cd-workflows.md)). Whether the deployed schedule is actually running cannot be verified from the repo; run `odds scheduler list-jobs --backend aws`.
+`.github/workflows/daily-validation.yml`: 09:00 UTC runs `odds validate daily --check-discovery --verbose --output-json validation_<yesterday>.json` against the `production` environment and uploads it (kept 30 days). The file is named after the day it checks, so the file dated D covers D ([CI/CD workflows](../operations/ci-cd-workflows.md)). Whether the deployed schedule is actually running cannot be verified from the repo; run `odds scheduler list-jobs --backend aws`.
 
 ## Read-only diagnostics
 

@@ -40,7 +40,7 @@ Adopted 2026-03-16 (PR #234, applied across the EPL tuning configs) and kept on 
 ## Evidence
 
 - PRs #161, #230, #234, #361, #362; issues #437, #452.
-- `CLAUDE.md` "Model Evaluation" section, added in 4b116fd (PR #230) and held in `AGENTS.md` until 9b3ae09; text at `git show 9b3ae09^:AGENTS.md`.
-- `docs/MODELING.md` commits a6f3d3a (PR #234), d34c267 and b61c8e8 (PR #361); text at `git show origin/main:docs/MODELING.md`.
+- `CLAUDE.md` "Model Evaluation" section, added in 4b116fd (PR #230) and held in `AGENTS.md` until #458; text at `git show 7887039:AGENTS.md`.
+- `docs/MODELING.md` commits a6f3d3a (PR #234), d34c267 and b61c8e8 (PR #361); text at `git show 7887039:docs/MODELING.md`.
 - `experiments/results/cv_protocol_grid/grid_results.csv`; `experiments/scripts/cv_protocol_grid.py`; `experiments/configs/xgboost_epl_production_*.yaml`.
 - Wiki: [Cross-validation](../../wiki/modelling/cross-validation.md), [Training config](../../wiki/modelling/training-config.md).

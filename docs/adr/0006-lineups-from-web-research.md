@@ -43,6 +43,6 @@ The code matches the decision:
 
 - PRs and issues: #244, #295, #296, #322, #481.
 - Commits: 3f74022 (`docs/AGENT_DATA_SOURCES.md` added, 2026-04-13), c0ecdf5 (ESPN row revised, 2026-04-14), fa40196 (lineup signal check).
-- Prior text: `git show 3f74022:docs/AGENT_DATA_SOURCES.md` ("Evaluated and Rejected", "Lineup Data Source Conclusion"); `git show origin/main:docs/AGENT_DATA_SOURCES.md`.
+- Prior text: `git show 3f74022:docs/AGENT_DATA_SOURCES.md` ("Evaluated and Rejected", "Lineup Data Source Conclusion"); `git show 7887039:docs/AGENT_DATA_SOURCES.md`.
 - Code and prompts: `packages/odds-mcp/agents/epl/base.md`, `odds_lambda.jobs.agent_run.CADENCE`, `odds_lambda.scheduling.jobs._JOB_MODULE_MAP`, `odds_lambda.storage.espn_lineup_writer.EspnLineupWriter`, `scripts/ingest_espn_lineups.py`.
 - Wiki: [Agent data sources and rejected sources](../../wiki/agent/agent-data-sources.md#rejected-sources), [The betting agent](../../wiki/agent/betting-agent.md), [EPL context data](../../wiki/collection/epl-context-data.md).

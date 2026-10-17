@@ -715,6 +715,40 @@ class TestStaleness:
         _, found = stale(committed)
         assert [f.message for f in found if f.slug == "a"] == [f"pkg.Crate.run changed in {sha}"]
 
+    def test_retargeting_a_reexport_is_stale(self, committed: Path) -> None:
+        init = f"{PKG}/__init__.py"
+        write_file(committed, init, "from pkg.mod import calculate as chosen\n")
+        commit(committed, "packages")
+        put_a(committed, "`pkg.chosen`")
+        commit(committed, "wiki", message="cite alias")
+        assert stale(committed) == ([], [])
+        write_file(committed, init, "from pkg.mod import other as chosen\n")
+        sha = commit(committed, "packages")
+        errors, found = stale(committed)
+        assert errors == []
+        assert [(f.message, f.lines) for f in found if f.slug == "a"] == [
+            (f"pkg.chosen changed in {sha}", (line_of(committed, "`pkg.chosen`"),))
+        ]
+
+    def test_unrelated_edit_to_the_reexporting_module_is_not_stale(self, committed: Path) -> None:
+        init = f"{PKG}/__init__.py"
+        write_file(committed, init, "from pkg.mod import calculate as chosen\n\nOTHER = 1\n")
+        commit(committed, "packages")
+        put_a(committed, "`pkg.chosen`")
+        commit(committed, "wiki", message="cite alias")
+        write_file(
+            committed,
+            init,
+            "from pkg.mod import calculate as chosen\n\nOTHER = 2\nMORE = 3\n",
+        )
+        commit(committed, "packages")
+        assert stale(committed) == ([], [])
+
+    def test_alias_hops_are_not_module_backlinks(self, committed: Path) -> None:
+        write_file(committed, f"{PKG}/__init__.py", "from pkg.mod import calculate as chosen\n")
+        put_a(committed, "`pkg.chosen`")
+        assert f"{PKG}/__init__.py" not in lint_repo(committed).cites
+
     def test_class_attribute_edit_is_stale_for_that_attribute_only(self, committed: Path) -> None:
         put_a(committed, "`pkg.mod.Box.limit`")
         commit(committed, "wiki", message="cite attr")
@@ -881,6 +915,51 @@ class TestMergeCommits:
         git(committed, "merge", "-q", "--no-ff", "side", "-m", "merge")
         assert stale(committed) == ([], [])
 
+    def test_merge_treesame_to_its_second_parent_is_still_seen(self, committed: Path) -> None:
+        trunk = git(committed, "branch", "--show-current")
+        git(committed, "checkout", "-q", "-b", "side")
+        edit_mod(committed, "return 2", "return 20")
+        commit(committed, "packages", message="side")
+        git(committed, "checkout", "-q", trunk)
+        edit_mod(committed, "return 1", "return 10")
+        trunk_commit = commit(committed, "packages", message="trunk")
+        git(committed, "merge", "-q", "--no-ff", "--no-commit", "side")
+        git(committed, "checkout", "side", "--", MOD)
+        commit(committed, "packages", message="take side")
+        assert git(committed, "rev-parse", "HEAD^{tree}") == git(
+            committed, "rev-parse", "side^{tree}"
+        )
+        _, found = stale(committed)
+        assert found[0].message == f"pkg.mod.calculate changed in {trunk_commit}"
+
+    def test_page_edited_on_a_merged_side_branch_is_not_stale(self, committed: Path) -> None:
+        trunk = git(committed, "branch", "--show-current")
+        git(committed, "checkout", "-q", "-b", "side")
+        write_file(committed, "wiki/alpha/a.md", (committed / "wiki/alpha/a.md").read_text() + "\n")
+        commit(committed, "wiki", message="edit page on side")
+        git(committed, "checkout", "-q", trunk)
+        edit_mod(committed, "return 2", "return 20")
+        commit(committed, "packages", message="trunk")
+        git(committed, "merge", "-q", "--no-ff", "side", "-m", "merge")
+        assert stale(committed) == ([], [])
+
+    def test_branch_that_changes_code_then_updates_the_page_is_fresh_after_merge(
+        self, committed: Path
+    ) -> None:
+        trunk = git(committed, "branch", "--show-current")
+        git(committed, "checkout", "-q", "-b", "feature")
+        edit_mod(committed, "return 1", "return 10")
+        commit(committed, "packages", message="A: code")
+        page = committed / "wiki/alpha/a.md"
+        write_file(committed, "wiki/alpha/a.md", page.read_text() + "\nUpdated.\n")
+        commit(committed, "wiki", message="B: page")
+        git(committed, "checkout", "-q", trunk)
+        write_file(committed, "trunk.txt", "trunk\n")
+        commit(committed, "trunk.txt", message="trunk")
+        git(committed, "merge", "-q", "--no-ff", "feature", "-m", "merge")
+        _, found = stale(committed)
+        assert {f.slug for f in found} == {"b"}
+
 
 class TestMissingFiles:
     @pytest.fixture
@@ -900,6 +979,23 @@ class TestMissingFiles:
         put_a(committed, "Runs `scripts/tool.py`.")
         commit(committed, "wiki", message="cite script")
         return committed
+
+    def test_path_citation_is_fresh_after_merging_the_branch_that_updated_it(
+        self, cited_toml: Path
+    ) -> None:
+        trunk = git(cited_toml, "branch", "--show-current")
+        git(cited_toml, "checkout", "-q", "-b", "feature")
+        write_file(cited_toml, "notes.toml", "a = 2\n")
+        commit(cited_toml, "notes.toml", message="A: config")
+        page = cited_toml / "wiki/alpha/a.md"
+        write_file(cited_toml, "wiki/alpha/a.md", page.read_text() + "\nUpdated.\n")
+        commit(cited_toml, "wiki", message="B: page")
+        git(cited_toml, "checkout", "-q", trunk)
+        write_file(cited_toml, "trunk.txt", "trunk\n")
+        commit(cited_toml, "trunk.txt", message="trunk")
+        git(cited_toml, "merge", "-q", "--no-ff", "feature", "-m", "merge")
+        _, found = stale(cited_toml)
+        assert "a" not in {f.slug for f in found}
 
     def test_renamed_cited_file_is_error(self, cited_script: Path) -> None:
         git(cited_script, "mv", "scripts/tool.py", "scripts/renamed.py")

@@ -35,6 +35,6 @@ Decided 2026-03-19 (PR #253 merged). `sharp_bookmakers: [pinnacle, betfair_excha
 ## Evidence
 
 - PRs #217, #231, #253; issues #421, #477.
-- `docs/MODELING.md` commits 7346c2c (PR #217) and 1d1381f (PR #253); text at `git show origin/main:docs/MODELING.md`.
+- `docs/MODELING.md` commits 7346c2c (PR #217) and 1d1381f (PR #253); text at `git show 7887039:docs/MODELING.md`.
 - `experiments/configs/xgboost_epl_hybrid_sharp.yaml`, `experiments/configs/xgboost_epl_betfair_sharp.yaml`, `experiments/scripts/hybrid_sharp_validation.py`, `experiments/scripts/sharp_feature_correlation.py`.
 - Wiki: [Sharp benchmark](../../wiki/modelling/sharp-benchmark.md), [Betfair Exchange](../../wiki/collection/betfair-exchange.md), [Data sources](../../wiki/collection/data-sources.md).
