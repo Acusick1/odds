@@ -99,6 +99,7 @@ experiments/results/**/*.txt
 models/
 mlruns/
 *.html
+!tests/fixtures/oddsportal/*.html
 
 # Logs
 logs/

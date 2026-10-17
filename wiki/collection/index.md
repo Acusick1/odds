@@ -17,7 +17,7 @@ Each external source has a fetcher, a job (or manual script) that runs it, and a
 - [NBA injury reports, game logs and player stats](nba-injuries-and-stats.md) — The deprioritized NBA feeds (injury PDFs, stats.nba.com game logs, PBPStats player stats), their manual CLIs, writers and event matching.
 - [Odds API historical backfill](odds-api-backfill.md) — odds discover, odds backfill and the GameSelector, GapBackfillPlanner, BackfillExecutor modules.
 - [Odds API ingestion service](odds-ingestion-service.md) — OddsIngestionService steps and callbacks, the fetch_logs table, and odds fetch current / odds discover upcoming.
-- [OddsPortal scraper](oddsportal-scraper.md) — oddsportal_common, oddsportal_adapter, browser_lock, retries, and odds scrape upcoming.
+- [OddsPortal scraper](oddsportal-scraper.md) — The OddsPortal HTTP feed client, the adapter that converts its prices, the shared oddsportal_common helpers, the results job's OddsHarvester retries, and odds scrape upcoming.
 - [Polymarket pipeline and tables](polymarket.md) — Client, classifier, ingestion, fetch and backfill jobs, manual linking, CLI, AWS gate, the five tables and order-book metrics.
 - [Results and status jobs](results-jobs.md) — update-status, fetch-scores, fetch-oddsportal-results and odds fetch scores: cadence, flow, heartbeats, failure handling.
 - [Sport, market and bookmaker keys](sport-and-market-keys.md) — SportKey, job-name suffixes, the market-key dialects per writer, bookmaker key maps, and DataCollectionConfig defaults.

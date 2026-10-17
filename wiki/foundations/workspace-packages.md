@@ -95,7 +95,7 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 |---|---|---|
 | Odds API | `odds_lambda.data_fetcher`, `odds_lambda.api_key_manager`, `odds_lambda.event_sync` (event discovery and `op_live_` twin merge) | [Odds API client](../collection/odds-api-client.md) |
 | Ingestion | `odds_lambda.ingestion`, `odds_lambda.storage.validators` | [Odds API ingestion service](../collection/odds-ingestion-service.md) |
-| Scrapers | `odds_lambda.oddsportal_common`, `odds_lambda.oddsportal_adapter`, `odds_lambda.browser_lock` | [OddsPortal scraper](../collection/oddsportal-scraper.md) |
+| Scrapers | `odds_lambda.oddsportal_common`, `odds_lambda.oddsportal_adapter`, `odds_lambda.oddsportal_client` | [OddsPortal scraper](../collection/oddsportal-scraper.md) |
 | Exchange | `betfair/` | [Betfair Exchange](../collection/betfair-exchange.md) |
 | Sport context fetchers | `odds_lambda.espn_fixture_fetcher`, `odds_lambda.mlb_stats_fetcher`, `odds_lambda.injury_fetcher`, `odds_lambda.game_log_fetcher`, `odds_lambda.pbpstats_fetcher`, `odds_lambda.polymarket_fetcher` | [EPL](../collection/epl-context-data.md), [MLB](../collection/mlb-probable-pitchers.md), [NBA](../collection/nba-injuries-and-stats.md), [Polymarket](../collection/polymarket.md) |
 | Storage | `storage/` (one reader/writer pair per source) | [Storage layer](../storage/storage-layer.md) |
