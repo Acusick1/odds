@@ -33,7 +33,7 @@ Every change to a model under `packages/odds-core/odds_core/` needs an Alembic m
 
 ## Always-on host
 
-On an always-on scheduler host, `deploy.sh` migrates before it restarts the scheduler, so the old scheduler briefly sees the new schema. That is safe for additive migrations. For a destructive one, stop the service first (`sudo systemctl stop odds-scheduler`), migrate, then redeploy ([Local scheduler](../scheduling/local-scheduler.md)).
+On an always-on scheduler host, `deploy.sh` migrates before it restarts the scheduler, so the old scheduler briefly sees the new schema. That is safe for additive migrations. For a destructive one, stop the service first (`sudo systemctl stop odds-scheduler`), migrate, then redeploy ([Redeploy](../scheduling/howto-run-scheduler-service.md#redeploy)).
 
 ## Related
 
