@@ -1,7 +1,7 @@
 ---
 type: howto
 title: Set up and run locally
-description: Install, write a working .env, start Postgres, migrate, make a first fetch, enable the pre-commit hooks, and run the offline tests.
+description: Install, write a working .env, start Postgres, migrate, make a first fetch, enable the pre-commit hooks and issue claiming, and run the offline tests.
 sources:
   - migrations/env.py
   - docker-compose.yml
@@ -11,6 +11,7 @@ sources:
   - odds_cli.commands.status.show_quota
   - tests/conftest.py
   - .pre-commit-config.yaml
+  - .githooks/claim-issue.sh
 status: stable
 ---
 
@@ -30,8 +31,9 @@ Prerequisites: Python 3.12+, [uv](https://github.com/astral-sh/uv), Docker, and 
 4. **Migrate.** `uv run alembic upgrade head`. `migrations/env.py` overwrites the `alembic.ini` URL with `DATABASE_URL`, so the 5432 URL in the ini is never used. Details: [Create and apply a database migration](howto-database-migration.md).
 5. **Check.** `uv run odds status show`, then `uv run odds status quota`. The free tier is 500 units per month per key, and each `fetch current` costs 1 unit per region per market (3 by default) ([Odds API client](../collection/odds-api-client.md)).
 6. **First fetch.** `uv run odds fetch current --sport soccer_epl`. Pass `--sport`: the default is `basketball_nba` ([Sport defaults](odds-cli.md#sport-defaults)). Each fetch costs units.
-7. **Enable the hooks** (before committing). `uv run pre-commit install` runs the lint hooks on every commit; `uv run pre-commit run --all-files` runs them everywhere ([Code conventions](code-conventions.md#mechanical-gates)). `ln -s ../../.githooks/claim-issue.sh "$(git rev-parse --git-common-dir)/hooks/post-checkout"` installs the `claim-issue` git hook, which assigns issue `<n>` to you when you create a branch named `<n>-<slug>` or `issue-<n>-<slug>`; it never blocks a checkout (`.githooks/claim-issue.sh`).
-8. **Run the scheduler** (optional). Set `SCHEDULER_BOOTSTRAP_JOBS` to the jobs you need, then `uv run odds scheduler start` ([Local scheduler](../scheduling/local-scheduler.md)). The default in `odds_core.config.SchedulerConfig.bootstrap_jobs` is the production job set, including `fetch-odds` and `fetch-scores`, which spend Odds API quota ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
+7. **Enable the hooks** (before committing). `uv run pre-commit install` runs the lint hooks on every commit; `uv run pre-commit run --all-files` runs them everywhere ([Code conventions](code-conventions.md#mechanical-gates)).
+8. **Enable issue claiming** (before creating an issue branch). `ln -s ../../.githooks/claim-issue.sh "$(git rev-parse --git-common-dir)/hooks/post-checkout"` installs the `claim-issue` git hook, which assigns issue `<n>` to you when you create a branch named `<n>-<slug>` or `issue-<n>-<slug>` and never blocks a checkout (`.githooks/claim-issue.sh`). Install it once per clone; worktrees share it and run the main checkout's copy of the script.
+9. **Run the scheduler** (optional). Set `SCHEDULER_BOOTSTRAP_JOBS` to the jobs you need, then `uv run odds scheduler start` ([Local scheduler](../scheduling/local-scheduler.md)). The default in `odds_core.config.SchedulerConfig.bootstrap_jobs` is the production job set, including `fetch-odds` and `fetch-scores`, which spend Odds API quota ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
 
 Any import of `odds_core` builds settings, so a missing `ODDS_API_KEY` or `DATABASE_URL` fails every command ([Workspace packages](workspace-packages.md#odds-core)). To seed local data from production see [Copy production data locally](howto-copy-production-data.md). Tests need none of this database.
 
