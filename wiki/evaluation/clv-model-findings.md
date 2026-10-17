@@ -59,7 +59,7 @@ Several results below used feature sets the code does not define, for example th
 
 ## Caveats
 
-- These runs set `early_stopping_rounds`, which XGBoost evaluated on the validation fold, so fold metrics are optimistically biased (#474).
+- XGBoost runs through `odds train`, including the deployed model, set `early_stopping_rounds`, which XGBoost evaluated on the validation fold, so their fold metrics are optimistically biased (#474). Script-based experiments that fit without an `eval_set` are not affected.
 
 ## Related
 
