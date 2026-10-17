@@ -117,11 +117,9 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
     }
 )
 
-# Jobs with fixed cron schedules when run locally. Mirrors terraform's
-# ``fixed_schedule_expressions`` for the jobs that have moved out of
-# Lambda and into the local scheduler. Keys are base job names (no sport
-# suffix); the scheduler CLI expands per-sport jobs into one schedule per
-# target sport, each with its own compound job name.
+# Jobs with fixed cron schedules in the local scheduler. Keys are base job
+# names (no sport suffix); the scheduler CLI expands per-sport jobs into one
+# schedule per target sport, each with its own compound job name.
 _JOB_CRON_MAP: dict[str, str] = {
     "daily-digest": "0 8 * * *",
     "fetch-espn-fixtures": "0 6 * * *",
@@ -284,7 +282,7 @@ def resolve_target_sports(job_name: str, configured_sports: Sequence[SportKey]) 
     unrestricted jobs run for every configured sport.
     """
     allowed = get_job_sports(job_name)
-    return list(allowed) if allowed is not None else list(configured_sports)
+    return [s for s in configured_sports if allowed is None or s in allowed]
 
 
 def expected_compound_job_names(

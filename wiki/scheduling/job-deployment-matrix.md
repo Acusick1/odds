@@ -24,7 +24,7 @@ Three lists in code decide what the production scheduler runs:
 
 - `odds_core.config.SchedulerConfig.bootstrap_jobs` names the jobs `odds scheduler start` bootstraps. `agent-run` and `daily-digest` are commented out there, so they run only when added to `SCHEDULER_BOOTSTRAP_JOBS`.
 - `odds_lambda.scheduling.jobs._JOB_CRON_MAP` gives the jobs installed as a fixed cron. Every other bootstrapped job runs its bootstrap function once and then self-schedules ([Self-scheduling](self-scheduling.md)).
-- `odds_lambda.scheduling.jobs._JOB_SPORTS` limits a per-sport job, cron or self-scheduling, to an allowlist of sports. A per-sport job absent from it runs for every sport in `data_collection.sports` (`odds_lambda.scheduling.jobs.resolve_target_sports`).
+- `odds_lambda.scheduling.jobs._JOB_SPORTS` limits a per-sport job, cron or self-scheduling, to the configured sports in its allowlist. A per-sport job absent from it runs for every sport in `data_collection.sports` (`odds_lambda.scheduling.jobs.resolve_target_sports`).
 
 | Job | Bootstrapped by default | Sports | Schedule |
 |---|---|---|---|

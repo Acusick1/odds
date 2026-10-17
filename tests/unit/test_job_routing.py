@@ -257,6 +257,9 @@ class TestResolveTargetSports:
     def test_event_driven_job_with_allowlist_ignores_unlisted_sports(self, job: str) -> None:
         assert resolve_target_sports(job, ["soccer_epl", "baseball_mlb"]) == ["soccer_epl"]
 
+    def test_allowlisted_sport_not_configured_is_dropped(self) -> None:
+        assert resolve_target_sports("fetch-odds", ["baseball_mlb"]) == []
+
     def test_empty_configured_sports_yields_empty(self) -> None:
         assert resolve_target_sports("fetch-oddsportal", []) == []
 

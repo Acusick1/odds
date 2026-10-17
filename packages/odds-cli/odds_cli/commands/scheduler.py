@@ -361,7 +361,8 @@ def smoke(
 
     Derives the job set from ``scheduler.bootstrap_jobs`` (the same single
     source of truth ``start`` uses), expands per-sport jobs into one run per
-    configured sport, runs each once, and prints a per-job pass/fail table.
+    target sport (``resolve_target_sports``), runs each once, and prints a
+    per-job pass/fail table.
     Exits non-zero (exit code = number of failed jobs) if any job fails.
 
     ``agent-run`` is skipped by default (never place paper bets during a deploy
