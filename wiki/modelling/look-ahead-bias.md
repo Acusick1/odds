@@ -33,7 +33,6 @@ Decision time is the instant a prediction or bet is assumed to be made. Everythi
 
 The pregame window is the documented default because sharp-retail divergence peaks 3-6 h before NBA games (`experiments/results/exp4_hours_to_game/FINDINGS.md`, PR #166); timing on EPL is untested ([NBA timing and injuries](../evaluation/exp-nba-timing-and-injuries.md), [CLV model findings](../evaluation/clv-model-findings.md)).
 
-The XGBoost fold passed as `eval_set` is used for metrics and pruning only, so validation rows never influence the fitted trees (#474).
 
 ## No future data, layer by layer
 
@@ -42,6 +41,7 @@ The XGBoost fold passed as `eval_set` is used for metrics and pruning only, so v
 - **Sampling.** `odds_analytics.feature_groups.TierSampler` excludes `IN_PLAY` snapshots unless that is the decision tier. Including them leaked post-kickoff odds and produced a spurious R² of +0.45 (commit 2a84d88, `experiments/results/exp2_feature_group_isolation/FINDINGS.md`; [early NBA signal](../evaluation/exp-early-nba-signal-and-lstm.md#the-in_play-leak)).
 - **Feature groups.** Injuries use only reports with `report_time <= snapshot_time` (`odds_analytics.injury_features.extract_injury_features`); standings, match stats and EPL schedule use matches strictly before `commence_time`; the LSTM adapter keeps sequences whose first entry is at or before the snapshot ([feature groups](feature-groups.md), [EPL context features](epl-context-features.md)).
 - **Cross-source contamination** (PR #231) is a related bug, not a time leak: see [EPL sharp-reference experiments](../evaluation/exp-epl-sharp-reference.md).
+- **Validation-fold leakage** is not a time leak either: XGBoost has no early stopping, so validation rows never influence the fitted trees; see [cross-validation](cross-validation.md#cv-methods-and-metrics).
 
 ## Where the rule breaks
 

@@ -21,7 +21,7 @@ status: stable
 - The `experiments/configs/xgboost_epl_production_*` YAMLs carry the search space that avoids constant predictors on sliding windows; older YAMLs carry the original space ([search-space experiment](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test)).
 - Scripts run as `uv run python experiments/scripts/<script>.py`.
 - The February 2026 scripts reference feature groups the code does not define and may not run ([early NBA signal search](exp-early-nba-signal-and-lstm.md#caveats)).
-- Training configs under `experiments/configs/` have no early-stopping setting; boosting length is `n_estimators`, which the search space tunes.
+- XGBoost configs under `experiments/configs/` have no early-stopping setting; boosting length is `n_estimators`, which the search space tunes ([training config](../modelling/training-config.md)).
 
 ## `FINDINGS.md`
 

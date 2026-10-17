@@ -11,7 +11,7 @@ experiment:
   description: "Production candidate: EPL CLV with tabular + match_stats features\
     \ under sliding-380:50 + principled Optuna search (mcw [1,15],\
     \ gamma=0, reg_alpha=0, reg_lambda log [0.01, 5.0]). 2026-04-23 ablation: best\
-    \ individual feature group config; CV val_R\xB2=0.058, val_MSE=0.000716."
+    \ individual feature group config."
 training:
   strategy_type: xgboost_line_movement
   data:

@@ -98,7 +98,7 @@ By the time game-time injury designations are public (0-3 h) the closing line ha
 - Exp 4 used 13 features including the injury group, which later runs found uninformative.
 - **Tier boundaries are encoded more than once and disagree** at exactly 3, 12, 24 and 72 h: `odds_lambda.tier_utils.calculate_tier` uses `<=` while `odds_lambda.oddsportal_common.hours_to_tier` uses `<` ([fetch tier](../storage/fetch-tier.md#boundary-encodings), #446).
 - Line-release numbers are NBA and Odds API only.
-- Results recorded before #474 come from runs where XGBoost early stopping monitored the validation fold, so their fold metrics are optimistic; current configs have no early stopping.
+- The `odds train` bet365 and Pinnacle runs in the injury-feature section set `early_stopping_rounds` on the validation fold, so their fold metrics are optimistically biased ([caveat](clv-model-findings.md#caveats)). Exp 4, Exp 6 and Exp 6b were script-based with no `eval_set` and are not affected.
 
 ## Related
 

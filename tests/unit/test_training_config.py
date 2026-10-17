@@ -31,6 +31,7 @@ from odds_analytics.training import (
     XGBoostConfig,
 )
 from odds_lambda.fetch_tier import FetchTier
+from pydantic import ValidationError
 
 # =============================================================================
 # ExperimentConfig Tests
@@ -513,6 +514,11 @@ class TestXGBoostConfig:
         assert config.max_depth == 10
         assert config.learning_rate == 0.05
         assert config.reg_alpha == 0.1
+
+    def test_early_stopping_rounds_rejected(self):
+        """Early stopping is not configurable; unknown fields are forbidden."""
+        with pytest.raises(ValidationError):
+            XGBoostConfig(early_stopping_rounds=50)
 
     def test_invalid_n_estimators(self):
         """Test invalid n_estimators validation."""

@@ -376,6 +376,34 @@ class TestXGBoostLineMovementStrategyTrainFromConfig:
         with pytest.raises(ValueError, match="Invalid strategy_type"):
             strategy.train_from_config(invalid_config, X_train, y_train, feature_names)
 
+    def test_validation_data_does_not_stop_training_early(self, training_data):
+        """Validation rows are scored but never cut the booster short."""
+        X_train, y_train, feature_names = training_data
+        y_train = y_train.astype(np.float32) * 0.1
+        rng = np.random.default_rng(0)
+        X_val = rng.random((20, X_train.shape[1]))
+        y_val = rng.random(20) * 0.1
+
+        config = MLTrainingConfig(
+            experiment=ExperimentConfig(name="no_early_stopping"),
+            training=TrainingConfig(
+                strategy_type="xgboost_line_movement",
+                data=DataConfig(
+                    start_date=date(2024, 10, 1),
+                    end_date=date(2024, 12, 31),
+                ),
+                model=XGBoostConfig(n_estimators=200, learning_rate=0.3),
+            ),
+        )
+
+        strategy = XGBoostLineMovementStrategy()
+        strategy.train_from_config(
+            config, X_train, y_train, feature_names, X_val=X_val, y_val=y_val
+        )
+
+        assert strategy.model is not None
+        assert strategy.model.get_booster().num_boosted_rounds() == 200
+
 
 class TestConfigValidation:
     """Test configuration validation in train_from_config methods."""
