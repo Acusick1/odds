@@ -508,13 +508,11 @@ class TestXGBoostConfig:
             subsample=0.9,
             reg_alpha=0.1,
             reg_lambda=2.0,
-            early_stopping_rounds=50,
         )
         assert config.n_estimators == 500
         assert config.max_depth == 10
         assert config.learning_rate == 0.05
         assert config.reg_alpha == 0.1
-        assert config.early_stopping_rounds == 50
 
     def test_invalid_n_estimators(self):
         """Test invalid n_estimators validation."""

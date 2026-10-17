@@ -440,10 +440,6 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             "n_jobs": model_config.n_jobs,
         }
 
-        # Handle early stopping if configured
-        if model_config.early_stopping_rounds is not None:
-            xgb_params["early_stopping_rounds"] = model_config.early_stopping_rounds
-
         # Log configuration parameters to tracker if enabled
         if tracker:
             from odds_analytics.training.utils import flatten_config_for_tracking

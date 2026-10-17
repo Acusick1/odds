@@ -54,6 +54,7 @@ On 589 overlapping events Betfair Exchange `sharp_prob` correlates 0.9994 with P
 - `experiments/configs/xgboost_epl_hybrid_sharp.yaml` predates the principled search space, and the 2026-03-18 sliding-380 feature-group numbers were a search-space artefact and should not be used.
 - The sliding-380 numbers above do not reproduce under current data and the hybrid reference; feature counts are as recorded (the results used a 7-column tabular group; the code defines 6).
 - Fold counts disagree between sources: the 2026-03-15/16 expanding:150 runs are logged as 6 folds (tabular, + standings) and 5 folds (+ match_stats, + standings + match_stats), while this page says about 7 for the same protocol; `experiments/results/xgboost_epl_production_expanding_150/verification` holds no fold metadata, so neither can be confirmed.
+- Results recorded before #474 come from runs where XGBoost early stopping monitored the validation fold, so their fold metrics are optimistic; current configs have no early stopping.
 
 ## Related
 

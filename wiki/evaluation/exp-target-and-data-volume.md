@@ -43,6 +43,7 @@ R² plateaus at about 1.5K events and oscillates between about 0 and +0.035 afte
 - Tuned CV R² is optimistically biased (best of N trials); comparisons between equally tuned runs are fair ([CV protocol grid](exp-cv-protocol-grid.md)).
 - The Pinnacle and bet365 runs differ in source (Odds API against OddsPortal), size (about 800 against about 5K events) and folds (4 against 11); no run compares the two targets on the same source and event count (#482).
 - The production YAML also lists bet365 in `retail_bookmakers`, so the target bookmaker's snapshot price is an input to `retail_sharp_diff` ([sharp benchmark](../modelling/sharp-benchmark.md)).
+- Results recorded before #474 come from runs where XGBoost early stopping monitored the validation fold, so their fold metrics are optimistic; current configs have no early stopping.
 
 ## Related
 

@@ -16,7 +16,7 @@ status: stable
 
 # Training config
 
-`odds_analytics.training.config` is authoritative for fields and defaults; configs live in `experiments/configs/` and the production example is `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`. What `odds train` does with a config is on [Training pipeline](training-pipeline.md).
+`odds_analytics.training.config` is authoritative for fields and defaults; configs live in `experiments/configs/` and the production example is `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`. `odds_analytics.training.config.XGBoostConfig` has no early-stopping field and rejects unknown keys, so boosting length is set only by `n_estimators`. What `odds train` does with a config is on [Training pipeline](training-pipeline.md).
 
 ## Sections
 

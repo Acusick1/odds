@@ -94,7 +94,7 @@ Deployed as `epl-clv-home` `v308058c` (CV R² +0.058, MSE 0.000716), replacing t
 
 ## Caveats
 
-- **Search spaces in older YAMLs.** Most older committed configs still carry the original space (`min_child_weight` up to 50, early stopping 15), for example `experiments/configs/xgboost_epl_lineup.yaml` and `experiments/configs/xgboost_epl_hybrid_sharp.yaml`; copy the search space from the `experiments/configs/xgboost_epl_production_*` configs when starting a new sliding-window run.
+- **Search spaces in older YAMLs.** Most older committed configs still carry the original space (`min_child_weight` up to 50), for example `experiments/configs/xgboost_epl_lineup.yaml` and `experiments/configs/xgboost_epl_hybrid_sharp.yaml`; copy the search space from the `experiments/configs/xgboost_epl_production_*` configs when starting a new sliding-window run.
 - The 2026-03-18 sliding-380 feature-group numbers (#234) were a search-space artefact and should not be used ([EPL sharp-reference experiments](exp-epl-sharp-reference.md)).
 - **FPL is not reproducible.** The FPL tables and reader remain ([EPL context data](../collection/epl-context-data.md)) but the run cannot be repeated as recorded.
 - The `min_child_weight` rule of thumb has no recorded source.

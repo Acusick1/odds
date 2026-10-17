@@ -40,6 +40,8 @@ This grid is the evidence for [ADR-0004](../../docs/adr/0004-walk-forward-cv-pro
 
 Expanding cells start validation after 700 training events and sliding-380 after 380, so MSEs are computed on different validation sets and the ranking is not like-for-like until the grid is re-run on a common validation range (#452).
 
+Results recorded before #474 come from runs where XGBoost early stopping monitored the validation fold, so their fold metrics are optimistic; current configs have no early stopping.
+
 ## Related
 
 - [Cross-validation](../modelling/cross-validation.md), [CLV model findings](clv-model-findings.md), [EPL feature ablation](exp-epl-feature-ablation-and-search-space.md)

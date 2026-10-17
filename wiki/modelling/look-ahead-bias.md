@@ -33,6 +33,8 @@ Decision time is the instant a prediction or bet is assumed to be made. Everythi
 
 The pregame window is the documented default because sharp-retail divergence peaks 3-6 h before NBA games (`experiments/results/exp4_hours_to_game/FINDINGS.md`, PR #166); timing on EPL is untested ([NBA timing and injuries](../evaluation/exp-nba-timing-and-injuries.md), [CLV model findings](../evaluation/clv-model-findings.md)).
 
+The XGBoost fold passed as `eval_set` is used for metrics and pruning only, so validation rows never influence the fitted trees (#474).
+
 ## No future data, layer by layer
 
 - **Backtest odds.** As above: `odds_lambda.storage.readers.OddsReader.get_odds_at_time` around `decision_time`.

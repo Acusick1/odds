@@ -34,6 +34,7 @@ Several results below used feature sets the code does not define, for example th
 - Polymarket features are untested at scale (230 events, no effect): [Polymarket market research](../collection/polymarket-market-research.md).
 - NBA bookmakers release lines at different times: [line release timing](exp-nba-timing-and-injuries.md#bookmaker-line-release-timing).
 - Flat betting does not survive the vig, and line shopping does not close the gap: [betting simulation](exp-betting-simulation.md).
+- Results recorded before #474 come from runs where XGBoost early stopping monitored the validation fold, so their fold metrics are optimistic; current configs have no early stopping.
 
 ## Data used
 

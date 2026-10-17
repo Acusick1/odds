@@ -212,6 +212,26 @@ class TestXGBoostLineMovementStrategy:
         not pytest.importorskip("xgboost", reason="xgboost not installed"),
         reason="requires xgboost",
     )
+    def test_validation_data_does_not_stop_training_early(self):
+        """Validation rows are scored but never cut the booster short."""
+        strategy = XGBoostLineMovementStrategy()
+        rng = np.random.default_rng(0)
+
+        X_train = rng.random((80, 5))
+        y_train = rng.uniform(-0.1, 0.1, 80)
+        X_val = rng.random((20, 5))
+        y_val = rng.uniform(-0.1, 0.1, 20)  # pure noise: validation loss stalls early
+        feature_names = [f"feature_{i}" for i in range(5)]
+
+        strategy.train(X_train, y_train, feature_names, X_val=X_val, y_val=y_val, n_estimators=200)
+
+        assert strategy.model is not None
+        assert strategy.model.get_booster().num_boosted_rounds() == 200
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("xgboost", reason="xgboost not installed"),
+        reason="requires xgboost",
+    )
     def test_predict_movement(self):
         """Test that model can predict line movement."""
         strategy = XGBoostLineMovementStrategy()
