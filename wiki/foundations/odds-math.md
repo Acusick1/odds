@@ -23,6 +23,7 @@ status: stable
 
 - `odds_core.odds_math.american_to_decimal(american_odds)`: positive `a/100 + 1`, negative `100/|a| + 1`.
 - `odds_core.odds_math.decimal_to_american(decimal_odds)`: `>= 2.0` gives `int((d-1)*100)`, otherwise `int(-100/(d-1))`. `int()` truncates toward zero; `d == 1.0` raises `ZeroDivisionError`.
+- `odds_core.odds_math.probability_to_american(probability)`: nearest American price for a probability strictly between 0 and 1, `ValueError` outside it. At or below 0.5 it is `round(100 (1-p)/p)`, above it `round(-100 p/(1-p))`; unlike `odds_core.odds_math.decimal_to_american` it rounds.
 - `odds_core.odds_math.calculate_implied_probability(american_odds)`: `1 / american_to_decimal(...)`. Includes vig. It divides by `odds_core.odds_math.american_to_decimal`, so `american_odds == 0` raises.
 - `odds_core.odds_math.devig_probabilities(*probs)`: proportional normalization to sum 1 for any outcome count; uniform if the sum is `<= 0`; `()` for no input. It does not validate that inputs are in `[0, 1]` ([Devigging](devigging.md)).
 - `odds_core.odds_math.determine_h2h_winner(home_score, away_score)` returns `"home"`, `"away"` or `"draw"`.

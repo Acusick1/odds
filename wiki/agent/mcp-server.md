@@ -43,7 +43,7 @@ status: stable
 | `odds_mcp.server.refresh_scrape`, `odds_mcp.server.get_scrape_status`, `odds_mcp.server.get_scheduled_jobs`, `odds_mcp.server.schedule_next_wakeup` | [below](#scrape-and-scheduling-tools) |
 | `odds_mcp.tools.epl.get_team_context` (EPL), `odds_mcp.tools.mlb.get_probable_pitchers` (MLB) | [sport context tools](mcp-sport-context-tools.md) |
 
-15 tools are defined in `odds_mcp.server` and 2 in `odds_mcp/tools/`. `odds_mcp.server` has `_DEFAULT_SHARP_BOOKMAKERS = ["pinnacle", "betfair_exchange"]` and a comment saying it duplicates the feature default and must be kept in sync; the values differ deliberately (#421, [code copies](../modelling/sharp-benchmark.md#code-copies)).
+15 tools are defined in `odds_mcp.server` (`odds_mcp.server.find_retail_edges`, which excludes the sharp list and `odds_core.bookmakers.NON_BETTABLE_BOOKMAKERS`, has its own test in `tests/unit/test_mcp_server.py`) and 2 in `odds_mcp/tools/`. `odds_mcp.server` has `_DEFAULT_SHARP_BOOKMAKERS = ["pinnacle", "betfair_exchange"]` and a comment saying it duplicates the feature default and must be kept in sync; the values differ deliberately (#421, [code copies](../modelling/sharp-benchmark.md#code-copies)).
 
 ## Sport sub-servers
 

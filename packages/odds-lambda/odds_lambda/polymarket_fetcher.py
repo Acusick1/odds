@@ -3,17 +3,21 @@
 import asyncio
 import re
 import time
+from datetime import UTC, datetime, timedelta
 
 import aiohttp
 import structlog
 from odds_core.config import get_settings
 from odds_core.polymarket_models import PolymarketMarketType
+from odds_core.sports import SportKey
 from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
+
+from odds_lambda.polymarket_sports import POLYMARKET_SPORTS
 
 logger = structlog.get_logger()
 
@@ -22,6 +26,11 @@ REQUEST_TIMEOUT = 30
 
 # Maximum concurrent requests for batch operations
 MAX_CONCURRENT_REQUESTS = 10
+
+GAMMA_PAGE_SIZE = 100
+
+# CLOB rejects startTs/endTs windows of 20 days and accepts 14.
+MAX_HISTORY_WINDOW = timedelta(days=14)
 
 
 class PolymarketClient:
@@ -39,8 +48,6 @@ class PolymarketClient:
         polymarket_config = app_settings.polymarket
         self.gamma_url = gamma_url or polymarket_config.gamma_base_url
         self.clob_url = clob_url or polymarket_config.clob_base_url
-        self.nba_series_id = polymarket_config.nba_series_id
-        self.game_tag_id = polymarket_config.game_tag_id
         self.session: aiohttp.ClientSession | None = None
 
     async def __aenter__(self) -> "PolymarketClient":
@@ -116,42 +123,37 @@ class PolymarketClient:
             )
             raise
 
-    async def get_nba_events(
-        self, active: bool = True, closed: bool = False, limit: int = 100, offset: int = 0
+    async def get_events(
+        self,
+        sport_key: SportKey,
+        active: bool | None = True,
+        closed: bool = False,
+        limit: int = GAMMA_PAGE_SIZE,
+        offset: int = 0,
     ) -> list[dict]:
+        """Fetch one page of a sport's events from the Gamma API (at most 100 per page).
+
+        Closed events keep ``active=true``, so pass ``active=None`` to list them.
         """
-        Fetch NBA events from Gamma API.
-
-        Args:
-            active: Include active events
-            closed: Include closed events
-            limit: Maximum events per page
-            offset: Pagination offset
-
-        Returns:
-            List of event dicts
-
-        Example:
-            async with PolymarketClient() as client:
-                events = await client.get_nba_events(active=True)
-                for event in events:
-                    print(f"{event['title']}")
-        """
-        params = {
-            "series_id": self.nba_series_id,
-            "tag_id": self.game_tag_id,
-            "active": str(active).lower(),
+        sport = POLYMARKET_SPORTS[sport_key]
+        params: dict[str, str | int] = {
+            "series_id": sport.series_id,
             "closed": str(closed).lower(),
             "limit": limit,
             "offset": offset,
         }
+        if active is not None:
+            params["active"] = str(active).lower()
+        if sport.tag_id is not None:
+            params["tag_id"] = sport.tag_id
 
         data, response_time = await self._make_request(self.gamma_url, "/events", params=params)
 
         events = data if isinstance(data, list) else []
 
         logger.info(
-            "nba_events_fetched",
+            "polymarket_events_fetched",
+            sport=sport_key,
             active=active,
             closed=closed,
             events_count=len(events),
@@ -159,6 +161,21 @@ class PolymarketClient:
         )
 
         return events
+
+    async def get_all_events(
+        self, sport_key: SportKey, active: bool | None = True, closed: bool = False
+    ) -> list[dict]:
+        """Fetch every page of a sport's events, ending on the first empty page.
+
+        Offset paging can repeat an event when the listing shifts mid-fetch, so
+        events are keyed by their Polymarket id.
+        """
+        events: dict[str, dict] = {}
+        offset = 0
+        while page := await self.get_events(sport_key, active=active, closed=closed, offset=offset):
+            offset += len(page)
+            events.update({str(event["id"]): event for event in page})
+        return list(events.values())
 
     async def get_event_by_id(self, event_id: str) -> dict | None:
         """
@@ -292,7 +309,7 @@ class PolymarketClient:
     async def get_price_history(
         self,
         token_id: str,
-        interval: str = "max",
+        interval: str | None = "max",
         fidelity: int = 5,
         start_ts: int | None = None,
         end_ts: int | None = None,
@@ -302,23 +319,17 @@ class PolymarketClient:
 
         Args:
             token_id: CLOB token ID (as string)
-            interval: Time interval ('max', '1d', '1h', etc.)
+            interval: Time interval ('max', '1d', '1h', etc.); None to use start_ts/end_ts only
             fidelity: Data point density (1-10)
             start_ts: Start timestamp (Unix seconds)
             end_ts: End timestamp (Unix seconds)
 
         Returns:
             List of price history dicts [{t: unix_timestamp, p: price}]
-
-        Note:
-            Data retention is ~30 days rolling. Older data gradually purged.
         """
-        params = {
-            "market": token_id,
-            "interval": interval,
-            "fidelity": fidelity,
-        }
-
+        params: dict[str, str | int] = {"market": token_id, "fidelity": fidelity}
+        if interval is not None:
+            params["interval"] = interval
         if start_ts is not None:
             params["startTs"] = start_ts
         if end_ts is not None:
@@ -339,6 +350,32 @@ class PolymarketClient:
         )
 
         return history
+
+    async def get_price_series(
+        self, token_id: str, start: datetime, end: datetime, fidelity: int = 1
+    ) -> list[tuple[datetime, float]]:
+        """Midpoint series for ``[start, end]`` from explicit windows, oldest first.
+
+        ``interval=max`` returns nothing for old markets, so the range is split
+        into windows of at most ``MAX_HISTORY_WINDOW``.
+        """
+        series: list[tuple[datetime, float]] = []
+        window_start = start
+        while window_start < end:
+            window_end = min(window_start + MAX_HISTORY_WINDOW, end)
+            history = await self.get_price_history(
+                token_id,
+                interval=None,
+                fidelity=fidelity,
+                start_ts=int(window_start.timestamp()),
+                end_ts=int(window_end.timestamp()),
+            )
+            series.extend(
+                (datetime.fromtimestamp(point["t"], UTC), point["p"]) for point in history
+            )
+            window_start = window_end
+        series.sort(key=lambda point: point[0])
+        return list(dict(series).items())
 
     async def get_prices_batch(
         self, token_ids: list[str], max_concurrent: int = MAX_CONCURRENT_REQUESTS

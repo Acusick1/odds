@@ -32,7 +32,7 @@ Breadth and speed of information synthesis by an LLM agent, not the XGBoost CLV 
 
 ## What runs where
 
-One host, the mini-PC, runs every scheduled job under its local scheduler and holds the production database ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The job set is `odds_core.config.SchedulerConfig.bootstrap_jobs`, with `agent-run` and `daily-digest` commented out. The two AWS Lambdas (`odds-scheduler`, `odds-scheduler-scraper`) and their Terraform remain but are dormant, and the Neon database they wrote to is a frozen archive. The repo does not record the deployed AWS state; the only check is `odds scheduler list-jobs --backend aws`.
+One host, the mini-PC, runs every scheduled job under its local scheduler and holds the production database ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The default job set is `odds_core.config.SchedulerConfig.bootstrap_jobs`, with `agent-run` and `daily-digest` commented out. The two AWS Lambdas (`odds-scheduler`, `odds-scheduler-scraper`) and their Terraform remain but are dormant, and the Neon database they wrote to is a frozen archive. The repo does not record the deployed AWS state; the only check is `odds scheduler list-jobs --backend aws`.
 
 Per-job table: [Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs); local backend: [Local scheduler](../scheduling/local-scheduler.md).
 
@@ -52,7 +52,7 @@ Each fails quietly on EPL and MLB data: the symptom is an empty result (no event
 - `backfill plan` and `backfill scores` hardcode `sport_key="basketball_nba"` (`odds_cli.commands.backfill`), as does `odds_analytics.backfill_executor.BackfillExecutor` ([Odds API historical backfill](../collection/odds-api-backfill.md)).
 - Completeness checks discover NBA games only, and `odds_lambda.storage.readers.OddsReader.get_games_by_date` buckets days noon-to-noon UTC "to capture a full NBA game day" and has no sport filter, so it serves every sport (`odds_lambda.storage.tier_validator.TierCoverageValidator`; [Coverage and completeness checks](../storage/coverage-checks.md), [OddsReader](../storage/odds-reader.md)).
 - `odds_analytics.strategies.BasicEVStrategy` defaults to NBA-style markets and US retail books, which match nothing in OddsPortal EPL data (`1x2`, UK books) ([Backtest strategies](../evaluation/backtest-strategies.md)).
-- Polymarket code targets NBA (`odds_lambda.polymarket_fetcher.PolymarketClient.get_nba_events`, `odds_core.config.PolymarketConfig.nba_series_id`) ([Polymarket pipeline and tables](../collection/polymarket.md)).
+- The Polymarket price and order-book tables and jobs target NBA (`odds_lambda.jobs.fetch_polymarket.main`); EPL match prices (fetched with `odds_lambda.polymarket_fetcher.PolymarketClient`) are stored as odds snapshots ([Polymarket pipeline and tables](../collection/polymarket.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)).
 - The `.env.example` template sets `SPORTS=basketball_nba` ([Configuration](configuration.md)).
 
 ## Related

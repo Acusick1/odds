@@ -25,7 +25,7 @@ status: stable
 
 # The odds CLI
 
-`odds_cli.main.app` is a Typer app installed as the `odds` script. Each group is a module in `packages/odds-cli/odds_cli/commands/` registered with `add_typer`. Each command's `--help` is authoritative for flags and defaults. Commands are documented on the page that owns their domain; none is repeated here. `odds_cli.main.callback` configures human-readable logging ([Code conventions](code-conventions.md#logging)). The root help text and banner describe the tool as NBA (#448).
+`odds_cli.main.app` is a Typer app installed as the `odds` script. Each group is a module in `packages/odds-cli/odds_cli/commands/` registered with `add_typer`. Each command's `--help` is authoritative for flags and defaults. Commands are documented on the page that owns their domain (the `polymarket` group's Polymarket EPL commands included); none is repeated here. `odds_cli.main.callback` configures human-readable logging ([Code conventions](code-conventions.md#logging)). The root help text and banner describe the tool as NBA (#448).
 
 ## Command groups
 
@@ -41,7 +41,7 @@ status: stable
 | `validate`, `quality` | [Coverage and completeness checks](../storage/coverage-checks.md) |
 | `copy` | [Copy production data locally](howto-copy-production-data.md) |
 | `scheduler` | [Local scheduler](../scheduling/local-scheduler.md) |
-| `polymarket` | [Polymarket pipeline and tables](../collection/polymarket.md) |
+| `polymarket` | [Polymarket pipeline and tables](../collection/polymarket.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#backfill-command) |
 | `injuries`, `nba-stats`, `pbpstats` | [NBA feeds](../collection/nba-injuries-and-stats.md) |
 | `paper` | [Paper trading](../agent/paper-trading.md) |
 | `agent` | [Agent runtime and the agent-run job](../agent/agent-run-job.md) |
@@ -74,7 +74,7 @@ The help text disagrees with the code in four places (#448, #466):
 
 - The root help, banner and callback docstring say "NBA" (`odds_cli.main.app`, `odds_cli.main.callback`).
 - `--strategy` on `odds backtest run` lists `lstm`, which is not a key of `odds_cli.commands.backtest.STRATEGIES`.
-- `odds scheduler run-once` help names three jobs (`fetch-odds`, `fetch-scores`, `update-status`) of the 14 in `odds_lambda.scheduling.jobs._JOB_MODULE_MAP` (`odds_cli.commands.scheduler.run_once`).
+- `odds scheduler run-once` help names three jobs (`fetch-odds`, `fetch-scores`, `update-status`) of the 15 in `odds_lambda.scheduling.jobs._JOB_MODULE_MAP` (`odds_cli.commands.scheduler.run_once`).
 - `odds scheduler info` has no help text, because its docstring follows a statement (`odds_cli.commands.scheduler.info`). It lists each sport's Odds API bookmakers.
 
 ## Related

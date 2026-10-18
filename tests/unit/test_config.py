@@ -170,8 +170,6 @@ class TestSettings:
 
             assert settings.polymarket.gamma_base_url == "https://gamma-api.polymarket.com"
             assert settings.polymarket.clob_base_url == "https://clob.polymarket.com"
-            assert settings.polymarket.nba_series_id == "10345"
-            assert settings.polymarket.game_tag_id == "100639"
             assert settings.polymarket.enabled is True
             assert settings.polymarket.price_poll_interval == 300
             assert settings.polymarket.orderbook_poll_interval == 1800
@@ -192,7 +190,6 @@ class TestSettings:
                 "POLYMARKET_PRICE_POLL_INTERVAL": "60",
                 "POLYMARKET_ORDERBOOK_POLL_INTERVAL": "900",
                 "POLYMARKET_COLLECT_PLAYER_PROPS": "true",
-                "POLYMARKET_NBA_SERIES_ID": "99999",
             },
         ):
             settings = Settings()
@@ -201,7 +198,6 @@ class TestSettings:
             assert settings.polymarket.price_poll_interval == 60
             assert settings.polymarket.orderbook_poll_interval == 900
             assert settings.polymarket.collect_player_props is True
-            assert settings.polymarket.nba_series_id == "99999"
 
     def test_betfair_defaults(self):
         """Defaults: disabled, no creds, sports=None (resolved from SPORT_CONFIG at runtime)."""

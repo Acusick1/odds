@@ -122,12 +122,12 @@ class TestFetchPolymarketMain:
     async def test_early_return_when_polymarket_disabled(self, job: JobMocks) -> None:
         job.settings.polymarket.enabled = False
         await fetch_polymarket.main(JobContext())
-        job.client.get_nba_events.assert_not_called()
+        job.client.get_events.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_api_events_schedules_from_db(self, job: JobMocks) -> None:
         db_event = _make_active_event(hours_until=6)
-        job.client.get_nba_events.return_value = []
+        job.client.get_events.return_value = []
         job.reader.get_active_events.return_value = [db_event]
 
         await fetch_polymarket.main(JobContext())
@@ -138,7 +138,7 @@ class TestFetchPolymarketMain:
 
     @pytest.mark.asyncio
     async def test_no_api_events_no_db_events_schedules_daily(self, job: JobMocks) -> None:
-        job.client.get_nba_events.return_value = []
+        job.client.get_events.return_value = []
         job.reader.get_active_events.return_value = []
 
         await fetch_polymarket.main(JobContext())
@@ -151,7 +151,7 @@ class TestFetchPolymarketMain:
 
     @pytest.mark.asyncio
     async def test_happy_path_calls_service(self, job: JobMocks) -> None:
-        job.client.get_nba_events.return_value = [{"id": "ev-1"}]
+        job.client.get_events.return_value = [{"id": "ev-1"}]
 
         discovery_result = PolymarketIngestionResult(events_processed=1, markets_discovered=2)
         snapshot_result = PolymarketIngestionResult(
@@ -168,7 +168,7 @@ class TestFetchPolymarketMain:
     @pytest.mark.asyncio
     async def test_no_active_events_after_upsert_schedules_daily(self, job: JobMocks) -> None:
         """When collect_snapshots returns no fetch_tier, schedule daily."""
-        job.client.get_nba_events.return_value = [{"id": "ev-1"}]
+        job.client.get_events.return_value = [{"id": "ev-1"}]
 
         discovery_result = PolymarketIngestionResult(events_processed=1)
         snapshot_result = PolymarketIngestionResult(fetch_tier=None)
@@ -185,7 +185,7 @@ class TestFetchPolymarketMain:
 
     @pytest.mark.asyncio
     async def test_fetch_log_written_on_success(self, job: JobMocks) -> None:
-        job.client.get_nba_events.return_value = [{"id": "ev-1"}]
+        job.client.get_events.return_value = [{"id": "ev-1"}]
 
         discovery_result = PolymarketIngestionResult(events_processed=1, markets_discovered=2)
         snapshot_result = PolymarketIngestionResult(
@@ -206,7 +206,7 @@ class TestFetchPolymarketMain:
 
     @pytest.mark.asyncio
     async def test_fetch_log_written_on_failure(self, job: JobMocks) -> None:
-        job.client.get_nba_events.side_effect = Exception("API down")
+        job.client.get_events.side_effect = Exception("API down")
 
         with pytest.raises(Exception, match="API down"):
             await fetch_polymarket.main(JobContext())
@@ -221,7 +221,7 @@ class TestFetchPolymarketMain:
 
     @pytest.mark.asyncio
     async def test_self_schedules_on_success(self, job: JobMocks) -> None:
-        job.client.get_nba_events.return_value = [{"id": "ev-1"}]
+        job.client.get_events.return_value = [{"id": "ev-1"}]
 
         discovery_result = PolymarketIngestionResult(events_processed=1)
         snapshot_result = PolymarketIngestionResult(
@@ -238,7 +238,7 @@ class TestFetchPolymarketMain:
 
     @pytest.mark.asyncio
     async def test_scheduling_failure_does_not_fail_job(self, job: JobMocks) -> None:
-        job.client.get_nba_events.return_value = [{"id": "ev-1"}]
+        job.client.get_events.return_value = [{"id": "ev-1"}]
 
         discovery_result = PolymarketIngestionResult(events_processed=1)
         snapshot_result = PolymarketIngestionResult(

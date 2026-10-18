@@ -22,7 +22,7 @@ Group names are dispatched by string in several places, so a new group touches e
    - The look-ahead rule per layer is on [Decision time and look-ahead bias](look-ahead-bias.md).
 2. **Register the name.** Add it to `odds_analytics.training.config.FeatureGroupName` (which `odds_analytics.feature_groups._STATIC_FEATURE_GROUPS` derives from), `odds_analytics.feature_groups._static_feature_group_names` (choose a prefix) and `odds_analytics.feature_groups._extract_static_feature_parts`.
    - The dispatch functions branch on the group name, so a name missed in one of them is dropped without an error.
-3. **Load its data.** Add the loading in `odds_analytics.feature_groups.collect_event_data` (or a cache in `odds_analytics.feature_groups.preload_feature_group_caches`) and the field in `odds_analytics.feature_groups.EventDataBundle`.
+3. **Load its data.** Add the loading in `odds_analytics.feature_groups.collect_event_data` (which drops reference-only Polymarket snapshots) (or a cache in `odds_analytics.feature_groups.preload_feature_group_caches`) and the field in `odds_analytics.feature_groups.EventDataBundle`.
 4. **Describe it in the config.** Mention it in the `feature_groups` description of `odds_analytics.training.config.FeatureConfig`.
    - The field is validated against `FeatureGroupName`, so a name missing from step 2 fails at config load, including as a `feature_groups` tuning choice ([training config](training-config.md)).
    - A config that uses the group also sets `target_type`, which has no default.

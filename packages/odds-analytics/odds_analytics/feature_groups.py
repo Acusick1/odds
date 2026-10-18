@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, get_args
 import numpy as np
 import pandas as pd
 import structlog
+from odds_core.bookmakers import is_reference_only_snapshot
 from odds_core.game_log_models import NbaTeamGameLog
 from odds_core.injury_models import InjuryReport
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
@@ -185,9 +186,14 @@ async def collect_event_data(
 
     # Filter to snapshots containing the configured market so the sampler
     # doesn't pick snapshots with data for a different market (e.g. h2h
-    # snapshot when we need totals).
+    # snapshot when we need totals), and drop prediction-market-only snapshots,
+    # which carry no retail or target prices to build a decision row from.
     market = config.primary_market
-    all_snapshots = [s for s in all_snapshots_raw if raw_data_has_market(s.raw_data, market)]
+    all_snapshots = [
+        s
+        for s in all_snapshots_raw
+        if raw_data_has_market(s.raw_data, market) and not is_reference_only_snapshot(s.raw_data)
+    ]
 
     # Derive closing snapshot from already-loaded snapshots (avoid extra DB query)
     closing_tier_value = config.closing_tier.value

@@ -23,7 +23,7 @@ Every scheduled job runs on one host: the mini-PC, a WSL2 guest on a Windows mac
 Three lists in code decide what the production scheduler runs:
 
 - `odds_core.config.SchedulerConfig.bootstrap_jobs` names the jobs `odds scheduler start` bootstraps. `agent-run` and `daily-digest` are commented out there, so they run only when added to `SCHEDULER_BOOTSTRAP_JOBS`.
-- `odds_lambda.scheduling.jobs._JOB_CRON_MAP` gives the jobs installed as a fixed cron. Every other bootstrapped job runs its bootstrap function once and then self-schedules ([Self-scheduling](self-scheduling.md)).
+- `odds_lambda.scheduling.jobs._JOB_CRON_MAP` gives the jobs installed as a fixed cron (`fetch-polymarket-odds` among them, replaced by its first self-schedule). Every other bootstrapped job runs its bootstrap function once and then self-schedules ([Self-scheduling](self-scheduling.md)).
 - `odds_lambda.scheduling.jobs._JOB_SPORTS` limits a per-sport job, cron or self-scheduling, to the configured sports in its allowlist. A per-sport job absent from it runs for every sport in `data_collection.sports` (`odds_lambda.scheduling.jobs.resolve_target_sports`).
 
 | Job | Bootstrapped by default | Sports | Schedule |
@@ -33,6 +33,7 @@ Three lists in code decide what the production scheduler runs:
 | `update-status`, `check-health` | yes | global | self-scheduling; health every 60 min |
 | `fetch-oddsportal`, `fetch-oddsportal-results` | yes | every configured sport | proximity (30 min to 2 h) / daily 08:00 UTC |
 | `fetch-betfair-exchange` | yes | every Betfair-supported sport | cron `*/30 * * * *` until the first self-schedule replaces it ([cron table](local-scheduler.md#bootstrap-jobs-and-cron-table)) |
+| `fetch-polymarket-odds` | no, pending ADR-0013 | every sport with three-way Polymarket match markets (EPL) | cron `*/15 * * * *` until the first self-schedule replaces it ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#the-fetch-polymarket-odds-job)) |
 | `fetch-espn-fixtures` | yes | EPL | cron `0 6 * * *` |
 | `fetch-mlb-probables` | yes | MLB | cron `0 6 * * *` |
 | `daily-digest` | no | EPL | cron `0 8 * * *`; posts to Discord |
@@ -42,7 +43,7 @@ Three lists in code decide what the production scheduler runs:
 
 The betting agent is not scheduled: it is run by hand on the mini-PC with `odds agent run` as the restricted `odds_agent` role ([Agent runtime](../agent/agent-run-job.md)). Collection jobs keep running a sport through its off-season (#487).
 
-Per-job pages: [fetch-odds](../collection/fetch-odds-job.md), [fetch-scores and update-status](../collection/results-jobs.md), [status lifecycle](../collection/event-status-lifecycle.md), [OddsPortal](../collection/fetch-oddsportal-job.md), [Betfair](../collection/betfair-exchange.md), [digest](../operations/daily-digest.md), [health](../operations/health-monitor.md), [agent](../agent/agent-run-job.md), [ESPN fixtures](../collection/epl-context-data.md), [MLB probables](../collection/mlb-probable-pitchers.md), [Polymarket](../collection/polymarket.md).
+Per-job pages: [fetch-odds](../collection/fetch-odds-job.md), [fetch-scores and update-status](../collection/results-jobs.md), [status lifecycle](../collection/event-status-lifecycle.md), [OddsPortal](../collection/fetch-oddsportal-job.md), [Betfair](../collection/betfair-exchange.md), [digest](../operations/daily-digest.md), [health](../operations/health-monitor.md), [agent](../agent/agent-run-job.md), [ESPN fixtures](../collection/epl-context-data.md), [MLB probables](../collection/mlb-probable-pitchers.md), [Polymarket](../collection/polymarket.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md).
 
 Known defects on the production host: OddsPortal scrapes return 0 matches (#484), one hung OddsPortal run ends the local chains (#485), and the ESPN fixtures request returns HTTP 400 (#486).
 

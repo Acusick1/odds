@@ -21,7 +21,7 @@ Figures were observed from live markets, not computed by code in this repo. The 
 
 | Sport | Observed character |
 |---|---|
-| EPL | (inferred) Thin, $10K-$100K per match, and AMM-driven: the book reflects automated market-maker parameters, not public sentiment. Rejected for the agent ([agent-data-sources](../agent/agent-data-sources.md#rejected-sources)). |
+| EPL | Since 2025-08 the median match trades about $0.9M before kick-off (range $0.33M-$4.0M over nine complete matches), mostly in the last 24 hours, with 1-2 cent spreads and prices within about 1 pp of Pinnacle ([#509](https://github.com/Acusick1/odds/issues/509), [findings](https://github.com/Acusick1/odds/blob/research/polymarket-epl-liquidity-2026/research/polymarket-epl-liquidity-2026.md)). The earlier "thin, $10K-$100K, AMM-driven" figure has no record of its method and could not be reproduced. Prices stay within 0.35-0.5 pp of Betfair Exchange from 3 days out ([#518](https://github.com/Acusick1/odds/issues/518)). |
 | NBA | (inferred) Deep: $178K-$2.5M USDC moneyline volume per game, about 1 cent spreads, 25-28 levels per side, top-of-book size about $1,100-$1,600. |
 | MLB | Deep: $152K median per game, up to $5.8M for playoff games, 1 cent spreads, 32-44 levels per side, median $567K total depth. Prices are collinear with devigged bet365 (mean delta about 1 cent on games with real volume) through arbitrage, not AMM seeding. Trading is discrete: 89% of 5-minute ticks show no movement and the rest jump by at least 1 cent. A sharp-reference candidate, not a mispricing venue. |
 
@@ -29,14 +29,14 @@ Use of Polymarket as an MLB sharp reference is untested and not part of the ADR.
 
 ## Series and tag ids
 
-Series and tag IDs for other sports were recorded during research and are not in config (inferred, dff040d):
+`odds_lambda.polymarket_sports.POLYMARKET_SPORTS` holds the series and tag IDs for NBA and EPL. The MLB IDs were recorded during research and are not in config (inferred, dff040d):
 
 | Sport | Series ID | Tag IDs | Ticker |
 |---|---|---|---|
-| EPL | `10188` | `82`, `306` | `epl-{away3}-{home3}-YYYY-MM-DD` |
+| EPL | `10188` | `82`, `306` (the series ID alone selects the same events) | `epl-{home3}-{away3}-YYYY-MM-DD` (home first) |
 | MLB | `3` | `100639` (game tag) | `mlb-{away3}-{home3}-YYYY-MM-DD` |
 
-Config holds only the NBA series (`10345`) and game tag (`100639`) in `odds_core.config.PolymarketConfig`.
+NBA (`10345`, game tag `100639`) and EPL (`10188`) are in `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`, not in `odds_core.config.PolymarketConfig`.
 
 ## Market richness
 
@@ -49,7 +49,7 @@ Observed from the API, not verifiable from the repo:
 | Data | Active markets | Resolved markets |
 |---|---|---|
 | Event and market metadata (Gamma) | yes | yes, indefinitely |
-| Price history (CLOB) | yes, accumulating | about 25 days at full 5-minute resolution, partial from 25 to 31 days (a gradual trim, not a hard cutoff), gone after about 31 days |
+| Price history (CLOB) | yes, accumulating | NBA with `interval=max`: about 25 days at full 5-minute resolution, partial from 25 to 31 days, gone after about 31 days. EPL with explicit `startTs`/`endTs` windows of at most 14 days: complete one-minute series for all 449 finished matches back to 2025-08-15, while `interval=max` is empty for old markets ([#518](https://github.com/Acusick1/odds/issues/518)) |
 | Order book (CLOB) | live only | no (404 after close) |
 | Current price and midpoint (CLOB) | yes | no |
 

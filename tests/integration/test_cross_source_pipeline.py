@@ -332,6 +332,35 @@ class TestCollectEventData:
         assert bundle.pm_context.home_idx in (0, 1)
         assert len(bundle.pm_prices) > 0
 
+    async def test_polymarket_only_snapshots_leave_the_bundle(
+        self, pglite_async_session, cross_source_test_data
+    ):
+        event = cross_source_test_data["events"][2]
+        before = await collect_event_data(event, pglite_async_session, self._make_config())
+        pglite_async_session.add(
+            OddsSnapshot(
+                event_id=event.id,
+                snapshot_time=event.commence_time - timedelta(minutes=1),
+                raw_data={
+                    "bookmakers": [
+                        {
+                            "key": "polymarket",
+                            "title": "Polymarket",
+                            "markets": [{"key": "h2h", "outcomes": []}],
+                        }
+                    ]
+                },
+                bookmaker_count=1,
+                fetch_tier=FetchTier.CLOSING.value,
+            )
+        )
+        await pglite_async_session.commit()
+
+        after = await collect_event_data(event, pglite_async_session, self._make_config())
+
+        assert [s.id for s in after.snapshots] == [s.id for s in before.snapshots]
+        assert after.closing_snapshot == before.closing_snapshot
+
     async def test_no_pm_context_when_group_not_requested(
         self, pglite_async_session, cross_source_test_data
     ):

@@ -36,7 +36,7 @@ tests/fixtures/     sample Odds API JSON
 
 ## Unit and integration databases
 
-`tests/unit` and `tests/integration` use an in-process PostgreSQL (py-pglite) on TCP port 5434. `tests/conftest.py` forces TCP; the session fixture creates all SQLModel tables once; `pglite_async_session` truncates every table (`RESTART IDENTITY CASCADE`) before each test and yields an `AsyncSession` with `expire_on_commit=False`. Aliases `test_engine` and `test_session` exist for older tests. Run one pytest process at a time, since the port is fixed ([AGENTS.md](../../AGENTS.md#tests)). Fixtures for Odds API payloads live under `tests/fixtures/`.
+`tests/unit` and `tests/integration` use an in-process PostgreSQL (py-pglite) on TCP port 5434. `tests/conftest.py` forces TCP; the session fixture creates all SQLModel tables once; `pglite_async_session` truncates every table (`RESTART IDENTITY CASCADE`) before each test and yields an `AsyncSession` with `expire_on_commit=False`. Aliases `test_engine` and `test_session` exist for older tests, and `gamma_event` builds a Gamma EPL match event for Polymarket tests. Run one pytest process at a time, since the port is fixed ([AGENTS.md](../../AGENTS.md#tests)). Fixtures for Odds API payloads live under `tests/fixtures/`.
 
 ## Migration tests
 

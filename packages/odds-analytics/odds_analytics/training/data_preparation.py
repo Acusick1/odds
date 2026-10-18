@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import structlog
+from odds_core.event_ids import is_odds_api_event_id
 from odds_core.models import Event, EventStatus
 from scipy import stats
 from sklearn.model_selection import train_test_split
@@ -373,8 +374,7 @@ async def filter_events_by_date_range(
 
     # oddsapi = everything that isn't from a known scraped source; filter in-memory
     if data_source == "oddsapi":
-        scraped_prefixes = ("op_", "fduk_")
-        events = [e for e in events if not e.id.startswith(scraped_prefixes)]
+        events = [e for e in events if is_odds_api_event_id(e.id)]
 
     logger.info(
         "filtered_events_by_date_range",
