@@ -61,7 +61,7 @@
         "colsample_bytree": 1.0,
         "reg_lambda": 3.164426633191584
       },
-      "tune_seconds": 98.7
+      "tune_seconds": 100.2
     },
     "sliding_380": {
       "cell": "sliding_380",
@@ -82,7 +82,7 @@
         "colsample_bytree": 0.9,
         "reg_lambda": 0.2903608245443353
       },
-      "tune_seconds": 87.4
+      "tune_seconds": 88.5
     },
     "sliding_760": {
       "cell": "sliding_760",
@@ -103,7 +103,7 @@
         "colsample_bytree": 0.5,
         "reg_lambda": 4.450482499466886
       },
-      "tune_seconds": 70.9
+      "tune_seconds": 72.4
     }
   }
 }

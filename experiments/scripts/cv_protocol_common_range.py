@@ -38,7 +38,7 @@ from odds_analytics.training.tuner import OptunaTuner, apply_trial_params, creat
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 # Per-fold training logs would run to millions of lines over 100 trials per cell.
 structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.WARNING))
@@ -82,17 +82,50 @@ async def load_rows(config: MLTrainingConfig) -> CellData:
     return CellData(data.X_train, data.y_train, data.feature_names, data.event_ids_train)
 
 
-async def load_commence_times() -> dict[str, datetime]:
+async def load_commence_times(until: datetime | None) -> dict[str, datetime]:
+    conditions = [
+        Event.sport_key == "soccer_epl",
+        Event.status == EventStatus.FINAL,
+        Event.commence_time >= datetime.combine(COUNT_START, datetime.min.time(), UTC),
+    ]
+    if until is not None:
+        conditions.append(Event.commence_time < until)
+    async with async_session_maker() as session:
+        result = await session.execute(select(Event.id, Event.commence_time).where(*conditions))
+        return {row.id: row.commence_time for row in result}
+
+
+SNAPSHOT_COVERAGE_SQL = text(
+    """
+    SELECT e.commence_time, s.raw_data->>'source' AS source, s.fetch_tier,
+           s.raw_data::text LIKE '%"pinnacle"%'
+               OR s.raw_data::text LIKE '%"betfair_exchange"%' AS has_sharp,
+           s.raw_data::text LIKE '%"bet365"%' AS has_bet365
+    FROM odds_snapshots s JOIN events e ON e.id = s.event_id
+    WHERE e.sport_key = 'soccer_epl' AND e.status = 'FINAL'
+      AND e.commence_time >= :start AND e.commence_time < :until
+    """
+)
+
+
+async def snapshot_coverage() -> pd.DataFrame:
+    """Snapshots per season, source and tier, with how many quote a sharp book and bet365."""
+    start = datetime.combine(COUNT_START, datetime.min.time(), UTC)
     async with async_session_maker() as session:
         result = await session.execute(
-            select(Event.id, Event.commence_time).where(
-                Event.sport_key == "soccer_epl",
-                Event.status == EventStatus.FINAL,
-                Event.commence_time >= datetime.combine(COUNT_START, datetime.min.time(), UTC),
-                Event.commence_time < EVALUATION_START,
-            )
+            SNAPSHOT_COVERAGE_SQL, {"start": start, "until": EVALUATION_START}
         )
-        return {row.id: row.commence_time for row in result}
+        df = pd.DataFrame(result.all(), columns=list(result.keys()))
+    df["season"] = pd.to_datetime(df["commence_time"], utc=True).map(season_of)
+    return (
+        df.groupby(["season", "source", "fetch_tier"])
+        .agg(
+            snapshots=("has_sharp", "size"),
+            with_sharp=("has_sharp", "sum"),
+            with_bet365=("has_bet365", "sum"),
+        )
+        .reset_index()
+    )
 
 
 def check_cells_share_data(base: MLTrainingConfig, cells: dict[str, MLTrainingConfig]) -> None:
@@ -252,7 +285,7 @@ async def count_events(base: MLTrainingConfig) -> tuple[pd.DataFrame, CellData]:
     wide = base.model_copy(deep=True)
     wide.training.data.start_date = COUNT_START
     rows = await load_rows(wide)
-    commence = await load_commence_times()
+    commence = await load_commence_times(until=EVALUATION_START)
     db = pd.Series({eid: season_of(pd.Timestamp(ct)) for eid, ct in commence.items()})
     with_rows = pd.Series(list(dict.fromkeys(rows.event_ids))).map(
         lambda eid: season_of(pd.Timestamp(commence[eid]))
@@ -262,12 +295,11 @@ async def count_events(base: MLTrainingConfig) -> tuple[pd.DataFrame, CellData]:
     )
     counts = counts.fillna(0).astype(int).sort_index()
     counts.index.name = "season"
-    counts["rows"] = (
-        pd.Series(rows.event_ids)
-        .map(lambda eid: season_of(pd.Timestamp(commence[eid])))
-        .value_counts()
-        .reindex(counts.index, fill_value=0)
-    )
+    row_seasons = pd.Series(rows.event_ids).map(lambda eid: season_of(pd.Timestamp(commence[eid])))
+    hours = pd.Series(rows.X[:, rows.feature_names.index("hours_until_event")])
+    counts["min_hours_until_event"] = hours.groupby(row_seasons.to_numpy()).min()
+    counts["max_hours_until_event"] = hours.groupby(row_seasons.to_numpy()).max()
+    counts["rows"] = row_seasons.value_counts().reindex(counts.index, fill_value=0)
     return counts, rows
 
 
@@ -279,10 +311,12 @@ async def main(n_trials: int, workers: int, n_resamples: int, seed: int) -> None
 
     counts, wide_rows = await count_events(base)
     counts.to_csv(OUTPUT_DIR / "event_counts.csv")
+    (await snapshot_coverage()).to_csv(OUTPUT_DIR / "snapshot_coverage.csv", index=False)
     print(counts.to_string())
 
     data = await load_rows(base)
-    commence = await load_commence_times()
+    # No upper bound here, so an evaluation-range row reaches the check below.
+    commence = await load_commence_times(until=None)
     if set(dict.fromkeys(wide_rows.event_ids)) != set(dict.fromkeys(data.event_ids)):
         raise ValueError("base start_date drops events that yield rows from COUNT_START")
     event_times = pd.to_datetime([commence[eid] for eid in data.event_ids], utc=True)

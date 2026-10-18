@@ -10,6 +10,7 @@ sources:
   - experiments/configs/xgboost_epl_cv_protocol_sliding_760.yaml
   - experiments/results/cv_protocol_common_range/results.csv
   - experiments/results/cv_protocol_common_range/event_counts.csv
+  - experiments/results/cv_protocol_common_range/snapshot_coverage.csv
   - experiments/results/cv_protocol_common_range/folds.csv
   - experiments/results/cv_protocol_common_range/summary.json
   - odds_analytics.training.cross_validation.make_walk_forward_splits
@@ -30,7 +31,7 @@ This experiment picks the walk-forward protocol for the EPL CLV re-baseline (#45
 - **Common validation range:** the events every cell predicts. It starts at the largest `min_train_events` (760) and ends where sliding-760's last full 50-event block ends. That gives 1,100 events and 1,100 rows, 2021-08-13 to 2024-04-27 (`summary.json`).
 - **Metric:** MSE pooled over the common rows. Each cell also reports the two per-fold baselines defined on #495, both fitted on the same training rows: an OLS fit with intercept on `retail_sharp_diff`, and the training-fold mean as a floor.
 - **Uncertainty:** a paired bootstrap that resamples common-range events (2,000 resamples) gives a 95% percentile CI for each cell's MSE minus the expanding cell's MSE, and for the model's MSE minus the OLS baseline's.
-- **Choice rule:** take the cell with the lowest pooled MSE. If its CI against expanding includes zero, take expanding instead, because it is simpler and trains on more data.
+- **Choice rule:** take the cell with the lowest pooled MSE. If its CI against expanding includes zero, take expanding instead, because it is simpler and has more data. The rule, its reason and the cells were fixed in the ticket's design before the run (#503).
 
 ## Event counts
 
@@ -45,10 +46,12 @@ This experiment picks the walk-forward protocol for the EPL CLV re-baseline (#45
 | 2022-23 | 380 | 380 |
 | 2023-24 | 380 | 380 |
 
-- **2015-16 to 2018-19 yield no rows.** Their FDUK closing snapshot quotes only Pinnacle, so no event has a bet365 close and none gets a target (checked on stored snapshots). The "expanding from 2015" cell is therefore the expanding cell, which already starts at the first season with rows.
-- **2019-20 and 2020-21** are FDUK-only. Their closing snapshot carries bet365, and every row has a sharp price.
-- **Every tuning-range row uses the FDUK `early` snapshot.** That holds in the OddsPortal seasons too, where the OddsPortal snapshots before the close carry no Pinnacle or Betfair price. `hours_until_event` is 23 to 24.25 in every season. So the FDUK seasons are the same decision regime as the later ones.
-- In total there are 1,900 events and 1,900 rows, one per event. That leaves 1,100 common validation events, above the roughly 300 needed to keep the sliding-760 cell.
+`experiments/results/cv_protocol_common_range/snapshot_coverage.csv` counts the stored snapshots per season, source and tier that quote a sharp bookmaker (Pinnacle or Betfair Exchange) and bet365:
+
+- **2015-16 to 2018-19 yield no rows.** Their FDUK closing snapshots quote Pinnacle but never bet365, so no event has a bet365 close and none gets a target. The "expanding from 2015" cell is therefore the expanding cell, which already starts at the first season with rows.
+- **2019-20 and 2020-21** are FDUK-only. Their closing snapshots carry bet365, and every row has a sharp price.
+- **Every tuning-range decision row comes from the FDUK `early` snapshot.** No OddsPortal snapshot in the tuning range quotes a sharp bookmaker, and `odds_analytics.feature_groups.TierSampler` excludes closing-tier snapshots at `decision_tier: sharp` and keeps only snapshots that quote a sharp bookmaker. `hours_until_event` runs from 23 to 24.25 in every season (`event_counts.csv`). So the FDUK seasons are the same decision regime as the later ones.
+- In total there are 1,900 events and 1,900 rows, one per event. That leaves 1,100 common validation events. The design kept sliding-760 only if at least about 300 remained (#503).
 
 ## Results
 
@@ -91,7 +94,7 @@ Every other model field keeps its value in the base config.
 
 ## Caveats
 
-- **The tuning bias is common, not absent.** Each cell is scored on rows its own tuner saw, so every pooled MSE is optimistic. The bias applies to every cell alike, so the comparison is fair, but the absolute levels are not out-of-sample estimates.
+- **Tuning bias favours sliding-760.** Each cell is scored on rows its own tuner saw, so every pooled MSE is optimistic. Sliding-760's tuning folds are exactly the 1,100 common events, so its tuned objective equals its pooled MSE. Expanding and sliding-380 were tuned on 1,500 events, 400 of them outside the common range. The bias tilts the comparison towards sliding-760, which still did not clear the rule, so the choice of expanding stands. The absolute levels are not out-of-sample estimates.
 - **One seed.** Seed-to-seed spread was not measured, so the gaps between cells, all within the bootstrap CIs, may be smaller than seed noise.
 - **Late best trials.** Every cell's best trial came at trial 94 or 95, but the best value improved by at most 2.7 × 10⁻⁶ after trial 50 (`trials.csv`), well inside the CIs.
 - **Tabular only.** The protocol was chosen on the tabular group. The match_stats group was not re-tested.

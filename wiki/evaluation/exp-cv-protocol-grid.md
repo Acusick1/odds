@@ -11,7 +11,7 @@ status: stable
 
 # CV protocol grid
 
-The grid compared cells on different validation sets, and its results predate the training and CV validity fixes, so they are void (#494). The protocol is now chosen on a common validation range: [CV protocol on a common validation range](exp-cv-protocol-common-range.md).
+The grid compared cells on different validation sets, and its results predate the training and CV validity fixes, so they are void (#494). The protocol is chosen on a common validation range: [CV protocol on a common validation range](exp-cv-protocol-common-range.md).
 
 This grid is the evidence for [ADR-0004](../../docs/adr/0004-walk-forward-cv-protocol.md) (walk-forward CV was added in PR #161 and `test_split: 0.0` in PR #230; the grid is PR #234, the 32-feature rerun is recorded in commit d34c267, and the search-space re-test is PRs #361 and #362). How the folds are built is on [Cross-validation](../modelling/cross-validation.md).
 
