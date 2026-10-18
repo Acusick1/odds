@@ -13,6 +13,7 @@ from odds_core.api_models import (
     create_scheduled_event,
 )
 from odds_core.config import get_settings
+from odds_core.utils import relabel_three_way_markets
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -190,7 +191,10 @@ class TheOddsAPIClient:
         data, response_time = await self._make_request(f"sports/{sport}/odds", params=params)
 
         # Ensure data is a list
-        raw_events_data = data if isinstance(data, list) else [data] if data else []
+        raw_events_data = [
+            relabel_three_way_markets(event_dict, sport)
+            for event_dict in (data if isinstance(data, list) else [data] if data else [])
+        ]
 
         # Convert API dicts to Event instances (scheduled games only)
         events = [create_scheduled_event(event_dict) for event_dict in raw_events_data]
@@ -319,7 +323,10 @@ class TheOddsAPIClient:
 
         # Historical endpoint returns {"data": [...]}
         response_data = data.get("data", []) if isinstance(data, dict) else []
-        raw_events_data = response_data if isinstance(response_data, list) else []
+        raw_events_data = [
+            relabel_three_way_markets(event_dict, sport)
+            for event_dict in (response_data if isinstance(response_data, list) else [])
+        ]
 
         # Convert API dicts to Event instances (scheduled games only)
         events = [create_scheduled_event(event_dict) for event_dict in raw_events_data]
