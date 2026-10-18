@@ -31,7 +31,7 @@ status: stable
 
 ## Data prerequisites
 
-The engine needs `FINAL` events with scores and normalized `odds_core.models.Odds` rows near the decision time. Historical OddsPortal and football-data.co.uk (FDUK) events have `odds_core.models.OddsSnapshot` rows but no `odds_core.models.Odds` rows: `scripts/ingest_oddsportal.py` and `scripts/ingest_football_data_uk.py` write snapshots only, so those events log `no_odds_at_decision_time` and produce no bets (#435; [historical ingest scripts](../collection/historical-ingest-scripts.md), [odds tables](../storage/odds-tables.md)). The Odds API historical backfill does write `odds_core.models.Odds` rows but is NBA-only and paid, so EPL backtests have little or no usable data ([Odds API backfill](../collection/odds-api-backfill.md)).
+The engine needs `FINAL` events with scores and normalized `odds_core.models.Odds` rows near the decision time. Historical OddsPortal and football-data.co.uk (FDUK) events have `odds_core.models.OddsSnapshot` rows but no `odds_core.models.Odds` rows: `scripts/ingest_oddsportal.py` and `scripts/ingest_football_data_uk.py` write snapshots only (no `odds_core.models.Odds` rows), so those events log `no_odds_at_decision_time` and produce no bets (#435; [historical ingest scripts](../collection/historical-ingest-scripts.md), [odds tables](../storage/odds-tables.md)). The Odds API historical backfill does write `odds_core.models.Odds` rows but is NBA-only and paid, so EPL backtests have little or no usable data ([Odds API backfill](../collection/odds-api-backfill.md)).
 
 ## Event loop
 
