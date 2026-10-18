@@ -180,7 +180,8 @@ def calculate_devigged_bookmaker_target(
     away_team: str,
     bookmaker_key: str = "pinnacle",
     market_key: str = "h2h",
-    outcome: Literal["home", "away", "draw"] = "home",
+    *,
+    outcome: Literal["home", "away", "draw"],
 ) -> float | None:
     """Calculate target as devigged bookmaker close minus devigged bookmaker at snapshot.
 

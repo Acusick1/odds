@@ -240,7 +240,6 @@ class TestRunCV:
                 model=XGBoostConfig(n_estimators=10, max_depth=3),
                 features=FeatureConfig(
                     target_type="raw",
-                    target_bookmaker="pinnacle",
                 ),
             ),
         )
@@ -397,7 +396,6 @@ class TestTimeSeriesCV:
                 model=XGBoostConfig(n_estimators=10, max_depth=3),
                 features=FeatureConfig(
                     target_type="raw",
-                    target_bookmaker="pinnacle",
                 ),
             ),
         )
@@ -421,7 +419,6 @@ class TestTimeSeriesCV:
                 model=XGBoostConfig(n_estimators=10, max_depth=3),
                 features=FeatureConfig(
                     target_type="raw",
-                    target_bookmaker="pinnacle",
                 ),
             ),
         )
@@ -732,7 +729,6 @@ class TestRunCVStaticFeatures:
                 model=XGBoostConfig(),
                 features=FeatureConfig(
                     target_type="raw",
-                    target_bookmaker="pinnacle",
                 ),
             ),
         )
@@ -828,7 +824,6 @@ class TestWalkForwardCV:
                 model=XGBoostConfig(n_estimators=10, max_depth=3),
                 features=FeatureConfig(
                     target_type="raw",
-                    target_bookmaker="pinnacle",
                 ),
             ),
         )
@@ -853,7 +848,6 @@ class TestWalkForwardCV:
                 model=XGBoostConfig(n_estimators=10, max_depth=3),
                 features=FeatureConfig(
                     target_type="raw",
-                    target_bookmaker="pinnacle",
                 ),
             ),
         )

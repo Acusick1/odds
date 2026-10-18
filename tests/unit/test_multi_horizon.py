@@ -102,7 +102,6 @@ class TestGroupTimeseriesCV:
                     "strategy_type": "xgboost_line_movement",
                     "features": {
                         "target_type": "raw",
-                        "target_bookmaker": "pinnacle",
                         "feature_groups": ["tabular"],
                         "markets": ["h2h"],
                         "outcome": "home",
@@ -243,7 +242,6 @@ class TestFeatureConfigValidation:
     def test_default_sampling_config(self):
         config = FeatureConfig(
             target_type="raw",
-            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
@@ -257,7 +255,6 @@ class TestFeatureConfigValidation:
     def test_sampling_config_time_range(self):
         config = FeatureConfig(
             target_type="raw",
-            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
@@ -278,7 +275,6 @@ class TestFeatureConfigValidation:
 
         config = FeatureConfig(
             target_type="raw",
-            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
@@ -299,7 +295,6 @@ class TestFeatureConfigValidation:
     def test_default_target_type_is_raw(self):
         config = FeatureConfig(
             target_type="raw",
-            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
@@ -321,12 +316,11 @@ class TestFeatureConfigValidation:
     def test_adapter_default_is_xgboost(self):
         config = FeatureConfig(
             target_type="raw",
-            target_bookmaker="pinnacle",
         )
         assert config.adapter == "xgboost"
 
     def test_adapter_lstm(self):
-        config = FeatureConfig(target_type="raw", target_bookmaker="pinnacle", adapter="lstm")
+        config = FeatureConfig(target_type="raw", adapter="lstm")
         assert config.adapter == "lstm"
 
 
@@ -1086,7 +1080,6 @@ class TestLSTMAdapter:
     def config(self):
         return FeatureConfig(
             target_type="raw",
-            target_bookmaker="pinnacle",
             adapter="lstm",
             feature_groups=["tabular"],
             markets=["h2h"],
@@ -1130,7 +1123,6 @@ class TestLSTMAdapter:
 
         seq_only_config = FeatureConfig(
             target_type="raw",
-            target_bookmaker="pinnacle",
             adapter="lstm",
             feature_groups=[],
             markets=["h2h"],

@@ -13,8 +13,8 @@ from odds_analytics.feature_groups import (
 )
 from odds_analytics.training.config import FeatureConfig
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from pydantic import ValidationError
 from odds_core.odds_math import calculate_implied_probability, devig_probabilities
+from pydantic import ValidationError
 
 
 def _make_event() -> Event:
@@ -147,7 +147,7 @@ class TestSnapshotHasBookmaker:
 class TestShouldFilterMissingSharp:
     def _make_config(self, sharp_bookmakers: list[str], target_bookmaker: str) -> FeatureConfig:
         return FeatureConfig(
-            target_type="raw",
+            target_type="devigged_bookmaker",
             sharp_bookmakers=sharp_bookmakers,
             target_bookmaker=target_bookmaker,
             markets=["h2h"],
@@ -163,6 +163,10 @@ class TestShouldFilterMissingSharp:
 
     def test_multiple_sharp_includes_target_still_filters(self) -> None:
         config = self._make_config(["pinnacle", "bet365"], "bet365")
+        assert _should_filter_missing_sharp(config) is True
+
+    def test_raw_filters_whenever_sharp_configured(self) -> None:
+        config = FeatureConfig(target_type="raw", sharp_bookmakers=["bet365"], markets=["h2h"])
         assert _should_filter_missing_sharp(config) is True
 
     def test_multiple_sharp_none_is_target(self) -> None:
@@ -189,16 +193,16 @@ class TestFeatureGroupValidation:
 
     def test_unknown_name_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            FeatureConfig(feature_groups=("tabular", "bogus"))
+            FeatureConfig(target_type="raw", feature_groups=("tabular", "bogus"))
 
     @pytest.mark.parametrize("name", ["epl_lineup", "trajectory"])
     def test_removed_or_unhandled_names_rejected(self, name: str) -> None:
         with pytest.raises(ValidationError):
-            FeatureConfig(feature_groups=("tabular", name))
+            FeatureConfig(target_type="raw", feature_groups=("tabular", name))
 
     def test_every_dispatched_group_accepted(self) -> None:
         names = tuple(sorted(_STATIC_FEATURE_GROUPS))
-        assert FeatureConfig(feature_groups=names).feature_groups == names
+        assert FeatureConfig(target_type="raw", feature_groups=names).feature_groups == names
 
 
 class TestPreloadFeatureGroupCaches:

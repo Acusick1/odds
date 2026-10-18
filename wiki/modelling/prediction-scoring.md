@@ -27,7 +27,7 @@ It is not scheduled on its own: the [fetch-oddsportal job](../collection/fetch-o
 ## Flow
 
 1. `odds_lambda.model_loader.load_model` fetches the model. `ValueError` or `FileNotFoundError` returns zero stats with an error log.
-2. The bundled `odds_analytics.training.config.FeatureConfig` supplies `sport_key` (the scorer does not use its target fields). If the `sport` argument differs, the run aborts (`sport_mismatch`). Scoring uses the bundled config, so feature groups, sharp roster and the feature names must match what training produced.
+2. The bundled `odds_analytics.training.config.FeatureConfig` supplies `sport_key`. If the `sport` argument differs, the run aborts (`sport_mismatch`). Scoring uses the bundled config, so feature groups, sharp roster and the feature names must match what training produced.
 3. `odds_analytics.feature_groups.XGBoostAdapter.feature_names` on the config must equal the model's saved feature names, else `feature_name_mismatch` and abort, so the variance filter's dropped columns matter ([feature pipeline](feature-pipeline.md#nan-fill-and-variance-policy)).
 4. For each SCHEDULED future event of that sport: select snapshots with no prediction yet for this `model_name`, collect event data once, then per snapshot `adapter.transform`, `model.predict`, and insert.
 5. Insert is `INSERT ... ON CONFLICT DO NOTHING` on constraint `uq_prediction_event_snap_model`, so reruns are safe. `snapshots_skipped` counts snapshots the adapter returns `None` for.

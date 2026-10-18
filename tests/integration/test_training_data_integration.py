@@ -66,7 +66,6 @@ class TestTrainingDataIntegration:
                 ),
                 features=FeatureConfig(
                     target_type="raw",
-                    target_bookmaker="pinnacle",
                     outcome="home",
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],
@@ -102,7 +101,6 @@ class TestTrainingDataIntegration:
                 ),
                 features=FeatureConfig(
                     target_type="raw",
-                    target_bookmaker="pinnacle",
                     adapter="lstm",
                     outcome="home",
                     markets=["h2h"],
@@ -135,7 +133,6 @@ class TestTrainingDataIntegration:
                 },
                 "features": {
                     "target_type": "raw",
-                    "target_bookmaker": "pinnacle",
                     "outcome": "home",
                     "markets": ["h2h"],
                     "sharp_bookmakers": ["pinnacle"],
@@ -330,7 +327,6 @@ class TestInjuryFeaturesIntegration:
                 ),
                 features=FeatureConfig(
                     target_type="raw",
-                    target_bookmaker="pinnacle",
                     outcome="home",
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],
@@ -460,7 +456,6 @@ class TestRestFeaturesIntegration:
                 ),
                 features=FeatureConfig(
                     target_type="raw",
-                    target_bookmaker="pinnacle",
                     outcome="home",
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],

@@ -676,7 +676,6 @@ class LSTMLineMovementStrategy(BettingStrategy):
         # Prepare training data with regression targets using composable feature groups
         feature_config = FeatureConfig(
             target_type="raw",
-            target_bookmaker="pinnacle",
             adapter="lstm",
             outcome=outcome,
             markets=[self.params["market"]],

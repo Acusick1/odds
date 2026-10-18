@@ -41,7 +41,7 @@ Rows recorded in #160 (2026-02-21) and #166 (2026-02-28); no results directory h
 | 2026-02-21 | Sequence + 17 static features | 800 events, Pinnacle | -0.122 ± 0.115 |
 | 2026-02-28 | Sequence only, packed sequences, 15 x 8 timesteps, 50 trials, 5-fold walk-forward | about 1K Odds API events, Pinnacle | -0.075 ± 0.113 |
 
-Config for the Pinnacle runs: `experiments/configs/lstm_pinnacle_tuning.yaml` (also `experiments/configs/lstm_line_movement_tuning.yaml`); both set the raw target against Pinnacle explicitly. Best of the first tuning: hidden 48, 2 layers; the static branch increased overfitting. The 2026-02-28 result is worse than a constant predictor. The 2026-02-28 row has only the config behind it, no results file, so it is unverified.
+Config for the Pinnacle runs: `experiments/configs/lstm_pinnacle_tuning.yaml` (also `experiments/configs/lstm_line_movement_tuning.yaml`). Best of the first tuning: hidden 48, 2 layers; the static branch increased overfitting. The 2026-02-28 result is worse than a constant predictor. The 2026-02-28 row has only the config behind it, no results file, so it is unverified.
 
 - **2026-02-27 mask fix (#163).** The log row says packed sequences were introduced so the mask is applied correctly (code: `odds_analytics.lstm_line_movement._compact_sequences` in `odds_analytics.lstm_line_movement`). The experiment log files it as a bug fix with no result.
 - **Exp 2 cross-check:** LSTM at both decision times is R² about 0 once the `IN_PLAY` leak is fixed; the earlier LSTM +0.02 was contaminated.

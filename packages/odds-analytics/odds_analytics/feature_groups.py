@@ -136,9 +136,13 @@ def snapshot_has_bookmaker(snapshot: OddsSnapshot, bookmaker_key: str, market: s
 def _should_filter_missing_sharp(config: FeatureConfig) -> bool:
     """Whether to exclude events missing sharp bookmaker closing odds.
 
-    Only applies when sharp_bookmakers differ from target_bookmaker — if they
-    match, there are no cross-source features that would degrade from missing data.
+    A raw target has no target bookmaker, so any configured sharp bookmaker filters.
+    A devigged target skips the filter when sharp_bookmakers equals the target
+    bookmaker, since there are then no cross-source features that would degrade
+    from missing data.
     """
+    if config.target_type == "raw":
+        return bool(config.sharp_bookmakers)
     return set(config.sharp_bookmakers) != {config.target_bookmaker}
 
 
@@ -884,8 +888,6 @@ def _compute_target(
                 bookmaker_key=config.target_bookmaker,
                 outcome=outcome_name,
             )
-        if config.outcome in ("over", "under"):
-            raise ValueError(f"outcome {config.outcome!r} is not valid for market {market!r}")
         return calculate_devigged_bookmaker_target(
             snapshot_odds_all,
             closing_odds_all,

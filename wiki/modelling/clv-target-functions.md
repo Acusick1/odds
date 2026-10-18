@@ -30,9 +30,9 @@ status: stable
 - `"devigged_bookmaker"` uses the functions above.
 - `"raw"` uses `odds_analytics.sequence_loader.calculate_regression_target`, the mean vig-inclusive implied-probability delta. Devigging therefore applies to the target only when the YAML sets `target_type: devigged_bookmaker`.
 
-`target_type` and `target_bookmaker` are required fields of `odds_analytics.training.config.FeatureConfig`, so a config that omits either fails validation.
+`odds_analytics.training.config.FeatureConfig` requires `target_type`. `target_bookmaker` is required for `devigged_bookmaker` and must be omitted for `raw`; `devigged_bookmaker` is valid only for `h2h`, `1x2` and `totals`, and `outcome` must be `over` or `under` exactly when the market is `totals`. A config that breaks these rules fails validation.
 
-`odds_analytics.feature_groups._compute_target` passes `outcome` to every branch, so the target and the tabular features describe the same side. `over` and `under` are valid only for totals; the devigged h2h target raises `ValueError` for them.
+`odds_analytics.feature_groups._compute_target` passes `outcome` to every branch, so the target and the tabular features describe the same side. 
 
 ## Closing snapshot
 

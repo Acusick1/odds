@@ -53,7 +53,7 @@ def sample_config_with_tuning(tmp_path):
             description="Test tuning experiment",
         ),
         training=TrainingConfig(
-            features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
+            features=FeatureConfig(target_type="raw"),
             strategy_type="xgboost_line_movement",
             data=DataConfig(
                 start_date="2024-10-01",
@@ -97,7 +97,7 @@ def sample_config_without_tuning(tmp_path):
             tags=["test"],
         ),
         training=TrainingConfig(
-            features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
+            features=FeatureConfig(target_type="raw"),
             strategy_type="xgboost_line_movement",
             data=DataConfig(
                 start_date="2024-10-01",
@@ -147,7 +147,7 @@ def test_tune_command_validates_search_spaces(cli_runner, tmp_path):
     config = MLTrainingConfig(
         experiment=ExperimentConfig(name="test"),
         training=TrainingConfig(
-            features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
+            features=FeatureConfig(target_type="raw"),
             strategy_type="xgboost_line_movement",
             data=DataConfig(start_date="2024-10-01", end_date="2024-12-31"),
             model=XGBoostConfig(),
@@ -274,7 +274,7 @@ def test_display_tuning_summary():
             description="Test description",
         ),
         training=TrainingConfig(
-            features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
+            features=FeatureConfig(target_type="raw"),
             strategy_type="xgboost_line_movement",
             data=DataConfig(start_date="2024-10-01", end_date="2024-12-31"),
             model=XGBoostConfig(),

@@ -61,7 +61,7 @@ def sample_config(sample_search_spaces):
             description="Test experiment",
         ),
         training=TrainingConfig(
-            features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
+            features=FeatureConfig(target_type="raw"),
             strategy_type="xgboost_line_movement",
             data=DataConfig(
                 start_date="2024-10-01",
@@ -295,7 +295,7 @@ def test_create_objective_no_search_spaces():
     config = MLTrainingConfig(
         experiment=ExperimentConfig(name="test"),
         training=TrainingConfig(
-            features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
+            features=FeatureConfig(target_type="raw"),
             strategy_type="xgboost_line_movement",
             data=DataConfig(start_date="2024-10-01", end_date="2024-12-31"),
             model=XGBoostConfig(),

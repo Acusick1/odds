@@ -751,7 +751,7 @@ class TestCalculateDeviggedBookmakerTarget:
             self._make_odds("Celtics", 170, timestamp),
         ]
         result = calculate_devigged_bookmaker_target(
-            snapshot_odds, closing_odds, "Lakers", "Celtics"
+            snapshot_odds, closing_odds, "Lakers", "Celtics", outcome="home"
         )
         assert result is not None
 
@@ -770,7 +770,9 @@ class TestCalculateDeviggedBookmakerTarget:
             self._make_odds("Lakers", -150, timestamp),
             self._make_odds("Celtics", 130, timestamp),
         ]
-        result = calculate_devigged_bookmaker_target(odds, odds, "Lakers", "Celtics")
+        result = calculate_devigged_bookmaker_target(
+            odds, odds, "Lakers", "Celtics", outcome="home"
+        )
         assert result == pytest.approx(0.0)
 
     def test_missing_snapshot_pinnacle(self, timestamp):
@@ -793,7 +795,9 @@ class TestCalculateDeviggedBookmakerTarget:
             self._make_odds("Celtics", 170, timestamp),
         ]
         assert (
-            calculate_devigged_bookmaker_target(snapshot_odds, closing_odds, "Lakers", "Celtics")
+            calculate_devigged_bookmaker_target(
+                snapshot_odds, closing_odds, "Lakers", "Celtics", outcome="home"
+            )
             is None
         )
 
@@ -805,7 +809,9 @@ class TestCalculateDeviggedBookmakerTarget:
         ]
         closing_odds = []
         assert (
-            calculate_devigged_bookmaker_target(snapshot_odds, closing_odds, "Lakers", "Celtics")
+            calculate_devigged_bookmaker_target(
+                snapshot_odds, closing_odds, "Lakers", "Celtics", outcome="home"
+            )
             is None
         )
 
@@ -822,7 +828,7 @@ class TestCalculateDeviggedBookmakerTarget:
             self._make_odds("Chelsea", 350, timestamp, market="1x2"),
         ]
         result = calculate_devigged_bookmaker_target(
-            snapshot_odds, closing_odds, "Arsenal", "Chelsea", market_key="1x2"
+            snapshot_odds, closing_odds, "Arsenal", "Chelsea", market_key="1x2", outcome="home"
         )
         assert result is not None
         snap = extract_devigged_h2h_probs(snapshot_odds, "Arsenal", "Chelsea", market_key="1x2")

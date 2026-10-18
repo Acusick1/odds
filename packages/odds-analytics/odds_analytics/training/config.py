@@ -572,6 +572,9 @@ class SamplingConfig(BaseModel):
 # =============================================================================
 
 
+_DEVIGGED_MARKETS = frozenset({"h2h", "1x2", "totals"})
+
+
 class FeatureConfig(BaseModel):
     """
     Feature extraction configuration.
@@ -708,9 +711,10 @@ class FeatureConfig(BaseModel):
         "'devigged_bookmaker': bookmaker close vs bookmaker at snapshot, both devigged.",
     )
 
-    target_bookmaker: str = Field(
-        description="Bookmaker key for the target and for closing-snapshot selection "
-        "(devigged target computation when target_type='devigged_bookmaker').",
+    target_bookmaker: str | None = Field(
+        default=None,
+        description="Bookmaker key for the devigged target and closing-snapshot selection. "
+        "Required when target_type='devigged_bookmaker'; must be omitted for 'raw'.",
     )
 
     closing_source_priority: list[str] | None = Field(
@@ -730,6 +734,28 @@ class FeatureConfig(BaseModel):
     def validate_feature_groups_for_adapter(self) -> FeatureConfig:
         if self.adapter == "xgboost" and not self.feature_groups:
             raise ValueError("feature_groups must name at least one group for the xgboost adapter")
+        return self
+
+    @model_validator(mode="after")
+    def validate_target_for_market(self) -> FeatureConfig:
+        if self.target_type == "devigged_bookmaker":
+            if self.target_bookmaker is None:
+                raise ValueError(
+                    "target_bookmaker is required when target_type is devigged_bookmaker"
+                )
+            if self.primary_market not in _DEVIGGED_MARKETS:
+                raise ValueError(
+                    f"devigged_bookmaker has no target for market {self.primary_market!r}; "
+                    f"supported markets: {sorted(_DEVIGGED_MARKETS)}"
+                )
+        elif self.target_bookmaker is not None:
+            raise ValueError("target_bookmaker must be omitted when target_type is raw")
+        is_totals_outcome = self.outcome in ("over", "under")
+        if is_totals_outcome != (self.primary_market == "totals"):
+            raise ValueError(
+                f"outcome {self.outcome!r} is incompatible with market {self.primary_market!r}: "
+                "over/under apply only to totals, home/away only to other markets"
+            )
         return self
 
 

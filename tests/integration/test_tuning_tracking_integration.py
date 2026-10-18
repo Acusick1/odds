@@ -43,7 +43,6 @@ training:
 
   features:
     target_type: raw
-    target_bookmaker: pinnacle
     sharp_bookmakers: ["pinnacle"]
     retail_bookmakers: ["fanduel"]
     markets: ["h2h"]

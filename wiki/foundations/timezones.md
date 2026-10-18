@@ -46,7 +46,7 @@ Helpers in `odds_core.time`:
 | `odds_core.time.to_eastern`, `odds_core.time.EASTERN` | America/New_York for NBA game days and injury reports |
 | `odds_core.time.utc_isoformat` | ISO 8601 with a trailing `Z` |
 
-`Z`-suffix ISO parsing is inlined in `odds_core.snapshot_utils`, `odds_lambda.espn_fixture_fetcher`, `odds_lambda.mlb_stats_fetcher`, `odds_lambda.jobs.fetch_oddsportal_results`, the MCP EPL tools and `odds_analytics.sequence_loader` instead of calling `odds_core.time.parse_api_datetime`; its target functions take no timestamps. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/look-ahead-bias.md).
+`Z`-suffix ISO parsing is inlined in `odds_core.snapshot_utils`, `odds_lambda.espn_fixture_fetcher`, `odds_lambda.mlb_stats_fetcher`, `odds_lambda.jobs.fetch_oddsportal_results`, the MCP EPL tools and `odds_analytics.sequence_loader` instead of calling `odds_core.time.parse_api_datetime`. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/look-ahead-bias.md).
 
 ## Naive datetimes in current code
 

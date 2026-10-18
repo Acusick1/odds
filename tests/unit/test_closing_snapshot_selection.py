@@ -103,7 +103,7 @@ class TestSelectClosingSnapshot:
         oddsportal_snap = _make_snapshot(event, ["bet365", "betway"], hours_before=0.0)
         candidates = [oddsapi_snap, oddsportal_snap]
 
-        config = FeatureConfig(target_bookmaker="pinnacle", target_type="raw")
+        config = FeatureConfig(target_type="raw")
         result = _select_closing_snapshot(candidates, event, config)
         assert result is oddsportal_snap
 
