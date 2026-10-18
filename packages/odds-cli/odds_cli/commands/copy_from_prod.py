@@ -41,7 +41,7 @@ def copy_from_production(
         raise typer.Exit(code=1) from e
 
     try:
-        asyncio.run(
+        stats = asyncio.run(
             copy_from_prod(
                 start_date=start,
                 end_date=end,
@@ -55,3 +55,6 @@ def copy_from_production(
     except Exception as e:
         console.print(f"\n[bold red]✗ Copy failed: {str(e)}[/bold red]")
         raise typer.Exit(code=1) from e
+
+    if stats.events_failed > 0:
+        raise typer.Exit(code=1)
