@@ -20,7 +20,7 @@ status: stable
 ## Devigged target
 
 - `odds_analytics.sequence_loader.calculate_devigged_bookmaker_target` returns the closing minus snapshot devigged probability of the configured outcome (`home`, `away` or `draw`) for one bookmaker, or `None` if either side lacks that bookmaker or the outcome. It handles 2-way and 3-way markets; `draw` exists only in 3-way markets.
-- `odds_analytics.sequence_loader.extract_devigged_h2h_probs` converts prices with `odds_core.odds_math.calculate_implied_probability` and normalises with `odds_core.odds_math.devig_probabilities`. Devigging is proportional only, and the 3-way (`Draw`) probability is devigged together with home and away ([odds arithmetic](../foundations/odds-math.md), [devigging](../foundations/devigging.md)).
+- `odds_analytics.sequence_loader.extract_devigged_h2h_probs` converts prices with `odds_core.models.Odds.implied_probability` (1 over the stored decimal price) and normalises with `odds_core.odds_math.devig_probabilities`. Devigging is proportional only, and the 3-way (`Draw`) probability is devigged together with home and away ([odds arithmetic](../foundations/odds-math.md), [devigging](../foundations/devigging.md)).
 - `odds_analytics.sequence_loader.calculate_devigged_totals_target` does the same for Over/Under.
 
 ## Dispatch

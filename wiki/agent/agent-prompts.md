@@ -39,7 +39,7 @@ The agent may ask for its next wake-up with `odds_mcp.server.schedule_next_wakeu
 The agent does not bet on qualitative team assessment. Every bet needs one of four specific bases:
 
 1. an information gap;
-2. retail or cross-venue dispersion among bettable books (`odds_mcp.server.find_retail_edges`, see [retail edges](mcp-market-tools.md#retail-edges));
+2. retail or cross-venue dispersion among bettable books (`odds_mcp.server.find_retail_edges`, whose rows give each retail price as both an American quote and the source decimal; see [retail edges](mcp-market-tools.md#retail-edges));
 3. a structural bias (bookmaker liability management, accumulator distortion, public money on popular teams);
 4. fundamental value.
 

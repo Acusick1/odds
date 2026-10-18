@@ -183,8 +183,8 @@ async def load_betting_context(event_ids: np.ndarray) -> dict[str, BettingContex
             continue
 
         ctx[eid] = BettingContext(
-            home_american_odds=home_odds_obj.price,
-            away_american_odds=away_odds_obj.price,
+            home_american_odds=home_odds_obj.american_price,
+            away_american_odds=away_odds_obj.american_price,
             home_wins=event.home_score > event.away_score,
         )
 

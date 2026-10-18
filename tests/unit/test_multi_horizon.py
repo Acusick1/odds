@@ -17,6 +17,7 @@ from odds_analytics.feature_groups import (
 from odds_analytics.training.config import FeatureConfig, MLTrainingConfig, SamplingConfig
 from odds_analytics.training.cross_validation import CVResult, run_cv
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.odds_math import american_to_decimal
 
 
 @pytest.fixture
@@ -1224,7 +1225,7 @@ class TestLSTMAdapter:
             bookmaker_title="Pinnacle",
             market_key="h2h",
             outcome_name=event.home_team,
-            price=-150,
+            price_decimal=american_to_decimal(-150),
             point=None,
             odds_timestamp=snapshot_time - timedelta(hours=1),
             last_update=snapshot_time - timedelta(hours=1),
@@ -1235,7 +1236,7 @@ class TestLSTMAdapter:
             bookmaker_title="Pinnacle",
             market_key="h2h",
             outcome_name=event.home_team,
-            price=-140,
+            price_decimal=american_to_decimal(-140),
             point=None,
             odds_timestamp=snapshot_time + timedelta(hours=1),
             last_update=snapshot_time + timedelta(hours=1),

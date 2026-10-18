@@ -29,7 +29,7 @@ Briefs are what the [betting agent](betting-agent.md) concluded about a match, w
 | `decision` | `odds_core.match_brief_models.BriefDecision`: `watching`, `bet` or `skip` |
 | summary | One line for triage views (the tool docstring suggests under about 100 characters; not enforced) |
 | `brief_text` | Free-form; structure is set by the agent prompt |
-| `sharp_price_at_brief` | JSON `SharpPriceMap`, keyed by outcome name: `{bookmaker, price, implied_prob}`; nullable |
+| `sharp_price_at_brief` | JSON `SharpPriceMap`, keyed by outcome name: `{bookmaker, price, price_decimal, implied_prob}` (`price` is the derived American quote, `implied_prob` comes from `price_decimal`); nullable |
 | `created_at` | UTC, timezone-aware |
 
 `odds_mcp.server.save_match_brief` takes `market` to choose the snapshot but the row has no market column, so a brief cannot be tied to the market it priced, and `sharp_price_at_brief` is keyed by outcome only (#480).

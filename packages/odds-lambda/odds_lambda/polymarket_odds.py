@@ -14,7 +14,7 @@ from typing import Any, Literal
 import structlog
 from odds_core.event_ids import is_odds_api_event_id
 from odds_core.models import Event
-from odds_core.odds_math import probability_to_american
+from odds_core.odds_math import PRICE_DECIMAL_KEY
 from odds_core.team import normalize_team_name
 
 from odds_lambda.fetch_tier import FetchTier
@@ -108,7 +108,7 @@ class PolymarketMatch:
 
     def midpoints(self) -> Prices | None:
         mids = {side: self.outcome_market(side).midpoint for side in SIDES}
-        if any(mid is None for mid in mids.values()):
+        if any(mid is None or not 0.0 < mid < 1.0 for mid in mids.values()):
             return None
         return Prices(**mids)  # type: ignore[arg-type]
 
@@ -319,7 +319,7 @@ def build_raw_data(
                     {
                         "key": sport.market_key,
                         "outcomes": [
-                            {"name": names[side], "price": probability_to_american(p)}
+                            {"name": names[side], PRICE_DECIMAL_KEY: 1 / p}
                             for side, p in prices.by_side().items()
                         ],
                     }

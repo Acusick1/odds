@@ -37,11 +37,11 @@ from zoneinfo import ZoneInfo
 
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.odds_math import PRICE_DECIMAL_KEY
 from odds_core.team import team_abbrev
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.oddsportal_common import (
     IngestionStats,
-    decimal_to_american,
     find_existing_event,
     hours_to_tier,
 )
@@ -274,9 +274,9 @@ def _extract_three_way_odds(
             {
                 "key": MARKET_KEY,
                 "outcomes": [
-                    {"name": home_team, "price": decimal_to_american(home_odds)},
-                    {"name": "Draw", "price": decimal_to_american(draw_odds)},
-                    {"name": away_team, "price": decimal_to_american(away_odds)},
+                    {"name": home_team, PRICE_DECIMAL_KEY: home_odds},
+                    {"name": "Draw", PRICE_DECIMAL_KEY: draw_odds},
+                    {"name": away_team, PRICE_DECIMAL_KEY: away_odds},
                 ],
             }
         ],

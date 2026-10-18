@@ -11,6 +11,7 @@ sources:
   - odds_core.team.normalize_team_name
   - odds_lambda.data_fetcher.TheOddsAPIClient.get_odds
   - odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds
+  - odds_core.odds_math.outcome_price_decimal
   - odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP
   - odds_lambda.oddsportal_common.slugify
   - odds_lambda.betfair.constants.SPORT_CONFIG
@@ -72,6 +73,8 @@ A market key is whatever string sits in `raw_data.bookmakers[].markets[].key`, a
 - `betfair_exchange` has three writers: FDUK `BFE*` columns, the Betfair job, and OddsPortal's "Betfair Exchange" row (`odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP`, with matched volume from the feed).
 - OddsPortal scrape names (`1x2`, `over_under_2_5`, `home_away`) are the keys of `odds_lambda.oddsportal_client.FEED_MARKETS`, the only ones the live scrape accepts; `odds_mcp.server.refresh_scrape` rejects any other value. They are inputs to `odds_mcp.server.refresh_scrape` and `odds scrape --market`, not stored keys. The totals spelling is `over_under_2_5` (not `over_under_2.5`), and `odds_lambda.oddsportal_adapter.convert_market` raises `ValueError("Unsupported market")` for anything else ([oddsportal-scraper](oddsportal-scraper.md)).
 - MCP read tools accept `odds_mcp.server.MarketKey` (`h2h`, `1x2`, `totals`, `spreads`) and match it exactly, so EPL queries need `1x2`, MLB queries need `h2h`, and a wrong key returns an empty result rather than an error (#433; [mcp-market-tools](../agent/mcp-market-tools.md)).
+
+A market's outcomes are priced by `price` (integer American, The Odds API) or `price_decimal` (FDUK, OddsPortal, Betfair, and Polymarket from the current ingest code; older stored snapshots can still carry `price`, see [Price encodings](../foundations/odds-math.md#price-encodings)); readers go through `odds_core.odds_math.outcome_price_decimal`.
 
 Bookmaker keys: OddsPortal display names map through `odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP` with a slug fallback; the default Odds API list is under [Odds API scope](#odds-api-scope).
 

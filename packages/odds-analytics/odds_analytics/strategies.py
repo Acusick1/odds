@@ -1,7 +1,6 @@
 """Example betting strategies for backtesting."""
 
 from odds_core.models import Odds
-from odds_core.odds_math import calculate_implied_probability
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backtesting import (
@@ -76,7 +75,7 @@ class FlatBettingStrategy(BettingStrategy):
             target_outcome = draw_odd.outcome_name if draw_odd else None
         elif pattern == "favorite":
             # Find favorite (lowest odds / most negative)
-            min_odds = min(relevant_odds, key=lambda o: o.price)
+            min_odds = min(relevant_odds, key=lambda o: o.price_decimal)
             target_outcome = min_odds.outcome_name
         else:
             return []
@@ -97,7 +96,7 @@ class FlatBettingStrategy(BettingStrategy):
                     market=target_odds.market_key,
                     outcome=target_odds.outcome_name,
                     bookmaker=target_odds.bookmaker_key,
-                    odds=target_odds.price,
+                    odds=target_odds.american_price,
                     line=target_odds.point,
                     confidence=0.5,  # Flat confidence (50%)
                     rationale=f"Flat bet on {pattern} team",
@@ -172,7 +171,7 @@ class BasicEVStrategy(BettingStrategy):
             # For each outcome in sharp book
             for sharp_odd in sharp_odds:
                 # Calculate "true" probability from sharp book
-                true_prob = calculate_implied_probability(sharp_odd.price)
+                true_prob = sharp_odd.implied_probability
 
                 # Check retail books for better odds
                 for retail_book in retail_books:
@@ -196,7 +195,7 @@ class BasicEVStrategy(BettingStrategy):
                     # Calculate EV at retail odds using sharp probability
                     ev = calculate_ev(
                         bet_probability=true_prob,
-                        american_odds=retail_odd.price,
+                        american_odds=retail_odd.american_price,
                         stake=100.0,  # Per $100
                     )
 
@@ -210,11 +209,11 @@ class BasicEVStrategy(BettingStrategy):
                                 market=retail_odd.market_key,
                                 outcome=retail_odd.outcome_name,
                                 bookmaker=retail_odd.bookmaker_key,
-                                odds=retail_odd.price,
+                                odds=retail_odd.american_price,
                                 line=retail_odd.point,
                                 confidence=true_prob,  # Use sharp implied prob as confidence
                                 rationale=f"+EV: {ev_percentage:.2%} edge over {sharp_book} "
-                                f"(Sharp: {sharp_odd.price}, Retail: {retail_odd.price})",
+                                f"(Sharp: {sharp_odd.american_price}, Retail: {retail_odd.american_price})",
                             )
                         )
 
@@ -289,21 +288,21 @@ class ArbitrageStrategy(BettingStrategy):
 
                 if draw_odds and home_odds and away_odds:
                     # 3-way market (football): need all three legs
-                    best_home = max(home_odds, key=lambda o: o.price)
-                    best_away = max(away_odds, key=lambda o: o.price)
-                    best_draw = max(draw_odds, key=lambda o: o.price)
+                    best_home = max(home_odds, key=lambda o: o.price_decimal)
+                    best_away = max(away_odds, key=lambda o: o.price_decimal)
+                    best_draw = max(draw_odds, key=lambda o: o.price_decimal)
 
                     hold = calculate_market_hold(
-                        [best_home.price, best_away.price, best_draw.price]
+                        [best_home.price_decimal, best_away.price_decimal, best_draw.price_decimal]
                     )
                     if hold > max_hold:
                         continue
 
                     has_arb, profit_pct, stakes = detect_arbitrage(
                         [
-                            (best_home.bookmaker_key, best_home.price),
-                            (best_away.bookmaker_key, best_away.price),
-                            (best_draw.bookmaker_key, best_draw.price),
+                            (best_home.bookmaker_key, best_home.price_decimal),
+                            (best_away.bookmaker_key, best_away.price_decimal),
+                            (best_draw.bookmaker_key, best_draw.price_decimal),
                         ]
                     )
 
@@ -315,7 +314,7 @@ class ArbitrageStrategy(BettingStrategy):
                                     market=market,
                                     outcome=best_odd.outcome_name,
                                     bookmaker=best_odd.bookmaker_key,
-                                    odds=best_odd.price,
+                                    odds=best_odd.american_price,
                                     line=None,
                                     confidence=1.0,
                                     rationale=f"3-way arb: {profit_pct:.2f}% profit",
@@ -324,17 +323,17 @@ class ArbitrageStrategy(BettingStrategy):
 
                 elif home_odds and away_odds:
                     # 2-way market (basketball)
-                    best_home = max(home_odds, key=lambda o: o.price)
-                    best_away = max(away_odds, key=lambda o: o.price)
+                    best_home = max(home_odds, key=lambda o: o.price_decimal)
+                    best_away = max(away_odds, key=lambda o: o.price_decimal)
 
-                    hold = calculate_market_hold([best_home.price, best_away.price])
+                    hold = calculate_market_hold([best_home.price_decimal, best_away.price_decimal])
                     if hold > max_hold:
                         continue
 
                     has_arb, profit_pct, stakes = detect_arbitrage(
                         [
-                            (best_home.bookmaker_key, best_home.price),
-                            (best_away.bookmaker_key, best_away.price),
+                            (best_home.bookmaker_key, best_home.price_decimal),
+                            (best_away.bookmaker_key, best_away.price_decimal),
                         ]
                     )
 
@@ -345,7 +344,7 @@ class ArbitrageStrategy(BettingStrategy):
                                 market=market,
                                 outcome=best_home.outcome_name,
                                 bookmaker=best_home.bookmaker_key,
-                                odds=best_home.price,
+                                odds=best_home.american_price,
                                 line=None,
                                 confidence=1.0,
                                 rationale=f"Arbitrage: {profit_pct:.2f}% profit "
@@ -358,7 +357,7 @@ class ArbitrageStrategy(BettingStrategy):
                                 market=market,
                                 outcome=best_away.outcome_name,
                                 bookmaker=best_away.bookmaker_key,
-                                odds=best_away.price,
+                                odds=best_away.american_price,
                                 line=None,
                                 confidence=1.0,
                                 rationale=f"Arbitrage: {profit_pct:.2f}% profit "
@@ -387,18 +386,20 @@ class ArbitrageStrategy(BettingStrategy):
                         away_line_odds = [o for o in line_odds if o.outcome_name == event.away_team]
 
                         if home_line_odds and away_line_odds:
-                            best_home = max(home_line_odds, key=lambda o: o.price)
-                            best_away = max(away_line_odds, key=lambda o: o.price)
+                            best_home = max(home_line_odds, key=lambda o: o.price_decimal)
+                            best_away = max(away_line_odds, key=lambda o: o.price_decimal)
 
                             # Skip if market hold is too high
-                            hold = calculate_market_hold([best_home.price, best_away.price])
+                            hold = calculate_market_hold(
+                                [best_home.price_decimal, best_away.price_decimal]
+                            )
                             if hold > max_hold:
                                 continue
 
                             has_arb, profit_pct, stakes = detect_arbitrage(
                                 [
-                                    (best_home.bookmaker_key, best_home.price),
-                                    (best_away.bookmaker_key, best_away.price),
+                                    (best_home.bookmaker_key, best_home.price_decimal),
+                                    (best_away.bookmaker_key, best_away.price_decimal),
                                 ]
                             )
 
@@ -410,7 +411,7 @@ class ArbitrageStrategy(BettingStrategy):
                                             market=market,
                                             outcome=best_home.outcome_name,
                                             bookmaker=best_home.bookmaker_key,
-                                            odds=best_home.price,
+                                            odds=best_home.american_price,
                                             line=best_home.point,
                                             confidence=1.0,
                                             rationale=f"Spread arb: {profit_pct:.2f}% profit at {line_value}",
@@ -420,7 +421,7 @@ class ArbitrageStrategy(BettingStrategy):
                                             market=market,
                                             outcome=best_away.outcome_name,
                                             bookmaker=best_away.bookmaker_key,
-                                            odds=best_away.price,
+                                            odds=best_away.american_price,
                                             line=best_away.point,
                                             confidence=1.0,
                                             rationale=f"Spread arb: {profit_pct:.2f}% profit at {line_value}",
@@ -433,18 +434,20 @@ class ArbitrageStrategy(BettingStrategy):
                         under_odds = [o for o in line_odds if o.outcome_name.lower() == "under"]
 
                         if over_odds and under_odds:
-                            best_over = max(over_odds, key=lambda o: o.price)
-                            best_under = max(under_odds, key=lambda o: o.price)
+                            best_over = max(over_odds, key=lambda o: o.price_decimal)
+                            best_under = max(under_odds, key=lambda o: o.price_decimal)
 
                             # Skip if market hold is too high
-                            hold = calculate_market_hold([best_over.price, best_under.price])
+                            hold = calculate_market_hold(
+                                [best_over.price_decimal, best_under.price_decimal]
+                            )
                             if hold > max_hold:
                                 continue
 
                             has_arb, profit_pct, stakes = detect_arbitrage(
                                 [
-                                    (best_over.bookmaker_key, best_over.price),
-                                    (best_under.bookmaker_key, best_under.price),
+                                    (best_over.bookmaker_key, best_over.price_decimal),
+                                    (best_under.bookmaker_key, best_under.price_decimal),
                                 ]
                             )
 
@@ -456,7 +459,7 @@ class ArbitrageStrategy(BettingStrategy):
                                             market=market,
                                             outcome=best_over.outcome_name,
                                             bookmaker=best_over.bookmaker_key,
-                                            odds=best_over.price,
+                                            odds=best_over.american_price,
                                             line=best_over.point,
                                             confidence=1.0,
                                             rationale=f"Total arb: {profit_pct:.2f}% profit at {line_value}",
@@ -466,7 +469,7 @@ class ArbitrageStrategy(BettingStrategy):
                                             market=market,
                                             outcome=best_under.outcome_name,
                                             bookmaker=best_under.bookmaker_key,
-                                            odds=best_under.price,
+                                            odds=best_under.american_price,
                                             line=best_under.point,
                                             confidence=1.0,
                                             rationale=f"Total arb: {profit_pct:.2f}% profit at {line_value}",

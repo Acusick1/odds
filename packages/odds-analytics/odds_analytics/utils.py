@@ -10,7 +10,7 @@ import math
 from collections.abc import Collection, Iterable, Sequence
 from typing import TYPE_CHECKING
 
-from odds_core.odds_math import american_to_decimal, calculate_implied_probability
+from odds_core.odds_math import american_to_decimal, decimal_to_implied_probability
 
 if TYPE_CHECKING:
     from rich.table import Table
@@ -131,24 +131,24 @@ def calculate_profit_factor(winning_profit: float, losing_loss: float) -> float:
     return winning_profit / abs(losing_loss)
 
 
-def calculate_market_hold(odds_list: list[int]) -> float:
-    """Market hold (bookmaker's edge/vig) from a list of odds for all outcomes."""
-    implied_probs = [calculate_implied_probability(odds) for odds in odds_list]
+def calculate_market_hold(decimal_odds_list: list[float]) -> float:
+    """Market hold (bookmaker's edge/vig) from the decimal odds of all outcomes."""
+    implied_probs = [decimal_to_implied_probability(odds) for odds in decimal_odds_list]
     return sum(implied_probs) - 1.0
 
 
 def per_book_market_holds(
-    prices: Iterable[tuple[str, str, int]],
+    prices: Iterable[tuple[str, str, float]],
     required_outcomes: Collection[str],
 ) -> dict[str, float]:
-    """Market hold per bookmaker from ``(bookmaker, outcome, price)`` tuples.
+    """Market hold per bookmaker from ``(bookmaker, outcome, decimal price)`` tuples.
 
     Books missing any of ``required_outcomes`` are dropped — a partial-market
     sum would understate the hold (possibly negative) with no signal to the
     caller. Duplicate ``(bookmaker, outcome)`` entries keep the last price.
     """
     required = set(required_outcomes)
-    by_book: dict[str, dict[str, int]] = {}
+    by_book: dict[str, dict[str, float]] = {}
     for bookmaker, outcome, price in prices:
         by_book.setdefault(bookmaker, {})[outcome] = price
     return {
@@ -158,13 +158,13 @@ def per_book_market_holds(
     }
 
 
-def detect_arbitrage(odds_list: list[tuple[str, int]]) -> tuple[bool, float, dict]:
+def detect_arbitrage(odds_list: list[tuple[str, float]]) -> tuple[bool, float, dict]:
     """Detect arbitrage opportunity across multiple bookmakers.
 
     Returns:
         Tuple of (has_arbitrage, profit_percentage, stake_distribution).
     """
-    implied_probs = [calculate_implied_probability(odds) for _, odds in odds_list]
+    implied_probs = [decimal_to_implied_probability(odds) for _, odds in odds_list]
 
     total_implied_prob = sum(implied_probs)
 

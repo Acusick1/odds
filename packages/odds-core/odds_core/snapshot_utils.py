@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from odds_core.models import Odds, OddsSnapshot
+from odds_core.odds_math import outcome_price_decimal
 
 
 def extract_odds_from_snapshot(
@@ -64,7 +65,7 @@ def extract_odds_from_snapshot(
                         bookmaker_title=bookmaker_title,
                         market_key=market_key,
                         outcome_name=outcome_name,
-                        price=outcome_data.get("price"),
+                        price_decimal=outcome_price_decimal(outcome_data),
                         point=outcome_data.get("point"),
                         odds_timestamp=snapshot.snapshot_time,
                         last_update=last_update,

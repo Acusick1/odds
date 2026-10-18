@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from odds_core.match_brief_models import SharpPriceMeta, SharpPriceResult
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
-from odds_core.odds_math import calculate_implied_probability
 from odds_core.snapshot_utils import extract_odds_from_snapshot
 from odds_core.utils import raw_data_has_market
 from sqlalchemy import and_, func, select
@@ -314,8 +313,7 @@ class OddsReader:
             if latest_time:
                 query = query.where(Odds.odds_timestamp == latest_time)
 
-        # Order by price (highest first for positive odds, least negative for negative)
-        query = query.order_by(Odds.price.desc())
+        query = query.order_by(Odds.price_decimal.desc())
 
         result = await self.session.execute(query)
         return result.scalars().first()
@@ -742,11 +740,12 @@ class OddsReader:
                         if o.bookmaker_key == bm_key and o.outcome_name == outcome_name
                     ]
                     if bm_match:
-                        price = bm_match[0].price
+                        sharp_odds = bm_match[0]
                         sharp_result.prices[outcome_name] = {
                             "bookmaker": bm_key,
-                            "price": price,
-                            "implied_prob": round(calculate_implied_probability(price), 6),
+                            "price": sharp_odds.american_price,
+                            "price_decimal": sharp_odds.price_decimal,
+                            "implied_prob": round(sharp_odds.implied_probability, 6),
                         }
                         sharp_result.meta[outcome_name] = SharpPriceMeta(
                             snapshot_id=snapshot.id,

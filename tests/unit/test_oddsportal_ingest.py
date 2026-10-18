@@ -72,10 +72,17 @@ class TestBuildRawData2Way:
 
         assert result is not None
         outcomes = result["bookmakers"][0]["markets"][0]["outcomes"]
-        # 2.5 decimal → (2.5-1)*100 = 150 American
-        assert outcomes[0]["price"] == 150
-        # 1.5 decimal → -100/(1.5-1) = -200 American
-        assert outcomes[1]["price"] == -200
+        assert outcomes[0]["price_decimal"] == 2.5
+        assert outcomes[1]["price_decimal"] == 1.5
+        assert all("price" not in o for o in outcomes)
+
+    def test_skips_bookmaker_with_non_decimal_price(self) -> None:
+        bk = _make_bookmaker("bet365", num_outcomes=2, home_closing=1.0)
+        result = build_raw_data(
+            [bk], "Team A", "Team B", use_opening=False, match_dt=MATCH_DT, num_outcomes=2
+        )
+
+        assert result is None
 
     def test_skips_bookmaker_without_history(self) -> None:
         bk = {"bookmaker_name": "broken", "odds_history_data": None}
@@ -129,11 +136,11 @@ class TestBuildRawData3Way:
         assert result is not None
         outcomes = result["bookmakers"][0]["markets"][0]["outcomes"]
         assert outcomes[0]["name"] == "Arsenal"
-        assert outcomes[0]["price"] == 100  # 2.0 → +100
+        assert outcomes[0]["price_decimal"] == 2.0
         assert outcomes[1]["name"] == "Draw"
-        assert outcomes[1]["price"] == 250  # 3.5 → +250
+        assert outcomes[1]["price_decimal"] == 3.5
         assert outcomes[2]["name"] == "Chelsea"
-        assert outcomes[2]["price"] == 300  # 4.0 → +300
+        assert outcomes[2]["price_decimal"] == 4.0
 
     def test_skips_bookmaker_with_only_2_entries_for_3way(self) -> None:
         """If odds_history_data has only 2 entries but num_outcomes=3, skip."""

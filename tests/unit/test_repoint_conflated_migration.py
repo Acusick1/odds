@@ -22,6 +22,7 @@ import pytest
 # absent when create_all runs.
 from odds_core.match_brief_models import MatchBrief  # noqa: F401
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.odds_math import american_to_decimal
 from odds_core.paper_trade_models import PaperTrade  # noqa: F401
 from odds_core.prediction_models import Prediction  # noqa: F401
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -269,7 +270,7 @@ class TestRepointMigrationUpgrade:
             bookmaker_title="Bet365",
             market_key="h2h",
             outcome_name="Safe Home",
-            price=-110,
+            price_decimal=american_to_decimal(-110),
             odds_timestamp=snap_safe_time,
             last_update=snap_safe_time,
         )
@@ -328,7 +329,7 @@ class TestRepointMigrationUpgrade:
             bookmaker_title="Bet365",
             market_key="h2h",
             outcome_name="Dup Home",
-            price=-120,
+            price_decimal=american_to_decimal(-120),
             odds_timestamp=snap_dup_time,
             last_update=snap_dup_time,
         )

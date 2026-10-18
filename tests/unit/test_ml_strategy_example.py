@@ -10,6 +10,7 @@ from odds_analytics.backtesting import BacktestConfig, BacktestEvent, BetOpportu
 from odds_analytics.feature_extraction import TabularFeatureExtractor, TabularFeatures
 from odds_analytics.ml_strategy_example import XGBoostStrategy
 from odds_core.models import EventStatus, Odds
+from odds_core.odds_math import american_to_decimal
 
 
 @pytest.fixture
@@ -39,7 +40,7 @@ def sample_odds_snapshot(sample_event):
             bookmaker_title="Pinnacle",
             market_key="h2h",
             outcome_name=sample_event.home_team,
-            price=-120,
+            price_decimal=american_to_decimal(-120),
             point=None,
             odds_timestamp=timestamp,
             last_update=timestamp,
@@ -51,7 +52,7 @@ def sample_odds_snapshot(sample_event):
             bookmaker_title="Pinnacle",
             market_key="h2h",
             outcome_name=sample_event.away_team,
-            price=+100,
+            price_decimal=american_to_decimal(+100),
             point=None,
             odds_timestamp=timestamp,
             last_update=timestamp,
@@ -64,7 +65,7 @@ def sample_odds_snapshot(sample_event):
             bookmaker_title="FanDuel",
             market_key="h2h",
             outcome_name=sample_event.home_team,
-            price=-115,
+            price_decimal=american_to_decimal(-115),
             point=None,
             odds_timestamp=timestamp,
             last_update=timestamp,
@@ -76,7 +77,7 @@ def sample_odds_snapshot(sample_event):
             bookmaker_title="FanDuel",
             market_key="h2h",
             outcome_name=sample_event.away_team,
-            price=-105,
+            price_decimal=american_to_decimal(-105),
             point=None,
             odds_timestamp=timestamp,
             last_update=timestamp,
@@ -89,7 +90,7 @@ def sample_odds_snapshot(sample_event):
             bookmaker_title="DraftKings",
             market_key="h2h",
             outcome_name=sample_event.home_team,
-            price=-118,
+            price_decimal=american_to_decimal(-118),
             point=None,
             odds_timestamp=timestamp,
             last_update=timestamp,
@@ -101,7 +102,7 @@ def sample_odds_snapshot(sample_event):
             bookmaker_title="DraftKings",
             market_key="h2h",
             outcome_name=sample_event.away_team,
-            price=-102,
+            price_decimal=american_to_decimal(-102),
             point=None,
             odds_timestamp=timestamp,
             last_update=timestamp,

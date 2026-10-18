@@ -20,7 +20,7 @@ from typing import Literal, NamedTuple
 import numpy as np
 import structlog
 from odds_core.models import Odds
-from odds_core.odds_math import calculate_implied_probability, devig_probabilities
+from odds_core.odds_math import devig_probabilities, outcome_price_decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Outcome name used by the Odds API for draw results in 3-way markets
@@ -96,8 +96,8 @@ def calculate_regression_target(
     if market == "h2h":
         # For h2h, use implied probability delta
         # Average across bookmakers if multiple
-        opening_probs = [calculate_implied_probability(o.price) for o in opening_odds]
-        closing_probs = [calculate_implied_probability(o.price) for o in closing_odds]
+        opening_probs = [o.implied_probability for o in opening_odds]
+        closing_probs = [o.implied_probability for o in closing_odds]
 
         if not opening_probs or not closing_probs:
             return None
@@ -161,11 +161,11 @@ def extract_devigged_h2h_probs(
     if home_odds is None or away_odds is None:
         return None
 
-    home_raw = calculate_implied_probability(home_odds.price)
-    away_raw = calculate_implied_probability(away_odds.price)
+    home_raw = home_odds.implied_probability
+    away_raw = away_odds.implied_probability
 
     if draw_odds is not None:
-        draw_raw = calculate_implied_probability(draw_odds.price)
+        draw_raw = draw_odds.implied_probability
         home, draw, away = devig_probabilities(home_raw, draw_raw, away_raw)
         return DeviggedProbs(home=home, draw=draw, away=away)
 
@@ -236,8 +236,8 @@ def extract_devigged_totals_probs(
     if over_odds is None or under_odds is None:
         return None
 
-    over_raw = calculate_implied_probability(over_odds.price)
-    under_raw = calculate_implied_probability(under_odds.price)
+    over_raw = over_odds.implied_probability
+    under_raw = under_odds.implied_probability
     over, under = devig_probabilities(over_raw, under_raw)
     return DeviggedTotalsProbs(over=over, under=under)
 
@@ -286,8 +286,8 @@ async def load_sequences_for_event(
 
         Example return value:
         [
-            [Odds(bookmaker="pinnacle", price=-110, ...), Odds(bookmaker="fanduel", ...)],
-            [Odds(bookmaker="pinnacle", price=-115, ...), Odds(bookmaker="fanduel", ...)],
+            [Odds(bookmaker="pinnacle", price_decimal=1.91, ...), Odds(bookmaker="fanduel", ...)],
+            [Odds(bookmaker="pinnacle", price_decimal=1.87, ...), Odds(bookmaker="fanduel", ...)],
             ...
         ]
 
@@ -358,7 +358,6 @@ async def load_sequences_for_event(
                 outcomes = market.get("outcomes", [])
                 for outcome in outcomes:
                     outcome_name = outcome.get("name")
-                    price = outcome.get("price")  # American odds
                     point = outcome.get("point")  # Spread/total line
 
                     # Create Odds object (not persisted to DB, just for in-memory use)
@@ -368,7 +367,7 @@ async def load_sequences_for_event(
                         bookmaker_title=bookmaker_title,
                         market_key=market_key,
                         outcome_name=outcome_name,
-                        price=price,
+                        price_decimal=outcome_price_decimal(outcome),
                         point=point,
                         odds_timestamp=snapshot.snapshot_time,
                         last_update=last_update,

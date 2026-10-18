@@ -8,6 +8,12 @@ odds-analytics — can call them without pulling in numpy, pandas, etc.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
+PRICE_DECIMAL_KEY = "price_decimal"
+PRICE_AMERICAN_KEY = "price"
+
 
 def american_to_decimal(american_odds: int) -> float:
     """Convert American odds to decimal odds.
@@ -24,33 +30,43 @@ def american_to_decimal(american_odds: int) -> float:
 
 
 def decimal_to_american(decimal_odds: float) -> int:
-    """Convert decimal odds to American odds.
+    """Convert decimal odds to the nearest integer American odds.
+
+    Integer American odds cannot represent every decimal price, so this is a
+    display and bet-record conversion; probabilities and EV must use the
+    decimal price.
 
     Examples:
         >>> decimal_to_american(1.909)
         -110
         >>> decimal_to_american(2.50)
-        +150
+        150
     """
+    if decimal_odds <= 1.0:
+        raise ValueError(f"Decimal odds must exceed 1.0, got {decimal_odds}")
     if decimal_odds >= 2.0:
-        return int((decimal_odds - 1) * 100)
-    return int(-100 / (decimal_odds - 1))
+        return round((decimal_odds - 1) * 100)
+    return round(-100 / (decimal_odds - 1))
 
 
-def probability_to_american(probability: float) -> int:
-    """Convert a probability strictly between 0 and 1 to the nearest American price.
+def decimal_to_implied_probability(decimal_odds: float) -> float:
+    """Implied probability (0-1) from decimal odds."""
+    return 1 / decimal_odds
 
-    Examples:
-        >>> probability_to_american(0.6)
-        -150
-        >>> probability_to_american(0.25)
-        300
+
+def outcome_price_decimal(outcome: Mapping[str, Any]) -> float:
+    """Decimal price of a ``raw_data`` outcome.
+
+    Snapshots built by this pipeline carry the source's decimal price under
+    ``price_decimal``. The Odds API's own responses carry its integer American
+    price under ``price``, which converts exactly.
+
+    Raises:
+        KeyError: if the outcome has neither key.
     """
-    if not 0.0 < probability < 1.0:
-        raise ValueError(f"probability must be in (0, 1), got {probability}")
-    if probability <= 0.5:
-        return round(100 * (1 - probability) / probability)
-    return round(-100 * probability / (1 - probability))
+    if PRICE_DECIMAL_KEY in outcome:
+        return float(outcome[PRICE_DECIMAL_KEY])
+    return american_to_decimal(int(outcome[PRICE_AMERICAN_KEY]))
 
 
 def calculate_implied_probability(american_odds: int) -> float:
@@ -60,7 +76,7 @@ def calculate_implied_probability(american_odds: int) -> float:
         >>> calculate_implied_probability(-110)
         0.524
     """
-    return 1 / american_to_decimal(american_odds)
+    return decimal_to_implied_probability(american_to_decimal(american_odds))
 
 
 def devig_probabilities(*probs: float) -> tuple[float, ...]:

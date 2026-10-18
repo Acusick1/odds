@@ -52,9 +52,9 @@ class TestConvertMarket:
                         {
                             "key": "1x2",
                             "outcomes": [
-                                {"name": "Arsenal", "price": 100},
-                                {"name": "Draw", "price": 250},
-                                {"name": "Everton", "price": -200},
+                                {"name": "Arsenal", "price_decimal": 2.0},
+                                {"name": "Draw", "price_decimal": 3.5},
+                                {"name": "Everton", "price_decimal": 1.5},
                             ],
                         }
                     ],
@@ -81,8 +81,8 @@ class TestConvertMarket:
         market = match.raw_data["bookmakers"][0]["markets"][0]
         assert market["key"] == "totals"
         assert market["outcomes"] == [
-            {"name": "Over", "price": 100, "point": 2.5},
-            {"name": "Under", "price": -200, "point": 2.5},
+            {"name": "Over", "price_decimal": 2.0, "point": 2.5},
+            {"name": "Under", "price_decimal": 1.5, "point": 2.5},
         ]
 
     def test_home_away_uses_h2h_key(self, event: ListingEvent) -> None:
@@ -92,8 +92,8 @@ class TestConvertMarket:
         market = match.raw_data["bookmakers"][0]["markets"][0]
         assert market["key"] == "h2h"
         assert market["outcomes"] == [
-            {"name": "Arsenal", "price": 150},
-            {"name": "Everton", "price": -200},
+            {"name": "Arsenal", "price_decimal": 2.5},
+            {"name": "Everton", "price_decimal": 1.5},
         ]
 
     def test_betfair_matched_only_with_volumes(self, event: ListingEvent) -> None:

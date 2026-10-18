@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 import structlog
 from odds_core.models import Event
+from odds_core.odds_math import PRICE_DECIMAL_KEY
 from oddsharvester.core.scrape_result import ScrapeResult
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,15 +74,6 @@ def slugify(name: str) -> str:
 def normalize_bookmaker_key(name: str) -> str:
     """Map OddsPortal bookmaker name to pipeline key."""
     return BOOKMAKER_KEY_MAP.get(name, slugify(name))
-
-
-def decimal_to_american(d: float) -> int:
-    """Convert decimal odds to American odds."""
-    if d >= 2.0:
-        return round((d - 1) * 100)
-    elif d > 1.0:
-        return round(-100 / (d - 1))
-    return -10000
 
 
 def parse_match_date(date_str: str) -> datetime:
@@ -191,7 +183,7 @@ def build_raw_data(
             continue
 
         raw_decimals = [e.get("odds") for e in entries]  # type: ignore[union-attr]
-        if any(d is None for d in raw_decimals):
+        if any(d is None or d <= 1.0 for d in raw_decimals):
             continue
         decimals: list[float] = raw_decimals  # type: ignore[assignment]  # None filtered above
 
@@ -200,18 +192,18 @@ def build_raw_data(
             for name, decimal in zip(outcome_names, decimals, strict=True):
                 outcome: dict[str, Any] = {
                     "name": name,
-                    "price": decimal_to_american(decimal),
+                    PRICE_DECIMAL_KEY: decimal,
                 }
                 if line is not None:
                     outcome["point"] = line
                 outcomes.append(outcome)
         else:
             outcomes = [
-                {"name": home_team, "price": decimal_to_american(decimals[0])},
+                {"name": home_team, PRICE_DECIMAL_KEY: decimals[0]},
             ]
             if num_outcomes >= 3:
-                outcomes.append({"name": DRAW_OUTCOME, "price": decimal_to_american(decimals[1])})
-            outcomes.append({"name": away_team, "price": decimal_to_american(decimals[-1])})
+                outcomes.append({"name": DRAW_OUTCOME, PRICE_DECIMAL_KEY: decimals[1]})
+            outcomes.append({"name": away_team, PRICE_DECIMAL_KEY: decimals[-1]})
 
         raw_ts = parse_odds_timestamp(entries[0]["timestamp"])  # type: ignore[index]
         fixed_ts = fix_odds_timestamp(raw_ts, match_dt)

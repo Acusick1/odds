@@ -281,15 +281,15 @@ class TestGetLatestBookPrices:
 
         # Only the newer price surfaces, with provenance to the newer snapshot
         brighton = result.entries[("bet365", "Brighton", None)]
-        assert brighton.odds.price == -130
+        assert brighton.odds.american_price == -130
         assert brighton.meta.snapshot_time == new_time
 
         draw = result.entries[("bet365", "Draw", None)]
-        assert draw.odds.price == 280
+        assert draw.odds.american_price == 280
         assert draw.meta.snapshot_time == new_time
 
         wolves = result.entries[("bet365", "Wolves", None)]
-        assert wolves.odds.price == 360
+        assert wolves.odds.american_price == 360
         assert wolves.meta.snapshot_time == new_time
 
         # Exactly 3 entries — one per outcome, no duplicates from the older snapshot

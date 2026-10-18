@@ -15,7 +15,7 @@ status: stable
 
 # How odds are stored
 
-Odds are stored twice. Each fetch becomes one `odds_core.models.OddsSnapshot` row holding the complete payload as JSON in `raw_data`, plus one `odds_core.models.Odds` row per bookmaker, market and outcome. `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` writes both: raw for debugging, auditing and exact preservation, normalized for SQL filtering and time series `(inferred)`. Columns and indexes are on [Odds snapshot and odds tables](odds-tables.md).
+Odds are stored twice (the normalized rows keep `price_decimal`, constrained above 1.0). Each fetch becomes one `odds_core.models.OddsSnapshot` row holding the complete payload as JSON in `raw_data`, plus one `odds_core.models.Odds` row per bookmaker, market and outcome. `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` writes both: raw for debugging, auditing and exact preservation, normalized for SQL filtering and time series `(inferred)`. Columns and indexes are on [Odds snapshot and odds tables](odds-tables.md).
 
 ## The normalized half is not universal
 
@@ -25,9 +25,9 @@ Odds are stored twice. Each fetch becomes one `odds_core.models.OddsSnapshot` ro
 
 `odds_lambda.storage.readers.OddsReader` splits by path ([OddsReader](odds-reader.md#which-path-each-method-uses)): three price lookups read normalized rows, while most price lookups rebuild `odds_core.models.Odds` objects from `raw_data` with `odds_core.snapshot_utils.extract_odds_from_snapshot` and never persist them. Those raw-based readers work for every source, including historical ones, which is why the sharp-price and latest-book queries behind the agent's tools do not depend on the normalized rows `(inferred)`.
 
-## Two parsers, two behaviours
+## Two parsers, one price rule
 
-Two code paths turn `raw_data` into `odds_core.models.Odds`: the writer's `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` coerces with `int(outcome.get("price", 0))`, so an absent price is stored as 0, while `odds_core.snapshot_utils.extract_odds_from_snapshot` passes prices through unchanged (#464). The same snapshot can thus yield a 0 price from the normalized table and a missing or raw price from the raw-based readers. Provenance and uniqueness constraints are on [Odds snapshot and odds tables](odds-tables.md).
+Two code paths turn `raw_data` into `odds_core.models.Odds`, the writer's `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` and `odds_core.snapshot_utils.extract_odds_from_snapshot`. Both read each outcome's price with `odds_core.odds_math.outcome_price_decimal`, which raises `KeyError` when an outcome has neither `price_decimal` nor `price` ([Odds arithmetic helpers](../foundations/odds-math.md#price-encodings)). The same snapshot therefore yields the same prices from the normalized table and from the raw-based readers. Provenance and uniqueness constraints are on [Odds snapshot and odds tables](odds-tables.md).
 
 ## Related
 

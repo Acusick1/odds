@@ -606,6 +606,7 @@ class TestFindRetailEdges:
             assert set(arsenal[side].keys()) == {
                 "book",
                 "price",
+                "price_decimal",
                 "implied_prob",
                 "divergence",
                 "z_score",

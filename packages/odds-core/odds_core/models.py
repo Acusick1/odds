@@ -4,9 +4,10 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime, Index
+from sqlalchemy import JSON, CheckConstraint, Column, DateTime, Float, Index
 from sqlmodel import Field, SQLModel
 
+from odds_core.odds_math import decimal_to_american, decimal_to_implied_probability
 from odds_core.team import normalize_team_name
 
 
@@ -128,7 +129,10 @@ class Odds(SQLModel, table=True):
 
     # Outcome data
     outcome_name: str = Field(description="Team name or Over/Under")
-    price: int = Field(description="American odds (e.g., -110, +150)")
+    price_decimal: float = Field(
+        sa_column=Column(Float, nullable=False),
+        description="Decimal odds as quoted by the source (e.g., 1.91, 2.5)",
+    )
     point: float | None = Field(default=None, description="Spread/total line (e.g., -2.5, 218.5)")
 
     # Timestamps
@@ -151,7 +155,16 @@ class Odds(SQLModel, table=True):
     __table_args__ = (
         Index("ix_event_bookmaker_market", "event_id", "bookmaker_key", "market_key"),
         Index("ix_bookmaker_time", "bookmaker_key", "odds_timestamp"),
+        CheckConstraint("price_decimal > 1.0", name="ck_odds_price_decimal_gt_one"),
     )
+
+    @property
+    def implied_probability(self) -> float:
+        return decimal_to_implied_probability(self.price_decimal)
+
+    @property
+    def american_price(self) -> int:
+        return decimal_to_american(self.price_decimal)
 
 
 class DataQualityLog(SQLModel, table=True):

@@ -11,6 +11,7 @@ import torch
 from odds_analytics.backtesting import BacktestConfig, BacktestEvent, BetOpportunity
 from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy, LSTMModel
 from odds_core.models import Event, EventStatus, Odds
+from odds_core.odds_math import american_to_decimal
 
 
 @pytest.fixture
@@ -40,7 +41,7 @@ def sample_odds_snapshot(sample_event):
             bookmaker_title="Pinnacle",
             market_key="h2h",
             outcome_name=sample_event.home_team,
-            price=-130,
+            price_decimal=american_to_decimal(-130),
             point=None,
             odds_timestamp=timestamp,
             last_update=timestamp,
@@ -52,7 +53,7 @@ def sample_odds_snapshot(sample_event):
             bookmaker_title="Pinnacle",
             market_key="h2h",
             outcome_name=sample_event.away_team,
-            price=+110,
+            price_decimal=american_to_decimal(+110),
             point=None,
             odds_timestamp=timestamp,
             last_update=timestamp,
@@ -65,7 +66,7 @@ def sample_odds_snapshot(sample_event):
             bookmaker_title="FanDuel",
             market_key="h2h",
             outcome_name=sample_event.home_team,
-            price=-125,
+            price_decimal=american_to_decimal(-125),
             point=None,
             odds_timestamp=timestamp,
             last_update=timestamp,
@@ -77,7 +78,7 @@ def sample_odds_snapshot(sample_event):
             bookmaker_title="FanDuel",
             market_key="h2h",
             outcome_name=sample_event.away_team,
-            price=+105,
+            price_decimal=american_to_decimal(+105),
             point=None,
             odds_timestamp=timestamp,
             last_update=timestamp,
@@ -414,7 +415,7 @@ class TestLSTMLineMovementStrategy:
                     bookmaker_title="Pinnacle",
                     market_key="h2h",
                     outcome_name=sample_event.home_team,
-                    price=-120,
+                    price_decimal=american_to_decimal(-120),
                     point=None,
                     odds_timestamp=datetime(2024, 11, 15, 12, 0, 0, tzinfo=UTC),
                     last_update=datetime(2024, 11, 15, 12, 0, 0, tzinfo=UTC),
