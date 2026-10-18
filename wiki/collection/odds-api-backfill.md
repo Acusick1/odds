@@ -33,8 +33,8 @@ Fills in historical Odds API snapshots (the paid `/historical/odds` endpoint, 10
 
 ## Limits
 
-- `basketball_nba` is literal in `odds_cli.commands.backfill` (plan, scores), `odds_analytics.backfill_executor.BackfillExecutor._process_snapshot` (`odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds`) and the tier validator's game-discovery check. Only `odds discover` takes `--sport`; plan finds no events for EPL and there is no `--sport` on plan, execute or scores (#448).
-- Historical responses for soccer carry the three-way market as `1x2`, relabelled by `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds` ([sport-and-market-keys](sport-and-market-keys.md#market-key-dialects)).
+- `basketball_nba` is literal in `odds_cli.commands.backfill` (plan, scores), `odds_analytics.backfill_executor.BackfillExecutor._process_snapshot` (`odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds`, which requests the sport's configured bookmakers) and the tier validator's game-discovery check. Only `odds discover` takes `--sport`; plan finds no events for EPL and there is no `--sport` on plan, execute or scores (#448).
+- Historical responses for soccer carry the three-way market as `1x2`, relabelled, and bookmaker keys renamed to pipeline keys, by `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds` ([sport-and-market-keys](sport-and-market-keys.md#market-key-dialects)).
 - The `gaps` analysis is not sport-filtered; the executor then requests NBA historical odds and marks a non-NBA event "not found in API response" after the call, so quota is spent for nothing ([howto-backfill-odds-api-history](howto-backfill-odds-api-history.md)).
 - The quota estimate is a constant 30 per snapshot (`odds_analytics.gap_backfill_planner.GapBackfillPlanner.QUOTA_PER_SNAPSHOT`, a literal 30 in `odds_analytics.game_selector.GameSelector`, and `+= 30` in the executor), not derived from configured regions or markets (#441; [odds-api-quota](odds-api-quota.md)).
 - Final scores are not available from the Odds API for games older than 3 days (`odds_cli.commands.discover` docstring), hence `backfill scores`.

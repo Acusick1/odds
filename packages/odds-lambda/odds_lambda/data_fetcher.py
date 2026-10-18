@@ -2,6 +2,7 @@
 
 import time
 from datetime import UTC, datetime
+from typing import Any
 
 import aiohttp
 import structlog
@@ -24,6 +25,22 @@ from tenacity import (
 from odds_lambda.api_key_manager import AllKeysExhaustedError, APIKeyManager
 
 logger = structlog.get_logger()
+
+# Odds API keys that differ from the pipeline's bookmaker keys
+# (odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP, scripts/ingest_football_data_uk.py).
+ODDS_API_BOOKMAKER_KEY_MAP: dict[str, str] = {
+    "betfair_ex_uk": "betfair_exchange",
+    "betfair_ex_eu": "betfair_exchange",
+    "ladbrokes_uk": "ladbrokes",
+    "betfred_uk": "betfred",
+    "sport888": "888sport",
+}
+
+
+def canonicalize_bookmaker_keys(raw_events_data: list[dict[str, Any]]) -> None:
+    for event in raw_events_data:
+        for bookmaker in event.get("bookmakers", []):
+            bookmaker["key"] = ODDS_API_BOOKMAKER_KEY_MAP.get(bookmaker["key"], bookmaker["key"])
 
 
 class TheOddsAPIClient:
@@ -179,7 +196,7 @@ class TheOddsAPIClient:
         app_settings = get_settings()
         regions = regions or app_settings.data_collection.regions
         markets = markets or app_settings.data_collection.markets
-        bookmakers = bookmakers or app_settings.data_collection.bookmakers
+        bookmakers = bookmakers or app_settings.data_collection.bookmakers_for(sport)
 
         params = {
             "regions": ",".join(regions),
@@ -195,6 +212,7 @@ class TheOddsAPIClient:
             relabel_three_way_markets(event_dict, sport)
             for event_dict in (data if isinstance(data, list) else [data] if data else [])
         ]
+        canonicalize_bookmaker_keys(raw_events_data)
 
         # Convert API dicts to Event instances (scheduled games only)
         events = [create_scheduled_event(event_dict) for event_dict in raw_events_data]
@@ -307,7 +325,7 @@ class TheOddsAPIClient:
         app_settings = get_settings()
         regions = regions or app_settings.data_collection.regions
         markets = markets or app_settings.data_collection.markets
-        bookmakers = bookmakers or app_settings.data_collection.bookmakers
+        bookmakers = bookmakers or app_settings.data_collection.bookmakers_for(sport)
 
         params = {
             "regions": ",".join(regions),
@@ -327,6 +345,7 @@ class TheOddsAPIClient:
             relabel_three_way_markets(event_dict, sport)
             for event_dict in (response_data if isinstance(response_data, list) else [])
         ]
+        canonicalize_bookmaker_keys(raw_events_data)
 
         # Convert API dicts to Event instances (scheduled games only)
         events = [create_scheduled_event(event_dict) for event_dict in raw_events_data]

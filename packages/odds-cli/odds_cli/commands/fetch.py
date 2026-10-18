@@ -67,7 +67,9 @@ async def _fetch_current(sport: str):
                 console.print(
                     f"  Events processed: {result.processed_events} of {result.total_events}"
                 )
-                console.print(f"  Bookmakers: {len(app_settings.data_collection.bookmakers)}")
+                console.print(
+                    f"  Bookmakers: {len(app_settings.data_collection.bookmakers_for(sport))}"
+                )
                 console.print(f"  Markets: {', '.join(app_settings.data_collection.markets)}")
 
                 if result.quota_remaining is not None:

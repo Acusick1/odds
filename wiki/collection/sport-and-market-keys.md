@@ -29,7 +29,16 @@ status: stable
 
 ## Odds API scope
 
-`odds_core.config.DataCollectionConfig` defaults: sports `soccer_epl`, `baseball_mlb`; markets `h2h`, `spreads`, `totals`; region `us`; bookmakers pinnacle, circasports, draftkings, fanduel, betmgm, williamhill_us, betrivers, bovada. These filters apply only to Odds API requests ([configuration](../foundations/configuration.md)). Requests go to `odds_core.config.APIConfig.base_url` under `sports/{sport_key}/odds` and `sports/{sport_key}/scores`, with sport keys from `odds_core.sports.SportKey` (`soccer_epl`, `baseball_mlb`, `basketball_nba`).
+`odds_core.config.DataCollectionConfig` defaults: sports `soccer_epl`, `baseball_mlb`; markets `h2h`, `spreads`, `totals`; region `us`. `odds_core.config.DataCollectionConfig.bookmakers` maps each sport to the Odds API bookmaker keys it requests, read through `odds_core.config.DataCollectionConfig.bookmakers_for`, which raises `ValueError` for a sport with no entry:
+
+- `soccer_epl`: pinnacle, betfair_ex_uk, williamhill, paddypower, skybet, ladbrokes_uk, coral, betfred_uk, betvictor, sport888.
+- `baseball_mlb` and `basketball_nba`: pinnacle, circasports, draftkings, fanduel, betmgm, williamhill_us, betrivers, bovada.
+
+The Odds API gives `bookmakers` priority over `regions`, so the region setting has no effect on these requests, and it bills each group of up to 10 named bookmakers as one region ([Odds API v4 guide](https://the-odds-api.com/liveapi/guides/v4/)). The Odds API carries no bet365 for EPL in the `uk` or `eu` region (checked 2026-10-18); bet365 comes from OddsPortal and FDUK.
+
+`odds_lambda.data_fetcher.TheOddsAPIClient.get_odds` and `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds` rewrite response bookmaker keys through `odds_lambda.data_fetcher.ODDS_API_BOOKMAKER_KEY_MAP` (`odds_lambda.data_fetcher.canonicalize_bookmaker_keys`) before anything stores them, so the same book carries the same key across sources: `betfair_ex_uk` and `betfair_ex_eu` become `betfair_exchange`, `ladbrokes_uk` becomes `ladbrokes`, `betfred_uk` becomes `betfred` and `sport888` becomes `888sport`. The other EPL keys already match the OddsPortal and FDUK keys below.
+
+These filters apply only to Odds API requests ([configuration](../foundations/configuration.md)). Requests go to `odds_core.config.APIConfig.base_url` under `sports/{sport_key}/odds` and `sports/{sport_key}/scores`, with sport keys from `odds_core.sports.SportKey` (`soccer_epl`, `baseball_mlb`, `basketball_nba`).
 
 ## OddsPortal and FDUK coverage
 

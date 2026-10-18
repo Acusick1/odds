@@ -3,6 +3,8 @@
 import os
 from unittest.mock import patch
 
+import pytest
+
 # Set up minimal environment before importing Settings
 if "ODDS_API_KEY" not in os.environ:
     os.environ["ODDS_API_KEY"] = "test_key"
@@ -30,7 +32,18 @@ class TestSettings:
             assert settings.api.keys is None
             assert settings.database.pool_size == 5
             assert settings.data_collection.sports == ["soccer_epl", "baseball_mlb"]
-            assert len(settings.data_collection.bookmakers) == 8
+            assert settings.data_collection.bookmakers_for("soccer_epl") == [
+                "pinnacle",
+                "betfair_ex_uk",
+                "williamhill",
+                "paddypower",
+                "skybet",
+                "ladbrokes_uk",
+                "coral",
+                "betfred_uk",
+                "betvictor",
+                "sport888",
+            ]
             assert settings.data_collection.markets == ["h2h", "spreads", "totals"]
             assert settings.data_collection.regions == ["us"]
             assert settings.scheduler.backend == "local"
@@ -99,7 +112,32 @@ class TestSettings:
                 "bovada",
             ]
 
-            assert settings.data_collection.bookmakers == expected_bookmakers
+            assert settings.data_collection.bookmakers_for("baseball_mlb") == expected_bookmakers
+            assert settings.data_collection.bookmakers_for("basketball_nba") == expected_bookmakers
+
+    def test_settings_bookmakers_fit_one_region(self):
+        """Each sport names at most 10 bookmakers, which the Odds API bills as one region."""
+        with patch.dict(
+            os.environ,
+            {"ODDS_API_KEY": "test_key", "DATABASE_URL": "postgresql://test:test@localhost/test"},
+            clear=True,
+        ):
+            settings = Settings(_env_file=None)
+
+            for bookmakers in settings.data_collection.bookmakers.values():
+                assert len(bookmakers) <= 10
+
+    def test_settings_bookmakers_unknown_sport_raises(self):
+        """A sport with no configured bookmakers fails instead of requesting none."""
+        with patch.dict(
+            os.environ,
+            {"ODDS_API_KEY": "test_key", "DATABASE_URL": "postgresql://test:test@localhost/test"},
+            clear=True,
+        ):
+            settings = Settings(_env_file=None)
+
+            with pytest.raises(ValueError, match="icehockey_nhl"):
+                settings.data_collection.bookmakers_for("icehockey_nhl")
 
     def test_settings_aws_configuration(self):
         """Test AWS-specific configuration fields."""

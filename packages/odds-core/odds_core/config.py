@@ -39,6 +39,31 @@ class DatabaseConfig(BaseSettings):
     pool_size: int = Field(default=5, description="Database connection pool size")
 
 
+_US_BOOKMAKERS: tuple[str, ...] = (
+    "pinnacle",
+    "circasports",
+    "draftkings",
+    "fanduel",
+    "betmgm",
+    "williamhill_us",  # Caesars
+    "betrivers",
+    "bovada",
+)
+
+_UK_BOOKMAKERS: tuple[str, ...] = (
+    "pinnacle",
+    "betfair_ex_uk",
+    "williamhill",
+    "paddypower",
+    "skybet",
+    "ladbrokes_uk",
+    "coral",
+    "betfred_uk",
+    "betvictor",
+    "sport888",
+)
+
+
 class DataCollectionConfig(BaseSettings):
     """Data collection parameters."""
 
@@ -47,23 +72,24 @@ class DataCollectionConfig(BaseSettings):
     sports: list[SportKey] = Field(
         default=["soccer_epl", "baseball_mlb"], description="Sports to track"
     )
-    bookmakers: list[str] = Field(
-        default=[
-            "pinnacle",
-            "circasports",
-            "draftkings",
-            "fanduel",
-            "betmgm",
-            "williamhill_us",  # Caesars
-            "betrivers",
-            "bovada",
-        ],
-        description="Bookmakers to track",
+    bookmakers: dict[SportKey, list[str]] = Field(
+        default_factory=lambda: {
+            "soccer_epl": list(_UK_BOOKMAKERS),
+            "baseball_mlb": list(_US_BOOKMAKERS),
+            "basketball_nba": list(_US_BOOKMAKERS),
+        },
+        description="Odds API bookmaker keys requested per sport; at most 10 cost one region",
     )
     markets: list[str] = Field(
         default=["h2h", "spreads", "totals"], description="Markets to collect"
     )
     regions: list[str] = Field(default=["us"], description="Regions for odds data")
+
+    def bookmakers_for(self, sport: str) -> list[str]:
+        bookmakers = self.bookmakers.get(sport)
+        if bookmakers is None:
+            raise ValueError(f"No Odds API bookmakers configured for sport {sport!r}")
+        return bookmakers
 
 
 class SchedulerConfig(BaseSettings):
@@ -340,7 +366,7 @@ class Settings(BaseSettings):
         settings = get_settings()
         api_key = settings.api.key
         db_url = settings.database.url
-        bookmakers = settings.data_collection.bookmakers
+        bookmakers = settings.data_collection.bookmakers_for("soccer_epl")
     """
 
     model_config = SettingsConfigDict(

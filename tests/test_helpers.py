@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from odds_core.api_models import EventsResponse, HistoricalOddsResponse, OddsResponse
 from odds_core.models import Event, EventStatus
@@ -36,6 +37,7 @@ class StubOddsClient:
             events_response: The EventsResponse to return from get_events(). Defaults to empty.
         """
         self._odds_response = odds_response
+        self.get_odds_calls: list[dict[str, Any]] = []
         self._events_response = events_response or EventsResponse(
             events=[],
             response_time_ms=0,
@@ -53,6 +55,7 @@ class StubOddsClient:
 
     async def get_odds(self, *args, **kwargs) -> OddsResponse:
         """Return the configured odds response."""
+        self.get_odds_calls.append(kwargs)
         return self._odds_response
 
     async def get_events(self, *args, **kwargs) -> EventsResponse:
