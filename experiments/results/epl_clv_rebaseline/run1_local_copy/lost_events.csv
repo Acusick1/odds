@@ -1,0 +1,84 @@
+event_id,commence_time,season,home_team,away_team,reason,production_hours_before
+op_live_WOL_LIV_2026-03-03,2026-03-03 20:15:00+00:00,2025-26,Wolves,Liverpool,no final score,
+op_live_FUL_WESHAM_2026-03-04,2026-03-04 19:30:00+00:00,2025-26,Fulham,West Ham,no final score,
+op_live_ASTVIL_CHE_2026-03-04,2026-03-04 19:30:00+00:00,2025-26,Aston Villa,Chelsea,no final score,
+op_live_CHE_NEW_2026-03-14,2026-03-14 17:30:00+00:00,2025-26,Chelsea,Newcastle,no final score,
+op_live_MANUTD_ASTVIL_2026-03-15,2026-03-15 14:00:00+00:00,2025-26,Manchester Utd,Aston Villa,no final score,
+op_live_ARS_EVE_2026-03-14,2026-03-14 17:30:00+00:00,2025-26,Arsenal,Everton,no final score,
+op_live_MANCIT_ARS_2026-04-19,2026-04-19 15:30:00+00:00,2025-26,Manchester City,Arsenal,no day-before snapshot quoting bet365 and a sharp bookmaker,17.872222900390625
+op_live_BRE_FUL_2026-04-18,2026-04-18 11:30:00+00:00,2025-26,Brentford,Fulham,no day-before snapshot quoting bet365 and a sharp bookmaker,27.426944732666016
+op_live_CRYPAL_NEW_2026-04-12,2026-04-12 13:00:00+00:00,2025-26,Crystal Palace,Newcastle,no day-before snapshot quoting bet365 and a sharp bookmaker,41.53499984741211
+op_live_SUN_TOT_2026-04-12,2026-04-12 13:00:00+00:00,2025-26,Sunderland,Tottenham,no day-before snapshot quoting bet365 and a sharp bookmaker,41.483055114746094
+op_live_LIV_FUL_2026-04-11,2026-04-11 16:30:00+00:00,2025-26,Liverpool,Fulham,no final score,
+op_live_MANUTD_LEE_2026-04-13,2026-04-13 19:00:00+00:00,2025-26,Manchester Utd,Leeds,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_ARS_BOU_2026-04-11,2026-04-11 11:30:00+00:00,2025-26,Arsenal,Bournemouth,no final score,
+op_live_CHE_MANUTD_2026-04-18,2026-04-18 19:00:00+00:00,2025-26,Chelsea,Manchester Utd,no day-before snapshot quoting bet365 and a sharp bookmaker,34.94444274902344
+op_live_NEW_BOU_2026-04-18,2026-04-18 14:00:00+00:00,2025-26,Newcastle,Bournemouth,no day-before snapshot quoting bet365 and a sharp bookmaker,29.931943893432617
+op_live_BUR_BRI_2026-04-11,2026-04-11 14:00:00+00:00,2025-26,Burnley,Brighton,no final score,
+op_live_BRE_EVE_2026-04-11,2026-04-11 14:00:00+00:00,2025-26,Brentford,Everton,no final score,
+op_live_CRYPAL_WESHAM_2026-04-20,2026-04-20 19:00:00+00:00,2025-26,Crystal Palace,West Ham,no day-before snapshot quoting bet365 and a sharp bookmaker,22.912500381469727
+op_live_LEE_WOL_2026-04-18,2026-04-18 14:00:00+00:00,2025-26,Leeds,Wolves,no day-before snapshot quoting bet365 and a sharp bookmaker,29.943889617919922
+op_live_CHE_MANCIT_2026-04-12,2026-04-12 15:30:00+00:00,2025-26,Chelsea,Manchester City,no day-before snapshot quoting bet365 and a sharp bookmaker,44.045833587646484
+op_live_BOU_BRE_2026-03-03,2026-03-03 19:30:00+00:00,2025-26,Bournemouth,Brentford,no final score,
+op_live_BRE_WOL_2026-03-16,2026-03-16 20:00:00+00:00,2025-26,Brentford,Wolves,no final score,
+op_live_CRYPAL_LEE_2026-03-15,2026-03-15 14:00:00+00:00,2025-26,Crystal Palace,Leeds,no final score,
+op_live_WESHAM_MANCIT_2026-03-14,2026-03-14 20:00:00+00:00,2025-26,West Ham,Manchester City,no final score,
+op_live_LIV_TOT_2026-03-15,2026-03-15 16:30:00+00:00,2025-26,Liverpool,Tottenham,no final score,
+op_live_SUN_BRI_2026-03-14,2026-03-14 15:00:00+00:00,2025-26,Sunderland,Brighton,no final score,
+op_live_TOT_CRYPAL_2026-03-05,2026-03-05 20:00:00+00:00,2025-26,Tottenham,Crystal Palace,no final score,
+op_live_MANCIT_NOT_2026-03-04,2026-03-04 19:30:00+00:00,2025-26,Manchester City,Nottingham,no final score,
+op_live_NOT_FUL_2026-03-15,2026-03-15 14:00:00+00:00,2025-26,Nottingham,Fulham,no final score,
+op_live_EVE_BUR_2026-03-03,2026-03-03 19:30:00+00:00,2025-26,Everton,Burnley,no final score,
+op_live_BRI_ARS_2026-03-04,2026-03-04 19:30:00+00:00,2025-26,Brighton,Arsenal,no final score,
+op_live_NEW_MANUTD_2026-03-04,2026-03-04 20:15:00+00:00,2025-26,Newcastle,Manchester Utd,no final score,
+op_live_LEE_SUN_2026-03-03,2026-03-03 19:30:00+00:00,2025-26,Leeds,Sunderland,no final score,
+op_live_BUR_BOU_2026-03-14,2026-03-14 15:00:00+00:00,2025-26,Burnley,Bournemouth,no final score,
+op_live_BOU_MANUTD_2026-03-20,2026-03-20 20:00:00+00:00,2025-26,Bournemouth,Manchester Utd,no final score,
+op_live_BRI_LIV_2026-03-21,2026-03-21 12:30:00+00:00,2025-26,Brighton,Liverpool,no final score,
+op_live_FUL_BUR_2026-03-21,2026-03-21 15:00:00+00:00,2025-26,Fulham,Burnley,no final score,
+op_live_EVE_CHE_2026-03-21,2026-03-21 17:30:00+00:00,2025-26,Everton,Chelsea,no final score,
+op_live_LEE_BRE_2026-03-21,2026-03-21 20:00:00+00:00,2025-26,Leeds,Brentford,no final score,
+op_live_NEW_SUN_2026-03-22,2026-03-22 12:00:00+00:00,2025-26,Newcastle,Sunderland,no final score,
+op_live_TOT_NOT_2026-03-22,2026-03-22 14:15:00+00:00,2025-26,Tottenham,Nottingham,no final score,
+op_live_ASTVIL_WESHAM_2026-03-22,2026-03-22 14:15:00+00:00,2025-26,Aston Villa,West Ham,no final score,
+10d3a3a8df4f15a0754da8195a47c41f,2026-04-10 19:00:00+00:00,2025-26,West Ham,Wolves,no final score,
+ff027a0ac6a0538a713b46bd753b670d,2026-04-11 11:30:00+00:00,2025-26,Arsenal,Bournemouth,no closing snapshot with bet365 and a sharp bookmaker,
+44d98d5d5c19eb115a527f1de294f03e,2026-04-11 14:00:00+00:00,2025-26,Burnley,Brighton,no closing snapshot with bet365 and a sharp bookmaker,
+0b8adb16f16b2490e3fbd514a2d86190,2026-04-11 14:00:00+00:00,2025-26,Brentford,Everton,no closing snapshot with bet365 and a sharp bookmaker,
+f022ab37b6c69f588015498186a9694b,2026-04-11 16:30:00+00:00,2025-26,Liverpool,Fulham,no closing snapshot with bet365 and a sharp bookmaker,
+aa83ffb32d9d72361f2cca8c1d3c2b19,2026-04-12 13:00:00+00:00,2025-26,Crystal Palace,Newcastle,no closing snapshot with bet365 and a sharp bookmaker,
+5b7b41cabf1a84e8991c9cf3d0a7ab90,2026-04-12 13:00:00+00:00,2025-26,Sunderland,Tottenham,no closing snapshot with bet365 and a sharp bookmaker,
+e4c2f457a464a95a8631ab28ef77b0b9,2026-04-12 15:30:00+00:00,2025-26,Chelsea,Manchester City,no day-before snapshot quoting bet365 and a sharp bookmaker,
+op_live_LIV_CRYPAL_2026-04-25,2026-04-25 14:00:00+00:00,2025-26,Liverpool,Crystal Palace,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_MANUTD_BRE_2026-04-27,2026-04-27 19:00:00+00:00,2025-26,Manchester Utd,Brentford,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_BRI_CHE_2026-04-21,2026-04-21 19:00:00+00:00,2025-26,Brighton,Chelsea,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_BUR_MANCIT_2026-04-22,2026-04-22 19:00:00+00:00,2025-26,Burnley,Manchester City,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_WESHAM_EVE_2026-04-25,2026-04-25 14:00:00+00:00,2025-26,West Ham,Everton,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_WOL_TOT_2026-04-25,2026-04-25 14:00:00+00:00,2025-26,Wolves,Tottenham,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_FUL_ASTVIL_2026-04-25,2026-04-25 11:30:00+00:00,2025-26,Fulham,Aston Villa,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_ARS_NEW_2026-04-25,2026-04-25 16:30:00+00:00,2025-26,Arsenal,Newcastle,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_SUN_NOT_2026-04-24,2026-04-24 19:00:00+00:00,2025-26,Sunderland,Nottingham,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_BOU_LEE_2026-04-22,2026-04-22 19:00:00+00:00,2025-26,Bournemouth,Leeds,no closing snapshot with bet365 and a sharp bookmaker,
+7d48c93e68e7403998d0ed38e99caae5,2026-04-13 19:00:00+00:00,2025-26,Manchester Utd,Leeds,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_SUN_CHE_2026-05-24T1500,2026-05-24 15:00:00+00:00,2025-26,Sunderland,Chelsea,no day-before snapshot quoting bet365 and a sharp bookmaker,29.160554885864258
+op_live_FUL_NEW_2026-05-24T1500,2026-05-24 15:00:00+00:00,2025-26,Fulham,Newcastle,no day-before snapshot quoting bet365 and a sharp bookmaker,29.15166664123535
+op_live_BOU_CRYPAL_2026-05-03T1300,2026-05-03 13:00:00+00:00,2025-26,Bournemouth,Crystal Palace,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_BRE_WESHAM_2026-05-02T1400,2026-05-02 14:00:00+00:00,2025-26,Brentford,West Ham,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_EVE_MANCIT_2026-05-04T1900,2026-05-04 19:00:00+00:00,2025-26,Everton,Manchester City,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_ASTVIL_TOT_2026-05-03T1800,2026-05-03 18:00:00+00:00,2025-26,Aston Villa,Tottenham,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_TOT_BRI_2026-04-18,2026-04-18 16:30:00+00:00,2025-26,Tottenham,Brighton,no day-before snapshot quoting bet365 and a sharp bookmaker,32.44472122192383
+op_live_WOL_SUN_2026-05-02T1400,2026-05-02 14:00:00+00:00,2025-26,Wolves,Sunderland,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_MANUTD_LIV_2026-05-03T1430,2026-05-03 14:30:00+00:00,2025-26,Manchester Utd,Liverpool,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_ARS_FUL_2026-05-02T1630,2026-05-02 16:30:00+00:00,2025-26,Arsenal,Fulham,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_NEW_BRI_2026-05-02T1400,2026-05-02 14:00:00+00:00,2025-26,Newcastle,Brighton,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_CHE_NOT_2026-05-04T1400,2026-05-04 14:00:00+00:00,2025-26,Chelsea,Nottingham,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_LEE_BUR_2026-05-01T1900,2026-05-01 19:00:00+00:00,2025-26,Leeds,Burnley,no closing snapshot with bet365 and a sharp bookmaker,
+op_live_MANCIT_ASTVIL_2026-05-24T1500,2026-05-24 15:00:00+00:00,2025-26,Manchester City,Aston Villa,no day-before snapshot quoting bet365 and a sharp bookmaker,29.149444580078125
+op_live_TOT_EVE_2026-05-24T1500,2026-05-24 15:00:00+00:00,2025-26,Tottenham,Everton,no day-before snapshot quoting bet365 and a sharp bookmaker,29.158611297607422
+op_live_WESHAM_LEE_2026-05-24T1500,2026-05-24 15:00:00+00:00,2025-26,West Ham,Leeds,no day-before snapshot quoting bet365 and a sharp bookmaker,29.167499542236328
+op_live_NOT_BOU_2026-05-24T1500,2026-05-24 15:00:00+00:00,2025-26,Nottingham,Bournemouth,no day-before snapshot quoting bet365 and a sharp bookmaker,29.142499923706055
+op_live_LIV_BRE_2026-05-24T1500,2026-05-24 15:00:00+00:00,2025-26,Liverpool,Brentford,no day-before snapshot quoting bet365 and a sharp bookmaker,29.16111183166504
+op_live_CRYPAL_ARS_2026-05-24T1500,2026-05-24 15:00:00+00:00,2025-26,Crystal Palace,Arsenal,no day-before snapshot quoting bet365 and a sharp bookmaker,29.170000076293945
+op_live_ARS_BUR_2026-05-18T1900,2026-05-18 19:00:00+00:00,2025-26,Arsenal,Burnley,no day-before snapshot quoting bet365 and a sharp bookmaker,
+op_live_BUR_WOL_2026-05-24T1500,2026-05-24 15:00:00+00:00,2025-26,Burnley,Wolves,no day-before snapshot quoting bet365 and a sharp bookmaker,29.169721603393555
+op_live_BRI_MANUTD_2026-05-24T1500,2026-05-24 15:00:00+00:00,2025-26,Brighton,Manchester Utd,no day-before snapshot quoting bet365 and a sharp bookmaker,29.151111602783203

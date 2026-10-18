@@ -16,13 +16,14 @@
     "last_commence": "2024-05-19T15:00:00+00:00"
   },
   "evaluation_range": {
-    "events_with_rows": 684,
+    "events_with_rows": 685,
     "scored_events": 650,
     "first_scored": "op_2024-2025_MANUTD_FUL_2024-08-16",
     "first_scored_commence": "2024-08-16T19:00:00+00:00",
     "last_scored": "op_2025-2026_TOT_ARS_2026-02-22",
     "last_scored_commence": "2026-02-22T16:30:00+00:00",
-    "unscored_partial_block_events": 34,
+    "unscored_partial_block_events": 35,
+    "twins_dropped": {},
     "folds": 13
   },
   "seed_a": {
@@ -55,7 +56,7 @@
       "reg_lambda": 0.011077056227236738
     },
     "tuning_range_cv_mse": 0.0007085279095917941,
-    "tune_seconds": 130.9
+    "tune_seconds": 155.9
   },
   "overall": {
     "events": 650,

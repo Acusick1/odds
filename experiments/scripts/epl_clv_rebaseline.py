@@ -68,7 +68,7 @@ DAY_BEFORE_HOURS = 24.0
 # FDUK stamps its day-before snapshot 23 h before kick-off under British Summer Time and
 # 24 h otherwise; tuning-range rows run from 23.0 to 24.25 h.
 DAY_BEFORE_TOLERANCE_HOURS = 1.0
-EVAL_SEASONS = {"2024-25", "2025-26"}
+EVAL_SEASONS = {"2024-25", "2025-26", "2026-27"}
 # Fields the re-baseline config may change from the #452 expanding cell's config.
 REBASELINE_DATA_FIELDS = {"end_date", "min_train_events"}
 
@@ -190,6 +190,30 @@ def check_tuning_rows(day_before: CellData, production: CellData, n_tuning_rows:
         raise ValueError("day-before sampler changes tuning-range targets")
 
 
+def canonical_first(event_id: str) -> tuple[bool, str]:
+    """Sort key putting the ID that ``OddsWriter.adopt_live_twins`` keeps first.
+
+    Adoption merges an ``op_live_`` twin into the Odds API event, so a scraped-source
+    ID (``op_``, ``fduk_``) ranks after an Odds API ID.
+    """
+    return (event_id.startswith(("op_", "fduk_")), event_id)
+
+
+def dedupe_matches(data: CellData, events: pd.DataFrame) -> tuple[CellData, dict[str, str]]:
+    """Keep one row per match; return the kept data and each dropped twin's kept ID."""
+    row_events = list(dict.fromkeys(data.event_ids))
+    match = events.loc[row_events, "match"]
+    kept: dict[Any, str] = {}
+    for eid in sorted(row_events, key=canonical_first):
+        kept.setdefault(match[eid], eid)
+    dropped = {eid: kept[match[eid]] for eid in row_events if kept[match[eid]] != eid}
+    keep = ~np.isin(data.event_ids, list(dropped))
+    return (
+        CellData(data.X[keep], data.y[keep], data.feature_names, data.event_ids[keep]),
+        dropped,
+    )
+
+
 def slice_rows(data: CellData, n: int) -> CellData:
     return CellData(data.X[:n], data.y[:n], data.feature_names, data.event_ids[:n])
 
@@ -278,15 +302,18 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
     production = await load_rows(rebaseline)
     events = await load_events()
 
+    if len(set(data.event_ids)) != len(data.event_ids):
+        raise ValueError("expected one decision row per event")
+    # A match with rows under two event IDs (live twins) is counted once.
+    data, twins = dedupe_matches(data, events)
     row_events = list(dict.fromkeys(data.event_ids))
     if len(row_events) != len(data.event_ids):
         raise ValueError("expected one decision row per event")
     row_times = events.loc[row_events, "commence_time"]
     if not row_times.is_monotonic_increasing:
         raise ValueError("rows are not in chronological order")
-    matches = events.loc[row_events, ["home_team", "away_team", "commence_time"]]
-    if matches.duplicated().any():
-        raise ValueError(f"one match has rows under two event ids: {matches[matches.duplicated()]}")
+    if events.loc[row_events, "match"].duplicated().any():
+        raise ValueError("a match still has rows under two event ids")
     eval_seasons = set(row_times[row_times >= EVALUATION_START].map(season_of))
     if not eval_seasons <= EVAL_SEASONS:
         raise ValueError(f"evaluation rows fall outside {sorted(EVAL_SEASONS)}: {eval_seasons}")
@@ -320,6 +347,8 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
     def loss_reason(eid: str) -> str | None:
         if eid in set(eval_events):
             return None
+        if eid in twins:
+            return f"twin of {twins[eid]}, which has the match's row"
         if not eval_db.at[eid, "scored"]:
             return "no final score"
         if eid not in sampler.called:
@@ -401,7 +430,8 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
     verdict = keep_test(overall)
 
     table = [{"slice": "all", "group": "all", **overall}]
-    for slice_col in ("season", "sharp_bookmaker", "source"):
+    oof["collection"] = np.where(oof["source"] == "football_data_uk", "fduk", "live")
+    for slice_col in ("season", "sharp_bookmaker", "source", "collection"):
         for group, sub in oof.groupby(slice_col):
             table.append(
                 {
@@ -445,6 +475,17 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
                 **compare(tail, unscored_tail, n_resamples, bootstrap_seed),
             }
         )
+        tail["collection"] = np.where(tail["source"] == "football_data_uk", "fduk", "live")
+        for group, sub in tail.groupby("collection"):
+            table.append(
+                {
+                    "slice": "unscored_tail_collection",
+                    "group": group,
+                    **compare(
+                        sub, list(dict.fromkeys(sub["event_id"])), n_resamples, bootstrap_seed
+                    ),
+                }
+            )
         tail.to_csv(OUTPUT_DIR / "tail_predictions.csv", index=False)
     results = pd.DataFrame(table)
 
@@ -515,6 +556,7 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
             "last_scored": scored[-1],
             "last_scored_commence": at(scored[-1]),
             "unscored_partial_block_events": len(unscored_tail),
+            "twins_dropped": twins,
             "folds": int(folds_a["fold"].nunique()),
         },
         "seed_a": {

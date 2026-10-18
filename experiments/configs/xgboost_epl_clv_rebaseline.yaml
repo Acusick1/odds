@@ -4,7 +4,7 @@ experiment:
   description: "EPL CLV re-baseline (#496): the #452 expanding cell's config over the tuning and evaluation ranges, with min_train_events 1900 so validation starts at the first evaluation-range event, and the hyperparameters frozen from the #452 expanding cell's best trial (seed A). Seed B's hyperparameters are applied by experiments/scripts/epl_clv_rebaseline.py."
 training:
   data:
-    end_date: '2026-07-31'
+    end_date: '2026-10-18'
     min_train_events: 1900
   model:
     n_estimators: 150
