@@ -116,6 +116,7 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 | Training | `training/` (`config.py`, `odds_analytics.training.data_preparation`, `odds_analytics.training.cross_validation`, `odds_analytics.training.tuner`, `odds_analytics.training.feature_selection`, `odds_analytics.training.tracking`) | [Training pipeline](../modelling/training-pipeline.md) |
 | Line-movement models | `odds_analytics.xgboost_line_movement`, `odds_analytics.lstm_line_movement`, `odds_analytics.sequence_loader` | [Line-movement strategies](../modelling/line-movement-models.md) |
 | Backfill | `odds_analytics.gap_backfill_planner`, `odds_analytics.game_selector`, `odds_analytics.backfill_executor` | [Odds API historical backfill](../collection/odds-api-backfill.md) |
+| Coverage reporting | `odds_analytics.quality_metrics` | [Coverage checks](../storage/coverage-checks.md) |
 | Helpers | `utils.py` (EV, holds, arbitrage), `odds_analytics.quality_metrics` | |
 
 ### Names that mislead

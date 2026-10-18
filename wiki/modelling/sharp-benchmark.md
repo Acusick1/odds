@@ -5,6 +5,7 @@ description: What the sharp reference is and why, its priority semantics, the di
 sources:
   - odds_analytics.feature_extraction.TabularFeatureExtractor
   - odds_analytics.feature_extraction.calculate_sharp_retail_metrics
+  - odds_analytics.feature_extraction.select_sharp_odds
   - odds_analytics.feature_extraction.SequenceFeatureExtractor
   - odds_analytics.feature_extraction.DEFAULT_RETAIL_BOOKMAKERS
   - odds_analytics.feature_extraction.DEFAULT_SHARP_BOOKMAKERS
@@ -25,9 +26,9 @@ It anchors the model's strongest feature, the retail-sharp divergence, and the a
 
 ## Priority semantics
 
-`sharp_bookmakers` is an ordered list and the first bookmaker that has odds in the market wins (`odds_analytics.feature_extraction.TabularFeatureExtractor`):
+`sharp_bookmakers` is an ordered list and the first bookmaker that has odds for the requested outcome wins (`odds_analytics.feature_extraction.select_sharp_odds`):
 
-- Features: `odds_analytics.feature_extraction.TabularFeatureExtractor` tries each sharp bookmaker in order and stops at the first with odds in the market; `odds_analytics.feature_extraction.calculate_sharp_retail_metrics` does the same.
+- Features: `odds_analytics.feature_extraction.TabularFeatureExtractor` and `odds_analytics.feature_extraction.calculate_sharp_retail_metrics` both pick the sharp bookmaker with `odds_analytics.feature_extraction.select_sharp_odds`, which filters to the requested outcome itself. `odds_analytics.feature_extraction.SequenceFeatureExtractor` called without an outcome leaves its sharp features unset.
 - Sampling: `odds_analytics.feature_groups.TierSampler` keeps only snapshots containing any (not all) of `required_bookmakers`, and `odds_analytics.feature_groups.prepare_training_data` drops events lacking every sharp bookmaker at close. This filter applies only when `set(sharp_bookmakers) != {target_bookmaker}` ([feature pipeline](feature-pipeline.md)).
 - MCP: `odds_lambda.storage.readers.OddsReader.get_sharp_prices` scans snapshots newest-first within a 2 h lookback and resolves the priority order per outcome ([odds reader](../storage/odds-reader.md)); `odds_mcp.server.find_retail_edges` defaults to `[pinnacle, betfair_exchange]`.
 
@@ -49,7 +50,7 @@ It is the strongest raw correlate of CLV from the first experiment onward (r = 0
 |---|---|---|---|
 | Where | `odds_analytics.feature_extraction.TabularFeatureExtractor` | `odds_analytics.feature_extraction.calculate_sharp_retail_metrics`, called by `odds_analytics.feature_extraction.SequenceFeatureExtractor` | `odds_mcp.server.find_retail_edges`, sharp from `odds_lambda.storage.readers.OddsReader.get_sharp_prices` |
 | Retail side | Mean of per-book implied probabilities for the outcome, over configured `retail_bookmakers` | Implied probability of the mean American price | One row per book, every non-sharp book in the window |
-| Sharp side | First bookmaker in the list with any odds in the market | Same | First bookmaker per outcome, so outcomes can resolve to different books, and sharp and retail prices can come from different snapshots |
+| Sharp side | First bookmaker in the list with odds for the requested outcome (`odds_analytics.feature_extraction.select_sharp_odds`) | Same | First bookmaker per outcome, so outcomes can resolve to different books, and sharp and retail prices can come from different snapshots |
 | Defaults | `["pinnacle"]`; retail `fanduel`, `draftkings`, `betmgm` (`odds_analytics.feature_extraction.DEFAULT_RETAIL_BOOKMAKERS`) | Same | `["pinnacle", "betfair_exchange"]`; no retail list |
 | Time | Snapshot at decision time | Same | Newest price per book within a lookback window (default 2 h) |
 

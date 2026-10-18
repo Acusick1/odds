@@ -40,7 +40,7 @@ The EPL groups are detailed on [EPL context features](epl-context-features.md) a
 
 ## Tabular extractor
 
-`odds_analytics.feature_extraction.TabularFeatureExtractor` builds `sharp_prob` and `retail_sharp_diff` from `sharp_bookmakers` and `retail_bookmakers`. The code defaults are `odds_analytics.feature_extraction.DEFAULT_SHARP_BOOKMAKERS` (`["pinnacle"]`) and `odds_analytics.feature_extraction.DEFAULT_RETAIL_BOOKMAKERS` (`fanduel`, `draftkings`, `betmgm`); the other copies of these defaults are compared in [Sharp benchmark](sharp-benchmark.md#code-copies). The extractor stops at the first sharp bookmaker with the market; if that bookmaker lacks the requested outcome, `sharp_prob` is NaN rather than trying the next bookmaker (#477). The implied probabilities are not devigged.
+`odds_analytics.feature_extraction.TabularFeatureExtractor` builds `sharp_prob` and `retail_sharp_diff` from `sharp_bookmakers` and `retail_bookmakers`. The code defaults are `odds_analytics.feature_extraction.DEFAULT_SHARP_BOOKMAKERS` (`["pinnacle"]`) and `odds_analytics.feature_extraction.DEFAULT_RETAIL_BOOKMAKERS` (`fanduel`, `draftkings`, `betmgm`); the other copies of these defaults are compared in [Sharp benchmark](sharp-benchmark.md#code-copies). `sharp_prob` comes from the first sharp bookmaker, in `sharp_bookmakers` order, that quotes the requested outcome in the market; it is NaN only when none does, and `retail_sharp_diff` is then NaN as well. The implied probabilities are not devigged.
 
 ## NBA injuries
 
