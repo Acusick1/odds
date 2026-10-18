@@ -19,7 +19,7 @@ Four feeds write `raw_data` snapshots in The Odds API shape ([odds tables](../st
 | The Odds API | US books incl. Pinnacle, dense snapshots | `fetch-odds` job ([fetch-odds-job](fetch-odds-job.md), [client](odds-api-client.md)) | mini-PC, EPL only | API hex ids |
 | OddsPortal | UK books, upcoming and closing odds | `fetch-oddsportal` job ([fetch-oddsportal-job](fetch-oddsportal-job.md)) | mini-PC | `op_live_*` (`odds_lambda.storage.writers.OddsWriter.LIVE_EVENT_ID_PREFIX`) |
 | Betfair Exchange | Best back price per outcome | `fetch-betfair-exchange` job ([betfair-exchange](betfair-exchange.md)) | mini-PC | joins existing events |
-| football-data.co.uk (FDUK) | Historical EPL, Pinnacle and exchange closing odds | manual script ([historical-ingest-scripts](historical-ingest-scripts.md)) | manual | `fduk_*` / `op_<season>_*` |
+| football-data.co.uk (FDUK) | Historical EPL opening and closing odds from Pinnacle, the exchange and UK retail books, with approximated snapshot times | manual script ([historical-ingest-scripts](historical-ingest-scripts.md)) | manual | `fduk_*` / `op_<season>_*` |
 
 ESPN, MLB and Polymarket are non-odds feeds: [epl-context-data](epl-context-data.md), [mlb-probable-pitchers](mlb-probable-pitchers.md), [polymarket](polymarket.md). Polymarket was built for NBA and is deprioritised ([ADR-0007](../../docs/adr/0007-deprioritise-polymarket.md), [market research](polymarket-market-research.md)). The ESPN and MLB collectors run as a daily cron. Every scheduled collector runs on the mini-PC ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). The agent-facing view of the same feeds, including sources it rejected, is [agent-data-sources](../agent/agent-data-sources.md).
 

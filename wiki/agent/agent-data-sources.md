@@ -28,7 +28,7 @@ Collected by jobs or ingestion scripts into the database and available through [
 | OddsPortal | UK multi-bookmaker odds (`odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP`), upcoming and closing | Self-scheduling by kickoff proximity (`odds_lambda.jobs.fetch_oddsportal.CADENCE`) | [OddsPortal](../collection/oddsportal-scraper.md) |
 | Betfair Exchange | Best back/lay Match Odds, the sharp reference | Self-scheduling by kickoff proximity (`odds_lambda.jobs.fetch_betfair_exchange.CADENCE`) | [Betfair](../collection/betfair-exchange.md) |
 | The Odds API | US bookmaker odds | Self-scheduling by fetch tier, EPL only (`odds_lambda.scheduling.jobs._JOB_SPORTS`); 500 units per month per free key (the only quota that is a code default, `odds_core.config.APIConfig`; a paid key changes it) | [Odds API quota](../collection/odds-api-quota.md) |
-| football-data.co.uk | Historical EPL, Pinnacle and Betfair closing odds | Manual script | [historical loads](../collection/historical-ingest-scripts.md) |
+| football-data.co.uk | Historical EPL opening and closing odds from Pinnacle, Betfair Exchange and UK retail books | Manual script | [historical loads](../collection/historical-ingest-scripts.md) |
 | ESPN fixtures | All-competition EPL schedule | Daily job (cron in `_JOB_CRON_MAP`) | [EPL context](../collection/epl-context-data.md) |
 | ESPN lineups | Starting XIs | Manual script | [EPL context](../collection/epl-context-data.md) |
 | MLB Stats API | Probable pitchers | Daily job | [MLB pitchers](../collection/mlb-probable-pitchers.md) |

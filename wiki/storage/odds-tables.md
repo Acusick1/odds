@@ -41,7 +41,7 @@ Two free-text fields tag where a snapshot came from. Each producer sets them as 
 | `oddsportal` | OddsPortal historical/closing builds (`odds_lambda.oddsportal_common.build_raw_data`) |
 | `oddsportal_live` | live feed adapter (`odds_lambda.oddsportal_adapter.convert_market`) |
 | `betfair_api` | Betfair Exchange job (also adds `betfair_event_id`) |
-| `football_data_uk` | `scripts/ingest_football_data_uk.py` |
+| `football_data_uk` | `scripts/ingest_football_data_uk.py`; snapshot times are approximations recorded in `raw_data.timing` ([Historical ingest scripts](../collection/historical-ingest-scripts.md#snapshot-shape)) |
 
 `api_request_id` is matched by training's `closing_source_priority`; the `data_source` filter matches event-ID prefixes (`op_`, `fduk_`) instead (`odds_analytics.training.data_preparation.filter_events_by_date_range`, #468) ([CLV and the training target](../modelling/clv-target.md), [Training config](../modelling/training-config.md)): `oddsportal` (or `oddsportal_<market>`), `oddsportal_closing`, `football_data_uk`, and `betfair_api_<iso time>`; null for Odds API rows.
 

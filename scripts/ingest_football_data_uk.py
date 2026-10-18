@@ -27,10 +27,13 @@ import csv
 import io
 import logging
 import math
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
+from zoneinfo import ZoneInfo
 
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
@@ -41,7 +44,7 @@ from odds_lambda.oddsportal_common import (
     find_existing_event,
     hours_to_tier,
 )
-from sqlalchemy import and_, select
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from team_names import normalize_team as _normalize_team_central
 
@@ -57,6 +60,7 @@ BASE_URL = "https://www.football-data.co.uk/mmz4281"
 SOURCE_TAG = "football_data_uk"
 SPORT_KEY = "soccer_epl"
 SPORT_TITLE = "EPL"
+EVENT_ID_PREFIX = "fduk"
 
 # Season label → URL path segment
 SEASONS: dict[str, str] = {
@@ -71,6 +75,7 @@ SEASONS: dict[str, str] = {
     "2023-2024": "2324",
     "2024-2025": "2425",
     "2025-2026": "2526",
+    "2026-2027": "2627",
 }
 
 # Bookmaker column prefixes → pipeline bookmaker key.
@@ -84,6 +89,12 @@ BOOKMAKER_PREFIXES: dict[str, str] = {
     "IW": "interwetten",
     "WH": "williamhill",
     "VC": "betvictor",
+    "BV": "betvictor",
+    "BFD": "betfred",
+    "PP": "paddypower",
+    "SKB": "skybet",
+    "BMGM": "betmgm",
+    "CL": "coral",
     "LB": "ladbrokes",
     "1XB": "onexbet",
 }
@@ -92,7 +103,38 @@ BOOKMAKER_PREFIXES: dict[str, str] = {
 AGGREGATE_PREFIXES: dict[str, str] = {
     "Max": "market_max",
     "Avg": "market_avg",
+    "BbMx": "market_max",
+    "BbAv": "market_avg",
 }
+
+UK_TZ = ZoneInfo("Europe/London")
+DEFAULT_KICKOFF = time(15, 0)
+
+
+@dataclass(frozen=True)
+class CollectionSlot:
+    """A weekly deadline by which FDUK has collected its opening odds (UK local time)."""
+
+    weekday: int
+    latest: time
+
+
+# football-data.co.uk/matches.php: weekend fixtures are collected on Friday afternoons
+# generally not later than 17:00, midweek fixtures on Tuesdays not later than 13:00.
+WEEKEND_SLOT = CollectionSlot(weekday=4, latest=time(17, 0))
+MIDWEEK_SLOT = CollectionSlot(weekday=1, latest=time(13, 0))
+MIDWEEK_WEEKDAYS = frozenset({1, 2, 3})
+
+
+class TimeBasis(StrEnum):
+    COLLECTION_DEADLINE = "fduk_collection_deadline"
+    KICKOFF = "kickoff"
+
+
+@dataclass(frozen=True)
+class Kickoff:
+    commence_time: datetime
+    time_assumed: bool
 
 
 def normalize_team(name: str) -> str:
@@ -136,21 +178,49 @@ def read_csv(path: Path) -> list[dict[str, str]]:
     return [row for row in reader if row.get("HomeTeam")]
 
 
-def _parse_date(row: dict[str, str]) -> datetime:
-    """Parse match date + time from CSV row to UTC datetime.
+def parse_kickoff(row: dict[str, str]) -> Kickoff:
+    """Parse the match date and UK-local kick-off time into a UTC instant.
 
-    Date format is DD/MM/YYYY (4-digit year) or DD/MM/YY (2-digit year).
-    Time column may or may not exist; defaults to 15:00.
-    UK kickoff times are in local time (GMT/BST); we approximate as UTC
-    since the exact timezone offset per date isn't worth the complexity
-    for historical ingestion (max 1h error).
+    Date format is DD/MM/YYYY or DD/MM/YY. Seasons before 2019-20 have no Time
+    column; those kick-offs are assumed to be 15:00 and flagged.
     """
     date_str = row["Date"]
-    time_str = row.get("Time", "15:00")
-    if not time_str:
-        time_str = "15:00"
+    time_str = (row.get("Time") or "").strip()
     fmt = "%d/%m/%Y" if len(date_str.split("/")[-1]) == 4 else "%d/%m/%y"
-    return datetime.strptime(f"{date_str} {time_str}", f"{fmt} %H:%M").replace(tzinfo=UTC)
+    parsed_date = datetime.strptime(date_str, fmt).date()
+    kickoff_time = datetime.strptime(time_str, "%H:%M").time() if time_str else DEFAULT_KICKOFF
+    local = datetime.combine(parsed_date, kickoff_time, tzinfo=UK_TZ)
+    return Kickoff(commence_time=local.astimezone(UTC), time_assumed=not time_str)
+
+
+def _slot_instant(slot: CollectionSlot, on: date) -> datetime:
+    return datetime.combine(on, slot.latest, tzinfo=UK_TZ).astimezone(UTC)
+
+
+def _latest_slot_before(limit: datetime) -> datetime:
+    local_day = limit.astimezone(UK_TZ).date()
+    candidates = [
+        _slot_instant(slot, local_day - timedelta(days=offset))
+        for offset in range(8)
+        for slot in (WEEKEND_SLOT, MIDWEEK_SLOT)
+        if (local_day - timedelta(days=offset)).weekday() == slot.weekday
+    ]
+    return max(c for c in candidates if c < limit)
+
+
+def opening_snapshot_time(commence_time: datetime) -> datetime:
+    """Latest documented collection time of the FDUK opening odds for a match.
+
+    Midweek (Tue-Thu) kick-offs use the Tuesday deadline and all others the Friday
+    deadline. A deadline at or after kick-off falls back to the preceding deadline.
+    """
+    local = commence_time.astimezone(UTC).astimezone(UK_TZ)
+    slot = MIDWEEK_SLOT if local.weekday() in MIDWEEK_WEEKDAYS else WEEKEND_SLOT
+    days_back = (local.weekday() - slot.weekday) % 7
+    deadline = _slot_instant(slot, local.date() - timedelta(days=days_back))
+    if deadline >= commence_time:
+        return _latest_slot_before(commence_time)
+    return deadline
 
 
 def _safe_float(value: str | None) -> float | None:
@@ -250,6 +320,7 @@ def _build_snapshot_raw_data(
     away_team: str,
     *,
     use_closing: bool,
+    kickoff_time_assumed: bool = False,
 ) -> dict[str, Any] | None:
     """Build raw_data dict from a CSV row for one timing (opening or closing).
 
@@ -273,9 +344,11 @@ def _build_snapshot_raw_data(
     if not bookmakers:
         return None
 
+    basis = TimeBasis.KICKOFF if use_closing else TimeBasis.COLLECTION_DEADLINE
     raw_data: dict[str, Any] = {
         "bookmakers": bookmakers,
         "source": SOURCE_TAG,
+        "timing": {"basis": basis.value, "kickoff_time_assumed": kickoff_time_assumed},
     }
 
     match_stats = _extract_match_stats(row)
@@ -294,7 +367,9 @@ def build_event_id(
     """Generate deterministic event ID for football-data.co.uk events."""
     home_abbrev = team_abbrev(home_team)
     away_abbrev = team_abbrev(away_team)
-    return f"fduk_{season}_{home_abbrev}_{away_abbrev}_{commence_time.date().isoformat()}"
+    return (
+        f"{EVENT_ID_PREFIX}_{season}_{home_abbrev}_{away_abbrev}_{commence_time.date().isoformat()}"
+    )
 
 
 async def ingest_season(
@@ -377,13 +452,19 @@ async def _ingest_one_match(
 
     home_team = normalize_team(home_raw)
     away_team = normalize_team(away_raw)
-    commence_time = _parse_date(row)
+    kickoff = parse_kickoff(row)
+    commence_time = kickoff.commence_time
 
     # --- Match or create Event ---
     event_id = await find_existing_event(session, home_team, away_team, commence_time)
 
     if event_id:
         stats.events_matched += 1
+        matched = await session.get(Event, event_id)
+        if matched and event_id.startswith(f"{EVENT_ID_PREFIX}_"):
+            matched.commence_time = commence_time
+            if matched.completed_at is not None:
+                matched.completed_at = commence_time + timedelta(hours=2)
     else:
         event_id = build_event_id(season, home_team, away_team, commence_time)
 
@@ -410,72 +491,51 @@ async def _ingest_one_match(
             session.add(event)
             stats.events_created += 1
 
-    # --- Check for existing snapshots (idempotency / update) ---
-    existing_snap_result = await session.execute(
-        select(OddsSnapshot).where(
-            and_(
-                OddsSnapshot.event_id == event_id,
-                OddsSnapshot.api_request_id == SOURCE_TAG,
+    existing_snaps = list(
+        (
+            await session.execute(
+                select(OddsSnapshot).where(
+                    and_(
+                        OddsSnapshot.event_id == event_id,
+                        OddsSnapshot.api_request_id == SOURCE_TAG,
+                    )
+                )
             )
         )
+        .scalars()
+        .all()
     )
-    existing_snaps = list(existing_snap_result.scalars().all())
     if existing_snaps:
-        # Merge match_stats into existing snapshots' raw_data if missing
-        match_stats = _extract_match_stats(row)
-        if match_stats:
-            for snap in existing_snaps:
-                raw = snap.raw_data
-                if raw and "match_stats" not in raw:
-                    # Reassign a new dict so SQLAlchemy detects the JSON mutation
-                    snap.raw_data = {**raw, "match_stats": match_stats}
-                    stats.snapshots_updated += 1
-        return
-
-    # --- Build opening snapshot ---
-    opening_data = _build_snapshot_raw_data(row, home_team, away_team, use_closing=False)
-    if opening_data:
-        # Opening odds: assume ~24h before match
-        opening_time = commence_time - timedelta(hours=24)
-        hours_before = 24.0
-        tier = hours_to_tier(hours_before)
-
-        for bk in opening_data["bookmakers"]:
-            bk["last_update"] = opening_time.isoformat().replace("+00:00", "Z")
-
-        snapshot = OddsSnapshot(
-            event_id=event_id,
-            snapshot_time=opening_time,
-            raw_data=opening_data,
-            bookmaker_count=len(opening_data["bookmakers"]),
-            api_request_id=SOURCE_TAG,
-            fetch_tier=tier,
-            hours_until_commence=hours_before,
+        await session.execute(
+            delete(OddsSnapshot).where(OddsSnapshot.id.in_([snap.id for snap in existing_snaps]))
         )
-        session.add(snapshot)
-        stats.snapshots_inserted += 1
+        stats.snapshots_updated += len(existing_snaps)
 
-    # --- Build closing snapshot ---
-    closing_data = _build_snapshot_raw_data(row, home_team, away_team, use_closing=True)
-    if closing_data:
-        # Closing odds: ~1h before match
-        closing_time = commence_time - timedelta(hours=1)
-        hours_before = 1.0
-        tier = hours_to_tier(hours_before)
-
-        for bk in closing_data["bookmakers"]:
-            bk["last_update"] = closing_time.isoformat().replace("+00:00", "Z")
-
-        snapshot = OddsSnapshot(
-            event_id=event_id,
-            snapshot_time=closing_time,
-            raw_data=closing_data,
-            bookmaker_count=len(closing_data["bookmakers"]),
-            api_request_id=SOURCE_TAG,
-            fetch_tier=tier,
-            hours_until_commence=hours_before,
+    for use_closing in (False, True):
+        raw_data = _build_snapshot_raw_data(
+            row,
+            home_team,
+            away_team,
+            use_closing=use_closing,
+            kickoff_time_assumed=kickoff.time_assumed,
         )
-        session.add(snapshot)
+        if raw_data is None:
+            continue
+        snapshot_time = commence_time if use_closing else opening_snapshot_time(commence_time)
+        hours_before = (commence_time - snapshot_time).total_seconds() / 3600
+        for bk in raw_data["bookmakers"]:
+            bk["last_update"] = snapshot_time.isoformat().replace("+00:00", "Z")
+        session.add(
+            OddsSnapshot(
+                event_id=event_id,
+                snapshot_time=snapshot_time,
+                raw_data=raw_data,
+                bookmaker_count=len(raw_data["bookmakers"]),
+                api_request_id=SOURCE_TAG,
+                fetch_tier=hours_to_tier(hours_before),
+                hours_until_commence=hours_before,
+            )
+        )
         stats.snapshots_inserted += 1
 
 
@@ -492,7 +552,7 @@ def main() -> None:
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Ingest all available seasons (2015-2026)",
+        help="Ingest all available seasons (2015-2027)",
     )
     parser.add_argument(
         "--dry-run",

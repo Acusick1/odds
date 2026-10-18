@@ -35,9 +35,9 @@ The scripts load `odds_core.models.Event` and `odds_core.models.OddsSnapshot` ro
    ```
    - Use the same seasons as step 2, or `--all`. Check the dry-run counts, then run without `--dry-run`.
    - It downloads `E0.csv` per season and writes an opening and a closing snapshot per match.
-   - Matches that already have an `op_` event get no new event, and only `match_stats` is back-filled for them.
+   - Matches that already have an `op_` event get no new event; their snapshots are still written.
 4. Rerun any step to fill gaps.
-   - A snapshot is skipped if one with the same `api_request_id` already exists, so reruns do not duplicate.
+   - OddsPortal snapshots are skipped if one with the same `api_request_id` already exists. FDUK snapshots are replaced from the CSV, so reruns do not duplicate and pick up refreshed files.
 5. Check the load with the database, not the repo: event and snapshot counts per season are data facts.
 
 ## Related
