@@ -1110,7 +1110,7 @@ class TestLSTMAdapter:
 
         seq_only_config = FeatureConfig(
             adapter="lstm",
-            feature_groups=["sequence"],
+            feature_groups=[],
             markets=["h2h"],
             outcome="home",
             lookback_hours=72,

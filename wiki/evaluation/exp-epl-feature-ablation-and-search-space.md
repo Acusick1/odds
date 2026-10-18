@@ -6,7 +6,6 @@ sources:
   - experiments/configs/xgboost_epl_production_all_features.yaml
   - experiments/configs/xgboost_epl_production_tabular_match_stats.yaml
   - experiments/configs/xgboost_epl_production_tabular_only.yaml
-  - experiments/configs/xgboost_epl_lineup.yaml
   - experiments/configs/xgboost_epl_hybrid_sharp.yaml
   - experiments/scripts/lineup_signal_check.py
   - odds_analytics.feature_groups
@@ -86,7 +85,7 @@ Under the principled space sliding-380:50 yields 48-50 unique predictions on 50 
 - `*_roll3` columns include the current match, so they are look-ahead by construction (the script's own docstring says so).
 - The match-specific metrics need the starting XI, which the script docstring puts at about 75 minutes before kickoff and the agent's data-source notes at KO-60, while training samples at the sharp tier or 3-12 h out, so the strong signal is late information ([look-ahead bias](../modelling/look-ahead-bias.md#where-the-rule-breaks), [ADR-0006](../../docs/adr/0006-lineups-from-web-research.md)).
 
-`experiments/configs/xgboost_epl_lineup.yaml` trains `tabular + standings + match_stats + epl_lineup`; no result for it is recorded in the experiment log ([EPL context features](../modelling/epl-context-features.md)).
+Lineup features would need the starting XI, which is public about an hour before kick-off, after every training decision tier, so no feature group uses them (#481).
 
 ## Outcome
 
@@ -95,7 +94,7 @@ Deployed as `epl-clv-home` `v308058c` (CV R² +0.058, MSE 0.000716), replacing t
 ## Caveats
 
 - These runs, including the early stopping 15 to 50 result and the +0.058 deployed-model figure, used early stopping on the validation fold, so fold metrics are optimistically biased ([caveat](clv-model-findings.md#caveats)).
-- **Search spaces in older YAMLs.** Most older committed configs still carry the original space (`min_child_weight` up to 50), for example `experiments/configs/xgboost_epl_lineup.yaml` and `experiments/configs/xgboost_epl_hybrid_sharp.yaml`; copy the search space from the `experiments/configs/xgboost_epl_production_*` configs when starting a new sliding-window run.
+- **Search spaces in older YAMLs.** Most older committed configs still carry the original space (`min_child_weight` up to 50), for example `experiments/configs/xgboost_epl_hybrid_sharp.yaml`; copy the search space from the `experiments/configs/xgboost_epl_production_*` configs when starting a new sliding-window run.
 - The 2026-03-18 sliding-380 feature-group numbers (#234) were a search-space artefact and should not be used ([EPL sharp-reference experiments](exp-epl-sharp-reference.md)).
 - **FPL is not reproducible.** The FPL tables and reader remain ([EPL context data](../collection/epl-context-data.md)) but the run cannot be repeated as recorded.
 - The `min_child_weight` rule of thumb has no recorded source.

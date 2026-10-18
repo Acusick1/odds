@@ -48,6 +48,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = structlog.get_logger()
 
+# Single source of truth for valid feature group names; feature_groups.py
+# derives its static-group dispatch set from this.
+FeatureGroupName = Literal[
+    "tabular",
+    "polymarket",
+    "injuries",
+    "rest",
+    "standings",
+    "match_stats",
+    "epl_schedule",
+]
+
 # Maximum inheritance depth to prevent excessive nesting
 _MAX_INHERITANCE_DEPTH = 10
 
@@ -639,10 +651,9 @@ class FeatureConfig(BaseModel):
     )
 
     # Feature groups to compose
-    feature_groups: tuple[str, ...] = Field(
+    feature_groups: tuple[FeatureGroupName, ...] = Field(
         default=("tabular",),
-        min_length=1,
-        description="Feature groups to compose. Available: tabular, trajectory, polymarket, injuries, rest, standings, match_stats, epl_schedule, epl_lineup",
+        description="Feature groups to compose. May be empty only for the lstm adapter. Available: tabular, polymarket, injuries, rest, standings, match_stats, epl_schedule",
     )
 
     # Standings feature configuration
@@ -715,6 +726,12 @@ class FeatureConfig(BaseModel):
         description="Sport key for inference (e.g. 'soccer_epl'). "
         "Populated from training data config when loading from a full training config.",
     )
+
+    @model_validator(mode="after")
+    def validate_feature_groups_for_adapter(self) -> FeatureConfig:
+        if self.adapter == "xgboost" and not self.feature_groups:
+            raise ValueError("feature_groups must name at least one group for the xgboost adapter")
+        return self
 
 
 # =============================================================================
@@ -1209,6 +1226,16 @@ class MLTrainingConfig(BaseModel):
         default=None,
         description="Experiment tracking configuration (optional)",
     )
+
+    @model_validator(mode="after")
+    def validate_tuned_feature_groups(self) -> MLTrainingConfig:
+        """Validate every feature_groups search choice as a FeatureConfig would."""
+        if self.tuning is None or "feature_groups" not in self.tuning.search_spaces:
+            return self
+        base = self.training.features.model_dump()
+        for choice in self.tuning.search_spaces["feature_groups"].choices or []:
+            FeatureConfig.model_validate({**base, "feature_groups": choice})
+        return self
 
     @classmethod
     def from_yaml(cls, filepath: str | Path) -> MLTrainingConfig:

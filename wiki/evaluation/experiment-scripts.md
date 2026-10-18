@@ -16,7 +16,7 @@ status: stable
 
 ## Script and config conventions
 
-- Scripts load data through `odds_analytics.feature_groups.prepare_training_data` with an `odds_analytics.training.config.MLTrainingConfig` read from `experiments/configs/` ([training config](../modelling/training-config.md)).
+- Scripts load data through `odds_analytics.feature_groups.prepare_training_data` with an `odds_analytics.training.config.MLTrainingConfig` read from `experiments/configs/`, validated at load ([training config](../modelling/training-config.md)).
 - Code defaults are `target_type: raw` and `target_bookmaker: pinnacle`, and the default CV protocol is not walk-forward, so a YAML must set the target and protocol itself to match production ([target functions](../modelling/clv-target-functions.md), [cross-validation](../modelling/cross-validation.md), [ADR-0004](../../docs/adr/0004-walk-forward-cv-protocol.md)).
 - The `experiments/configs/xgboost_epl_production_*` YAMLs carry the search space that avoids constant predictors on sliding windows; older YAMLs carry the original space ([search-space experiment](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test)).
 - Scripts run as `uv run python experiments/scripts/<script>.py`.
@@ -58,7 +58,7 @@ Zeroed features once hid an adapter bug ([early NBA signal search](exp-early-nba
 | `exp7_backtest_simulation`, `exp7b_line_shopping` | Flat betting and line shopping | [Betting simulation](exp-betting-simulation.md) |
 | `cv_protocol_grid` | CV window and step grid | [CV protocol grid](exp-cv-protocol-grid.md) |
 | `hybrid_sharp_validation` | Pinnacle versus Betfair sharp reference | [EPL sharp reference](exp-epl-sharp-reference.md) |
-| `lineup_signal_check` | EPL lineup features | [EPL feature ablation](exp-epl-feature-ablation-and-search-space.md#lineup-signal-check), [EPL context features](../modelling/epl-context-features.md) |
+| `lineup_signal_check` | EPL lineup metrics (historical; no feature group uses them) | [EPL feature ablation](exp-epl-feature-ablation-and-search-space.md#lineup-signal-check), [EPL context features](../modelling/epl-context-features.md) |
 | `betfair_historical_analysis` | Parses Betfair historical NBA files | none |
 | `betfair_nba_explore` | Live Betfair NBA market survey | none |
 | `sharp_feature_correlation` | Pinnacle versus Betfair sharp features on overlapping events | none |

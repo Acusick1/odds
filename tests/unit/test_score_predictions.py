@@ -300,7 +300,6 @@ class TestScoreEvents:
         assert collect_kwargs["standings_cache"] is sentinel_standings
         assert collect_kwargs["match_stats_cache"] is None
         assert collect_kwargs["fixtures_df"] is None
-        assert collect_kwargs["lineup_cache"] is None
 
         predict_input = mock_model.predict.call_args.args[0]
         assert predict_input.shape == (1, len(_TABULAR_STANDINGS_FEATURE_NAMES))

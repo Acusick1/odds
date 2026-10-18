@@ -4,7 +4,6 @@ title: CLV and the training target
 description: What CLV means here, why the target is a close-minus-snapshot delta of one devigged bookmaker, and how sampling changes the target.
 sources:
   - odds_analytics.sequence_loader.calculate_devigged_bookmaker_target
-  - odds_analytics.training.config.FeatureConfig
 status: stable
 ---
 

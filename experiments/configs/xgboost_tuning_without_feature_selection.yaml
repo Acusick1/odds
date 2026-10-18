@@ -51,7 +51,7 @@ training:
     markets: ["h2h", "spreads", "totals"]
     outcome: "home"
     normalize: false
-    feature_groups: ["tabular", "trajectory"]
+    feature_groups: ["tabular"]
     sampling:
       strategy: "tier"
       decision_tier: "pregame"

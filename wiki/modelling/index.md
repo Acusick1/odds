@@ -11,7 +11,7 @@ The XGBoost CLV model predicts how far a bookmaker's line moves between a decisi
 ### Reference
 
 - [Cross-validation](cross-validation.md) — How cross_validation.py builds walk-forward folds, the other CV methods, per-fold metrics and train_with_cv.
-- [EPL context feature groups](epl-context-features.md) — The standings, match_stats, epl_schedule and epl_lineup extractors with their inputs, windows, point-in-time rules and data dependencies.
+- [EPL context feature groups](epl-context-features.md) — The standings, match_stats and epl_schedule extractors with their inputs, windows, point-in-time rules and data dependencies.
 - [Feature groups](feature-groups.md) — The catalogue of feature groups and column counts, the tabular extractor and its sharp and retail defaults, and the NBA injury, rest and Polymarket groups.
 - [Feature pipeline](feature-pipeline.md) — The five layers of odds_analytics.feature_groups, caches, samplers, adapters, orchestrator, NaN-fill and variance policy.
 - [Hyperparameter tuner (Optuna)](hyperparameter-tuner.md) — OptunaTuner, the objective, search-space schema, feature selection and CLI options, with the production search space cited by file.

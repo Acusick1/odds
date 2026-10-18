@@ -35,6 +35,7 @@ Every model forbids unknown keys (`extra="forbid"`). A file has `experiment` (na
 - `odds_analytics.training.config.SamplingConfig`: `strategy` (`time_range` default, or `tier`), `decision_tier` (default `pregame`, used by `tier`), and `min_hours` 3.0, `max_hours` 12.0 and `max_samples_per_event` 5 (used by `time_range`). Production sets `strategy: tier` with `decision_tier: sharp` ([feature pipeline](feature-pipeline.md)).
 - A YAML that omits `target_type` and `target_bookmaker` trains the raw mean-implied-probability delta against Pinnacle (#434); the production target is devigged bet365 ([ADR-0002](../../docs/adr/0002-bet365-clv-target.md)).
 - `sharp_bookmakers` defaults to Pinnacle only, while the hybrid reference sets `[pinnacle, betfair_exchange]`; the MCP default differs on purpose (#421, [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md)).
+- `feature_groups` accepts only the names in `odds_analytics.training.config.FeatureGroupName`, must be non-empty for the `xgboost` adapter (the `lstm` adapter may leave it empty), and each `feature_groups` choice in a tuning search space is validated by `odds_analytics.training.config.MLTrainingConfig` at load.
 - The primary market is `markets[0]` by position (#475). `odds_analytics.training.config.FeatureConfig` carries bookmaker rosters, sampling, LSTM, Polymarket and EPL settings, so every committed YAML serialises about 30 unrelated fields.
 - The production YAML lists bet365 in `retail_bookmakers` as well as using it as the target bookmaker.
 
@@ -44,7 +45,6 @@ Every model forbids unknown keys (`extra="forbid"`). A file has `experiment` (na
 
 ## Values accepted but not trainable
 
-- `feature_groups` is a free `tuple[str, ...]`, so an unknown name is ignored and its description still lists `trajectory`, which no code handles (#475, #473).
 - `strategy_type: xgboost` and `lstm` validate, but `odds_cli.commands.train.STRATEGY_CLASSES` and `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.train_from_config` reject them; under `tune` the resulting error is swallowed per trial (#437, [tuner](hyperparameter-tuner.md)).
 - Search-space keys that match nothing are dropped silently (#437).
 

@@ -8,7 +8,7 @@ experiment:
   - h2h
   description: >
     Initial CLV prediction model using cross-source Polymarket + sportsbook
-    features. Combines sportsbook tabular and trajectory features with
+    features. Combines sportsbook tabular features with
     Polymarket price, order book, and cross-source divergence features.
     Training data limited to ~222 events with dual-source moneyline coverage
     (Jan 10 – Feb 10, 2026). Heavily regularized for small sample size.
@@ -58,7 +58,6 @@ training:
     normalize: false
     feature_groups:
     - tabular
-    - trajectory
     - polymarket
     movement_threshold: 0.005
     pm_velocity_window_hours: 2.0
