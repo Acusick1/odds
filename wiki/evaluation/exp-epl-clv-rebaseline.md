@@ -37,7 +37,7 @@ The test ran twice, on two copies of the data. Both are recorded, and the second
 
 ## Setup
 
-- **Script:** `experiments/scripts/epl_clv_rebaseline.py`, with outputs in `experiments/results/epl_clv_rebaseline/`. It reuses the tuning, refit, baseline and bootstrap functions of `experiments/scripts/cv_protocol_common_range.py` ([CV protocol on a common validation range](exp-cv-protocol-common-range.md)). On run 1's data, a repeat run reproduced `results.csv`, `folds.csv`, `oof_predictions.csv`, `tail_predictions.csv` and `decision_rows.csv` byte for byte. `trials_seed_b.csv` differed only in trial timestamps.
+- **Script:** `experiments/scripts/epl_clv_rebaseline.py`, with outputs in `experiments/results/epl_clv_rebaseline/`. It reuses the tuning, refit, baseline and bootstrap functions of `experiments/scripts/cv_protocol_common_range.py` ([CV protocol on a common validation range](exp-cv-protocol-common-range.md)). Its row loading, seed tuning, fold scoring and keep test take the target bookmaker from the config, and the [Pinnacle retest](exp-epl-clv-pinnacle-retest.md) reuses them. On run 1's data, a repeat run reproduced `results.csv`, `folds.csv`, `oof_predictions.csv`, `tail_predictions.csv` and `decision_rows.csv` byte for byte. `trials_seed_b.csv` differed only in trial timestamps.
 - **Config:** `experiments/configs/xgboost_epl_clv_rebaseline.yaml` inherits the #452 expanding cell `experiments/configs/xgboost_epl_cv_protocol_expanding.yaml`. It extends `end_date` to 2026-10-18 and sets `min_train_events` to 1,900. It holds seed A's hyperparameters. The script fails unless the config differs from the cell only in those fields and its model fields equal the #452 best trial in `experiments/results/cv_protocol_common_range/summary.json`. The features are tabular only, the target is devigged bet365, and the sharp reference is `[pinnacle, betfair_exchange]`.
 - **Ranges:** the tuning range is the 1,900 events before 2024-08-01. The evaluation range is every event on or after that date. Nothing is tuned on the evaluation range.
 - **Folds:** expanding walk-forward through `odds_analytics.training.cross_validation.make_walk_forward_splits`, with 50-event validation blocks. The first fold trains on the 1,900 tuning-range events. Each later fold trains on every earlier event. `odds_analytics.training.cross_validation.make_walk_forward_splits` drops the partial last block ([CV protocol on a common validation range](exp-cv-protocol-common-range.md#fold-layout-for-the-re-baseline)).
@@ -130,7 +130,7 @@ These are the two conditions pre-registered on #496 (`summary.json` `keep_test`)
 1. **PASS.** The mean over the seeds of MSE(baseline) − MSE(model) is 5.95 × 10⁻⁶. That is larger than |MSE(seed A) − MSE(seed B)| = 0.13 × 10⁻⁶.
 2. **FAIL.** The test requires each seed's 95% CI on MSE(baseline) − MSE(model) to exclude zero, with the model better. Seed A's CI is [-6.7, 18.5] × 10⁻⁶ and seed B's is [-6.7, 18.8] × 10⁻⁶. Both include zero.
 
-**The bet365 target fails the keep test.** On the #495 rules, keep is ruled out. Retarget or retire depends on whether another target passes under the same rules. No other target was tested here.
+**The bet365 target fails the keep test.** On the #495 rules, keep is ruled out. Retarget or retire depends on whether another target passes under the same rules. The Pinnacle target, tested on #482, fails both conditions ([Pinnacle against bet365](exp-epl-clv-pinnacle-retest.md)).
 
 ## Informational breakdowns
 
@@ -155,7 +155,7 @@ These do not decide anything. All values are in units of 10⁻⁶, from `results
 
 ## Caveats
 
-- **Single target.** Only bet365 was tested. A retarget, for example to Pinnacle, needs its own run under the same rules (#495).
+- **Single target.** Only bet365 is tested here. The Pinnacle target is tested on the events both targets share, which end on 2026-01-08 ([Pinnacle against bet365](exp-epl-clv-pinnacle-retest.md)).
 - **No live-collected rows are scored.** The 2025-26 rows in the folds are all FDUK day-before snapshots. The live-collected regime (`oddsportal_live` and Betfair API snapshots, from April 2026) appears only in the dropped partial block. Live scoring reads live-collected snapshots, so this test says little about the model's live behaviour (inferred; [prediction scoring](../modelling/prediction-scoring.md)).
 - **Data gaps shape the range.** The March 2026 scores are missing in production, FDUK coverage ends on 2026-03-05, and no FINAL 2026-27 event has a bet365 price in any snapshot. Together they leave the scored range ending on 2026-02-22, so the evaluation range on or after 2024-08-01 is scored only up to there. More data will extend it only if later events get scores, day-before bet365 prices and bet365 closing prices.
 - **The deployed model is not this model.** `epl-clv-home` uses tabular and match_stats features with sliding-380 folds ([CLV model findings](clv-model-findings.md#deployed-model)). This test covers the tabular group under the ADR-0010 protocol only.

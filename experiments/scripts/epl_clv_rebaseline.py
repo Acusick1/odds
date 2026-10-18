@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
+import optuna
 import pandas as pd
 from cv_protocol_common_range import (
     CELL_CONFIGS,
@@ -103,6 +104,11 @@ class DayBeforeSampler:
         self._market = config.primary_market
         self.called: set[str] = set()
         self.selected: dict[str, DecisionRow] = {}
+
+    @property
+    def target_bookmaker(self) -> str:
+        assert self._config.target_bookmaker is not None
+        return self._config.target_bookmaker
 
     def _sharp_bookmaker(self, snapshot: OddsSnapshot, event: Event) -> str | None:
         odds = extract_odds_from_snapshot(snapshot, event.id, market=self._market)
@@ -313,17 +319,35 @@ def keep_test(overall: dict[str, float | int]) -> dict[str, Any]:
     }
 
 
-async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    rebaseline = MLTrainingConfig.from_yaml(REBASELINE_CONFIG)
-    cell = MLTrainingConfig.from_yaml(TUNING_CELL_CONFIG)
-    check_rebaseline_config(rebaseline, cell)
+@dataclass(frozen=True)
+class TargetRows:
+    """One target's day-before rows, one per match, with the production sampler's for checks."""
 
-    # Rows: the day-before sampler, and the production sampler for comparison.
-    sampler = DayBeforeSampler(rebaseline.training.features)
-    data = await load_rows(rebaseline, sampler=sampler)
-    production = await load_rows(rebaseline)
-    events = await load_events()
+    data: CellData
+    sampler: DayBeforeSampler
+    production: CellData
+    twins: dict[str, str]
+    n_tuning: int
+
+    @property
+    def eval_events(self) -> list[str]:
+        return list(self.data.event_ids[self.n_tuning :])
+
+    def production_hours(self) -> dict[str, float]:
+        hours_col = self.production.feature_names.index("hours_until_event")
+        return dict(zip(self.production.event_ids, self.production.X[:, hours_col], strict=True))
+
+
+async def load_target_rows(config: MLTrainingConfig, events: pd.DataFrame) -> TargetRows:
+    """Day-before rows for ``config``'s target, checked against ADR-0010's tuning range.
+
+    Fails unless the rows are one per match in chronological order, the tuning range
+    is ADR-0010's 1,900 events, and the day-before sampler reproduces every production
+    tuning-range row.
+    """
+    sampler = DayBeforeSampler(config.training.features)
+    data = await load_rows(config, sampler=sampler)
+    production = await load_rows(config)
 
     if len(set(data.event_ids)) != len(data.event_ids):
         raise ValueError("expected one decision row per event")
@@ -350,33 +374,43 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
     if int((prod_times < EVALUATION_START).sum()) != n_tuning:
         raise ValueError("the production sampler gives a different tuning-range row count")
     check_tuning_rows(data, production, n_tuning)
-    tuning = slice_rows(data, n_tuning)
-    eval_events = row_events[n_tuning:]
+    return TargetRows(data, sampler, production, twins, n_tuning)
 
-    # Per-event decision rows over the evaluation range, with the production pick's horizon.
-    hours_col = data.feature_names.index("hours_until_event")
-    prod_hours = dict(zip(production.event_ids, production.X[:, hours_col], strict=True))
+
+def decision_rows_frame(
+    rows: TargetRows, events: pd.DataFrame, eval_events: list[str]
+) -> pd.DataFrame:
+    """Per-event decision rows over ``eval_events``, with the production pick's horizon."""
+    prod_hours = rows.production_hours()
     eval_db = events[events["commence_time"] >= EVALUATION_START]
     rows_df = pd.DataFrame(
-        [asdict(sampler.selected[eid]) for eid in eval_events if eid in sampler.selected]
+        [asdict(rows.sampler.selected[eid]) for eid in eval_events if eid in rows.sampler.selected]
     ).set_index("event_id")
     rows_df = rows_df.loc[eval_events]
     rows_df.insert(0, "commence_time", eval_db.loc[eval_events, "commence_time"])
     rows_df.insert(1, "season", eval_db.loc[eval_events, "season"])
     rows_df["production_hours_before"] = [prod_hours.get(eid, np.nan) for eid in eval_events]
+    return rows_df
 
-    # Why evaluation-range events in the database have no row.
+
+def lost_events_frame(rows: TargetRows, events: pd.DataFrame) -> pd.DataFrame:
+    """Why each evaluation-range event in the database has no row for this target."""
+    bookmaker = rows.sampler.target_bookmaker
+    prod_hours = rows.production_hours()
+    eval_db = events[events["commence_time"] >= EVALUATION_START]
+    eval_events = set(rows.eval_events)
+
     def loss_reason(eid: str) -> str | None:
-        if eid in set(eval_events):
+        if eid in eval_events:
             return None
-        if eid in twins:
-            return f"twin of {twins[eid]}, which has the match's row"
+        if eid in rows.twins:
+            return f"twin of {rows.twins[eid]}, which has the match's row"
         if not eval_db.at[eid, "scored"]:
             return "no final score"
-        if eid not in sampler.called:
-            return "no closing snapshot with bet365 and a sharp bookmaker"
-        if eid not in sampler.selected:
-            return "no day-before snapshot quoting bet365 and a sharp bookmaker"
+        if eid not in rows.sampler.called:
+            return f"no closing snapshot with {bookmaker} and a sharp bookmaker"
+        if eid not in rows.sampler.selected:
+            return f"no day-before snapshot quoting {bookmaker} and a sharp bookmaker"
         return "target or features could not be computed"
 
     losses = pd.DataFrame(
@@ -390,7 +424,14 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
         }
     ).dropna(subset=["reason"])
     losses.index.name = "event_id"
+    return losses
 
+
+def event_counts_frame(
+    rows: TargetRows, events: pd.DataFrame, rows_df: pd.DataFrame, losses: pd.DataFrame
+) -> pd.DataFrame:
+    """Evaluation-range events in the database, with rows and losses, by season."""
+    eval_db = events[events["commence_time"] >= EVALUATION_START]
     counts = (
         eval_db.groupby("season")
         .agg(
@@ -400,14 +441,14 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
         )
         .join(rows_df.groupby("season").size().rename("events_with_day_before_row"))
         .join(
-            pd.Series([season_of(t) for t in events.loc[data.event_ids, "commence_time"]])
+            pd.Series([season_of(t) for t in events.loc[rows.data.event_ids, "commence_time"]])
             .value_counts()
             .rename("rows")
         )
     )
     counts["rows_per_event"] = counts["rows"] / counts["events_with_day_before_row"]
     prod_eval = pd.Series(
-        [season_of(events.at[eid, "commence_time"]) for eid in production.event_ids]
+        [season_of(events.at[eid, "commence_time"]) for eid in rows.production.event_ids]
     )
     counts["production_sampler_rows"] = prod_eval.value_counts().reindex(counts.index)
     by_reason = losses.groupby(["season", "reason"]).size().unstack(fill_value=0)
@@ -415,6 +456,69 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
     count_cols = [c for c in counts.columns if c != "rows_per_event"]
     counts[count_cols] = counts[count_cols].fillna(0).astype(int)
     counts.index.name = "season"
+    return counts
+
+
+def tune_seed(
+    name: str, cell: MLTrainingConfig, tuning: CellData, n_trials: int, seed: int
+) -> tuple[optuna.Study, float]:
+    """Tune ``cell`` on the tuning range with ``seed`` as Optuna sampler seed and ``random_state``.
+
+    Fails unless a refit of the best trial reproduces its tuned objective.
+    """
+    study, tune_seconds = tune(name, with_params(cell, {}, seed), tuning, n_trials, seed)
+    _, folds = refit_folds(name, with_params(cell, study.best_params, seed), tuning)
+    if not np.isclose(folds["val_mse"].mean(), study.best_value, rtol=1e-7):
+        raise RuntimeError(f"{name}: refit does not reproduce its tuned objective")
+    return study, tune_seconds
+
+
+def score_seeds(
+    config: MLTrainingConfig,
+    data: CellData,
+    seeds: dict[str, tuple[dict[str, Any], int]],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Walk ``config``'s folds over ``data`` once per seed, with its hyperparameters frozen.
+
+    ``seeds`` maps ``seed_a`` and ``seed_b`` to (hyperparameters, ``random_state``). Returns
+    the out-of-fold rows, with ``pred_seed_a`` and ``pred_seed_b``, and both seeds' folds.
+    Fails unless both seeds score identical rows against identical baselines.
+    """
+    oof_by_seed: dict[str, pd.DataFrame] = {}
+    folds_by_seed: list[pd.DataFrame] = []
+    for name in ("seed_a", "seed_b"):
+        params, seed = seeds[name]
+        oof_by_seed[name], folds = refit_folds(name, with_params(config, params, seed), data)
+        folds_by_seed.append(folds)
+    oof_a, oof_b = oof_by_seed["seed_a"], oof_by_seed["seed_b"]
+    for col in ("event_id", "y", "pred_ols", "pred_mean"):
+        if not oof_a[col].equals(oof_b[col]):
+            raise RuntimeError(f"seeds disagree on {col}; they must score identical rows")
+    oof = oof_a.drop(columns=["cell", "pred_model"]).assign(
+        pred_seed_a=oof_a["pred_model"], pred_seed_b=oof_b["pred_model"]
+    )
+    return oof, pd.concat(folds_by_seed, ignore_index=True)
+
+
+async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    rebaseline = MLTrainingConfig.from_yaml(REBASELINE_CONFIG)
+    cell = MLTrainingConfig.from_yaml(TUNING_CELL_CONFIG)
+    check_rebaseline_config(rebaseline, cell)
+
+    # Rows: the day-before sampler, checked against the production sampler.
+    events = await load_events()
+    rows = await load_target_rows(rebaseline, events)
+    data, twins, n_tuning = rows.data, rows.twins, rows.n_tuning
+    row_events = list(data.event_ids)
+    tuning = slice_rows(data, n_tuning)
+    eval_events = rows.eval_events
+
+    prod_hours = rows.production_hours()
+    eval_db = events[events["commence_time"] >= EVALUATION_START]
+    rows_df = decision_rows_frame(rows, events, eval_events)
+    losses = lost_events_frame(rows, events)
+    counts = event_counts_frame(rows, events, rows_df, losses)
     print(counts.to_string())
 
     # Seed A: the frozen #452 trial, scored on the tuning-range folds for comparison with
@@ -426,24 +530,17 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
     seed_a_check = float(seed_a_tuning_folds["val_mse"].mean())
 
     # Seed B: re-tune the #452 expanding cell on the tuning range with new seeds.
-    seed_b_cell = with_params(cell, {}, SEED_B)
-    study, tune_seconds = tune("epl_clv_rebaseline_seed_b", seed_b_cell, tuning, n_trials, SEED_B)
+    study, tune_seconds = tune_seed("epl_clv_rebaseline_seed_b", cell, tuning, n_trials, SEED_B)
     seed_b_params = study.best_params
-    _, seed_b_tuning_folds = refit_folds("seed_b", with_params(cell, seed_b_params, SEED_B), tuning)
-    if not np.isclose(seed_b_tuning_folds["val_mse"].mean(), study.best_value, rtol=1e-7):
-        raise RuntimeError("seed B refit does not reproduce its tuned objective")
 
     # Evaluation range: walk forward with each seed's hyperparameters frozen.
-    oof_a, folds_a = refit_folds("seed_a", with_params(rebaseline, seed_a_params, SEED_A), data)
-    oof_b, folds_b = refit_folds("seed_b", with_params(rebaseline, seed_b_params, SEED_B), data)
-    for col in ("event_id", "y", "pred_ols", "pred_mean"):
-        if not oof_a[col].equals(oof_b[col]):
-            raise RuntimeError(f"seeds disagree on {col}; they must score identical rows")
-    if oof_a["event_id"].iloc[0] != eval_events[0]:
-        raise RuntimeError("the first validation event is not the first evaluation-range event")
-    oof = oof_a.drop(columns=["cell", "pred_model"]).assign(
-        pred_seed_a=oof_a["pred_model"], pred_seed_b=oof_b["pred_model"]
+    oof, folds = score_seeds(
+        rebaseline,
+        data,
+        {"seed_a": (seed_a_params, SEED_A), "seed_b": (seed_b_params, SEED_B)},
     )
+    if oof["event_id"].iloc[0] != eval_events[0]:
+        raise RuntimeError("the first validation event is not the first evaluation-range event")
     oof = oof.join(rows_df, on="event_id")
     scored = list(dict.fromkeys(oof["event_id"]))
     unscored_tail = eval_events[len(scored) :]
@@ -540,7 +637,6 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
     def at(eid: str) -> str:
         return events.at[eid, "commence_time"].isoformat()
 
-    folds = pd.concat([folds_a, folds_b], ignore_index=True)
     for col in ("first_train_event", "last_train_event", "first_val_event", "last_val_event"):
         folds[col.replace("event", "commence")] = folds[col].map(at)
 
@@ -581,7 +677,7 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
             "last_scored_commence": at(scored[-1]),
             "unscored_partial_block_events": len(unscored_tail),
             "twins_dropped": twins,
-            "folds": int(folds_a["fold"].nunique()),
+            "folds": int(folds["fold"].nunique()),
         },
         "seed_a": {
             "sampler_seed": SEED_A,
