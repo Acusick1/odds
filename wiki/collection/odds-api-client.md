@@ -18,7 +18,7 @@ status: stable
 
 ## Methods
 
-`odds_lambda.data_fetcher.TheOddsAPIClient.get_odds`, `odds_lambda.data_fetcher.TheOddsAPIClient.get_events` (free), `odds_lambda.data_fetcher.TheOddsAPIClient.get_scores` (always sends `daysFrom`, default 1), `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds`, `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_events`. Odds methods default regions, markets and bookmakers from `odds_core.config.DataCollectionConfig` ([sport-and-market-keys](sport-and-market-keys.md#odds-api-scope)). Responses carry `quota_remaining` from the `x-requests-remaining` header.
+`odds_lambda.data_fetcher.TheOddsAPIClient.get_odds`, `odds_lambda.data_fetcher.TheOddsAPIClient.get_events` (free), `odds_lambda.data_fetcher.TheOddsAPIClient.get_scores` (always sends `daysFrom`, default 1), `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds`, `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_events`. Odds methods default regions, markets and bookmakers from `odds_core.config.DataCollectionConfig` ([sport-and-market-keys](sport-and-market-keys.md#odds-api-scope)). Responses carry `quota_remaining` from the `x-requests-remaining` header. `odds_lambda.data_fetcher.TheOddsAPIClient.get_odds` and `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds` relabel soccer three-way `h2h` markets to `1x2`, with canonical team names, in `raw_events_data` ([market-key dialects](sport-and-market-keys.md#market-key-dialects)).
 
 ## Retry and rotation
 
