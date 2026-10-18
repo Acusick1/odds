@@ -75,43 +75,41 @@ class ProductionDataCopier:
         console.print(f"  Skip existing: {self.skip_existing}")
         console.print()
 
+        console.print("[bold blue]Querying production database...[/bold blue]")
         async with self.prod_session_maker() as prod_session:
-            prod_reader = OddsReader(prod_session)
-
-            console.print("[bold blue]Querying production database...[/bold blue]")
-            events = await prod_reader.get_events_by_date_range(
+            events = await OddsReader(prod_session).get_events_by_date_range(
                 start_date=start_date,
                 end_date=end_date,
                 sport_key=sport_key,
             )
 
-            self.stats.total_events = len(events)
-            console.print(f"[green]Found {len(events)} events in production[/green]")
+        self.stats.total_events = len(events)
+        console.print(f"[green]Found {len(events)} events in production[/green]")
 
-            if not events:
-                console.print("[yellow]No events found matching criteria[/yellow]")
-                return self.stats
+        if not events:
+            console.print("[yellow]No events found matching criteria[/yellow]")
+            return self.stats
 
-            with Progress(
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn(),
-                TimeElapsedColumn(),
-                console=console,
-            ) as progress:
-                task = progress.add_task(description="Copying events...", total=len(events))
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task(description="Copying events...", total=len(events))
 
-                for event in events:
-                    try:
-                        await self._copy_event(event, prod_session, progress, task)
-                    except Exception as e:
-                        self.stats.failed_event_ids.append(event.id)
-                        console.print(
-                            f"[red]Error copying event {event.id} ({event.away_team} @ {event.home_team}): {e}[/red]"
-                        )
-                        logger.error("copy_event_failed", event_id=event.id, error=str(e))
+            for event in events:
+                try:
+                    await self._copy_event(event, progress, task)
+                except Exception as e:
+                    self.stats.failed_event_ids.append(event.id)
+                    console.print(
+                        f"[red]Error copying event {event.id} ({event.away_team} @ {event.home_team}): {e}[/red]"
+                    )
+                    logger.error("copy_event_failed", event_id=event.id, error=str(e))
 
-                    progress.advance(task)
+                progress.advance(task)
 
         self._print_summary()
 
@@ -120,14 +118,16 @@ class ProductionDataCopier:
     async def _copy_event(
         self,
         event: Event,
-        prod_session: AsyncSession,
         progress: Progress,
         task_id: TaskID,
     ) -> None:
         game_desc = f"{event.away_team} @ {event.home_team}"
         progress.update(task_id, description=f"Copying: {game_desc[:50]}...")
 
-        async with self.local_session_maker() as local_session:
+        async with (
+            self.local_session_maker() as local_session,
+            self.prod_session_maker() as prod_session,
+        ):
             if self.skip_existing and await local_session.get(Event, event.id) is not None:
                 self.stats.events_skipped += 1
                 logger.debug("skipping_existing_event", event_id=event.id)
@@ -184,6 +184,7 @@ class ProductionDataCopier:
             snapshot_ids = {
                 prod.id: local.id
                 for prod, local in zip(prod_snapshots, local_snapshots, strict=True)
+                if prod.id is not None and local.id is not None
             }
 
             if prod_odds:
@@ -210,16 +211,13 @@ class ProductionDataCopier:
         logger.info("event_copied", event_id=event.id, snapshot_count=len(local_snapshots))
 
     @staticmethod
-    def _local_snapshot_id(
-        prediction: Prediction, snapshot_ids: dict[int | None, int | None]
-    ) -> int:
-        local_id = snapshot_ids.get(prediction.snapshot_id)
-        if local_id is None:
+    def _local_snapshot_id(prediction: Prediction, snapshot_ids: dict[int, int]) -> int:
+        if prediction.snapshot_id not in snapshot_ids:
             raise ValueError(
                 f"prediction {prediction.id} references production snapshot "
                 f"{prediction.snapshot_id}, which does not belong to event {prediction.event_id}"
             )
-        return local_id
+        return snapshot_ids[prediction.snapshot_id]
 
     def _print_summary(self) -> None:
         """Print summary statistics."""
