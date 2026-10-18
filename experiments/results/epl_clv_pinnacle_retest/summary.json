@@ -1,0 +1,249 @@
+{
+  "config": "experiments/configs/xgboost_epl_clv_rebaseline.yaml",
+  "tuning_cell_config": "experiments/configs/xgboost_epl_cv_protocol_expanding.yaml",
+  "bet365_hyperparameters": "experiments/results/epl_clv_rebaseline/summary.json",
+  "evaluation_start": "2024-08-01T00:00:00+00:00",
+  "bootstrap_resamples": 2000,
+  "bootstrap_seed": 42,
+  "tuning_range": {
+    "n_events": 1900,
+    "same_events_for_both_targets": true,
+    "last_event": "op_2023-2024_SHEUTD_TOT_2024-05-19",
+    "last_commence": "2024-05-19T15:00:00+00:00"
+  },
+  "evaluation_range": {
+    "events_with_rows": {
+      "bet365": 685,
+      "pinnacle": 591
+    },
+    "twins_dropped": {
+      "bet365": {},
+      "pinnacle": {}
+    },
+    "common_events": 590,
+    "first_common": "op_2024-2025_MANUTD_FUL_2024-08-16",
+    "last_common": "op_2025-2026_ARS_LIV_2026-01-08",
+    "last_common_commence": "2026-01-08T20:00:00+00:00",
+    "scored_events": 550,
+    "first_scored": "op_2024-2025_MANUTD_FUL_2024-08-16",
+    "first_scored_commence": "2024-08-16T19:00:00+00:00",
+    "last_scored": "op_2025-2026_FUL_NOT_2025-12-22",
+    "last_scored_commence": "2025-12-22T20:00:00+00:00",
+    "unscored_partial_block_events": 40,
+    "folds": 11
+  },
+  "training_rule": {
+    "rule": "every fold trains on the common events before its validation block, so both targets train on identical events and features",
+    "extra_train_events_if_each_target_used_all_its_earlier_events": {
+      "bet365": 0,
+      "pinnacle": 0
+    }
+  },
+  "pinnacle": {
+    "seed_a": {
+      "sampler_seed": 42,
+      "random_state": 42,
+      "n_trials": 100,
+      "best_trial": 62,
+      "params": {
+        "n_estimators": 100,
+        "max_depth": 3,
+        "learning_rate": 0.01073898362540406,
+        "min_child_weight": 14,
+        "subsample": 0.6,
+        "colsample_bytree": 0.7,
+        "reg_lambda": 0.7602687306569254
+      },
+      "tuning_range_cv_mse": 0.0007585140372005602,
+      "tune_seconds": 119.5
+    },
+    "seed_b": {
+      "sampler_seed": 7,
+      "random_state": 7,
+      "n_trials": 100,
+      "best_trial": 85,
+      "params": {
+        "n_estimators": 100,
+        "max_depth": 2,
+        "learning_rate": 0.010531794654656895,
+        "min_child_weight": 15,
+        "subsample": 0.5,
+        "colsample_bytree": 0.6,
+        "reg_lambda": 0.10201866282217704
+      },
+      "tuning_range_cv_mse": 0.0007589812739752233,
+      "tune_seconds": 107.3
+    }
+  },
+  "bet365": {
+    "seed_a": {
+      "random_state": 42,
+      "params": {
+        "n_estimators": 150,
+        "max_depth": 2,
+        "learning_rate": 0.016540622580753447,
+        "min_child_weight": 11,
+        "subsample": 0.5,
+        "colsample_bytree": 1.0,
+        "reg_lambda": 3.164426633191584
+      }
+    },
+    "seed_b": {
+      "random_state": 7,
+      "params": {
+        "n_estimators": 250,
+        "max_depth": 2,
+        "learning_rate": 0.011061004889139492,
+        "min_child_weight": 14,
+        "subsample": 0.5,
+        "colsample_bytree": 0.9,
+        "reg_lambda": 0.011077056227236738
+      }
+    }
+  },
+  "overall": {
+    "bet365": {
+      "events": 550,
+      "rows": 550,
+      "mse_seed_a": 0.0008004058036021888,
+      "mse_seed_b": 0.0008000782690942287,
+      "mse_ols": 0.00080702337436378,
+      "mse_mean_floor": 0.0008192698812854662,
+      "ols_minus_seed_a": 6.617578593167404e-06,
+      "ols_minus_seed_a_ci_low": -5.994291468100176e-06,
+      "ols_minus_seed_a_ci_high": 1.9952142780477293e-05,
+      "ols_minus_seed_b": 6.9450790231879046e-06,
+      "ols_minus_seed_b_ci_low": -6.652332165024493e-06,
+      "ols_minus_seed_b_ci_high": 2.0578354597091722e-05,
+      "seed_a_minus_seed_b": 3.2750043002050064e-07,
+      "seed_a_minus_seed_b_ci_low": -2.7051405473189633e-06,
+      "seed_a_minus_seed_b_ci_high": 3.481127999045609e-06,
+      "mean_minus_seed_a": 1.8864086361510446e-05,
+      "mean_minus_seed_a_ci_low": -6.138656225651565e-06,
+      "mean_minus_seed_a_ci_high": 4.37698794141423e-05,
+      "mean_minus_seed_b": 1.9191586791530947e-05,
+      "mean_minus_seed_b_ci_low": -5.478727680599841e-06,
+      "mean_minus_seed_b_ci_high": 4.4321294209529804e-05,
+      "mean_minus_ols": 1.2246507768343042e-05,
+      "mean_minus_ols_ci_low": -1.3404729736496477e-05,
+      "mean_minus_ols_ci_high": 3.817286077709994e-05,
+      "r2_seed_a_vs_mean": 0.023025474406161428,
+      "r2_seed_b_vs_mean": 0.02342526269991163,
+      "r2_ols_vs_mean": 0.0149480741345831,
+      "target_variance": 0.0008172816596925259,
+      "target_mean": -0.0018586305668577552,
+      "relative_gain_seed_a": 0.008199983796484702,
+      "relative_gain_seed_b": 0.00860579661482926
+    },
+    "pinnacle": {
+      "events": 550,
+      "rows": 550,
+      "mse_seed_a": 0.0007445923984050751,
+      "mse_seed_b": 0.0007436075829900801,
+      "mse_ols": 0.0007446708623319864,
+      "mse_mean_floor": 0.0007430089947729967,
+      "ols_minus_seed_a": 7.846138694073308e-08,
+      "ols_minus_seed_a_ci_low": -7.592514157295311e-06,
+      "ols_minus_seed_a_ci_high": 7.591552355072674e-06,
+      "ols_minus_seed_b": 1.0632384907115948e-06,
+      "ols_minus_seed_b_ci_low": -4.7600147399035186e-06,
+      "ols_minus_seed_b_ci_high": 6.689838387749398e-06,
+      "seed_a_minus_seed_b": 9.847771037708617e-07,
+      "seed_a_minus_seed_b_ci_low": -1.8985650756142179e-06,
+      "seed_a_minus_seed_b_ci_high": 4.078573801300718e-06,
+      "mean_minus_seed_a": -1.5833900855682188e-06,
+      "mean_minus_seed_a_ci_low": -9.368088445789986e-06,
+      "mean_minus_seed_a_ci_high": 5.341831835228744e-06,
+      "mean_minus_seed_b": -5.986129817973571e-07,
+      "mean_minus_seed_b_ci_low": -6.150839120494685e-06,
+      "mean_minus_seed_b_ci_high": 4.220935398772423e-06,
+      "mean_minus_ols": -1.6618514725089519e-06,
+      "mean_minus_ols_ci_low": -7.215766895000687e-06,
+      "mean_minus_ols_ci_high": 3.748816366865638e-06,
+      "r2_seed_a_vs_mean": -0.0021310692645950535,
+      "r2_seed_b_vs_mean": -0.0008056271475775922,
+      "r2_ols_vs_mean": -0.0022366721946582846,
+      "target_variance": 0.0007420375477522612,
+      "target_mean": -0.0017954952782019973,
+      "relative_gain_seed_a": 0.0001053638471834738,
+      "relative_gain_seed_b": 0.0014277965534759782
+    }
+  },
+  "keep_test_pinnacle": {
+    "condition_1": {
+      "rule": "mean over seeds of MSE(baseline) - MSE(model) > |MSE(seed A) - MSE(seed B)|",
+      "mean_improvement": 5.70849938826164e-07,
+      "seed_spread": 9.84815414994955e-07,
+      "pass": false
+    },
+    "condition_2": {
+      "rule": "for each seed, the 95% paired bootstrap CI by event on MSE(baseline) - MSE(model) excludes zero, with the model better",
+      "seed_a_ci": [
+        -7.592514157295311e-06,
+        7.591552355072674e-06
+      ],
+      "seed_b_ci": [
+        -4.7600147399035186e-06,
+        6.689838387749398e-06
+      ],
+      "seed_a_pass": false,
+      "seed_b_pass": false,
+      "pass": false
+    },
+    "passes": false
+  },
+  "keep_test_bet365_on_common_set": {
+    "condition_1": {
+      "rule": "mean over seeds of MSE(baseline) - MSE(model) > |MSE(seed A) - MSE(seed B)|",
+      "mean_improvement": 6.781328808177654e-06,
+      "seed_spread": 3.275345079600811e-07,
+      "pass": true
+    },
+    "condition_2": {
+      "rule": "for each seed, the 95% paired bootstrap CI by event on MSE(baseline) - MSE(model) excludes zero, with the model better",
+      "seed_a_ci": [
+        -5.994291468100176e-06,
+        1.9952142780477293e-05
+      ],
+      "seed_b_ci": [
+        -6.652332165024493e-06,
+        2.0578354597091722e-05
+      ],
+      "seed_a_pass": false,
+      "seed_b_pass": false,
+      "pass": false
+    },
+    "passes": false
+  },
+  "skill_pinnacle_minus_bet365": {
+    "r2_vs_mean_seed_a": {
+      "bet365": 0.02302548499880408,
+      "pinnacle": -0.0021310510326351118,
+      "pinnacle_minus_bet365": -0.02515653603143919,
+      "ci_low": -0.05104458417665125,
+      "ci_high": 0.0013025355768975274
+    },
+    "relative_gain_over_ols_seed_a": {
+      "bet365": 0.008199984207749367,
+      "pinnacle": 0.00010536384797887877,
+      "pinnacle_minus_bet365": -0.00809461995959282,
+      "ci_low": -0.02081765388138592,
+      "ci_high": 0.004190819629002351
+    },
+    "r2_vs_mean_seed_b": {
+      "bet365": 0.023425231697055127,
+      "pinnacle": -0.000805660477879222,
+      "pinnacle_minus_bet365": -0.02423089217493435,
+      "ci_low": -0.049207595319140734,
+      "ci_high": 0.001967042912424112
+    },
+    "relative_gain_over_ols_seed_b": {
+      "bet365": 0.008605796843767166,
+      "pinnacle": 0.001427796552889049,
+      "pinnacle_minus_bet365": -0.007178000174462795,
+      "ci_low": -0.020074452739208937,
+      "ci_high": 0.005860964662861079
+    }
+  },
+  "target_correlation": 0.9139972017003671
+}

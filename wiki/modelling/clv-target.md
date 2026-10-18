@@ -19,7 +19,7 @@ The delta is measured from the sampled snapshot to the close ([decision time](lo
 
 ## Why bet365 and not Pinnacle
 
-The production target is the devigged bet365 delta. Pinnacle's lines move too little to predict: CV R² -0.017 on NBA, against 0.036 for bet365 on NBA and 0.058 on EPL. The choice is recorded in [ADR-0002](../../docs/adr/0002-bet365-clv-target.md) and the runs behind it are on [Target bookmaker and data volume experiments](../evaluation/exp-target-and-data-volume.md). The target bookmaker's snapshot price is also an input to the model's strongest feature, `retail_sharp_diff` ([sharp benchmark](sharp-benchmark.md)).
+The production target is the devigged bet365 delta, recorded in [ADR-0002](../../docs/adr/0002-bet365-clv-target.md) on NBA runs the map #494 voids. On EPL, scored on the same events, folds and features, a Pinnacle-target model has no out-of-sample skill (R² about 0 against the training-fold mean), against about 0.023 for bet365. The difference is within bootstrap noise ([Pinnacle against bet365](../evaluation/exp-epl-clv-pinnacle-retest.md)). Pinnacle's EPL lines move almost as much as bet365's, with a target variance 91% of bet365's, so the NBA reason that Pinnacle moves too little does not hold on EPL. The proposed [ADR-0011](../../docs/adr/0011-bet365-clv-target-on-like-for-like-evidence.md) records this evidence. The earlier NBA runs are on [Target bookmaker and data volume experiments](../evaluation/exp-target-and-data-volume.md). The target bookmaker's snapshot price is also an input to the model's strongest feature, `retail_sharp_diff` ([sharp benchmark](sharp-benchmark.md)).
 
 ## Related
 

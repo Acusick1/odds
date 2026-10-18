@@ -41,7 +41,7 @@ R² plateaus at about 1.5K events and oscillates between about 0 and +0.035 afte
 - The extrapolation to 20K events (+0.07) sits uneasily with "more data will not help"; the reading rests on the small marginal slope.
 - All Exp 6 subsets sample the sharp tier (mean about 19 h before the game) and OddsPortal has no 0-3 h snapshots. The pregame subset was diluted, because about 93% of its events fell back to the sharp snapshot ([look-ahead bias](../modelling/look-ahead-bias.md#where-the-rule-breaks)).
 - Tuned CV R² is optimistically biased (best of N trials); comparisons between equally tuned runs are fair ([CV protocol grid](exp-cv-protocol-grid.md)).
-- The Pinnacle and bet365 runs differ in source (Odds API against OddsPortal), size (about 800 against about 5K events) and folds (4 against 11); no run compares the two targets on the same source and event count (#482).
+- The Pinnacle and bet365 runs differ in source (Odds API against OddsPortal), size (about 800 against about 5K events) and folds (4 against 11). The like-for-like comparison is on EPL: [Pinnacle against bet365 as the EPL CLV target](exp-epl-clv-pinnacle-retest.md). There, Pinnacle's target variance is 91% of bet365's, not a fraction of it.
 - The production YAML (`experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`) also lists bet365 first in `retail_bookmakers`, so the target bookmaker's snapshot price is an input to `retail_sharp_diff` ([sharp benchmark](../modelling/sharp-benchmark.md)).
 - The `odds train` bet365 and Pinnacle runs set `early_stopping_rounds` on the validation fold, so their fold metrics are optimistically biased ([caveat](clv-model-findings.md#caveats)). The Exp 6 learning curve was script-based with no `eval_set` and is not affected.
 

@@ -1,0 +1,7 @@
+season,target,events_in_db,matches_in_db,events_scored,events_with_day_before_row,rows,rows_per_event,production_sampler_rows,lost: no closing snapshot with bet365 and a sharp bookmaker,lost: no day-before snapshot quoting bet365 and a sharp bookmaker,lost: no final score,common_events,lost: no closing snapshot with pinnacle and a sharp bookmaker,lost: no day-before snapshot quoting pinnacle and a sharp bookmaker
+2024-25,bet365,380,380,380,380,380,1.0,380,0.0,0.0,0,380,,
+2025-26,bet365,387,379,354,305,305,1.0,293,28.0,21.0,33,210,,
+2026-27,bet365,43,43,43,0,0,,0,43.0,0.0,0,0,,
+2024-25,pinnacle,380,380,380,380,380,1.0,380,,,0,380,0.0,0.0
+2025-26,pinnacle,387,379,354,211,211,1.0,211,,,33,210,139.0,4.0
+2026-27,pinnacle,43,43,43,0,0,,0,,,0,0,43.0,0.0
