@@ -67,8 +67,9 @@ SEED_B = 7
 TUNING_EVENTS = 1900
 LAST_TUNING_COMMENCE = pd.Timestamp("2024-05-19T15:00:00Z")
 DAY_BEFORE_HOURS = 24.0
-# FDUK stamps its day-before snapshot 23 h before kick-off under British Summer Time and
-# 24 h otherwise; tuning-range rows run from 23.0 to 24.25 h.
+# At the time of this run FDUK snapshots were stamped 24 h before the UK clock time read as
+# UTC, so they sit 23 h before kick-off under British Summer Time and 24 h otherwise;
+# tuning-range rows run from 23.0 to 24.25 h.
 DAY_BEFORE_TOLERANCE_HOURS = 1.0
 LIVE_TWIN_PREFIX = "op_live_"
 EVAL_SEASONS = {"2024-25", "2025-26", "2026-27"}

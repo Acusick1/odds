@@ -10,9 +10,10 @@ from scripts.ingest_football_data_uk import (
     SEASONS,
     UK_TZ,
     _build_snapshot_raw_data,
-    _extract_h2h_odds,
+    _extract_three_way_odds,
     build_event_id,
     normalize_team,
+    opening_fetch_tier,
     opening_snapshot_time,
     parse_kickoff,
 )
@@ -57,11 +58,11 @@ class TestNormalizeTeam:
 class TestExtractH2hOdds:
     def test_extracts_three_way_odds(self) -> None:
         row = {"PSH": "2.50", "PSD": "3.40", "PSA": "2.80"}
-        result = _extract_h2h_odds(row, "PS", "pinnacle", "Arsenal", "Chelsea")
+        result = _extract_three_way_odds(row, "PS", "pinnacle", "Arsenal", "Chelsea")
 
         assert result is not None
         assert result["key"] == "pinnacle"
-        assert result["markets"][0]["key"] == "h2h"
+        assert result["markets"][0]["key"] == "1x2"
         outcomes = result["markets"][0]["outcomes"]
         assert len(outcomes) == 3
         assert outcomes[0]["name"] == "Arsenal"
@@ -73,22 +74,22 @@ class TestExtractH2hOdds:
 
     def test_returns_none_when_column_missing(self) -> None:
         row = {"PSH": "2.50", "PSD": "3.40"}  # PSA missing
-        result = _extract_h2h_odds(row, "PS", "pinnacle", "Arsenal", "Chelsea")
+        result = _extract_three_way_odds(row, "PS", "pinnacle", "Arsenal", "Chelsea")
         assert result is None
 
     def test_returns_none_when_value_empty(self) -> None:
         row = {"PSH": "2.50", "PSD": "", "PSA": "2.80"}
-        result = _extract_h2h_odds(row, "PS", "pinnacle", "Arsenal", "Chelsea")
+        result = _extract_three_way_odds(row, "PS", "pinnacle", "Arsenal", "Chelsea")
         assert result is None
 
     def test_returns_none_when_odds_at_or_below_one(self) -> None:
         row = {"PSH": "1.00", "PSD": "3.40", "PSA": "2.80"}
-        result = _extract_h2h_odds(row, "PS", "pinnacle", "Arsenal", "Chelsea")
+        result = _extract_three_way_odds(row, "PS", "pinnacle", "Arsenal", "Chelsea")
         assert result is None
 
     def test_favourite_american_odds(self) -> None:
         row = {"B365H": "1.50", "B365D": "4.00", "B365A": "6.00"}
-        result = _extract_h2h_odds(row, "B365", "bet365", "Liverpool", "Norwich")
+        result = _extract_three_way_odds(row, "B365", "bet365", "Liverpool", "Norwich")
 
         assert result is not None
         outcomes = result["markets"][0]["outcomes"]
@@ -98,7 +99,7 @@ class TestExtractH2hOdds:
 
     def test_closing_prefix(self) -> None:
         row = {"PSCH": "2.10", "PSCD": "3.50", "PSCA": "3.20"}
-        result = _extract_h2h_odds(row, "PSC", "pinnacle", "Arsenal", "Chelsea")
+        result = _extract_three_way_odds(row, "PSC", "pinnacle", "Arsenal", "Chelsea")
 
         assert result is not None
         assert result["key"] == "pinnacle"
@@ -279,17 +280,44 @@ class TestOpeningSnapshotTime:
         local = datetime.strptime(kickoff_local, "%Y-%m-%d %H:%M").replace(tzinfo=UK_TZ)
         assert opening_snapshot_time(local.astimezone(UTC)) == expected_utc
 
-    def test_deadline_after_kickoff_falls_back_to_previous_deadline(self) -> None:
-        local = datetime(2025, 1, 10, 15, 0, tzinfo=UK_TZ)
-        assert opening_snapshot_time(local.astimezone(UTC)) == datetime(
-            2025, 1, 7, 13, 0, tzinfo=UTC
-        )
+    def test_deadline_at_or_after_kickoff_has_no_opening_time(self) -> None:
+        friday_1500 = datetime(2025, 1, 10, 15, 0, tzinfo=UK_TZ).astimezone(UTC)
+        boxing_day = datetime(2023, 12, 26, 12, 30, tzinfo=UK_TZ).astimezone(UTC)
+        friday_1700 = datetime(2025, 1, 10, 17, 0, tzinfo=UK_TZ).astimezone(UTC)
+        assert opening_snapshot_time(friday_1500) is None
+        assert opening_snapshot_time(boxing_day) is None
+        assert opening_snapshot_time(friday_1700) is None
+
+    def test_deadline_follows_uk_clock_across_march_change(self) -> None:
+        # Saturday 2025-03-29 15:00 GMT; Friday 17:00 GMT
+        before = datetime(2025, 3, 29, 15, 0, tzinfo=UK_TZ).astimezone(UTC)
+        assert opening_snapshot_time(before) == datetime(2025, 3, 28, 17, 0, tzinfo=UTC)
+        # Sunday 2025-03-30 (clocks went forward at 01:00) 16:30 BST; Friday still 17:00 GMT
+        after = datetime(2025, 3, 30, 16, 30, tzinfo=UK_TZ).astimezone(UTC)
+        assert opening_snapshot_time(after) == datetime(2025, 3, 28, 17, 0, tzinfo=UTC)
+        # Saturday 2025-04-05 15:00 BST; Friday 17:00 BST is 16:00Z
+        bst = datetime(2025, 4, 5, 15, 0, tzinfo=UK_TZ).astimezone(UTC)
+        assert opening_snapshot_time(bst) == datetime(2025, 4, 4, 16, 0, tzinfo=UTC)
 
     def test_opening_precedes_kickoff(self) -> None:
         start = datetime(2024, 8, 1, tzinfo=UTC)
         for hours in range(0, 24 * 120, 5):
             kickoff = start + timedelta(hours=hours)
-            assert opening_snapshot_time(kickoff) < kickoff
+            opening = opening_snapshot_time(kickoff)
+            assert opening is None or opening < kickoff
+
+
+class TestOpeningFetchTier:
+    def test_never_closing_tier(self) -> None:
+        for tenths in range(0, 1000):
+            assert opening_fetch_tier(tenths / 10) != "closing"
+
+    @pytest.mark.parametrize(
+        ("hours", "tier"),
+        [(0.5, "pregame"), (7.0, "pregame"), (19.5, "sharp"), (47.5, "early"), (75.0, "opening")],
+    )
+    def test_tiers(self, hours: float, tier: str) -> None:
+        assert opening_fetch_tier(hours) == tier
 
 
 class TestSnapshotTimingMetadata:
@@ -334,6 +362,20 @@ class TestRetailBookmakerPrefixes:
             result = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=use_closing)
             assert result is not None
             assert [bk["key"] for bk in result["bookmakers"]] == [key]
+
+
+class TestDuplicateBookmakerKeys:
+    def test_betvictor_columns_collapse_to_one_bookmaker(self) -> None:
+        row = {
+            "VCH": "2.0", "VCD": "3.0", "VCA": "4.0",
+            "BVH": "2.1", "BVD": "3.1", "BVA": "4.1",
+            "MaxH": "2.5", "MaxD": "3.5", "MaxA": "4.5",
+            "BbMxH": "2.6", "BbMxD": "3.6", "BbMxA": "4.6",
+        }  # fmt: skip
+        result = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=False)
+        assert result is not None
+        keys = [bk["key"] for bk in result["bookmakers"]]
+        assert sorted(keys) == ["betvictor", "market_max"]
 
 
 class TestSeasons:
