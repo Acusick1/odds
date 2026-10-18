@@ -23,7 +23,7 @@ status: stable
    - Options: `--output`, `--dry-run`, `--verbose`, `--track`, `--tracking-uri`, `--sport`.
    - It runs CV, fits a final model and writes `models/xgboost_line_movement_<experiment.name>.pkl` plus a sibling `.yaml` holding the full config ([training pipeline](training-pipeline.md)).
 3. **Or tune first.** `odds train tune --config <file> --n-trials 100`; the config needs a `tuning` section ([tuner](hyperparameter-tuner.md)). The best parameters go to `<config>_best.yaml`; then run step 2 on that file.
-   - Do not publish the output of `--train-best`: it leaves only a metadata `.yaml` beside the `.pkl`, which scoring refuses (#437).
+   - `--train-best` trains on the best parameters and writes the same `.pkl` plus full-config `.yaml` as step 2.
 4. **Check the artifacts.** Read the CV metrics and `experiments/results/<experiment.name>/verification/`.
    - No all-NaN or constant features, and the expected feature count ([run an experiment](../evaluation/experiment-scripts.md#verification-artifacts)).
 5. **Publish.** `odds model publish --name epl-clv-home --path models/<file>.pkl [--version v1.2] [--bucket <bucket>]`.

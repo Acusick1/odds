@@ -954,7 +954,7 @@ class TestTrainingConfig:
         with pytest.raises(ValueError, match="requires XGBoostConfig"):
             TrainingConfig(
                 features=FeatureConfig(target_type="raw"),
-                strategy_type="xgboost",
+                strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
                     end_date=date(2024, 12, 31),
@@ -965,7 +965,7 @@ class TestTrainingConfig:
         with pytest.raises(ValueError, match="requires LSTMConfig"):
             TrainingConfig(
                 features=FeatureConfig(target_type="raw"),
-                strategy_type="lstm",
+                strategy_type="lstm_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
                     end_date=date(2024, 12, 31),
@@ -977,7 +977,7 @@ class TestTrainingConfig:
         """Test default strategy parameters."""
         config = TrainingConfig(
             features=FeatureConfig(target_type="raw"),
-            strategy_type="xgboost",
+            strategy_type="xgboost_line_movement",
             data=DataConfig(
                 start_date=date(2024, 1, 1),
                 end_date=date(2024, 12, 31),
@@ -1207,7 +1207,7 @@ class TestJSONLoading:
                 "tags": ["test", "json"],
             },
             "training": {
-                "strategy_type": "xgboost",
+                "strategy_type": "xgboost_line_movement",
                 "features": {"target_type": "raw"},
                 "data": {
                     "start_date": "2024-01-01",
@@ -1251,7 +1251,7 @@ class TestJSONLoading:
         config = MLTrainingConfig.from_json(json_config_file)
 
         assert config.experiment.name == "json_test"
-        assert config.training.strategy_type == "xgboost"
+        assert config.training.strategy_type == "xgboost_line_movement"
         assert config.training.data.test_split == 0.25
         assert config.training.model.n_estimators == 150
         assert config.tuning is not None
@@ -1339,7 +1339,7 @@ class TestSerialization:
         data = {
             "experiment": {"name": "dict_test"},
             "training": {
-                "strategy_type": "xgboost",
+                "strategy_type": "xgboost_line_movement",
                 "features": {"target_type": "raw"},
                 "data": {
                     "start_date": "2024-01-01",
@@ -1418,7 +1418,7 @@ class TestValidationErrorMessages:
         with pytest.raises(ValueError) as excinfo:
             TrainingConfig(
                 features=FeatureConfig(target_type="raw"),
-                strategy_type="xgboost",
+                strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
                     end_date=date(2024, 12, 31),
@@ -1442,7 +1442,7 @@ class TestEdgeCases:
             experiment=ExperimentConfig(name="minimal"),
             training=TrainingConfig(
                 features=FeatureConfig(target_type="raw"),
-                strategy_type="xgboost",
+                strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
                     end_date=date(2024, 1, 2),  # Minimum 1 day
@@ -1454,7 +1454,7 @@ class TestEdgeCases:
 
     def test_all_strategy_types(self):
         """Test all supported strategy types."""
-        for strategy in ["xgboost", "xgboost_line_movement"]:
+        for strategy in ["xgboost_line_movement"]:
             config = TrainingConfig(
                 features=FeatureConfig(target_type="raw"),
                 strategy_type=strategy,
@@ -1466,7 +1466,7 @@ class TestEdgeCases:
             )
             assert config.strategy_type == strategy
 
-        for strategy in ["lstm", "lstm_line_movement"]:
+        for strategy in ["lstm_line_movement"]:
             config = TrainingConfig(
                 strategy_type=strategy,
                 data=DataConfig(
@@ -1483,7 +1483,7 @@ class TestEdgeCases:
         config_data = {
             "experiment": {"name": "date_test"},
             "training": {
-                "strategy_type": "xgboost",
+                "strategy_type": "xgboost_line_movement",
                 "features": {"target_type": "raw"},
                 "data": {
                     "start_date": "2024-10-15",  # Specific date format
@@ -1578,7 +1578,7 @@ class TestUnknownFieldRejection:
         with pytest.raises(ValueError, match="Extra inputs are not permitted"):
             TrainingConfig(
                 features=FeatureConfig(target_type="raw"),
-                strategy_type="xgboost",
+                strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
                     end_date=date(2024, 12, 31),
@@ -1594,7 +1594,7 @@ class TestUnknownFieldRejection:
                 experiment=ExperimentConfig(name="test"),
                 training=TrainingConfig(
                     features=FeatureConfig(target_type="raw"),
-                    strategy_type="xgboost",
+                    strategy_type="xgboost_line_movement",
                     data=DataConfig(
                         start_date=date(2024, 1, 1),
                         end_date=date(2024, 12, 31),
@@ -1612,7 +1612,7 @@ class TestUnknownFieldRejection:
                 "unknown_field": "should_fail",
             },
             "training": {
-                "strategy_type": "xgboost",
+                "strategy_type": "xgboost_line_movement",
                 "features": {"target_type": "raw"},
                 "data": {
                     "start_date": "2024-01-01",
@@ -2048,7 +2048,7 @@ class TestConfigInheritance:
         config_data = {
             "experiment": {"name": "no_base"},
             "training": {
-                "strategy_type": "xgboost",
+                "strategy_type": "xgboost_line_movement",
                 "features": {"target_type": "raw"},
                 "data": {
                     "start_date": "2024-01-01",

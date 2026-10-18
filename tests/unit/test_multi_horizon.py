@@ -195,8 +195,8 @@ class TestGroupTimeseriesCV:
                 f"Fold {i} train size ({fold_splits[i][0]}) > fold {i + 1} ({fold_splits[i + 1][0]})"
             )
 
-    def test_walk_forward_with_no_event_ids_falls_back_to_timeseries(self):
-        """walk_forward without event_ids warns and falls back to timeseries CV."""
+    def test_walk_forward_with_no_event_ids_raises(self):
+        """walk_forward without event_ids is an error, not a switch to timeseries CV."""
         n_rows = 20
         n_features = 3
         X = np.random.randn(n_rows, n_features).astype(np.float32)
@@ -206,9 +206,8 @@ class TestGroupTimeseriesCV:
         config = self._make_config()
         strategy = self._make_mock_strategy()
 
-        result = run_cv(strategy, config, X, y, feature_names, event_ids=None)
-        assert isinstance(result, CVResult)
-        assert result.cv_method == "timeseries"
+        with pytest.raises(ValueError, match="event_ids"):
+            run_cv(strategy, config, X, y, feature_names, event_ids=None)
 
     def test_fold_results_populated(self):
         """Each fold should produce valid metrics."""

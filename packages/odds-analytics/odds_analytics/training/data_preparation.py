@@ -34,6 +34,7 @@ Example usage:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -196,6 +197,16 @@ def save_verification_artifacts(
     )
 
 
+@dataclass(frozen=True)
+class EvalData:
+    """Held-out rows a final model or a non-CV tuning trial is scored on."""
+
+    X: np.ndarray
+    y: np.ndarray
+    static: np.ndarray | None
+    masks: np.ndarray | None
+
+
 class TrainingDataResult:
     """
     Container for training data preparation results.
@@ -279,6 +290,16 @@ class TrainingDataResult:
     def num_features(self) -> int:
         """Number of features."""
         return len(self.feature_names)
+
+    @property
+    def eval_data(self) -> EvalData | None:
+        """Validation rows if any, else test rows, else None when nothing is held out."""
+        if self.num_val_samples > 0:
+            assert self.X_val is not None and self.y_val is not None
+            return EvalData(self.X_val, self.y_val, self.static_val, self.masks_val)
+        if self.num_test_samples > 0:
+            return EvalData(self.X_test, self.y_test, self.static_test, self.masks_test)
+        return None
 
     def to_dict(self) -> dict:
         """Convert to dictionary format for backward compatibility."""
@@ -472,8 +493,10 @@ async def prepare_training_data_from_config(
     if event_ids is not None:
         # Event-level split: sort by event commence time, split at event boundary
         unique_events = list(dict.fromkeys(event_ids))  # preserve order
-        n_test_events = max(1, int(len(unique_events) * data_config.test_split))
-        train_events = set(unique_events[:-n_test_events])
+        n_test_events = int(len(unique_events) * data_config.test_split)
+        if data_config.test_split > 0:
+            n_test_events = max(1, n_test_events)
+        train_events = set(unique_events[: len(unique_events) - n_test_events])
 
         train_mask = np.array([eid in train_events for eid in event_ids])
         test_mask = ~train_mask
@@ -488,6 +511,11 @@ async def prepare_training_data_from_config(
         masks_test = masks[test_mask] if masks is not None else None
         static_trainval = static[train_mask] if static is not None else None
         static_test = static[test_mask] if static is not None else None
+    elif data_config.test_split == 0:
+        X_trainval, y_trainval, masks_trainval, static_trainval = X, y, masks, static
+        X_test, y_test = X[:0], y[:0]
+        masks_test = masks[:0] if masks is not None else None
+        static_test = static[:0] if static is not None else None
     else:
         split_result = _split_aligned_arrays(
             [X, y, masks, static],

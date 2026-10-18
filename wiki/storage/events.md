@@ -43,7 +43,7 @@ status: stable
 | OddsPortal live scrape | `op_live_{HOME}_{AWAY}_{YYYY-MM-DDTHHMM}` | `odds_lambda.storage.writers.OddsWriter._build_event_id` |
 | football-data.co.uk | `fduk_{season}_{HOME}_{AWAY}_{date}` | `scripts/ingest_football_data_uk.py` |
 
-Training's `data_source` filter matches these prefixes (`op_%`, `fduk_%`) in `odds_analytics.training.data_preparation` ([Training config](../modelling/training-config.md)). FDUK rows that match an existing `op_` event get no new event of their own ([Historical ingest scripts](../collection/historical-ingest-scripts.md)).
+Training's `data_source` filter matches these prefixes (`op_%`, `fduk_%`) when `odds_analytics.training.data_preparation.filter_events_by_date_range` selects events ([Training config](../modelling/training-config.md)). FDUK rows that match an existing `op_` event get no new event of their own ([Historical ingest scripts](../collection/historical-ingest-scripts.md)).
 
 ## Team-name normalizers
 

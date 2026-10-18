@@ -27,6 +27,7 @@ Every model forbids unknown keys (`extra="forbid"`). A file has `experiment` (na
 - `data_source`: `oddsportal` (`op_` ids), `football_data_uk` (`fduk_`), `oddsapi` (everything else), `all` or null (no filter). The filter is on event-id prefix ([events](../storage/events.md)). `sport_key`, `start_date`/`end_date` (required), `min_snapshots`.
 - CV: `cv_method` (`walk_forward`, `timeseries` default, `kfold`), `window_type` (`expanding` default or `sliding`), `min_train_events`, `max_train_events`, `val_step_events`, `n_folds` ([cross-validation](cross-validation.md)). `use_kfold` defaults true and `test_split` to 0.2.
 - The code defaults are `cv_method: timeseries` and `test_split: 0.2`, so the production protocol (`cv_method: walk_forward`, `window_type: sliding`, 380/380/50, `test_split: 0.0`) exists only where a YAML sets it ([ADR-0004](../../docs/adr/0004-walk-forward-cv-protocol.md)).
+- `strategy_type` is `xgboost_line_movement` or `lstm_line_movement` (`odds_analytics.training.config.StrategyType`), the keys of `odds_cli.commands.train.STRATEGY_CLASSES`; any other value fails validation.
 - `n_folds` is ignored for `walk_forward` and is required (checked at run time by `odds_analytics.training.cross_validation.run_cv`, not by the schema) for `kfold` and `timeseries`.
 
 **`training.features`**
@@ -39,14 +40,13 @@ Every model forbids unknown keys (`extra="forbid"`). A file has `experiment` (na
 - The primary market is `markets[0]` by position (#475). `odds_analytics.training.config.FeatureConfig` carries bookmaker rosters, sampling, LSTM, Polymarket and EPL settings, so every committed YAML serialises about 30 unrelated fields.
 - The production YAML lists bet365 in `retail_bookmakers` as well as using it as the target bookmaker.
 
+**`tuning`**
+
+`metric` is `val_mse`, `val_mae` or `val_r2`; `direction` is derived from it and rejected if it contradicts it. Search-space keys must name a model or `odds_analytics.training.config.FeatureConfig` field, or `top_k_features` ([tuner](hyperparameter-tuner.md)).
+
 ## Data source and bookmaker
 
 `target_bookmaker` must belong to the selected `data_source`; a target bookmaker absent from the source drops events, counted only in a log line. The data-source and bookmaker combinations used by the committed configs are set out in [Train and publish a model](howto-train-and-publish-model.md#choose-data).
-
-## Values accepted but not trainable
-
-- `strategy_type: xgboost` and `lstm` validate, but `odds_cli.commands.train.STRATEGY_CLASSES` and `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.train_from_config` reject them; under `tune` the resulting error is swallowed per trial (#437, [tuner](hyperparameter-tuner.md)).
-- Search-space keys that match nothing are dropped silently (#437).
 
 ## Related
 

@@ -16,6 +16,7 @@ from odds_analytics.training import (
     prepare_training_data_from_config,
     save_verification_artifacts,
 )
+from odds_analytics.training.config import TOP_K_FEATURES_KEY, FeatureConfig, StrategyType
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from odds_core.database import async_session_maker
 from rich.console import Console
@@ -29,14 +30,54 @@ if TYPE_CHECKING:
 app = typer.Typer()
 console = Console()
 
+LineMovementStrategy = XGBoostLineMovementStrategy | LSTMLineMovementStrategy
+
 # Strategy registry mapping strategy_type to class
-STRATEGY_CLASSES = {
+STRATEGY_CLASSES: dict[StrategyType, type[LineMovementStrategy]] = {
     "xgboost_line_movement": XGBoostLineMovementStrategy,
     "lstm_line_movement": LSTMLineMovementStrategy,
 }
 
+
+def _resolve_study_storage(storage: str | None, in_memory: bool) -> str | None:
+    """Return the Optuna storage URL, or None for an in-memory study."""
+    if in_memory:
+        if storage is not None:
+            raise typer.BadParameter("--in-memory and --storage are mutually exclusive")
+        return None
+    if storage is not None:
+        return storage
+
+    from odds_core.config import get_settings
+
+    db_url = get_settings().database.url
+    # Optuna uses SQLAlchemy's sync engine; the project's installed driver is psycopg 3.
+    for prefix in ("postgresql+asyncpg://", "postgresql://"):
+        if db_url.startswith(prefix):
+            return "postgresql+psycopg://" + db_url.removeprefix(prefix)
+    raise typer.BadParameter(
+        f"Cannot derive an Optuna storage URL from DATABASE_URL scheme; pass --storage "
+        f"or --in-memory (got {db_url.split('://', 1)[0]}://)"
+    )
+
+
 # Default directory for experiment configs
 DEFAULT_CONFIG_DIR = Path("experiments")
+
+
+def _save_model_with_config(
+    strategy: LineMovementStrategy, config: MLTrainingConfig, path: str
+) -> None:
+    """Save the model and, beside it, the full training config that scoring reads."""
+    try:
+        strategy.save_model(path)
+        console.print(f"\n[green]Model saved to {path}[/green]")
+        config_output = Path(path).with_suffix(".yaml")
+        config.to_yaml(config_output)
+        console.print(f"[green]Configuration saved to {config_output}[/green]")
+    except Exception:
+        console.print_exception()
+        raise typer.Exit(1) from None
 
 
 def _save_data_verification(data_result: TrainingDataResult, output_dir: Path) -> None:
@@ -194,11 +235,6 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
     strategy_type = config.training.strategy_type
 
     # Get strategy class
-    if strategy_type not in STRATEGY_CLASSES:
-        console.print(f"[red]Error: Unknown strategy type '{strategy_type}'[/red]")
-        console.print(f"Available types: {', '.join(STRATEGY_CLASSES.keys())}")
-        raise typer.Exit(1)
-
     strategy_class = STRATEGY_CLASSES[strategy_type]
 
     console.print(f"\n[bold]Training {config.experiment.name}[/bold]")
@@ -358,20 +394,7 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
             output_path = _get_output_path(config)
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-            try:
-                strategy.save_model(output_path)
-                console.print(f"\n[green]Model saved to {output_path}[/green]")
-            except Exception:
-                console.print_exception()
-                raise typer.Exit(1) from None
-
-            # Step 4: Save configuration alongside model
-            config_output = Path(output_path).with_suffix(".yaml")
-            try:
-                config.to_yaml(config_output)
-                console.print(f"[green]Configuration saved to {config_output}[/green]")
-            except Exception as e:
-                console.print(f"[yellow]Warning: Could not save configuration: {e}[/yellow]")
+            _save_model_with_config(strategy, config, output_path)
 
             console.print("\n[bold green]Training complete![/bold green]")
 
@@ -432,13 +455,6 @@ def validate_config(
         ml_config = None
 
     if ml_config:
-        # Validate strategy type
-        if ml_config.training.strategy_type not in STRATEGY_CLASSES:
-            errors.append(
-                f"Unknown strategy_type '{ml_config.training.strategy_type}'. "
-                f"Available: {', '.join(STRATEGY_CLASSES.keys())}"
-            )
-
         # Validate date range
         data_config = ml_config.training.data
         if data_config.start_date >= data_config.end_date:
@@ -720,7 +736,10 @@ def run_tuning(
         None, "--study-name", help="Optuna study name for persistence/resumption"
     ),
     storage: str | None = typer.Option(
-        None, "--storage", help="Optuna storage URL (defaults to DATABASE_URL from config)"
+        None, "--storage", help="Optuna storage URL (defaults to DATABASE_URL from settings)"
+    ),
+    in_memory: bool = typer.Option(
+        False, "--in-memory", help="Keep the study in memory instead of the database"
     ),
     track: bool = typer.Option(False, "--track", help="Enable MLflow experiment tracking"),
     tracking_uri: str | None = typer.Option(
@@ -787,21 +806,7 @@ def run_tuning(
     if timeout is not None:
         ml_config.tuning.timeout = timeout
 
-    # Determine storage URL (default to DATABASE_URL if not specified)
-    storage_url = storage
-    if storage_url is None:
-        try:
-            from odds_core.config import get_config
-
-            db_url = get_config().database.url
-            # Convert asyncpg URL to psycopg2 URL for Optuna
-            if db_url.startswith("postgresql+asyncpg://"):
-                storage_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
-            else:
-                storage_url = db_url
-        except Exception:
-            # If DATABASE_URL not available, use in-memory storage
-            storage_url = None
+    storage_url = _resolve_study_storage(storage, in_memory)
 
     # Determine study name
     if study_name is None:
@@ -899,9 +904,10 @@ async def _run_tuning_async(
             console.print(f"[cyan]Experiment: {ml_config.tracking.experiment_name}[/cyan]\n")
 
         # Step 3: Create objective function
-        # Use validation data for optimization if available, otherwise use test data
-        X_val = data_result.X_val if data_result.num_val_samples > 0 else data_result.X_test
-        y_val = data_result.y_val if data_result.num_val_samples > 0 else data_result.y_test
+        # Use validation data for optimization if available, otherwise test data, else none
+        eval_data = data_result.eval_data
+        X_val = eval_data.X if eval_data else None
+        y_val = eval_data.y if eval_data else None
 
         # Pre-compute features for all feature_groups choices if being tuned
         precomputed_features = None
@@ -941,9 +947,7 @@ async def _run_tuning_async(
         tune_mask_obj_kw: dict[str, Any] = {}
         if data_result.masks_train is not None:
             tune_mask_obj_kw["masks_train"] = data_result.masks_train
-            tune_mask_obj_kw["masks_val"] = (
-                data_result.masks_val if data_result.num_val_samples > 0 else data_result.masks_test
-            )
+            tune_mask_obj_kw["masks_val"] = eval_data.masks if eval_data else None
 
         objective = create_objective(
             config=ml_config,
@@ -954,9 +958,7 @@ async def _run_tuning_async(
             y_val=y_val,
             precomputed_features=precomputed_features,
             static_train=data_result.static_train,
-            static_val=data_result.static_val
-            if data_result.num_val_samples > 0
-            else data_result.static_test,
+            static_val=eval_data.static if eval_data else None,
             event_ids_train=data_result.event_ids_train,
             event_ids_val=data_result.event_ids_val,
             **tune_mask_obj_kw,
@@ -1021,10 +1023,12 @@ async def _run_tuning_async(
 
         # Update model parameters with best values
         for param_name, param_value in study.best_params.items():
-            if hasattr(best_config.training.model, param_name):
-                setattr(best_config.training.model, param_name, param_value)
-            elif hasattr(best_config.training.features, param_name):
+            if param_name == TOP_K_FEATURES_KEY:
+                continue
+            if param_name in FeatureConfig.model_fields:
                 setattr(best_config.training.features, param_name, param_value)
+            else:
+                setattr(best_config.training.model, param_name, param_value)
 
         # Determine output path
         if output_path is None:
@@ -1043,13 +1047,7 @@ async def _run_tuning_async(
         if train_best:
             console.print("\n[bold]Training model with best parameters...[/bold]")
 
-            # Get strategy class
-            strategy_type = best_config.training.strategy_type
-            if strategy_type not in STRATEGY_CLASSES:
-                console.print(f"[red]Error: Unknown strategy type '{strategy_type}'[/red]")
-                raise typer.Exit(1)
-
-            strategy_class = STRATEGY_CLASSES[strategy_type]
+            strategy_class = STRATEGY_CLASSES[best_config.training.strategy_type]
             strategy = strategy_class()
 
             # Train with best config
@@ -1064,11 +1062,7 @@ async def _run_tuning_async(
                     tune_mask_kw: dict[str, Any] = {}
                     if data_result.masks_train is not None:
                         tune_mask_kw["masks_train"] = data_result.masks_train
-                        tune_mask_kw["masks_val"] = (
-                            data_result.masks_val
-                            if data_result.num_val_samples > 0
-                            else data_result.masks_test
-                        )
+                        tune_mask_kw["masks_val"] = eval_data.masks if eval_data else None
 
                     history = strategy.train_from_config(
                         config=best_config,
@@ -1078,9 +1072,7 @@ async def _run_tuning_async(
                         X_val=X_val,
                         y_val=y_val,
                         static_train=data_result.static_train,
-                        static_val=data_result.static_val
-                        if data_result.num_val_samples > 0
-                        else data_result.static_test,
+                        static_val=eval_data.static if eval_data else None,
                         **tune_mask_kw,
                     )
                 except Exception:
@@ -1098,8 +1090,7 @@ async def _run_tuning_async(
             Path(output_model_path).parent.mkdir(parents=True, exist_ok=True)
 
             try:
-                strategy.save_model(output_model_path)
-                console.print(f"\n[green]Model saved to {output_model_path}[/green]")
+                _save_model_with_config(strategy, best_config, output_model_path)
 
                 # Log best model to parent MLflow run if tracking enabled
                 if ml_config.tracking and ml_config.tracking.enabled:

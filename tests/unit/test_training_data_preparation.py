@@ -108,7 +108,7 @@ class TestTrainingDataResult:
             y_train=y_train,
             y_test=y_test,
             feature_names=feature_names,
-            strategy_type="xgboost",
+            strategy_type="xgboost_line_movement",
         )
 
         result_dict = result.to_dict()
@@ -139,7 +139,7 @@ class TestTrainingDataResult:
             y_train=y_train,
             y_test=y_test,
             feature_names=feature_names,
-            strategy_type="lstm",
+            strategy_type="lstm_line_movement",
             masks_train=masks_train,
             masks_test=masks_test,
         )

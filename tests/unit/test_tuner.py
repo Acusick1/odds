@@ -370,8 +370,9 @@ def test_objective_function_execution(mock_strategy_class, sample_config, sample
 def test_objective_function_handles_training_failure(
     mock_strategy_class, sample_config, sample_training_data
 ):
-    """Test objective function handles training failures gracefully."""
+    """A training error propagates so Optuna records the trial as failed."""
     X_train, y_train, X_val, y_val, feature_names = sample_training_data
+    sample_config.training.data.use_kfold = False
 
     # Mock strategy that raises exception
     mock_strategy = MagicMock()
@@ -394,18 +395,17 @@ def test_objective_function_handles_training_failure(
     mock_trial.suggest_float.return_value = 0.05
     mock_trial.suggest_categorical.return_value = "reg:squarederror"
 
-    # Execute objective - should return inf for minimize direction
-    result = objective(mock_trial)
-
-    assert result == float("inf")  # Bad value for failed trial
+    with pytest.raises(Exception, match="Training failed"):
+        objective(mock_trial)
 
 
 @patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
 def test_objective_function_metric_not_found(
     mock_strategy_class, sample_config, sample_training_data
 ):
-    """Test objective function when metric not found in history."""
+    """A metric missing from the history fails the trial."""
     X_train, y_train, X_val, y_val, feature_names = sample_training_data
+    sample_config.training.data.use_kfold = False
 
     # Mock strategy that returns history without the expected metric
     mock_strategy = MagicMock()
@@ -431,10 +431,8 @@ def test_objective_function_metric_not_found(
     mock_trial.suggest_float.return_value = 0.05
     mock_trial.suggest_categorical.return_value = "reg:squarederror"
 
-    # Execute objective - should return inf when metric not found
-    result = objective(mock_trial)
-
-    assert result == float("inf")
+    with pytest.raises(KeyError, match="val_mse"):
+        objective(mock_trial)
 
 
 # =============================================================================
@@ -445,6 +443,7 @@ def test_objective_function_metric_not_found(
 def test_full_optimization_workflow(sample_config, sample_training_data):
     """Test full optimization workflow (integration test)."""
     X_train, y_train, X_val, y_val, feature_names = sample_training_data
+    sample_config.training.data.use_kfold = False
 
     # Create tuner
     tuner = OptunaTuner(

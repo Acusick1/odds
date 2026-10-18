@@ -32,14 +32,14 @@ The production protocol is `cv_method: walk_forward`, `window_type: sliding`, `m
 `odds_analytics.training.cross_validation.run_cv` switches on `data.cv_method`: `walk_forward`, `timeseries` (sklearn `TimeSeriesSplit(n_folds)`, row-level, requires sorted data) or `kfold`.
 
 - `n_folds` is ignored for `walk_forward` and mandatory for the other methods, but only `odds_analytics.training.cross_validation.run_cv` enforces it.
-- `walk_forward` without `event_ids` logs a warning and runs `timeseries` with `n_folds` (default 5), changing the protocol and the metric meaning (#437).
+- `walk_forward` without `event_ids` raises `ValueError`.
 - Per fold it calls `odds_analytics.training.cross_validation.TrainableStrategy.train_from_config` and records train and validation MSE, MAE and R² (`odds_analytics.training.cross_validation.CVFoldResult`). `odds_analytics.training.cross_validation.CVResult` reports mean and population standard deviation. Each fold's R² is against that fold's own mean.
 - XGBoost has no early stopping: every fold builds all `n_estimators` trees. The strategy passes the fold as `eval_set` for metrics and Optuna pruning only, so the validation rows never influence the fitted model (#474).
 - `odds_analytics.training.cross_validation.train_with_cv` then fits a final model on all rows and merges the CV metrics into the history. Tuning optimises the mean CV metric ([tuner](hyperparameter-tuner.md)).
 
 ## Test split
 
-The splitter takes `max(1, int(n * test_split))` events, so `test_split: 0.0` still holds out the last event from `odds train run` CV (#437). That event is included in tuning CV ([training pipeline](training-pipeline.md#steps-of-odds-train-run)).
+The event-level split takes `int(n * test_split)` events, at least one when `test_split > 0`; `test_split: 0.0` holds out none ([training pipeline](training-pipeline.md#steps-of-odds-train-run)). With no test set, `odds_analytics.training.cross_validation.train_with_cv` fits the final model without a validation set, so its history has no `val_*` metrics beyond the merged CV means.
 
 ## Related
 

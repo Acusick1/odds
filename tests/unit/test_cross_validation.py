@@ -900,25 +900,6 @@ class TestWalkForwardCV:
         # 10 events, min_train=4, val_step=2 → 3 folds
         assert result.n_folds == 3
 
-    def test_no_event_ids_falls_back_to_timeseries(self, walk_forward_config):
-        """walk_forward without event_ids falls back to timeseries."""
-        X = np.random.randn(50, 3)
-        y = np.random.randn(50)
-
-        mock_strategy = MagicMock()
-        mock_strategy.train_from_config.return_value = MOCK_HISTORY
-
-        result = run_cv(
-            strategy=mock_strategy,
-            config=walk_forward_config,
-            X=X,
-            y=y,
-            feature_names=["f1", "f2", "f3"],
-            event_ids=None,
-        )
-
-        assert result.cv_method == "timeseries"
-
     def test_derived_n_folds_matches_fold_count(self, walk_forward_config):
         """n_folds in CVResult matches actual number of folds generated."""
         X = np.random.randn(10, 3)

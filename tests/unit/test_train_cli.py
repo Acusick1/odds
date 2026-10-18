@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import typer
+import yaml
 from odds_analytics.training.config import (
     DataConfig,
     ExperimentConfig,
@@ -389,6 +390,7 @@ async def test_run_tuning_async_with_train_best(sample_config_with_tuning, tmp_p
     from odds_cli.commands.train import _run_tuning_async, load_config
 
     config = load_config(str(sample_config_with_tuning))
+    config.training.output_path = str(tmp_path / "models")
     study_name = "test_study"
     storage_url = None
     output_path = str(tmp_path / "best_config.yaml")
@@ -461,6 +463,9 @@ async def test_run_tuning_async_with_train_best(sample_config_with_tuning, tmp_p
             # Verify training was called
             assert mock_strategy.train_from_config.called
             assert mock_strategy.save_model.called
+            saved_configs = list((tmp_path / "models").glob("*.yaml"))
+            assert len(saved_configs) == 1
+            assert "features" in yaml.safe_load(saved_configs[0].read_text())["training"]
         finally:
             # Restore original strategy
             STRATEGY_CLASSES["xgboost_line_movement"] = original_strategy
