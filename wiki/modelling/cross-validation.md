@@ -11,18 +11,21 @@ sources:
   - odds_analytics.training.config.DataConfig
   - odds_analytics.training.data_preparation.prepare_training_data_from_config
   - experiments/configs/xgboost_epl_production_tabular_match_stats.yaml
+  - experiments/configs/xgboost_epl_cv_protocol_expanding.yaml
 status: stable
 ---
 
 # Cross-validation
 
-The production protocol is `cv_method: walk_forward`, `window_type: sliding`, `min_train_events = max_train_events = 380`, `val_step_events: 50`, `test_split: 0.0`, set in the training YAML, which also carries an `n_folds: 5` that `walk_forward` ignores (`experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`, whose metrics are on [CLV model findings](../evaluation/clv-model-findings.md#deployed-model)); the code defaults are `cv_method: timeseries` and `test_split: 0.2` ([training config](training-config.md)). The decision and its evidence are [ADR-0004](../../docs/adr/0004-walk-forward-cv-protocol.md) and [CV protocol grid](../evaluation/exp-cv-protocol-grid.md).
+The EPL evaluation protocol is `cv_method: walk_forward`, `window_type: expanding`, `min_train_events: 380`, `val_step_events: 50`, `test_split: 0.0`, from 2019-08-01, set in `experiments/configs/xgboost_epl_cv_protocol_expanding.yaml` (which also carries an `n_folds: 5` that `walk_forward` ignores). Hyperparameters are tuned only on events before 2024-08-01, the tuning range. Events from that date on, the evaluation range, are scored by folds that walk forward with the tuned values frozen, starting at `min_train_events` equal to the tuning-range event count. The decision and its evidence are [ADR-0010](../../docs/adr/0010-expanding-walk-forward-and-evaluation-range.md) and [CV protocol on a common validation range](../evaluation/exp-cv-protocol-common-range.md), which also gives the fold layout.
+
+The deployed model's config, `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`, predates that decision and uses sliding-380:50 (`window_type: sliding`, `min_train_events = max_train_events = 380`); its metrics are on [CLV model findings](../evaluation/clv-model-findings.md#deployed-model). The code defaults are `cv_method: timeseries` and `test_split: 0.2` ([training config](training-config.md)).
 
 ## How folds are built
 
 `odds_analytics.training.cross_validation.make_walk_forward_splits(event_ids, min_train_events, val_step_events, window_type, max_train_events)` takes row-level event ids in chronological order and works on unique events:
 
-- The first validation block starts after `min_train_events`; each block holds exactly `val_step_events` events; the last partial block is dropped. Fold count is `floor((n_events - min_train_events) / val_step_events)`; fewer than `min + step` events raises `ValueError`. That gives about 26 folds on 1.73K events and 28 on 1,813 events.
+- The first validation block starts after `min_train_events`; each block holds exactly `val_step_events` events; the last partial block is dropped. Fold count is `floor((n_events - min_train_events) / val_step_events)`; fewer than `min + step` events raises `ValueError`. That gives 30 folds on the 1,900 tuning-range events with `min_train_events: 380`, and 22 with 760.
 - `expanding` trains on every earlier event; `sliding` trains on the previous `max_train_events` only.
 - Splits are row indices, so multi-row events (time-range sampling) stay whole on one side.
 - Chronological order is assumed, not checked. Order comes from `odds_lambda.storage.readers.OddsReader.get_events_by_date_range`; a caller passing shuffled data gets no error ([feature pipeline](feature-pipeline.md)).

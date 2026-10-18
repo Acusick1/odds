@@ -26,7 +26,7 @@ Several results below used feature sets the code does not define, for example th
 - Sharp reference is Pinnacle with Betfair fallback: [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md), [EPL sharp-reference experiments](exp-epl-sharp-reference.md).
 - Sharp-vs-retail divergence is the core feature: [sharp benchmark](../modelling/sharp-benchmark.md).
 - On EPL, match_stats helps and the rest do not: [EPL ablation](exp-epl-feature-ablation-and-search-space.md). Injuries, rest, FPL and Polymarket add nothing ([NBA timing and injuries](exp-nba-timing-and-injuries.md), [early NBA signal search](exp-early-nba-signal-and-lstm.md)).
-- Sliding-380:50 is the protocol: [ADR-0004](../../docs/adr/0004-walk-forward-cv-protocol.md), [CV protocol grid](exp-cv-protocol-grid.md); it only works with the principled search space ([same experiment page](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test)).
+- Expanding walk-forward in 50-event steps is the protocol, tuned before 2024-08-01 and evaluated after: [ADR-0010](../../docs/adr/0010-expanding-walk-forward-and-evaluation-range.md), [CV protocol on a common validation range](exp-cv-protocol-common-range.md). On a common validation range, expanding, sliding-380 and sliding-760 are within bootstrap noise of each other. Sliding windows need the principled search space ([search-space experiment](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test)).
 - NBA injury features add nothing: [NBA timing and injuries](exp-nba-timing-and-injuries.md#nba-injury-features-exp-6-6b) (untested on EPL).
 - LSTM adds nothing: [early NBA signal and LSTM](exp-early-nba-signal-and-lstm.md#lstm-sequence-models).
 - More NBA data will not help (plateau about 1.5K events; the log-fit marginal return at 4,524 events is dR²/dN = 6.7e-06, `experiments/results/exp6_learning_curve/FINDINGS.md`); EPL has about 1.8K events and a plateau is likely but unconfirmed.
@@ -56,6 +56,7 @@ Several results below used feature sets the code does not define, for example th
 - 2026-03-16, 03-19: [CV protocol grid](exp-cv-protocol-grid.md).
 - 2026-03-20 (#255), 04-23 (#361): [EPL feature ablation](exp-epl-feature-ablation-and-search-space.md).
 - 2026-04-23: [principled search space](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test).
+- 2026-10-18 (#452): [CV protocol on a common validation range](exp-cv-protocol-common-range.md).
 
 ## Caveats
 

@@ -1,0 +1,109 @@
+{
+  "base_config": "experiments/configs/xgboost_epl_cv_protocol_base.yaml",
+  "evaluation_start": "2024-08-01T00:00:00+00:00",
+  "n_trials_per_cell": 100,
+  "bootstrap_resamples": 2000,
+  "seed": 42,
+  "tuning_range": {
+    "n_rows": 1900,
+    "n_events": 1900,
+    "first_event": "fduk_2019-2020_LIV_NOR_2019-08-09",
+    "first_commence": "2019-08-09T20:00:00+00:00",
+    "last_event": "op_2023-2024_ARS_EVE_2024-05-19",
+    "last_commence": "2024-05-19T15:00:00+00:00"
+  },
+  "common_range": {
+    "n_events": 1100,
+    "first_event": "op_2021-2022_BRE_ARS_2021-08-13",
+    "first_commence": "2021-08-13T19:00:00+00:00",
+    "last_event": "op_2023-2024_WOL_LUT_2024-04-27",
+    "last_commence": "2024-04-27T14:00:00+00:00",
+    "first_position": 760
+  },
+  "lowest_pooled_mse_cell": "sliding_760",
+  "lowest_ci_excludes_zero_vs_expanding": false,
+  "chosen": "expanding",
+  "chosen_config": "experiments/configs/xgboost_epl_cv_protocol_expanding.yaml",
+  "chosen_best_params": {
+    "n_estimators": 150,
+    "max_depth": 2,
+    "learning_rate": 0.016540622580753447,
+    "min_child_weight": 11,
+    "subsample": 0.5,
+    "colsample_bytree": 1.0,
+    "reg_lambda": 3.164426633191584
+  },
+  "rebaseline_fold_layout": {
+    "window_type": "expanding",
+    "max_train_events": null,
+    "val_step_events": 50,
+    "min_train_events": 1900,
+    "start_date": "2019-08-01",
+    "first_val_event_after": "op_2023-2024_ARS_EVE_2024-05-19"
+  },
+  "cells": {
+    "expanding": {
+      "cell": "expanding",
+      "config": "experiments/configs/xgboost_epl_cv_protocol_expanding.yaml",
+      "window_type": "expanding",
+      "min_train_events": 380,
+      "max_train_events": null,
+      "val_step_events": 50,
+      "n_folds": 30,
+      "best_trial": 94,
+      "best_cv_mean_fold_mse": 0.0007062772541151693,
+      "best_params": {
+        "n_estimators": 150,
+        "max_depth": 2,
+        "learning_rate": 0.016540622580753447,
+        "min_child_weight": 11,
+        "subsample": 0.5,
+        "colsample_bytree": 1.0,
+        "reg_lambda": 3.164426633191584
+      },
+      "tune_seconds": 100.2
+    },
+    "sliding_380": {
+      "cell": "sliding_380",
+      "config": "experiments/configs/xgboost_epl_cv_protocol_sliding_380.yaml",
+      "window_type": "sliding",
+      "min_train_events": 380,
+      "max_train_events": 380,
+      "val_step_events": 50,
+      "n_folds": 30,
+      "best_trial": 95,
+      "best_cv_mean_fold_mse": 0.000711922807386145,
+      "best_params": {
+        "n_estimators": 150,
+        "max_depth": 2,
+        "learning_rate": 0.011799985170677563,
+        "min_child_weight": 13,
+        "subsample": 0.6,
+        "colsample_bytree": 0.9,
+        "reg_lambda": 0.2903608245443353
+      },
+      "tune_seconds": 88.5
+    },
+    "sliding_760": {
+      "cell": "sliding_760",
+      "config": "experiments/configs/xgboost_epl_cv_protocol_sliding_760.yaml",
+      "window_type": "sliding",
+      "min_train_events": 760,
+      "max_train_events": 760,
+      "val_step_events": 50,
+      "n_folds": 22,
+      "best_trial": 94,
+      "best_cv_mean_fold_mse": 0.0006593608030181548,
+      "best_params": {
+        "n_estimators": 250,
+        "max_depth": 2,
+        "learning_rate": 0.011267278094315693,
+        "min_child_weight": 8,
+        "subsample": 1.0,
+        "colsample_bytree": 0.5,
+        "reg_lambda": 4.450482499466886
+      },
+      "tune_seconds": 72.4
+    }
+  }
+}
