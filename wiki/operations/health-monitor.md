@@ -41,13 +41,13 @@ A job inside `odds_core.alerts.job_alert_context` inserts `heartbeat:<name>` on 
 
 | Job | Writes a heartbeat | Default expectation |
 |---|---|---|
-| fetch-oddsportal (per sport) | yes | 10 h EPL, 12 h MLB (overnight window plus polling interval) |
+| fetch-oddsportal (per sport) | yes | 11 h EPL, 12 h MLB (overnight window plus polling interval) |
 | fetch-oddsportal-results (per sport) | yes | 26 h (EPL, MLB) |
 | daily-digest (EPL) | yes | none |
 | check-health | yes | 2 h |
 | update-status | yes | none |
 | fetch-betfair-exchange | yes | none |
-| fetch-polymarket-odds (per sport) | yes | 10 h (EPL) |
+| fetch-polymarket-odds (per sport) | yes | none until the job is bootstrapped |
 | score-predictions | yes | none |
 | fetch-mlb-probables | yes | none |
 | fetch-espn-fixtures | yes | none |

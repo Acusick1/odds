@@ -30,12 +30,12 @@ Collect Polymarket EPL match prices as a sharp reference, not a trading venue.
 |---|---|---|
 | Where to store | `polymarket` entries on `odds_snapshots` (market key `1x2`) | The existing `polymarket_*` tables: they are NBA-shaped (two outcomes per market, an NBA ticker parser, manual event linking) and the feature pipeline and sharp-reference readers read `odds_snapshots` |
 | History depth | 7 days, with a drop rule for prices off the sum | 3 days only: the sum rule is reliable from 3 days out and 7-day points fail it in about 7% of matches, but the retail rows of [ADR-0012](0012-retail-ev-against-betfair-exchange-close.md) run to 7 days out and the dropped points are counted, not hidden |
-| Collection | Backfill and a live job | Backfill only: order books and ongoing prices are not replayable later, and the live midpoint keeps the series current for the fresh evaluation season |
+| Collection | Backfill and a live job | Backfill only: the live job's best bid and ask cannot be backfilled, and the live midpoint keeps the series current for the fresh evaluation season. The live job stores midpoints and best bid and ask, not order books |
 | Exchanges in retail screening | Leave to `sharp_bookmakers` | Always exclude them: an exchange is bettable from the UK, so excluding it is the caller's choice. Only Pinnacle and Polymarket are excluded unconditionally |
 
 ## Consequences
 
-- Accepting this ADR adds `fetch-polymarket-odds` to `odds_core.config.SchedulerConfig.bootstrap_jobs`, which ends ADR-0007's "no Polymarket job runs by default" for EPL; the NBA jobs stay out. Until then the job, its config and its heartbeat expectation are wired but inactive. Nothing is lost meanwhile, because `/prices-history` backfills finished matches.
+- Accepting this ADR adds `fetch-polymarket-odds` to `odds_core.config.SchedulerConfig.bootstrap_jobs`, which ends ADR-0007's "no Polymarket job runs by default" for EPL; the NBA jobs stay out. The same change adds the `fetch-polymarket-odds-epl` entry (11 h, covering the EPL overnight pause) to `odds_core.config.AlertConfig.heartbeat_expectations`, which is absent until the job is bootstrapped. Until then the job is registered but inactive. Only the live best bid and ask are lost meanwhile, because `/prices-history` backfills finished matches.
 - The client is sport-agnostic through `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`; the NBA ids moved out of `odds_core.config.PolymarketConfig`.
 - Whether Polymarket adds information beyond Betfair Exchange is untested. A `polymarket` snapshot holds no other bookmaker, so using it as the sharp side of a decision row needs a pipeline that merges sources per decision time.
 - History starts at 2025-08 and adds no earlier training range.

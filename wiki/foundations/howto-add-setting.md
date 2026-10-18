@@ -15,7 +15,7 @@ status: stable
 
 How settings are structured and which variables bypass them is in [Configuration](configuration.md).
 
-1. **Add the field** to the right class in `odds_core.config` with a type and a default, plus a description (a dict default such as `odds_core.config.AlertConfig.heartbeat_expectations` is a mapping of job name to hours, not a scalar). Per-sport identifiers such as Polymarket series IDs are not settings; they live in a per-sport map beside their client ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#sport-config-and-discovery)).
+1. **Add the field** to the right class in `odds_core.config` with a type and a default, plus a description (a dict default such as `odds_core.config.AlertConfig.heartbeat_expectations` maps job names to allowed hours rather than holding a scalar). Per-sport identifiers such as Polymarket series IDs are not settings; they live in a per-sport map beside their client ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#sport-config-and-discovery)).
    - A section with an `env_prefix` reads `<PREFIX><FIELD>`; a bare section reads the upper-cased field name ([Sections](configuration.md#sections)).
 2. **Add it to `.env.example`.**
    - Write list fields as JSON arrays and dict fields (such as `BOOKMAKERS`) as JSON objects; the template's comma-separated lists make `odds_core.config.get_settings` raise ([List fields and the template](configuration.md#list-fields-and-the-template)).

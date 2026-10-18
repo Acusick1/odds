@@ -92,7 +92,7 @@ No grid time after the earlier of the event's `commence_time` and Polymarket's s
 4. Each sport's run writes an `odds_core.models.FetchLog` row (`success` is whether a snapshot was stored), so `odds_lambda.health_monitor.HealthMonitor.check_consecutive_failures` sees it ([health monitor](../operations/health-monitor.md)).
 5. Failures alert: a sport that raises, or that Gamma lists no upcoming match for while our database has SCHEDULED events within 5 days (`odds_lambda.jobs.fetch_polymarket_odds.LISTING_CHECK_HORIZON`, `odds_lambda.jobs.fetch_polymarket_odds.EmptyListingError`), is logged as a failed fetch, the job reschedules, and then it raises inside `odds_core.alerts.job_alert_context`, which sends the critical alert and skips the heartbeat. If matches were seen but none stored, `send_job_warning("job_empty:<job>")`.
 
-The job heartbeat has a 10 hour expectation for EPL, which covers the 22:00-06:00 UTC overnight window in `odds_core.config.AlertConfig.heartbeat_expectations`. The job pairs against existing events and never creates one, so a match the Odds API or OddsPortal has not yet synced is skipped until its event exists.
+The job writes a heartbeat, but `odds_core.config.AlertConfig.heartbeat_expectations` has no entry for it until it is bootstrapped; the entry then needs 11 hours to cover the 22:00-06:00 UTC overnight pause. The job pairs against existing events and never creates one, so a match the Odds API or OddsPortal has not yet synced is skipped until its event exists.
 
 ## Related
 

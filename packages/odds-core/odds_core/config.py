@@ -226,12 +226,11 @@ class AlertConfig(BaseSettings):
         default={
             # Overnight windows (EPL 22-06 UTC, MLB 05-14 UTC) pause these jobs, so the
             # allowed gap is the window plus the polling interval.
-            "fetch-oddsportal-epl": 10,
+            "fetch-oddsportal-epl": 11,
             "fetch-oddsportal-results-epl": 26,
             "fetch-oddsportal-mlb": 12,
             "fetch-oddsportal-results-mlb": 26,
             "check-health": 2,
-            "fetch-polymarket-odds-epl": 10,
         },
         description="Max hours between job completions before alerting (job_name -> hours)",
     )

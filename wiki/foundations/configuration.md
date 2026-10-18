@@ -20,7 +20,7 @@ status: stable
 
 # Configuration (Settings)
 
-`odds_core.config` is authoritative for every setting and default (including the per-job heartbeat hours and the default bootstrap job list), apart from the per-sport Polymarket identifiers in `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`. `odds_core.config.Settings` composes one `BaseSettings` class per concern; `odds_core.config.get_settings()` returns a cached instance and `odds_core.config.reset_settings_cache()` clears it. `.env.example` is the variable template. The `project_root` field of `odds_core.config.Settings` is the repo root derived from the file location. To add a field, see [Set up and run locally](howto-add-setting.md).
+`odds_core.config` is authoritative for every setting and default (including the per-job heartbeat hours, which allow for each job's overnight pause, and the default bootstrap job list), apart from the per-sport Polymarket identifiers in `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`. `odds_core.config.Settings` composes one `BaseSettings` class per concern; `odds_core.config.get_settings()` returns a cached instance and `odds_core.config.reset_settings_cache()` clears it. `.env.example` is the variable template. The `project_root` field of `odds_core.config.Settings` is the repo root derived from the file location. To add a field, see [Set up and run locally](howto-add-setting.md).
 
 Model and feature settings (`target_type`, `sharp_bookmakers`) are not here: they live in the training YAML ([Training config](../modelling/training-config.md)).
 
@@ -35,7 +35,7 @@ Model and feature settings (`target_type`, `sharp_bookmakers`) are not here: the
 | `aws` | `odds_core.config.AWSConfig` | `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX` | [Scheduler backends](../scheduling/scheduler-backends.md) |
 | `model` | `odds_core.config.ModelConfig` | `MODEL_NAME`, `MODEL_BUCKET` | [Model store](../modelling/model-store.md) |
 | `data_quality` | `odds_core.config.DataQualityConfig` | `ENABLE_VALIDATION`, `REJECT_INVALID_ODDS` (bare); `enable_validation` is read only by `odds_lambda.ingestion.OddsIngestionService.ingest_sport`, whose `validate` argument overrides it; `reject_invalid_odds` is read by nothing (#448) | [Odds validation](../storage/odds-validator.md) |
-| `alerts` | `odds_core.config.AlertConfig` | `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED`, thresholds, `HEARTBEAT_EXPECTATIONS` (bare, hours per job between 2 and 26 by default) | [Alerts](../operations/alerts.md) |
+| `alerts` | `odds_core.config.AlertConfig` | `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED`, thresholds, `HEARTBEAT_EXPECTATIONS` (bare, hours per job, 2 to 26 by default) | [Alerts](../operations/alerts.md) |
 | `logging` | `odds_core.config.LoggingConfig` | `LOG_LEVEL`, `LOG_FILE` | [Code conventions](code-conventions.md#logging) |
 | `polymarket`, `betfair` | `odds_core.config.PolymarketConfig`, `odds_core.config.BetfairConfig` | `POLYMARKET_*`, `BETFAIR_*` | [Polymarket](../collection/polymarket.md) (series and tag IDs are per sport in `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`, not settings), [Betfair Exchange](../collection/betfair-exchange.md) |
 
