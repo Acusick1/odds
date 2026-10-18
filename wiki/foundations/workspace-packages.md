@@ -122,7 +122,7 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 
 - `odds_analytics.sequence_loader` is not LSTM-only: it holds the target maths for every model (`odds_analytics.sequence_loader.calculate_devigged_bookmaker_target`, `odds_analytics.sequence_loader.DeviggedProbs`), the label for every model ([Target functions](../modelling/clv-target-functions.md), [Devigging](devigging.md)).
 - `odds_analytics.quality_metrics` never touches `odds_core.models.DataQualityLog`; it counts game and odds coverage. Data-quality rows are a separate system ([Odds validation](../storage/odds-validator.md), [Coverage checks](../storage/coverage-checks.md)).
-- `odds_analytics.ml_strategy_example` (430 lines) is tested infrastructure for an XGBoost win-probability classifier, not the CLV regression the system uses ([Line-movement strategies](../modelling/line-movement-models.md)).
+- `odds_analytics.ml_strategy_example` (426 lines) is tested infrastructure for an XGBoost win-probability classifier, not the CLV regression the system uses ([Line-movement strategies](../modelling/line-movement-models.md)).
 - `odds_analytics.utils.per_book_market_holds` is the hold maths the MCP screener calls ([retail edges](../agent/mcp-market-tools.md#retail-edges)); it is the only reason `odds-mcp` imports analytics ([odds-mcp server](../agent/mcp-server.md)).
 
 ## Dependency exceptions

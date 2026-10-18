@@ -27,7 +27,7 @@ The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README
 | CLI flags and defaults | each command's `--help` ([The odds CLI](odds-cli.md)) |
 | Job and schedule matrix | `odds_core.config.SchedulerConfig.bootstrap_jobs`, `odds_lambda.scheduling.jobs._JOB_CRON_MAP` and `odds_lambda.scheduling.jobs._JOB_SPORTS` for production on the mini-PC; `deployment/aws/terraform/eventbridge.tf` for the dormant AWS rules ([Where each job runs](../scheduling/job-deployment-matrix.md)); deployed AWS state only via `odds scheduler list-jobs --backend aws` |
 | Alerting and reporting | `odds_core.alerts` ([Alerts](../operations/alerts.md), [Reporting surfaces](../operations/reporting-surfaces.md)) |
-| MCP toolset | the `@mcp.tool()` functions in `odds_mcp.server` ([odds-mcp server](../agent/mcp-server.md)) |
+| MCP toolset | the `@mcp.tool()` definitions in `odds_mcp.server` ([odds-mcp server](../agent/mcp-server.md)) |
 | Agent behaviour | the prompt files in `packages/odds-mcp/agents/` ([The betting agent](../agent/betting-agent.md)) |
 | Schema and storage | the model files, chiefly `odds_core.models` ([Storage](../storage/index.md)) |
 | Training data, target, features | `odds_analytics.training.config.FeatureConfig` and `odds_analytics.feature_groups`; evidence in `experiments/results/` ([CLV model findings](../evaluation/clv-model-findings.md)) |
@@ -44,7 +44,7 @@ Vale rejects change-narrating words in `README.md`, `AGENTS.md`, `docs/adr/`, `d
 
 ## Issue tracker
 
-Issues live in GitHub Issues on `Acusick1/odds`, added to the `Personal` project board. Work on an issue is claimed by assignment: a branch named `<n>-<slug>` or `issue-<n>-<slug>` triggers the `claim-issue` git hook, which assigns the issue. Open a draft PR whose body contains `Closes #<n>` as soon as the branch has its first commit; linking moves the issue to In Progress and merging moves it to Done. The PR is marked ready only after an agent that did not write the change has reviewed it. Triage labels, the `gh` command table, and the sub-issue and wayfinding procedures are in `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`, which are authoritative and loaded through [AGENTS.md](../../AGENTS.md#agent-skills). External PRs are not a triage surface: `docs/agents/issue-tracker.md` sets "PRs as a request surface" to `no`.
+Issues live in GitHub Issues on `Acusick1/odds`, added to the `Personal` project board. Claiming an issue (branches `<n>-<slug>` or `issue-<n>-<slug>`) is in `docs/agents/issue-tracker.md`. Open a draft PR whose body contains `Closes #<n>` as soon as the branch has its first commit; linking moves the issue to In Progress and merging moves it to Done. Triage labels, the `gh` command table, and the sub-issue and wayfinding procedures are in `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`, which are authoritative and loaded through [AGENTS.md](../../AGENTS.md#agent-skills). External PRs are not a triage surface: `docs/agents/issue-tracker.md` sets "PRs as a request surface" to `no`.
 
 ## Related
 

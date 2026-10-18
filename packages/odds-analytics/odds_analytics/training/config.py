@@ -399,13 +399,6 @@ class XGBoostConfig(BaseModel):
         description="Number of parallel threads (-1 for all available)",
     )
 
-    # Early stopping
-    early_stopping_rounds: int | None = Field(
-        default=None,
-        ge=1,
-        description="Validation metric needs to improve at least once in every N rounds",
-    )
-
 
 class LSTMConfig(BaseModel):
     """

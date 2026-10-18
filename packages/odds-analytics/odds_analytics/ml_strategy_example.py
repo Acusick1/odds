@@ -348,10 +348,6 @@ class XGBoostStrategy(BettingStrategy):
             "eval_metric": "logloss",
         }
 
-        # Handle early stopping if configured
-        if model_config.early_stopping_rounds is not None:
-            xgb_params["early_stopping_rounds"] = model_config.early_stopping_rounds
-
         # Override with search space midpoints if tuning config exists
         if config.tuning and config.tuning.search_spaces:
             xgb_params = resolve_search_spaces(xgb_params, config.tuning.search_spaces)
