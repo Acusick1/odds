@@ -65,6 +65,7 @@ def make_ml_config() -> Callable[..., Any]:
         cv_method: str = "timeseries",
         test_split: float = 0.2,
         strategy_type: str = "xgboost_line_movement",
+        tuning: bool = True,
     ) -> MLTrainingConfig:
         data_kwargs: dict[str, Any] = {}
         if cv_method == "walk_forward":
@@ -81,12 +82,15 @@ def make_ml_config() -> Callable[..., Any]:
                     use_kfold=use_kfold,
                     cv_method=cv_method,
                     test_split=test_split,
+                    validation_split=0.0 if use_kfold or not tuning else 0.1,
                     **data_kwargs,
                 ),
                 model=XGBoostConfig(n_estimators=10),
                 features=FeatureConfig(target_type="raw"),
             ),
-            tuning=TuningConfig(metric=metric, search_spaces=search_spaces or {}),
+            tuning=(
+                TuningConfig(metric=metric, search_spaces=search_spaces or {}) if tuning else None
+            ),
         )
 
     return _make

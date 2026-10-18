@@ -1416,40 +1416,93 @@ class TestObjectiveMetric:
 
 
 class TestApplyTrialParams:
-    def test_model_and_feature_params_are_applied(self, make_ml_config):
+    def test_model_params_and_feature_groups_are_applied(self, make_ml_config):
         from odds_analytics.training.tuner import apply_trial_params
 
         config = make_ml_config()
-        apply_trial_params(config, {"n_estimators": 77, "form_window": 3})
+        apply_trial_params(config, {"n_estimators": 77, "feature_groups": ("tabular", "rest")})
         assert config.training.model.n_estimators == 77
-        assert config.training.features.form_window == 3
+        assert config.training.features.feature_groups == ("tabular", "rest")
 
     def test_top_k_features_is_skipped(self, make_ml_config):
         from odds_analytics.training.tuner import apply_trial_params
 
-        config = make_ml_config()
-        apply_trial_params(config, {"top_k_features": 4})
+        apply_trial_params(make_ml_config(), {"top_k_features": 4})
 
-    def test_unknown_param_raises(self, make_ml_config):
+    @pytest.mark.parametrize("name", ["no_such_param", "form_window"])
+    def test_untunable_param_raises(self, make_ml_config, name):
         from odds_analytics.training.tuner import apply_trial_params
 
-        with pytest.raises(ValueError, match="no_such_param"):
-            apply_trial_params(make_ml_config(), {"no_such_param": 1})
+        with pytest.raises(ValueError, match=name):
+            apply_trial_params(make_ml_config(), {name: 1})
 
-    def test_param_on_both_model_and_features_is_set_on_both(self):
-        from odds_analytics.training import FeatureConfig
-        from odds_analytics.training.config import LSTMConfig
-        from odds_analytics.training.tuner import apply_trial_params
 
-        config = MLTrainingConfig(
-            experiment=ExperimentConfig(name="lstm"),
-            training=TrainingConfig(
-                strategy_type="lstm_line_movement",
-                data=DataConfig(start_date="2024-01-01", end_date="2024-12-31"),
-                model=LSTMConfig(lookback_hours=72, timesteps=24),
-                features=FeatureConfig(adapter="lstm", target_type="raw"),
-            ),
+class TestStudyNameAndResume:
+    def test_default_study_name_is_unique_per_run(self):
+        from datetime import UTC, datetime
+
+        from odds_cli.commands.train import _default_study_name
+
+        first = _default_study_name("exp", datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC))
+        second = _default_study_name("exp", datetime(2026, 1, 2, 3, 4, 6, tzinfo=UTC))
+        assert first == "exp_20260102T030405Z"
+        assert first != second
+
+    def test_existing_trial_count(self, tmp_path):
+        import optuna
+        from odds_cli.commands.train import _existing_trial_count
+
+        storage = f"sqlite:///{tmp_path / 's.db'}"
+        assert _existing_trial_count("s", None) is None
+        assert _existing_trial_count("s", storage) is None
+        study = optuna.create_study(study_name="s", storage=storage)
+        study.optimize(lambda t: t.suggest_float("x", 0, 1), n_trials=3)
+        assert _existing_trial_count("s", storage) == 3
+
+    def test_feature_ranking_is_computed_when_study_lacks_it(self, make_ml_config):
+        import optuna
+
+        config = make_ml_config(
+            search_spaces={"top_k_features": SearchSpace(type="int", low=1, high=2)}
         )
-        apply_trial_params(config, {"lookback_hours": 48, "timesteps": 12})
-        assert config.training.model.lookback_hours == config.training.features.lookback_hours == 48
-        assert config.training.model.timesteps == config.training.features.timesteps == 12
+        config.training.feature_selection.enabled = True
+        X = np.random.randn(30, 3)
+        y = np.random.randn(30)
+        objective = create_objective(
+            config=config,
+            X_train=X,
+            y_train=y,
+            feature_names=["a", "b", "c"],
+            X_val=X[:5],
+            y_val=y[:5],
+        )
+        study = optuna.create_study()
+        strategy = MagicMock()
+        strategy.train_from_config.return_value = FULL_HISTORY
+        with patch(
+            "odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy",
+            return_value=strategy,
+        ):
+            study.optimize(objective, n_trials=1)
+            assert "feature_ranking_names" in study.user_attrs
+            # A later trial of a resumed study reuses the stored ranking.
+            ranking = study.user_attrs["feature_ranking_names"]
+            study.optimize(objective, n_trials=1)
+        assert study.user_attrs["feature_ranking_names"] == ranking
+
+
+class TestStudyStorageSchema:
+    def test_application_alembic_table_breaks_optuna_storage(self, tmp_path):
+        """Evidence for keeping Optuna out of the application database (Optuna 4.6.0)."""
+        import sqlite3
+
+        import optuna
+
+        path = tmp_path / "app.db"
+        conn = sqlite3.connect(path)
+        conn.execute("create table alembic_version (version_num varchar(32) not null)")
+        conn.execute("insert into alembic_version values ('0042_app_migration')")
+        conn.commit()
+        conn.close()
+        with pytest.raises(RuntimeError, match="no longer compatible with the table schema"):
+            optuna.create_study(storage=f"sqlite:///{path}")

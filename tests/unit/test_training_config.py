@@ -2229,14 +2229,20 @@ class TestSearchSpaceKeys:
         with pytest.raises(ValidationError, match="no_such_param"):
             make_ml_config(search_spaces={"no_such_param": SearchSpace(type="int", low=1, high=3)})
 
-    def test_model_feature_and_top_k_keys_are_accepted(self, make_ml_config):
+    def test_model_feature_groups_and_top_k_keys_are_accepted(self, make_ml_config):
         make_ml_config(
             search_spaces={
                 "n_estimators": SearchSpace(type="int", low=1, high=3),
-                "form_window": SearchSpace(type="int", low=1, high=3),
+                "feature_groups": SearchSpace(
+                    type="categorical", choices=[["tabular"], ["tabular", "rest"]]
+                ),
                 "top_k_features": SearchSpace(type="int", low=1, high=3),
             }
         )
+
+    def test_other_feature_fields_are_rejected(self, make_ml_config):
+        with pytest.raises(ValidationError, match="form_window"):
+            make_ml_config(search_spaces={"form_window": SearchSpace(type="int", low=1, high=3)})
 
     def test_lstm_key_on_xgboost_model_fails(self, make_ml_config):
         with pytest.raises(ValidationError, match="hidden_size"):
@@ -2248,3 +2254,16 @@ class TestStrategyTypeValues:
     def test_unimplemented_alias_is_rejected(self, name, make_ml_config):
         with pytest.raises(ValidationError):
             make_ml_config(strategy_type=name)
+
+
+class TestTuningNeedsValidationData:
+    def test_non_cv_tuning_without_validation_split_is_rejected(self, make_ml_config):
+        config = make_ml_config()
+        data = config.training.data.model_copy(update={"validation_split": 0.0})
+        with pytest.raises(ValidationError, match="validation_split"):
+            MLTrainingConfig.model_validate(
+                {**config.model_dump(), "training": {**config.training.model_dump(), "data": data}}
+            )
+
+    def test_cv_tuning_needs_no_validation_split(self, make_ml_config):
+        make_ml_config(use_kfold=True, cv_method="walk_forward")

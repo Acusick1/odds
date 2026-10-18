@@ -42,7 +42,7 @@ Every model forbids unknown keys (`extra="forbid"`). A file has `experiment` (na
 
 **`tuning`**
 
-`metric` is `val_mse`, `val_mae` or `val_r2`; the optimization direction follows from it and is not configurable. Search-space keys must name a model or `odds_analytics.training.config.FeatureConfig` field, or `top_k_features` ([tuner](hyperparameter-tuner.md)).
+`metric` is `val_mse`, `val_mae` or `val_r2`; the optimization direction follows from it and is not configurable. Search-space keys must be model fields, `feature_groups` or `top_k_features`, and a non-CV `tuning` section needs `validation_split > 0` ([tuner](hyperparameter-tuner.md)).
 
 ## Data source and bookmaker
 

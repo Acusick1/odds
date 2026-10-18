@@ -973,7 +973,7 @@ class TestTestSplitZero:
     async def _prepare(self, make_ml_config, test_split, with_event_ids):
         from odds_analytics.feature_groups import PreparedFeatureData
 
-        config = make_ml_config(test_split=test_split)
+        config = make_ml_config(test_split=test_split, tuning=False)
         n_events = 10
         event_ids = np.repeat([f"e{i}" for i in range(n_events)], 2) if with_event_ids else None
         prepared = PreparedFeatureData(

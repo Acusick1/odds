@@ -34,6 +34,7 @@ training:
     end_date: "2024-11-15"
     test_split: 0.2
     use_kfold: false
+    validation_split: 0.1
     random_seed: 42
 
   model:

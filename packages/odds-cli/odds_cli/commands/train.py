@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,7 +17,7 @@ from odds_analytics.training import (
     prepare_training_data_from_config,
     save_verification_artifacts,
 )
-from odds_analytics.training.config import StrategyType
+from odds_analytics.training.config import TOP_K_FEATURES_KEY, StrategyType
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from odds_core.database import async_session_maker
 from rich.console import Console
@@ -42,11 +43,29 @@ STRATEGY_CLASSES: dict[StrategyType, type[LineMovementStrategy]] = {
 DEFAULT_STUDY_STORAGE = "sqlite:///experiments/optuna.db"
 
 
+def _default_study_name(experiment_name: str, now: datetime | None = None) -> str:
+    """A fresh study name per run; resuming needs an explicit ``--study-name``."""
+    stamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
+    return f"{experiment_name}_{stamp}"
+
+
+def _existing_trial_count(study_name: str, storage_url: str | None) -> int | None:
+    """Number of trials in an existing study of that name, or None if there is none."""
+    if storage_url is None:
+        return None
+    import optuna
+
+    if study_name not in optuna.get_all_study_names(storage_url):
+        return None
+    return len(optuna.load_study(study_name=study_name, storage=storage_url).trials)
+
+
 def _resolve_study_storage(storage: str | None, in_memory: bool) -> str | None:
     """Return the Optuna storage URL, or None for an in-memory study.
 
-    The default is a local SQLite file: Optuna's tables must not share the application
-    database, whose alembic history they would clash with.
+    The default is a SQLite file at ``experiments/optuna.db``, relative to the working
+    directory. Optuna's tables must not share the application database, whose alembic
+    history they would clash with.
     """
     if in_memory:
         if storage is not None:
@@ -726,7 +745,9 @@ def run_tuning(
         None, "--timeout", help="Override timeout in seconds from config"
     ),
     study_name: str | None = typer.Option(
-        None, "--study-name", help="Optuna study name for persistence/resumption"
+        None,
+        "--study-name",
+        help="Study name; naming an existing study resumes it (default: experiment name + UTC timestamp)",
     ),
     storage: str | None = typer.Option(
         None, "--storage", help=f"Optuna storage URL (default: {DEFAULT_STUDY_STORAGE})"
@@ -798,7 +819,7 @@ def run_tuning(
     if timeout is not None:
         ml_config.tuning.timeout = timeout
 
-    if train_best and "top_k_features" in ml_config.tuning.search_spaces:
+    if train_best and TOP_K_FEATURES_KEY in ml_config.tuning.search_spaces:
         console.print(
             "[red]Error: --train-best cannot be combined with a top_k_features search space; "
             "the selected feature subset is not saved with the best config[/red]"
@@ -809,7 +830,7 @@ def run_tuning(
 
     # Determine study name
     if study_name is None:
-        study_name = f"{ml_config.experiment.name}_tuning"
+        study_name = _default_study_name(ml_config.experiment.name)
 
     # Override tracking configuration if flags provided
     if track:
@@ -848,6 +869,9 @@ async def _run_tuning_async(
 
     console.print("\n[bold]Starting Hyperparameter Optimization[/bold]")
     console.print(f"Study: {study_name}")
+    existing_trials = _existing_trial_count(study_name, storage_url)
+    if existing_trials is not None:
+        console.print(f"[yellow]Resuming study with {existing_trials} existing trials[/yellow]")
     console.print(f"Trials: {ml_config.tuning.n_trials}")
     console.print(f"Direction: {ml_config.tuning.direction}")
     console.print(f"Metric: {ml_config.tuning.metric}\n")

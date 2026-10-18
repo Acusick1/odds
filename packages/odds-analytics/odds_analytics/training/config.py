@@ -941,6 +941,9 @@ class SearchSpace(BaseModel):
 # Tuned through feature selection (ranked once, then top k kept), not a config field.
 TOP_K_FEATURES_KEY = "top_k_features"
 
+# Feature-config keys a search space may name: the groups are pre-computed per choice.
+TUNABLE_FEATURE_KEYS = frozenset({"feature_groups", TOP_K_FEATURES_KEY})
+
 METRIC_DIRECTIONS: dict[str, Literal["minimize", "maximize"]] = {
     "val_mse": "minimize",
     "val_mae": "minimize",
@@ -1274,19 +1277,32 @@ class MLTrainingConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_search_space_keys(self) -> MLTrainingConfig:
-        """Reject search-space keys that match neither the model nor the features config."""
+        """Allow only model fields, ``feature_groups`` and ``top_k_features`` in the search space.
+
+        Data is prepared once per feature-group choice, so any other feature field
+        would change nothing a trial measures.
+        """
         if self.tuning is None:
             return self
-        unknown = sorted(
-            set(self.tuning.search_spaces)
-            - set(type(self.training.model).model_fields)
-            - set(FeatureConfig.model_fields)
-            - {TOP_K_FEATURES_KEY}
-        )
+        model_fields = set(type(self.training.model).model_fields)
+        allowed = (model_fields - set(FeatureConfig.model_fields)) | TUNABLE_FEATURE_KEYS
+        unknown = sorted(set(self.tuning.search_spaces) - allowed)
         if unknown:
             raise ValueError(
-                f"tuning.search_spaces keys {unknown} match no field of "
-                f"{type(self.training.model).__name__} or FeatureConfig"
+                f"tuning.search_spaces keys {unknown} are not tunable: allowed are the "
+                f"{type(self.training.model).__name__} fields not shared with FeatureConfig, "
+                f"and {sorted(TUNABLE_FEATURE_KEYS)}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_tuning_has_validation_data(self) -> MLTrainingConfig:
+        """A non-CV tuning trial is scored on validation rows, so it needs a split."""
+        data = self.training.data
+        if self.tuning is not None and not data.use_kfold and data.validation_split == 0:
+            raise ValueError(
+                "tuning with use_kfold=false needs validation_split > 0; "
+                "test rows are never used for tuning"
             )
         return self
 

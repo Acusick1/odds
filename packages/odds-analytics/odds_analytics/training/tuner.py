@@ -707,24 +707,21 @@ def suggest_params_from_search_space(
 def apply_trial_params(config: MLTrainingConfig, params: dict[str, Any]) -> None:
     """Apply sampled or best parameters to ``config`` in place.
 
-    A parameter that names a field of both the model and the features config (the LSTM
-    ``lookback_hours`` and ``timesteps``) is set on both, so the two stay in agreement.
+    Model fields go to the model config and ``feature_groups`` to the features config;
     ``top_k_features`` is not a config field and is skipped.
     """
-    from odds_analytics.training.config import TOP_K_FEATURES_KEY, FeatureConfig
+    from odds_analytics.training.config import TOP_K_FEATURES_KEY
 
     model_fields = type(config.training.model).model_fields
     for name, value in params.items():
         if name == TOP_K_FEATURES_KEY:
             continue
-        in_model = name in model_fields
-        in_features = name in FeatureConfig.model_fields
-        if not (in_model or in_features):
-            raise ValueError(f"Parameter '{name}' matches no model or feature config field")
-        if in_model:
+        if name == "feature_groups":
+            config.training.features.feature_groups = value
+        elif name in model_fields:
             setattr(config.training.model, name, value)
-        if in_features:
-            setattr(config.training.features, name, value)
+        else:
+            raise ValueError(f"Parameter '{name}' is not tunable")
 
 
 def create_objective(
@@ -903,8 +900,8 @@ def create_objective(
             and config.training.feature_selection.enabled
             and not is_lstm_strategy
         ):
-            # Run feature selection once on first trial and store rankings
-            if trial.number == 0:
+            # Rank once per study: the first trial of a fresh study computes it
+            if "feature_ranking_names" not in trial.study.user_attrs:
                 from odds_analytics.training.feature_selection import get_feature_selector
 
                 logger.info(

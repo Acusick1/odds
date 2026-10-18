@@ -34,7 +34,7 @@ status: stable
 
 ## Tune
 
-`odds train tune` ([hyperparameter tuner](hyperparameter-tuner.md)) prepares data once, pre-computes features per `feature_groups` choice if that is searched, runs Optuna (study `<experiment>_tuning`), writes the best config to `<config>_best.yaml`, and with `--train-best` trains and saves a model. Studies are stored in the local SQLite file `optuna.db` under `experiments/` unless `--storage` names another store or `--in-memory` is passed; they never use `DATABASE_URL`. `--train-best` writes the full best config beside the model, as `odds train run` does, so `odds model publish` uploads a `.yaml` with the `training.features` section the S3 loader reads ([model store](model-store.md), [prediction scoring](prediction-scoring.md)).
+`odds train tune` ([hyperparameter tuner](hyperparameter-tuner.md)) prepares data once, pre-computes features per `feature_groups` choice if that is searched, runs Optuna (study `<experiment>_<UTC timestamp>` unless `--study-name` is given), writes the best config to `<config>_best.yaml`, and with `--train-best` trains and saves a model. Studies are stored in the SQLite file `optuna.db` in `experiments/`, relative to the working directory, unless `--storage` names another store or `--in-memory` is passed; they never use `DATABASE_URL`. `--train-best` writes the full best config beside the model, as `odds train run` does, so `odds model publish` uploads a `.yaml` with the `training.features` section the S3 loader reads ([model store](model-store.md), [prediction scoring](prediction-scoring.md)).
 
 ## MLflow
 
