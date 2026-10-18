@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Protocol, get_args
+from typing import TYPE_CHECKING, Literal, Protocol, get_args
 
 import numpy as np
 import pandas as pd
@@ -133,6 +133,20 @@ def snapshot_has_bookmaker(snapshot: OddsSnapshot, bookmaker_key: str, market: s
     return False
 
 
+def _devigged_bookmaker(config: FeatureConfig) -> str:
+    """The target bookmaker of a devigged config (``FeatureConfig`` guarantees it is set)."""
+    if config.target_bookmaker is None:
+        raise ValueError("target_bookmaker is required for a devigged_bookmaker target")
+    return config.target_bookmaker
+
+
+def _h2h_outcome(config: FeatureConfig) -> Literal["home", "away"]:
+    """The side of an h2h/1x2 config (``FeatureConfig`` guarantees over/under only for totals)."""
+    if config.outcome not in ("home", "away"):
+        raise ValueError(f"outcome {config.outcome!r} is not a home/away side")
+    return config.outcome
+
+
 def _should_filter_missing_sharp(config: FeatureConfig) -> bool:
     """Whether to exclude events missing sharp bookmaker closing odds.
 
@@ -142,7 +156,7 @@ def _should_filter_missing_sharp(config: FeatureConfig) -> bool:
     from missing data.
     """
     if config.target_type == "raw":
-        return bool(config.sharp_bookmakers)
+        return True
     return set(config.sharp_bookmakers) != {config.target_bookmaker}
 
 
@@ -885,7 +899,7 @@ def _compute_target(
             return calculate_devigged_totals_target(
                 snapshot_odds_all,
                 closing_odds_all,
-                bookmaker_key=config.target_bookmaker,
+                bookmaker_key=_devigged_bookmaker(config),
                 outcome=outcome_name,
             )
         return calculate_devigged_bookmaker_target(
@@ -893,9 +907,9 @@ def _compute_target(
             closing_odds_all,
             event.home_team,
             event.away_team,
-            bookmaker_key=config.target_bookmaker,
+            bookmaker_key=_devigged_bookmaker(config),
             market_key=market,
-            outcome=config.outcome,
+            outcome=_h2h_outcome(config),
         )
     else:
         # "raw": avg implied prob delta (snapshot → closing)
@@ -945,7 +959,7 @@ def _select_closing_snapshot(
         with_bookmaker = [
             c
             for c in candidates
-            if _has_bookmaker_closing(c, event, config.target_bookmaker, market)
+            if _has_bookmaker_closing(c, event, _devigged_bookmaker(config), market)
         ]
         if with_bookmaker:
             if config.closing_source_priority:
@@ -1123,7 +1137,7 @@ async def prepare_training_data(
         # For devigged_bookmaker, must have bookmaker closing data
         market = config.primary_market
         if config.target_type == "devigged_bookmaker" and not _has_bookmaker_closing(
-            bundle.closing_snapshot, event, config.target_bookmaker, market
+            bundle.closing_snapshot, event, _devigged_bookmaker(config), market
         ):
             skipped_events += 1
             continue

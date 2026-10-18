@@ -636,7 +636,7 @@ class TestFeatureConfig:
         assert config.timesteps is None
 
     def test_empty_feature_groups_rejected_for_xgboost(self):
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError, match="at least one group"):
             FeatureConfig(target_type="raw", adapter="xgboost", feature_groups=[])
 
     def test_empty_feature_groups_allowed_for_lstm(self):
@@ -644,8 +644,9 @@ class TestFeatureConfig:
         assert config.feature_groups == ()
 
     def test_missing_target_type_fails(self):
-        with pytest.raises(ValidationError, match="target_type"):
+        with pytest.raises(ValidationError) as exc:
             FeatureConfig()  # type: ignore[call-arg]
+        assert exc.value.errors()[0]["loc"] == ("target_type",)
 
     def test_devigged_requires_target_bookmaker(self):
         with pytest.raises(ValidationError, match="target_bookmaker is required"):

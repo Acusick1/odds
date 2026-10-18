@@ -128,7 +128,7 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 
 ## Dependency exceptions
 
-- `packages/odds-lambda/pyproject.toml` does not declare `odds-analytics`, but `odds_lambda.model_loader` imports `odds_analytics.training.config` (where the feature group names are validated) and `odds_lambda.jobs.score_predictions` imports `odds_analytics.feature_groups` at module level (#454). Analytics declares a dependency on odds-lambda, so the cycle is undeclared on this side. The scraper-side consequence is on [Prediction scoring](../modelling/prediction-scoring.md).
+- `packages/odds-lambda/pyproject.toml` does not declare `odds-analytics`, but `odds_lambda.model_loader` imports `odds_analytics.training.config` (where the feature group names and target fields are validated) and `odds_lambda.jobs.score_predictions` imports `odds_analytics.feature_groups` at module level (#454). Analytics declares a dependency on odds-lambda, so the cycle is undeclared on this side. The scraper-side consequence is on [Prediction scoring](../modelling/prediction-scoring.md).
 - `odds_core.paper_trade_models.PaperTrade` imports `odds_analytics.backtesting.models` (type-checking plus a lazy import inside `odds_core.paper_trade_models.PaperTrade.to_bet_record`), so odds-core depends on odds-analytics in practice (#459).
 - `python-dotenv` is declared in core but nothing imports it; `.env` is read only by pydantic-settings (#459).
 

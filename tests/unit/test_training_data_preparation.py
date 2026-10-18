@@ -477,8 +477,8 @@ class TestPrepareTrainingDataFromConfig:
                 await prepare_training_data_from_config(basic_xgboost_config, session)
 
     def test_unknown_feature_group_rejected(self):
-        with pytest.raises(ValidationError):
-            FeatureConfig(feature_groups=["unknown_group"])
+        with pytest.raises(ValidationError, match="feature_groups"):
+            FeatureConfig(target_type="raw", feature_groups=["unknown_group"])
 
     @pytest.mark.asyncio
     async def test_train_test_split_ratio(self, basic_xgboost_config, mock_events):
