@@ -99,7 +99,7 @@ class OddsReader:
             min_snapshots: Minimum number of snapshots required per event
 
         Returns:
-            List of Event records
+            Event records ordered by commence time, then event ID
         """
         query = select(Event).where(
             and_(
@@ -128,7 +128,8 @@ class OddsReader:
             )
             query = query.where(snapshot_count)
 
-        query = query.order_by(Event.commence_time)
+        # The event ID breaks kick-off ties so walk-forward folds do not depend on the query plan.
+        query = query.order_by(Event.commence_time, Event.id)
 
         result = await self.session.execute(query)
         return list(result.scalars().all())

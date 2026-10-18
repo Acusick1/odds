@@ -1071,6 +1071,7 @@ async def prepare_training_data(
     events: list[Event],
     session: AsyncSession,
     config: FeatureConfig,
+    sampler: SnapshotSampler | None = None,
 ) -> PreparedFeatureData:
     """Unified training data preparation using the 5-layer adapter architecture.
 
@@ -1088,6 +1089,7 @@ async def prepare_training_data(
         events: List of Event objects (filters to FINAL status internally)
         session: Async database session
         config: FeatureConfig controlling sampling, features, and target
+        sampler: Decision-snapshot sampler replacing the one ``config.sampling`` specifies
 
     Returns:
         PreparedFeatureData with X, y, feature_names, masks, and event_ids for CV
@@ -1097,7 +1099,8 @@ async def prepare_training_data(
         raise ValueError(f"No valid events found in {len(events)} total events")
 
     adapter = _make_adapter(config)
-    sampler = _make_sampler(config)
+    if sampler is None:
+        sampler = _make_sampler(config)
     feature_names = adapter.feature_names(config)
 
     X_list: list[np.ndarray] = []

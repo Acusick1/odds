@@ -37,7 +37,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import structlog
@@ -47,6 +47,9 @@ from sklearn.model_selection import train_test_split
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.training.config import MLTrainingConfig
+
+if TYPE_CHECKING:
+    from odds_analytics.feature_groups import SnapshotSampler
 
 logger = structlog.get_logger()
 
@@ -390,6 +393,7 @@ async def filter_events_by_date_range(
 async def prepare_training_data_from_config(
     config: MLTrainingConfig,
     session: AsyncSession,
+    sampler: SnapshotSampler | None = None,
 ) -> TrainingDataResult:
     """
     Prepare training data using configuration object.
@@ -403,6 +407,7 @@ async def prepare_training_data_from_config(
     Args:
         config: MLTrainingConfig object with all training parameters
         session: Async database session
+        sampler: Decision-snapshot sampler replacing the one ``config`` specifies
 
     Returns:
         TrainingDataResult containing train/test splits and metadata
@@ -473,6 +478,7 @@ async def prepare_training_data_from_config(
         events=events,
         session=session,
         config=features_config,
+        sampler=sampler,
     )
 
     X = prep_result.X

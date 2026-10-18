@@ -864,6 +864,55 @@ class TestPrepareTrainingData:
         assert not all(y == 0 for y in result.y)
 
     @pytest.mark.asyncio
+    async def test_injected_sampler_replaces_config_sampler(self, sample_events):
+        """A passed sampler picks the decision snapshots instead of config.sampling's."""
+        event = sample_events[0]
+        commence = event.commence_time
+        closing_snap = _make_snapshot(
+            100, event.id, commence - timedelta(hours=0.5), home_price=-200, away_price=170
+        )
+        decision_snaps = [
+            _make_snapshot(
+                i, event.id, commence - timedelta(hours=h), home_price=-150 - i, away_price=130 + i
+            )
+            for i, h in enumerate([4, 6, 8, 10])
+        ]
+        chosen = decision_snaps[2]
+
+        class PickOne:
+            calls = 0
+
+            def sample(self, bundle: EventDataBundle) -> list[OddsSnapshot]:
+                PickOne.calls += 1
+                return [chosen]
+
+        config = FeatureConfig(
+            target_bookmaker="pinnacle",
+            feature_groups=["tabular"],
+            markets=["h2h"],
+            outcome="home",
+            closing_tier="closing",
+            target_type="devigged_bookmaker",
+            sampling=SamplingConfig(
+                strategy="time_range", min_hours=3.0, max_hours=12.0, max_samples_per_event=5
+            ),
+        )
+        bundle = self._make_bundle(event, closing_snap, decision_snaps + [closing_snap])
+
+        with patch(
+            "odds_analytics.feature_groups.collect_event_data",
+            new=AsyncMock(return_value=bundle),
+        ):
+            result = await prepare_training_data(
+                events=[event], session=AsyncMock(), config=config, sampler=PickOne()
+            )
+
+        assert PickOne.calls == 1
+        assert result.num_samples == 1
+        hours = result.X[0, result.feature_names.index("hours_until_event")]
+        assert hours == pytest.approx(8.0)
+
+    @pytest.mark.asyncio
     async def test_drops_event_without_bookmaker_closing(self, sample_events):
         """Events without bookmaker closing data are skipped with devigged_bookmaker target."""
         event = sample_events[0]

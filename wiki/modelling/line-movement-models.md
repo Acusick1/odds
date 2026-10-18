@@ -25,7 +25,7 @@ Two `odds_analytics.backtesting.services.BettingStrategy` subclasses wrap a trai
 
 ## Backtest behaviour
 
-- **Feature vector.** The XGBoost strategy builds `odds_analytics.feature_extraction.TabularFeatures.to_array` (6 values). Models trained by `odds_analytics.feature_groups.prepare_training_data` add `hours_until_event` (from the XGBoost adapter) and any other configured groups, so a model trained through it receives a different width (#476; read from code, not run). Model strategies need `--model-path`.
+- **Feature vector.** The XGBoost strategy builds `odds_analytics.feature_extraction.TabularFeatures.to_array` (6 values). Models trained from the arrays that `odds_analytics.feature_groups.prepare_training_data` builds add `hours_until_event` (from the XGBoost adapter) and any other configured groups, so a model trained through it receives a different width (#476; read from code, not run). Model strategies need `--model-path`.
 - **Market and bookmakers.** Both strategies default to `market="h2h"`, while EPL odds use `1x2`; the CLI constructs them with defaults and cannot override ([market keys](../collection/sport-and-market-keys.md#market-key-dialects), #465). XGBoost defaults to eight bookmakers (Pinnacle plus seven US books); the extractor's sharp and retail rosters default to `pinnacle` and `fanduel/draftkings/betmgm`, ignoring the hybrid sharp reference (#465; [sharp benchmark](sharp-benchmark.md#code-copies)).
 - **Snapshots.** LSTM backtests load all snapshots for the event; the cutoff arithmetic is under [look-ahead bias](look-ahead-bias.md#where-the-rule-breaks).
 - **Decision time.** The model learns from 3-24 h snapshots while backtests decide 1 h out, so a model-driven backtest feeds it inputs unlike its training rows (same page).

@@ -112,8 +112,8 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 | Area | Modules | Page |
 |---|---|---|
 | Backtesting | `backtesting/` (`config.py`, `models.py`, `odds_analytics.backtesting.services`), `odds_analytics.strategies` | [Backtest engine](../evaluation/backtest-engine.md), [Backtest strategies](../evaluation/backtest-strategies.md) |
-| Features | `odds_analytics.feature_extraction`, `odds_analytics.feature_groups`, `odds_analytics.standings_features`, `odds_analytics.match_stats_features`, `odds_analytics.epl_schedule_features`, `odds_analytics.schedule_features`, `odds_analytics.injury_features`, `odds_analytics.polymarket_features` | [Feature pipeline](../modelling/feature-pipeline.md) |
-| Training | `training/` (`odds_analytics.training.config`, `odds_analytics.training.data_preparation`, `odds_analytics.training.cross_validation`, `odds_analytics.training.tuner` (Optuna wrapper), `odds_analytics.training.feature_selection`, `odds_analytics.training.tracking`) | [Training pipeline](../modelling/training-pipeline.md) |
+| Features | `odds_analytics.feature_extraction`, `odds_analytics.feature_groups` (snapshot samplers and the training-array orchestrator), `odds_analytics.standings_features`, `odds_analytics.match_stats_features`, `odds_analytics.epl_schedule_features`, `odds_analytics.schedule_features`, `odds_analytics.injury_features`, `odds_analytics.polymarket_features` | [Feature pipeline](../modelling/feature-pipeline.md) |
+| Training | `training/` (`odds_analytics.training.config`, `odds_analytics.training.data_preparation` (config-driven event selection and training-data preparation), `odds_analytics.training.cross_validation`, `odds_analytics.training.tuner` (Optuna wrapper with a seedable sampler), `odds_analytics.training.feature_selection`, `odds_analytics.training.tracking`) | [Training pipeline](../modelling/training-pipeline.md) |
 | Line-movement models | `odds_analytics.xgboost_line_movement`, `odds_analytics.lstm_line_movement`, `odds_analytics.sequence_loader` | [Line-movement strategies](../modelling/line-movement-models.md) |
 | Backfill | `odds_analytics.gap_backfill_planner`, `odds_analytics.game_selector`, `odds_analytics.backfill_executor` | [Odds API historical backfill](../collection/odds-api-backfill.md) |
 | Coverage reporting | `odds_analytics.quality_metrics` | [Coverage checks](../storage/coverage-checks.md) |
@@ -128,7 +128,7 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 
 ## Dependency exceptions
 
-- `packages/odds-lambda/pyproject.toml` does not declare `odds-analytics`, but `odds_lambda.model_loader` imports `odds_analytics.training.config` (where the feature group names and target fields are validated) and `odds_lambda.jobs.score_predictions` imports `odds_analytics.feature_groups` at module level (#454). Analytics declares a dependency on odds-lambda, so the cycle is undeclared on this side. The scraper-side consequence is on [Prediction scoring](../modelling/prediction-scoring.md).
+- `packages/odds-lambda/pyproject.toml` does not declare `odds-analytics`, but `odds_lambda.model_loader` imports `odds_analytics.training.config` (where the feature group names and target fields are validated) and `odds_lambda.jobs.score_predictions` imports `odds_analytics.feature_groups` (the training-array module) at module level (#454). Analytics declares a dependency on odds-lambda, so the cycle is undeclared on this side. The scraper-side consequence is on [Prediction scoring](../modelling/prediction-scoring.md).
 - `odds_core.paper_trade_models.PaperTrade` imports `odds_analytics.backtesting.models` (type-checking plus a lazy import inside `odds_core.paper_trade_models.PaperTrade.to_bet_record`), so odds-core depends on odds-analytics in practice (#459).
 - `python-dotenv` is declared in core but nothing imports it; `.env` is read only by pydantic-settings (#459).
 

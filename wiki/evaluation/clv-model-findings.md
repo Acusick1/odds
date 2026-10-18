@@ -12,7 +12,7 @@ status: stable
 
 # What the CLV model can and cannot do
 
-The model predicts line movement: the devigged bet365 CLV delta between a snapshot and the close ([CLV target](../modelling/clv-target.md)). The signal is weak but real: best EPL CV R² about 0.058, NBA plateau about 0.036. It cannot be bet alone: flat betting on NBA loses at every useful threshold ([betting simulation](exp-betting-simulation.md)); that simulation is NBA only and EPL has not been simulated. The agent treats the model as a supplementary sanity check (`packages/odds-mcp/agents/common.md`); its strongest feature is the sharp-retail spread the agent already sees through `odds_mcp.server.find_retail_edges` ([sharp benchmark](../modelling/sharp-benchmark.md), [ADR-0005](../../docs/adr/0005-information-edge.md)).
+The model predicts line movement: the devigged bet365 CLV delta between a snapshot and the close ([CLV target](../modelling/clv-target.md)). Out of sample, the tabular EPL model explains about 2.6% of the target's variance against the training mean, and does not beat a one-feature OLS fit on the sharp-retail spread by more than bootstrap noise ([EPL CLV re-baseline](exp-epl-clv-rebaseline.md)); the NBA plateau was about 0.036 R², a pre-fix number. It cannot be bet alone: flat betting on NBA loses at every useful threshold ([betting simulation](exp-betting-simulation.md)); that simulation is NBA only and EPL has not been simulated. The agent treats the model as a supplementary sanity check (`packages/odds-mcp/agents/common.md`); its strongest feature is the sharp-retail spread the agent already sees through `odds_mcp.server.find_retail_edges` ([sharp benchmark](../modelling/sharp-benchmark.md), [ADR-0005](../../docs/adr/0005-information-edge.md)).
 
 Several results below used feature sets the code does not define, for example the 7-feature tabular group and the `trajectory` and `cross_source` groups of experiments before 2026-03-15; their numbers are as recorded and are not reproducible ([feature groups](../modelling/feature-groups.md)).
 
@@ -22,10 +22,13 @@ Several results below used feature sets the code does not define, for example th
 
 ## Current conclusions
 
-- bet365, not Pinnacle, is the target: [ADR-0002](../../docs/adr/0002-bet365-clv-target.md), [target and data volume](exp-target-and-data-volume.md).
+Every result below that predates the training and CV validity fixes (#474, #434, #477, #437, #475, #481) is void, including the deployed model's CV metrics, the EPL feature ablation, the CV protocol grid and ADR-0002's rejection of Pinnacle as a target (#494). They are kept as the record, not as evidence.
+
+- The current evidence on the EPL model's role is [EPL CLV re-baseline against the simple baseline](exp-epl-clv-rebaseline.md). Out of sample on the ADR-0010 evaluation range, the tabular bet365 model beats a one-feature OLS fit on `tab_retail_sharp_diff` by about 6 × 10⁻⁶ MSE over two seeds, but neither seed's bootstrap CI excludes zero. So the model fails the keep test pre-registered on #496.
+- bet365, not Pinnacle, is the target: [ADR-0002](../../docs/adr/0002-bet365-clv-target.md), [target and data volume](exp-target-and-data-volume.md). Its rejection of Pinnacle is pre-fix and void; Pinnacle has not been re-tested under the keep-test rules (#495).
 - Sharp reference is Pinnacle with Betfair fallback: [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md), [EPL sharp-reference experiments](exp-epl-sharp-reference.md).
 - Sharp-vs-retail divergence is the core feature: [sharp benchmark](../modelling/sharp-benchmark.md).
-- On EPL, match_stats helps and the rest do not: [EPL ablation](exp-epl-feature-ablation-and-search-space.md). Injuries, rest, FPL and Polymarket add nothing ([NBA timing and injuries](exp-nba-timing-and-injuries.md), [early NBA signal search](exp-early-nba-signal-and-lstm.md)).
+- On EPL, match_stats helped and the rest did not in the pre-fix, void ablation: [EPL ablation](exp-epl-feature-ablation-and-search-space.md). Injuries, rest, FPL and Polymarket add nothing ([NBA timing and injuries](exp-nba-timing-and-injuries.md), [early NBA signal search](exp-early-nba-signal-and-lstm.md)).
 - Expanding walk-forward in 50-event steps is the protocol, tuned before 2024-08-01 and evaluated after: [ADR-0010](../../docs/adr/0010-expanding-walk-forward-and-evaluation-range.md), [CV protocol on a common validation range](exp-cv-protocol-common-range.md). On a common validation range, expanding, sliding-380 and sliding-760 are within bootstrap noise of each other. Sliding windows need the principled search space ([search-space experiment](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test)).
 - NBA injury features add nothing: [NBA timing and injuries](exp-nba-timing-and-injuries.md#nba-injury-features-exp-6-6b) (untested on EPL).
 - LSTM adds nothing: [early NBA signal and LSTM](exp-early-nba-signal-and-lstm.md#lstm-sequence-models).
@@ -57,6 +60,7 @@ Several results below used feature sets the code does not define, for example th
 - 2026-03-20 (#255), 04-23 (#361): [EPL feature ablation](exp-epl-feature-ablation-and-search-space.md).
 - 2026-04-23: [principled search space](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test).
 - 2026-10-18 (#452): [CV protocol on a common validation range](exp-cv-protocol-common-range.md).
+- 2026-10-18 (#496): [EPL CLV re-baseline against the simple baseline](exp-epl-clv-rebaseline.md).
 
 ## Caveats
 

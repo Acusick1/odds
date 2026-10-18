@@ -31,6 +31,7 @@ import numpy as np
 import optuna
 import pandas as pd
 import structlog
+from odds_analytics.feature_groups import SnapshotSampler
 from odds_analytics.training.config import MLTrainingConfig
 from odds_analytics.training.cross_validation import make_walk_forward_splits
 from odds_analytics.training.data_preparation import prepare_training_data_from_config
@@ -73,9 +74,9 @@ def season_of(ts: pd.Timestamp) -> str:
     return f"{start}-{(start + 1) % 100:02d}"
 
 
-async def load_rows(config: MLTrainingConfig) -> CellData:
+async def load_rows(config: MLTrainingConfig, sampler: SnapshotSampler | None = None) -> CellData:
     async with async_session_maker() as session:
-        data = await prepare_training_data_from_config(config, session)
+        data = await prepare_training_data_from_config(config, session, sampler=sampler)
     if data.validation_data is not None or data.X_test is not None:
         raise ValueError("expected every row in the training arrays (no val or test split)")
     assert data.event_ids_train is not None
@@ -146,17 +147,19 @@ def ols_fit_predict(x_train: np.ndarray, y_train: np.ndarray, x_val: np.ndarray)
     return coef[0] + coef[1] * x_val
 
 
-def run_cell(name: str, config_path: Path, data: CellData, n_trials: int) -> dict[str, Any]:
-    """Tune one cell, then refit its best trial per fold for out-of-fold predictions."""
-    config = MLTrainingConfig.from_yaml(config_path)
+def tune(
+    name: str, config: MLTrainingConfig, data: CellData, n_trials: int, sampler_seed: int = 42
+) -> tuple[optuna.Study, float]:
+    """Tune ``config`` on its own walk-forward folds; return the study and seconds taken."""
     assert config.tuning is not None
     tuner = OptunaTuner(
-        study_name=f"cv_protocol_common_range_{name}",
+        study_name=name,
         direction=config.tuning.direction,
         sampler=config.tuning.sampler,
         pruner=config.tuning.pruner,
         storage=None,
         tracking_config=None,
+        sampler_seed=sampler_seed,
     )
     objective = create_objective(
         config=config,
@@ -167,11 +170,18 @@ def run_cell(name: str, config_path: Path, data: CellData, n_trials: int) -> dic
     )
     t0 = time.monotonic()
     study = tuner.optimize(objective=objective, n_trials=n_trials)
-    tune_seconds = time.monotonic() - t0
+    return study, time.monotonic() - t0
 
-    best_config = config.model_copy(deep=True)
-    apply_trial_params(best_config, study.best_params)
-    wf = best_config.training.data
+
+def refit_folds(
+    name: str, config: MLTrainingConfig, data: CellData
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Fit ``config`` on each walk-forward fold; return out-of-fold rows and per-fold stats.
+
+    Each validation row carries the model's prediction and the two per-fold baselines
+    defined on #495, fitted on the same training rows.
+    """
+    wf = config.training.data
     assert wf.min_train_events is not None and wf.val_step_events is not None
     splits = make_walk_forward_splits(
         event_ids=data.event_ids,
@@ -187,11 +197,10 @@ def run_cell(name: str, config_path: Path, data: CellData, n_trials: int) -> dic
 
     rows: list[pd.DataFrame] = []
     folds: list[dict[str, Any]] = []
-    fold_mses: list[float] = []
     for fold_idx, (train_idx, val_idx) in enumerate(splits):
         strategy = XGBoostLineMovementStrategy()
         history = strategy.train_from_config(
-            config=best_config,
+            config=config,
             X_train=data.X[train_idx],
             y_train=data.y[train_idx],
             feature_names=data.feature_names,
@@ -200,7 +209,6 @@ def run_cell(name: str, config_path: Path, data: CellData, n_trials: int) -> dic
         )
         assert strategy.model is not None
         pred = strategy.model.predict(data.X[val_idx])
-        fold_mses.append(history["val_mse"])
         rows.append(
             pd.DataFrame(
                 {
@@ -234,12 +242,24 @@ def run_cell(name: str, config_path: Path, data: CellData, n_trials: int) -> dic
                 "val_mse": history["val_mse"],
             }
         )
+    return pd.concat(rows, ignore_index=True), pd.DataFrame(folds)
+
+
+def run_cell(name: str, config_path: Path, data: CellData, n_trials: int) -> dict[str, Any]:
+    """Tune one cell, then refit its best trial per fold for out-of-fold predictions."""
+    config = MLTrainingConfig.from_yaml(config_path)
+    study, tune_seconds = tune(f"cv_protocol_common_range_{name}", config, data, n_trials)
+
+    best_config = config.model_copy(deep=True)
+    apply_trial_params(best_config, study.best_params)
+    oof, folds = refit_folds(name, best_config, data)
 
     # The refit must reproduce the tuned objective, or the predictions are not the best trial's.
-    refit_mean = float(np.mean(fold_mses))
+    refit_mean = float(folds["val_mse"].mean())
     if not np.isclose(refit_mean, study.best_value, rtol=1e-7, atol=0.0):
         raise RuntimeError(f"{name}: refit mean fold MSE {refit_mean} != {study.best_value}")
 
+    wf = best_config.training.data
     trials = study.trials_dataframe()
     trials.insert(0, "cell", name)
     return {
@@ -249,13 +269,13 @@ def run_cell(name: str, config_path: Path, data: CellData, n_trials: int) -> dic
         "min_train_events": wf.min_train_events,
         "max_train_events": wf.max_train_events,
         "val_step_events": wf.val_step_events,
-        "n_folds": len(splits),
+        "n_folds": len(folds),
         "best_trial": study.best_trial.number,
         "best_cv_mean_fold_mse": study.best_value,
         "best_params": study.best_params,
         "tune_seconds": round(tune_seconds, 1),
-        "oof": pd.concat(rows, ignore_index=True),
-        "folds": pd.DataFrame(folds),
+        "oof": oof,
+        "folds": folds,
         "trials": trials,
     }
 
