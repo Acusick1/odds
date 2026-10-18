@@ -5,7 +5,7 @@ description: The CLV training target, the feature pipeline, the sharp benchmark,
 
 # CLV modelling
 
-The XGBoost CLV model predicts how far a bookmaker's line moves between a decision snapshot and the close. These pages cover the target, the features, training and validation, and the deployed model's publishing and scoring path. The decisions that fixed the current setup are ADRs: [bet365 as the target](../../docs/adr/0002-bet365-clv-target.md), [the hybrid sharp reference](../../docs/adr/0003-hybrid-sharp-reference.md) and [the walk-forward CV protocol](../../docs/adr/0004-walk-forward-cv-protocol.md). For what the model has been shown to do, start at [CLV model findings](../evaluation/clv-model-findings.md).
+The XGBoost CLV model predicts how far a bookmaker's line moves between a decision snapshot and the close. These pages cover the target, the features, training and validation, and the deployed model's publishing and scoring path. The decisions behind the current setup are ADRs: [the hybrid sharp reference](../../docs/adr/0003-hybrid-sharp-reference.md) and [the expanding walk-forward protocol](../../docs/adr/0010-expanding-walk-forward-and-evaluation-range.md). [bet365 as the target](../../docs/adr/0002-bet365-clv-target.md) is superseded by [a retail bet's EV against the Betfair Exchange close](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md), which the code does not compute yet. For what the model has been shown to do, start at [CLV model findings](../evaluation/clv-model-findings.md).
 
 <!-- pages:start -->
 ### Reference
