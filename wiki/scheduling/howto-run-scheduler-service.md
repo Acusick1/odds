@@ -25,7 +25,12 @@ The AWS rules must stay disabled, or both hosts collect. `odds scheduler list-jo
    sudo systemctl enable --now odds-scheduler
    ```
    - `Restart=always` with `RestartSec=5` restarts it after a crash or reboot.
-3. **Check.** `systemctl status odds-scheduler`, `journalctl -u odds-scheduler -f`.
+3. **Let the deploying user restart the service without a password.** `deploy.sh` restarts the unit through `sudo` and, with no terminal, refuses to start unless this rule exists. Create it with `sudo visudo -f /etc/sudoers.d/odds-scheduler` (replace `andrew` with the unit's `User`):
+   ```
+   andrew ALL=(root) NOPASSWD: /usr/bin/systemctl start odds-scheduler, /usr/bin/systemctl stop odds-scheduler, /usr/bin/systemctl restart odds-scheduler, /usr/bin/systemctl enable --now odds-scheduler, /usr/bin/systemctl daemon-reload
+   ```
+   - The paths must match `command -v systemctl`; `sudo -n -l` lists the rule.
+4. **Check.** `systemctl status odds-scheduler`, `journalctl -u odds-scheduler -f`.
 
 ## Start it at Windows boot (WSL hosts)
 
@@ -40,9 +45,13 @@ On a Windows host the unit runs inside WSL, which starts only when something cal
 
 ## Redeploy
 
-Run `./deploy.sh` from the repo root on the mini-PC; it is the only path to production. It first puts `$HOME/.local/bin` (the uv installer's directory) on `PATH` and checks that `git`, `uv`, `sudo` and `systemctl` resolve, exiting before any change if one does not, so it also runs from a non-interactive `ssh <host> 'cd ~/odds && ./deploy.sh'`. In order it then runs `git pull --ff-only`, `uv sync`, `uv run alembic upgrade head`, `SCHEDULER_DRY_RUN=true uv run odds scheduler smoke`, `sudo systemctl restart odds-scheduler`, then status and `odds scheduler list-jobs`.
+Run `./deploy.sh` from the repo root on the mini-PC; it is the only path to production. It works from a terminal or from a non-interactive `ssh <host> 'cd ~/odds && ./deploy.sh'`.
 
-- New code serves only after the restart. Until then the running scheduler keeps the modules it loaded at start, whatever the checkout holds. `systemctl status odds-scheduler` shows the start time, which must be later than the pull (`git reflog -1 --date=iso`).
+1. **Preflight.** It puts `$HOME/.local/bin` (the uv installer's directory) on `PATH` and checks that `git`, `uv`, `sudo` and `systemctl` resolve. Without a terminal it also requires the NOPASSWD rule for `systemctl restart odds-scheduler` ([Install the unit](#install-the-unit)). A failed check exits before anything changes.
+2. **Update and validate.** `git pull --ff-only`, `uv sync`, `uv run alembic upgrade head`, `SCHEDULER_DRY_RUN=true uv run odds scheduler smoke`.
+3. **Restart.** `sudo systemctl restart odds-scheduler`. New code serves only from here: until the restart the running scheduler keeps the modules it loaded at start, whatever the checkout holds.
+4. **Verify.** After 15 s it exits non-zero, printing the unit status, unless the unit is active, its `ActiveEnterTimestamp` is later than the start of the deploy, and its `NRestarts` has not grown (no crash loop). Then it prints `odds scheduler list-jobs`.
+
 - `set -e` aborts before the restart if migration or smoke fails, so the old code keeps serving.
 - Dry-run makes self-scheduling a no-op, so the live schedule store is untouched. It does not stop the jobs' own work: smoke runs each job's real `main()`, so a due `fetch-odds` or `fetch-scores` spends Odds API quota ([CLI](local-scheduler.md#cli)).
 - `--ff-only` fails on a diverged checkout, so discard or commit local edits on the host first.
