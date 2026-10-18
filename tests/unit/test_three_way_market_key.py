@@ -124,9 +124,11 @@ def load_migration() -> ModuleType:
 class TestRelabelMigration:
     async def seed(self, session: AsyncSession) -> None:
         when = datetime(2026, 10, 18, 10, tzinfo=UTC)
-        for event_id, sport_key, three_way in [
-            ("epl", "soccer_epl", True),
-            ("mlb", "baseball_mlb", False),
+        for event_id, sport_key, three_way, market_key in [
+            ("epl", "soccer_epl", True, "h2h"),
+            ("epl_1x2_long", "soccer_epl", True, "1x2"),
+            ("epl_1x2_canonical", "soccer_epl", True, "1x2"),
+            ("mlb", "baseball_mlb", False, "h2h"),
         ]:
             session.add(
                 Event(
@@ -140,6 +142,10 @@ class TestRelabelMigration:
                 )
             )
             raw = three_way_event(sport_key)
+            raw["bookmakers"][0]["markets"][0]["key"] = market_key
+            if event_id == "epl_1x2_canonical":
+                for outcome in raw["bookmakers"][0]["markets"][0]["outcomes"]:
+                    outcome["name"] = normalize_team_name(outcome["name"])
             if not three_way:
                 raw["bookmakers"][0]["markets"][0]["outcomes"].pop()
             raw["bookmakers"].append({"key": "empty", "title": "Empty", "markets": []})
@@ -148,7 +154,9 @@ class TestRelabelMigration:
                 OddsSnapshot(event_id=event_id, snapshot_time=when, raw_data=raw, bookmaker_count=1)
             )
             names = (
-                ["Newcastle United", "Tottenham Hotspur", "Draw"]
+                ["Newcastle", "Tottenham", "Draw"]
+                if event_id == "epl_1x2_canonical"
+                else ["Newcastle United", "Tottenham Hotspur", "Draw"]
                 if three_way
                 else ["Newcastle United", "Tottenham Hotspur"]
             )
@@ -158,7 +166,7 @@ class TestRelabelMigration:
                         event_id=event_id,
                         bookmaker_key="pinnacle",
                         bookmaker_title="Pinnacle",
-                        market_key="h2h",
+                        market_key=market_key,
                         outcome_name=name,
                         price=100,
                         odds_timestamp=when,
@@ -196,6 +204,18 @@ class TestRelabelMigration:
 
             odds, snapshots = await self.keys(test_session)
             assert odds["epl"] == {("1x2", "Newcastle"), ("1x2", "Tottenham"), ("1x2", "Draw")}
+            for event_id in ("epl_1x2_long", "epl_1x2_canonical"):
+                assert odds[event_id] == {
+                    ("1x2", "Newcastle"),
+                    ("1x2", "Tottenham"),
+                    ("1x2", "Draw"),
+                }
+                names = [
+                    o["name"]
+                    for o in snapshots[event_id]["bookmakers"][0]["markets"][0]["outcomes"]
+                ]
+                assert names == ["Newcastle", "Tottenham", "Draw"]
+                assert market_keys(snapshots[event_id]) == ["1x2", "totals"]
             assert odds["mlb"] == {
                 ("h2h", "Newcastle United"),
                 ("h2h", "Tottenham Hotspur"),
