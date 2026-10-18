@@ -21,7 +21,7 @@ FDUK sources its Pinnacle odds from Pinnacle's public API. PR #217 recorded that
 
 ## Pinnacle as sharp reference (March 2026)
 
-About 1.7K combined OddsPortal + FDUK EPL events, devigged bet365 target, 100 trials per run. Signal comes from having a sharp reference, not from more data.
+About 1.7K combined OddsPortal + FDUK EPL events, devigged bet365 target (home-side), 100 trials per run. Signal comes from having a sharp reference, not from more data.
 
 - **Control** (03-10): combined data with bet365 as its own sharp reference, CV R² = -0.005 ± 0.008.
 - **Invalid run** (03-10): Pinnacle sharp, CV R² 0.031 ± 0.014, inflated by #231.

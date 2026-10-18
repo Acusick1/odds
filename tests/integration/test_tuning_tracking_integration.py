@@ -42,6 +42,7 @@ training:
     random_state: 42
 
   features:
+    target_type: raw
     sharp_bookmakers: ["pinnacle"]
     retail_bookmakers: ["fanduel"]
     markets: ["h2h"]

@@ -101,6 +101,7 @@ class TestGroupTimeseriesCV:
                 "training": {
                     "strategy_type": "xgboost_line_movement",
                     "features": {
+                        "target_type": "raw",
                         "feature_groups": ["tabular"],
                         "markets": ["h2h"],
                         "outcome": "home",
@@ -240,6 +241,7 @@ class TestFeatureConfigValidation:
 
     def test_default_sampling_config(self):
         config = FeatureConfig(
+            target_type="raw",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
@@ -252,6 +254,7 @@ class TestFeatureConfigValidation:
 
     def test_sampling_config_time_range(self):
         config = FeatureConfig(
+            target_type="raw",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
@@ -271,6 +274,7 @@ class TestFeatureConfigValidation:
         from odds_lambda.fetch_tier import FetchTier
 
         config = FeatureConfig(
+            target_type="raw",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
@@ -290,6 +294,7 @@ class TestFeatureConfigValidation:
 
     def test_default_target_type_is_raw(self):
         config = FeatureConfig(
+            target_type="raw",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
@@ -299,6 +304,7 @@ class TestFeatureConfigValidation:
 
     def test_devigged_bookmaker_target_type(self):
         config = FeatureConfig(
+            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
@@ -308,11 +314,13 @@ class TestFeatureConfigValidation:
         assert config.target_type == "devigged_bookmaker"
 
     def test_adapter_default_is_xgboost(self):
-        config = FeatureConfig()
+        config = FeatureConfig(
+            target_type="raw",
+        )
         assert config.adapter == "xgboost"
 
     def test_adapter_lstm(self):
-        config = FeatureConfig(adapter="lstm")
+        config = FeatureConfig(target_type="raw", adapter="lstm")
         assert config.adapter == "lstm"
 
 
@@ -822,6 +830,7 @@ class TestPrepareTrainingData:
         all_snaps = decision_snaps + [closing_snap]
 
         config = FeatureConfig(
+            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
@@ -893,6 +902,7 @@ class TestPrepareTrainingData:
         )
 
         config = FeatureConfig(
+            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
@@ -943,6 +953,7 @@ class TestPrepareTrainingData:
         all_snaps = [decision_snap, closing_snap]
 
         config = FeatureConfig(
+            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
@@ -999,6 +1010,7 @@ class TestPrepareTrainingData:
         all_snaps = decision_snaps + [closing_snap]
 
         config = FeatureConfig(
+            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
@@ -1067,6 +1079,7 @@ class TestLSTMAdapter:
     @pytest.fixture
     def config(self):
         return FeatureConfig(
+            target_type="raw",
             adapter="lstm",
             feature_groups=["tabular"],
             markets=["h2h"],
@@ -1109,6 +1122,7 @@ class TestLSTMAdapter:
         from odds_analytics.feature_extraction import SequenceFeatures
 
         seq_only_config = FeatureConfig(
+            target_type="raw",
             adapter="lstm",
             feature_groups=[],
             markets=["h2h"],
@@ -1265,6 +1279,7 @@ class TestPrepareTrainingDataMaskCollection:
         )
 
         config = FeatureConfig(
+            target_bookmaker="pinnacle",
             adapter="xgboost",
             feature_groups=["tabular"],
             markets=["h2h"],
@@ -1323,6 +1338,7 @@ class TestPrepareTrainingDataMaskCollection:
         mock_output = AdapterOutput(features=mock_sequence, mask=mock_mask)
 
         config = FeatureConfig(
+            target_bookmaker="pinnacle",
             adapter="lstm",
             feature_groups=["tabular"],
             markets=["h2h"],

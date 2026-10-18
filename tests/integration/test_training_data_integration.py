@@ -65,6 +65,7 @@ class TestTrainingDataIntegration:
                     learning_rate=0.1,
                 ),
                 features=FeatureConfig(
+                    target_type="raw",
                     outcome="home",
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],
@@ -99,6 +100,7 @@ class TestTrainingDataIntegration:
                     epochs=20,
                 ),
                 features=FeatureConfig(
+                    target_type="raw",
                     adapter="lstm",
                     outcome="home",
                     markets=["h2h"],
@@ -130,6 +132,7 @@ class TestTrainingDataIntegration:
                     "max_depth": 6,
                 },
                 "features": {
+                    "target_type": "raw",
                     "outcome": "home",
                     "markets": ["h2h"],
                     "sharp_bookmakers": ["pinnacle"],
@@ -323,6 +326,7 @@ class TestInjuryFeaturesIntegration:
                     learning_rate=0.1,
                 ),
                 features=FeatureConfig(
+                    target_type="raw",
                     outcome="home",
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],
@@ -451,6 +455,7 @@ class TestRestFeaturesIntegration:
                     learning_rate=0.1,
                 ),
                 features=FeatureConfig(
+                    target_type="raw",
                     outcome="home",
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],

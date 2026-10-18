@@ -43,7 +43,7 @@ Same day, 1,813 EPL events, hybrid sharp, 100 trials each. Under sliding-380:50 
 
 ### Revised space
 
-Drawn from published XGBoost tuning guidance for small-N, low-SNR regression; defined in `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`:
+Drawn from published XGBoost tuning guidance for small-N, low-SNR regression; defined in `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`, which sets `target_type: devigged_bookmaker` and `target_bookmaker: bet365`:
 
 | Parameter | Original | Principled |
 |---|---|---|
@@ -77,7 +77,7 @@ Under the principled space sliding-380:50 yields 48-50 unique predictions on 50 
 
 ## Lineup signal check
 
-`experiments/scripts/lineup_signal_check.py` correlates lineup metrics with the devigged bet365 CLV target on 1,684-1,709 matched rows; output is `experiments/results/lineup_signal_check/` (`correlations.csv`, `joined_data.csv`). There is no FINDINGS file. From `correlations.csv`:
+`experiments/scripts/lineup_signal_check.py` correlates lineup metrics with the home-side devigged bet365 CLV target on 1,684-1,709 matched rows; output is `experiments/results/lineup_signal_check/` (`correlations.csv`, `joined_data.csv`). There is no FINDINGS file. From `correlations.csv`:
 
 - Strongest: `diff_cumulative_starts_lost`, r = -0.278 (n = 1,684, univariate R² 0.077); `diff_xi_changes` r = -0.184.
 - "Tendency" features that need no lineup announcement are weak: `diff_cumulative_starts_lost_tendency_3` r = -0.074; the xi-change tendencies are not significant (p above 0.08).

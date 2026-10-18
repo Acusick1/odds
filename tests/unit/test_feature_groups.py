@@ -6,12 +6,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from odds_analytics.feature_groups import (
     _STATIC_FEATURE_GROUPS,
+    _compute_target,
     _should_filter_missing_sharp,
     preload_feature_group_caches,
     snapshot_has_bookmaker,
 )
 from odds_analytics.training.config import FeatureConfig
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.odds_math import calculate_implied_probability, devig_probabilities
 from pydantic import ValidationError
 
 
@@ -145,6 +147,7 @@ class TestSnapshotHasBookmaker:
 class TestShouldFilterMissingSharp:
     def _make_config(self, sharp_bookmakers: list[str], target_bookmaker: str) -> FeatureConfig:
         return FeatureConfig(
+            target_type="devigged_bookmaker",
             sharp_bookmakers=sharp_bookmakers,
             target_bookmaker=target_bookmaker,
             markets=["h2h"],
@@ -160,6 +163,10 @@ class TestShouldFilterMissingSharp:
 
     def test_multiple_sharp_includes_target_still_filters(self) -> None:
         config = self._make_config(["pinnacle", "bet365"], "bet365")
+        assert _should_filter_missing_sharp(config) is True
+
+    def test_raw_filters_whenever_sharp_configured(self) -> None:
+        config = FeatureConfig(target_type="raw", sharp_bookmakers=["bet365"], markets=["h2h"])
         assert _should_filter_missing_sharp(config) is True
 
     def test_multiple_sharp_none_is_target(self) -> None:
@@ -186,16 +193,16 @@ class TestFeatureGroupValidation:
 
     def test_unknown_name_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            FeatureConfig(feature_groups=("tabular", "bogus"))
+            FeatureConfig(target_type="raw", feature_groups=("tabular", "bogus"))
 
     @pytest.mark.parametrize("name", ["epl_lineup", "trajectory"])
     def test_removed_or_unhandled_names_rejected(self, name: str) -> None:
         with pytest.raises(ValidationError):
-            FeatureConfig(feature_groups=("tabular", name))
+            FeatureConfig(target_type="raw", feature_groups=("tabular", name))
 
     def test_every_dispatched_group_accepted(self) -> None:
         names = tuple(sorted(_STATIC_FEATURE_GROUPS))
-        assert FeatureConfig(feature_groups=names).feature_groups == names
+        assert FeatureConfig(target_type="raw", feature_groups=names).feature_groups == names
 
 
 class TestPreloadFeatureGroupCaches:
@@ -356,3 +363,68 @@ class TestPreloadFeatureGroupCaches:
         mock_standings.assert_not_called()
         mock_match_stats.assert_not_called()
         mock_fixtures.assert_awaited_once_with(session)
+
+
+def _priced_snapshot(home: int, draw: int, away: int, hours_before: float) -> OddsSnapshot:
+    commence = datetime(2025, 12, 1, 15, 0, tzinfo=UTC)
+    snapshot_time = commence - timedelta(hours=hours_before)
+    return OddsSnapshot(
+        event_id="evt_1",
+        snapshot_time=snapshot_time,
+        raw_data={
+            "bookmakers": [
+                {
+                    "key": "bet365",
+                    "title": "Bet365",
+                    "last_update": snapshot_time.isoformat(),
+                    "markets": [
+                        {
+                            "key": "1x2",
+                            "outcomes": [
+                                {"name": "Arsenal", "price": home},
+                                {"name": "Draw", "price": draw},
+                                {"name": "Chelsea", "price": away},
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+        bookmaker_count=1,
+        fetch_tier="closing",
+        hours_until_commence=hours_before,
+        api_request_id="test",
+    )
+
+
+class TestComputeDeviggedTargetOutcome:
+    """The devigged h2h/1x2 target follows ``FeatureConfig.outcome``."""
+
+    @staticmethod
+    def _target(outcome: str) -> float | None:
+        config = FeatureConfig(
+            target_type="devigged_bookmaker",
+            target_bookmaker="bet365",
+            markets=["1x2"],
+            outcome=outcome,  # type: ignore[arg-type]
+        )
+        snapshot = _priced_snapshot(100, 250, 300, hours_before=6)
+        closing = _priced_snapshot(-125, 260, 380, hours_before=0.1)
+        return _compute_target(snapshot, closing, _make_event(), config)
+
+    def test_away_gives_away_side_delta(self):
+        away = self._target("away")
+        home = self._target("home")
+
+        assert away is not None and home is not None
+        assert away < 0 < home
+        assert away != pytest.approx(-home)
+
+    def test_away_delta_matches_devigged_probabilities(self):
+        def away_prob(prices: tuple[int, int, int]) -> float:
+            raw = [calculate_implied_probability(p) for p in prices]
+            return devig_probabilities(*raw)[2]
+
+        expected = away_prob((-125, 260, 380)) - away_prob((100, 250, 300))
+
+        assert self._target("away") == pytest.approx(expected)

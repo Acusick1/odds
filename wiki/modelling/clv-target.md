@@ -9,7 +9,7 @@ status: stable
 
 # CLV and the training target
 
-CLV (closing line value) is how far a bookmaker's line moves between a decision snapshot and the close. The CLV model regresses that movement: `target = devigged_fair_close - devigged_fair_at_snapshot` for one bookmaker (`target_bookmaker`). A positive value means the price at the snapshot was too low and the line moved up (`odds_analytics.sequence_loader.calculate_devigged_bookmaker_target` returns closing probability minus snapshot probability). Why a delta rather than the closing price is `(inferred)`: the decision needs the size of the move, and a delta is stationary and roughly mean-zero.
+CLV (closing line value) is how far a bookmaker's line moves between a decision snapshot and the close. The CLV model regresses that movement: `target = devigged_fair_close - devigged_fair_at_snapshot` for one bookmaker (`target_bookmaker`). A positive value means the price at the snapshot was too low and the line moved up (`odds_analytics.sequence_loader.calculate_devigged_bookmaker_target` returns closing probability minus snapshot probability for the configured `outcome`, a required argument). Why a delta rather than the closing price is `(inferred)`: the decision needs the size of the move, and a delta is stationary and roughly mean-zero.
 
 The functions, dispatch and config fields that compute it are on [Target functions](clv-target-functions.md).
 

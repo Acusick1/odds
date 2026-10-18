@@ -19,8 +19,8 @@ status: stable
 
 ## Devigged target
 
-- `odds_analytics.sequence_loader.calculate_devigged_bookmaker_target` returns `closing home prob - snapshot home prob` for one bookmaker, or `None` if either side lacks that bookmaker. It handles 2-way and 3-way markets.
-- `odds_analytics.sequence_loader.extract_devigged_h2h_probs` converts prices with `odds_core.odds_math.calculate_implied_probability` and normalises with `odds_core.odds_math.devig_probabilities`. Devigging is proportional only, and the 3-way (`Draw`) target still uses the home probability only ([odds arithmetic](../foundations/odds-math.md), [devigging](../foundations/devigging.md)).
+- `odds_analytics.sequence_loader.calculate_devigged_bookmaker_target` returns the closing minus snapshot devigged probability of the configured outcome (`home`, `away` or `draw`) for one bookmaker, or `None` if either side lacks that bookmaker or the outcome. It handles 2-way and 3-way markets; `draw` exists only in 3-way markets.
+- `odds_analytics.sequence_loader.extract_devigged_h2h_probs` converts prices with `odds_core.odds_math.calculate_implied_probability` and normalises with `odds_core.odds_math.devig_probabilities`. Devigging is proportional only, and the 3-way (`Draw`) probability is devigged together with home and away ([odds arithmetic](../foundations/odds-math.md), [devigging](../foundations/devigging.md)).
 - `odds_analytics.sequence_loader.calculate_devigged_totals_target` does the same for Over/Under.
 
 ## Dispatch
@@ -30,13 +30,13 @@ status: stable
 - `"devigged_bookmaker"` uses the functions above.
 - `"raw"` uses `odds_analytics.sequence_loader.calculate_regression_target`, the mean vig-inclusive implied-probability delta. Devigging therefore applies to the target only when the YAML sets `target_type: devigged_bookmaker`.
 
-`target_type` defaults to `raw` and `target_bookmaker` to `pinnacle`, so a YAML that omits them trains the raw mean-implied-probability delta against Pinnacle (#434).
+`odds_analytics.training.config.FeatureConfig` requires `target_type`. `target_bookmaker` is required for `devigged_bookmaker` and must be omitted for `raw`; `devigged_bookmaker` is valid only for `h2h`, `1x2` and `totals`, and `outcome` must be `over` or `under` exactly when the market is `totals`. A config that breaks these rules fails validation.
 
-`odds_analytics.feature_groups._compute_target` calls the devigged h2h target without the outcome, so it is always the home-side delta while the tabular features follow `outcome` (#434). With `outcome: away` the features and target describe different sides (read from code; not run). Totals respect `outcome`.
+`odds_analytics.feature_groups._compute_target` passes `outcome` to every branch, so the target and the tabular features describe the same side. 
 
 ## Closing snapshot
 
-`odds_analytics.feature_groups._select_closing_snapshot` takes the snapshots in `closing_tier`, prefers those that contain the target bookmaker, then the first match in `closing_source_priority`, else the latest. `closing_source_priority` is matched against `odds_core.models.OddsSnapshot.api_request_id`, whose values are provenance tags such as `football_data_uk` and `oddsportal_closing` ([provenance tags](../storage/odds-tables.md#provenance)). Events with no usable closing snapshot are dropped in `odds_analytics.feature_groups.prepare_training_data` ([feature pipeline](feature-pipeline.md)).
+`odds_analytics.feature_groups._select_closing_snapshot` takes the snapshots in `closing_tier`, prefers those that contain the target bookmaker, then the first match in `closing_source_priority`, else the latest. `closing_source_priority` is matched against `odds_core.models.OddsSnapshot.api_request_id`, whose values are provenance tags such as `football_data_uk` and `oddsportal_closing` ([provenance tags](../storage/odds-tables.md#provenance)). A devigged config reads its target bookmaker through a guard that raises if it is unset. Events with no usable closing snapshot are dropped in `odds_analytics.feature_groups.prepare_training_data` ([feature pipeline](feature-pipeline.md)).
 
 ## Config fields
 

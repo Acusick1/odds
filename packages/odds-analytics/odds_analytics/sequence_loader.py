@@ -180,12 +180,14 @@ def calculate_devigged_bookmaker_target(
     away_team: str,
     bookmaker_key: str = "pinnacle",
     market_key: str = "h2h",
+    *,
+    outcome: Literal["home", "away", "draw"],
 ) -> float | None:
     """Calculate target as devigged bookmaker close minus devigged bookmaker at snapshot.
 
     Returns:
-        fair_close_home - fair_snapshot_home, or None if bookmaker data missing
-        on either side.
+        fair_close - fair_snapshot for the requested outcome, or None if bookmaker
+        data is missing on either side or the outcome is absent (draw in a 2-way market).
     """
     snapshot_probs = extract_devigged_h2h_probs(
         snapshot_odds, home_team, away_team, bookmaker_key, market_key
@@ -197,6 +199,12 @@ def calculate_devigged_bookmaker_target(
     if snapshot_probs is None or closing_probs is None:
         return None
 
+    if outcome == "draw":
+        if snapshot_probs.draw is None or closing_probs.draw is None:
+            return None
+        return closing_probs.draw - snapshot_probs.draw
+    if outcome == "away":
+        return closing_probs.away - snapshot_probs.away
     return closing_probs.home - snapshot_probs.home
 
 

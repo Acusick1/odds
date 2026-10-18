@@ -301,6 +301,7 @@ class TestCollectEventData:
     def _make_config(self, with_pm: bool = True) -> FeatureConfig:
         groups = ("tabular", "polymarket") if with_pm else ("tabular",)
         return FeatureConfig(
+            target_type="raw",
             sharp_bookmakers=["pinnacle"],
             retail_bookmakers=["fanduel", "draftkings"],
             markets=["h2h"],
@@ -348,7 +349,7 @@ class TestXGBoostAdapterFeatureCount:
     def test_tabular_only_feature_names(self):
         from odds_analytics.feature_extraction import TabularFeatures
 
-        config = FeatureConfig(feature_groups=["tabular"])
+        config = FeatureConfig(target_type="raw", feature_groups=["tabular"])
         adapter = XGBoostAdapter()
         names = adapter.feature_names(config)
         expected = len(TabularFeatures.get_feature_names()) + 1  # +1 for hours_until_event
@@ -362,7 +363,7 @@ class TestXGBoostAdapterFeatureCount:
             PolymarketTabularFeatures,
         )
 
-        config = FeatureConfig(feature_groups=["tabular", "polymarket"])
+        config = FeatureConfig(target_type="raw", feature_groups=["tabular", "polymarket"])
         adapter = XGBoostAdapter()
         names = adapter.feature_names(config)
         expected = (
@@ -379,6 +380,7 @@ class TestPrepareTrainingDataWithPolymarket:
 
     def _make_config(self) -> FeatureConfig:
         return FeatureConfig(
+            target_type="raw",
             sharp_bookmakers=["pinnacle"],
             retail_bookmakers=["fanduel", "draftkings"],
             markets=["h2h"],
@@ -387,7 +389,6 @@ class TestPrepareTrainingDataWithPolymarket:
             feature_groups=("tabular", "polymarket"),
             pm_velocity_window_hours=2.0,
             pm_price_tolerance_minutes=60,
-            target_type="raw",
             sampling=SamplingConfig(
                 strategy="time_range",
                 min_hours=3.0,

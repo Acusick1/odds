@@ -891,6 +891,7 @@ async def analyze_closing_tier_target_variance(early_targets: np.ndarray) -> Non
                 event.away_team,
                 bookmaker_key="bet365",
                 market_key="1x2",
+                outcome="home",
             )
             if target is not None:
                 closing_targets.append(target)

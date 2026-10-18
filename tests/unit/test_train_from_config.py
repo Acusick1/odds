@@ -30,6 +30,7 @@ def sample_xgboost_config():
             description="Test XGBoost configuration",
         ),
         training=TrainingConfig(
+            features=FeatureConfig(target_type="raw"),
             strategy_type="xgboost",
             data=DataConfig(
                 start_date=date(2024, 10, 1),
@@ -59,6 +60,7 @@ def sample_xgboost_line_movement_config():
             description="Test XGBoost line movement configuration",
         ),
         training=TrainingConfig(
+            features=FeatureConfig(target_type="raw"),
             strategy_type="xgboost_line_movement",
             data=DataConfig(
                 start_date=date(2024, 10, 1),
@@ -98,7 +100,7 @@ def sample_lstm_config():
                 lookback_hours=48,
                 timesteps=12,
             ),
-            features=FeatureConfig(adapter="lstm"),
+            features=FeatureConfig(target_type="raw", adapter="lstm"),
         ),
     )
 
@@ -112,6 +114,7 @@ def sample_config_with_search_spaces():
             tags=["test", "tuning"],
         ),
         training=TrainingConfig(
+            features=FeatureConfig(target_type="raw"),
             strategy_type="xgboost",
             data=DataConfig(
                 start_date=date(2024, 10, 1),
@@ -206,7 +209,7 @@ class TestXGBoostStrategyTrainFromConfig:
                     end_date=date(2024, 12, 31),
                 ),
                 model=LSTMConfig(),  # Wrong config type
-                features=FeatureConfig(adapter="lstm"),
+                features=FeatureConfig(target_type="raw", adapter="lstm"),
             ),
         )
 
@@ -364,6 +367,7 @@ class TestXGBoostLineMovementStrategyTrainFromConfig:
         invalid_config = MLTrainingConfig(
             experiment=ExperimentConfig(name="invalid"),
             training=TrainingConfig(
+                features=FeatureConfig(target_type="raw"),
                 strategy_type="xgboost",  # Should be xgboost_line_movement
                 data=DataConfig(
                     start_date=date(2024, 10, 1),
@@ -387,6 +391,7 @@ class TestXGBoostLineMovementStrategyTrainFromConfig:
         config = MLTrainingConfig(
             experiment=ExperimentConfig(name="no_early_stopping"),
             training=TrainingConfig(
+                features=FeatureConfig(target_type="raw"),
                 strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 10, 1),
@@ -417,6 +422,7 @@ class TestConfigValidation:
         config = MLTrainingConfig(
             experiment=ExperimentConfig(name="test"),
             training=TrainingConfig(
+                features=FeatureConfig(target_type="raw"),
                 strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 10, 1),

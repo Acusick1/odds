@@ -679,6 +679,67 @@ class TestCalculateDeviggedBookmakerTarget:
             last_update=timestamp,
         )
 
+    def _three_way(self, prices: tuple[int, int, int], timestamp: datetime) -> list[Odds]:
+        home, draw, away = prices
+        return [
+            self._make_odds("Arsenal", home, timestamp, market="1x2"),
+            self._make_odds("Draw", draw, timestamp, market="1x2"),
+            self._make_odds("Chelsea", away, timestamp, market="1x2"),
+        ]
+
+    def test_away_outcome_is_away_side_delta(self, timestamp):
+        snapshot_odds = [
+            self._make_odds("Lakers", -150, timestamp),
+            self._make_odds("Celtics", 130, timestamp),
+        ]
+        closing_odds = [
+            self._make_odds("Lakers", -200, timestamp),
+            self._make_odds("Celtics", 170, timestamp),
+        ]
+        snap = extract_devigged_h2h_probs(snapshot_odds, "Lakers", "Celtics")
+        close = extract_devigged_h2h_probs(closing_odds, "Lakers", "Celtics")
+        assert snap is not None and close is not None
+
+        away = calculate_devigged_bookmaker_target(
+            snapshot_odds, closing_odds, "Lakers", "Celtics", outcome="away"
+        )
+        home = calculate_devigged_bookmaker_target(
+            snapshot_odds, closing_odds, "Lakers", "Celtics", outcome="home"
+        )
+
+        assert away == pytest.approx(close.away - snap.away)
+        assert home == pytest.approx(close.home - snap.home)
+        assert away == pytest.approx(-home)
+
+    def test_draw_outcome_in_three_way_market(self, timestamp):
+        snapshot_odds = self._three_way((200, 250, 350), timestamp)
+        closing_odds = self._three_way((180, 260, 400), timestamp)
+        snap = extract_devigged_h2h_probs(snapshot_odds, "Arsenal", "Chelsea", market_key="1x2")
+        close = extract_devigged_h2h_probs(closing_odds, "Arsenal", "Chelsea", market_key="1x2")
+        assert snap is not None and close is not None
+        assert snap.draw is not None and close.draw is not None
+
+        result = calculate_devigged_bookmaker_target(
+            snapshot_odds,
+            closing_odds,
+            "Arsenal",
+            "Chelsea",
+            market_key="1x2",
+            outcome="draw",
+        )
+
+        assert result == pytest.approx(close.draw - snap.draw)
+
+    def test_draw_outcome_in_two_way_market_is_none(self, timestamp):
+        odds = [
+            self._make_odds("Lakers", -150, timestamp),
+            self._make_odds("Celtics", 130, timestamp),
+        ]
+        assert (
+            calculate_devigged_bookmaker_target(odds, odds, "Lakers", "Celtics", outcome="draw")
+            is None
+        )
+
     def test_correct_delta(self, timestamp):
         """Target is fair_close_home - fair_snapshot_home."""
         snapshot_odds = [
@@ -690,7 +751,7 @@ class TestCalculateDeviggedBookmakerTarget:
             self._make_odds("Celtics", 170, timestamp),
         ]
         result = calculate_devigged_bookmaker_target(
-            snapshot_odds, closing_odds, "Lakers", "Celtics"
+            snapshot_odds, closing_odds, "Lakers", "Celtics", outcome="home"
         )
         assert result is not None
 
@@ -709,7 +770,9 @@ class TestCalculateDeviggedBookmakerTarget:
             self._make_odds("Lakers", -150, timestamp),
             self._make_odds("Celtics", 130, timestamp),
         ]
-        result = calculate_devigged_bookmaker_target(odds, odds, "Lakers", "Celtics")
+        result = calculate_devigged_bookmaker_target(
+            odds, odds, "Lakers", "Celtics", outcome="home"
+        )
         assert result == pytest.approx(0.0)
 
     def test_missing_snapshot_pinnacle(self, timestamp):
@@ -732,7 +795,9 @@ class TestCalculateDeviggedBookmakerTarget:
             self._make_odds("Celtics", 170, timestamp),
         ]
         assert (
-            calculate_devigged_bookmaker_target(snapshot_odds, closing_odds, "Lakers", "Celtics")
+            calculate_devigged_bookmaker_target(
+                snapshot_odds, closing_odds, "Lakers", "Celtics", outcome="home"
+            )
             is None
         )
 
@@ -744,7 +809,9 @@ class TestCalculateDeviggedBookmakerTarget:
         ]
         closing_odds = []
         assert (
-            calculate_devigged_bookmaker_target(snapshot_odds, closing_odds, "Lakers", "Celtics")
+            calculate_devigged_bookmaker_target(
+                snapshot_odds, closing_odds, "Lakers", "Celtics", outcome="home"
+            )
             is None
         )
 
@@ -761,7 +828,7 @@ class TestCalculateDeviggedBookmakerTarget:
             self._make_odds("Chelsea", 350, timestamp, market="1x2"),
         ]
         result = calculate_devigged_bookmaker_target(
-            snapshot_odds, closing_odds, "Arsenal", "Chelsea", market_key="1x2"
+            snapshot_odds, closing_odds, "Arsenal", "Chelsea", market_key="1x2", outcome="home"
         )
         assert result is not None
         snap = extract_devigged_h2h_probs(snapshot_odds, "Arsenal", "Chelsea", market_key="1x2")
