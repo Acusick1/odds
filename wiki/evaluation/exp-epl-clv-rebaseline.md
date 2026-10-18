@@ -30,10 +30,10 @@ This experiment applies the keep test pre-registered on #496 to the tabular EPL 
 
 The test ran twice, on two copies of the data. Both are recorded, and the second is the decision result.
 
-1. **Run 1, the earlier local copy** (`experiments/results/epl_clv_rebaseline/run1_local_copy/`). The local development database then held EPL events up to 2026-05-24. Its config `end_date` was 2026-07-31. It scored 650 events and failed condition 2.
-2. **Run 2, the full range** (`experiments/results/epl_clv_rebaseline/`). After seeing run 1's verdict, the user chose to refresh the local database from production for 2025-08-01 to 2026-10-18 and re-run with everything else unchanged. Because that choice came after a result was seen, run 2 is the decision result and run 1 is kept as recorded. The config `end_date` is 2026-10-18, which covers every FINAL, scored EPL event in the database (the last kicks off at 2026-10-17 16:30).
+1. **Run 1, the earlier local copy** (`experiments/results/epl_clv_rebaseline/run1_local_copy/`). The local development database then held EPL events up to 2026-05-24. Its config `end_date` was 2026-07-31 (commit `99b050c`). It scored 650 events and failed condition 2.
+2. **Run 2, the full range** (`experiments/results/epl_clv_rebaseline/`). After run 1's verdict was known, the local database was refreshed from production for 2025-08-01 to 2026-10-18 and the test re-run with everything else unchanged. Because the refresh was chosen after a result was seen, run 2 is the decision result and run 1 is kept as recorded. The config `end_date` is 2026-10-18, which covers every FINAL, scored EPL event in the database (the last kicks off at 2026-10-17 16:30).
 
-**The verdict did not change, and nor did any scored number.** The refresh added one 2025-26 row and the 43 events of 2026-27, but none of them falls in a full 50-event block. The 13 folds, the 650 scored events and every keep-test number are identical in the two runs (`folds.csv` is byte-identical). Only the partial last block (34 events in run 1, 35 in run 2), the counts and the sampling comparison differ. The figures below are run 2's.
+**The verdict did not change, and nor did any scored number.** The refresh added one 2025-26 row, which falls in the partial last block, and the 43 FINAL events of 2026-27, which yield no rows. The 13 folds, the 650 scored events and every keep-test number are identical in the two runs (`folds.csv` is byte-identical). Only the partial last block (34 events in run 1, 35 in run 2), the counts and the sampling comparison differ. The figures below are run 2's.
 
 ## Setup
 
@@ -47,7 +47,7 @@ The test ran twice, on two copies of the data. Both are recorded, and the second
 - **Baselines:** both are fitted on each fold's training rows. The gating baseline is a one-feature OLS fit with intercept on `tab_retail_sharp_diff`, the column the model receives. The training-fold mean is the floor.
 - **Metric:** MSE pooled over every scored evaluation-range row. The model and the baselines are scored on identical rows, and the script fails if the two seeds' rows, targets or baseline predictions differ.
 - **Uncertainty:** a paired bootstrap resamples events, with 2,000 resamples and seed 42. Every comparison uses the same resampled events.
-- **One row per match.** A live-collected match can exist under two event IDs, an Odds API ID and an `op_live_` twin. When both yield rows, the script keeps the Odds API ID's row, the ID that `odds_lambda.storage.writers.OddsWriter.adopt_live_twins` keeps when it merges twins, and drops the other. The script fails if a match still has two rows. Neither run dropped a twin, because no match had rows under both IDs (`summary.json` `evaluation_range.twins_dropped`).
+- **One row per match.** A live-collected match can exist under two event IDs, an Odds API ID and an `op_live_` twin. The script treats events with the same teams and kick-offs within `odds_lambda.storage.writers.OddsWriter.EVENT_MATCH_WINDOW` as one match, the window `odds_lambda.storage.writers.OddsWriter.adopt_live_twins` matches twins within. When both twins yield rows, it keeps the other ID's row, as adoption keeps the Odds API event, and drops the `op_live_` one. Any other duplicate match fails the run. Run 2 dropped no twin, because no match had rows under both IDs (`summary.json` `evaluation_range.twins_dropped` is empty). Run 1 had no dedupe step and would have failed on a duplicate match.
 
 ## Decision rows
 
@@ -71,7 +71,7 @@ Each event contributes one decision row, its day-before snapshot. That is the ro
 | 2025-26 | none | no | 75 |
 | 2026-27 | none | no | 43 |
 
-Every FDUK event gets the same row from both samplers. The two disagree only on live-collected events (April and May 2026). There the production sampler mixes horizons from 13 h to 44 h. More often it drops the event, because the snapshot it picks is a Betfair API snapshot that has no bet365 price. That is the case for the 19 events that get only a day-before row.
+Every FDUK event gets the same row from both samplers. The two disagree only on live-collected events (April and May 2026). There the production sampler mixes horizons from 13 h to 44 h. More often it drops the event, because the snapshot it picks has no bet365 price. For 18 of the 19 events that get only a day-before row, that snapshot is a Betfair API one (inferred from a query of the latest sharp-tier snapshot per event).
 
 ## Event counts
 
@@ -88,7 +88,7 @@ Run 1 had the same 2024-25 counts and 304 rows in 2025-26, and no 2026-27 events
 - **Twins.** In 2025-26, 8 matches in April 2026 exist under two event IDs, which is why 387 events are 379 matches.
 - **Lost events** (`experiments/results/epl_clv_rebaseline/lost_events.csv`), 82 of 387 in 2025-26 and all 43 in 2026-27:
   - 33 in 2025-26 have no final score: the 28 `op_live_` events of 3 to 22 March 2026, and 5 April events, four of them `op_live_` twins of scored Odds API events. Production has no scores for these either, so this is a data gap, not a copy problem. Ten of the March events (3 to 5 March) have FDUK day-before snapshots and are lost only for the missing score.
-  - 28 in 2025-26 and all 43 in 2026-27 have no closing snapshot that quotes both bet365 and a sharp bookmaker. The 2025-26 ones kick off from 11 April 2026, and 7 of them are Odds API twins. **No 2026-27 snapshot quotes bet365 at all:** that season has only Betfair API snapshots and Odds API snapshots that quote Pinnacle, so no bet365 target can be computed for it.
+  - 28 in 2025-26 and all 43 in 2026-27 have no closing snapshot that quotes both bet365 and a sharp bookmaker. The 2025-26 ones kick off from 11 April 2026, and 7 of them are Odds API twins. **No snapshot of a FINAL 2026-27 event quotes bet365:** those events have only Betfair API and Odds API snapshots, so no bet365 target can be computed for them. Some SCHEDULED 2026-27 events do have `oddsportal_live` snapshots that quote bet365.
   - 21 in 2025-26 have no snapshot within 1 h of the day-before point that quotes bet365 and a sharp bookmaker. All kick off from 12 April 2026 and are live-collected.
 - **FDUK coverage** ends with the 2026-03-05 kick-offs, in production as well as locally. Later day-before rows can only come from live-collected snapshots.
 - **Pinnacle gap.** In 71 FDUK events from 2026-01-17 to 2026-03-01, the day-before snapshot has no Pinnacle price. These are not lost: the hybrid reference uses Betfair Exchange instead ([sharp benchmark](../modelling/sharp-benchmark.md)).
@@ -138,10 +138,10 @@ These do not decide anything. All values are in units of 10⁻⁶, from `results
 
 | Slice | Events | Seed A | Seed B | OLS | Floor | OLS minus seed A | OLS minus seed B |
 |---|---|---|---|---|---|---|---|
-| 2024-25 | 380 | 823.4 | 822.6 | 820.8 | 850.7 | -2.5 [-18.6, 13.5] | -1.8 [-18.6, 15.0] |
-| 2025-26 | 270 | 788.8 | 789.6 | 806.6 | 801.5 | 17.7 [-1.8, 37.0] | 17.0 [-1.9, 35.8] |
-| Pinnacle sharp | 590 | 802.1 | 801.8 | 807.6 | 820.2 | 5.5 [-7.5, 18.8] | 5.8 [-7.9, 19.6] |
-| Betfair Exchange sharp | 60 | 877.0 | 878.6 | 887.2 | 929.4 | 10.2 [-24.0, 46.7] | 8.6 [-25.8, 44.9] |
+| 2024-25 | 380 | 823.4 | 822.6 | 820.8 | 850.7 | -2.5 [-18.6, 13.5] | -1.8 [-18.6, 14.9] |
+| 2025-26 | 270 | 788.8 | 789.6 | 806.6 | 801.5 | 17.7 [-1.8, 37.0] | 16.9 [-1.9, 35.7] |
+| Pinnacle sharp | 590 | 802.1 | 801.8 | 807.6 | 820.2 | 5.5 [-7.5, 18.8] | 5.7 [-7.9, 19.6] |
+| Betfair Exchange sharp | 60 | 877.0 | 878.6 | 887.2 | 929.4 | 10.2 [-24.0, 46.7] | 8.6 [-25.8, 44.8] |
 | FDUK rows | 650 | 809.0 | 808.9 | 814.9 | 830.2 | 5.9 [-6.7, 18.5] | 6.0 [-6.7, 18.8] |
 | Live-collected rows | 0 | | | | | | |
 | Partial last block (not a fold) | 35 | 613.0 | 613.6 | 603.6 | 609.4 | -9.3 [-54.9, 40.0] | -9.9 [-63.2, 48.4] |
@@ -157,7 +157,7 @@ These do not decide anything. All values are in units of 10⁻⁶, from `results
 
 - **Single target.** Only bet365 was tested. A retarget, for example to Pinnacle, needs its own run under the same rules (#495).
 - **No live-collected rows are scored.** The 2025-26 rows in the folds are all FDUK day-before snapshots. The live-collected regime (`oddsportal_live` and Betfair API snapshots, from April 2026) appears only in the dropped partial block. Live scoring reads live-collected snapshots, so this test says little about the model's live behaviour (inferred; [prediction scoring](../modelling/prediction-scoring.md)).
-- **Data gaps shape the range.** The March 2026 scores are missing in production, FDUK coverage ends on 2026-03-05, and 2026-27 has no bet365 price in any snapshot. Together they leave the scored range ending on 2026-02-22, so the evaluation range on or after 2024-08-01 is scored only up to there. More data will extend it only if later events get scores, day-before bet365 prices and bet365 closing prices.
+- **Data gaps shape the range.** The March 2026 scores are missing in production, FDUK coverage ends on 2026-03-05, and no FINAL 2026-27 event has a bet365 price in any snapshot. Together they leave the scored range ending on 2026-02-22, so the evaluation range on or after 2024-08-01 is scored only up to there. More data will extend it only if later events get scores, day-before bet365 prices and bet365 closing prices.
 - **The deployed model is not this model.** `epl-clv-home` uses tabular and match_stats features with sliding-380 folds ([CLV model findings](clv-model-findings.md#deployed-model)). This test covers the tabular group under the ADR-0010 protocol only.
 - **Seed B lands close to seed A.** The two seeds' tuned hyperparameters differ, but their pooled MSEs differ by 0.13 × 10⁻⁶. Condition 1 is therefore easy to pass. What decides the result is the event-level noise in condition 2.
 

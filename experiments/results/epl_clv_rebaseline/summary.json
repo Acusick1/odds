@@ -56,7 +56,7 @@
       "reg_lambda": 0.011077056227236738
     },
     "tuning_range_cv_mse": 0.0007085279095917941,
-    "tune_seconds": 155.9
+    "tune_seconds": 153.9
   },
   "overall": {
     "events": 650,

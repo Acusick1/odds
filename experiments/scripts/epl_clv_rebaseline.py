@@ -51,6 +51,7 @@ from odds_analytics.training.tuner import apply_trial_params
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.snapshot_utils import extract_odds_from_snapshot
+from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
 
 OUTPUT_DIR = EXPERIMENTS_DIR / "results" / "epl_clv_rebaseline"
@@ -68,6 +69,7 @@ DAY_BEFORE_HOURS = 24.0
 # FDUK stamps its day-before snapshot 23 h before kick-off under British Summer Time and
 # 24 h otherwise; tuning-range rows run from 23.0 to 24.25 h.
 DAY_BEFORE_TOLERANCE_HOURS = 1.0
+LIVE_TWIN_PREFIX = "op_live_"
 EVAL_SEASONS = {"2024-25", "2025-26", "2026-27"}
 # Fields the re-baseline config may change from the #452 expanding cell's config.
 REBASELINE_DATA_FIELDS = {"end_date", "min_train_events"}
@@ -171,9 +173,28 @@ async def load_events() -> pd.DataFrame:
     df["commence_time"] = pd.to_datetime(df["commence_time"], utc=True)
     df["season"] = df["commence_time"].map(season_of)
     df["scored"] = df["home_score"].notna() & df["away_score"].notna()
-    # Live-collected events can have a twin under another ID for the same match.
-    df["match"] = list(zip(df["home_team"], df["away_team"], df["commence_time"], strict=True))
+    df["match"] = match_ids(df)
     return df
+
+
+def match_ids(events: pd.DataFrame) -> pd.Series:
+    """One ID per match: same teams, kick-offs within the twin-adoption window.
+
+    Live-collected events can have a twin under another event ID for the same match;
+    ``OddsWriter.EVENT_MATCH_WINDOW`` is the window adoption matches twins within.
+    """
+    window = pd.Timedelta(OddsWriter.EVENT_MATCH_WINDOW)
+    ids = pd.Series(0, index=events.index)
+    next_id = 0
+    ordered = events.sort_values("commence_time")
+    for _, group in ordered.groupby(["home_team", "away_team"], sort=False):
+        start: pd.Timestamp | None = None
+        for eid, kickoff in group["commence_time"].items():
+            if start is None or kickoff - start > window:
+                next_id += 1
+                start = kickoff
+            ids[eid] = next_id
+    return ids
 
 
 def check_tuning_rows(day_before: CellData, production: CellData, n_tuning_rows: int) -> None:
@@ -190,28 +211,30 @@ def check_tuning_rows(day_before: CellData, production: CellData, n_tuning_rows:
         raise ValueError("day-before sampler changes tuning-range targets")
 
 
-def canonical_first(event_id: str) -> tuple[bool, str]:
-    """Sort key putting the ID that ``OddsWriter.adopt_live_twins`` keeps first.
-
-    Adoption merges an ``op_live_`` twin into the Odds API event, so a scraped-source
-    ID (``op_``, ``fduk_``) ranks after an Odds API ID.
-    """
-    return (event_id.startswith(("op_", "fduk_")), event_id)
-
-
 def dedupe_matches(data: CellData, events: pd.DataFrame) -> tuple[CellData, dict[str, str]]:
-    """Keep one row per match; return the kept data and each dropped twin's kept ID."""
-    row_events = list(dict.fromkeys(data.event_ids))
+    """Keep one row per match; return the kept data and each dropped twin's kept ID.
+
+    Of an ``op_live_`` twin and another ID, the other is kept, as
+    ``OddsWriter.adopt_live_twins`` keeps the Odds API event. Any other duplicate raises.
+    """
+    row_events = list(data.event_ids)
     match = events.loc[row_events, "match"]
-    kept: dict[Any, str] = {}
-    for eid in sorted(row_events, key=canonical_first):
+    kept: dict[int, str] = {}
+    for eid in sorted(row_events, key=lambda e: (e.startswith(LIVE_TWIN_PREFIX), e)):
         kept.setdefault(match[eid], eid)
     dropped = {eid: kept[match[eid]] for eid in row_events if kept[match[eid]] != eid}
+    if any(not eid.startswith(LIVE_TWIN_PREFIX) for eid in dropped):
+        raise ValueError(f"duplicate match not explained by an op_live_ twin: {dropped}")
     keep = ~np.isin(data.event_ids, list(dropped))
     return (
         CellData(data.X[keep], data.y[keep], data.feature_names, data.event_ids[keep]),
         dropped,
     )
+
+
+def collection(source: pd.Series) -> np.ndarray:
+    """FDUK rows against rows from live-collected snapshots."""
+    return np.where(source == "football_data_uk", "fduk", "live")
 
 
 def slice_rows(data: CellData, n: int) -> CellData:
@@ -304,11 +327,10 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
 
     if len(set(data.event_ids)) != len(data.event_ids):
         raise ValueError("expected one decision row per event")
-    # A match with rows under two event IDs (live twins) is counted once.
+    # A match with rows under two event IDs (live twins) is counted once. The tuning
+    # range has no twins, so check_tuning_rows below compares undeduped production rows.
     data, twins = dedupe_matches(data, events)
-    row_events = list(dict.fromkeys(data.event_ids))
-    if len(row_events) != len(data.event_ids):
-        raise ValueError("expected one decision row per event")
+    row_events = list(data.event_ids)
     row_times = events.loc[row_events, "commence_time"]
     if not row_times.is_monotonic_increasing:
         raise ValueError("rows are not in chronological order")
@@ -389,7 +411,9 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
     )
     counts["production_sampler_rows"] = prod_eval.value_counts().reindex(counts.index)
     by_reason = losses.groupby(["season", "reason"]).size().unstack(fill_value=0)
-    counts = counts.join(by_reason.add_prefix("lost: ")).fillna(0)
+    counts = counts.join(by_reason.add_prefix("lost: "))
+    count_cols = [c for c in counts.columns if c != "rows_per_event"]
+    counts[count_cols] = counts[count_cols].fillna(0).astype(int)
     counts.index.name = "season"
     print(counts.to_string())
 
@@ -430,7 +454,7 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
     verdict = keep_test(overall)
 
     table = [{"slice": "all", "group": "all", **overall}]
-    oof["collection"] = np.where(oof["source"] == "football_data_uk", "fduk", "live")
+    oof["collection"] = collection(oof["source"])
     for slice_col in ("season", "sharp_bookmaker", "source", "collection"):
         for group, sub in oof.groupby(slice_col):
             table.append(
@@ -475,7 +499,7 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
                 **compare(tail, unscored_tail, n_resamples, bootstrap_seed),
             }
         )
-        tail["collection"] = np.where(tail["source"] == "football_data_uk", "fduk", "live")
+        tail["collection"] = collection(tail["source"])
         for group, sub in tail.groupby("collection"):
             table.append(
                 {
