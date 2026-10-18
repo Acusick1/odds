@@ -20,7 +20,7 @@ status: stable
 
 # Configuration (Settings)
 
-`odds_core.config` is authoritative for every setting and default. `odds_core.config.Settings` composes one `BaseSettings` class per concern; `odds_core.config.get_settings()` returns a cached instance and `odds_core.config.reset_settings_cache()` clears it. `.env.example` is the variable template. The `project_root` field of `odds_core.config.Settings` is the repo root derived from the file location. To add a field, see [Set up and run locally](howto-add-setting.md).
+`odds_core.config` is authoritative for every setting and default (including the per-job heartbeat hours, which allow for each job's overnight pause, and the default bootstrap job list), apart from the per-sport Polymarket identifiers in `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`. `odds_core.config.Settings` composes one `BaseSettings` class per concern; `odds_core.config.get_settings()` returns a cached instance and `odds_core.config.reset_settings_cache()` clears it. `.env.example` is the variable template. The `project_root` field of `odds_core.config.Settings` is the repo root derived from the file location. To add a field, see [Set up and run locally](howto-add-setting.md).
 
 Model and feature settings (`target_type`, `sharp_bookmakers`) are not here: they live in the training YAML ([Training config](../modelling/training-config.md)).
 
@@ -35,15 +35,15 @@ Model and feature settings (`target_type`, `sharp_bookmakers`) are not here: the
 | `aws` | `odds_core.config.AWSConfig` | `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX` | [Scheduler backends](../scheduling/scheduler-backends.md) |
 | `model` | `odds_core.config.ModelConfig` | `MODEL_NAME`, `MODEL_BUCKET` | [Model store](../modelling/model-store.md) |
 | `data_quality` | `odds_core.config.DataQualityConfig` | `ENABLE_VALIDATION`, `REJECT_INVALID_ODDS` (bare); `enable_validation` is read only by `odds_lambda.ingestion.OddsIngestionService.ingest_sport`, whose `validate` argument overrides it; `reject_invalid_odds` is read by nothing (#448) | [Odds validation](../storage/odds-validator.md) |
-| `alerts` | `odds_core.config.AlertConfig` | `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED`, thresholds, `HEARTBEAT_EXPECTATIONS` (bare) | [Alerts](../operations/alerts.md) |
+| `alerts` | `odds_core.config.AlertConfig` | `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED`, thresholds, `HEARTBEAT_EXPECTATIONS` (bare, hours per job, 2 to 26 by default) | [Alerts](../operations/alerts.md) |
 | `logging` | `odds_core.config.LoggingConfig` | `LOG_LEVEL`, `LOG_FILE` | [Code conventions](code-conventions.md#logging) |
-| `polymarket`, `betfair` | `odds_core.config.PolymarketConfig`, `odds_core.config.BetfairConfig` | `POLYMARKET_*`, `BETFAIR_*` | [Polymarket](../collection/polymarket.md), [Betfair Exchange](../collection/betfair-exchange.md) |
+| `polymarket`, `betfair` | `odds_core.config.PolymarketConfig`, `odds_core.config.BetfairConfig` | `POLYMARKET_*`, `BETFAIR_*` | [Polymarket](../collection/polymarket.md) (series and tag IDs are per sport in `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`, not settings), [Betfair Exchange](../collection/betfair-exchange.md) |
 
 Eight sections carry an env prefix and three are bare (`SPORTS`, `ALERT_ENABLED`, `HEARTBEAT_EXPECTATIONS` as raw JSON).
 
 ## List fields and the template
 
-List fields (`SPORTS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are parsed as JSON arrays, and `BOOKMAKERS` as a JSON object of sport key to bookmaker list that replaces the whole default map. `.env.example` writes the lists comma-separated and sets `SPORTS=basketball_nba`, so copying it unchanged makes `odds_core.config.get_settings()` raise `SettingsError` on `sports` (#444). The code default for `SCHEDULER_BOOTSTRAP_JOBS` is `odds_core.config.SchedulerConfig`'s: the production job set, with `agent-run` and `daily-digest` commented out ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
+List fields (`SPORTS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are parsed as JSON arrays, and `BOOKMAKERS` as a JSON object of sport key to bookmaker list that replaces the whole default map. `.env.example` writes the lists comma-separated and sets `SPORTS=basketball_nba`, so copying it unchanged makes `odds_core.config.get_settings()` raise `SettingsError` on `sports` (#444). The code default for `SCHEDULER_BOOTSTRAP_JOBS` is `odds_core.config.SchedulerConfig`'s: the production job set (without `fetch-polymarket-odds`, which is registered but opt-in), with `agent-run` and `daily-digest` commented out ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
 
 ## Read at import
 

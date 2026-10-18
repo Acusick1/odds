@@ -380,13 +380,12 @@ class TestHealthMonitor:
         """Should flag jobs with old heartbeats."""
         monitor = HealthMonitor(mock_session, mock_settings)
 
-        # Mock query: heartbeat from 5 hours ago (exceeds 2h threshold)
+        # Mock query: heartbeat from 30 hours ago (exceeds every expectation)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(hours=5)
+        mock_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(hours=30)
         mock_session.execute.return_value = mock_result
 
         with patch.object(monitor, "_send_alert", return_value=True):
             issues = await monitor.check_job_heartbeats()
 
-        # All hourly jobs should be flagged (2h threshold), daily job may or may not
-        assert len(issues) >= 3  # At least the 3 hourly jobs
+        assert len(issues) == len(mock_settings.alerts.heartbeat_expectations)

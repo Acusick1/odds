@@ -37,6 +37,22 @@ def decimal_to_american(decimal_odds: float) -> int:
     return int(-100 / (decimal_odds - 1))
 
 
+def probability_to_american(probability: float) -> int:
+    """Convert a probability strictly between 0 and 1 to the nearest American price.
+
+    Examples:
+        >>> probability_to_american(0.6)
+        -150
+        >>> probability_to_american(0.25)
+        300
+    """
+    if not 0.0 < probability < 1.0:
+        raise ValueError(f"probability must be in (0, 1), got {probability}")
+    if probability <= 0.5:
+        return round(100 * (1 - probability) / probability)
+    return round(-100 * probability / (1 - probability))
+
+
 def calculate_implied_probability(american_odds: int) -> float:
     """Implied probability (0-1) from American odds.
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import structlog
+from odds_core.bookmakers import ZERO_MARGIN_BOOKMAKERS
 from odds_core.time import parse_api_datetime
 
 logger = structlog.get_logger()
@@ -20,16 +21,6 @@ class OddsValidator:
     MAX_VIG_PERCENT = 15.0  # Maximum reasonable vig/juice
     MAX_SPREAD_MOVEMENT = 10.0  # Maximum point spread change
     MAX_TOTAL_MOVEMENT = 20.0  # Maximum total points change
-
-    # Exchange bookmakers legitimately operate near 0% vig, so the vig floor
-    # check is skipped for them. These are The Odds API / production keys,
-    # distinct from the OddsPortal display-name mapping in oddsportal_common.py.
-    EXCHANGE_BOOKMAKERS: set[str] = {
-        "betfair_exchange",
-        "betdaq",
-        "smarkets",
-        "matchbook",
-    }
 
     @staticmethod
     def american_to_probability(odds: int) -> float:
@@ -212,7 +203,7 @@ class OddsValidator:
                     f"{bookmaker} {market}: Negative vig ({vig_percent:.2f}%), "
                     "possible arbitrage or data error"
                 )
-            elif bookmaker not in cls.EXCHANGE_BOOKMAKERS and vig_percent < cls.MIN_VIG_PERCENT:
+            elif bookmaker not in ZERO_MARGIN_BOOKMAKERS and vig_percent < cls.MIN_VIG_PERCENT:
                 warnings.append(
                     f"{bookmaker} {market}: Vig too low ({vig_percent:.2f}%), "
                     "possible arbitrage or data error"

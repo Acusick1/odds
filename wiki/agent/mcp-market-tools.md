@@ -45,7 +45,7 @@ Reads stored `predictions` rows newest first; it does not run the model. `total_
 
 ## Retail edges
 
-`odds_mcp.server.find_retail_edges` ranks retail books that price an outcome longer than the sharp reference ([sharp benchmark](../modelling/sharp-benchmark.md)).
+`odds_mcp.server.find_retail_edges` ranks retail books that price an outcome longer than the sharp reference ([sharp benchmark](../modelling/sharp-benchmark.md)). Books in `sharp_bookmakers` and in `odds_core.bookmakers.NON_BETTABLE_BOOKMAKERS` (Pinnacle and `polymarket`, which a UK bettor cannot use) are never retail rows. Exchanges are retail rows unless the sharp list names them.
 
 Inputs: `event_id`, `market` (`h2h`, `1x2`, `totals`, `spreads`), `sharp_bookmakers` (list, JSON-array string or comma string; default `["pinnacle", "betfair_exchange"]`), `sharp_lookback_hours=2.0`, `lookback_hours=2.0` (retail).
 

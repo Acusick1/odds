@@ -27,14 +27,14 @@ Collected by jobs or ingestion scripts into the database and available through [
 |---|---|---|---|
 | OddsPortal | UK multi-bookmaker odds (`odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP`), upcoming and closing | Self-scheduling by kickoff proximity (`odds_lambda.jobs.fetch_oddsportal.CADENCE`) | [OddsPortal](../collection/oddsportal-scraper.md) |
 | Betfair Exchange | Best back/lay Match Odds, the sharp reference | Self-scheduling by kickoff proximity (`odds_lambda.jobs.fetch_betfair_exchange.CADENCE`) | [Betfair](../collection/betfair-exchange.md) |
-| The Odds API | US bookmaker odds | Self-scheduling by fetch tier, EPL only (`odds_lambda.scheduling.jobs._JOB_SPORTS`); 500 units per month per free key (the only quota that is a code default, `odds_core.config.APIConfig`; a paid key changes it) | [Odds API quota](../collection/odds-api-quota.md) |
+| The Odds API | US bookmaker odds | Self-scheduling by fetch tier, EPL only (its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist); 500 units per month per free key (the only quota that is a code default, `odds_core.config.APIConfig`; a paid key changes it) | [Odds API quota](../collection/odds-api-quota.md) |
 | football-data.co.uk | Historical EPL opening and closing `1x2` odds from Pinnacle, Betfair Exchange and UK retail books | Manual script | [historical loads](../collection/historical-ingest-scripts.md) |
 | ESPN fixtures | All-competition EPL schedule | Daily job (cron in `_JOB_CRON_MAP`) | [EPL context](../collection/epl-context-data.md) |
 | ESPN lineups | Starting XIs | Manual script | [EPL context](../collection/epl-context-data.md) |
 | MLB Stats API | Probable pitchers | Daily job | [MLB pitchers](../collection/mlb-probable-pitchers.md) |
-| Polymarket | Volume, order book depth, imbalance, price velocity | Pipeline built, deprioritized | [Polymarket](../collection/polymarket.md) |
+| Polymarket | EPL 1X2 midpoints as `polymarket` snapshots at 5 min to 1 h spacing; NBA volume, order book depth, imbalance, price velocity | EPL: opt-in job, self-scheduling by kickoff proximity once bootstrapped (`odds_lambda.jobs.fetch_polymarket_odds.CADENCE`); NBA: built, deprioritized | [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md), [Polymarket](../collection/polymarket.md) |
 
-The cadence column summarises code; the `odds_lambda.jobs.fetch_oddsportal.CADENCE` and `odds_lambda.scheduling.jobs._JOB_CRON_MAP` values are authoritative. Every scheduled collector runs on the mini-PC; the ESPN and MLB collectors are daily crons. The Betfair `*/30` cron floor is replaced by self-scheduling once the first self-schedule runs ([local scheduler](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)). ESPN is still used in the pipeline for fixtures (`odds_lambda.espn_fixture_fetcher.EspnFixtureFetcher`) and a manual lineup ingestion script exists (`scripts/ingest_espn_lineups.py`); the lineup rejection below applies to lineup timing for the agent, not to those feeds. The [pipeline-side view](../collection/data-sources.md) of the same feeds lists every bookmaker and key.
+The cadence column summarises code; the `odds_lambda.jobs.fetch_oddsportal.CADENCE` and `odds_lambda.scheduling.jobs._JOB_CRON_MAP` values are authoritative. Every scheduled collector runs on the mini-PC; the ESPN and MLB collectors are daily crons, and the `fetch-betfair-exchange` `*/30` cron floor is replaced by self-scheduling once the first self-schedule runs ([local scheduler](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)). ESPN is still used in the pipeline for fixtures (`odds_lambda.espn_fixture_fetcher.EspnFixtureFetcher`) and a manual lineup ingestion script exists (`scripts/ingest_espn_lineups.py`); the lineup rejection below applies to lineup timing for the agent, not to those feeds. `fetch-polymarket-odds` is opt-in and has no schedule, cron or otherwise, while it is not in `bootstrap_jobs`. The [pipeline-side view](../collection/data-sources.md) of the same feeds lists every bookmaker and key.
 
 ## On-demand research
 
@@ -62,7 +62,7 @@ Not collected on a schedule; the agent searches and browses these each wake-up w
 | API-Football | Free tier blocks current-season fixture lookup (2022-2024 only) and the lineups endpoint needs the gated fixture ids; Pro plan about $20 per month |
 | football-data.org | A different site from football-data.co.uk; lineups cost €29 per month and timing is undocumented |
 | ESPN API (for lineups) | Lineups appear around KO-60 but non-monotonically (present at KO-60, gone by KO-45 in a 2026-04-14 Champions League test; nothing at KO-59 in a 2026-04-13 EPL test); 403 from cloud and datacenter IPs |
-| Polymarket | EPL volume thin ($10-100K per match) and AMM-driven, so the book reflects maker parameters, not public sentiment; UK trading is blocked. See [Polymarket](../collection/polymarket.md) and [ADR-0007](../../docs/adr/0007-deprioritise-polymarket.md) |
+| Polymarket (as a sentiment source) | The EPL book tracks Betfair Exchange within 0.35-0.5 pp ([#518](https://github.com/Acusick1/odds/issues/518)), so it adds a price reference, not independent sentiment; UK trading is blocked. See [Polymarket](../collection/polymarket.md) and [ADR-0007](../../docs/adr/0007-deprioritise-polymarket.md) |
 
 ### Lineup sourcing (2026-04-13)
 

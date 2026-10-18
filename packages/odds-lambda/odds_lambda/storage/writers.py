@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from odds_core.event_ids import LIVE_EVENT_ID_PREFIX
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 from odds_core.team import normalize_team_name, team_abbrev
 from odds_core.time import ensure_utc, parse_api_datetime
@@ -21,7 +22,6 @@ logger = structlog.get_logger()
 class OddsWriter:
     """Handles all write operations to the database."""
 
-    LIVE_EVENT_ID_PREFIX = "op_live_"
     LIVE_EVENT_STALE_THRESHOLD = timedelta(hours=1)
     EVENT_MATCH_WINDOW = timedelta(hours=2)
 
@@ -88,7 +88,7 @@ class OddsWriter:
         home_abbrev = team_abbrev(home_team)
         away_abbrev = team_abbrev(away_team)
         date_str = match_date.strftime("%Y-%m-%dT%H%M")
-        return f"{OddsWriter.LIVE_EVENT_ID_PREFIX}{home_abbrev}_{away_abbrev}_{date_str}"
+        return f"{LIVE_EVENT_ID_PREFIX}{home_abbrev}_{away_abbrev}_{date_str}"
 
     async def find_or_create_event(
         self,
@@ -132,7 +132,7 @@ class OddsWriter:
                 date=match_date.isoformat(),
                 count=len(candidates),
             )
-            canonical = [c for c in candidates if not c.startswith(self.LIVE_EVENT_ID_PREFIX)]
+            canonical = [c for c in candidates if not c.startswith(LIVE_EVENT_ID_PREFIX)]
             return (canonical or candidates)[0], False
 
         # Create new event
@@ -143,7 +143,7 @@ class OddsWriter:
         if existing:
             return event_id, False
 
-        if event_id.startswith(self.LIVE_EVENT_ID_PREFIX):
+        if event_id.startswith(LIVE_EVENT_ID_PREFIX):
             stale_cutoff = datetime.now(UTC) - self.LIVE_EVENT_STALE_THRESHOLD
             if ensure_utc(match_date) < stale_cutoff:
                 raise ValueError(
@@ -182,14 +182,14 @@ class OddsWriter:
         """
         adopted = 0
         for api_event in events:
-            if api_event.id.startswith(self.LIVE_EVENT_ID_PREFIX):
+            if api_event.id.startswith(LIVE_EVENT_ID_PREFIX):
                 continue
 
             commence = ensure_utc(api_event.commence_time)
             result = await self.session.execute(
                 select(Event).where(
                     and_(
-                        Event.id.startswith(self.LIVE_EVENT_ID_PREFIX, autoescape=True),
+                        Event.id.startswith(LIVE_EVENT_ID_PREFIX, autoescape=True),
                         Event.sport_key == api_event.sport_key,
                         Event.home_team == api_event.home_team,
                         Event.away_team == api_event.away_team,

@@ -17,13 +17,13 @@ status: stable
 
 # The fetch-odds job
 
-`odds_lambda.jobs.fetch_odds.main(ctx)` is the scheduled caller of [the ingestion service](odds-ingestion-service.md). It is in the default local `bootstrap_jobs` and runs on the mini-PC as `fetch-odds-epl`: the `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist limits it to EPL to save Odds API quota ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs), [odds-api-quota](odds-api-quota.md)). Its AWS rule is dormant.
+`odds_lambda.jobs.fetch_odds.main(ctx)` is the scheduled caller of [the ingestion service](odds-ingestion-service.md). It is in the default local scheduler `bootstrap_jobs` and runs on the mini-PC as `fetch-odds-epl`: its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist limits it to EPL to save Odds API quota ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs), [odds-api-quota](odds-api-quota.md)). Its AWS rule is dormant.
 
 ## Flow
 
 It runs `sports` as `[ctx.sport]` or `data_collection.sports`:
 
-1. **Event sync**: `odds_lambda.event_sync.EventSyncService.sync_sports` calls the free `/events` endpoint and bulk-upserts events, then merges any `op_live_` twin of each synced event into it (`odds_lambda.storage.writers.OddsWriter.adopt_live_twins`); a failure is logged (`event_sync_failed`) and ignored. It runs on every invocation, before the gate, so `odds_lambda.scheduling.helpers.get_next_kickoff` sees fixtures. `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` overwrites status and scores of existing events ([events](../storage/events.md), #440).
+1. **Event sync**: `odds_lambda.event_sync.EventSyncService.sync_sports` calls the free `/events` endpoint and bulk-upserts events, then merges any `op_live_`-prefixed twin of each synced event into it (`odds_lambda.storage.writers.OddsWriter.adopt_live_twins`); a failure is logged (`event_sync_failed`) and ignored. It runs on every invocation, before the gate, so `odds_lambda.scheduling.helpers.get_next_kickoff` sees fixtures. `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` overwrites status and scores of existing events ([events](../storage/events.md), #440).
 2. **Gate**: `decide_forward_resilient(sports, CADENCE, lookahead_days=settings.scheduler.lookahead_days)`. The cadence is `odds_lambda.jobs.fetch_odds.CADENCE` ([decision-engine](../scheduling/decision-engine.md#cadence)). fetch-odds is the only job that takes `lookahead_days` from `odds_core.config.SchedulerConfig`, and it has no overnight window.
 3. **Pre-schedule** under the compound name, then return if the gate says skip.
 4. **Ingest**: `odds_lambda.ingestion.OddsIngestionService.ingest_sports`.

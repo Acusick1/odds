@@ -10,6 +10,7 @@ import structlog
 from odds_core.sports import SportKey
 
 from odds_lambda.betfair.constants import SPORT_CONFIG as BETFAIR_SPORT_CONFIG
+from odds_lambda.polymarket_sports import MATCH_ODDS_SPORTS
 
 logger = structlog.get_logger()
 
@@ -70,6 +71,7 @@ _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
     "agent-run": ("odds_lambda.jobs.agent_run", "main"),
     "fetch-espn-fixtures": ("odds_lambda.jobs.fetch_espn_fixtures", "main"),
     "fetch-betfair-exchange": ("odds_lambda.jobs.fetch_betfair_exchange", "main"),
+    "fetch-polymarket-odds": ("odds_lambda.jobs.fetch_polymarket_odds", "main"),
     "fetch-mlb-probables": ("odds_lambda.jobs.fetch_mlb_probables", "main"),
 }
 
@@ -113,6 +115,7 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
         "agent-run",
         "fetch-espn-fixtures",
         "fetch-betfair-exchange",
+        "fetch-polymarket-odds",
         "fetch-mlb-probables",
     }
 )
@@ -127,6 +130,9 @@ _JOB_CRON_MAP: dict[str, str] = {
     # cadence near kickoff; this cron is the safety floor that catches
     # cold-start gaps and backfills if self-scheduling stalls.
     "fetch-betfair-exchange": "*/30 * * * *",
+    # Polymarket match prices. The cron starts the chain; the job's first
+    # self-schedule replaces it (same schedule id).
+    "fetch-polymarket-odds": "*/15 * * * *",
     # MLB probable pitchers — once daily at 06:00 UTC. Backstop only:
     # the MCP ``get_probable_pitchers`` tool writes through every call.
     "fetch-mlb-probables": "0 6 * * *",
@@ -144,6 +150,7 @@ _JOB_SPORTS: dict[str, tuple[SportKey, ...]] = {
     # Allowlist derived from the BFE adapter's supported-sports map so adding
     # a new sport requires only a SPORT_CONFIG entry.
     "fetch-betfair-exchange": tuple(BETFAIR_SPORT_CONFIG),
+    "fetch-polymarket-odds": MATCH_ODDS_SPORTS,
     "fetch-mlb-probables": ("baseball_mlb",),
     # Odds API quota is spent on EPL only.
     "fetch-odds": ("soccer_epl",),

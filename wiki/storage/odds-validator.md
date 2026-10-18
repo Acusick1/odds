@@ -29,7 +29,7 @@ status: stable
 - Bookmaker `last_update` in the future or unparseable.
 - Markets with no outcomes.
 - Each outcome price: non-numeric, or outside `MIN_ODDS`..`MAX_ODDS` (-10000 to 10000) via `odds_lambda.storage.validators.OddsValidator.validate_odds_value`.
-- For two-outcome `h2h`/`spreads`/`totals` markets, `odds_lambda.storage.validators.OddsValidator.validate_vig`: vig above `MAX_VIG_PERCENT` (15), negative, or below `MIN_VIG_PERCENT` (2). The floor is skipped for `EXCHANGE_BOOKMAKERS` (betfair_exchange, betdaq, smarkets, matchbook). Vig warnings do not affect `is_valid`.
+- For two-outcome `h2h`/`spreads`/`totals` markets, `odds_lambda.storage.validators.OddsValidator.validate_vig`: vig above `MAX_VIG_PERCENT` (15), negative, or below `MIN_VIG_PERCENT` (2). The floor is skipped for `odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS`: the exchanges (betfair_exchange, betdaq, smarkets, matchbook) in `odds_core.bookmakers.EXCHANGE_BOOKMAKERS` and `polymarket`. Vig warnings do not affect `is_valid`.
 
 `odds_lambda.storage.validators.OddsValidator.validate_line_movement` (spread over 10, total over 20 points) and `odds_lambda.storage.validators.OddsValidator.validate_event_data` (required fields) have no caller outside tests (#448). `odds_lambda.storage.validators.OddsValidator.american_to_probability` computes implied probability itself rather than calling the core helper (#463; [Odds arithmetic helpers](../foundations/odds-math.md#conversion-copies)).
 

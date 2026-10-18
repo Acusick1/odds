@@ -41,7 +41,7 @@ These apply only if the dormant scraper Lambda runs again.
 
 ## Heartbeats
 
-Heartbeats are keyed `heartbeat:fetch-oddsportal-<sport>`; both sports have 2 h expectations in `odds_core.config.AlertConfig.heartbeat_expectations` ([alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
+Heartbeats are keyed `heartbeat:fetch-oddsportal-<sport>`; both sports have entries (11 h EPL, 12 h MLB, covering the overnight window) in `odds_core.config.AlertConfig.heartbeat_expectations` ([alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
 
 ## Related
 

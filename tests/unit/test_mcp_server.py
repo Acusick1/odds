@@ -802,6 +802,31 @@ class TestFindRetailEdges:
                 }
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("reference", ["polymarket", "pinnacle"])
+    async def test_unbettable_books_never_appear_as_retail(self, reference: str) -> None:
+        odds = [
+            self._make_odds("bet365", "Arsenal", -105),
+            self._make_odds("bet365", "Chelsea", -115),
+            self._make_odds(reference, "Arsenal", 150),
+            self._make_odds(reference, "Chelsea", 150),
+        ]
+        reader = self._mock_reader(
+            sharp_result=self._make_sharp_result(
+                {
+                    "Arsenal": {"bookmaker": "other", "price": -110, "implied_prob": 0.524},
+                    "Chelsea": {"bookmaker": "other", "price": -110, "implied_prob": 0.524},
+                }
+            )
+        )
+
+        result = await self._call(odds, reader)
+
+        books = {e["best_retail"]["book"] for e in result["per_outcome"]} | {
+            e["book"] for e in result["retail_edges"]
+        }
+        assert books == {"bet365"}
+
+    @pytest.mark.asyncio
     async def test_sign_convention_negative_divergence_longer_than_sharp(self) -> None:
         # midnite prices Arsenal *longer* than sharp → negative divergence, lands in retail_edges.
         odds = [

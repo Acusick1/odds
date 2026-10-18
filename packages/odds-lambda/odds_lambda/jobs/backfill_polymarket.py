@@ -229,7 +229,9 @@ async def _fetch_all_closed_events(client: PolymarketClient) -> list[dict]:
     limit = 100
 
     while True:
-        events = await client.get_nba_events(active=False, closed=True, limit=limit, offset=offset)
+        events = await client.get_events(
+            "basketball_nba", active=False, closed=True, limit=limit, offset=offset
+        )
 
         if not events:
             # Empty response means we've exhausted pagination

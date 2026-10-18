@@ -224,9 +224,11 @@ class AlertConfig(BaseSettings):
     # Keys are compound job names matching EventBridge rules (e.g. "fetch-oddsportal-epl").
     heartbeat_expectations: dict[str, float] = Field(
         default={
-            "fetch-oddsportal-epl": 2,
+            # Overnight windows (EPL 22-06 UTC, MLB 05-14 UTC) pause these jobs, so the
+            # allowed gap is the window plus the polling interval.
+            "fetch-oddsportal-epl": 11,
             "fetch-oddsportal-results-epl": 26,
-            "fetch-oddsportal-mlb": 2,
+            "fetch-oddsportal-mlb": 12,
             "fetch-oddsportal-results-mlb": 26,
             "check-health": 2,
         },
@@ -253,8 +255,6 @@ class PolymarketConfig(BaseSettings):
     clob_base_url: str = Field(
         default="https://clob.polymarket.com", description="CLOB API base URL"
     )
-    nba_series_id: str = Field(default="10345", description="NBA series tag ID")
-    game_tag_id: str = Field(default="100639", description="NBA game tag ID")
     enabled: bool = Field(default=True, description="Enable Polymarket data collection")
 
     # Polling intervals (seconds)

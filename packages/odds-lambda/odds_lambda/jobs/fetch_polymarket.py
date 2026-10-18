@@ -114,7 +114,7 @@ async def main(ctx: JobContext) -> None:
 
             # Discover active NBA events from Gamma API
             logger.info("discovering_active_polymarket_events")
-            events_data = await client.get_nba_events(active=True, closed=False)
+            events_data = await client.get_events("basketball_nba", active=True, closed=False)
 
             if not events_data:
                 logger.info(

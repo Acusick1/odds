@@ -192,13 +192,13 @@ class TestFetchAllClosedEvents:
     async def test_single_page_returns_all_events(self, mock_polymarket_client, sample_event_data):
         """Single page with fewer results than limit returns all events."""
         # Return fewer than 100 events (stops pagination)
-        mock_polymarket_client.get_nba_events.return_value = [sample_event_data]
+        mock_polymarket_client.get_events.return_value = [sample_event_data]
 
         events = await backfill_polymarket._fetch_all_closed_events(mock_polymarket_client)
 
         assert len(events) == 1
         assert events[0]["id"] == "event-123"
-        mock_polymarket_client.get_nba_events.assert_called_once()
+        mock_polymarket_client.get_events.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_multiple_pages_accumulates_events(self, mock_polymarket_client):
@@ -207,7 +207,7 @@ class TestFetchAllClosedEvents:
         first_page = [{"id": f"event-{i}", "markets": []} for i in range(100)]
         second_page = [{"id": f"event-{i}", "markets": []} for i in range(100, 150)]
 
-        mock_polymarket_client.get_nba_events.side_effect = [
+        mock_polymarket_client.get_events.side_effect = [
             first_page,  # First page (full)
             second_page,  # Second page (partial - stops pagination)
         ]
@@ -215,23 +215,23 @@ class TestFetchAllClosedEvents:
         events = await backfill_polymarket._fetch_all_closed_events(mock_polymarket_client)
 
         assert len(events) == 150
-        assert mock_polymarket_client.get_nba_events.call_count == 2
+        assert mock_polymarket_client.get_events.call_count == 2
 
     @pytest.mark.asyncio
     async def test_empty_first_response_returns_empty(self, mock_polymarket_client):
         """Empty first response returns empty list immediately."""
-        mock_polymarket_client.get_nba_events.return_value = []
+        mock_polymarket_client.get_events.return_value = []
 
         events = await backfill_polymarket._fetch_all_closed_events(mock_polymarket_client)
 
         assert events == []
-        mock_polymarket_client.get_nba_events.assert_called_once()
+        mock_polymarket_client.get_events.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_pagination_stops_on_empty_response(self, mock_polymarket_client):
         """Pagination stops when empty list is returned."""
         first_page = [{"id": f"event-{i}", "markets": []} for i in range(100)]
-        mock_polymarket_client.get_nba_events.side_effect = [
+        mock_polymarket_client.get_events.side_effect = [
             first_page,
             [],  # Empty response - stops pagination
         ]
@@ -239,7 +239,7 @@ class TestFetchAllClosedEvents:
         events = await backfill_polymarket._fetch_all_closed_events(mock_polymarket_client)
 
         assert len(events) == 100
-        assert mock_polymarket_client.get_nba_events.call_count == 2
+        assert mock_polymarket_client.get_events.call_count == 2
 
 
 class TestMainIntegration:
@@ -306,7 +306,7 @@ class TestMainIntegration:
             patch("odds_lambda.jobs.backfill_polymarket.get_settings") as mock_get_settings,
         ):
             mock_client_class.return_value = mock_polymarket_client
-            mock_polymarket_client.get_nba_events.return_value = [sample_event_data]
+            mock_polymarket_client.get_events.return_value = [sample_event_data]
             mock_polymarket_client.get_price_history.return_value = [{"t": 1705339200, "p": "0.5"}]
 
             mock_session_ctx.return_value = mock_async_session
@@ -375,7 +375,7 @@ class TestMainIntegration:
             patch("odds_lambda.jobs.backfill_polymarket.get_settings") as mock_get_settings,
         ):
             mock_client_class.return_value = mock_polymarket_client
-            mock_polymarket_client.get_nba_events.return_value = [sample_event_data]
+            mock_polymarket_client.get_events.return_value = [sample_event_data]
             mock_polymarket_client.get_price_history.return_value = [{"t": 1705339200, "p": "0.5"}]
 
             mock_session_ctx.return_value = mock_async_session
@@ -447,7 +447,7 @@ class TestMainIntegration:
             patch("odds_lambda.jobs.backfill_polymarket.get_settings") as mock_get_settings,
         ):
             mock_client_class.return_value = mock_polymarket_client
-            mock_polymarket_client.get_nba_events.return_value = [event1, event2]
+            mock_polymarket_client.get_events.return_value = [event1, event2]
 
             mock_session_ctx.return_value = mock_async_session
 
@@ -495,7 +495,7 @@ class TestMainIntegration:
             patch("odds_lambda.jobs.backfill_polymarket.get_settings") as mock_get_settings,
         ):
             mock_client_class.return_value = mock_polymarket_client
-            mock_polymarket_client.get_nba_events.return_value = [sample_event_data]
+            mock_polymarket_client.get_events.return_value = [sample_event_data]
             mock_polymarket_client.get_price_history.return_value = [{"t": 1705339200, "p": "0.5"}]
 
             mock_session_ctx.return_value = mock_async_session
@@ -551,7 +551,7 @@ class TestMainIntegration:
             patch("odds_lambda.jobs.backfill_polymarket.get_settings") as mock_get_settings,
         ):
             mock_client_class.return_value = mock_polymarket_client
-            mock_polymarket_client.get_nba_events.return_value = [sample_event_data]
+            mock_polymarket_client.get_events.return_value = [sample_event_data]
             mock_polymarket_client.get_price_history.return_value = [{"t": 1705339200, "p": "0.5"}]
 
             mock_session_ctx.return_value = mock_async_session

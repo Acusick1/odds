@@ -15,6 +15,7 @@ import structlog
 from fastmcp import FastMCP
 from odds_analytics.utils import per_book_market_holds
 from odds_core.agent_wakeup_models import AgentWakeup
+from odds_core.bookmakers import NON_BETTABLE_BOOKMAKERS
 from odds_core.database import async_session_maker
 from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
@@ -981,7 +982,7 @@ async def find_retail_edges(
 
         event_dict = _event_to_dict(event)
 
-    sharp_set = set(sharp_bms)
+    sharp_set = set(sharp_bms) | NON_BETTABLE_BOOKMAKERS
 
     # Build per-(outcome, point) buckets of retail odds, dropping sharp books.
     # Each retail row carries provenance from its contributing snapshot.

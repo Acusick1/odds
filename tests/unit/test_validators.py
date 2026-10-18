@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+from odds_core.bookmakers import ZERO_MARGIN_BOOKMAKERS
 from odds_lambda.storage.validators import OddsValidator
 
 
@@ -99,7 +100,7 @@ class TestOddsValidator:
         # -102/-102: prob = 102/202 = 0.5050 each, total = 1.0099, vig = 0.99%
         for price in [-102, -103, -105]:
             outcomes = [{"price": price}, {"price": price}]
-            for bookmaker in OddsValidator.EXCHANGE_BOOKMAKERS:
+            for bookmaker in ZERO_MARGIN_BOOKMAKERS:
                 warnings = OddsValidator.validate_vig(outcomes, bookmaker, "totals")
                 assert len(warnings) == 0, (
                     f"Unexpected warning for {bookmaker} at {price}: {warnings}"

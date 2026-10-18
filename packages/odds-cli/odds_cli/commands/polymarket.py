@@ -1,8 +1,11 @@
 """Polymarket data operations commands."""
 
 import asyncio
+from datetime import UTC, datetime
+from typing import cast
 
 import typer
+from odds_core.sports import SportKey
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
@@ -117,6 +120,53 @@ async def _backfill_async(
     )
 
 
+@app.command("backfill-odds")
+def backfill_odds(
+    sport: str = typer.Option("soccer_epl", "--sport", help="Sport key with three-way markets"),
+    since: str = typer.Option("2025-08-01", "--since", help="Earliest kick-off (UTC date)"),
+    limit: int | None = typer.Option(None, "--limit", help="Backfill at most this many events"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Fetch and resample without writing"),
+):
+    """Store Polymarket price history as `polymarket` odds snapshots for finished events.
+
+    Reads events from DATABASE_URL and skips events that already have history
+    snapshots, so it is safe to rerun.
+    """
+    from odds_core.sports import SUPPORTED_SPORTS
+    from odds_lambda.polymarket_odds_backfill import backfill_sport
+
+    if sport not in SUPPORTED_SPORTS:
+        console.print(f"[red]Unknown sport {sport}; use one of {', '.join(SUPPORTED_SPORTS)}[/red]")
+        raise typer.Exit(1)
+    report = asyncio.run(
+        backfill_sport(
+            cast(SportKey, sport),
+            since=datetime.fromisoformat(since).replace(tzinfo=UTC),
+            limit=limit,
+            dry_run=dry_run,
+        )
+    )
+    table = Table(title="Polymarket odds backfill" + (" (dry run)" if dry_run else ""))
+    table.add_column("Metric")
+    table.add_column("Count", justify="right")
+    for name, value in (
+        ("Finished events", report.events_considered),
+        ("Paired with a Polymarket match", report.events_paired),
+        ("Skipped (already backfilled)", report.events_skipped_existing),
+        ("Skipped (twin of another event)", report.twin_events_skipped),
+        ("Events written", report.events_written),
+        ("Events with no usable points", report.events_without_points),
+        ("Snapshots written", report.snapshots_written),
+        ("Grid points dropped, missing prices", report.points_missing),
+        ("Grid points dropped, prices off sum", report.points_off_sum),
+        ("Events without a Polymarket match", len(report.unmatched_event_ids)),
+        ("Events with several Polymarket matches", len(report.ambiguous_event_ids)),
+        ("Polymarket matches without an event", len(report.unmatched_pm_tickers)),
+    ):
+        table.add_row(name, str(value))
+    console.print(table)
+
+
 @app.command("discover")
 def discover():
     """List active NBA events currently on Polymarket."""
@@ -137,7 +187,7 @@ async def _discover_async():
         task = progress.add_task("Fetching events from Gamma API...", total=None)
         try:
             async with PolymarketClient() as client:
-                events = await client.get_nba_events(active=True, closed=False)
+                events = await client.get_events("basketball_nba", active=True, closed=False)
             progress.update(task, completed=True)
         except Exception as e:
             progress.stop()

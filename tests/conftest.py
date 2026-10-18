@@ -486,3 +486,42 @@ def mock_polymarket_settings():
     mock = MagicMock()
     mock.polymarket.enabled = True
     return mock
+
+
+@pytest.fixture
+def gamma_event() -> Callable[..., dict[str, Any]]:
+    """Build a Gamma EPL match event with three Yes/No markets (home, draw, away).
+
+    ``quotes`` maps the market slug suffix to ``(bestBid, bestAsk)``; markets are
+    listed away, draw, home so tests cannot rely on order.
+    """
+
+    def build(
+        slug: str = "epl-bou-che-2025-12-06",
+        home: str = "AFC Bournemouth",
+        away: str = "Chelsea FC",
+        start: str = "2025-12-06T15:00:00Z",
+        quotes: dict[str, tuple[float | None, float | None]] | None = None,
+    ) -> dict[str, Any]:
+        quoted = quotes or {"che": (0.20, 0.22), "draw": (0.24, 0.26), "bou": (0.52, 0.54)}
+        return {
+            "id": "900",
+            "slug": slug,
+            "startTime": start,
+            "teams": [
+                {"name": home, "ordering": "home"},
+                {"name": away, "ordering": "away"},
+            ],
+            "markets": [
+                {
+                    "id": str(index),
+                    "slug": f"{slug}-{suffix}",
+                    "clobTokenIds": json.dumps([f"yes-{suffix}", f"no-{suffix}"]),
+                    "bestBid": bid,
+                    "bestAsk": ask,
+                }
+                for index, (suffix, (bid, ask)) in enumerate(quoted.items(), start=1)
+            ],
+        }
+
+    return build

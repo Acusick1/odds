@@ -54,7 +54,7 @@ Only `min_bet_size`, `max_bet_size` and `max_bet_percentage` of `odds_analytics.
 
 ## Settlement
 
-h2h and `1x2` moneylines (a draw wins only the Draw outcome when any odds in the snapshot are `1x2`, else it is a push), spreads and totals (a push is profit 0). An unknown market logs a warning and settles as `unknown` with 0 profit. Settlement uses `odds_core.odds_math` helpers ([odds arithmetic](../foundations/odds-math.md)).
+h2h and `1x2` moneylines (a draw wins only the Draw outcome when any odds in the snapshot are `1x2`, else it is a push), spreads and totals (a push is profit 0). An unknown market logs a warning and settles as `unknown` with 0 profit. Settlement uses the `odds_core.odds_math` winner and profit helpers ([odds arithmetic](../foundations/odds-math.md)).
 
 ## Metrics
 

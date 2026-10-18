@@ -20,7 +20,7 @@ Two tools in `packages/odds-mcp/odds_mcp/tools/`, each on its own `FastMCP` sub-
 
 ## Team context (EPL)
 
-`get_team_context(team, as_of=None, last_n=5, next_n=5, include_standings=True)` reads the `espn_fixtures` table (rows per team, refreshed daily by `fetch-espn-fixtures`, see [EPL context data](../collection/epl-context-data.md)). That job is a daily cron (`0 6 * * *` in `_JOB_CRON_MAP`) on the mini-PC's scheduler, so the tool goes stale whenever the job fails, as it does on ESPN's HTTP 400 (#486). `team` goes through `odds_core.team.normalize_team_name`; `as_of` defaults to now (a naive value is taken as UTC); `last_n` and `next_n` are floored at 1.
+`get_team_context(team, as_of=None, last_n=5, next_n=5, include_standings=True)` reads the `espn_fixtures` table (rows per team, refreshed daily by `fetch-espn-fixtures`, see [EPL context data](../collection/epl-context-data.md)). That job runs as a daily fixed cron (`0 6 * * *` in `_JOB_CRON_MAP`) on the mini-PC's scheduler, so the tool goes stale whenever the job fails, as it does on ESPN's HTTP 400 (#486). `team` goes through `odds_core.team.normalize_team_name`; `as_of` defaults to now (a naive value is taken as UTC); `last_n` and `next_n` are floored at 1.
 
 | Field | Content |
 |---|---|

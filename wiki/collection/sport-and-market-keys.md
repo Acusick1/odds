@@ -50,7 +50,7 @@ These filters apply only to Odds API requests ([configuration](../foundations/co
 
 `odds_core.sports.SportKey` is `Literal["soccer_epl", "baseball_mlb", "basketball_nba"]`, matching The Odds API's convention. It is the `odds_core.models.Event.sport_key` value and the `sport` argument of jobs, MCP tools and CLI commands.
 
-Job names use a short suffix: `odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP` maps `epl` to `soccer_epl` and `mlb` to `baseball_mlb`, and `odds_lambda.scheduling.jobs.make_compound_job_name("fetch-odds", "soccer_epl")` gives `fetch-odds-epl` only for jobs in `odds_lambda.scheduling.jobs._PER_SPORT_JOBS` ([job-registry](../scheduling/job-registry.md#compound-job-names)). NBA has no suffix, so its compound names stay bare. The suffix names EventBridge rules, heartbeat keys and `odds_mcp.server.get_scheduled_jobs` filters.
+Job names use a short suffix: `odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP` maps `epl` to `soccer_epl` and `mlb` to `baseball_mlb`, and `odds_lambda.scheduling.jobs.make_compound_job_name("fetch-odds", "soccer_epl")` gives `fetch-odds-epl`, and only for jobs in `odds_lambda.scheduling.jobs._PER_SPORT_JOBS` ([job-registry](../scheduling/job-registry.md#compound-job-names)). NBA has no suffix, so its compound names stay bare. The suffix names EventBridge rules, heartbeat keys and `odds_mcp.server.get_scheduled_jobs` filters.
 
 Sport naming is translated separately per surface: compound job names (`daily-digest-epl`), sport keys (`soccer_epl`), heartbeat keys, CloudWatch metrics, embed titles and CLI names each have their own table (`odds_lambda.jobs.daily_digest`, `odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP`; #384).
 
@@ -66,6 +66,7 @@ A market key is whatever string sits in `raw_data.bookmakers[].markets[].key`, a
 | FDUK (`scripts/ingest_football_data_uk.py`) | `1x2` | none | none |
 | OddsPortal adapter | `1x2` | `h2h` (scraped as `home_away`) | `totals`, point 2.5 (scraped as `over_under_2_5`) |
 | Betfair (`odds_lambda.betfair.constants.SPORT_CONFIG`) | `1x2` (EPL) | `h2h` (MLB) | none |
+| Polymarket (`odds_lambda.polymarket_sports.POLYMARKET_SPORTS`) | `1x2` (EPL) | none | none |
 
 - The football three-way key is `1x2` in every source. The Odds API names that market `h2h` and spells teams in full ("Newcastle United"); `odds_core.utils.relabel_three_way_markets` rewrites an `h2h` market with a Draw outcome to `1x2` and its team outcomes to the canonical names of `odds_core.team.normalize_team_name`, for soccer sport keys, as `odds_lambda.data_fetcher.TheOddsAPIClient.get_odds` and `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds` return it. OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`, using the pipeline key in `odds_lambda.oddsportal_client.FEED_MARKETS`), historical OddsPortal ingest (`MARKET_CONFIGS["1x2"]` in `scripts/ingest_oddsportal.py`) and Betfair EPL write `1x2` directly, and FDUK writes it too (`MARKET_KEY` in `scripts/ingest_football_data_uk.py`). MLB and NBA stay `h2h`.
 - `betfair_exchange` has three writers: FDUK `BFE*` columns, the Betfair job, and OddsPortal's "Betfair Exchange" row (`odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP`, with matched volume from the feed).
