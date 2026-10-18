@@ -74,8 +74,9 @@ class TestOddsIngestionService:
             ),
         )
 
+        client = StubOddsClient(response)
         service = OddsIngestionService(
-            client=StubOddsClient(response),  # type: ignore
+            client=client,  # type: ignore
             settings=mock_settings,
             session_factory=mock_session_factory,
         )
@@ -86,6 +87,7 @@ class TestOddsIngestionService:
         )
 
         assert result.sport_key == "basketball_nba"
+        assert client.get_odds_calls[0]["bookmakers"] == ["fanduel", "draftkings"]
         assert result.total_events == 1
         assert result.processed_events == 1
         assert result.quota_remaining == 12345

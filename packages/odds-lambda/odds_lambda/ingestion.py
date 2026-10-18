@@ -116,11 +116,12 @@ class OddsIngestionService:
         )
         callback_bundle = callbacks or OddsIngestionCallbacks()
 
+        bookmakers = self._settings.data_collection.bookmakers_for(sport_key)
         response = await self._client.get_odds(
             sport=sport_key,
             regions=self._settings.data_collection.regions,
             markets=self._settings.data_collection.markets,
-            bookmakers=self._settings.data_collection.bookmakers,
+            bookmakers=bookmakers,
         )
 
         if callback_bundle.on_fetch_complete:
@@ -164,7 +165,7 @@ class OddsIngestionService:
             fetch_log = FetchLog(
                 sport_key=sport_key,
                 events_count=len(response.events),
-                bookmakers_count=len(self._settings.data_collection.bookmakers),
+                bookmakers_count=len(bookmakers),
                 success=len(failures) == 0,
                 api_quota_remaining=response.quota_remaining,
                 response_time_ms=response.response_time_ms,

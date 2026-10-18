@@ -127,7 +127,7 @@ def mock_settings() -> Any:
         database=DatabaseConfig(url="postgresql+asyncpg://localhost/test"),
         data_collection=DataCollectionConfig(
             sports=["basketball_nba"],
-            bookmakers=["fanduel", "draftkings"],
+            bookmakers={"basketball_nba": ["fanduel", "draftkings"]},
             markets=["h2h", "spreads", "totals"],
             regions=["us"],
         ),

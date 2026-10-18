@@ -25,7 +25,7 @@ Prerequisites: Python 3.12+, [uv](https://github.com/astral-sh/uv), Docker, and 
 2. **Create `.env`.** Start from `.env.example` but do not copy it unchanged: `odds_core.config.get_settings` raises on its comma-separated lists ([List fields and the template](configuration.md#list-fields-and-the-template)):
    - `ODDS_API_KEY=<your key>`
    - `DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/odds`, written literally. `${LOCAL_DATABASE_URL}` would expand to an empty string, because the template defines `LOCAL_DATABASE_URL` below `DATABASE_URL`. The template's `DATABASE_URL=${DEV_DATABASE_URL}` points at the shared dev database, so a fresh copy writes to dev (#429).
-   - Write list values as JSON arrays: `SPORTS=["soccer_epl"]`, and the same for `BOOKMAKERS`, `MARKETS`, `REGIONS` if set. `SPORTS=basketball_nba` in the template is NBA.
+   - Write list values as JSON arrays: `SPORTS=["soccer_epl"]`, and the same for `MARKETS`, `REGIONS` if set. Leave `BOOKMAKERS` unset unless you need a JSON object of sport to bookmakers ([List fields](configuration.md#list-fields-and-the-template)). `SPORTS=basketball_nba` in the template is NBA.
    - Export `LOCAL_DATABASE_URL`, `PROD_DATABASE_URL` and `AGENT_DATABASE_URL` in the shell if you use them: they are read with `os.getenv`, and `.env` is never exported to the process environment ([variables read outside Settings](configuration.md#variables-read-outside-settings)).
 3. **Start Postgres.** `docker compose up -d postgres` runs `postgres:15` (database `odds`, `postgres`/`postgres`) on host port 5433, chosen to avoid a system Postgres on 5432 (`docker-compose.yml`).
 4. **Migrate.** `uv run alembic upgrade head`. `migrations/env.py` overwrites the `alembic.ini` URL with `DATABASE_URL`, so the 5432 URL in the ini is never used. Details: [Create and apply a database migration](howto-database-migration.md).
@@ -38,7 +38,7 @@ Prerequisites: Python 3.12+, [uv](https://github.com/astral-sh/uv), Docker, and 
 Any import of `odds_core` builds settings, so a missing `ODDS_API_KEY` or `DATABASE_URL` fails every command ([Workspace packages](workspace-packages.md#odds-core)). To seed local data from production see [Copy production data locally](howto-copy-production-data.md). Tests need none of this database.
 
 > [!WARNING]
-> Never point `DATABASE_URL` at production from a development machine. Production is the mini-PC's database, migrated only by `deploy.sh` on that host ([Databases and environments](databases-and-environments.md#environments)).
+> Never point `DATABASE_URL` at production from a development machine. Production is the mini-PC's database, migrated only by [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) on that host ([Databases and environments](databases-and-environments.md#environments)).
 
 ## Run the tests
 

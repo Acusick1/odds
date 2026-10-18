@@ -530,7 +530,8 @@ def info():
     table.add_row("Lookahead Days", str(app_settings.scheduler.lookahead_days))
     table.add_row("Sports", ", ".join(app_settings.data_collection.sports))
     table.add_row("Markets", ", ".join(app_settings.data_collection.markets))
-    table.add_row("Bookmakers", f"{len(app_settings.data_collection.bookmakers)} configured")
+    for sport, bookmakers in app_settings.data_collection.bookmakers.items():
+        table.add_row(f"Bookmakers ({sport})", ", ".join(bookmakers))
 
     if app_settings.scheduler.backend == "aws":
         table.add_row("AWS Region", app_settings.aws.region or "[red]Not set[/red]")
