@@ -14,7 +14,7 @@ status: stable
 
 1. **Write a config.** Start from the production YAML `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`; it tunes 100 `val_mse` trials and its description carries no metrics, which are on [CLV model findings](../evaluation/clv-model-findings.md#deployed-model).
    - Leave boosting length to `n_estimators`; the config has no early-stopping field.
-   - Set `target_type: devigged_bookmaker` and `target_bookmaker: bet365`, the production target ([ADR-0002](../../docs/adr/0002-bet365-clv-target.md)).
+   - Set `target_type: devigged_bookmaker` and `target_bookmaker: bet365`, the suspended model's target ([ADR-0002](../../docs/adr/0002-bet365-clv-target.md)).
    - Choose the data so `target_bookmaker` belongs to the selected `data_source` (see [Choose data](#choose-data)).
    - Set `sport_key` and the CV protocol ([ADR-0010](../../docs/adr/0010-expanding-walk-forward-and-evaluation-range.md), [training config](training-config.md)).
    - Copy the search space from that YAML, not from an older config, which carries a space that collapses on sliding windows ([search-space experiment](../evaluation/exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test)).

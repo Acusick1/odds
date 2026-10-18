@@ -17,9 +17,13 @@ The functions, dispatch and config fields that compute it are on [Target functio
 
 The delta is measured from the sampled snapshot to the close ([decision time](look-ahead-bias.md)), so the same event can yield different targets under different samplers. A target measured from a closing-tier snapshot has std 0.0016 against 0.054 at the sharp tier, so any R² near 0.6 on it is an artefact, not skill ([NBA timing and injury experiments](../evaluation/exp-nba-timing-and-injuries.md#nba-injury-features-exp-6-6b)).
 
-## Why bet365 and not Pinnacle
+## Why the suspended model uses bet365
 
-The production target is the devigged bet365 delta, recorded in [ADR-0002](../../docs/adr/0002-bet365-clv-target.md) on NBA runs the map #494 voids. On EPL, scored on the same events, folds and features, a Pinnacle-target model has no out-of-sample skill (R² about 0 against the training-fold mean), against about 0.023 for bet365. The difference is within bootstrap noise ([Pinnacle against bet365](../evaluation/exp-epl-clv-pinnacle-retest.md)). Pinnacle's EPL lines move almost as much as bet365's, with a target variance 91% of bet365's, so the NBA reason that Pinnacle moves too little does not hold on EPL. The proposed [ADR-0011](../../docs/adr/0011-bet365-clv-target-on-like-for-like-evidence.md) records this evidence. The earlier NBA runs are on [Target bookmaker and data volume experiments](../evaluation/exp-target-and-data-volume.md). The target bookmaker's snapshot price is also an input to the model's strongest feature, `retail_sharp_diff` ([sharp benchmark](sharp-benchmark.md)).
+The suspended model's target is the devigged bet365 delta, recorded in [ADR-0002](../../docs/adr/0002-bet365-clv-target.md) on NBA runs the map #494 voids. On EPL, scored on the same events, folds and features, a Pinnacle-target model has no out-of-sample skill (R² about 0 against the training-fold mean), against about 0.023 for bet365. The difference is within bootstrap noise ([Pinnacle against bet365](../evaluation/exp-epl-clv-pinnacle-retest.md)). Pinnacle's EPL lines move almost as much as bet365's, with a target variance 91% of bet365's, so the NBA reason that Pinnacle moves too little does not hold on EPL. [ADR-0011](../../docs/adr/0011-bet365-clv-target-on-like-for-like-evidence.md) records this evidence. The earlier NBA runs are on [Target bookmaker and data volume experiments](../evaluation/exp-target-and-data-volume.md). The target bookmaker's snapshot price is also an input to the model's strongest feature, `retail_sharp_diff` ([sharp benchmark](sharp-benchmark.md)).
+
+## The next target
+
+[ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md) supersedes both ADRs. The next EPL model predicts a retail bet's expected value against the Betfair Exchange close, with a row for each outcome, retail book and decision time. The training pipeline does not compute that target yet.
 
 ## Related
 

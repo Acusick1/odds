@@ -5,7 +5,7 @@ description: The backtest engine and strategies, what the CLV model has been sho
 
 # Backtests and model research
 
-Backtests replay a strategy over stored events; experiments record what the CLV model was and was not shown to do. Start with [CLV model findings](clv-model-findings.md) for the current conclusions, then the experiment pages for the evidence. The experiment pages are the evidence for the modelling ADRs ([0002](../../docs/adr/0002-bet365-clv-target.md), [0003](../../docs/adr/0003-hybrid-sharp-reference.md), [0010](../../docs/adr/0010-expanding-walk-forward-and-evaluation-range.md), and the proposed [0011](../../docs/adr/0011-bet365-clv-target-on-like-for-like-evidence.md)).
+Backtests replay a strategy over stored events; experiments record what the CLV model was and was not shown to do. Start with [CLV model findings](clv-model-findings.md) for the current conclusions, then the experiment pages for the evidence. The experiment pages are the evidence for the modelling ADRs ([0002](../../docs/adr/0002-bet365-clv-target.md), [0003](../../docs/adr/0003-hybrid-sharp-reference.md), [0010](../../docs/adr/0010-expanding-walk-forward-and-evaluation-range.md), [0011](../../docs/adr/0011-bet365-clv-target-on-like-for-like-evidence.md) and [0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md)).
 
 <!-- pages:start -->
 ### Reference

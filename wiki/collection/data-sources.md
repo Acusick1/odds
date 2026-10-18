@@ -25,7 +25,7 @@ ESPN, MLB and Polymarket are non-odds feeds: [epl-context-data](epl-context-data
 
 ## Bookmaker roles
 
-(Inferred.) Pinnacle and Circa Sports are sharp, low-margin books (Circa is Vegas-based). DraftKings, FanDuel, BetMGM and Caesars (`williamhill_us`) are major US retail books, BetRivers is regional retail and Bovada is offshore. UK books come from OddsPortal: bet365 is the primary target ([ADR-0002](../../docs/adr/0002-bet365-clv-target.md)); Betway, Betfred and bwin are retail. The default Odds API bookmaker list is `odds_core.config.DataCollectionConfig.bookmakers`.
+(Inferred.) Pinnacle and Circa Sports are sharp, low-margin books (Circa is Vegas-based). DraftKings, FanDuel, BetMGM and Caesars (`williamhill_us`) are major US retail books, BetRivers is regional retail and Bovada is offshore. UK books come from OddsPortal: bet365 is the suspended model's target ([ADR-0002](../../docs/adr/0002-bet365-clv-target.md)); Betway, Betfred and bwin are retail. The default Odds API bookmaker list is `odds_core.config.DataCollectionConfig.bookmakers`.
 
 ## Pinnacle coverage gap
 
