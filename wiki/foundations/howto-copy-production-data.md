@@ -7,7 +7,6 @@ sources:
   - odds_lambda.copy_from_production.ProductionDataCopier
   - odds_cli.commands.copy_from_prod.copy_from_production
   - odds_lambda.storage.readers.OddsReader.get_events_by_date_range
-  - odds_lambda.storage.writers.OddsWriter.upsert_event
   - odds_lambda.storage.writers.OddsWriter.store_odds_snapshot
 status: stable
 ---
@@ -26,7 +25,7 @@ status: stable
    ```
 
 3. **Run without `--dry-run`.** Add `--overwrite` only to replace events already present locally.
-4. **Check the summary.** A per-event failure is logged and counted, and the run continues.
+4. **Check the summary.** A failed event is rolled back, listed by id and counted in `events_failed`, and the run continues; the command exits 1 if any event failed, so rerun after fixing the cause.
 
 ## Related
 

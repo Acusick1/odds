@@ -10,11 +10,19 @@ import os
 from datetime import UTC, datetime
 
 import structlog
-from odds_core.models import Event
+from odds_core.models import Event, OddsSnapshot
 from odds_core.prediction_models import Prediction
 from rich.console import Console
-from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeElapsedColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    TaskID,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from odds_lambda.storage.readers import OddsReader
@@ -55,8 +63,9 @@ class ProductionDataCopier:
             "events_skipped": 0,
             "snapshots_copied": 0,
             "predictions_copied": 0,
-            "errors": 0,
+            "events_failed": 0,
         }
+        self.failed_event_ids: list[str] = []
 
     async def copy_events(
         self,
@@ -117,7 +126,8 @@ class ProductionDataCopier:
                     try:
                         await self._copy_event(event, prod_reader, progress, task)
                     except Exception as e:
-                        self.stats["errors"] += 1
+                        self.stats["events_failed"] += 1
+                        self.failed_event_ids.append(event.id)
                         console.print(
                             f"[red]Error copying event {event.id} ({event.away_team} @ {event.home_team}): {e}[/red]"
                         )
@@ -135,128 +145,128 @@ class ProductionDataCopier:
         event: Event,
         prod_reader: OddsReader,
         progress: Progress,
-        task_id,
+        task_id: TaskID,
     ) -> None:
-        """
-        Copy a single event and its snapshots from prod to local.
-
-        Args:
-            event: Event to copy
-            prod_reader: Reader for production database
-            progress: Rich progress bar
-            task_id: Progress task ID
-        """
         game_desc = f"{event.away_team} @ {event.home_team}"
         progress.update(task_id, description=f"Copying: {game_desc[:50]}...")
 
         async with self.local_session_maker() as local_session:
-            local_reader = OddsReader(local_session)
-            local_writer = OddsWriter(local_session)
-
-            # Check if event already exists locally
-            existing_event = await local_reader.get_event_by_id(event.id)
-
-            if existing_event and self.skip_existing:
+            if self.skip_existing and await local_session.get(Event, event.id) is not None:
                 self.stats["events_skipped"] += 1
                 logger.debug("skipping_existing_event", event_id=event.id)
                 return
 
+            prod_snapshots = await prod_reader.get_snapshots_for_event(event.id)
+
             if self.dry_run:
-                # In dry run, just count what would be copied
-                snapshots = await prod_reader.get_snapshots_for_event(event.id)
                 self.stats["events_copied"] += 1
-                self.stats["snapshots_copied"] += len(snapshots)
+                self.stats["snapshots_copied"] += len(prod_snapshots)
                 logger.info(
                     "dry_run_would_copy",
                     event_id=event.id,
-                    snapshot_count=len(snapshots),
+                    snapshot_count=len(prod_snapshots),
                 )
                 return
 
-            # Copy the event - use model_dump() to create a new detached instance
-            # This avoids session conflicts and automatically handles all fields
-            event_dict = event.model_dump()
-            new_event = Event(**event_dict)
-            await local_writer.upsert_event(new_event)
-            self.stats["events_copied"] += 1
+            await local_session.merge(Event(**event.model_dump()))
+            await local_session.flush()
 
-            # Get all snapshots for this event from production
-            async with self.prod_session_maker() as prod_session_snapshot:
-                prod_reader_snapshot = OddsReader(prod_session_snapshot)
-                snapshots = await prod_reader_snapshot.get_snapshots_for_event(event.id)
+            snapshot_ids, snapshots_copied = await self._copy_snapshots(
+                event.id, prod_snapshots, local_session
+            )
+            predictions_copied = await self._copy_predictions(
+                event.id, snapshot_ids, prod_reader.session, local_session
+            )
+            await local_session.commit()
 
-                # Copy each snapshot
-                for snapshot in snapshots:
-                    # Check if snapshot already exists
-                    snapshot_exists = await local_reader.snapshot_exists(
-                        event.id,
-                        snapshot.snapshot_time,
-                        tolerance_minutes=1,  # Strict tolerance
-                    )
+        self.stats["events_copied"] += 1
+        self.stats["snapshots_copied"] += snapshots_copied
+        self.stats["predictions_copied"] += predictions_copied
+        logger.info("event_copied", event_id=event.id, snapshot_count=len(prod_snapshots))
 
-                    if not snapshot_exists:
-                        # Store snapshot with raw data
-                        # The writer will handle creating normalized Odds records
-                        # and calculating tier/hours_until_commence automatically
-                        await local_writer.store_odds_snapshot(
-                            event_id=event.id,
-                            raw_data=snapshot.raw_data,
-                            snapshot_time=snapshot.snapshot_time,
-                        )
-                        self.stats["snapshots_copied"] += 1
+    async def _copy_snapshots(
+        self,
+        event_id: str,
+        prod_snapshots: list[OddsSnapshot],
+        local_session: AsyncSession,
+    ) -> tuple[dict[int, int], int]:
+        """Copy snapshots with every column preserved.
 
-                # Copy predictions
-                pred_count = await self._copy_predictions(
-                    event.id, prod_session_snapshot, local_session
+        Returns:
+            Map from production snapshot id to local snapshot id, and the number
+            of snapshots newly inserted.
+        """
+        local_writer = OddsWriter(local_session)
+        local_snapshots = (
+            (
+                await local_session.execute(
+                    select(OddsSnapshot).where(OddsSnapshot.event_id == event_id)
                 )
-                self.stats["predictions_copied"] += pred_count
+            )
+            .scalars()
+            .all()
+        )
+        local_by_key = {(s.snapshot_time, s.api_request_id): s.id for s in local_snapshots}
 
-                await local_session.commit()
-
-                logger.info(
-                    "event_copied",
-                    event_id=event.id,
-                    snapshot_count=len(snapshots),
+        snapshot_ids: dict[int, int] = {}
+        inserted = 0
+        for prod_snapshot in prod_snapshots:
+            key = (prod_snapshot.snapshot_time, prod_snapshot.api_request_id)
+            local_id = local_by_key.get(key)
+            if local_id is None:
+                snapshot, _ = await local_writer.store_odds_snapshot(
+                    event_id=event_id,
+                    raw_data=prod_snapshot.raw_data,
+                    snapshot_time=prod_snapshot.snapshot_time,
+                    validate=False,
                 )
+                snapshot.api_request_id = prod_snapshot.api_request_id
+                snapshot.fetch_tier = prod_snapshot.fetch_tier
+                snapshot.hours_until_commence = prod_snapshot.hours_until_commence
+                snapshot.created_at = prod_snapshot.created_at
+                await local_session.flush()
+                local_id = snapshot.id
+                inserted += 1
+            assert prod_snapshot.id is not None and local_id is not None
+            snapshot_ids[prod_snapshot.id] = local_id
+        return snapshot_ids, inserted
 
     async def _copy_predictions(
         self,
         event_id: str,
+        snapshot_ids: dict[int, int],
         prod_session: AsyncSession,
         local_session: AsyncSession,
     ) -> int:
-        """Copy predictions for an event from prod to local.
+        """Copy predictions, re-pointing each at the local copy of its snapshot.
 
-        Uses ON CONFLICT DO NOTHING to skip duplicates (matches the
-        uq_prediction_event_snap_model constraint).
-
-        Returns:
-            Number of predictions copied.
+        Raises:
+            KeyError: A prediction references a snapshot that was not copied.
         """
         result = await prod_session.execute(
             select(Prediction).where(Prediction.event_id == event_id)
         )
-        predictions = list(result.scalars().all())
+        rows = [
+            {
+                "event_id": pred.event_id,
+                "snapshot_id": snapshot_ids[pred.snapshot_id],
+                "model_name": pred.model_name,
+                "model_version": pred.model_version,
+                "predicted_clv": pred.predicted_clv,
+                "created_at": pred.created_at,
+            }
+            for pred in result.scalars().all()
+        ]
+        if not rows:
+            return 0
 
-        copied = 0
-        for pred in predictions:
-            new_pred = Prediction(
-                event_id=pred.event_id,
-                snapshot_id=pred.snapshot_id,
-                model_name=pred.model_name,
-                model_version=pred.model_version,
-                predicted_clv=pred.predicted_clv,
-                created_at=pred.created_at,
-            )
-            local_session.add(new_pred)
-            try:
-                await local_session.flush()
-                copied += 1
-            except Exception:
-                # Duplicate — unique constraint violation
-                await local_session.rollback()
-
-        return copied
+        inserted = await local_session.execute(
+            pg_insert(Prediction)
+            .values(rows)
+            .on_conflict_do_nothing(constraint="uq_prediction_event_snap_model")
+            .returning(Prediction.id)
+        )
+        return len(inserted.all())
 
     def _print_summary(self) -> None:
         """Print summary statistics."""
@@ -268,10 +278,13 @@ class ProductionDataCopier:
 
         console.print(f"  Predictions copied: [green]{self.stats['predictions_copied']}[/green]")
 
-        if self.stats["errors"] > 0:
-            console.print(f"  Errors: [red]{self.stats['errors']}[/red]")
+        if self.failed_event_ids:
+            console.print(f"  Events failed: [red]{self.stats['events_failed']}[/red]")
+            console.print(f"  Failed event ids: {', '.join(self.failed_event_ids)}")
 
-        if self.dry_run:
+        if self.failed_event_ids:
+            console.print("\n[bold red]✗ Copy finished with failed events[/bold red]")
+        elif self.dry_run:
             console.print("\n[yellow]DRY RUN - No data was actually copied[/yellow]")
         else:
             console.print("\n[bold green]✓ Copy completed successfully![/bold green]")
@@ -285,7 +298,7 @@ async def copy_from_prod(
     sport: str = "soccer_epl",
     dry_run: bool = False,
     skip_existing: bool = True,
-):
+) -> dict[str, int]:
     """
     Copy all events, snapshots, and predictions from production to local database.
 
@@ -335,7 +348,7 @@ async def copy_from_prod(
             skip_existing=skip_existing,
         )
 
-        await copier.copy_events(
+        return await copier.copy_events(
             start_date=start_dt,
             end_date=end_dt,
             sport_key=sport,
