@@ -28,7 +28,7 @@ Each external source has a fetcher, a job (or manual script) that runs it, and a
 
 ### Explanation
 
-- [Data sources](data-sources.md) — Every odds feed and what it supplies, bookmaker roles, the Pinnacle coverage gap, and where each feed runs.
+- [Data sources](data-sources.md) — Every odds feed and what each one supplies, bookmaker roles, the Pinnacle coverage gap, and where each feed runs.
 - [Event status lifecycle](event-status-lifecycle.md) — The five statuses, which job or command sets each, and what each status gates downstream.
 - [Odds API quota accounting](odds-api-quota.md) — How quota is spent, recorded in fetch_logs, alerted by fetch-odds and the health monitor, and checked with odds status quota, and where those disagree.
 - [Polymarket market character and data availability](polymarket-market-research.md) — Observed market depth by sport, series and tag ids from research, market richness, and how long the API keeps data.

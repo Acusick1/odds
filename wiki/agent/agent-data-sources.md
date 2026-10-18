@@ -1,7 +1,7 @@
 ---
 type: explanation
 title: Agent data sources and rejected sources
-description: Which sources are collected on a schedule and exposed through MCP versus researched live each wake-up, why lineups come from web search, and why each evaluated source was rejected.
+description: Which sources are collected on a schedule and exposed through MCP versus researched live each wake-up, why lineups come from web search, and why every evaluated source was rejected.
 sources:
   - odds_lambda.jobs.fetch_oddsportal.CADENCE
   - odds_lambda.jobs.fetch_betfair_exchange.CADENCE

@@ -780,7 +780,7 @@ class TestRunCVStaticFeatures:
         calls = []
         mock_strategy = MagicMock()
         mock_strategy.train_from_config = MagicMock(
-            side_effect=lambda **kw: (calls.append(kw) or MOCK_HISTORY)
+            side_effect=lambda **kw: calls.append(kw) or MOCK_HISTORY
         )
 
         run_cv(

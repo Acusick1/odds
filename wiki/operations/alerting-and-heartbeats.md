@@ -19,7 +19,7 @@ Three mechanisms watch the system, and each sees a different failure.
 |---|---|---|
 | Event-driven | `odds_core.alerts.job_alert_context` sends `job_failure:<job>` and `odds_core.alerts.send_job_warning` sends soft-failure warnings ([alerts](alerts.md)) | a job that raised or came back empty |
 | Heartbeat | `heartbeat:<job>` rows written on clean exit, compared to the per-job allowed hours in `odds_core.config.AlertConfig.heartbeat_expectations` | a job that stopped running |
-| Poll-driven | `odds_lambda.health_monitor.HealthMonitor` ([health-monitor](health-monitor.md)) | stale snapshots, fetch failures, low quota, data-quality errors |
+| Poll-driven | `odds_lambda.health_monitor.HealthMonitor` ([health-monitor](health-monitor.md)) | stale snapshots, fetch failures, low quota, data-quality errors, duplicate events, recent events still scheduled after kick-off |
 
 Event-driven alerts fire only if the job runs far enough to raise. A job that never starts, or whose chain of self-scheduled runs ended, raises nothing, which is what heartbeats and the poll cover. The poll covers data symptoms (no new snapshots within the stale-data threshold) that do not depend on a single job writing a row. (Inferred: the split exists because self-scheduling ends a chain silently when a run dies; see [self-scheduling](../scheduling/self-scheduling.md#failure-policy-by-job).)
 

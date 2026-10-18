@@ -9,6 +9,7 @@ import structlog
 from odds_core.database import async_session_maker
 
 from odds_lambda.data_fetcher import TheOddsAPIClient
+from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger(__name__)
@@ -56,7 +57,7 @@ class EventSyncService:
         async with self._session_factory() as session:
             writer = OddsWriter(session)
             counts = await writer.bulk_upsert_events(response.events)
-            await writer.adopt_live_twins(response.events)
+            await EventMerger(session).adopt_twins(response.events)
             await session.commit()
 
         logger.info(
