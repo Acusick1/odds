@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: superseded by ADR-0012
 ---
 
 # Keep bet365 over Pinnacle as the CLV target, on a like-for-like EPL test
