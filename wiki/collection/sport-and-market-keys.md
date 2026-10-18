@@ -10,9 +10,8 @@ sources:
   - odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP
   - odds_lambda.oddsportal_common.slugify
   - odds_lambda.betfair.constants.SPORT_CONFIG
-  - odds_lambda.oddsportal_adapter.convert_upcoming_matches
-  - odds_lambda.oddsportal_adapter._MARKET_CONVERTERS
-  - odds_lambda.oddsportal_adapter.parse_betfair_odds
+  - odds_lambda.oddsportal_adapter.convert_market
+  - odds_lambda.oddsportal_client.FEED_MARKETS
   - odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP
   - odds_lambda.scheduling.jobs._PER_SPORT_JOBS
   - odds_lambda.scheduling.jobs.make_compound_job_name
@@ -54,9 +53,9 @@ A market key is whatever string sits in `raw_data.bookmakers[].markets[].key`, a
 | OddsPortal adapter | `1x2` | `h2h` (scraped as `home_away`) | `totals`, point 2.5 (scraped as `over_under_2_5`) |
 | Betfair (`odds_lambda.betfair.constants.SPORT_CONFIG`) | `1x2` (EPL) | `h2h` (MLB) | none |
 
-- The football three-way key is not uniform. The Odds API and FDUK store `h2h` with a Draw outcome (`_extract_h2h_odds` in `scripts/ingest_football_data_uk.py`). OddsPortal live (`odds_lambda.oddsportal_adapter._convert_1x2_match`), historical OddsPortal ingest (`MARKET_CONFIGS["1x2"]` in `scripts/ingest_oddsportal.py`) and Betfair EPL store `1x2`. EPL data is therefore `1x2` from OddsPortal and Betfair but `h2h` from the Odds API and FDUK; MLB is `h2h`. Readers must check both for football.
-- `betfair_exchange` has three writers: FDUK `BFE*` columns, the Betfair job, and OddsPortal's "Betfair Exchange" row (`odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP`, fractional odds parsed by `odds_lambda.oddsportal_adapter.parse_betfair_odds`).
-- OddsHarvester scrape names (`1x2`, `over_under_2_5`, `home_away`) are the only keys `odds_lambda.oddsportal_adapter._MARKET_CONVERTERS` accepts. They are inputs to `odds_mcp.server.refresh_scrape` and `odds scrape --market`, not stored keys. The totals spelling is `over_under_2_5` (not `over_under_2.5`), and `odds_lambda.oddsportal_adapter.convert_upcoming_matches` raises `ValueError("Unsupported market")` for anything else ([oddsportal-scraper](oddsportal-scraper.md)).
+- The football three-way key is not uniform. The Odds API and FDUK store `h2h` with a Draw outcome (`_extract_h2h_odds` in `scripts/ingest_football_data_uk.py`). OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`, using the pipeline key in `odds_lambda.oddsportal_client.FEED_MARKETS`), historical OddsPortal ingest (`MARKET_CONFIGS["1x2"]` in `scripts/ingest_oddsportal.py`) and Betfair EPL store `1x2`. EPL data is therefore `1x2` from OddsPortal and Betfair but `h2h` from the Odds API and FDUK; MLB is `h2h`. Readers must check both for football.
+- `betfair_exchange` has three writers: FDUK `BFE*` columns, the Betfair job, and OddsPortal's "Betfair Exchange" row (`odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP`, with matched volume from the feed).
+- OddsPortal scrape names (`1x2`, `over_under_2_5`, `home_away`) are the keys of `odds_lambda.oddsportal_client.FEED_MARKETS`, the only ones the live scrape accepts; `odds_mcp.server.refresh_scrape` rejects any other value. They are inputs to `odds_mcp.server.refresh_scrape` and `odds scrape --market`, not stored keys. The totals spelling is `over_under_2_5` (not `over_under_2.5`), and `odds_lambda.oddsportal_adapter.convert_market` raises `ValueError("Unsupported market")` for anything else ([oddsportal-scraper](oddsportal-scraper.md)).
 - MCP read tools accept `odds_mcp.server.MarketKey` (`h2h`, `1x2`, `totals`, `spreads`) and match it exactly, so EPL queries need `1x2`, MLB queries need `h2h`, and a wrong key returns an empty result rather than an error (#433; [mcp-market-tools](../agent/mcp-market-tools.md)).
 
 Bookmaker keys: OddsPortal display names map through `odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP` with a slug fallback; the default Odds API list is under [Odds API scope](#odds-api-scope).

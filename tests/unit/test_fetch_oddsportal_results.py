@@ -388,6 +388,7 @@ class TestSportResolution:
         spec = LeagueSpec(
             sport="test",
             league="test-league",
+            listing_path="/test/",
             sport_key="test_sport",
             sport_title="Test",
             primary_market="unknown_market",

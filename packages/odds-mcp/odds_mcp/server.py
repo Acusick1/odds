@@ -24,6 +24,7 @@ from odds_core.prediction_models import Prediction
 from odds_core.snapshot_utils import extract_odds_from_snapshot
 from odds_core.sports import SportKey
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME
+from odds_lambda.oddsportal_client import FEED_MARKETS
 from odds_lambda.paper_trading import (
     get_open_trades,
     get_portfolio_summary,
@@ -365,8 +366,8 @@ async def refresh_scrape(
     immediately via Postgres LISTEN/NOTIFY.
 
     Args:
-        league: OddsHarvester league name (e.g. "england-premier-league").
-        market: Market to scrape (e.g. "1x2", "over_under_2_5").
+        league: League name from the scrape registry (e.g. "england-premier-league", "mlb").
+        market: Feed market key: "1x2", "over_under_2_5" or "home_away".
 
     Returns:
         Dict confirming the job was submitted, or an error.
@@ -377,6 +378,12 @@ async def refresh_scrape(
     if known_spec is None:
         return {
             "error": f"Unknown league '{league}'. Known leagues: {sorted(_LEAGUE_SPEC_BY_NAME.keys())}",
+            "error_type": "ValueError",
+        }
+
+    if market not in FEED_MARKETS:
+        return {
+            "error": f"Unknown market '{market}'. Known markets: {sorted(FEED_MARKETS)}",
             "error_type": "ValueError",
         }
 

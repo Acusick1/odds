@@ -39,7 +39,7 @@ Two free-text fields tag where a snapshot came from. Each producer sets them as 
 |---|---|
 | (absent) | The Odds API payloads |
 | `oddsportal` | OddsPortal historical/closing builds (`odds_lambda.oddsportal_common.build_raw_data`) |
-| `oddsportal_live` | live-scrape adapter (`odds_lambda.oddsportal_adapter`) |
+| `oddsportal_live` | live feed adapter (`odds_lambda.oddsportal_adapter.convert_market`) |
 | `betfair_api` | Betfair Exchange job (also adds `betfair_event_id`) |
 | `football_data_uk` | `scripts/ingest_football_data_uk.py` |
 
