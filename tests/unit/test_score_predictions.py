@@ -390,6 +390,8 @@ class TestScoreEvents:
     @patch("odds_lambda.jobs.score_predictions.load_model")
     async def test_returns_empty_stats_when_no_sport_key(self, mock_load: MagicMock) -> None:
         config_no_sport = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
             adapter="xgboost",
             sharp_bookmakers=["bet365"],
             retail_bookmakers=["betway"],

@@ -43,7 +43,7 @@ Same day, 1,813 EPL events, hybrid sharp, 100 trials each. Under sliding-380:50 
 
 ### Revised space
 
-Drawn from published XGBoost tuning guidance for small-N, low-SNR regression; defined in `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`:
+Drawn from published XGBoost tuning guidance for small-N, low-SNR regression; defined in `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`, which also sets the devigged bet365 target explicitly:
 
 | Parameter | Original | Principled |
 |---|---|---|

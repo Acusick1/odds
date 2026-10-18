@@ -62,7 +62,8 @@ training:
     movement_threshold: 0.005
     pm_velocity_window_hours: 2.0
     pm_price_tolerance_minutes: 30
-    target_type: devigged_pinnacle
+    target_type: devigged_bookmaker
+    target_bookmaker: pinnacle
     sampling:
       strategy: time_range
       min_hours: 3.0

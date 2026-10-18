@@ -53,6 +53,8 @@ training:
     retail_bookmakers: ["fanduel", "draftkings", "betmgm"]
     markets: ["h2h", "spreads", "totals"]
     outcome: "home"
+    target_type: "raw"
+    target_bookmaker: "pinnacle"
     normalize: false
     feature_groups: ["tabular"]
     sampling:

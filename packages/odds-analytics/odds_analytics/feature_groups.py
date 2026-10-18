@@ -884,6 +884,8 @@ def _compute_target(
                 bookmaker_key=config.target_bookmaker,
                 outcome=outcome_name,
             )
+        if config.outcome in ("over", "under"):
+            raise ValueError(f"outcome {config.outcome!r} is not valid for market {market!r}")
         return calculate_devigged_bookmaker_target(
             snapshot_odds_all,
             closing_odds_all,
@@ -891,6 +893,7 @@ def _compute_target(
             event.away_team,
             bookmaker_key=config.target_bookmaker,
             market_key=market,
+            outcome=config.outcome,
         )
     else:
         # "raw": avg implied prob delta (snapshot → closing)

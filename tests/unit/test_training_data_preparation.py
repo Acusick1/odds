@@ -160,7 +160,10 @@ class TestFeatureConfigExtraction:
 
     def test_feature_config_default_values(self):
         """Test that FeatureConfig provides sensible defaults."""
-        config = FeatureConfig()
+        config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
+        )
 
         assert config.outcome == "home"
         assert config.markets == ["h2h", "spreads", "totals"]
@@ -176,6 +179,8 @@ class TestFeatureConfigExtraction:
         from odds_lambda.fetch_tier import FetchTier
 
         config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
             outcome="away",
             markets=["spreads"],
             sharp_bookmakers=["pinnacle", "circasports"],
@@ -207,6 +212,7 @@ class TestPrepareTrainingDataFromConfig:
                 tags=["test"],
             ),
             training=TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 10, 1),
@@ -241,7 +247,9 @@ class TestPrepareTrainingDataFromConfig:
                     lookback_hours=72,
                     timesteps=24,
                 ),
-                features=FeatureConfig(adapter="lstm"),
+                features=FeatureConfig(
+                    target_type="raw", target_bookmaker="pinnacle", adapter="lstm"
+                ),
             ),
         )
 
@@ -338,6 +346,7 @@ class TestPrepareTrainingDataFromConfig:
         config = MLTrainingConfig(
             experiment=ExperimentConfig(name="test_val_split", tags=["test"]),
             training=TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 10, 1),
@@ -406,6 +415,7 @@ class TestPrepareTrainingDataFromConfig:
         config = MLTrainingConfig(
             experiment=ExperimentConfig(name="test_sport_filter", tags=["test"]),
             training=TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 10, 1),
@@ -533,6 +543,8 @@ class TestConfigLoadingIntegration:
                     "max_depth": 6,
                 },
                 "features": {
+                    "target_type": "raw",
+                    "target_bookmaker": "pinnacle",
                     "outcome": "home",
                     "markets": ["h2h"],
                     "sharp_bookmakers": ["pinnacle"],

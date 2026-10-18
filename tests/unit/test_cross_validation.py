@@ -238,7 +238,10 @@ class TestRunCV:
                     random_seed=42,
                 ),
                 model=XGBoostConfig(n_estimators=10, max_depth=3),
-                features=FeatureConfig(),
+                features=FeatureConfig(
+                    target_type="raw",
+                    target_bookmaker="pinnacle",
+                ),
             ),
         )
 
@@ -392,7 +395,10 @@ class TestTimeSeriesCV:
                     random_seed=42,
                 ),
                 model=XGBoostConfig(n_estimators=10, max_depth=3),
-                features=FeatureConfig(),
+                features=FeatureConfig(
+                    target_type="raw",
+                    target_bookmaker="pinnacle",
+                ),
             ),
         )
 
@@ -413,7 +419,10 @@ class TestTimeSeriesCV:
                     random_seed=42,
                 ),
                 model=XGBoostConfig(n_estimators=10, max_depth=3),
-                features=FeatureConfig(),
+                features=FeatureConfig(
+                    target_type="raw",
+                    target_bookmaker="pinnacle",
+                ),
             ),
         )
 
@@ -721,7 +730,10 @@ class TestRunCVStaticFeatures:
                     random_seed=42,
                 ),
                 model=XGBoostConfig(),
-                features=FeatureConfig(),
+                features=FeatureConfig(
+                    target_type="raw",
+                    target_bookmaker="pinnacle",
+                ),
             ),
         )
 
@@ -814,7 +826,10 @@ class TestWalkForwardCV:
                     val_step_events=2,
                 ),
                 model=XGBoostConfig(n_estimators=10, max_depth=3),
-                features=FeatureConfig(),
+                features=FeatureConfig(
+                    target_type="raw",
+                    target_bookmaker="pinnacle",
+                ),
             ),
         )
 
@@ -836,7 +851,10 @@ class TestWalkForwardCV:
                     max_train_events=6,
                 ),
                 model=XGBoostConfig(n_estimators=10, max_depth=3),
-                features=FeatureConfig(),
+                features=FeatureConfig(
+                    target_type="raw",
+                    target_bookmaker="pinnacle",
+                ),
             ),
         )
 

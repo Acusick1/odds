@@ -67,6 +67,8 @@ class TestMLflowTrackingIntegration:
                     learning_rate=0.1,
                 ),
                 features=FeatureConfig(
+                    target_type="raw",
+                    target_bookmaker="pinnacle",
                     outcome="home",
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],
@@ -154,6 +156,8 @@ class TestMLflowTrackingIntegration:
                     max_depth=3,
                 ),
                 features=FeatureConfig(
+                    target_type="raw",
+                    target_bookmaker="pinnacle",
                     outcome="home",
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],

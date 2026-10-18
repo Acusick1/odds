@@ -704,14 +704,13 @@ class FeatureConfig(BaseModel):
 
     # Target formulation
     target_type: Literal["raw", "devigged_bookmaker"] = Field(
-        default="raw",
         description="Target formulation. 'raw': avg implied prob delta at snapshot vs closing. "
         "'devigged_bookmaker': bookmaker close vs bookmaker at snapshot, both devigged.",
     )
 
     target_bookmaker: str = Field(
-        default="pinnacle",
-        description="Bookmaker key for devigged target computation (used when target_type='devigged_bookmaker').",
+        description="Bookmaker key for the target and for closing-snapshot selection "
+        "(devigged target computation when target_type='devigged_bookmaker').",
     )
 
     closing_source_priority: list[str] | None = Field(
@@ -1046,7 +1045,6 @@ class TrainingConfig(BaseModel):
 
     # Feature configuration
     features: FeatureConfig = Field(
-        default_factory=FeatureConfig,
         description="Feature extraction settings",
     )
 

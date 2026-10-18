@@ -957,7 +957,10 @@ class TestFeatureExtractorFromConfig:
 
     def test_tabular_extractor_from_config_default_values(self):
         """Test that TabularFeatureExtractor.from_config uses config defaults correctly."""
-        config = FeatureConfig()
+        config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
+        )
         extractor = TabularFeatureExtractor.from_config(config)
 
         # Should match config defaults
@@ -967,6 +970,8 @@ class TestFeatureExtractorFromConfig:
     def test_tabular_extractor_from_config_custom_values(self):
         """Test that TabularFeatureExtractor.from_config respects custom config values."""
         config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
             sharp_bookmakers=["pinnacle", "circa"],
             retail_bookmakers=["fanduel", "betmgm"],
         )
@@ -977,13 +982,18 @@ class TestFeatureExtractorFromConfig:
 
     def test_sequence_extractor_from_config_requires_sequence_params(self):
         """Test that from_config raises when lookback_hours/timesteps are None."""
-        config = FeatureConfig()
+        config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
+        )
         with pytest.raises(ValueError, match="lookback_hours and timesteps"):
             SequenceFeatureExtractor.from_config(config)
 
     def test_sequence_extractor_from_config_with_sequence_params(self):
         """Test that SequenceFeatureExtractor.from_config uses provided values."""
-        config = FeatureConfig(lookback_hours=72, timesteps=24)
+        config = FeatureConfig(
+            target_type="raw", target_bookmaker="pinnacle", lookback_hours=72, timesteps=24
+        )
         extractor = SequenceFeatureExtractor.from_config(config)
 
         assert extractor.lookback_hours == 72
@@ -994,6 +1004,8 @@ class TestFeatureExtractorFromConfig:
     def test_sequence_extractor_from_config_custom_values(self):
         """Test that SequenceFeatureExtractor.from_config respects custom config values."""
         config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
             lookback_hours=48,
             timesteps=16,
             sharp_bookmakers=["pinnacle", "circa"],
@@ -1011,6 +1023,8 @@ class TestFeatureExtractorFromConfig:
     ):
         """Test complete pipeline: config → extractor → features for tabular."""
         config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
             sharp_bookmakers=["pinnacle"],
             retail_bookmakers=["fanduel", "draftkings"],
         )
@@ -1033,6 +1047,8 @@ class TestFeatureExtractorFromConfig:
     def test_sequence_extractor_from_config_produces_valid_features(self, sample_event):
         """Test complete pipeline: config → extractor → features for sequence."""
         config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
             lookback_hours=24,
             timesteps=8,
             sharp_bookmakers=["pinnacle"],
@@ -1074,7 +1090,10 @@ class TestFeatureExtractorFromConfig:
 
     def test_config_defaults_match_extractor_defaults(self):
         """Test that FeatureConfig defaults align with extractor class defaults."""
-        config = FeatureConfig()
+        config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
+        )
 
         # Tabular: FeatureConfig defaults match TabularFeatureExtractor defaults
         tabular_from_config = TabularFeatureExtractor.from_config(config)
@@ -1084,7 +1103,9 @@ class TestFeatureExtractorFromConfig:
         assert tabular_from_config.retail_bookmakers == tabular_default.retail_bookmakers
 
         # Sequence: requires explicit lookback_hours/timesteps (None by default)
-        lstm_config = FeatureConfig(lookback_hours=72, timesteps=24)
+        lstm_config = FeatureConfig(
+            target_type="raw", target_bookmaker="pinnacle", lookback_hours=72, timesteps=24
+        )
         sequence_from_config = SequenceFeatureExtractor.from_config(lstm_config)
         sequence_default = SequenceFeatureExtractor()
 
@@ -1095,11 +1116,16 @@ class TestFeatureExtractorFromConfig:
 
     def test_feature_config_normalize_field_exists(self):
         """Test that FeatureConfig has normalize field."""
-        config = FeatureConfig()
+        config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
+        )
         assert hasattr(config, "normalize")
         assert config.normalize is False  # Default value
 
-        config_with_normalize = FeatureConfig(normalize=True)
+        config_with_normalize = FeatureConfig(
+            target_type="raw", target_bookmaker="pinnacle", normalize=True
+        )
         assert config_with_normalize.normalize is True
 
     def test_feature_config_tier_parameters(self):
@@ -1108,6 +1134,8 @@ class TestFeatureExtractorFromConfig:
         from odds_lambda.fetch_tier import FetchTier
 
         config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
             closing_tier=FetchTier.CLOSING,
             sampling=SamplingConfig(strategy="tier", decision_tier=FetchTier.PREGAME),
         )
@@ -1124,13 +1152,18 @@ class TestFeatureExtractorFromConfig:
 
     def test_tabular_extractor_from_config_type_annotation(self):
         """Test that from_config has correct return type."""
-        config = FeatureConfig()
+        config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
+        )
         extractor = TabularFeatureExtractor.from_config(config)
         assert isinstance(extractor, TabularFeatureExtractor)
 
     def test_sequence_extractor_from_config_type_annotation(self):
         """Test that from_config has correct return type."""
-        config = FeatureConfig(lookback_hours=72, timesteps=24)
+        config = FeatureConfig(
+            target_type="raw", target_bookmaker="pinnacle", lookback_hours=72, timesteps=24
+        )
         extractor = SequenceFeatureExtractor.from_config(config)
         assert isinstance(extractor, SequenceFeatureExtractor)
 

@@ -434,6 +434,7 @@ class TestDataConfig:
         config = MLTrainingConfig(
             experiment=ExperimentConfig(name="test"),
             training=TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
@@ -458,6 +459,7 @@ class TestDataConfig:
         config = MLTrainingConfig(
             experiment=ExperimentConfig(name="test"),
             training=TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
@@ -620,7 +622,10 @@ class TestFeatureConfig:
 
     def test_default_values(self):
         """Test default feature config values."""
-        config = FeatureConfig()
+        config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
+        )
         assert config.sharp_bookmakers == ["pinnacle"]
         assert config.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
         assert config.markets == ["h2h", "spreads", "totals"]
@@ -639,9 +644,19 @@ class TestFeatureConfig:
         config = FeatureConfig(adapter="lstm", feature_groups=[])
         assert config.feature_groups == ()
 
+    def test_missing_target_type_fails(self):
+        with pytest.raises(ValidationError, match="target_type"):
+            FeatureConfig(target_bookmaker="pinnacle")  # type: ignore[call-arg]
+
+    def test_missing_target_bookmaker_fails(self):
+        with pytest.raises(ValidationError, match="target_bookmaker"):
+            FeatureConfig(target_type="raw")  # type: ignore[call-arg]
+
     def test_custom_bookmakers(self):
         """Test custom bookmaker lists."""
         config = FeatureConfig(
+            target_type="raw",
+            target_bookmaker="pinnacle",
             sharp_bookmakers=["pinnacle", "circasports"],
             retail_bookmakers=["fanduel"],
         )
@@ -665,7 +680,7 @@ class TestFeatureConfig:
     def test_empty_bookmakers_fails(self):
         """Test that empty bookmaker lists fail."""
         with pytest.raises(ValueError):
-            FeatureConfig(sharp_bookmakers=[])
+            FeatureConfig(target_type="raw", target_bookmaker="pinnacle", sharp_bookmakers=[])
 
 
 # =============================================================================
@@ -818,6 +833,7 @@ class TestTrainingConfig:
     def test_xgboost_config(self):
         """Test training config with XGBoost model."""
         config = TrainingConfig(
+            features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
             strategy_type="xgboost_line_movement",
             data=DataConfig(
                 start_date=date(2024, 1, 1),
@@ -838,7 +854,7 @@ class TestTrainingConfig:
                 end_date=date(2024, 12, 31),
             ),
             model=LSTMConfig(hidden_size=128, epochs=30),
-            features=FeatureConfig(adapter="lstm"),
+            features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle", adapter="lstm"),
         )
         assert config.strategy_type == "lstm_line_movement"
         assert isinstance(config.model, LSTMConfig)
@@ -854,7 +870,7 @@ class TestTrainingConfig:
                 end_date=date(2024, 12, 31),
             ),
             model=LSTMConfig(lookback_hours=48, timesteps=12),
-            features=FeatureConfig(adapter="lstm"),
+            features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle", adapter="lstm"),
         )
         assert config.features.lookback_hours == 48
         assert config.features.timesteps == 12
@@ -869,13 +885,19 @@ class TestTrainingConfig:
                     end_date=date(2024, 12, 31),
                 ),
                 model=LSTMConfig(lookback_hours=72),
-                features=FeatureConfig(adapter="lstm", lookback_hours=48),
+                features=FeatureConfig(
+                    target_type="raw",
+                    target_bookmaker="pinnacle",
+                    adapter="lstm",
+                    lookback_hours=48,
+                ),
             )
 
     def test_lstm_requires_lstm_adapter(self):
         """Test that LSTM strategy requires features.adapter='lstm'."""
         with pytest.raises(ValueError, match="requires features.adapter='lstm'"):
             TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type="lstm_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
@@ -887,6 +909,7 @@ class TestTrainingConfig:
     def test_xgboost_leaves_sequence_params_none(self):
         """Test that XGBoost TrainingConfig does not touch sequence params."""
         config = TrainingConfig(
+            features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
             strategy_type="xgboost_line_movement",
             data=DataConfig(
                 start_date=date(2024, 1, 1),
@@ -901,6 +924,7 @@ class TestTrainingConfig:
         """Test that model type must match strategy type."""
         with pytest.raises(ValueError, match="requires XGBoostConfig"):
             TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type="xgboost",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
@@ -911,6 +935,7 @@ class TestTrainingConfig:
 
         with pytest.raises(ValueError, match="requires LSTMConfig"):
             TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type="lstm",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
@@ -922,6 +947,7 @@ class TestTrainingConfig:
     def test_default_strategy_params(self):
         """Test default strategy parameters."""
         config = TrainingConfig(
+            features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
             strategy_type="xgboost",
             data=DataConfig(
                 start_date=date(2024, 1, 1),
@@ -953,6 +979,7 @@ class TestMLTrainingConfig:
                 description="Test configuration",
             ),
             training=TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
@@ -1002,6 +1029,8 @@ class TestMLTrainingConfig:
                 ),
                 model=LSTMConfig(),
                 features=FeatureConfig(
+                    target_type="raw",
+                    target_bookmaker="pinnacle",
                     adapter="lstm",
                     sharp_bookmakers=["pinnacle", "circasports"],
                 ),
@@ -1050,6 +1079,8 @@ class TestYAMLLoading:
                     "learning_rate": 0.05,
                 },
                 "features": {
+                    "target_type": "raw",
+                    "target_bookmaker": "pinnacle",
                     "sharp_bookmakers": ["pinnacle"],
                     "retail_bookmakers": ["fanduel", "draftkings"],
                 },
@@ -1111,6 +1142,8 @@ class TestYAMLLoading:
                     "loss_function": "huber",
                 },
                 "features": {
+                    "target_type": "raw",
+                    "target_bookmaker": "pinnacle",
                     "adapter": "lstm",
                 },
             },
@@ -1148,6 +1181,7 @@ class TestJSONLoading:
             },
             "training": {
                 "strategy_type": "xgboost",
+                "features": {"target_type": "raw", "target_bookmaker": "pinnacle"},
                 "data": {
                     "start_date": "2024-01-01",
                     "end_date": "2024-06-30",
@@ -1221,6 +1255,7 @@ class TestSerialization:
                 tags=["serialize", "test"],
             ),
             training=TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 3, 1),
@@ -1278,6 +1313,7 @@ class TestSerialization:
             "experiment": {"name": "dict_test"},
             "training": {
                 "strategy_type": "xgboost",
+                "features": {"target_type": "raw", "target_bookmaker": "pinnacle"},
                 "data": {
                     "start_date": "2024-01-01",
                     "end_date": "2024-12-31",
@@ -1354,6 +1390,7 @@ class TestValidationErrorMessages:
         """Test clear error message for model type mismatch."""
         with pytest.raises(ValueError) as excinfo:
             TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type="xgboost",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
@@ -1377,6 +1414,7 @@ class TestEdgeCases:
         config = MLTrainingConfig(
             experiment=ExperimentConfig(name="minimal"),
             training=TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type="xgboost",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
@@ -1391,6 +1429,7 @@ class TestEdgeCases:
         """Test all supported strategy types."""
         for strategy in ["xgboost", "xgboost_line_movement"]:
             config = TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type=strategy,
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
@@ -1408,7 +1447,9 @@ class TestEdgeCases:
                     end_date=date(2024, 12, 31),
                 ),
                 model=LSTMConfig(),
-                features=FeatureConfig(adapter="lstm"),
+                features=FeatureConfig(
+                    target_type="raw", target_bookmaker="pinnacle", adapter="lstm"
+                ),
             )
             assert config.strategy_type == strategy
 
@@ -1418,6 +1459,7 @@ class TestEdgeCases:
             "experiment": {"name": "date_test"},
             "training": {
                 "strategy_type": "xgboost",
+                "features": {"target_type": "raw", "target_bookmaker": "pinnacle"},
                 "data": {
                     "start_date": "2024-10-15",  # Specific date format
                     "end_date": "2025-01-20",
@@ -1489,7 +1531,7 @@ class TestUnknownFieldRejection:
     def test_feature_config_unknown_field_rejected(self):
         """Test that FeatureConfig rejects unknown fields."""
         with pytest.raises(ValueError, match="Extra inputs are not permitted"):
-            FeatureConfig(unknown_param=123)
+            FeatureConfig(target_type="raw", target_bookmaker="pinnacle", unknown_param=123)
 
     def test_search_space_unknown_field_rejected(self):
         """Test that SearchSpace rejects unknown fields."""
@@ -1510,6 +1552,7 @@ class TestUnknownFieldRejection:
         """Test that TrainingConfig rejects unknown fields."""
         with pytest.raises(ValueError, match="Extra inputs are not permitted"):
             TrainingConfig(
+                features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                 strategy_type="xgboost",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
@@ -1525,6 +1568,7 @@ class TestUnknownFieldRejection:
             MLTrainingConfig(
                 experiment=ExperimentConfig(name="test"),
                 training=TrainingConfig(
+                    features=FeatureConfig(target_type="raw", target_bookmaker="pinnacle"),
                     strategy_type="xgboost",
                     data=DataConfig(
                         start_date=date(2024, 1, 1),
@@ -1544,6 +1588,7 @@ class TestUnknownFieldRejection:
             },
             "training": {
                 "strategy_type": "xgboost",
+                "features": {"target_type": "raw", "target_bookmaker": "pinnacle"},
                 "data": {
                     "start_date": "2024-01-01",
                     "end_date": "2024-12-31",
@@ -1594,6 +1639,8 @@ class TestConfigInheritance:
                     "learning_rate": 0.1,
                 },
                 "features": {
+                    "target_type": "raw",
+                    "target_bookmaker": "pinnacle",
                     "sharp_bookmakers": ["pinnacle"],
                     "retail_bookmakers": ["fanduel", "draftkings", "betmgm"],
                 },
@@ -1663,6 +1710,8 @@ class TestConfigInheritance:
                         # n_estimators and max_depth should be inherited
                     },
                     "features": {
+                        "target_type": "raw",
+                        "target_bookmaker": "pinnacle",
                         "retail_bookmakers": ["caesars"],
                         # sharp_bookmakers should be inherited
                     },
@@ -1977,6 +2026,7 @@ class TestConfigInheritance:
             "experiment": {"name": "no_base"},
             "training": {
                 "strategy_type": "xgboost",
+                "features": {"target_type": "raw", "target_bookmaker": "pinnacle"},
                 "data": {
                     "start_date": "2024-01-01",
                     "end_date": "2024-12-31",

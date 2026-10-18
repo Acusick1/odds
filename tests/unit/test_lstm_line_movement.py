@@ -807,7 +807,9 @@ class TestLSTMModelStaticFeatures:
                     start_date=date(2024, 10, 1),
                     end_date=date(2025, 1, 1),
                 ),
-                features=FeatureConfig(adapter="lstm"),
+                features=FeatureConfig(
+                    target_type="raw", target_bookmaker="pinnacle", adapter="lstm"
+                ),
                 model=LSTMConfig(lookback_hours=24, timesteps=8),
             ),
         )

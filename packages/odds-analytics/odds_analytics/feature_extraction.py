@@ -411,6 +411,8 @@ class TabularFeatureExtractor(FeatureExtractor):
             from odds_analytics.training.config import FeatureConfig
 
             config = FeatureConfig(
+                target_type="raw",
+                target_bookmaker="pinnacle",
                 sharp_bookmakers=["pinnacle", "circa"],
                 retail_bookmakers=["fanduel", "draftkings"],
             )
@@ -612,6 +614,8 @@ class SequenceFeatureExtractor(FeatureExtractor):
             from odds_analytics.training.config import FeatureConfig
 
             config = FeatureConfig(
+                target_type="raw",
+                target_bookmaker="pinnacle",
                 lookback_hours=48,
                 timesteps=16,
                 sharp_bookmakers=["pinnacle"],
