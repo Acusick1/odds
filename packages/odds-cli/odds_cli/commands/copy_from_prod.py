@@ -56,5 +56,5 @@ def copy_from_production(
         console.print(f"\n[bold red]✗ Copy failed: {str(e)}[/bold red]")
         raise typer.Exit(code=1) from e
 
-    if stats["events_failed"] > 0:
+    if stats.events_failed > 0:
         raise typer.Exit(code=1)

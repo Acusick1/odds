@@ -63,13 +63,12 @@ The betting agent subprocess swaps in `AGENT_DATABASE_URL` when set (`odds_lambd
 
 `odds copy from-prod START END` ([how-to](howto-copy-production-data.md)). `START` and `END` are positional `YYYY-MM-DD` dates, where `odds backfill` and `odds quality` use `--start`/`--end`; `END` is inclusive through 23:59:59 UTC. Options (`odds_cli.commands.copy_from_prod.copy_from_production`): `--sport/-s` (default `soccer_epl`), `--dry-run`, `--skip-existing/--overwrite` (default skip existing), `--prod-url`, `--local-url`.
 
-- Source URL: `--prod-url`, else `PROD_DATABASE_URL`, else `DATABASE_URL`. Target URL: `--local-url`, else `LOCAL_DATABASE_URL` (required). On existing machines `PROD_DATABASE_URL` names the Neon archive, so without `--prod-url` the copy reads frozen data, not the mini-PC database.
-- Events come from `odds_lambda.storage.readers.OddsReader.get_events_by_date_range` for the sport and window, in kick-off order. With `--skip-existing`, an event already present locally is skipped.
-- Each event is copied in one local transaction: the event row is merged with every column (status, scores and timestamps included), each snapshot not already present locally (matched on `snapshot_time` and `api_request_id`) is stored through `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot`, which recomputes the normalized odds, and its `api_request_id`, `fetch_tier`, `hours_until_commence` and `created_at` are then set to production's values, so source tags survive ([OddsWriter](../storage/odds-writer.md)).
-- Predictions are inserted after the snapshots, each re-pointed at the local id of its production snapshot; duplicates against `uq_prediction_event_snap_model` are skipped with `ON CONFLICT DO NOTHING`.
+- Source URL: `--prod-url`, else `PROD_DATABASE_URL`; with neither, the command fails. Target URL: `--local-url`, else `LOCAL_DATABASE_URL` (required). On existing machines `PROD_DATABASE_URL` names the Neon archive, so without `--prod-url` the copy reads frozen data, not the mini-PC database.
+- Events come from `odds_lambda.storage.readers.OddsReader.get_events_by_date_range` for the sport and window, in kick-off order. With `--skip-existing` (the default), an event already present locally is skipped untouched.
+- `--overwrite` replaces an existing event. A copied event is replaced in one local transaction: its local predictions, odds rows and snapshots are deleted, the event row is merged with every column (status, scores and timestamps included), and production's snapshots (every column, so `api_request_id`, `fetch_tier` and `created_at` survive), production's odds rows (copied, not regenerated from `raw_data`) and production's predictions are inserted. Each prediction is re-pointed at the local id of its production snapshot, taken from the inserts themselves; a prediction whose snapshot does not belong to its event raises `ValueError`.
 - An event whose copy raises is rolled back whole, listed by id in the summary, counted in `events_failed` and never in `events_copied`; the run continues and the command exits 1 if any event failed.
 - Running `odds_lambda.copy_from_production` as a script bypasses the CLI: its `__main__` block reads only the two dates and `--dry-run`, so every other option is ignored.
-- `--dry-run` counts events and snapshots it would copy and writes nothing; its prediction count stays 0.
+- `--dry-run` counts events and snapshots it would copy and writes nothing; its odds and prediction counts stay 0.
 
 ## Related
 

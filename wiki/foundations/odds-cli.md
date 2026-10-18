@@ -66,7 +66,7 @@ Pass `--sport` explicitly. [About the system and its pivots](project-overview.md
 
 - **Database override.** `scheduler start` and `agent run` accept `--db NAME`, which calls `odds_cli.db_override.override_database_url`: it swaps the dbname in `DATABASE_URL`, writes `os.environ`, and clears the settings cache (`odds_cli.db_override.swap_dbname` rejects names containing `/` or `?`). The engine already built in-process keeps the original URL; only subprocesses see the swap ([Engine creation](databases-and-environments.md#engine-creation), [Read at import](configuration.md#read-at-import)). On `odds agent run` it has no effect at all when `AGENT_DATABASE_URL` is set ([Database role](../agent/agent-run-job.md#database-role)).
 - **Async.** Commands wrap async code in `asyncio.run()`.
-- **Exit codes.** Most groups exit with `typer.Exit(code=...)`; `odds_cli.commands.validate` (10 sites) and `odds_cli.commands.quality` (3) call `sys.exit(1)`. `odds_cli.commands.copy_from_prod` exits 1 when any event failed to copy.
+- **Exit codes.** Most groups exit with `typer.Exit(code=...)`; `odds_cli.commands.validate` (10 sites) and `odds_cli.commands.quality` (3) call `sys.exit(1)`. `odds_cli.commands.copy_from_prod` exits 1 when `odds_lambda.copy_from_production.CopyStats.events_failed` is non-zero.
 
 ## Help text
 
