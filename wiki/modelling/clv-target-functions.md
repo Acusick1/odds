@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Target functions
-description: The devigged and raw target functions, the `_compute_target` dispatch, closing-snapshot selection, and the target fields of FeatureConfig (the feature group names it validates are on [Feature groups](feature-groups.md)).
+description: The devigged and raw target functions, the `_compute_target` dispatch, closing-snapshot selection, and the target fields of FeatureConfig.
 sources:
   - odds_analytics.sequence_loader.calculate_devigged_bookmaker_target
   - odds_analytics.sequence_loader.calculate_devigged_totals_target

@@ -631,6 +631,14 @@ class TestFeatureConfig:
         assert config.lookback_hours is None
         assert config.timesteps is None
 
+    def test_empty_feature_groups_rejected_for_xgboost(self):
+        with pytest.raises(ValidationError):
+            FeatureConfig(adapter="xgboost", feature_groups=[])
+
+    def test_empty_feature_groups_allowed_for_lstm(self):
+        config = FeatureConfig(adapter="lstm", feature_groups=[])
+        assert config.feature_groups == ()
+
     def test_custom_bookmakers(self):
         """Test custom bookmaker lists."""
         config = FeatureConfig(
@@ -953,6 +961,27 @@ class TestMLTrainingConfig:
                 model=XGBoostConfig(n_estimators=100),
             ),
         )
+
+    def _with_tuned_feature_groups(self, choices):
+        return MLTrainingConfig(
+            experiment=ExperimentConfig(name="tuned_groups"),
+            training=TrainingConfig(
+                strategy_type="xgboost_line_movement",
+                data=DataConfig(start_date=date(2024, 1, 1), end_date=date(2024, 12, 31)),
+                model=XGBoostConfig(n_estimators=100),
+            ),
+            tuning=TuningConfig(
+                search_spaces={"feature_groups": SearchSpace(type="categorical", choices=choices)}
+            ),
+        )
+
+    def test_tuned_feature_groups_valid_choices_accepted(self):
+        config = self._with_tuned_feature_groups([["tabular"], ["tabular", "standings"]])
+        assert config.tuning is not None
+
+    def test_tuned_feature_groups_unknown_choice_rejected(self):
+        with pytest.raises(ValidationError):
+            self._with_tuned_feature_groups([["tabular"], ["tabular", "bogus"]])
 
     def test_basic_creation(self, basic_config):
         """Test creating a basic configuration."""

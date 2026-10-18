@@ -18,7 +18,7 @@ The XGBoost CLV model predicts how far a bookmaker's line moves between a decisi
 - [Line-movement strategies (XGBoost, LSTM)](line-movement-models.md) — The two strategy classes, their shared confidence mapping, defaults, save and load, and ml_strategy_example.
 - [Model store](model-store.md) — odds model publish, the S3 layout and bucket, load_model caching and model_supports_sport.
 - [Prediction scoring](prediction-scoring.md) — The score_events flow, the predictions table, where scoring runs and how failures surface.
-- [Target functions](clv-target-functions.md) — The devigged and raw target functions, the `_compute_target` dispatch, closing-snapshot selection, and the target fields of FeatureConfig (the feature group names it validates are on [Feature groups](feature-groups.md)).
+- [Target functions](clv-target-functions.md) — The devigged and raw target functions, the `_compute_target` dispatch, closing-snapshot selection, and the target fields of FeatureConfig.
 - [Training config](training-config.md) — The MLTrainingConfig schema, every section's fields and defaults, data-source selection, and values the schema accepts that cannot train.
 - [Training pipeline](training-pipeline.md) — What odds train run, tune, validate and list-configs do step by step, the splits, verification artifacts and MLflow tracking.
 

@@ -30,7 +30,7 @@ The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README
 | MCP toolset | the `@mcp.tool()` functions in `odds_mcp.server` ([odds-mcp server](../agent/mcp-server.md)) |
 | Agent behaviour | the prompt files in `packages/odds-mcp/agents/` ([The betting agent](../agent/betting-agent.md)) |
 | Schema and storage | the model files, chiefly `odds_core.models` ([Storage](../storage/index.md)) |
-| Training data, target, features | `odds_analytics.training.config.FeatureConfig` (including the valid feature group names) and `odds_analytics.feature_groups`; evidence in `experiments/results/` ([CLV model findings](../evaluation/clv-model-findings.md)) |
+| Training data, target, features | `odds_analytics.training.config.FeatureConfig` and `odds_analytics.feature_groups`; evidence in `experiments/results/` ([CLV model findings](../evaluation/clv-model-findings.md)) |
 | Agent data sources | [Agent data sources](../agent/agent-data-sources.md) |
 | Issue and triage workflow | `docs/agents/` (below) |
 

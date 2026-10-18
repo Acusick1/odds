@@ -14,7 +14,7 @@ status: stable
 
 # Prediction scoring
 
-`odds_lambda.jobs.score_predictions.score_events` scores snapshots of upcoming events with the published model ([model store](model-store.md)), handling multi-feature-group models, including the standings, match_stats and epl_schedule cache preload, via `odds_analytics.feature_groups.XGBoostAdapter` (PR #359; the groups are the names in `odds_analytics.training.config.FeatureGroupName`), and writes `odds_core.prediction_models.Prediction` rows.
+`odds_lambda.jobs.score_predictions.score_events` scores snapshots of upcoming events with the published model ([model store](model-store.md)), handling multi-feature-group models, including the standings, match_stats and epl_schedule cache preload, via `odds_analytics.feature_groups.XGBoostAdapter` (PR #359), and writes `odds_core.prediction_models.Prediction` rows.
 
 ## Where it runs
 

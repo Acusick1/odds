@@ -85,7 +85,7 @@ Under the principled space sliding-380:50 yields 48-50 unique predictions on 50 
 - `*_roll3` columns include the current match, so they are look-ahead by construction (the script's own docstring says so).
 - The match-specific metrics need the starting XI, which the script docstring puts at about 75 minutes before kickoff and the agent's data-source notes at KO-60, while training samples at the sharp tier or 3-12 h out, so the strong signal is late information ([look-ahead bias](../modelling/look-ahead-bias.md#where-the-rule-breaks), [ADR-0006](../../docs/adr/0006-lineups-from-web-research.md)).
 
-No `epl_lineup` feature group exists, because the signal exists only after the XI is public (#481).
+Lineup features would need the starting XI, which is public about an hour before kick-off, after every training decision tier, so no feature group uses them (#481).
 
 ## Outcome
 
