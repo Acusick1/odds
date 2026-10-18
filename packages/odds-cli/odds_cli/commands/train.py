@@ -353,6 +353,8 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             event_ids=getattr(data_result, "event_ids_train", None),
                             static_features=data_result.static_train,
                             static_test=data_result.static_test,
+                            sample_weights=data_result.sample_weights_train,
+                            sample_weights_test=data_result.sample_weights_test,
                             **mask_kw,
                         )
                     except Exception:
@@ -390,6 +392,8 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             tracker=tracker,
                             static_train=data_result.static_train,
                             static_val=data_result.static_test,
+                            sample_weight_train=data_result.sample_weights_train,
+                            sample_weight_val=data_result.sample_weights_test,
                             **mask_kw_direct,
                         )
                     except Exception:
@@ -988,6 +992,8 @@ async def _run_tuning_async(
             static_val=val_data.static if val_data else None,
             event_ids_train=data_result.event_ids_train,
             event_ids_val=data_result.event_ids_val,
+            sample_weights_train=data_result.sample_weights_train,
+            sample_weights_val=val_data.sample_weights if val_data else None,
             **tune_mask_obj_kw,
         )
 
@@ -1094,6 +1100,8 @@ async def _run_tuning_async(
                         y_val=y_val,
                         static_train=data_result.static_train,
                         static_val=val_data.static if val_data else None,
+                        sample_weight_train=data_result.sample_weights_train,
+                        sample_weight_val=val_data.sample_weights if val_data else None,
                         **tune_mask_kw,
                     )
                 except Exception:

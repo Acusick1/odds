@@ -15,7 +15,7 @@ Every code change keeps the wiki current. `uv run python scripts/wiki_lint.py` (
 - **The Odds API costs quota units.** Check `odds status quota` before bulk or historical fetches. See [quota](wiki/collection/odds-api-quota.md).
 - **Pass `--sport` and the sport's market key.** Several CLI defaults are NBA. EPL odds use `1x2` and MLB uses `h2h`. See [sources and keys](wiki/collection/sport-and-market-keys.md).
 - **Historical analysis uses only data at or before decision time.** `get_odds_at_time` searches both sides of the target time. See [look-ahead](wiki/modelling/look-ahead-bias.md).
-- **The suspended EPL model's CLV target is devigged bet365** (`target_type: devigged_bookmaker`, `target_bookmaker: bet365`). The next model's target is set by ADR-0012, and the code does not compute it yet. See [CLV target](wiki/modelling/clv-target.md).
+- **The suspended EPL model's CLV target is devigged bet365** (`target_type: devigged_bookmaker`, `target_bookmaker: bet365`). The next model's target, ADR-0012's retail EV against the Betfair Exchange close, is `target_type: retail_ev`. See [CLV target](wiki/modelling/clv-target.md).
 - **Use one `async with async_session_maker() as session` per task.** Lambda gets `NullPool` automatically. See [databases](wiki/foundations/databases-and-environments.md).
 
 ## Tests

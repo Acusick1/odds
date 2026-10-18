@@ -5,7 +5,7 @@ description: The CLV training target, the feature pipeline, the sharp benchmark,
 
 # CLV modelling
 
-The XGBoost CLV model predicts how far a bookmaker's line moves between a decision snapshot and the close. These pages cover the target, the features, training and validation, and the deployed model's publishing and scoring path. The decisions behind the current setup are ADRs: [the hybrid sharp reference](../../docs/adr/0003-hybrid-sharp-reference.md) and [the expanding walk-forward protocol](../../docs/adr/0010-expanding-walk-forward-and-evaluation-range.md). [bet365 as the target](../../docs/adr/0002-bet365-clv-target.md) is superseded by [a retail bet's EV against the Betfair Exchange close](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md), which the code does not compute yet. For what the model has been shown to do, start at [CLV model findings](../evaluation/clv-model-findings.md).
+The XGBoost CLV model predicts the value of a bet against the close. These pages cover the targets, the features, training and validation, and the deployed model's publishing and scoring path. The decisions behind the current setup are ADRs: [the hybrid sharp reference](../../docs/adr/0003-hybrid-sharp-reference.md), [the expanding walk-forward protocol](../../docs/adr/0010-expanding-walk-forward-and-evaluation-range.md) and [a retail bet's EV against the Betfair Exchange close](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md), the `retail_ev` target that supersedes [bet365 as the target](../../docs/adr/0002-bet365-clv-target.md). The suspended deployed model still predicts the bet365 line move. For what the model has been shown to do, start at [CLV model findings](../evaluation/clv-model-findings.md).
 
 <!-- pages:start -->
 ### Reference
@@ -18,13 +18,13 @@ The XGBoost CLV model predicts how far a bookmaker's line moves between a decisi
 - [Line-movement strategies (XGBoost, LSTM)](line-movement-models.md) — The two strategy classes, their shared confidence mapping, defaults, save and load, and ml_strategy_example.
 - [Model store](model-store.md) — odds model publish, the S3 layout and bucket, load_model caching and model_supports_sport.
 - [Prediction scoring](prediction-scoring.md) — The score_events flow, the predictions table, where scoring runs and how failures surface.
-- [Target functions](clv-target-functions.md) — The devigged and raw target functions, the `_compute_target` dispatch, closing-snapshot selection, and the target fields of FeatureConfig.
+- [Target functions](clv-target-functions.md) — The retail-EV row builder, its features, weights and keep-bar metrics, the devigged and raw delta functions, the `_compute_target` dispatch, closing-snapshot selection, and the target fields of FeatureConfig.
 - [Training config](training-config.md) — The MLTrainingConfig schema, every section's fields and defaults, data-source selection, and values the schema accepts that cannot train.
 - [Training pipeline](training-pipeline.md) — What odds train run, tune, validate and list-configs do step by step, the splits, verification artifacts and MLflow tracking.
 
 ### Explanation
 
-- [CLV and the training target](clv-target.md) — What CLV means here, why the target is a close-minus-snapshot delta of one devigged bookmaker, and how sampling changes the target.
+- [CLV and the training target](clv-target.md) — What CLV means here, the retail-EV target against the Betfair Exchange close and its baseline and weights, the older close-minus-snapshot delta, and how sampling changes a target.
 - [Decision time and look-ahead bias](look-ahead-bias.md) — The as-of instant for bets and training rows, the no-future-data rule per layer, and where it breaks.
 - [Sharp benchmark and retail-sharp divergence](sharp-benchmark.md) — What the sharp reference is and why, its priority semantics, the divergence feature and screener, and how the three code copies differ.
 

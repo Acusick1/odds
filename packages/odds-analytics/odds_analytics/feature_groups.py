@@ -198,7 +198,11 @@ async def collect_event_data(
     # Derive closing snapshot from already-loaded snapshots (avoid extra DB query)
     closing_tier_value = config.closing_tier.value
     closing_candidates = [s for s in all_snapshots if s.fetch_tier == closing_tier_value]
-    closing_snapshot = _select_closing_snapshot(closing_candidates, event, config)
+    closing_snapshot = (
+        None
+        if config.target_type == "retail_ev"
+        else _select_closing_snapshot(closing_candidates, event, config)
+    )
 
     # PM context (optional)
     pm_context: PMEventContext | None = None
@@ -705,6 +709,17 @@ def _extract_static_feature_parts(
                 logger.debug("injury_feature_extraction_failed", event_id=event.id)
                 parts.append(nan_block_inj)
 
+    parts.extend(_extract_event_context_parts(bundle, config))
+    return parts
+
+
+def _extract_event_context_parts(
+    bundle: EventDataBundle, config: FeatureConfig
+) -> list[np.ndarray]:
+    """Feature arrays of the configured groups that depend on the event, not a snapshot."""
+    event = bundle.event
+    parts: list[np.ndarray] = []
+
     # --- Rest/schedule features (NaN-fill when unavailable to keep row) ---
     if "rest" in config.feature_groups:
         from odds_analytics.schedule_features import RestScheduleFeatures, extract_rest_features
@@ -1055,6 +1070,7 @@ class PreparedFeatureData:
         event_ids: np.ndarray | None = None,
         static_features: np.ndarray | None = None,
         static_feature_names: list[str] | None = None,
+        sample_weights: np.ndarray | None = None,
     ) -> None:
         self.X = X
         self.y = y
@@ -1063,6 +1079,7 @@ class PreparedFeatureData:
         self.event_ids = event_ids
         self.static_features = static_features
         self.static_feature_names = static_feature_names
+        self.sample_weights = sample_weights
 
     @property
     def num_samples(self) -> int:
@@ -1086,6 +1103,7 @@ async def prepare_training_data(
       - config.sampling.strategy="time_range"  → multiple rows per event
       - config.target_type="raw"               → avg implied-prob delta
       - config.target_type="devigged_bookmaker" → devigged bookmaker delta
+      - config.target_type="retail_ev"          → ADR-0012 rows (odds_analytics.retail_ev)
 
     For devigged_bookmaker, events without target bookmaker closing data are dropped.
     Polymarket features NaN-fill when PM data is unavailable, so events are
@@ -1100,6 +1118,13 @@ async def prepare_training_data(
     Returns:
         PreparedFeatureData with X, y, feature_names, masks, and event_ids for CV
     """
+    if config.target_type == "retail_ev":
+        if sampler is not None:
+            raise ValueError("retail_ev builds a row per retail snapshot and takes no sampler")
+        from odds_analytics.retail_ev import prepare_retail_ev_training_data
+
+        return await prepare_retail_ev_training_data(events, session, config)
+
     valid_events = filter_completed_events(events)
     if not valid_events:
         raise ValueError(f"No valid events found in {len(events)} total events")

@@ -975,6 +975,8 @@ class LSTMLineMovementStrategy(BettingStrategy):
         static_val: np.ndarray | None = None,
         masks_train: np.ndarray | None = None,
         masks_val: np.ndarray | None = None,
+        sample_weight_train: np.ndarray | None = None,
+        sample_weight_val: np.ndarray | None = None,
     ) -> dict[str, Any]:
         """
         Train LSTM model using configuration object.
@@ -1000,6 +1002,9 @@ class LSTMLineMovementStrategy(BettingStrategy):
             TypeError: If model config is not LSTMConfig
         """
         from odds_analytics.training.config import LSTMConfig
+
+        if sample_weight_train is not None or sample_weight_val is not None:
+            raise ValueError("LSTMLineMovementStrategy does not support sample weights")
 
         # Validate strategy type
         if config.training.strategy_type != "lstm_line_movement":

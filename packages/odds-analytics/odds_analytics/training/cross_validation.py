@@ -55,6 +55,8 @@ class TrainableStrategy(Protocol):
         trial: Any | None = ...,
         static_train: np.ndarray | None = ...,
         static_val: np.ndarray | None = ...,
+        sample_weight_train: np.ndarray | None = ...,
+        sample_weight_val: np.ndarray | None = ...,
     ) -> dict[str, Any]: ...
 
 
@@ -326,6 +328,7 @@ def run_cv(
     event_ids: np.ndarray | None = None,
     static_features: np.ndarray | None = None,
     masks: np.ndarray | None = None,
+    sample_weights: np.ndarray | None = None,
 ) -> CVResult:
     """
     Run cross-validation on the provided data.
@@ -451,10 +454,13 @@ def run_cv(
         static_train_fold = static_features[train_idx] if static_features is not None else None
         static_val_fold = static_features[val_idx] if static_features is not None else None
 
-        mask_kwargs: dict[str, Any] = {}
+        fold_kwargs: dict[str, Any] = {}
         if masks is not None:
-            mask_kwargs["masks_train"] = masks[train_idx]
-            mask_kwargs["masks_val"] = masks[val_idx]
+            fold_kwargs["masks_train"] = masks[train_idx]
+            fold_kwargs["masks_val"] = masks[val_idx]
+        if sample_weights is not None:
+            fold_kwargs["sample_weight_train"] = sample_weights[train_idx]
+            fold_kwargs["sample_weight_val"] = sample_weights[val_idx]
 
         logger.debug(
             "training_fold",
@@ -475,7 +481,7 @@ def run_cv(
             y_val=y_val_fold,
             static_train=static_train_fold,
             static_val=static_val_fold,
-            **mask_kwargs,
+            **fold_kwargs,
         )
 
         fold_result = CVFoldResult(
@@ -533,6 +539,8 @@ def train_with_cv(
     static_test: np.ndarray | None = None,
     masks: np.ndarray | None = None,
     masks_test: np.ndarray | None = None,
+    sample_weights: np.ndarray | None = None,
+    sample_weights_test: np.ndarray | None = None,
 ) -> tuple[dict[str, Any], CVResult]:
     """Run CV, train final model on all data, merge CV metrics into history.
 
@@ -557,6 +565,7 @@ def train_with_cv(
         event_ids=event_ids,
         static_features=static_features,
         masks=masks,
+        sample_weights=sample_weights,
     )
 
     logger.info(
@@ -565,10 +574,13 @@ def train_with_cv(
         cv_val_r2=f"{cv_result.mean_val_r2:.4f} ± {cv_result.std_val_r2:.4f}",
     )
 
-    mask_kwargs: dict[str, Any] = {}
+    fold_kwargs: dict[str, Any] = {}
     if masks is not None:
-        mask_kwargs["masks_train"] = masks
-        mask_kwargs["masks_val"] = masks_test
+        fold_kwargs["masks_train"] = masks
+        fold_kwargs["masks_val"] = masks_test
+    if sample_weights is not None:
+        fold_kwargs["sample_weight_train"] = sample_weights
+        fold_kwargs["sample_weight_val"] = sample_weights_test
 
     history = strategy.train_from_config(
         config=config,
@@ -579,7 +591,7 @@ def train_with_cv(
         y_val=y_test,
         static_train=static_features,
         static_val=static_test,
-        **mask_kwargs,
+        **fold_kwargs,
     )
 
     history.update(cv_result.to_dict())

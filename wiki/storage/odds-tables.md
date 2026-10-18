@@ -14,6 +14,7 @@ sources:
   - odds_lambda.oddsportal_adapter
   - scripts/ingest_football_data_uk.py
   - odds_lambda.polymarket_odds.build_raw_data
+  - odds_core.snapshot_sources
 status: stable
 ---
 
@@ -34,7 +35,7 @@ The Odds API per-event object: `bookmakers[]`, each with `key`, `title`, `last_u
 
 ## Provenance
 
-Two free-text fields tag where a snapshot came from. Each producer sets them as literals independently; no enum or registry defines the vocabularies (#468).
+Two free-text fields tag where a snapshot came from. Each producer sets them as literals independently (#468). `odds_core.snapshot_sources.SnapshotSource` lists the `raw_data["source"]` values for readers, and `odds_core.snapshot_sources.snapshot_kind` classifies a snapshot from them, splitting FDUK by `timing.basis` into opening and closing prices; it raises on a value it does not know.
 
 | `raw_data["source"]` | Producer |
 |---|---|

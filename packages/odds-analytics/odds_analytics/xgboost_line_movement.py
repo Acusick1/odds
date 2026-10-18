@@ -271,6 +271,8 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         X_val: np.ndarray | None = None,
         y_val: np.ndarray | None = None,
         tracker: ExperimentTracker | None = None,
+        sample_weight_train: np.ndarray | None = None,
+        sample_weight_val: np.ndarray | None = None,
         **xgb_params,
     ) -> dict[str, Any]:
         """
@@ -317,13 +319,18 @@ class XGBoostLineMovementStrategy(BettingStrategy):
 
         # Prepare eval set if validation data provided
         eval_set = None
+        eval_weights = None
         if X_val is not None and y_val is not None:
             eval_set = [(X_train, y_train), (X_val, y_val)]
+            if sample_weight_train is not None:
+                eval_weights = [sample_weight_train, sample_weight_val]
 
         self.model.fit(
             X_train,
             y_train,
+            sample_weight=sample_weight_train,
             eval_set=eval_set,
+            sample_weight_eval_set=eval_weights,
             verbose=False,
         )
 
@@ -331,7 +338,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         from odds_analytics.training.utils import compute_regression_metrics
 
         train_predictions = self.model.predict(X_train)
-        train_metrics = compute_regression_metrics(y_train, train_predictions)
+        train_metrics = compute_regression_metrics(y_train, train_predictions, sample_weight_train)
 
         history: dict[str, Any] = {
             "train_mse": train_metrics["mse"],
@@ -343,7 +350,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
 
         if X_val is not None and y_val is not None:
             val_predictions = self.model.predict(X_val)
-            val_metrics = compute_regression_metrics(y_val, val_predictions)
+            val_metrics = compute_regression_metrics(y_val, val_predictions, sample_weight_val)
             history.update(
                 {
                     "val_mse": val_metrics["mse"],
@@ -374,6 +381,8 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         trial: Any | None = None,
         static_train: np.ndarray | None = None,
         static_val: np.ndarray | None = None,
+        sample_weight_train: np.ndarray | None = None,
+        sample_weight_val: np.ndarray | None = None,
     ) -> dict[str, Any]:
         """
         Train XGBoost regressor using configuration object.
@@ -486,6 +495,8 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             X_val=X_val,
             y_val=y_val,
             tracker=tracker,
+            sample_weight_train=sample_weight_train,
+            sample_weight_val=sample_weight_val,
             **xgb_params,
         )
 
@@ -536,6 +547,8 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         event_ids: np.ndarray | None = None,
         static_features: np.ndarray | None = None,
         static_test: np.ndarray | None = None,
+        sample_weights: np.ndarray | None = None,
+        sample_weights_test: np.ndarray | None = None,
     ) -> tuple[dict[str, Any], CVResult]:
         from odds_analytics.training.cross_validation import (
             train_with_cv as _train_with_cv,
@@ -552,6 +565,8 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             event_ids,
             static_features=static_features,
             static_test=static_test,
+            sample_weights=sample_weights,
+            sample_weights_test=sample_weights_test,
         )
 
     def save_model(self, filepath: str | Path) -> None:

@@ -11,6 +11,7 @@ sources:
   - odds_cli.commands.train.STRATEGY_CLASSES
   - odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.train_from_config
   - experiments/configs/xgboost_epl_production_tabular_match_stats.yaml
+  - experiments/configs/xgboost_epl_retail_ev.yaml
 status: stable
 ---
 
@@ -32,9 +33,10 @@ Every model forbids unknown keys (`extra="forbid"`). A file has `experiment` (na
 
 **`training.features`**
 
-- `target_type` (required: `raw` or `devigged_bookmaker`), `target_bookmaker` (required for `devigged_bookmaker`, omitted for `raw`), `sharp_bookmakers` (priority order, default `["pinnacle"]`), `retail_bookmakers`, `closing_source_priority`, `outcome`, `markets`, `feature_groups`, `form_window`, `match_stats_window`, `variance_threshold`, `sampling` ([target functions](clv-target-functions.md), [sharp benchmark](sharp-benchmark.md), [decision time](look-ahead-bias.md), [feature pipeline](feature-pipeline.md)).
+- `target_type` (required: `raw`, `devigged_bookmaker` or `retail_ev`), `target_bookmaker` (required for `devigged_bookmaker`, omitted otherwise), `sharp_bookmakers` (priority order, default `["pinnacle"]`), `retail_bookmakers`, `closing_source_priority`, `outcome`, `markets`, `feature_groups`, `form_window`, `match_stats_window`, `variance_threshold`, `sampling` ([target functions](clv-target-functions.md), [sharp benchmark](sharp-benchmark.md), [decision time](look-ahead-bias.md), [feature pipeline](feature-pipeline.md)).
 - `odds_analytics.training.config.SamplingConfig`: `strategy` (`time_range` default, or `tier`), `decision_tier` (default `pregame`, used by `tier`), and `min_hours` 3.0, `max_hours` 12.0 and `max_samples_per_event` 5 (used by `time_range`). Production sets `strategy: tier` with `decision_tier: sharp` ([feature pipeline](feature-pipeline.md)).
-- `training.features` and `target_type` have no defaults; the suspended model's target is devigged bet365 ([ADR-0002](../../docs/adr/0002-bet365-clv-target.md), superseded by [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md), which the code does not implement yet).
+- `training.features` and `target_type` have no defaults; the suspended model's target is devigged bet365 ([ADR-0002](../../docs/adr/0002-bet365-clv-target.md), superseded by [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md), the `retail_ev` target).
+- `retail_ev` needs the `xgboost` adapter and market `1x2` or `h2h`, ignores `outcome`, `sampling`, the bookmaker rosters and `closing_tier`, and takes in `feature_groups` only `odds_analytics.training.config.EVENT_CONTEXT_GROUPS`, which may be empty; its price features are built in ([target functions](clv-target-functions.md#retail-ev-features)). `experiments/configs/xgboost_epl_retail_ev.yaml` is its EPL config, from 2024-08-01 under expanding-380:50.
 - `sharp_bookmakers` defaults to Pinnacle only, while the hybrid reference sets `[pinnacle, betfair_exchange]`; the MCP default differs on purpose (#421, [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md)).
 - `feature_groups` accepts only the names in `odds_analytics.training.config.FeatureGroupName`, must be non-empty for the `xgboost` adapter (the `lstm` adapter may leave it empty), and each `feature_groups` choice in a tuning search space is validated by `odds_analytics.training.config.MLTrainingConfig` at load.
 - The primary market is `markets[0]` by position (#475). `odds_analytics.training.config.FeatureConfig` carries bookmaker rosters, sampling, LSTM, Polymarket and EPL settings, so every committed YAML serialises about 30 unrelated fields.

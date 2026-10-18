@@ -15,12 +15,15 @@ if TYPE_CHECKING:
     from odds_analytics.training.config import MLTrainingConfig
 
 
-def compute_regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
-    """Return dict with keys: mse, mae, r2."""
-    mse = float(np.mean((y_pred - y_true) ** 2))
-    mae = float(np.mean(np.abs(y_pred - y_true)))
-    ss_res = np.sum((y_true - y_pred) ** 2)
-    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+def compute_regression_metrics(
+    y_true: np.ndarray, y_pred: np.ndarray, sample_weight: np.ndarray | None = None
+) -> dict[str, float]:
+    """Return dict with keys: mse, mae, r2, each weighted by ``sample_weight`` when given."""
+    w = np.ones_like(y_true, dtype=np.float64) if sample_weight is None else sample_weight
+    mse = float(np.average((y_pred - y_true) ** 2, weights=w))
+    mae = float(np.average(np.abs(y_pred - y_true), weights=w))
+    ss_res = np.sum(w * (y_true - y_pred) ** 2)
+    ss_tot = np.sum(w * (y_true - np.average(y_true, weights=w)) ** 2)
     r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
     return {"mse": mse, "mae": mae, "r2": r2}
 

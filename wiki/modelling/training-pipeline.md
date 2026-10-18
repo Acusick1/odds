@@ -15,6 +15,8 @@ sources:
   - odds_analytics.training.cross_validation.train_with_cv
   - odds_analytics.training.tracking.MLflowTracker
   - odds_analytics.training.tracking.create_tracker
+  - odds_analytics.training.utils.compute_regression_metrics
+  - odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.train
 status: stable
 ---
 
@@ -31,6 +33,10 @@ status: stable
 5. **Verification artifacts.** `feature_stats.csv`, `feature_sample.csv` and `feature_target_corr.csv` are written to `experiments/results/<experiment.name>/verification/` from the concatenated splits ([run an experiment](../evaluation/experiment-scripts.md#verification-artifacts)).
 6. **Train.** If `use_kfold` (default true), `odds_analytics.training.cross_validation.train_with_cv` runs [walk-forward CV](cross-validation.md) and then fits a final model on all training rows; otherwise a single `odds_analytics.training.cross_validation.TrainableStrategy.train_from_config`. `odds_cli.commands.train.STRATEGY_CLASSES` has exactly the `odds_analytics.training.config.StrategyType` values, `xgboost_line_movement` and `lstm_line_movement` ([line-movement models](line-movement-models.md)).
 7. **Save.** The model goes to `<output_path>/<strategy_type>_<experiment.name>.pkl` (or `model_name`), and the full config is written beside it as `.yaml`, which the loader needs; a failed config write fails the command. `tune --train-best` saves through the same helper.
+
+## Sample weights
+
+`odds_analytics.feature_groups.PreparedFeatureData.sample_weights` is set only by the `retail_ev` target ([target functions](clv-target-functions.md#retail-ev-rows)). `odds_analytics.training.data_preparation.TrainingDataResult` splits it with the rows into `sample_weights_train`, `sample_weights_val` and `sample_weights_test`. `odds_cli.commands.train.run_training` and the tuning objective (`odds_analytics.training.tuner.create_objective`) pass them to `odds_analytics.training.cross_validation.run_cv` and `odds_analytics.training.cross_validation.train_with_cv`, which slice them per fold, and on to `odds_analytics.training.cross_validation.TrainableStrategy.train_from_config`. `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.train` passes them to `fit` as `sample_weight` and `sample_weight_eval_set`, so the validation RMSE used for Optuna pruning is weighted, and scores train and validation with `odds_analytics.training.utils.compute_regression_metrics`, whose MSE, MAE and R² are weighted when weights are given. The LSTM strategy raises if given weights. Feature selection for `top_k_features` and the verification artifacts ignore weights.
 
 ## Tune
 

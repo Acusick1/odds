@@ -15,6 +15,7 @@ sources:
   - odds_mcp.server.find_retail_edges
   - packages/odds-mcp/agents/common.md
   - odds_core.models.Odds
+  - odds_core.bookmakers.UK_RETAIL_BOOKMAKERS
 status: stable
 ---
 
@@ -24,7 +25,9 @@ The sharp benchmark is the price treated as closest to fair: Pinnacle, with Betf
 
 `polymarket` is a further reference for EPL matches from 2025-08: its midpoints sit within 0.35-0.5 pp of Betfair Exchange from three days out ([#518](https://github.com/Acusick1/odds/issues/518)) and are stored as snapshots holding no other bookmaker ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#snapshot-shape)). Whether it adds information beyond Betfair is untested.
 
-It anchors the model's strongest feature, the retail-sharp divergence, and the agent's retail screener ([MCP market tools](../agent/mcp-market-tools.md#retail-edges)). Because the agent sees the same quantity directly through `odds_mcp.server.find_retail_edges`, the model adds little for it ([betting agent](../agent/betting-agent.md)).
+The [retail-EV target](clv-target.md#the-retail-ev-target) does not use this priority list for its close: ADR-0012 fixes the close and the baseline to Betfair Exchange, and its retail rows come from the UK roster `odds_core.bookmakers.UK_RETAIL_BOOKMAKERS` rather than from every non-sharp book ([target functions](clv-target-functions.md#retail-ev-rows)).
+
+The sharp reference anchors the delta model's strongest feature, the retail-sharp divergence, and the agent's retail screener ([MCP market tools](../agent/mcp-market-tools.md#retail-edges)). Because the agent sees the same quantity directly through `odds_mcp.server.find_retail_edges`, the model adds little for it ([betting agent](../agent/betting-agent.md)).
 
 ## Priority semantics
 

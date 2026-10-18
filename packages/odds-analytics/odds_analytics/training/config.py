@@ -573,6 +573,10 @@ class SamplingConfig(BaseModel):
 
 
 _DEVIGGED_MARKETS = frozenset({"h2h", "1x2", "totals"})
+_RETAIL_EV_MARKETS = frozenset({"h2h", "1x2"})
+EVENT_CONTEXT_GROUPS: frozenset[str] = frozenset(
+    {"rest", "standings", "match_stats", "epl_schedule"}
+)
 
 
 class FeatureConfig(BaseModel):
@@ -706,9 +710,10 @@ class FeatureConfig(BaseModel):
     )
 
     # Target formulation
-    target_type: Literal["raw", "devigged_bookmaker"] = Field(
+    target_type: Literal["raw", "devigged_bookmaker", "retail_ev"] = Field(
         description="Target formulation. 'raw': avg implied prob delta at snapshot vs closing. "
-        "'devigged_bookmaker': bookmaker close vs bookmaker at snapshot, both devigged.",
+        "'devigged_bookmaker': bookmaker close vs bookmaker at snapshot, both devigged. "
+        "'retail_ev': a UK retail bet's EV against the Betfair Exchange close (ADR-0012).",
     )
 
     target_bookmaker: str | None = Field(
@@ -732,6 +737,16 @@ class FeatureConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_feature_groups_for_adapter(self) -> FeatureConfig:
+        if self.target_type == "retail_ev":
+            if self.adapter != "xgboost":
+                raise ValueError("retail_ev supports only the xgboost adapter")
+            extra = set(self.feature_groups) - EVENT_CONTEXT_GROUPS
+            if extra:
+                raise ValueError(
+                    f"retail_ev builds its own price features; feature_groups may name only "
+                    f"{sorted(EVENT_CONTEXT_GROUPS)}, got {sorted(extra)}"
+                )
+            return self
         if self.adapter == "xgboost" and not self.feature_groups:
             raise ValueError("feature_groups must name at least one group for the xgboost adapter")
         return self
@@ -749,7 +764,14 @@ class FeatureConfig(BaseModel):
                     f"supported markets: {sorted(_DEVIGGED_MARKETS)}"
                 )
         elif self.target_bookmaker is not None:
-            raise ValueError("target_bookmaker must be omitted when target_type is raw")
+            raise ValueError(
+                f"target_bookmaker must be omitted when target_type is {self.target_type}"
+            )
+        if self.target_type == "retail_ev" and self.primary_market not in _RETAIL_EV_MARKETS:
+            raise ValueError(
+                f"retail_ev has no target for market {self.primary_market!r}; "
+                f"supported markets: {sorted(_RETAIL_EV_MARKETS)}"
+            )
         is_totals_outcome = self.outcome in ("over", "under")
         if is_totals_outcome != (self.primary_market == "totals"):
             raise ValueError(
