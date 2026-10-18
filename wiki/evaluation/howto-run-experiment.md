@@ -12,7 +12,7 @@ status: stable
 
 Conventions, file formats and the script inventory are on [Experiment scripts and artifacts](experiment-scripts.md).
 
-1. **Write the script and config.** Put the script in `experiments/scripts/` and reuse a YAML from `experiments/configs/` ([conventions](experiment-scripts.md#script-and-config-conventions)).
+1. **Write the script and config.** Put the script in `experiments/scripts/` and reuse a YAML from `experiments/configs/` ([conventions](experiment-scripts.md#script-and-config-conventions)); `experiments/scripts/cv_protocol_grid.py` is the reference for a script that varies CV settings. A `tuning` section sets `metric`, which fixes the optimisation direction.
    - Set `target_type` (and `target_bookmaker` for `devigged_bookmaker`) and the CV protocol explicitly; the CV code defaults are not the production protocol.
    - For a sliding-window run, copy the search space from `experiments/configs/xgboost_epl_production_*`.
 2. **Commit the script.** Do this before the run, so `FINDINGS.md` can record the git SHA of the code that produced the results.

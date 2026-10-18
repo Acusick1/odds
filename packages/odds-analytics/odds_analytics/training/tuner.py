@@ -75,6 +75,7 @@ logger = structlog.get_logger()
 __all__ = [
     "HyperparameterTuner",
     "OptunaTuner",
+    "apply_trial_params",
     "create_objective",
 ]
 
@@ -388,6 +389,7 @@ class OptunaTuner(HyperparameterTuner):
             tracking_enabled=bool(self._tracker),
         )
 
+        raised = False
         try:
             self.study.optimize(
                 objective,
@@ -396,10 +398,13 @@ class OptunaTuner(HyperparameterTuner):
                 show_progress_bar=True,
                 callbacks=callbacks if callbacks else None,
             )
+        except Exception:
+            raised = True
+            raise
         finally:
             # Log final results to parent run if tracking enabled
             if self._tracker:
-                run_status = "FINISHED"
+                run_status = "FAILED" if raised else "FINISHED"
                 if any(t.state == optuna.trial.TrialState.COMPLETE for t in self.study.trials):
                     try:
                         # Log best trial results
@@ -699,6 +704,29 @@ def suggest_params_from_search_space(
     return suggested_params
 
 
+def apply_trial_params(config: MLTrainingConfig, params: dict[str, Any]) -> None:
+    """Apply sampled or best parameters to ``config`` in place.
+
+    A parameter that names a field of both the model and the features config (the LSTM
+    ``lookback_hours`` and ``timesteps``) is set on both, so the two stay in agreement.
+    ``top_k_features`` is not a config field and is skipped.
+    """
+    from odds_analytics.training.config import TOP_K_FEATURES_KEY, FeatureConfig
+
+    model_fields = type(config.training.model).model_fields
+    for name, value in params.items():
+        if name == TOP_K_FEATURES_KEY:
+            continue
+        in_model = name in model_fields
+        in_features = name in FeatureConfig.model_fields
+        if not (in_model or in_features):
+            raise ValueError(f"Parameter '{name}' matches no model or feature config field")
+        if in_model:
+            setattr(config.training.model, name, value)
+        if in_features:
+            setattr(config.training.features, name, value)
+
+
 def create_objective(
     config: MLTrainingConfig,
     X_train: ndarray,
@@ -762,14 +790,6 @@ def create_objective(
 
     feature_param_names = set(FeatureConfig.model_fields.keys())
     model_param_names = set(type(config.training.model).model_fields.keys())
-    unknown_keys = sorted(
-        set(search_spaces) - model_param_names - feature_param_names - {TOP_K_FEATURES_KEY}
-    )
-    if unknown_keys:
-        raise ValueError(
-            f"Search-space keys {unknown_keys} match no field of "
-            f"{type(config.training.model).__name__} or FeatureConfig"
-        )
 
     # Check if feature_groups is being tuned and we have pre-computed features
     tuning_feature_groups = "feature_groups" in search_spaces
@@ -842,13 +862,7 @@ def create_objective(
         # Create modified config with suggested parameters
         modified_config = config.model_copy(deep=True)
 
-        # Update model parameters
-        for param_name, param_value in model_params.items():
-            setattr(modified_config.training.model, param_name, param_value)
-
-        # Update feature parameters
-        for param_name, param_value in feature_params.items():
-            setattr(modified_config.training.features, param_name, param_value)
+        apply_trial_params(modified_config, suggested_params)
 
         # Select features: use pre-computed if available for feature_groups, otherwise default
         trial_X_train, trial_y_train = X_train, y_train
@@ -865,16 +879,16 @@ def create_objective(
                 data = precomputed_features[fg_key]
                 trial_X_train = data.X_train
                 trial_y_train = data.y_train
-                eval_data = data.eval_data
-                trial_X_val = eval_data.X if eval_data else None
-                trial_y_val = eval_data.y if eval_data else None
+                val_data = data.validation_data
+                trial_X_val = val_data.X if val_data else None
+                trial_y_val = val_data.y if val_data else None
                 trial_feature_names = data.feature_names
                 trial_static_train = data.static_train
-                trial_static_val = eval_data.static if eval_data else None
+                trial_static_val = val_data.static if val_data else None
                 trial_event_ids = data.event_ids_train
                 trial_event_ids_val = data.event_ids_val
                 trial_masks_train = data.masks_train
-                trial_masks_val = eval_data.masks if eval_data else None
+                trial_masks_val = val_data.masks if val_data else None
                 logger.debug(
                     "using_precomputed_features",
                     trial_number=trial.number,

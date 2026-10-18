@@ -77,7 +77,6 @@ def sample_config(sample_search_spaces):
         ),
         tuning=TuningConfig(
             n_trials=10,
-            direction="minimize",
             metric="val_mse",
             search_spaces=sample_search_spaces,
             sampler="tpe",
@@ -1286,3 +1285,171 @@ def test_no_feature_selection_without_top_k_in_search_space(
 
     # Verify no feature selection attributes were set
     assert "feature_ranking_names" not in mock_study.user_attrs
+
+
+# =============================================================================
+# Failure handling and parameter application (#437)
+# =============================================================================
+
+
+N_ESTIMATORS = {"n_estimators": SearchSpace(type="int", low=10, high=50)}
+FULL_HISTORY = dict.fromkeys(
+    ("train_mse", "train_mae", "train_r2", "val_mse", "val_mae", "val_r2"), 0.1
+)
+
+
+def _optimize(config, strategy, n_trials=3):
+    import optuna
+
+    X = np.random.randn(20, 3)
+    y = np.random.randn(20)
+    objective = create_objective(
+        config=config,
+        X_train=X,
+        y_train=y,
+        feature_names=["a", "b", "c"],
+        X_val=X[:5],
+        y_val=y[:5],
+    )
+    study = optuna.create_study()
+    with patch(
+        "odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy",
+        return_value=strategy,
+    ):
+        study.optimize(objective, n_trials=n_trials)
+    return study
+
+
+class TestObjectiveErrors:
+    """Errors in a trial fail the trial; pruning still works."""
+
+    def test_error_marks_trial_failed_and_aborts_study(self, make_ml_config):
+        import optuna
+
+        strategy = MagicMock()
+        strategy.train_from_config.side_effect = RuntimeError("boom")
+        config = make_ml_config(search_spaces=N_ESTIMATORS)
+        study = optuna.create_study()
+        objective = create_objective(
+            config=config,
+            X_train=np.zeros((4, 1)),
+            y_train=np.zeros(4),
+            feature_names=["a"],
+            X_val=np.zeros((2, 1)),
+            y_val=np.zeros(2),
+        )
+        with patch(
+            "odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy",
+            return_value=strategy,
+        ):
+            with pytest.raises(RuntimeError, match="boom"):
+                study.optimize(objective, n_trials=3)
+        assert [t.state for t in study.trials] == [optuna.trial.TrialState.FAIL]
+
+    def test_trial_pruned_is_recorded_as_pruned(self, make_ml_config):
+        import optuna
+
+        strategy = MagicMock()
+        strategy.train_from_config.side_effect = optuna.TrialPruned()
+        study = _optimize(make_ml_config(search_spaces=N_ESTIMATORS), strategy, n_trials=2)
+        assert {t.state for t in study.trials} == {optuna.trial.TrialState.PRUNED}
+
+    def test_import_error_is_not_swallowed(self, make_ml_config):
+        strategy = MagicMock()
+        strategy.train_from_config.side_effect = ImportError("xgboost missing")
+        with pytest.raises(ImportError):
+            _optimize(make_ml_config(search_spaces=N_ESTIMATORS), strategy, n_trials=1)
+
+    def test_failed_optimize_marks_tracker_run_failed(self, make_ml_config):
+        tuner = OptunaTuner(study_name="failed_run_status", direction="minimize")
+        tuner._tracker = MagicMock()
+        objective = MagicMock(side_effect=RuntimeError("boom"))
+        with pytest.raises(RuntimeError, match="boom"):
+            tuner.optimize(objective, n_trials=1)
+        tuner._tracker.end_run.assert_called_once_with(status="FAILED")
+
+
+class TestObjectiveMetric:
+    def test_cv_objective_returns_requested_metric(self, make_ml_config):
+        import optuna
+
+        config = make_ml_config(
+            search_spaces=N_ESTIMATORS, metric="val_r2", use_kfold=True, cv_method="walk_forward"
+        )
+        strategy = MagicMock()
+        strategy.train_from_config.return_value = {**FULL_HISTORY, "val_r2": 0.4}
+        objective = create_objective(
+            config=config,
+            X_train=np.zeros((10, 1)),
+            y_train=np.zeros(10),
+            feature_names=["a"],
+            event_ids_train=np.array([f"e{i}" for i in range(10)]),
+        )
+        with patch(
+            "odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy",
+            return_value=strategy,
+        ):
+            assert objective(optuna.create_study().ask()) == pytest.approx(0.4)
+
+    def test_cv_trial_with_nothing_held_out(self, make_ml_config):
+        import optuna
+
+        config = make_ml_config(
+            search_spaces=N_ESTIMATORS, use_kfold=True, cv_method="walk_forward", test_split=0.0
+        )
+        strategy = MagicMock()
+        strategy.train_from_config.return_value = FULL_HISTORY
+        objective = create_objective(
+            config=config,
+            X_train=np.zeros((10, 1)),
+            y_train=np.zeros(10),
+            feature_names=["a"],
+            X_val=None,
+            y_val=None,
+            event_ids_train=np.array([f"e{i}" for i in range(10)]),
+        )
+        with patch(
+            "odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy",
+            return_value=strategy,
+        ):
+            assert objective(optuna.create_study().ask()) == pytest.approx(0.1)
+
+
+class TestApplyTrialParams:
+    def test_model_and_feature_params_are_applied(self, make_ml_config):
+        from odds_analytics.training.tuner import apply_trial_params
+
+        config = make_ml_config()
+        apply_trial_params(config, {"n_estimators": 77, "form_window": 3})
+        assert config.training.model.n_estimators == 77
+        assert config.training.features.form_window == 3
+
+    def test_top_k_features_is_skipped(self, make_ml_config):
+        from odds_analytics.training.tuner import apply_trial_params
+
+        config = make_ml_config()
+        apply_trial_params(config, {"top_k_features": 4})
+
+    def test_unknown_param_raises(self, make_ml_config):
+        from odds_analytics.training.tuner import apply_trial_params
+
+        with pytest.raises(ValueError, match="no_such_param"):
+            apply_trial_params(make_ml_config(), {"no_such_param": 1})
+
+    def test_param_on_both_model_and_features_is_set_on_both(self):
+        from odds_analytics.training import FeatureConfig
+        from odds_analytics.training.config import LSTMConfig
+        from odds_analytics.training.tuner import apply_trial_params
+
+        config = MLTrainingConfig(
+            experiment=ExperimentConfig(name="lstm"),
+            training=TrainingConfig(
+                strategy_type="lstm_line_movement",
+                data=DataConfig(start_date="2024-01-01", end_date="2024-12-31"),
+                model=LSTMConfig(lookback_hours=72, timesteps=24),
+                features=FeatureConfig(adapter="lstm"),
+            ),
+        )
+        apply_trial_params(config, {"lookback_hours": 48, "timesteps": 12})
+        assert config.training.model.lookback_hours == config.training.features.lookback_hours == 48
+        assert config.training.model.timesteps == config.training.features.timesteps == 12

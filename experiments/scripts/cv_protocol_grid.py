@@ -283,10 +283,11 @@ async def main(n_trials: int, cells: list[GridCell], max_workers: int, config_pa
     X_train = data.X_train
     y_train = data.y_train
     feature_names = data.feature_names
-    X_val = data.X_val if data.num_val_samples > 0 else data.X_test
-    y_val = data.y_val if data.num_val_samples > 0 else data.y_test
+    val_data = data.validation_data
+    X_val = val_data.X if val_data else None
+    y_val = val_data.y if val_data else None
     static_train = data.static_train
-    static_val = data.static_val if data.num_val_samples > 0 else data.static_test
+    static_val = val_data.static if val_data else None
     event_ids_train = data.event_ids_train
     event_ids_val = data.event_ids_val
 

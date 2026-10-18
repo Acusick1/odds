@@ -536,13 +536,10 @@ def train_with_cv(
 ) -> tuple[dict[str, Any], CVResult]:
     """Run CV, train final model on all data, merge CV metrics into history.
 
-    The final model is fitted on every row of ``X``. ``X_test`` is optional; an empty
-    or missing test set means the final model is fitted without a validation set and
-    its history has no ``val_*`` metrics.
+    The final model is fitted on every row of ``X``. ``X_test`` is optional; without it
+    the final model is fitted without a validation set and its history has no ``val_*``
+    metrics beyond the merged CV means.
     """
-    if X_test is not None and len(X_test) == 0:
-        X_test = y_test = static_test = masks_test = None
-
     logger.info(
         "starting_train_with_cv",
         experiment_name=config.experiment.name,

@@ -116,10 +116,6 @@ def training_data():
 class TestResolveSearchSpaces:
     """Test resolve_search_spaces()."""
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"),
-        reason="requires xgboost",
-    )
     def test_resolve_search_spaces_int(self):
         """Test search space resolution for integer parameters."""
         params = {"n_estimators": 100}

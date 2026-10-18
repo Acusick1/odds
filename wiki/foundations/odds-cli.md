@@ -35,7 +35,7 @@ status: stable
 | `scrape` | [OddsPortal scraper](../collection/oddsportal-scraper.md) |
 | `odds_cli.commands.discover`, `odds_cli.commands.backfill` | [Odds API historical backfill](../collection/odds-api-backfill.md) |
 | `backtest` | [Backtest engine](../evaluation/backtest-engine.md), [Backtest strategies](../evaluation/backtest-strategies.md) |
-| `odds train` | [Training pipeline](../modelling/training-pipeline.md) (`tune` stores studies in the database unless `--in-memory`), [Hyperparameter tuner](../modelling/hyperparameter-tuner.md) |
+| `odds train` | [Training pipeline](../modelling/training-pipeline.md) (`tune` stores studies in a local SQLite file unless `--in-memory`), [Hyperparameter tuner](../modelling/hyperparameter-tuner.md) |
 | `model` | [Model store](../modelling/model-store.md) |
 | `odds status` | [odds status](../operations/health-monitor.md#odds-status), [Odds API quota](../collection/odds-api-quota.md) |
 | `validate`, `quality` | [Coverage and completeness checks](../storage/coverage-checks.md) |

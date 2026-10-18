@@ -809,7 +809,6 @@ class TestTuningConfig:
         """Test tuning config with search spaces."""
         config = TuningConfig(
             n_trials=50,
-            direction="maximize",
             metric="val_r2",
             search_spaces={
                 "n_estimators": SearchSpace(type="int", low=50, high=500),
@@ -1221,7 +1220,6 @@ class TestJSONLoading:
             },
             "tuning": {
                 "n_trials": 50,
-                "direction": "minimize",
                 "search_spaces": {
                     "n_estimators": {
                         "type": "int",
@@ -2097,7 +2095,6 @@ class TestConfigInheritance:
             base_with_options = base_config_data.copy()
             base_with_options["tuning"] = {
                 "n_trials": 100,
-                "direction": "minimize",
                 "search_spaces": {
                     "n_estimators": {"type": "int", "low": 50, "high": 500},
                 },
@@ -2205,3 +2202,49 @@ class TestDeepMerge:
         assert deep_merge({}, {"a": 1}) == {"a": 1}
         assert deep_merge({"a": 1}, {}) == {"a": 1}
         assert deep_merge({}, {}) == {}
+
+
+class TestTuningMetricAndDirection:
+    """The metric is a closed set and fixes the optimization direction (#437)."""
+
+    @pytest.mark.parametrize(
+        ("metric", "direction"),
+        [("val_mse", "minimize"), ("val_mae", "minimize"), ("val_r2", "maximize")],
+    )
+    def test_direction_derived_from_metric(self, metric, direction):
+        assert TuningConfig(metric=metric).direction == direction
+
+    def test_direction_is_not_a_config_field(self):
+        with pytest.raises(ValidationError):
+            TuningConfig(direction="minimize")
+
+    @pytest.mark.parametrize("metric", ["cv_val_mse_mean", "accuracy"])
+    def test_unsupported_metric_is_rejected(self, metric):
+        with pytest.raises(ValidationError):
+            TuningConfig(metric=metric)
+
+
+class TestSearchSpaceKeys:
+    def test_unknown_key_fails_validation(self, make_ml_config):
+        with pytest.raises(ValidationError, match="no_such_param"):
+            make_ml_config(search_spaces={"no_such_param": SearchSpace(type="int", low=1, high=3)})
+
+    def test_model_feature_and_top_k_keys_are_accepted(self, make_ml_config):
+        make_ml_config(
+            search_spaces={
+                "n_estimators": SearchSpace(type="int", low=1, high=3),
+                "form_window": SearchSpace(type="int", low=1, high=3),
+                "top_k_features": SearchSpace(type="int", low=1, high=3),
+            }
+        )
+
+    def test_lstm_key_on_xgboost_model_fails(self, make_ml_config):
+        with pytest.raises(ValidationError, match="hidden_size"):
+            make_ml_config(search_spaces={"hidden_size": SearchSpace(type="int", low=1, high=3)})
+
+
+class TestStrategyTypeValues:
+    @pytest.mark.parametrize("name", ["xgboost", "lstm"])
+    def test_unimplemented_alias_is_rejected(self, name, make_ml_config):
+        with pytest.raises(ValidationError):
+            make_ml_config(strategy_type=name)

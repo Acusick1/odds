@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import pickle
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 import structlog
@@ -39,9 +39,6 @@ from odds_analytics.backtesting import (
     BettingStrategy,
 )
 from odds_analytics.feature_extraction import FeatureExtractor, TabularFeatureExtractor
-
-if TYPE_CHECKING:
-    pass
 
 logger = structlog.get_logger()
 

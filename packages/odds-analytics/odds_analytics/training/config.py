@@ -972,11 +972,6 @@ class TuningConfig(BaseModel):
         default="val_mse",
         description="Mean cross-validation metric to optimize",
     )
-    direction: Literal["minimize", "maximize"] | None = Field(
-        default=None,
-        description="Optimization direction. Derived from the metric (val_r2 maximizes, "
-        "val_mse and val_mae minimize); if set, it must agree with the metric.",
-    )
     pruner: Literal["median", "hyperband", "none"] = Field(
         default="median",
         description="Pruning strategy for early trial termination",
@@ -992,16 +987,10 @@ class TuningConfig(BaseModel):
         description="Search space definitions for each tunable parameter",
     )
 
-    @model_validator(mode="after")
-    def derive_direction(self) -> TuningConfig:
-        """Fill the direction from the metric and reject a contradicting explicit value."""
-        expected = METRIC_DIRECTIONS[self.metric]
-        if self.direction is not None and self.direction != expected:
-            raise ValueError(
-                f"metric '{self.metric}' requires direction '{expected}', got '{self.direction}'"
-            )
-        self.direction = expected
-        return self
+    @property
+    def direction(self) -> Literal["minimize", "maximize"]:
+        """Optimization direction implied by the metric."""
+        return METRIC_DIRECTIONS[self.metric]
 
 
 # =============================================================================
@@ -1236,7 +1225,6 @@ class MLTrainingConfig(BaseModel):
 
         tuning:
           n_trials: 100
-          direction: "minimize"
           metric: "val_mse"
           search_spaces:
             n_estimators:

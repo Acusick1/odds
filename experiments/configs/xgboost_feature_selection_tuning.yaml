@@ -78,7 +78,6 @@ training:
 tuning:
   n_trials: 50  # Number of optimization trials
   timeout: null  # No timeout (run all trials)
-  direction: "minimize"  # Minimize validation error
   metric: "val_mse"  # Metric to optimize
   pruner: "median"  # Early stopping for unpromising trials
   sampler: "tpe"  # Tree-structured Parzen Estimator

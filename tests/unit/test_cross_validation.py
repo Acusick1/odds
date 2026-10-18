@@ -920,3 +920,35 @@ class TestWalkForwardCV:
 
         assert result.n_folds == len(result.fold_results)
         assert mock_strategy.train_from_config.call_count == result.n_folds
+
+
+class TestWalkForwardRequiresEventIds:
+    def test_raises_instead_of_switching_to_timeseries(self, make_ml_config):
+        config = make_ml_config(use_kfold=True, cv_method="walk_forward")
+        strategy = MagicMock()
+        with pytest.raises(ValueError, match="event_ids"):
+            run_cv(strategy, config, np.zeros((10, 1)), np.zeros(10), ["a"], event_ids=None)
+        strategy.train_from_config.assert_not_called()
+
+
+class TestTrainWithCVWithoutTestSet:
+    def test_final_model_is_fitted_without_validation_set(self, make_ml_config):
+        from odds_analytics.training.cross_validation import train_with_cv
+
+        config = make_ml_config(use_kfold=True, cv_method="walk_forward", test_split=0.0)
+        strategy = MagicMock()
+        strategy.train_from_config.return_value = MOCK_HISTORY
+
+        train_with_cv(
+            strategy,
+            config,
+            np.zeros((10, 1)),
+            np.zeros(10),
+            ["a"],
+            event_ids=np.array([f"e{i}" for i in range(10)]),
+        )
+
+        final_call = strategy.train_from_config.call_args_list[-1]
+        assert final_call.kwargs["X_val"] is None
+        assert final_call.kwargs["y_val"] is None
+        assert final_call.kwargs["static_val"] is None

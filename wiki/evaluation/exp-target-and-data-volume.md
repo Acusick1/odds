@@ -24,9 +24,9 @@ These runs are the evidence for [ADR-0002](../../docs/adr/0002-bet365-clv-target
 
 ## NBA target and data-volume runs
 
-**bet365 at scale (2026-02-27).** About 5K OddsPortal NBA events, 11-fold walk-forward CV, 100 Optuna trials, devigged bet365 target. Tabular-only CV R² = 0.036 ± 0.028; adding injuries gave 0.036 ± 0.033 ([NBA timing and injuries](exp-nba-timing-and-injuries.md)). Configs: `experiments/configs/xgboost_bet365_tuning.yaml`, `experiments/configs/xgboost_bet365_baseline_tuning.yaml`. First recorded in commit 2840086 (PR #164); no results directory holds the 11-fold numbers.
+**bet365 at scale (2026-02-27).** About 5K OddsPortal NBA events, 11-fold walk-forward CV, 100 Optuna trials, devigged bet365 target. Tabular-only CV R² = 0.036 ± 0.028; adding injuries gave 0.036 ± 0.033 ([NBA timing and injuries](exp-nba-timing-and-injuries.md)). Configs (expanding walk-forward, 2,000 minimum training events, step 200): `experiments/configs/xgboost_bet365_tuning.yaml`, `experiments/configs/xgboost_bet365_baseline_tuning.yaml`. First recorded in commit 2840086 (PR #164); no results directory holds the 11-fold numbers.
 
-**Pinnacle as target (2026-03-01).** About 800 Odds API NBA events, 4-fold walk-forward, 100 trials: CV R² = -0.017 ± 0.015. Config: `experiments/configs/xgboost_pinnacle_tuning.yaml`. Recorded in commit d7c6621.
+**Pinnacle as target (2026-03-01).** About 800 Odds API NBA events, 4-fold walk-forward, 100 trials: CV R² = -0.017 ± 0.015. Config: `experiments/configs/xgboost_pinnacle_tuning.yaml` (expanding walk-forward, 300 minimum training events, step 80). Recorded in commit d7c6621.
 
 **Learning curve, Exp 6 (2026-03-01).** Tuned tabular-only bet365 model on 500-4,524 OddsPortal events, expanding walk-forward CV (`experiments/scripts/exp6_learning_curve.py`, PR #168, results in `experiments/results/exp6_learning_curve/FINDINGS.md`):
 
@@ -42,7 +42,7 @@ R² plateaus at about 1.5K events and oscillates between about 0 and +0.035 afte
 - All Exp 6 subsets sample the sharp tier (mean about 19 h before the game) and OddsPortal has no 0-3 h snapshots. The pregame subset was diluted, because about 93% of its events fell back to the sharp snapshot ([look-ahead bias](../modelling/look-ahead-bias.md#where-the-rule-breaks)).
 - Tuned CV R² is optimistically biased (best of N trials); comparisons between equally tuned runs are fair ([CV protocol grid](exp-cv-protocol-grid.md)).
 - The Pinnacle and bet365 runs differ in source (Odds API against OddsPortal), size (about 800 against about 5K events) and folds (4 against 11); no run compares the two targets on the same source and event count (#482).
-- The production YAML also lists bet365 in `retail_bookmakers`, so the target bookmaker's snapshot price is an input to `retail_sharp_diff` ([sharp benchmark](../modelling/sharp-benchmark.md)).
+- The production YAML (`experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`) also lists bet365 first in `retail_bookmakers`, so the target bookmaker's snapshot price is an input to `retail_sharp_diff` ([sharp benchmark](../modelling/sharp-benchmark.md)).
 - The `odds train` bet365 and Pinnacle runs set `early_stopping_rounds` on the validation fold, so their fold metrics are optimistically biased ([caveat](clv-model-findings.md#caveats)). The Exp 6 learning curve was script-based with no `eval_set` and is not affected.
 
 ## Related

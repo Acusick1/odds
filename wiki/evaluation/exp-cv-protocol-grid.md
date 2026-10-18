@@ -23,7 +23,7 @@ This grid is the evidence for [ADR-0004](../../docs/adr/0004-walk-forward-cv-pro
 
 ## Grid evidence
 
-2026-03-16, about 1.7K EPL events, tabular features, Pinnacle sharp, 100 Optuna trials per cell. `experiments/scripts/cv_protocol_grid.py` crosses window type (expanding; sliding 95, 190, 380, 760 events) with validation step (10, 50, 150) and writes `experiments/results/cv_protocol_grid/grid_results.csv` (PR #234). CV MSE:
+2026-03-16, about 1.7K EPL events, tabular features, Pinnacle sharp, 100 Optuna trials per cell. `experiments/scripts/cv_protocol_grid.py` crosses window type (expanding; sliding 95, 190, 380, 760 events) with validation step (10, 50, 150) and writes `experiments/results/cv_protocol_grid/grid_results.csv` (PR #234). The script scores each cell on its own walk-forward folds and takes no test rows. CV MSE:
 
 | val_step | expanding | sliding-95 | sliding-190 | sliding-380 | sliding-760 |
 |---|---|---|---|---|---|

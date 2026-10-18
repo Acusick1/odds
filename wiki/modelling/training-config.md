@@ -42,7 +42,7 @@ Every model forbids unknown keys (`extra="forbid"`). A file has `experiment` (na
 
 **`tuning`**
 
-`metric` is `val_mse`, `val_mae` or `val_r2`; `direction` is derived from it and rejected if it contradicts it. Search-space keys must name a model or `odds_analytics.training.config.FeatureConfig` field, or `top_k_features` ([tuner](hyperparameter-tuner.md)).
+`metric` is `val_mse`, `val_mae` or `val_r2`; the optimization direction follows from it and is not configurable. Search-space keys must name a model or `odds_analytics.training.config.FeatureConfig` field, or `top_k_features` ([tuner](hyperparameter-tuner.md)).
 
 ## Data source and bookmaker
 

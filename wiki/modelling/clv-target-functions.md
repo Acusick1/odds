@@ -36,7 +36,7 @@ status: stable
 
 ## Closing snapshot
 
-`odds_analytics.feature_groups._select_closing_snapshot` takes the snapshots in `closing_tier`, prefers those that contain the target bookmaker, then the first match in `closing_source_priority`, else the latest. `closing_source_priority` is matched against `odds_core.models.OddsSnapshot.api_request_id`, whose values are provenance tags such as `football_data_uk` and `oddsportal_closing` ([provenance tags](../storage/odds-tables.md#provenance)). A devigged config reads its target bookmaker through a guard that raises if it is unset. Events with no usable closing snapshot are dropped in `odds_analytics.feature_groups.prepare_training_data` ([feature pipeline](feature-pipeline.md)).
+`odds_analytics.feature_groups._select_closing_snapshot` takes the snapshots in `closing_tier`. Under `devigged_bookmaker` it prefers those with the target bookmaker's data for the primary market, then the first match in `closing_source_priority`; otherwise, and under `raw`, it takes the latest. `closing_source_priority` is matched against `odds_core.models.OddsSnapshot.api_request_id`, whose values are provenance tags such as `football_data_uk` and `oddsportal_closing` ([provenance tags](../storage/odds-tables.md#provenance)). A devigged config reads its target bookmaker through a guard that raises if it is unset. `odds_analytics.feature_groups.prepare_training_data` drops events with no closing snapshot and, under `devigged_bookmaker`, events whose closing snapshot lacks the target bookmaker ([feature pipeline](feature-pipeline.md)).
 
 ## Config fields
 

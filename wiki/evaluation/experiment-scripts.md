@@ -16,7 +16,7 @@ status: stable
 
 ## Script and config conventions
 
-- Scripts load data through `odds_analytics.feature_groups.prepare_training_data` with an `odds_analytics.training.config.MLTrainingConfig` read from `experiments/configs/`, validated at load (strategy type, tuning metric, search-space keys and target fields; a `direction` key is rejected) ([training config](../modelling/training-config.md)).
+- Scripts load data through `odds_analytics.feature_groups.prepare_training_data` with an `odds_analytics.training.config.MLTrainingConfig` read from `experiments/configs/` (the loader validates strategy type, tuning metric and search-space keys and target fields, and rejects a `direction` key) ([training config](../modelling/training-config.md)).
 - Code defaults are `target_type: raw` and `target_bookmaker: pinnacle`, and the default CV protocol is not walk-forward, so a YAML must set the target and protocol itself to match production ([target functions](../modelling/clv-target-functions.md), [cross-validation](../modelling/cross-validation.md), [ADR-0004](../../docs/adr/0004-walk-forward-cv-protocol.md)).
 - The `experiments/configs/xgboost_epl_production_*` YAMLs carry the search space that avoids constant predictors on sliding windows; older YAMLs carry the original space ([search-space experiment](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test)).
 - Scripts run as `uv run python experiments/scripts/<script>.py`.

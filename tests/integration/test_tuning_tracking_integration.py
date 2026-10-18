@@ -53,7 +53,6 @@ training:
 
 tuning:
   n_trials: 3
-  direction: "minimize"
   metric: "val_mse"
   sampler: "tpe"
   pruner: "median"
