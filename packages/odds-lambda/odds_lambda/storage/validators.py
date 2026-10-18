@@ -23,7 +23,6 @@ class OddsValidator:
     MAX_SPREAD_MOVEMENT = 10.0  # Maximum point spread change
     MAX_TOTAL_MOVEMENT = 20.0  # Maximum total points change
 
-
     @classmethod
     def validate_odds_snapshot(cls, data: dict, event_id: str) -> tuple[bool, list[str]]:
         """

@@ -183,7 +183,7 @@ def build_raw_data(
             continue
 
         raw_decimals = [e.get("odds") for e in entries]  # type: ignore[union-attr]
-        if any(d is None for d in raw_decimals):
+        if any(d is None or d <= 1.0 for d in raw_decimals):
             continue
         decimals: list[float] = raw_decimals  # type: ignore[assignment]  # None filtered above
 

@@ -78,7 +78,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in
 | `config.py` | Pydantic Settings, see [Configuration](configuration.md) |
 | `odds_core.database` | Engine and `odds_core.database.async_session_maker`, see [Databases and environments](databases-and-environments.md) |
 | `odds_core.alerts` | `odds_core.alerts.AlertManager`, `odds_core.alerts.DiscordAlert`, see [Alerts](../operations/alerts.md) |
-| `odds_core.odds_math` | Price conversion in both directions, implied probability, devig, see [Odds arithmetic helpers](odds-math.md) |
+| `odds_core.odds_math` | Price conversion in both directions (decimal-first), implied probability, devig, see [Odds arithmetic helpers](odds-math.md) |
 | `odds_core.snapshot_utils`, `utils.py` | `odds_core.snapshot_utils.extract_odds_from_snapshot` (parse `raw_data` into `odds_core.models.Odds`), `odds_core.utils.raw_data_has_market` |
 | `odds_core.sports`, `odds_core.team`, `odds_core.time`, `odds_core.logging_setup` | [Sport keys](../collection/sport-and-market-keys.md), [team-name normalization](../storage/event-matching.md), [timezone helpers](timezones.md), structlog setup |
 | `odds_core.api_models` | The Odds API response models and event factories |
@@ -94,10 +94,10 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 | Area | Modules | Page |
 |---|---|---|
 | Odds API | `odds_lambda.data_fetcher` (also relabels soccer three-way `h2h` to `1x2` and renames bookmaker keys to pipeline keys), `odds_lambda.api_key_manager`, `odds_lambda.event_sync` (event discovery and `op_live_` twin merge) | [Odds API client](../collection/odds-api-client.md) |
-| Ingestion | `odds_lambda.ingestion`, `odds_lambda.storage.validators` | [Odds API ingestion service](../collection/odds-ingestion-service.md) |
-| OddsPortal scrapers | `odds_lambda.oddsportal_common`, `odds_lambda.oddsportal_adapter`, `odds_lambda.oddsportal_client` | [OddsPortal scraper](../collection/oddsportal-scraper.md) |
+| Ingestion (decimal price validation) | `odds_lambda.ingestion`, `odds_lambda.storage.validators` | [Odds API ingestion service](../collection/odds-ingestion-service.md) |
+| OddsPortal scrapers (decimal prices) | `odds_lambda.oddsportal_common`, `odds_lambda.oddsportal_adapter`, `odds_lambda.oddsportal_client` | [OddsPortal scraper](../collection/oddsportal-scraper.md) |
 | Exchange | `betfair/` | [Betfair Exchange](../collection/betfair-exchange.md) |
-| Sport context, Polymarket fetchers and event pairing | `odds_lambda.espn_fixture_fetcher`, `odds_lambda.mlb_stats_fetcher`, `odds_lambda.injury_fetcher`, `odds_lambda.game_log_fetcher`, `odds_lambda.pbpstats_fetcher`, `odds_lambda.polymarket_fetcher`, `odds_lambda.polymarket_odds` | [EPL](../collection/epl-context-data.md), [MLB](../collection/mlb-probable-pitchers.md), [NBA](../collection/nba-injuries-and-stats.md), [Polymarket](../collection/polymarket.md) |
+| Sport context, Polymarket fetchers (match prices stored as decimal reciprocals) and event pairing | `odds_lambda.espn_fixture_fetcher`, `odds_lambda.mlb_stats_fetcher`, `odds_lambda.injury_fetcher`, `odds_lambda.game_log_fetcher`, `odds_lambda.pbpstats_fetcher`, `odds_lambda.polymarket_fetcher`, `odds_lambda.polymarket_odds` | [EPL](../collection/epl-context-data.md), [MLB](../collection/mlb-probable-pitchers.md), [NBA](../collection/nba-injuries-and-stats.md), [Polymarket](../collection/polymarket.md) |
 | Storage | `storage/` (one reader/writer pair per source) | [Storage layer](../storage/storage-layer.md) |
 | Scheduling | `scheduling/` (`odds_lambda.scheduling.jobs`, `odds_lambda.scheduling.decision`, `odds_lambda.scheduling.helpers`, `odds_lambda.scheduling.backends`), `odds_lambda.lambda_handler`, `odds_lambda.fetch_tier`, `odds_lambda.tier_utils` | [Job registry](../scheduling/job-registry.md), [Self-scheduling](../scheduling/self-scheduling.md), [Fetch tier](../storage/fetch-tier.md) |
 | Jobs | `jobs/*.py`, one `main(ctx)` per file | `odds_lambda.scheduling.jobs._JOB_MODULE_MAP` lists all 15 |

@@ -76,6 +76,14 @@ class TestBuildRawData2Way:
         assert outcomes[1]["price_decimal"] == 1.5
         assert all("price" not in o for o in outcomes)
 
+    def test_skips_bookmaker_with_non_decimal_price(self) -> None:
+        bk = _make_bookmaker("bet365", num_outcomes=2, home_closing=1.0)
+        result = build_raw_data(
+            [bk], "Team A", "Team B", use_opening=False, match_dt=MATCH_DT, num_outcomes=2
+        )
+
+        assert result is None
+
     def test_skips_bookmaker_without_history(self) -> None:
         bk = {"bookmaker_name": "broken", "odds_history_data": None}
         result = build_raw_data(

@@ -36,7 +36,7 @@ The scripts load `odds_core.models.Event` and `odds_core.models.OddsSnapshot` ro
    - Use the same seasons as step 2, or `--all`. Check the dry-run counts, then run without `--dry-run`.
    - It downloads `E0.csv` per season and writes an opening and a closing snapshot per match, except that the opening snapshot is skipped when its documented deadline is at or after kick-off.
    - Matches that already have an `op_` event get no new event; their snapshots are still written.
-   - Prices are stored as the CSV decimal (`price_decimal`).
+   - Prices are stored as the CSV decimal (`price_decimal`). Snapshots loaded before the decimal price migration keep the old American `price` until this script is re-run ([Price encodings](../foundations/odds-math.md#price-encodings)).
 4. Rerun any step to fill gaps.
    - OddsPortal snapshots are skipped if one with the same `api_request_id` already exists. FDUK snapshots are replaced from the CSV, so reruns do not duplicate and pick up refreshed files.
 5. Check the load with the database, not the repo: event and snapshot counts per season are data facts.

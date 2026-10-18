@@ -27,7 +27,7 @@ status: stable
 - Empty list, event missing from a list payload, or no bookmakers: returns invalid immediately.
 - Bookmaker `last_update` in the future or unparseable.
 - Markets with no outcomes.
-- Each outcome price, read as a decimal through `odds_core.odds_math.outcome_price_decimal`: missing or unparseable is an error; outside `MIN_DECIMAL_ODDS`..`MAX_DECIMAL_ODDS` (1.01 to 101.0) is an error via `odds_lambda.storage.validators.OddsValidator.validate_odds_value`.
+- Each outcome price, read as a decimal through `odds_core.odds_math.outcome_price_decimal`: missing or unparseable is an error; outside `MIN_DECIMAL_ODDS`..`MAX_DECIMAL_ODDS` (1.01 to 101.0) is an error via `odds_lambda.storage.validators.OddsValidator.validate_odds_value` (the OddsPortal ingest skips prices at or below 1.0 before they reach it).
 - For two-outcome `h2h`/`spreads`/`totals` markets, `odds_lambda.storage.validators.OddsValidator.validate_vig`: vig (from decimal implied probabilities) above `MAX_VIG_PERCENT` (15), negative, or below `MIN_VIG_PERCENT` (2). The floor is skipped for `odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS`: the exchanges (betfair_exchange, betdaq, smarkets, matchbook) in `odds_core.bookmakers.EXCHANGE_BOOKMAKERS` and `polymarket`. Vig warnings do not affect `is_valid`.
 
 `odds_lambda.storage.validators.OddsValidator.validate_line_movement` (spread over 10, total over 20 points) and `odds_lambda.storage.validators.OddsValidator.validate_event_data` (required fields) have no caller outside tests (#448).

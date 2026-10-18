@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime, Float, Index
+from sqlalchemy import JSON, CheckConstraint, Column, DateTime, Float, Index
 from sqlmodel import Field, SQLModel
 
 from odds_core.odds_math import decimal_to_american, decimal_to_implied_probability
@@ -155,6 +155,7 @@ class Odds(SQLModel, table=True):
     __table_args__ = (
         Index("ix_event_bookmaker_market", "event_id", "bookmaker_key", "market_key"),
         Index("ix_bookmaker_time", "bookmaker_key", "odds_timestamp"),
+        CheckConstraint("price_decimal > 1.0", name="ck_odds_price_decimal_gt_one"),
     )
 
     @property

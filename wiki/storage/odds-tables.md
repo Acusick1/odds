@@ -43,14 +43,14 @@ Two free-text fields tag where a snapshot came from. Each producer sets them as 
 | `oddsportal_live` | live feed adapter (`odds_lambda.oddsportal_adapter.convert_market`) |
 | `betfair_api` | Betfair Exchange job (also adds `betfair_event_id`) |
 | `football_data_uk` | `scripts/ingest_football_data_uk.py`; market key `1x2`; snapshot times are approximations recorded in `raw_data.timing` ([Historical ingest scripts](../collection/historical-ingest-scripts.md#snapshot-shape)) |
-| `polymarket` | `odds_lambda.polymarket_odds.build_raw_data` (exact probabilities in `polymarket_meta`, bid and ask only on live rows), from the backfill and the fetch-polymarket-odds job ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)) |
+| `polymarket` | `odds_lambda.polymarket_odds.build_raw_data` (price is the reciprocal of the Yes probability as `price_decimal`; exact probabilities in `polymarket_meta`, bid and ask only on live rows), from the backfill and the fetch-polymarket-odds job ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)) |
 
 `api_request_id` is matched by training's `closing_source_priority`; the `data_source` filter matches event-ID prefixes (`op_`, `fduk_`; `odds_core.event_ids.SCRAPED_EVENT_ID_PREFIXES`) instead (`odds_analytics.training.data_preparation.filter_events_by_date_range`, #468) ([CLV and the training target](../modelling/clv-target.md), [Training config](../modelling/training-config.md)): `oddsportal` (or `oddsportal_<market>`), `oddsportal_closing`, `football_data_uk`, `betfair_api_<iso time>`, `polymarket_history` and `polymarket_live_<iso time>`; null for Odds API rows.
 
 ## odds
 
 - `id` (autoincrement PK), `event_id` (FK `events.id`), `bookmaker_key`, `bookmaker_title`, `market_key` (`h2h`, `spreads`, `totals`, and `1x2` for football), `outcome_name` (team or Over/Under).
-- `price_decimal` (float, not null; the source's decimal price). Derived read-only properties: `odds_core.models.Odds.implied_probability` and `odds_core.models.Odds.american_price` (nearest integer American quote, for display and bet records) ([Odds arithmetic helpers](../foundations/odds-math.md#price-encodings)). `point` (float, null for moneyline).
+- `price_decimal` (float, not null, constrained above 1.0 by `ck_odds_price_decimal_gt_one`; the source's decimal price). Derived read-only properties: `odds_core.models.Odds.implied_probability` and `odds_core.models.Odds.american_price` (nearest integer American quote, for display and bet records) ([Odds arithmetic helpers](../foundations/odds-math.md#price-encodings)). `point` (float, null for moneyline).
 - `odds_timestamp`: the snapshot time the row was valid for. `last_update`: the bookmaker's own timestamp, defaulting to the snapshot time. `created_at`.
 - `is_valid` (default true) and `validation_notes` (nullable): `is_valid` is always true and `validation_notes` always null, because the writer sets the defaults (#448).
 - Indexes: single-column `event_id`, `bookmaker_key`, `market_key`, `odds_timestamp`; composite `ix_event_bookmaker_market (event_id, bookmaker_key, market_key)` for lookups and line movement, and `ix_bookmaker_time (bookmaker_key, odds_timestamp)` for per-bookmaker analysis.

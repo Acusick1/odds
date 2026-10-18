@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock
 import pytest
 from odds_analytics.sequence_loader import extract_devigged_h2h_probs
 from odds_core.models import OddsSnapshot
-from odds_core.odds_math import probability_to_american
 from odds_core.snapshot_utils import extract_odds_from_snapshot
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.polymarket_fetcher import MAX_HISTORY_WINDOW, PolymarketClient
@@ -43,20 +42,6 @@ def flat_series(prices: Prices, start: datetime, end: datetime) -> dict[Side, li
         side: [(start + timedelta(minutes=i), p) for i in range(minutes + 1)]
         for side, p in prices.by_side().items()
     }
-
-
-class TestProbabilityToAmerican:
-    @pytest.mark.parametrize(
-        ("probability", "american"),
-        [(0.6, -150), (0.25, 300), (0.5, 100), (0.645, -182), (0.155, 545)],
-    )
-    def test_rounds_to_nearest_price(self, probability: float, american: int) -> None:
-        assert probability_to_american(probability) == american
-
-    @pytest.mark.parametrize("probability", [0.0, 1.0, -0.1, 1.2])
-    def test_rejects_non_probabilities(self, probability: float) -> None:
-        with pytest.raises(ValueError):
-            probability_to_american(probability)
 
 
 class TestParseMatchEvent:
@@ -317,6 +302,20 @@ class TestBuildRawData:
         assert raw_data["source"] == "polymarket"
         assert probs is not None
         assert (probs.home, probs.draw, probs.away) == pytest.approx((0.53, 0.25, 0.22), abs=2e-3)
+
+    def test_outcomes_carry_the_reciprocal_decimal_price(self, gamma_event) -> None:
+        match = parse_match_event(gamma_event(), EPL)
+        assert match is not None
+        event = make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea")
+
+        outcomes = build_raw_data(match, EPL, event, Prices(0.53, 0.25, 0.22), KICKOFF)[
+            "bookmakers"
+        ][0]["markets"][0]["outcomes"]
+
+        assert all("price" not in o for o in outcomes)
+        assert sorted(o["price_decimal"] for o in outcomes) == pytest.approx(
+            sorted([1 / 0.53, 1 / 0.25, 1 / 0.22])
+        )
 
     def test_meta_keeps_exact_probabilities(self, gamma_event) -> None:
         match = parse_match_event(gamma_event(), EPL)

@@ -4,8 +4,13 @@
 #
 # Pulls the latest code, syncs dependencies, applies migrations, smoke-tests
 # the bootstrapped jobs, and only then restarts the systemd-managed scheduler.
-# If migration or smoke fails, the script aborts BEFORE the restart, leaving the
-# running scheduler untouched on the old code.
+# If migration or smoke fails, the script aborts BEFORE the restart; the running
+# scheduler is untouched on the old code unless a migration was pending, in which
+# case it was stopped first and stays down.
+#
+# When the database is not at the migration head, the scheduler is stopped before
+# the migration runs, because a migration may drop or rewrite what the running code
+# reads. Every failure after that stop says the scheduler is down.
 #
 # After the restart it checks that the service is active, started after this
 # deploy began, and is not crash-looping, and exits non-zero otherwise.
@@ -32,12 +37,27 @@ done
 SERVICE=odds-scheduler
 SYSTEMCTL="$(command -v systemctl)"
 
-# The restart is the step that makes new code serve. Without a terminal sudo
-# cannot prompt, so require the NOPASSWD rule before changing anything.
-if [[ ! -t 0 ]] && ! sudo -n -l | grep -q "NOPASSWD:.*$SYSTEMCTL restart $SERVICE"; then
-    echo "deploy.sh: no NOPASSWD sudo rule for '$SYSTEMCTL restart $SERVICE' and no terminal to prompt; nothing was changed" >&2
-    exit 1
+# The restart makes new code serve, and the stop precedes a pending migration.
+# Without a terminal sudo cannot prompt, so require both NOPASSWD rules before
+# changing anything.
+if [[ ! -t 0 ]]; then
+    sudo_rules="$(sudo -n -l)"
+    for action in restart stop; do
+        if ! grep -q "NOPASSWD:.*$SYSTEMCTL $action $SERVICE" <<<"$sudo_rules"; then
+            echo "deploy.sh: no NOPASSWD sudo rule for '$SYSTEMCTL $action $SERVICE' and no terminal to prompt; nothing was changed" >&2
+            exit 1
+        fi
+    done
 fi
+
+scheduler_down=0
+report_scheduler_down() {
+    local status=$?
+    if (( status != 0 && scheduler_down == 1 )); then
+        echo "deploy.sh: FAILED with $SERVICE STOPPED. The scheduler is down: fix the failure, rerun ./deploy.sh, or start it with 'sudo $SYSTEMCTL start $SERVICE'." >&2
+    fi
+}
+trap report_scheduler_down EXIT
 
 deploy_started_at="$(date +%s)"
 
@@ -47,9 +67,14 @@ git pull --ff-only
 echo "==> uv sync"
 uv sync
 
-# Migration ordering: alembic runs before the restart, so the still-running old
-# scheduler briefly sees the new schema. This is safe for additive migrations
-# (the norm). If a migration is destructive, take the scheduler down first.
+# Migration ordering: a pending migration runs with the scheduler stopped, so the
+# old code never reads a schema it does not know. The hand-run agent's MCP server
+# is not managed here: do not deploy during an agent session.
+if ! uv run alembic current | grep -q "(head)"; then
+    echo "==> migration pending: stopping $SERVICE"
+    sudo "$SYSTEMCTL" stop "$SERVICE"
+    scheduler_down=1
+fi
 echo "==> alembic upgrade head"
 uv run alembic upgrade head
 
@@ -62,6 +87,7 @@ SCHEDULER_DRY_RUN=true uv run odds scheduler smoke
 # Only reached when migrate + smoke both succeed (set -e aborts otherwise).
 echo "==> restarting $SERVICE"
 sudo "$SYSTEMCTL" restart "$SERVICE"
+scheduler_down=0
 
 echo "==> verifying restart"
 restarts_before="$(systemctl show "$SERVICE" -p NRestarts --value)"
