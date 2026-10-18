@@ -28,7 +28,7 @@ status: stable
 
 ## Production search space
 
-The search space of the deployed model is in `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml` (PR #362), and the values are authoritative there. Most older committed YAMLs carry a different search space, so copy it from the `experiments/configs/xgboost_epl_production_*` configs when starting a new sliding-window run. Why it replaced the original, and the results under each, are on [EPL feature ablation and principled search space](../evaluation/exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test).
+The search space of the deployed model is in `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml` (PR #362), and the values are authoritative there. The deployed model `v308058c` was trained from that YAML as at commit `2bf3712`, which set early stopping on the validation fold ([caveat](../evaluation/clv-model-findings.md#caveats)). The search space tunes `n_estimators`, which is the only control on boosting length. Most older committed YAMLs carry a different search space, so copy it from the `experiments/configs/xgboost_epl_production_*` configs when starting a new sliding-window run. Why it replaced the original, and the results under each, are on [EPL feature ablation and principled search space](../evaluation/exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test).
 
 ## Related
 

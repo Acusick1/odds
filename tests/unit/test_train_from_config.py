@@ -68,7 +68,6 @@ def sample_xgboost_line_movement_config():
                 n_estimators=75,
                 max_depth=5,
                 learning_rate=0.08,
-                # Note: early_stopping_rounds requires validation data
             ),
         ),
     )
@@ -377,32 +376,23 @@ class TestXGBoostLineMovementStrategyTrainFromConfig:
         with pytest.raises(ValueError, match="Invalid strategy_type"):
             strategy.train_from_config(invalid_config, X_train, y_train, feature_names)
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"),
-        reason="requires xgboost",
-    )
-    def test_train_from_config_extracts_early_stopping(self, training_data):
-        """Test that early stopping rounds are extracted from config."""
+    def test_validation_data_does_not_stop_training_early(self, training_data):
+        """Validation rows are scored but never cut the booster short."""
         X_train, y_train, feature_names = training_data
         y_train = y_train.astype(np.float32) * 0.1
+        rng = np.random.default_rng(0)
+        X_val = rng.random((20, X_train.shape[1]))
+        y_val = rng.random(20) * 0.1
 
-        # Create validation data (required for early stopping)
-        X_val = np.random.rand(20, 10)
-        y_val = np.random.rand(20) * 0.1
-
-        # Create config with early stopping
         config = MLTrainingConfig(
-            experiment=ExperimentConfig(name="with_early_stopping"),
+            experiment=ExperimentConfig(name="no_early_stopping"),
             training=TrainingConfig(
                 strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 10, 1),
                     end_date=date(2024, 12, 31),
                 ),
-                model=XGBoostConfig(
-                    n_estimators=100,
-                    early_stopping_rounds=15,
-                ),
+                model=XGBoostConfig(n_estimators=200, learning_rate=0.3),
             ),
         )
 
@@ -411,8 +401,8 @@ class TestXGBoostLineMovementStrategyTrainFromConfig:
             config, X_train, y_train, feature_names, X_val=X_val, y_val=y_val
         )
 
-        # Model should be trained (early stopping param is passed through)
         assert strategy.model is not None
+        assert strategy.model.get_booster().num_boosted_rounds() == 200
 
 
 class TestConfigValidation:
@@ -459,7 +449,6 @@ class TestConfigValidation:
         assert hasattr(model_config, "objective")
         assert hasattr(model_config, "random_state")
         assert hasattr(model_config, "n_jobs")
-        assert hasattr(model_config, "early_stopping_rounds")
 
     def test_config_extracts_all_lstm_params(self, sample_lstm_config):
         """Test that all LSTM parameters are extracted from config."""
