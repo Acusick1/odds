@@ -90,14 +90,12 @@ def filter_odds_by_bookmakers(
 def select_sharp_odds(
     odds: list[Odds],
     sharp_bookmakers: list[str],
+    outcome: str,
 ) -> list[Odds]:
-    """Return the rows of the first bookmaker in priority order that has any in ``odds``.
-
-    Callers pass odds already narrowed to the outcome they need, so the chosen
-    bookmaker is the first one that quotes that outcome.
-    """
+    """Return ``outcome`` rows of the first sharp bookmaker, in priority order, that quotes it."""
+    outcome_odds = [o for o in odds if o.outcome_name == outcome]
     for bm in sharp_bookmakers:
-        sharp_odds = filter_odds_by_bookmakers(odds, [bm])
+        sharp_odds = filter_odds_by_bookmakers(outcome_odds, [bm])
         if sharp_odds:
             return sharp_odds
     return []
@@ -122,6 +120,7 @@ def calculate_sharp_retail_metrics(
     odds: list[Odds],
     sharp_bookmakers: list[str],
     retail_bookmakers: list[str],
+    outcome: str,
 ) -> dict[str, float | None]:
     """
     Calculate sharp vs retail probability metrics.
@@ -133,8 +132,10 @@ def calculate_sharp_retail_metrics(
     - retail_prob: Average retail bookmaker probability
     - diff: Differential (retail_prob - sharp_prob)
     """
-    sharp_odds = select_sharp_odds(odds, sharp_bookmakers)
-    retail_odds = filter_odds_by_bookmakers(odds, retail_bookmakers)
+    sharp_odds = select_sharp_odds(odds, sharp_bookmakers, outcome)
+    retail_odds = filter_odds_by_bookmakers(
+        [o for o in odds if o.outcome_name == outcome], retail_bookmakers
+    )
 
     result: dict[str, float | None] = {
         "sharp_price": None,
@@ -479,11 +480,7 @@ class TabularFeatureExtractor(FeatureExtractor):
 
         # 2. Sharp vs Retail features
         if retail_odds and outcome_team:
-            # Sharp book = first in priority order that quotes the requested outcome
-            sharp_outcome_odds = select_sharp_odds(
-                filter_odds_by_market_outcome(market_odds, market, outcome_team),
-                self.sharp_bookmakers,
-            )
+            sharp_outcome_odds = select_sharp_odds(market_odds, self.sharp_bookmakers, outcome_team)
             sharp_outcome = sharp_outcome_odds[0] if sharp_outcome_odds else None
             if sharp_outcome:
                 outcome_sharp_prob = calculate_implied_probability(sharp_outcome.price)
@@ -880,12 +877,14 @@ class SequenceFeatureExtractor(FeatureExtractor):
         feature_values["odds_std"] = float(np.std(prices)) if len(prices) > 1 else None
 
         # 4. Sharp vs retail features
-        sharp_retail = calculate_sharp_retail_metrics(
-            target_odds, self.sharp_bookmakers, self.retail_bookmakers
-        )
-        feature_values["sharp_odds"] = sharp_retail["sharp_price"]
-        feature_values["sharp_prob"] = sharp_retail["sharp_prob"]
-        feature_values["retail_sharp_diff"] = sharp_retail["diff"]
+        # Without a target outcome there is no outcome-specific sharp price to take.
+        if outcome is not None:
+            sharp_retail = calculate_sharp_retail_metrics(
+                target_odds, self.sharp_bookmakers, self.retail_bookmakers, outcome
+            )
+            feature_values["sharp_odds"] = sharp_retail["sharp_price"]
+            feature_values["sharp_prob"] = sharp_retail["sharp_prob"]
+            feature_values["retail_sharp_diff"] = sharp_retail["diff"]
 
         # 5. Time features (required)
         time_delta = event.commence_time - snapshot_time
