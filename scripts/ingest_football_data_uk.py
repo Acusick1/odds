@@ -474,7 +474,9 @@ async def _ingest_one_match(
     away_team = normalize_team(away_raw)
     kickoff = parse_kickoff(row)
 
-    event_id = await find_existing_event(session, home_team, away_team, kickoff.commence_time)
+    event_id = await find_existing_event(
+        session, home_team, away_team, kickoff.commence_time, SPORT_KEY
+    )
     if event_id is None:
         event_id = build_event_id(season, home_team, away_team, kickoff.commence_time)
     event = await session.get(Event, event_id)

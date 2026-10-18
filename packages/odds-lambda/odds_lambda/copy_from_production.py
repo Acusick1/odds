@@ -25,6 +25,7 @@ from rich.progress import (
 from sqlalchemy import delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.readers import OddsReader
 
 logger = structlog.get_logger()
@@ -39,6 +40,7 @@ class CopyStats:
     snapshots_copied: int = 0
     odds_copied: int = 0
     predictions_copied: int = 0
+    local_twin_matches: int = 0
     failed_event_ids: list[str] = field(default_factory=list)
 
     @property
@@ -111,6 +113,11 @@ class ProductionDataCopier:
 
                 progress.advance(task)
 
+        if not self.dry_run:
+            async with self.local_session_maker() as local_session:
+                self.stats.local_twin_matches = len(
+                    await EventMerger(local_session).find_twin_groups(sport_key)
+                )
         self._print_summary()
 
         return self.stats
@@ -229,6 +236,12 @@ class ProductionDataCopier:
 
         console.print(f"  Odds rows copied: [green]{self.stats.odds_copied}[/green]")
         console.print(f"  Predictions copied: [green]{self.stats.predictions_copied}[/green]")
+        if self.stats.local_twin_matches:
+            console.print(
+                f"  Local matches stored as several events: "
+                f"[yellow]{self.stats.local_twin_matches}[/yellow] "
+                "(run `odds events merge-twins --apply`)"
+            )
 
         if self.stats.failed_event_ids:
             console.print(f"  Events failed: [red]{self.stats.events_failed}[/red]")

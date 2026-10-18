@@ -21,6 +21,6 @@ An LLM agent per sport (EPL, MLB) runs as a `claude` subprocess over the odds-mc
 
 ### Explanation
 
-- [Agent data sources and rejected sources](agent-data-sources.md) — Which sources are collected on a schedule and exposed through MCP versus researched live each wake-up, why lineups come from web search, and why each evaluated source was rejected.
+- [Agent data sources and rejected sources](agent-data-sources.md) — Which sources are collected on a schedule and exposed through MCP versus researched live each wake-up, why lineups come from web search, and why every evaluated source was rejected.
 - [The betting agent](betting-agent.md) — What the per-sport agent is, its three channels, why prompts are authoritative, the role of the CLV model, the EPL matchday timeline, and its evaluation status.
 <!-- pages:end -->

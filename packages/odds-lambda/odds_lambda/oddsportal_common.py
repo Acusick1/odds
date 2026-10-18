@@ -6,18 +6,18 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from oddsharvester.core.scrape_result import FailedUrl
 
 import structlog
-from odds_core.models import Event
 from odds_core.odds_math import PRICE_DECIMAL_KEY
 from oddsharvester.core.scrape_result import ScrapeResult
-from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from odds_lambda.storage.event_merge import find_historical_match_id
 
 log = logging.getLogger(__name__)
 logger = structlog.get_logger()
@@ -455,30 +455,7 @@ async def find_existing_event(
     home_team: str,
     away_team: str,
     commence_time: datetime,
+    sport_key: str,
 ) -> str | None:
-    """Find an existing Event matching the given game within a +/-24h window."""
-    window_start = commence_time - timedelta(hours=24)
-    window_end = commence_time + timedelta(hours=24)
-
-    query = select(Event.id).where(
-        and_(
-            Event.commence_time >= window_start,
-            Event.commence_time <= window_end,
-            Event.home_team == home_team,
-            Event.away_team == away_team,
-        )
-    )
-    result = await session.execute(query)
-    candidates = list(result.scalars().all())
-
-    if len(candidates) == 1:
-        return candidates[0]
-    if len(candidates) > 1:
-        log.warning(
-            "Ambiguous match for %s @ %s on %s: %d candidates",
-            away_team,
-            home_team,
-            commence_time.date(),
-            len(candidates),
-        )
-    return None
+    """Find the Event for a historical row, without merging or creating anything."""
+    return await find_historical_match_id(session, home_team, away_team, commence_time, sport_key)

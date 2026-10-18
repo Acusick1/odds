@@ -8,8 +8,8 @@ sources:
   - odds_lambda.storage.writers.OddsWriter._parse_and_store_odds
   - odds_lambda.storage.writers.OddsWriter.bulk_insert_odds
   - odds_lambda.storage.writers.OddsWriter.find_or_create_event
-  - odds_lambda.storage.writers.OddsWriter.adopt_live_twins
-  - odds_lambda.storage.writers.OddsWriter.EVENT_MATCH_WINDOW
+  - odds_lambda.storage.event_merge.EVENT_MATCH_WINDOW
+  - odds_lambda.storage.event_merge.find_match_id
   - odds_lambda.storage.writers.OddsWriter._build_event_id
   - odds_lambda.storage.writers.OddsWriter.log_fetch
   - odds_lambda.storage.writers.OddsWriter.log_data_quality_issue
@@ -42,11 +42,7 @@ Event upserts (`odds_lambda.storage.writers.OddsWriter.upsert_event`, `odds_lamb
 
 ### find_or_create_event
 
-`odds_lambda.storage.writers.OddsWriter.find_or_create_event(home, away, match_date, sport_key, sport_title)` normalizes team names, looks for same-sport events within `odds_lambda.storage.writers.OddsWriter.EVENT_MATCH_WINDOW` (±2 hours), and returns `(event_id, was_created)`. With several events in the window it logs `ambiguous_event_match` and returns the lowest id among the candidates without the `odds_core.event_ids.LIVE_EVENT_ID_PREFIX` (`op_live_`), or among all candidates if every one is `op_live_`, so an Odds API event wins over a scraper twin. New ids are `op_live_{HOME}_{AWAY}_{YYYY-MM-DDTHHMM}` (`odds_lambda.storage.writers.OddsWriter._build_event_id`), so a rescheduled kickoff creates a new id unless the 2 h window matches an existing event. Creation raises `ValueError` if the match started more than `LIVE_EVENT_STALE_THRESHOLD` (1 hour) ago. Used by the [OddsPortal](../collection/oddsportal-scraper.md) and [Betfair](../collection/betfair-exchange.md) jobs; matcher comparison on [Event matching across sources](event-matching.md).
-
-### adopt_live_twins
-
-`odds_lambda.storage.writers.OddsWriter.adopt_live_twins(events)` merges each `op_live_` event with the same sport, teams and a commence time within the match window into the given Odds API event: every `event_id` foreign key to `events.id` (read from the PostgreSQL catalog by `odds_lambda.storage.writers.OddsWriter._event_reference_columns`, so every table is covered whichever models the process imported) is re-pointed, the twin's status, scores and `completed_at` are copied when the API event has no scores, the twin is deleted, and `live_twin_adopted` is logged with the rows moved per table. It runs in the caller's transaction. `odds_lambda.event_sync.EventSyncService.sync_sport` calls it for every synced event, so twins created while only the scrapers ran are merged on the next fetch-odds run. The one unique key on `event_id`, `predictions (event_id, snapshot_id, model_name)`, cannot collide because the twin's snapshots move with its predictions.
+`odds_lambda.storage.writers.OddsWriter.find_or_create_event(home, away, match_date, sport_key, sport_title)` normalizes team names, looks for same-sport events within `odds_lambda.storage.event_merge.EVENT_MATCH_WINDOW` (±2 hours) with `odds_lambda.storage.event_merge.find_match_id`, and returns `(event_id, was_created)`. With several events in the window it returns the canonical one (`odds_core.event_source.canonical_event_id`: the Odds API event, else the best scraper source) and never creates another; it does not merge or delete ([Event merge](../storage/event-merge.md)). New ids are `op_live_{HOME}_{AWAY}_{YYYY-MM-DDTHHMM}` (`odds_lambda.storage.writers.OddsWriter._build_event_id`), so a rescheduled kickoff creates a new id unless the 2 h window matches an existing event. Creation raises `ValueError` if the match started more than `LIVE_EVENT_STALE_THRESHOLD` (1 hour) ago. Used by the [OddsPortal](../collection/oddsportal-scraper.md) and [Betfair](../collection/betfair-exchange.md) jobs; matcher comparison on [Event matching across sources](event-matching.md).
 
 ## Bulk insert
 

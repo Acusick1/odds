@@ -1,7 +1,7 @@
 ---
 type: explanation
 title: Data sources
-description: Every odds feed and what it supplies, bookmaker roles, the Pinnacle coverage gap, and where each feed runs.
+description: Every odds feed and what each one supplies, bookmaker roles, the Pinnacle coverage gap, and where each feed runs.
 sources:
   - odds_core.config.DataCollectionConfig
   - odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP

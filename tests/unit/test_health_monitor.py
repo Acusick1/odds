@@ -284,7 +284,10 @@ class TestHealthMonitor:
                 with patch.object(monitor, "check_consecutive_failures", return_value=(True, 0)):
                     with patch.object(monitor, "check_api_quota", return_value=(True, 15000, 0.75)):
                         with patch.object(monitor, "check_data_quality", return_value=(True, 2)):
-                            with patch.object(monitor, "check_job_heartbeats", return_value=[]):
+                            with (
+                                patch.object(monitor, "check_job_heartbeats", return_value=[]),
+                                patch.object(monitor, "check_event_identity", return_value=[]),
+                            ):
                                 status = await monitor.check_system_health()
 
             assert isinstance(status, HealthStatus)
@@ -317,7 +320,10 @@ class TestHealthMonitor:
                 with patch.object(monitor, "check_consecutive_failures", return_value=(False, 4)):
                     with patch.object(monitor, "check_api_quota", return_value=(False, 1000, 0.05)):
                         with patch.object(monitor, "check_data_quality", return_value=(False, 15)):
-                            with patch.object(monitor, "check_job_heartbeats", return_value=[]):
+                            with (
+                                patch.object(monitor, "check_job_heartbeats", return_value=[]),
+                                patch.object(monitor, "check_event_identity", return_value=[]),
+                            ):
                                 # Mock alert sending
                                 with patch.object(monitor, "_send_alert", return_value=True):
                                     status = await monitor.check_system_health()

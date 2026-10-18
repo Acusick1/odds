@@ -51,6 +51,7 @@ On AWS, the Lambda handler also sends its own critical on any exception ([lambda
 | `consecutive_failures` | `odds_lambda.health_monitor.HealthMonitor` | error |
 | `quota_low`, `quota_critical` | `odds_lambda.health_monitor.HealthMonitor` | warning, critical |
 | `data_quality_errors` | `odds_lambda.health_monitor.HealthMonitor` | warning |
+| `duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `stale_scheduled_events:<sport>` (kick-off within the last 7 days) | `odds_lambda.health_monitor.HealthMonitor` | warning |
 | `missing_heartbeat:<job>` | `odds_lambda.health_monitor.HealthMonitor` | warning |
 | `health_check_failure` | `odds_lambda.health_monitor.HealthMonitor` | critical |
 

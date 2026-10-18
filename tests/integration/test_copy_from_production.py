@@ -377,3 +377,56 @@ class TestOverwriteReplacesLocalRows:
         stats = await _copier(prod_session_maker, local_session_maker).copy_events(*WINDOW, SPORT)
 
         assert (stats.events_skipped, stats.events_copied) == (1, 0)
+
+
+class TestCopyLeavesLocalTwins:
+    @pytest.mark.asyncio
+    async def test_local_twin_and_its_rows_survive_and_are_reported(
+        self,
+        prod_session_maker: async_sessionmaker[AsyncSession],
+        local_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _seed_prod_event(prod_session_maker, "evt_a", first_snapshot_id=500)
+        twin_id = "fduk_2026-2027_A_B_2026-08-22"
+        async with local_session_maker() as session:
+            session.add(
+                Event(
+                    id=twin_id,
+                    sport_key=SPORT,
+                    sport_title="EPL",
+                    commence_time=KICKOFF,
+                    home_team="Home evt_a",
+                    away_team="Away evt_a",
+                    status=EventStatus.SCHEDULED,
+                )
+            )
+            await session.flush()
+            session.add(
+                OddsSnapshot(
+                    event_id=twin_id,
+                    snapshot_time=KICKOFF,
+                    raw_data=_raw_data(),
+                    bookmaker_count=1,
+                    api_request_id="football_data_uk",
+                )
+            )
+            await session.commit()
+
+        stats = await _copier(
+            prod_session_maker, local_session_maker, skip_existing=False
+        ).copy_events(*WINDOW, SPORT)
+
+        assert stats.events_failed == 0
+        assert stats.local_twin_matches == 1
+        async with local_session_maker() as session:
+            assert await session.get(Event, twin_id) is not None
+            twin_snapshots = (
+                (
+                    await session.execute(
+                        select(OddsSnapshot).where(OddsSnapshot.event_id == twin_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert len(twin_snapshots) == 1

@@ -13,6 +13,7 @@ Stale data is detected via OddsSnapshot recency; other checks use OddsReader.
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 
 import structlog
@@ -23,7 +24,13 @@ from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.storage.event_merge import EventMerger
+
 logger = structlog.get_logger()
+
+LEAGUE_SPORTS: tuple[str, ...] = ("soccer_epl",)
+STALE_SCHEDULED_AGE = timedelta(hours=24)
+STALE_SCHEDULED_WINDOW = timedelta(days=7)
 
 
 class HealthMetrics(BaseModel):
@@ -270,6 +277,58 @@ class HealthMonitor:
 
         return is_healthy, total_errors
 
+    async def check_event_identity(self) -> list[str]:
+        """
+        Check that each match is one event and that no old event is still scheduled.
+
+        Each issue names its sport and is alerted separately; none merges anything.
+        Run ``odds events merge-twins --sport <sport> --apply`` for twins.
+
+        Returns:
+            Issue descriptions, empty when healthy.
+        """
+        merger = EventMerger(self.session)
+        issues: list[str] = []
+
+        twins = Counter(group[0].sport_key for group in await merger.find_twin_groups())
+        for sport, count in sorted(twins.items()):
+            issues.append(f"{count} {sport} matches stored as more than one event")
+            await self._send_alert(
+                alert_type=f"duplicate_events:{sport}",
+                severity="warning",
+                message=f"⚠️ {count} {sport} matches stored as more than one event; "
+                f"run `odds events merge-twins --sport {sport} --apply`",
+                context={"sport_key": sport, "twin_matches": count},
+            )
+
+        for sport in LEAGUE_SPORTS:
+            repeated = len(await merger.find_repeated_fixtures(sport))
+            if repeated:
+                issues.append(f"{repeated} {sport} fixtures stored twice in one season")
+                await self._send_alert(
+                    alert_type=f"repeated_fixtures:{sport}",
+                    severity="warning",
+                    message=f"⚠️ {repeated} {sport} fixtures stored twice in one season "
+                    "(a rescheduled match under a second id)",
+                    context={"sport_key": sport, "repeated_fixtures": repeated},
+                )
+
+        stale = Counter(
+            event.sport_key
+            for event in await merger.find_stale_scheduled(
+                STALE_SCHEDULED_AGE, STALE_SCHEDULED_WINDOW, datetime.now(UTC)
+            )
+        )
+        for sport, count in sorted(stale.items()):
+            issues.append(f"{count} {sport} events still scheduled long after kick-off")
+            await self._send_alert(
+                alert_type=f"stale_scheduled_events:{sport}",
+                severity="warning",
+                message=f"⚠️ {count} {sport} events still scheduled long after kick-off",
+                context={"sport_key": sport, "stale_scheduled": count},
+            )
+        return issues
+
     async def collect_metrics(self) -> HealthMetrics:
         """
         Collect all health metrics.
@@ -375,6 +434,7 @@ class HealthMonitor:
         3. API quota levels
         4. Data quality issues
         5. Job heartbeats (missing completions)
+        6. Event identity: twins, repeated fixtures, stale scheduled events
 
         Returns:
             HealthStatus with metrics and alerts sent
@@ -471,6 +531,9 @@ class HealthMonitor:
             # Check 5: Job heartbeats
             heartbeat_issues = await self.check_job_heartbeats()
             issues_detected.extend(heartbeat_issues)
+
+            # Check 6: One event per match
+            issues_detected.extend(await self.check_event_identity())
 
             # Housekeeping: purge old heartbeat rows
             await self.purge_old_heartbeats()

@@ -52,7 +52,7 @@ from odds_analytics.training.tuner import apply_trial_params
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.snapshot_utils import extract_odds_from_snapshot
-from odds_lambda.storage.writers import OddsWriter
+from odds_lambda.storage.event_merge import EVENT_MATCH_WINDOW
 from sqlalchemy import select
 
 OUTPUT_DIR = EXPERIMENTS_DIR / "results" / "epl_clv_rebaseline"
@@ -188,9 +188,9 @@ def match_ids(events: pd.DataFrame) -> pd.Series:
     """One ID per match: same teams, kick-offs within the twin-adoption window.
 
     Live-collected events can have a twin under another event ID for the same match;
-    ``OddsWriter.EVENT_MATCH_WINDOW`` is the window adoption matches twins within.
+    ``EVENT_MATCH_WINDOW`` is the window adoption matches twins within.
     """
-    window = pd.Timedelta(OddsWriter.EVENT_MATCH_WINDOW)
+    window = pd.Timedelta(EVENT_MATCH_WINDOW)
     ids = pd.Series(0, index=events.index)
     next_id = 0
     ordered = events.sort_values("commence_time")
@@ -222,7 +222,7 @@ def dedupe_matches(data: CellData, events: pd.DataFrame) -> tuple[CellData, dict
     """Keep one row per match; return the kept data and each dropped twin's kept ID.
 
     Of an ``op_live_`` twin and another ID, the other is kept, as
-    ``OddsWriter.adopt_live_twins`` keeps the Odds API event. Any other duplicate raises.
+    ``EventMerger`` keeps the Odds API event. Any other duplicate raises.
     """
     row_events = list(data.event_ids)
     match = events.loc[row_events, "match"]

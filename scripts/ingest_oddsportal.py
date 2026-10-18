@@ -340,7 +340,7 @@ async def _ingest_one_game(
     match_dt = parse_match_date(match_date_str)
 
     # --- Match or create Event ---
-    event_id = await find_existing_event(session, home_team, away_team, match_dt)
+    event_id = await find_existing_event(session, home_team, away_team, match_dt, sport_key)
 
     if event_id:
         stats.events_matched += 1

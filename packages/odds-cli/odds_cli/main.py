@@ -11,6 +11,7 @@ from odds_cli.commands import (
     backtest,
     copy_from_prod,
     discover,
+    events,
     fetch,
     injuries,
     model,
@@ -33,6 +34,7 @@ app = typer.Typer(
 )
 
 # Add command groups
+app.add_typer(events.app, name="events", help="Event identity maintenance")
 app.add_typer(fetch.app, name="fetch", help="Fetch odds data")
 app.add_typer(status.app, name="status", help="System status and monitoring")
 app.add_typer(backfill.app, name="backfill", help="Historical data backfill")
