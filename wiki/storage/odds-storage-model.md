@@ -23,7 +23,7 @@ Odds are stored twice. Each fetch becomes one `odds_core.models.OddsSnapshot` ro
 
 ## Which readers use which
 
-`odds_lambda.storage.readers.OddsReader` splits by path ([OddsReader](odds-reader.md#which-path-each-method-uses)): a few methods read normalized rows, while most price lookups rebuild `odds_core.models.Odds` objects from `raw_data` with `odds_core.snapshot_utils.extract_odds_from_snapshot` and never persist them. Those raw-based readers work for every source, including historical ones, which is why the sharp-price and latest-book queries behind the agent's tools do not depend on the normalized rows `(inferred)`.
+`odds_lambda.storage.readers.OddsReader` splits by path ([OddsReader](odds-reader.md#which-path-each-method-uses)): three methods read normalized rows, while most price lookups rebuild `odds_core.models.Odds` objects from `raw_data` with `odds_core.snapshot_utils.extract_odds_from_snapshot` and never persist them. Those raw-based readers work for every source, including historical ones, which is why the sharp-price and latest-book queries behind the agent's tools do not depend on the normalized rows `(inferred)`.
 
 ## Two parsers, two behaviours
 

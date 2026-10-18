@@ -28,7 +28,7 @@ The deployed model's config, `experiments/configs/xgboost_epl_production_tabular
 - The first validation block starts after `min_train_events`; each block holds exactly `val_step_events` events; the last partial block is dropped. Fold count is `floor((n_events - min_train_events) / val_step_events)`; fewer than `min + step` events raises `ValueError`. That gives 30 folds on the 1,900 tuning-range events with `min_train_events: 380`, and 22 with 760.
 - `expanding` trains on every earlier event; `sliding` trains on the previous `max_train_events` only.
 - Splits are row indices, so multi-row events (time-range sampling) stay whole on one side.
-- Chronological order is assumed, not checked. Order comes from `odds_lambda.storage.readers.OddsReader.get_events_by_date_range`; a caller passing shuffled data gets no error ([feature pipeline](feature-pipeline.md)).
+- Chronological order is assumed, not checked. Order comes from `odds_lambda.storage.readers.OddsReader.get_events_by_date_range`, which sorts by `commence_time` and then event ID, so kick-off ties fall in the same order whatever the date range and the 50-event block boundaries do not move with it; a caller passing shuffled data gets no error ([feature pipeline](feature-pipeline.md)).
 
 ## CV methods and metrics
 

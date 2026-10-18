@@ -1,0 +1,17 @@
+base: xgboost_epl_cv_protocol_expanding.yaml
+experiment:
+  name: xgboost_epl_clv_rebaseline
+  description: "EPL CLV re-baseline (#496): the #452 expanding cell's config over the tuning and evaluation ranges, with min_train_events 1900 so validation starts at the first evaluation-range event, and the hyperparameters frozen from the #452 expanding cell's best trial (seed A). Seed B's hyperparameters are applied by experiments/scripts/epl_clv_rebaseline.py."
+training:
+  data:
+    end_date: '2026-07-31'
+    min_train_events: 1900
+  model:
+    n_estimators: 150
+    max_depth: 2
+    learning_rate: 0.016540622580753447
+    min_child_weight: 11
+    subsample: 0.5
+    colsample_bytree: 1.0
+    reg_lambda: 3.164426633191584
+    random_state: 42

@@ -26,7 +26,7 @@ Decision time is the instant a prediction or bet is assumed to be made. Everythi
 
 ## Training
 
-`odds_analytics.training.config.SamplingConfig` selects the snapshot sampler ([feature pipeline](feature-pipeline.md)):
+`odds_analytics.training.config.SamplingConfig` selects the snapshot sampler, unless the caller passes one to `odds_analytics.feature_groups.prepare_training_data` ([feature pipeline](feature-pipeline.md)):
 
 - `strategy: time_range` (the default) uses `odds_analytics.feature_groups.TimeRangeSampler`: snapshots inside a `min_hours` to `max_hours` window before kickoff, at most `max_samples_per_event`, picked from equal-width time bins.
 - `strategy: tier` uses `odds_analytics.feature_groups.TierSampler`: one row per event, the latest snapshot whose tier is the `decision_tier` or any tier further from kickoff. `IN_PLAY` is excluded ([fetch tier](../storage/fetch-tier.md) has the tier boundaries). The default values are in [training config](training-config.md).

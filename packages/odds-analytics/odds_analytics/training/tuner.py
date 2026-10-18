@@ -154,6 +154,7 @@ class OptunaTuner(HyperparameterTuner):
         pruner: Pruning strategy ("median", "hyperband", "none")
         storage: Storage URL for persistence (e.g., "postgresql://...")
             If None, uses in-memory storage
+        sampler_seed: Seed for the sampler
         tracking_config: Optional TrackingConfig for MLflow experiment tracking
             If provided, each trial is logged as a nested run with the parent run
             containing study metadata and the best model
@@ -177,6 +178,7 @@ class OptunaTuner(HyperparameterTuner):
         pruner: str = "median",
         storage: str | None = None,
         tracking_config: TrackingConfig | None = None,
+        sampler_seed: int = 42,
     ):
         """Initialize Optuna tuner with specified configuration."""
         try:
@@ -190,7 +192,7 @@ class OptunaTuner(HyperparameterTuner):
         self.tracking_config = tracking_config
 
         # Create sampler
-        self.sampler = self._create_sampler(sampler)
+        self.sampler = self._create_sampler(sampler, sampler_seed)
 
         # Create pruner
         self.pruner = self._create_pruner(pruner)
@@ -212,12 +214,13 @@ class OptunaTuner(HyperparameterTuner):
             tracking_enabled=tracking_config is not None and tracking_config.enabled,
         )
 
-    def _create_sampler(self, sampler_name: str) -> Any:
+    def _create_sampler(self, sampler_name: str, seed: int) -> Any:
         """
         Create Optuna sampler from configuration.
 
         Args:
             sampler_name: Sampler type ("tpe", "random", "cmaes")
+            seed: Sampler seed
 
         Returns:
             Optuna sampler instance
@@ -227,18 +230,18 @@ class OptunaTuner(HyperparameterTuner):
         sampler_name = sampler_name.lower()
 
         if sampler_name == "tpe":
-            return optuna.samplers.TPESampler(seed=42)
+            return optuna.samplers.TPESampler(seed=seed)
         elif sampler_name == "random":
-            return optuna.samplers.RandomSampler(seed=42)
+            return optuna.samplers.RandomSampler(seed=seed)
         elif sampler_name == "cmaes":
-            return optuna.samplers.CmaEsSampler(seed=42)
+            return optuna.samplers.CmaEsSampler(seed=seed)
         else:
             logger.warning(
                 "unknown_sampler",
                 sampler=sampler_name,
                 message=f"Unknown sampler '{sampler_name}', defaulting to TPE",
             )
-            return optuna.samplers.TPESampler(seed=42)
+            return optuna.samplers.TPESampler(seed=seed)
 
     def _create_pruner(self, pruner_name: str) -> Any:
         """

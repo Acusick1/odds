@@ -22,6 +22,9 @@ Several results below used feature sets the code does not define, for example th
 
 ## Current conclusions
 
+Every result below that predates the training and CV validity fixes (#474, #434, #477, #437, #475, #481) is void, including the deployed model's CV metrics, the EPL feature ablation, the CV protocol grid and ADR-0002's rejection of Pinnacle as a target (#494). They are kept as the record, not as evidence.
+
+- The current evidence on the EPL model's role is [EPL CLV re-baseline against the simple baseline](exp-epl-clv-rebaseline.md). Out of sample on the ADR-0010 evaluation range, the tabular bet365 model beats a one-feature OLS fit on `tab_retail_sharp_diff` by about 6 × 10⁻⁶ MSE over two seeds, but neither seed's bootstrap CI excludes zero. So the model fails the keep test pre-registered on #496.
 - bet365, not Pinnacle, is the target: [ADR-0002](../../docs/adr/0002-bet365-clv-target.md), [target and data volume](exp-target-and-data-volume.md).
 - Sharp reference is Pinnacle with Betfair fallback: [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md), [EPL sharp-reference experiments](exp-epl-sharp-reference.md).
 - Sharp-vs-retail divergence is the core feature: [sharp benchmark](../modelling/sharp-benchmark.md).
@@ -57,6 +60,7 @@ Several results below used feature sets the code does not define, for example th
 - 2026-03-20 (#255), 04-23 (#361): [EPL feature ablation](exp-epl-feature-ablation-and-search-space.md).
 - 2026-04-23: [principled search space](exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test).
 - 2026-10-18 (#452): [CV protocol on a common validation range](exp-cv-protocol-common-range.md).
+- 2026-10-18 (#496): [EPL CLV re-baseline against the simple baseline](exp-epl-clv-rebaseline.md).
 
 ## Caveats
 

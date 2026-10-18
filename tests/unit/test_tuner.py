@@ -186,6 +186,22 @@ def test_optuna_tuner_sampler_creation():
     assert tuner_unknown.sampler is not None
 
 
+class TestOptunaTunerSamplerSeed:
+    @staticmethod
+    def _sampled_xs(sampler: str, sampler_seed: int) -> list[float]:
+        tuner = OptunaTuner(study_name="seeded", sampler=sampler, sampler_seed=sampler_seed)
+        study = tuner.optimize(lambda trial: trial.suggest_float("x", -10, 10) ** 2, n_trials=5)
+        return [t.params["x"] for t in study.trials]
+
+    @pytest.mark.parametrize("sampler", ["tpe", "random"])
+    def test_same_seed_reproduces_trials(self, sampler: str) -> None:
+        assert self._sampled_xs(sampler, 7) == self._sampled_xs(sampler, 7)
+
+    @pytest.mark.parametrize("sampler", ["tpe", "random"])
+    def test_different_seed_changes_trials(self, sampler: str) -> None:
+        assert self._sampled_xs(sampler, 7) != self._sampled_xs(sampler, 42)
+
+
 def test_optuna_tuner_pruner_creation():
     """Test pruner creation for different types."""
     # Median pruner

@@ -27,7 +27,7 @@ status: stable
 
 | Module | Class | Notes |
 |---|---|---|
-| `odds_lambda.storage.writers` / `odds_lambda.storage.readers` | [OddsWriter](odds-writer.md) / [OddsReader](odds-reader.md) | Events, snapshots, odds, fetch and quality logs |
+| `odds_lambda.storage.writers` / `odds_lambda.storage.readers` | [`odds_lambda.storage.writers.OddsWriter`](odds-writer.md) / [`odds_lambda.storage.readers.OddsReader`](odds-reader.md) | Events, snapshots, odds, fetch and quality logs |
 | `odds_lambda.storage.validators` | `odds_lambda.storage.validators.OddsValidator` | [Odds validation](odds-validator.md) |
 | `odds_lambda.storage.tier_validator` | `odds_lambda.storage.tier_validator.TierCoverageValidator` | [Coverage and completeness checks](coverage-checks.md) |
 | `odds_lambda.storage.polymarket_writer` / `odds_lambda.storage.polymarket_reader` | `odds_lambda.storage.polymarket_writer.PolymarketWriter` | [Polymarket](../collection/polymarket.md) |
