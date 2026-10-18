@@ -1,5 +1,7 @@
 """Unit tests for analytics utility functions."""
 
+from datetime import UTC, datetime
+
 import pytest
 from odds_analytics.utils import (
     calculate_ev,
@@ -12,11 +14,13 @@ from odds_analytics.utils import (
     detect_arbitrage,
     per_book_market_holds,
 )
+from odds_core.models import Odds
 from odds_core.odds_math import (
     american_to_decimal,
     calculate_implied_probability,
     calculate_profit_from_odds,
     decimal_to_american,
+    outcome_price_decimal,
 )
 
 
@@ -36,21 +40,61 @@ class TestOddsConversion:
         assert american_to_decimal(-150) == pytest.approx(1.667, rel=0.01)
 
     def test_decimal_to_american_over_2(self):
-        """Test converting decimal odds >= 2.0 to American."""
-        assert decimal_to_american(2.5) == pytest.approx(150, abs=5)
-        assert decimal_to_american(3.0) == pytest.approx(200, abs=5)
+        assert decimal_to_american(2.5) == 150
+        assert decimal_to_american(3.0) == 200
 
-    def test_decimal_to_american_under_2(self):
-        """Test converting decimal odds < 2.0 to American."""
-        assert decimal_to_american(1.909) == pytest.approx(-110, abs=5)
-        assert decimal_to_american(1.5) == pytest.approx(-200, abs=5)
+    def test_decimal_to_american_rounds_float_error(self):
+        assert decimal_to_american(2.02) == 102
+        assert decimal_to_american(2.01) == 101
+
+    def test_decimal_to_american_under_2_rounds_to_nearest(self):
+        assert decimal_to_american(1.91) == -110
+        assert decimal_to_american(1.909) == -110
+        assert decimal_to_american(1.5) == -200
+
+    def test_decimal_to_american_rejects_non_decimal_odds(self):
+        with pytest.raises(ValueError):
+            decimal_to_american(1.0)
 
     def test_roundtrip_conversion(self):
-        """Test that conversions are reversible."""
-        for american_odds in [-200, -150, -110, +100, +150, +200]:
-            decimal = american_to_decimal(american_odds)
-            back_to_american = decimal_to_american(decimal)
-            assert back_to_american == pytest.approx(american_odds, abs=5)
+        for american_odds in range(-1000, -100):
+            assert decimal_to_american(american_to_decimal(american_odds)) == american_odds
+        for american_odds in range(100, 1001):
+            assert decimal_to_american(american_to_decimal(american_odds)) == american_odds
+
+
+class TestOutcomePriceDecimal:
+    def test_pipeline_outcome_uses_decimal_key(self):
+        assert outcome_price_decimal({"name": "A", "price_decimal": 1.91}) == 1.91
+
+    def test_odds_api_outcome_converts_american_price(self):
+        assert outcome_price_decimal({"name": "A", "price": -110}) == pytest.approx(
+            1.90909, abs=1e-5
+        )
+        assert outcome_price_decimal({"name": "A", "price": 150}) == 2.5
+
+    def test_decimal_key_wins_over_american_price(self):
+        assert outcome_price_decimal({"price": -110, "price_decimal": 1.91}) == 1.91
+
+    def test_missing_price_raises(self):
+        with pytest.raises(KeyError):
+            outcome_price_decimal({"name": "A"})
+
+
+class TestOddsModelPrices:
+    def test_implied_probability_and_american_price_derive_from_decimal(self):
+        odds = Odds(
+            event_id="e",
+            bookmaker_key="b",
+            bookmaker_title="B",
+            market_key="1x2",
+            outcome_name="Home",
+            price_decimal=1.64,
+            odds_timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+            last_update=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        assert odds.implied_probability == pytest.approx(1 / 1.64)
+        assert odds.american_price == -156
 
 
 class TestProbabilityCalculations:
@@ -239,32 +283,34 @@ class TestMarketHold:
     def test_market_hold_standard_two_way(self):
         """Test hold calculation for standard two-way market."""
         # -110 on both sides is typical (4.8% hold)
-        hold = calculate_market_hold([-110, -110])
+        hold = calculate_market_hold([american_to_decimal(-110), american_to_decimal(-110)])
         assert hold == pytest.approx(0.048, rel=0.01)
 
     def test_market_hold_high_vig(self):
         """Test hold calculation for high-vig market."""
         # -120 on both sides (higher hold)
-        hold = calculate_market_hold([-120, -120])
+        hold = calculate_market_hold([american_to_decimal(-120), american_to_decimal(-120)])
         assert hold > 0.048
 
     def test_market_hold_arbitrage(self):
         """Test that arbitrage shows negative hold."""
         # +200 and -150 create arbitrage (negative hold)
-        hold = calculate_market_hold([+200, -150])
+        hold = calculate_market_hold([american_to_decimal(+200), american_to_decimal(-150)])
         assert hold < 0
 
     def test_market_hold_fair_odds(self):
         """Test that fair odds have zero hold."""
         # +100 on both sides (even money, no hold)
-        hold = calculate_market_hold([+100, +100])
+        hold = calculate_market_hold([american_to_decimal(+100), american_to_decimal(+100)])
         assert hold == pytest.approx(0.0, abs=0.001)
 
     def test_market_hold_three_way(self):
         """Test hold calculation for three-way market."""
         # Three outcomes with typical bookmaker hold (e.g., soccer match)
         # Using more realistic odds that sum to > 100%
-        hold = calculate_market_hold([+120, +200, +350])
+        hold = calculate_market_hold(
+            [american_to_decimal(+120), american_to_decimal(+200), american_to_decimal(+350)]
+        )
         # Should have positive hold
         assert hold > 0
 
@@ -272,10 +318,10 @@ class TestMarketHold:
 class TestPerBookMarketHolds:
     def test_complete_books_included(self):
         prices = [
-            ("bet365", "home", -110),
-            ("bet365", "away", -110),
-            ("betfred", "home", -105),
-            ("betfred", "away", -115),
+            ("bet365", "home", american_to_decimal(-110)),
+            ("bet365", "away", american_to_decimal(-110)),
+            ("betfred", "home", american_to_decimal(-105)),
+            ("betfred", "away", american_to_decimal(-115)),
         ]
         holds = per_book_market_holds(prices, required_outcomes={"home", "away"})
         assert set(holds) == {"bet365", "betfred"}
@@ -283,11 +329,11 @@ class TestPerBookMarketHolds:
 
     def test_book_missing_outcome_skipped(self):
         prices = [
-            ("bet365", "home", -110),
-            ("bet365", "draw", +250),
-            ("bet365", "away", +280),
-            ("partial", "home", -110),
-            ("partial", "draw", +250),
+            ("bet365", "home", american_to_decimal(-110)),
+            ("bet365", "draw", american_to_decimal(+250)),
+            ("bet365", "away", american_to_decimal(+280)),
+            ("partial", "home", american_to_decimal(-110)),
+            ("partial", "draw", american_to_decimal(+250)),
         ]
         holds = per_book_market_holds(prices, required_outcomes={"home", "draw", "away"})
         assert "partial" not in holds
@@ -305,7 +351,9 @@ class TestArbitrageDetection:
         # If we can bet both sides and implied probabilities sum < 1.0
         # Using odds where implied probs sum to < 1.0 (rare but possible)
         # +200 (33.3%) and -150 (60%) = 93.3% < 100%, so arbitrage exists
-        has_arb, profit_pct, stakes = detect_arbitrage([("pinnacle", +200), ("fanduel", -150)])
+        has_arb, profit_pct, stakes = detect_arbitrage(
+            [("pinnacle", american_to_decimal(+200)), ("fanduel", american_to_decimal(-150))]
+        )
         assert has_arb
         assert profit_pct > 0
         assert sum(stakes.values()) == pytest.approx(100.0, rel=0.1)
@@ -313,14 +361,18 @@ class TestArbitrageDetection:
     def test_detect_arbitrage_none(self):
         """Test when no arbitrage exists."""
         # Normal market with hold
-        has_arb, profit_pct, stakes = detect_arbitrage([("pinnacle", -110), ("fanduel", -110)])
+        has_arb, profit_pct, stakes = detect_arbitrage(
+            [("pinnacle", american_to_decimal(-110)), ("fanduel", american_to_decimal(-110))]
+        )
         assert not has_arb
         assert profit_pct == 0.0
         assert stakes == {}
 
     def test_arbitrage_stake_distribution(self):
         """Test that arbitrage stakes sum to 100%."""
-        has_arb, profit_pct, stakes = detect_arbitrage([("book1", +200), ("book2", -180)])
+        has_arb, profit_pct, stakes = detect_arbitrage(
+            [("book1", american_to_decimal(+200)), ("book2", american_to_decimal(-180))]
+        )
         if has_arb:
             assert sum(stakes.values()) == pytest.approx(100.0, rel=0.1)
 
@@ -328,12 +380,16 @@ class TestArbitrageDetection:
         """Test arbitrage profit calculation is accurate."""
         # Example: Team A at +150 (implied 40%) and Team B at -180 (implied 64.3%)
         # Total implied prob = 104.3%, so NO arbitrage (typical market with vig)
-        has_arb, profit_pct, stakes = detect_arbitrage([("book1", +150), ("book2", -180)])
+        has_arb, profit_pct, stakes = detect_arbitrage(
+            [("book1", american_to_decimal(+150)), ("book2", american_to_decimal(-180))]
+        )
         assert not has_arb  # Sum > 1.0, no arbitrage
 
         # Example: Team A at +200 (implied 33.3%) and Team B at -150 (implied 60%)
         # Total implied prob = 93.3%, so arbitrage exists with ~6.7% profit
-        has_arb, profit_pct, stakes = detect_arbitrage([("book1", +200), ("book2", -150)])
+        has_arb, profit_pct, stakes = detect_arbitrage(
+            [("book1", american_to_decimal(+200)), ("book2", american_to_decimal(-150))]
+        )
         assert has_arb
         assert profit_pct == pytest.approx(6.7, rel=0.1)
 
@@ -341,7 +397,9 @@ class TestArbitrageDetection:
         """Test that stake proportions are correctly calculated."""
         # +200 (33.3%) and -150 (60%)
         # Optimal stakes should be proportional to implied probabilities
-        has_arb, profit_pct, stakes = detect_arbitrage([("pinnacle", +200), ("fanduel", -150)])
+        has_arb, profit_pct, stakes = detect_arbitrage(
+            [("pinnacle", american_to_decimal(+200)), ("fanduel", american_to_decimal(-150))]
+        )
 
         assert has_arb
         # Stake on pinnacle (+200) should be ~35.7% (33.3 / 93.3 * 100)
@@ -354,7 +412,11 @@ class TestArbitrageDetection:
         # Three-way market (soccer draw, team A, team B)
         # If odds allow betting all three outcomes with profit
         has_arb, profit_pct, stakes = detect_arbitrage(
-            [("book1", +300), ("book2", +350), ("book3", +400)]
+            [
+                ("book1", american_to_decimal(+300)),
+                ("book2", american_to_decimal(+350)),
+                ("book3", american_to_decimal(+400)),
+            ]
         )
 
         # Implied probs: 25%, 22.2%, 20% = 67.2% < 100%, so arbitrage!

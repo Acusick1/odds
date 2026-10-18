@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from odds_core.event_ids import LIVE_EVENT_ID_PREFIX
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
+from odds_core.odds_math import outcome_price_decimal
 from odds_core.team import normalize_team_name, team_abbrev
 from odds_core.time import ensure_utc, parse_api_datetime
 from sqlalchemy import and_, select, text
@@ -393,7 +394,7 @@ class OddsWriter:
                         bookmaker_title=bookmaker_title,
                         market_key=market_key,
                         outcome_name=outcome.get("name"),
-                        price=int(outcome.get("price", 0)),
+                        price_decimal=outcome_price_decimal(outcome),
                         point=outcome.get("point"),  # Will be None for h2h
                         odds_timestamp=snapshot_time,
                         last_update=last_update,

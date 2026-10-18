@@ -66,11 +66,11 @@ class TestExtractH2hOdds:
         outcomes = result["markets"][0]["outcomes"]
         assert len(outcomes) == 3
         assert outcomes[0]["name"] == "Arsenal"
-        assert outcomes[0]["price"] == 150  # 2.50 decimal → +150
+        assert outcomes[0]["price_decimal"] == 2.5
         assert outcomes[1]["name"] == "Draw"
-        assert outcomes[1]["price"] == 240  # 3.40 decimal → +240
+        assert outcomes[1]["price_decimal"] == 3.4
         assert outcomes[2]["name"] == "Chelsea"
-        assert outcomes[2]["price"] == 180  # 2.80 decimal → +180
+        assert outcomes[2]["price_decimal"] == 2.8
 
     def test_returns_none_when_column_missing(self) -> None:
         row = {"PSH": "2.50", "PSD": "3.40"}  # PSA missing
@@ -87,15 +87,15 @@ class TestExtractH2hOdds:
         result = _extract_three_way_odds(row, "PS", "pinnacle", "Arsenal", "Chelsea")
         assert result is None
 
-    def test_favourite_american_odds(self) -> None:
+    def test_favourite_decimal_odds(self) -> None:
         row = {"B365H": "1.50", "B365D": "4.00", "B365A": "6.00"}
         result = _extract_three_way_odds(row, "B365", "bet365", "Liverpool", "Norwich")
 
         assert result is not None
         outcomes = result["markets"][0]["outcomes"]
-        assert outcomes[0]["price"] == -200  # 1.50 decimal → -200
-        assert outcomes[1]["price"] == 300  # 4.00 → +300
-        assert outcomes[2]["price"] == 500  # 6.00 → +500
+        assert outcomes[0]["price_decimal"] == 1.5
+        assert outcomes[1]["price_decimal"] == 4.0
+        assert outcomes[2]["price_decimal"] == 6.0
 
     def test_closing_prefix(self) -> None:
         row = {"PSCH": "2.10", "PSCD": "3.50", "PSCA": "3.20"}
@@ -136,8 +136,8 @@ class TestBuildSnapshotRawData:
         assert "bet365" in keys
 
         pinnacle = next(bk for bk in result["bookmakers"] if bk["key"] == "pinnacle")
-        home_price = pinnacle["markets"][0]["outcomes"][0]["price"]
-        assert home_price == 150  # 2.50 → +150
+        home_price = pinnacle["markets"][0]["outcomes"][0]["price_decimal"]
+        assert home_price == 2.5
 
     def test_closing_uses_c_columns(self) -> None:
         row = self._make_row()
@@ -145,8 +145,8 @@ class TestBuildSnapshotRawData:
 
         assert result is not None
         pinnacle = next(bk for bk in result["bookmakers"] if bk["key"] == "pinnacle")
-        home_price = pinnacle["markets"][0]["outcomes"][0]["price"]
-        assert home_price == 160  # 2.60 → +160
+        home_price = pinnacle["markets"][0]["outcomes"][0]["price_decimal"]
+        assert home_price == 2.6
 
     def test_returns_none_when_no_bookmakers(self) -> None:
         row = {"HomeTeam": "Arsenal", "AwayTeam": "Chelsea"}

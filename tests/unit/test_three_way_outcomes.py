@@ -10,6 +10,7 @@ from odds_analytics.backtesting.models import BacktestEvent, BetOpportunity
 from odds_analytics.backtesting.services import BacktestEngine, BettingStrategy
 from odds_analytics.strategies import ArbitrageStrategy, BasicEVStrategy, FlatBettingStrategy
 from odds_core.models import EventStatus, Odds
+from odds_core.odds_math import american_to_decimal
 
 # -- Fixtures --
 
@@ -97,7 +98,7 @@ def _make_odds(
         bookmaker_title=bookmaker.title(),
         market_key=market,
         outcome_name=outcome,
-        price=price,
+        price_decimal=american_to_decimal(price),
         point=point,
         odds_timestamp=datetime(2025, 1, 15, 14, 0, tzinfo=UTC),
         last_update=datetime(2025, 1, 15, 14, 0, tzinfo=UTC),

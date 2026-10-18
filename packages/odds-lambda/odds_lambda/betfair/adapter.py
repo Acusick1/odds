@@ -9,7 +9,7 @@ The pipeline's canonical bookmaker entry is::
       "markets": [
         {
           "key": "1x2" | "h2h",
-          "outcomes": [{"name": <canonical team>, "price": <American int>}, ...]
+          "outcomes": [{"name": <canonical team>, "price_decimal": <best back>}, ...]
         }
       ],
       "betfair_meta": {  # optional, supplemental
@@ -35,7 +35,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-from odds_core.odds_math import decimal_to_american
+from odds_core.odds_math import PRICE_DECIMAL_KEY
 from odds_core.team import normalize_team_name
 
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
@@ -131,10 +131,7 @@ def _runner_to_outcome(
             )
             outcome_name = canonical
 
-    return {
-        "name": outcome_name,
-        "price": decimal_to_american(runner.best_back),
-    }
+    return {"name": outcome_name, PRICE_DECIMAL_KEY: runner.best_back}
 
 
 def betfair_book_to_bookmaker_entry(

@@ -14,7 +14,7 @@ sources:
   - odds_lambda.storage.readers.OddsReader
   - odds_mcp.server.find_retail_edges
   - packages/odds-mcp/agents/common.md
-  - odds_core.odds_math.calculate_implied_probability
+  - odds_core.models.Odds
 status: stable
 ---
 
@@ -42,7 +42,7 @@ It anchors the model's strongest feature, the retail-sharp divergence, and the a
 
 ## Retail-sharp divergence
 
-**Definition.** `divergence = retail_implied_prob - sharp_implied_prob` for one outcome. Negative means the retail book prices that outcome longer than the sharp reference. Implied probabilities come from `odds_core.odds_math.calculate_implied_probability` and are not devigged, so a retail book with a larger margin shows a more positive divergence on every outcome; compare with `market_hold` in the screener output to separate margin from divergence ([devigging](../foundations/devigging.md)). The target is devigged ([CLV target](clv-target.md)).
+**Definition.** `divergence = retail_implied_prob - sharp_implied_prob` for one outcome. Negative means the retail book prices that outcome longer than the sharp reference. Implied probabilities come from `odds_core.models.Odds.implied_probability` (1 over the stored decimal price) and are not devigged, so a retail book with a larger margin shows a more positive divergence on every outcome; compare with `market_hold` in the screener output to separate margin from divergence ([devigging](../foundations/devigging.md)). The target is devigged ([CLV target](clv-target.md)).
 
 It is the strongest raw correlate of CLV from the first experiment onward (r = 0.12 in Exp 1, `experiments/results/exp1_feature_correlations/FINDINGS.md`; r = 0.356 at the sharp tier in Exp 6b, `experiments/results/exp6b_injury_closing_tier/FINDINGS.md`) and the core model feature `retail_sharp_diff` ([early NBA signal](../evaluation/exp-early-nba-signal-and-lstm.md), [NBA timing and injuries](../evaluation/exp-nba-timing-and-injuries.md)). The production YAML also lists bet365, the target bookmaker, in `retail_bookmakers`, so the target bookmaker's snapshot price is an input to `retail_sharp_diff` (PR #362, [training config](training-config.md)).
 
@@ -51,12 +51,12 @@ It is the strongest raw correlate of CLV from the first experiment onward (r = 0
 | | Feature, tabular path | Feature, helper path | MCP screener |
 |---|---|---|---|
 | Where | `odds_analytics.feature_extraction.TabularFeatureExtractor` | `odds_analytics.feature_extraction.calculate_sharp_retail_metrics`, called by `odds_analytics.feature_extraction.SequenceFeatureExtractor` | `odds_mcp.server.find_retail_edges`, sharp from `odds_lambda.storage.readers.OddsReader.get_sharp_prices` |
-| Retail side | Mean of per-book implied probabilities for the outcome, over configured `retail_bookmakers` | Implied probability of the mean American price | One row per book, every non-sharp book in the window |
+| Retail side | Mean of per-book implied probabilities for the outcome, over configured `retail_bookmakers` | Mean of per-book implied probabilities (`odds_analytics.feature_extraction.calculate_avg_probability`) | One row per book, every non-sharp book in the window |
 | Sharp side | First bookmaker in the list with odds for the requested outcome (`odds_analytics.feature_extraction.select_sharp_odds`) | Same | First bookmaker per outcome, so outcomes can resolve to different books, and sharp and retail prices can come from different snapshots |
 | Defaults | `["pinnacle"]`; retail `fanduel`, `draftkings`, `betmgm` (`odds_analytics.feature_extraction.DEFAULT_RETAIL_BOOKMAKERS`) | Same | `["pinnacle", "betfair_exchange"]`; no retail list |
 | Time | Snapshot at decision time | Same | Newest price per book within a lookback window (default 2 h) |
 
-Two features with the same name can therefore differ: averaging probabilities and taking the probability of the averaged price differ for books on opposite sides of even money.
+Both feature paths average per-book implied probabilities, so a feature of the same name agrees between them.
 
 The sharp roster is defined in several places in the code. `odds_analytics.training.config.FeatureConfig.sharp_bookmakers` and `odds_analytics.feature_extraction.DEFAULT_SHARP_BOOKMAKERS` default to `["pinnacle"]`, the strategies default to `pinnacle`, and the default sharp list in `odds_mcp.server` is `["pinnacle", "betfair_exchange"]` with a comment saying to keep it in sync. The two lists differ on purpose, a maintainer decision recorded in #421 and [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md). `odds_mcp.server.save_match_brief` stamps the hybrid list literal ([match briefs](../agent/match-briefs.md)). A training YAML that omits `betfair_exchange` silently loses the fallback, and a single training set can mix Pinnacle-based and Betfair-based `sharp_prob` values that the model cannot tell apart except through the level shift. Hybrid production configs set `sharp_bookmakers` explicitly ([training config](training-config.md)). The MCP-side point-bucket and bookmaker-mixing behaviour is on [MCP market tools](../agent/mcp-market-tools.md#retail-edges).
 

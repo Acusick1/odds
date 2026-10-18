@@ -34,7 +34,7 @@ from odds_analytics.training.cross_validation import make_walk_forward_splits
 from odds_analytics.training.data_preparation import filter_events_by_date_range
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_core.odds_math import american_to_decimal, calculate_implied_probability
+from odds_core.odds_math import calculate_implied_probability
 from odds_core.snapshot_utils import extract_odds_from_snapshot
 from sqlalchemy import select
 from xgboost import XGBRegressor
@@ -178,8 +178,8 @@ async def load_betting_context(event_ids: np.ndarray) -> dict[str, BettingContex
                 continue
             bm_odds = BookmakerOdds(
                 bookmaker=o.bookmaker_key,
-                american_odds=o.price,
-                decimal_odds=american_to_decimal(o.price),
+                american_odds=o.american_price,
+                decimal_odds=o.price_decimal,
             )
             if o.outcome_name == event.home_team:
                 home_odds.append(bm_odds)

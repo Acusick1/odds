@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from odds_cli.commands import copy_from_prod as copy_cli
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.odds_math import american_to_decimal
 from odds_core.prediction_models import Prediction
 from odds_lambda.copy_from_production import CopyStats, ProductionDataCopier
 from sqlalchemy import select, text
@@ -120,7 +121,7 @@ async def _seed_prod_event(
                     bookmaker_title="Bet365",
                     market_key="1x2",
                     outcome_name=outcome,
-                    price=price,
+                    price_decimal=american_to_decimal(price),
                     odds_timestamp=kickoff - timedelta(hours=1),
                     last_update=kickoff - timedelta(hours=1),
                 )

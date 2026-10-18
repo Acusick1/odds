@@ -19,8 +19,11 @@ class BriefDecision(str, Enum):
     SKIP = "skip"
 
 
-# Per-outcome sharp price entry: bookmaker key, American odds, implied probability.
-SharpPriceEntry = dict[str, Any]  # {"bookmaker": str, "price": int, "implied_prob": float}
+# Per-outcome sharp price entry: bookmaker key, derived American quote, source decimal
+# price, implied probability.
+SharpPriceEntry = dict[
+    str, Any
+]  # {"bookmaker": str, "price": int, "price_decimal": float, "implied_prob": float}
 # Keyed by outcome name (e.g. "Arsenal", "Draw", "Chelsea").
 SharpPriceMap = dict[str, SharpPriceEntry]
 

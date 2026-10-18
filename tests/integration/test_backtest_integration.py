@@ -12,6 +12,7 @@ from odds_analytics.backtesting import (
 )
 from odds_analytics.strategies import ArbitrageStrategy, FlatBettingStrategy
 from odds_core.models import Event, EventStatus, Odds
+from odds_core.odds_math import american_to_decimal
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.writers import OddsWriter
 
@@ -48,7 +49,7 @@ async def test_full_backtest_with_flat_strategy(test_session):
             bookmaker_title="FanDuel",
             market_key="h2h",
             outcome_name="Lakers",
-            price=-120,  # Lakers favorite
+            price_decimal=american_to_decimal(-120),  # Lakers favorite
             point=None,
             odds_timestamp=decision_time,
             last_update=decision_time,
@@ -59,7 +60,7 @@ async def test_full_backtest_with_flat_strategy(test_session):
             bookmaker_title="FanDuel",
             market_key="h2h",
             outcome_name="Warriors",
-            price=+110,  # Warriors underdog
+            price_decimal=american_to_decimal(+110),  # Warriors underdog
             point=None,
             odds_timestamp=decision_time,
             last_update=decision_time,
@@ -147,7 +148,7 @@ async def test_backtest_with_multiple_events(test_session):
                 bookmaker_title="FanDuel",
                 market_key="h2h",
                 outcome_name=event.home_team,
-                price=-110,
+                price_decimal=american_to_decimal(-110),
                 point=None,
                 odds_timestamp=decision_time,
                 last_update=decision_time,
@@ -158,7 +159,7 @@ async def test_backtest_with_multiple_events(test_session):
                 bookmaker_title="FanDuel",
                 market_key="h2h",
                 outcome_name=event.away_team,
-                price=-110,
+                price_decimal=american_to_decimal(-110),
                 point=None,
                 odds_timestamp=decision_time,
                 last_update=decision_time,
@@ -236,7 +237,7 @@ async def test_backtest_json_export_and_reconstruction(test_session):
         bookmaker_title="FanDuel",
         market_key="h2h",
         outcome_name="TestHome",
-        price=-110,
+        price_decimal=american_to_decimal(-110),
         point=None,
         odds_timestamp=decision_time,
         last_update=decision_time,
@@ -335,7 +336,7 @@ async def test_backtest_csv_export(test_session):
         bookmaker_title="FanDuel",
         market_key="h2h",
         outcome_name="TestHome",
-        price=-110,
+        price_decimal=american_to_decimal(-110),
         point=None,
         odds_timestamp=decision_time,
         last_update=decision_time,
@@ -403,7 +404,7 @@ async def test_arbitrage_strategy_max_hold_filter(test_session):
             bookmaker_title="Pinnacle",
             market_key="h2h",
             outcome_name="TeamA",
-            price=-120,
+            price_decimal=american_to_decimal(-120),
             point=None,
             odds_timestamp=decision_time,
             last_update=decision_time,
@@ -414,7 +415,7 @@ async def test_arbitrage_strategy_max_hold_filter(test_session):
             bookmaker_title="FanDuel",
             market_key="h2h",
             outcome_name="TeamB",
-            price=-120,
+            price_decimal=american_to_decimal(-120),
             point=None,
             odds_timestamp=decision_time,
             last_update=decision_time,

@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.odds_math import american_to_decimal
 
 from tests.test_helpers import TWIN_EVENT_ID, TWIN_KICKOFF, make_epl_event
 
@@ -160,7 +161,7 @@ async def test_events_with_odds(pglite_async_session):
                 bookmaker_title=bookmaker.title(),
                 market_key="h2h",
                 outcome_name=event.home_team,
-                price=opening_home_price,
+                price_decimal=american_to_decimal(opening_home_price),
                 point=None,
                 odds_timestamp=opening_time,
                 last_update=opening_time,
@@ -174,7 +175,7 @@ async def test_events_with_odds(pglite_async_session):
                 bookmaker_title=bookmaker.title(),
                 market_key="h2h",
                 outcome_name=event.away_team,
-                price=opening_away_price,
+                price_decimal=american_to_decimal(opening_away_price),
                 point=None,
                 odds_timestamp=opening_time,
                 last_update=opening_time,
@@ -188,7 +189,7 @@ async def test_events_with_odds(pglite_async_session):
                 bookmaker_title=bookmaker.title(),
                 market_key="h2h",
                 outcome_name=event.home_team,
-                price=closing_home_price,
+                price_decimal=american_to_decimal(closing_home_price),
                 point=None,
                 odds_timestamp=closing_time,
                 last_update=closing_time,
@@ -202,7 +203,7 @@ async def test_events_with_odds(pglite_async_session):
                 bookmaker_title=bookmaker.title(),
                 market_key="h2h",
                 outcome_name=event.away_team,
-                price=closing_away_price,
+                price_decimal=american_to_decimal(closing_away_price),
                 point=None,
                 odds_timestamp=closing_time,
                 last_update=closing_time,
@@ -246,7 +247,7 @@ async def live_twin_with_rows(pglite_async_session):
                 bookmaker_title="bet365",
                 market_key="1x2",
                 outcome_name="Arsenal",
-                price=150,
+                price_decimal=american_to_decimal(150),
                 odds_timestamp=snapshot.snapshot_time,
                 last_update=snapshot.snapshot_time,
             ),

@@ -22,7 +22,7 @@ How to run the tests is in [Set up and run locally](howto-develop-locally.md#run
 
 ```
 tests/unit/         ~90 flat files across all five packages; `conftest.py` holds the OddsPortal feed fixtures
-tests/integration/  shared fixtures in conftest.py (e.g. events with opening and closing snapshots, an `op_live_` event with child rows)
+tests/integration/  shared fixtures in conftest.py (e.g. events with opening and closing snapshots and `odds_core.models.Odds` rows priced through `price_decimal`, an `op_live_` event with child rows)
 tests/migration/    schema and CLI checks against a real database
 tests/fixtures/     sample Odds API JSON
 ```

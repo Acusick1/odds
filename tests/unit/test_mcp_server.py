@@ -4,7 +4,8 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.odds_math import american_to_decimal
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 
 
@@ -179,19 +180,23 @@ class TestSnapshotToDict:
     def test_includes_extracted_odds(self) -> None:
         from odds_mcp.server import _snapshot_to_dict
 
-        odds_obj = MagicMock()
-        odds_obj.bookmaker_key = "bet365"
-        odds_obj.bookmaker_title = "Bet365"
-        odds_obj.market_key = "h2h"
-        odds_obj.outcome_name = "Arsenal"
-        odds_obj.price = -110
-        odds_obj.point = None
+        odds_obj = Odds(
+            event_id="e1",
+            bookmaker_key="bet365",
+            bookmaker_title="Bet365",
+            market_key="h2h",
+            outcome_name="Arsenal",
+            price_decimal=american_to_decimal(-110),
+            odds_timestamp=datetime(2026, 4, 12, 10, 0, tzinfo=UTC),
+            last_update=datetime(2026, 4, 12, 10, 0, tzinfo=UTC),
+        )
 
         snap = self._make_snapshot()
         result = _snapshot_to_dict(snap, extracted_odds=[odds_obj])
         assert len(result["odds"]) == 1
         assert result["odds"][0]["bookmaker_key"] == "bet365"
         assert result["odds"][0]["price"] == -110
+        assert result["odds"][0]["price_decimal"] == pytest.approx(1.90909, abs=1e-5)
 
 
 class TestTradeToDict:
@@ -654,15 +659,19 @@ class TestFindRetailEdges:
         *,
         market: str = "h2h",
         point: float | None = None,
-    ) -> MagicMock:
-        o = MagicMock()
-        o.bookmaker_key = bookmaker
-        o.bookmaker_title = bookmaker
-        o.market_key = market
-        o.outcome_name = outcome
-        o.price = price
-        o.point = point
-        return o
+    ) -> Odds:
+        moment = datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
+        return Odds(
+            event_id="e1",
+            bookmaker_key=bookmaker,
+            bookmaker_title=bookmaker,
+            market_key=market,
+            outcome_name=outcome,
+            price_decimal=american_to_decimal(price),
+            point=point,
+            odds_timestamp=moment,
+            last_update=moment,
+        )
 
     def _make_snapshot(self) -> MagicMock:
         snap = MagicMock()
@@ -793,6 +802,7 @@ class TestFindRetailEdges:
                 assert set(row.keys()) == {
                     "book",
                     "price",
+                    "price_decimal",
                     "implied_prob",
                     "divergence",
                     "z_score",

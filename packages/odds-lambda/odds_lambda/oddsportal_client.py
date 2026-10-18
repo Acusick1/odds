@@ -247,7 +247,7 @@ def _outcome_values(raw: Any, count: int) -> list[Any] | None:
     return None
 
 
-def _positive_floats(raw: Any, count: int) -> tuple[float, ...] | None:
+def _decimal_prices(raw: Any, count: int) -> tuple[float, ...] | None:
     values = _outcome_values(raw, count)
     if values is None:
         return None
@@ -255,7 +255,7 @@ def _positive_floats(raw: Any, count: int) -> tuple[float, ...] | None:
         prices = tuple(float(v) for v in values)
     except (TypeError, ValueError):
         return None
-    return prices if all(p > 0 for p in prices) else None
+    return prices if all(p > 1.0 for p in prices) else None
 
 
 def _volumes(raw: Any, count: int) -> tuple[int, ...] | None:
@@ -286,7 +286,7 @@ def extract_market(
     """Read per-bookmaker prices for one market from a decrypted feed.
 
     Skips suspended bookmakers (``act`` false), unknown bookmaker ids and rows
-    with missing, non-positive or wrongly sized prices.
+    with missing, wrongly sized or non-decimal (at or below 1.0) prices.
     """
     key = f"E-{spec.betting_type}-{spec.scope}-0-{spec.handicap}-0"
     data = feed.get("d")
@@ -321,7 +321,7 @@ def extract_market(
         if name is None:
             logger.debug("oddsportal_unknown_bookmaker", bookmaker_id=bookmaker_id)
             continue
-        prices = _positive_floats(raw_prices, len(spec.outcomes))
+        prices = _decimal_prices(raw_prices, len(spec.outcomes))
         if prices is None:
             continue
         raw_volume = volume.get(bookmaker_id)

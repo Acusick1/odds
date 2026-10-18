@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from odds_core.odds_math import PRICE_DECIMAL_KEY
+
 from odds_lambda.oddsportal_client import (
     FEED_MARKETS,
     BookmakerPrices,
@@ -18,7 +20,6 @@ from odds_lambda.oddsportal_client import (
 )
 from odds_lambda.oddsportal_common import (
     DRAW_OUTCOME,
-    decimal_to_american,
     normalize_bookmaker_key,
 )
 
@@ -38,7 +39,7 @@ class MatchOdds:
 
 
 def _outcomes(
-    event: ListingEvent, spec: FeedMarketSpec, prices: tuple[int, ...]
+    event: ListingEvent, spec: FeedMarketSpec, prices: tuple[float, ...]
 ) -> list[dict[str, Any]]:
     names = {
         "home": event.home_team,
@@ -49,7 +50,7 @@ def _outcomes(
     }
     outcomes: list[dict[str, Any]] = []
     for label, price in zip(spec.outcomes, prices, strict=True):
-        outcome: dict[str, Any] = {"name": names[label], "price": price}
+        outcome: dict[str, Any] = {"name": names[label], PRICE_DECIMAL_KEY: price}
         if spec.point is not None:
             outcome["point"] = spec.point
         outcomes.append(outcome)
@@ -83,7 +84,6 @@ def convert_market(
 
     entries: list[dict[str, Any]] = []
     for bk in bookmakers:
-        american = tuple(decimal_to_american(p) for p in bk.prices)
         # The bookmaker's own change time is its update time; the validator rejects
         # future timestamps, so cap it at the scrape time.
         last_update = min(bk.last_change, scraped_at) if bk.last_change else scraped_at
@@ -94,7 +94,7 @@ def convert_market(
             "markets": [
                 {
                     "key": spec.pipeline_key,
-                    "outcomes": _outcomes(event, spec, american),
+                    "outcomes": _outcomes(event, spec, bk.prices),
                 }
             ],
         }

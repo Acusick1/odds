@@ -19,6 +19,7 @@ from odds_analytics.feature_groups import (
 )
 from odds_analytics.training import FeatureConfig, SamplingConfig
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.odds_math import american_to_decimal
 from odds_core.polymarket_models import (
     PolymarketEvent,
     PolymarketMarket,
@@ -119,7 +120,7 @@ def make_odds_records(
                         bookmaker_title=bk.title(),
                         market_key="h2h",
                         outcome_name=home_team,
-                        price=-130,
+                        price_decimal=american_to_decimal(-130),
                         point=None,
                         odds_timestamp=t,
                         last_update=t,
@@ -130,7 +131,7 @@ def make_odds_records(
                         bookmaker_title=bk.title(),
                         market_key="h2h",
                         outcome_name=away_team,
-                        price=110,
+                        price_decimal=american_to_decimal(110),
                         point=None,
                         odds_timestamp=t,
                         last_update=t,

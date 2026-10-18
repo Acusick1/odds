@@ -9,38 +9,33 @@ from odds_lambda.storage.validators import OddsValidator
 class TestOddsValidator:
     """Tests for OddsValidator class."""
 
-    def test_american_to_probability(self):
-        """Test converting American odds to probability."""
-        # Negative odds (favorite)
-        prob = OddsValidator.american_to_probability(-110)
-        assert 0.52 < prob < 0.53  # ~52.4%
-
-        prob = OddsValidator.american_to_probability(-200)
-        assert 0.66 < prob < 0.67  # ~66.7%
-
-        # Positive odds (underdog)
-        prob = OddsValidator.american_to_probability(150)
-        assert 0.39 < prob < 0.41  # ~40%
-
-        prob = OddsValidator.american_to_probability(200)
-        assert 0.33 < prob < 0.34  # ~33.3%
-
     def test_validate_odds_value_valid(self):
-        """Test validation of valid odds values."""
-        warnings = OddsValidator.validate_odds_value(-110, "fanduel", "h2h", "Lakers")
-        assert len(warnings) == 0
-
-        warnings = OddsValidator.validate_odds_value(150, "draftkings", "h2h", "Celtics")
-        assert len(warnings) == 0
+        """Test validation of valid decimal odds values."""
+        assert OddsValidator.validate_odds_value(1.91, "fanduel", "h2h", "Lakers") == []
+        assert OddsValidator.validate_odds_value(2.5, "draftkings", "h2h", "Celtics") == []
 
     def test_validate_odds_value_out_of_range(self):
-        """Test validation of odds outside valid range."""
-        warnings = OddsValidator.validate_odds_value(50000, "fanduel", "h2h", "Lakers")
+        """Test validation of decimal odds outside valid range."""
+        warnings = OddsValidator.validate_odds_value(500.0, "fanduel", "h2h", "Lakers")
         assert len(warnings) > 0
         assert "out of valid range" in warnings[0]
 
-        warnings = OddsValidator.validate_odds_value(-50000, "fanduel", "h2h", "Lakers")
-        assert len(warnings) > 0
+        assert OddsValidator.validate_odds_value(1.0, "fanduel", "h2h", "Lakers")
+
+    def test_snapshot_flags_missing_price(self):
+        data = {
+            "id": "e1",
+            "bookmakers": [
+                {"key": "bet365", "markets": [{"key": "h2h", "outcomes": [{"name": "Home"}]}]}
+            ],
+        }
+        is_valid, warnings = OddsValidator.validate_odds_snapshot(data, "e1")
+        assert not is_valid
+        assert "Missing or invalid price" in warnings[0]
+
+    def test_vig_reads_decimal_prices(self):
+        outcomes = [{"price_decimal": 1.91}, {"price_decimal": 1.91}]
+        assert OddsValidator.validate_vig(outcomes, "bet365", "h2h") == []
 
     def test_validate_vig_normal(self):
         """Test vig validation for normal two-way market."""

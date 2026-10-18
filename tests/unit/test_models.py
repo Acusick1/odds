@@ -2,7 +2,9 @@
 
 from datetime import UTC, datetime
 
+import pytest
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
+from odds_core.odds_math import american_to_decimal
 
 
 class TestEventModel:
@@ -86,7 +88,7 @@ class TestOddsModel:
             bookmaker_title="FanDuel",
             market_key="h2h",
             outcome_name="Lakers",
-            price=-110,
+            price_decimal=american_to_decimal(-110),
             odds_timestamp=datetime.now(UTC),
             last_update=datetime.now(UTC),
             is_valid=True,
@@ -96,7 +98,8 @@ class TestOddsModel:
         assert odds.bookmaker_key == "fanduel"
         assert odds.market_key == "h2h"
         assert odds.outcome_name == "Lakers"
-        assert odds.price == -110
+        assert odds.price_decimal == pytest.approx(1.90909, abs=1e-5)
+        assert odds.american_price == -110
         assert odds.point is None
         assert odds.is_valid is True
 
@@ -108,7 +111,7 @@ class TestOddsModel:
             bookmaker_title="FanDuel",
             market_key="spreads",
             outcome_name="Lakers",
-            price=-110,
+            price_decimal=american_to_decimal(-110),
             point=-2.5,
             odds_timestamp=datetime.now(UTC),
             last_update=datetime.now(UTC),
@@ -125,7 +128,7 @@ class TestOddsModel:
             bookmaker_title="FanDuel",
             market_key="h2h",
             outcome_name="Lakers",
-            price=50000,  # Invalid odds
+            price_decimal=american_to_decimal(50000),  # Invalid odds
             odds_timestamp=datetime.now(UTC),
             last_update=datetime.now(UTC),
             is_valid=False,

@@ -50,7 +50,7 @@ Package `packages/odds-lambda/odds_lambda/betfair/`, driven by the fetch-betfair
 
 ## Adapter behaviour
 
-- Outcome `price` is `best_back` converted to American with `odds_core.odds_math.decimal_to_american`, which truncates ([odds-math](../foundations/odds-math.md#conversion-copies)). Best lay, sizes and last traded price live only in `betfair_meta.runners`. Runners without a back price are dropped, and a book with fewer outcomes than expected returns `None` (nothing stored).
+- Outcome `price_decimal` is `best_back` unconverted, with no `price` key (`odds_core.odds_math.PRICE_DECIMAL_KEY`, [odds-math](../foundations/odds-math.md)). Best lay, sizes and last traded price live only in `betfair_meta.runners`. Runners without a back price are dropped, and a book with fewer outcomes than expected returns `None` (nothing stored).
 - The app key is the delayed one: prices lag 1-180 s (`odds_core.config.BetfairConfig` docstring). In-play and suspended books are still fetched (`betfair_meta.inplay`, `market_status`), and markets suspended pre-match are stored and counted in `books_suspended`.
 - Unknown runner names fall back to the normalized name with a warning, so an alias gap yields an outcome that matches neither team ([event-matching](../storage/event-matching.md)).
 - The market key differs by sport (`1x2` vs `h2h`), and `betfair_exchange` is also written by FDUK (`BFE*`) and by OddsPortal's Betfair row ([sport-and-market-keys](sport-and-market-keys.md#market-key-dialects)).

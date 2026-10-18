@@ -143,7 +143,9 @@ class TestSequenceLoaderIntegration:
             and o.bookmaker_key == "pinnacle"
         )
 
-        assert first_lakers_h2h.price != last_lakers_h2h.price, "Line should move over time"
+        assert first_lakers_h2h.price_decimal != last_lakers_h2h.price_decimal, (
+            "Line should move over time"
+        )
 
     async def test_load_sequences_multiple_markets(self, test_session):
         """Test loading sequences with multiple markets."""

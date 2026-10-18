@@ -4,7 +4,8 @@ title: Devigging and vig-inclusive prices
 description: What vig and proportional devigging are here, which consumers devig and which stay vig-inclusive, and what that means for comparing prices.
 sources:
   - odds_core.odds_math.devig_probabilities
-  - odds_core.odds_math.calculate_implied_probability
+  - odds_core.odds_math.decimal_to_implied_probability
+  - odds_core.models.Odds.implied_probability
   - odds_analytics.utils.per_book_market_holds
   - odds_analytics.sequence_loader.extract_devigged_h2h_probs
   - odds_analytics.sequence_loader.extract_devigged_totals_probs
@@ -19,7 +20,7 @@ status: stable
 
 # Devigging and vig-inclusive prices
 
-Bookmaker prices sum to more than 1 once converted to implied probability (`odds_core.odds_math.calculate_implied_probability`); the excess is the vig (hold). Devigging rescales one bookmaker's outcome probabilities for one market so they sum to 1, giving a "fair" estimate. The helper functions are on [Odds arithmetic helpers](odds-math.md).
+Bookmaker prices sum to more than 1 once converted to implied probability (`odds_core.odds_math.decimal_to_implied_probability` on the stored decimal price, exposed as `odds_core.models.Odds.implied_probability`); the excess is the vig (hold). Devigging rescales one bookmaker's outcome probabilities for one market so they sum to 1, giving a "fair" estimate. The helper functions are on [Odds arithmetic helpers](odds-math.md).
 
 ## What exists
 
@@ -31,13 +32,13 @@ All production use is in `odds_analytics.sequence_loader`, which holds the train
 
 ## Vig-inclusive consumers
 
-These use raw `odds_core.odds_math.calculate_implied_probability` and are not devigged:
+These use raw implied probabilities (`odds_core.models.Odds.implied_probability`) and are not devigged:
 
 - `target_type="raw"`: mean implied-probability delta across books, snapshot to close.
 - `odds_mcp.server.find_retail_edges`: `divergence = retail_implied_prob - sharp_implied_prob`, both vig-inclusive: the sharp probability comes from a book in the sharp list, and only the rows are retail books (the sharp list, Pinnacle and Polymarket are never rows), so a sharp book's own margin is part of every divergence ([retail edges](../agent/mcp-market-tools.md#retail-edges)).
 - The `sharp_prob` and `retail_sharp_diff` model features ([Sharp benchmark](../modelling/sharp-benchmark.md)).
 - `basic_ev` backtests use the vig-inclusive sharp probability as truth ([Backtest strategies](../evaluation/backtest-strategies.md)).
-- Hold measurement (`odds_analytics.utils.per_book_market_holds`) measures the vig rather than removing it.
+- Hold measurement (`odds_analytics.utils.per_book_market_holds`, over decimal prices) measures the vig rather than removing it.
 
 Comparing a vig-inclusive probability with a devigged one mixes two scales; the vig-inclusive consumers above are the places where that can happen `(inferred)`.
 

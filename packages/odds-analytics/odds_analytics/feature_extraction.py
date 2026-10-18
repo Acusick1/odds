@@ -33,7 +33,6 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from odds_core.models import Odds
-from odds_core.odds_math import american_to_decimal, calculate_implied_probability
 from odds_core.time import to_eastern
 
 from odds_analytics.backtesting import BacktestEvent
@@ -102,18 +101,17 @@ def select_sharp_odds(
 
 
 def calculate_avg_price(odds: list[Odds]) -> float:
-    """Calculate average American odds price across list."""
+    """Calculate the mean American quote across list."""
     if not odds:
         return 0.0
-    return float(np.mean([o.price for o in odds]))
+    return float(np.mean([o.american_price for o in odds]))
 
 
 def calculate_avg_probability(odds: list[Odds]) -> float:
     """Calculate average implied probability across odds list."""
     if not odds:
         return 0.0
-    avg_price = calculate_avg_price(odds)
-    return calculate_implied_probability(int(avg_price))
+    return float(np.mean([o.implied_probability for o in odds]))
 
 
 def calculate_sharp_retail_metrics(
@@ -475,7 +473,7 @@ class TabularFeatureExtractor(FeatureExtractor):
             outcome_odds_list = filter_odds_by_market_outcome(market_odds, market, outcome_team)
             if outcome_odds_list:
                 avg_outcome_prob = float(
-                    np.mean([calculate_implied_probability(o.price) for o in outcome_odds_list])
+                    np.mean([o.implied_probability for o in outcome_odds_list])
                 )
                 feature_values["consensus_prob"] = avg_outcome_prob
 
@@ -484,7 +482,7 @@ class TabularFeatureExtractor(FeatureExtractor):
             sharp_outcome_odds = select_sharp_odds(market_odds, self.sharp_bookmakers, outcome_team)
             sharp_outcome = sharp_outcome_odds[0] if sharp_outcome_odds else None
             if sharp_outcome:
-                outcome_sharp_prob = calculate_implied_probability(sharp_outcome.price)
+                outcome_sharp_prob = sharp_outcome.implied_probability
                 feature_values["sharp_prob"] = outcome_sharp_prob
 
                 # Retail-sharp diff for outcome side only
@@ -493,9 +491,7 @@ class TabularFeatureExtractor(FeatureExtractor):
                 )
                 if retail_outcome_odds:
                     avg_retail_prob = float(
-                        np.mean(
-                            [calculate_implied_probability(o.price) for o in retail_outcome_odds]
-                        )
+                        np.mean([o.implied_probability for o in retail_outcome_odds])
                     )
                     feature_values["retail_sharp_diff"] = avg_retail_prob - outcome_sharp_prob
 
@@ -692,6 +688,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
 
         # Track opening line for change calculation
         opening_odds = None
+        opening_prob = 0.0
 
         # Extract features for each timestep
         for timestep_idx, snapshot_idx in enumerate(resampled_indices):
@@ -716,6 +713,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
             # Store opening odds for reference and update opening-relative features
             if opening_odds is None and timestep_features is not None:
                 opening_odds = timestep_features.american_odds
+                opening_prob = timestep_features.implied_prob
                 # Create updated features with opening changes set to 0
                 timestep_features = SequenceFeatures(
                     american_odds=timestep_features.american_odds,
@@ -736,7 +734,6 @@ class SequenceFeatureExtractor(FeatureExtractor):
                 )
             elif opening_odds is not None and timestep_features is not None:
                 odds_change_from_opening = timestep_features.american_odds - opening_odds
-                opening_prob = calculate_implied_probability(int(opening_odds))
                 implied_prob_change_from_opening = timestep_features.implied_prob - opening_prob
                 # Create updated features with opening changes calculated
                 timestep_features = SequenceFeatures(
@@ -842,12 +839,12 @@ class SequenceFeatureExtractor(FeatureExtractor):
             return None
 
         # 1. Basic odds features (average across bookmakers)
-        prices = [o.price for o in target_odds]
+        prices = [o.american_price for o in target_odds]
         avg_price = calculate_avg_price(target_odds)
 
         feature_values["american_odds"] = avg_price
-        feature_values["decimal_odds"] = american_to_decimal(int(avg_price))
-        feature_values["implied_prob"] = calculate_implied_probability(int(avg_price))
+        feature_values["decimal_odds"] = float(np.mean([o.price_decimal for o in target_odds]))
+        feature_values["implied_prob"] = calculate_avg_probability(target_odds)
 
         # 2. Line movement features
         if prev_snapshot:
@@ -857,7 +854,7 @@ class SequenceFeatureExtractor(FeatureExtractor):
                 prev_avg_price = calculate_avg_price(prev_target_odds)
                 feature_values["odds_change_from_prev"] = avg_price - prev_avg_price
 
-                prev_prob = calculate_implied_probability(int(prev_avg_price))
+                prev_prob = calculate_avg_probability(prev_target_odds)
                 feature_values["implied_prob_change_from_prev"] = (
                     feature_values["implied_prob"] - prev_prob
                 )

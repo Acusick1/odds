@@ -12,7 +12,7 @@ status: stable
 
 # Betting simulation (Exp 7, 7b)
 
-Question: does the roughly 3.6% R² CLV signal survive the vig? Answer: no. The model finds direction (average CLV captured is positive at every threshold) but the vig consumes it. The simulation is NBA only; EPL has not been simulated. The numbers come from a standalone script (`experiments/scripts/exp7_backtest_simulation.py`) with its own settlement on raw vigged odds, not from the [backtest engine](backtest-engine.md), so they are not reproducible with `odds backtest`.
+Question: does the roughly 3.6% R² CLV signal survive the vig? Answer: no. The model finds direction (average CLV captured is positive at every threshold) but the vig consumes it. The simulation is NBA only; EPL has not been simulated. The numbers come from a standalone script (`experiments/scripts/exp7_backtest_simulation.py`) with its own settlement on raw vigged American quotes (`odds_core.models.Odds.american_price`, derived from the stored decimal price), not from the [backtest engine](backtest-engine.md), so they are not reproducible with `odds backtest`.
 
 ## Exp 7 (2026-03-01)
 

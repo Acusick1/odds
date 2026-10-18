@@ -226,7 +226,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             if not outcome_odds:
                 continue
 
-            best_odd = max(outcome_odds, key=lambda o: o.price)
+            best_odd = max(outcome_odds, key=lambda o: o.price_decimal)
 
             # Convert predicted movement to confidence for Kelly sizing
             # Higher predicted movement = higher confidence
@@ -239,7 +239,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
                     market=market,
                     outcome=outcome,
                     bookmaker=best_odd.bookmaker_key,
-                    odds=best_odd.price,
+                    odds=best_odd.american_price,
                     line=best_odd.point,
                     confidence=confidence,
                     rationale=f"Predicted movement: {predicted_movement:+.3f} "

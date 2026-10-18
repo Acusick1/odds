@@ -7,6 +7,7 @@ import pytest
 from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import SequenceFeatureExtractor, TabularFeatureExtractor
 from odds_core.models import Event, EventStatus, Odds
+from odds_core.odds_math import american_to_decimal
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.writers import OddsWriter
 
@@ -39,7 +40,7 @@ class TestFeatureExtractionIntegration:
                 bookmaker_title="Pinnacle",
                 market_key="h2h",
                 outcome_name=event.home_team,
-                price=-120,
+                price_decimal=american_to_decimal(-120),
                 point=None,
                 odds_timestamp=odds_time,
                 last_update=odds_time,
@@ -50,7 +51,7 @@ class TestFeatureExtractionIntegration:
                 bookmaker_title="Pinnacle",
                 market_key="h2h",
                 outcome_name=event.away_team,
-                price=+100,
+                price_decimal=american_to_decimal(+100),
                 point=None,
                 odds_timestamp=odds_time,
                 last_update=odds_time,
@@ -61,7 +62,7 @@ class TestFeatureExtractionIntegration:
                 bookmaker_title="FanDuel",
                 market_key="h2h",
                 outcome_name=event.home_team,
-                price=-115,
+                price_decimal=american_to_decimal(-115),
                 point=None,
                 odds_timestamp=odds_time,
                 last_update=odds_time,
@@ -72,7 +73,7 @@ class TestFeatureExtractionIntegration:
                 bookmaker_title="FanDuel",
                 market_key="h2h",
                 outcome_name=event.away_team,
-                price=-105,
+                price_decimal=american_to_decimal(-105),
                 point=None,
                 odds_timestamp=odds_time,
                 last_update=odds_time,
@@ -143,7 +144,7 @@ class TestFeatureExtractionIntegration:
                         bookmaker_title="Pinnacle",
                         market_key="h2h",
                         outcome_name=event.home_team,
-                        price=price,
+                        price_decimal=american_to_decimal(price),
                         point=None,
                         odds_timestamp=timestamp,
                         last_update=timestamp,
@@ -154,7 +155,7 @@ class TestFeatureExtractionIntegration:
                         bookmaker_title="Pinnacle",
                         market_key="h2h",
                         outcome_name=event.away_team,
-                        price=100,
+                        price_decimal=american_to_decimal(100),
                         point=None,
                         odds_timestamp=timestamp,
                         last_update=timestamp,
@@ -253,7 +254,7 @@ class TestFeatureExtractionIntegration:
                         bookmaker_title="FanDuel",
                         market_key="h2h",
                         outcome_name=event.home_team,
-                        price=-110,
+                        price_decimal=american_to_decimal(-110),
                         point=None,
                         odds_timestamp=timestamp,
                         last_update=timestamp,
@@ -264,7 +265,7 @@ class TestFeatureExtractionIntegration:
                         bookmaker_title="FanDuel",
                         market_key="h2h",
                         outcome_name=event.away_team,
-                        price=-110,
+                        price_decimal=american_to_decimal(-110),
                         point=None,
                         odds_timestamp=timestamp,
                         last_update=timestamp,
@@ -345,7 +346,9 @@ class TestFeatureExtractionIntegration:
                             bookmaker_title=bookmaker.title(),
                             market_key="h2h",
                             outcome_name=event.home_team,
-                            price=-120 if bookmaker == "pinnacle" else -115,
+                            price_decimal=american_to_decimal(
+                                -120 if bookmaker == "pinnacle" else -115
+                            ),
                             point=None,
                             odds_timestamp=timestamp,
                             last_update=timestamp,
@@ -356,7 +359,7 @@ class TestFeatureExtractionIntegration:
                             bookmaker_title=bookmaker.title(),
                             market_key="h2h",
                             outcome_name=event.away_team,
-                            price=100,
+                            price_decimal=american_to_decimal(100),
                             point=None,
                             odds_timestamp=timestamp,
                             last_update=timestamp,
@@ -439,7 +442,7 @@ class TestFeatureExtractionIntegration:
                 bookmaker_title="FanDuel",
                 market_key="h2h",
                 outcome_name=event.home_team,
-                price=-110,
+                price_decimal=american_to_decimal(-110),
                 point=None,
                 odds_timestamp=odds_time,
                 last_update=odds_time,

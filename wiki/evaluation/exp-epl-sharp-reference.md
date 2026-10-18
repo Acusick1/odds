@@ -13,7 +13,7 @@ status: stable
 
 # EPL sharp-reference experiments
 
-These runs are the evidence for [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md): PRs #217, #231, #253 and #234, plus `experiments/configs/xgboost_epl_hybrid_sharp.yaml` and `experiments/scripts/hybrid_sharp_validation.py`. The result tables below are as recorded in those PRs; no results artefact holds them (PR #253's MODELING.md entry points to `experiments/results/hybrid_sharp_validation/`, which was never committed).
+These runs are the evidence for [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md): PRs #217, #231, #253 and #234, plus `experiments/configs/xgboost_epl_hybrid_sharp.yaml` and `experiments/scripts/hybrid_sharp_validation.py`. In the tabular features, `sharp_prob` is the implied probability of the first sharp bookmaker that quotes the outcome (`odds_analytics.feature_extraction.TabularFeatureExtractor`). The result tables below are as recorded in those PRs; no results artefact holds them (PR #253's MODELING.md entry points to `experiments/results/hybrid_sharp_validation/`, which was never committed).
 
 ## Context
 

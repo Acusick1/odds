@@ -206,19 +206,16 @@ class TestBookToBookmakerEntry:
         outcome_names = [o["name"] for o in markets[0]["outcomes"]]
         assert sorted(outcome_names) == ["Crystal Palace", "Draw", "Liverpool"]
 
-    def test_epl_prices_are_american(self, epl_book: BetfairBook) -> None:
+    def test_epl_prices_are_best_back_decimals(self, epl_book: BetfairBook) -> None:
         cfg = SPORT_CONFIG["soccer_epl"]
         entry = betfair_book_to_bookmaker_entry(
             epl_book, cfg, home_team="Liverpool", away_team="Crystal Palace"
         )
         assert entry is not None
-        prices = {o["name"]: o["price"] for o in entry["markets"][0]["outcomes"]}
-        # 1.64 decimal -> -156 American (under 2.0 → negative line)
-        assert prices["Liverpool"] == pytest.approx(-156, abs=1)
-        # 5.7 decimal -> +470 American
-        assert prices["Crystal Palace"] == pytest.approx(470, abs=1)
-        # 4.5 decimal -> +350 American
-        assert prices["Draw"] == pytest.approx(350, abs=1)
+        outcomes = entry["markets"][0]["outcomes"]
+        assert all("price" not in o for o in outcomes)
+        prices = {o["name"]: o["price_decimal"] for o in outcomes}
+        assert prices == {"Liverpool": 1.64, "Crystal Palace": 5.7, "Draw": 4.5}
 
     def test_epl_betfair_meta_preserved(self, epl_book: BetfairBook) -> None:
         cfg = SPORT_CONFIG["soccer_epl"]

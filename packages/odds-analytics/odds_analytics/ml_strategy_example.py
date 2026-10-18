@@ -29,7 +29,6 @@ from typing import Any
 import numpy as np
 import structlog
 from odds_core.models import Odds
-from odds_core.odds_math import calculate_implied_probability
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backtesting import (
@@ -193,8 +192,8 @@ class XGBoostStrategy(BettingStrategy):
             if not outcome_odds:
                 continue
 
-            best_odd = max(outcome_odds, key=lambda o: o.price)
-            implied_prob = calculate_implied_probability(best_odd.price)
+            best_odd = max(outcome_odds, key=lambda o: o.price_decimal)
+            implied_prob = best_odd.implied_probability
 
             # Calculate edge (model prob - implied prob)
             edge = model_prob - implied_prob
@@ -207,7 +206,7 @@ class XGBoostStrategy(BettingStrategy):
                         market=market,
                         outcome=outcome,
                         bookmaker=best_odd.bookmaker_key,
-                        odds=best_odd.price,
+                        odds=best_odd.american_price,
                         line=best_odd.point,
                         confidence=model_prob,  # Model probability used for Kelly sizing
                         rationale=f"XGBoost edge: {edge:.2%} (Model: {model_prob:.2%}, "

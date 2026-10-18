@@ -16,7 +16,7 @@ status: stable
 
 # Early NBA signal search and LSTM
 
-All February 2026, NBA, Pinnacle target. Result: no signal at 193-230 events (and none for LSTM at about 1K), but two lasting findings: sharp-retail divergence is the best correlate, and `odds_analytics.feature_groups.TierSampler` had an `IN_PLAY` look-ahead bug. The bottleneck was data volume, not architecture or decision time.
+All February 2026, NBA, Pinnacle target. Result: no signal at 193-230 events (and none for LSTM at about 1K), but two lasting findings: sharp-retail divergence (retail minus sharp implied probability) is the best correlate, and `odds_analytics.feature_groups.TierSampler` had an `IN_PLAY` look-ahead bug. The bottleneck was data volume, not architecture or decision time.
 
 ## Early runs (193-230 events, devigged Pinnacle target)
 

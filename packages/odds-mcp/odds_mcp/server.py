@@ -19,7 +19,6 @@ from odds_core.bookmakers import NON_BETTABLE_BOOKMAKERS
 from odds_core.database import async_session_maker
 from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
-from odds_core.odds_math import calculate_implied_probability
 from odds_core.paper_trade_models import PaperTrade
 from odds_core.prediction_models import Prediction
 from odds_core.snapshot_utils import extract_odds_from_snapshot
@@ -110,7 +109,8 @@ def _odds_to_dict(odds: Odds) -> dict[str, Any]:
         "bookmaker_title": odds.bookmaker_title,
         "market_key": odds.market_key,
         "outcome_name": odds.outcome_name,
-        "price": odds.price,
+        "price": odds.american_price,
+        "price_decimal": odds.price_decimal,
         "point": odds.point,
         "last_update": odds.last_update.isoformat() if odds.last_update else None,
     }
@@ -1035,7 +1035,7 @@ async def find_retail_edges(
     if market in ("h2h", "1x2"):
         required_outcomes = {o.outcome_name for o in odds}
         book_hold = per_book_market_holds(
-            ((o.bookmaker_key, o.outcome_name, o.price) for o in odds),
+            ((o.bookmaker_key, o.outcome_name, o.price_decimal) for o in odds),
             required_outcomes=required_outcomes,
         )
 
@@ -1061,7 +1061,7 @@ async def find_retail_edges(
         for entry in sorted(outcome_entries, key=lambda e: e.odds.bookmaker_key):
             o = entry.odds
             bm_key = o.bookmaker_key
-            retail_prob = round(calculate_implied_probability(o.price), 6)
+            retail_prob = round(o.implied_probability, 6)
             divergence = round(retail_prob - sharp_prob, 6) if sharp_prob is not None else None
             market_hold = (
                 round(book_hold[bm_key], 6)
@@ -1071,7 +1071,8 @@ async def find_retail_edges(
             retail_rows.append(
                 {
                     "book": bm_key,
-                    "price": o.price,
+                    "price": o.american_price,
+                    "price_decimal": o.price_decimal,
                     "implied_prob": retail_prob,
                     "divergence": divergence,
                     # z_score filled in below once dispersion is known

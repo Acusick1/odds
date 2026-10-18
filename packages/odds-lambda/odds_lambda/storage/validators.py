@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import structlog
 from odds_core.bookmakers import ZERO_MARGIN_BOOKMAKERS
+from odds_core.odds_math import decimal_to_implied_probability, outcome_price_decimal
 from odds_core.time import parse_api_datetime
 
 logger = structlog.get_logger()
@@ -15,28 +16,13 @@ class OddsValidator:
     """Validator for odds data quality checks."""
 
     # Validation thresholds
-    MIN_ODDS = -10000
-    MAX_ODDS = 10000
+    MIN_DECIMAL_ODDS = 1.01
+    MAX_DECIMAL_ODDS = 101.0
     MIN_VIG_PERCENT = 2.0  # Minimum expected vig for non-exchange bookmakers
     MAX_VIG_PERCENT = 15.0  # Maximum reasonable vig/juice
     MAX_SPREAD_MOVEMENT = 10.0  # Maximum point spread change
     MAX_TOTAL_MOVEMENT = 20.0  # Maximum total points change
 
-    @staticmethod
-    def american_to_probability(odds: int) -> float:
-        """
-        Convert American odds to implied probability.
-
-        Args:
-            odds: American odds (e.g., -110, +150)
-
-        Returns:
-            Implied probability (0.0 to 1.0)
-        """
-        if odds > 0:
-            return 100 / (odds + 100)
-        else:
-            return abs(odds) / (abs(odds) + 100)
 
     @classmethod
     def validate_odds_snapshot(cls, data: dict, event_id: str) -> tuple[bool, list[str]]:
@@ -108,12 +94,17 @@ class OddsValidator:
 
                 # Validate each outcome
                 for outcome in outcomes:
-                    price = outcome.get("price")
-                    if price is not None:
-                        price_warnings = cls.validate_odds_value(
-                            price, bookmaker_key, market_key, outcome.get("name", "unknown")
+                    outcome_name = outcome.get("name", "unknown")
+                    try:
+                        price = outcome_price_decimal(outcome)
+                    except (KeyError, TypeError, ValueError):
+                        errors.append(
+                            f"{bookmaker_key} {market_key} {outcome_name}: Missing or invalid price"
                         )
-                        errors.extend(price_warnings)
+                        continue
+                    errors.extend(
+                        cls.validate_odds_value(price, bookmaker_key, market_key, outcome_name)
+                    )
 
                 # Validate vig for two-way markets (informational, not an error)
                 if market_key in ["h2h", "spreads", "totals"] and len(outcomes) == 2:
@@ -134,13 +125,13 @@ class OddsValidator:
 
     @classmethod
     def validate_odds_value(
-        cls, price: int, bookmaker: str, market: str, outcome: str
+        cls, price: float, bookmaker: str, market: str, outcome: str
     ) -> list[str]:
         """
-        Validate a single odds value.
+        Validate a single decimal odds value.
 
         Args:
-            price: American odds value
+            price: Decimal odds value
             bookmaker: Bookmaker key
             market: Market key
             outcome: Outcome name
@@ -148,22 +139,15 @@ class OddsValidator:
         Returns:
             List of warning messages
         """
-        warnings = []
-
-        # Check odds range
         if not isinstance(price, int | float):
-            warnings.append(f"{bookmaker} {market} {outcome}: Invalid price type {type(price)}")
-            return warnings
+            return [f"{bookmaker} {market} {outcome}: Invalid price type {type(price)}"]
 
-        price = int(price)
-
-        if price < cls.MIN_ODDS or price > cls.MAX_ODDS:
-            warnings.append(
+        if price < cls.MIN_DECIMAL_ODDS or price > cls.MAX_DECIMAL_ODDS:
+            return [
                 f"{bookmaker} {market} {outcome}: Odds {price} out of valid range "
-                f"({cls.MIN_ODDS} to {cls.MAX_ODDS})"
-            )
-
-        return warnings
+                f"({cls.MIN_DECIMAL_ODDS} to {cls.MAX_DECIMAL_ODDS})"
+            ]
+        return []
 
     @classmethod
     def validate_vig(cls, outcomes: list[dict], bookmaker: str, market: str) -> list[str]:
@@ -188,8 +172,8 @@ class OddsValidator:
             return warnings
 
         try:
-            prob1 = cls.american_to_probability(outcomes[0].get("price", 0))
-            prob2 = cls.american_to_probability(outcomes[1].get("price", 0))
+            prob1 = decimal_to_implied_probability(outcome_price_decimal(outcomes[0]))
+            prob2 = decimal_to_implied_probability(outcome_price_decimal(outcomes[1]))
 
             total_prob = prob1 + prob2
             vig_percent = (total_prob - 1.0) * 100
