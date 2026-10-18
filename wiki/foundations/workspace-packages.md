@@ -113,7 +113,7 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 |---|---|---|
 | Backtesting | `backtesting/` (`config.py`, `models.py`, `odds_analytics.backtesting.services`), `odds_analytics.strategies` | [Backtest engine](../evaluation/backtest-engine.md), [Backtest strategies](../evaluation/backtest-strategies.md) |
 | Features | `odds_analytics.feature_extraction`, `odds_analytics.feature_groups`, `odds_analytics.standings_features`, `odds_analytics.match_stats_features`, `odds_analytics.epl_schedule_features`, `odds_analytics.schedule_features`, `odds_analytics.injury_features`, `odds_analytics.polymarket_features` | [Feature pipeline](../modelling/feature-pipeline.md) |
-| Training | `training/` (`config.py`, `odds_analytics.training.data_preparation`, `odds_analytics.training.cross_validation`, `odds_analytics.training.tuner`, `odds_analytics.training.feature_selection`, `odds_analytics.training.tracking`) | [Training pipeline](../modelling/training-pipeline.md) |
+| Training | `training/` (`odds_analytics.training.config`, `odds_analytics.training.data_preparation`, `odds_analytics.training.cross_validation`, `odds_analytics.training.tuner` (Optuna wrapper), `odds_analytics.training.feature_selection`, `odds_analytics.training.tracking`) | [Training pipeline](../modelling/training-pipeline.md) |
 | Line-movement models | `odds_analytics.xgboost_line_movement`, `odds_analytics.lstm_line_movement`, `odds_analytics.sequence_loader` | [Line-movement strategies](../modelling/line-movement-models.md) |
 | Backfill | `odds_analytics.gap_backfill_planner`, `odds_analytics.game_selector`, `odds_analytics.backfill_executor` | [Odds API historical backfill](../collection/odds-api-backfill.md) |
 | Coverage reporting | `odds_analytics.quality_metrics` | [Coverage checks](../storage/coverage-checks.md) |
@@ -123,7 +123,7 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 
 - `odds_analytics.sequence_loader` is not LSTM-only: it holds the target maths for every model (`odds_analytics.sequence_loader.calculate_devigged_bookmaker_target`, `odds_analytics.sequence_loader.DeviggedProbs`), the label for every model ([Target functions](../modelling/clv-target-functions.md), [Devigging](devigging.md)).
 - `odds_analytics.quality_metrics` never touches `odds_core.models.DataQualityLog`; it counts game and odds coverage. Data-quality rows are a separate system ([Odds validation](../storage/odds-validator.md), [Coverage checks](../storage/coverage-checks.md)).
-- `odds_analytics.ml_strategy_example` (426 lines) is tested infrastructure for an XGBoost win-probability classifier, not the CLV regression the system uses ([Line-movement strategies](../modelling/line-movement-models.md)).
+- `odds_analytics.ml_strategy_example` (329 lines) is tested infrastructure for an XGBoost win-probability classifier, not the CLV regression the system uses ([Line-movement strategies](../modelling/line-movement-models.md)).
 - `odds_analytics.utils.per_book_market_holds` is the hold maths the MCP screener calls ([retail edges](../agent/mcp-market-tools.md#retail-edges)); it is the only reason `odds-mcp` imports analytics ([odds-mcp server](../agent/mcp-server.md)).
 
 ## Dependency exceptions

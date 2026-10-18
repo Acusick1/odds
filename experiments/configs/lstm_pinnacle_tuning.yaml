@@ -74,7 +74,6 @@ training:
 tuning:
   n_trials: 5
   timeout: null
-  direction: "minimize"
   metric: "val_mse"
   pruner: "median"
   sampler: "tpe"

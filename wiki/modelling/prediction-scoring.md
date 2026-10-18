@@ -14,20 +14,20 @@ status: stable
 
 # Prediction scoring
 
-`odds_lambda.jobs.score_predictions.score_events` scores snapshots of upcoming events with the published model ([model store](model-store.md)), handling multi-feature-group models, including the standings, match_stats and epl_schedule cache preload, via `odds_analytics.feature_groups.XGBoostAdapter` (PR #359), and writes `odds_core.prediction_models.Prediction` rows.
+`odds_lambda.jobs.score_predictions.score_events` scores snapshots of upcoming events with the published model ([model store](model-store.md)), handling multi-feature-group models, preloading the standings, match_stats and epl_schedule (fixtures) caches for the groups the config names, via `odds_analytics.feature_groups.XGBoostAdapter` (PR #359), and writes `odds_core.prediction_models.Prediction` rows.
 
 ## Where it runs
 
 It is not scheduled on its own: the [fetch-oddsportal job](../collection/fetch-oddsportal-job.md) calls it after ingest when `model_supports_sport(ctx.sport)`. `main(ctx)` is also registered as `score-predictions`, so `odds scheduler run-once score-predictions-epl` runs it by hand ([job registry](../scheduling/job-registry.md)).
 
 - The scraper image lacks `odds_analytics` and xgboost and `scraper.tf` sets no `MODEL_*`, so scoring runs only where a local scheduler runs `fetch-oddsportal` (#454; [local scheduler](../scheduling/local-scheduler.md), [AWS infrastructure](../operations/aws-infrastructure.md)).
-- Every failure inside `odds_lambda.jobs.score_predictions.score_events` returns normally and the call site in fetch-oddsportal swallows exceptions, so a broken model never alerts and never fails the scrape job (#454).
+- Every failure inside `odds_lambda.jobs.score_predictions.score_events` returns its stats dict normally (per-snapshot errors are only counted in `errors`) and the call site in fetch-oddsportal swallows exceptions, so a broken model never alerts and never fails the scrape job (#454).
 - `odds_lambda.model_loader` imports `odds_analytics` at module level (see [model store](model-store.md)).
 
 ## Flow
 
 1. `odds_lambda.model_loader.load_model` fetches the model. `ValueError` or `FileNotFoundError` returns zero stats with an error log.
-2. The bundled `odds_analytics.training.config.FeatureConfig` supplies `sport_key`. If the `sport` argument differs, the run aborts (`sport_mismatch`). Scoring uses the bundled config, so feature groups, sharp roster and the feature names must match what training produced.
+2. The bundled `odds_analytics.training.config.FeatureConfig` supplies `sport_key`. If the `sport` argument differs, the run aborts (`sport_mismatch`). Scoring uses the bundled config, so feature groups, sharp roster and the feature names must match what training produced; a bundled config naming an unknown feature group fails `odds_analytics.training.config.FeatureConfig` validation when the loader builds it.
 3. `odds_analytics.feature_groups.XGBoostAdapter.feature_names` on the config must equal the model's saved feature names, else `feature_name_mismatch` and abort, so the variance filter's dropped columns matter ([feature pipeline](feature-pipeline.md#nan-fill-and-variance-policy)).
 4. For each SCHEDULED future event of that sport: select snapshots with no prediction yet for this `model_name`, collect event data once, then per snapshot `adapter.transform`, `model.predict`, and insert.
 5. Insert is `INSERT ... ON CONFLICT DO NOTHING` on constraint `uq_prediction_event_snap_model`, so reruns are safe. `snapshots_skipped` counts snapshots the adapter returns `None` for.

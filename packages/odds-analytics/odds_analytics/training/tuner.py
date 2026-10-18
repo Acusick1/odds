@@ -75,6 +75,7 @@ logger = structlog.get_logger()
 __all__ = [
     "HyperparameterTuner",
     "OptunaTuner",
+    "apply_trial_params",
     "create_objective",
 ]
 
@@ -388,6 +389,7 @@ class OptunaTuner(HyperparameterTuner):
             tracking_enabled=bool(self._tracker),
         )
 
+        raised = False
         try:
             self.study.optimize(
                 objective,
@@ -396,11 +398,14 @@ class OptunaTuner(HyperparameterTuner):
                 show_progress_bar=True,
                 callbacks=callbacks if callbacks else None,
             )
+        except Exception:
+            raised = True
+            raise
         finally:
             # Log final results to parent run if tracking enabled
             if self._tracker:
-                run_status = "FINISHED"
-                if self.study.best_trial:
+                run_status = "FAILED" if raised else "FINISHED"
+                if any(t.state == optuna.trial.TrialState.COMPLETE for t in self.study.trials):
                     try:
                         # Log best trial results
                         self._tracker.log_params(
@@ -699,6 +704,26 @@ def suggest_params_from_search_space(
     return suggested_params
 
 
+def apply_trial_params(config: MLTrainingConfig, params: dict[str, Any]) -> None:
+    """Apply sampled or best parameters to ``config`` in place.
+
+    Model fields go to the model config and ``feature_groups`` to the features config;
+    ``top_k_features`` is not a config field and is skipped.
+    """
+    from odds_analytics.training.config import TOP_K_FEATURES_KEY
+
+    model_fields = type(config.training.model).model_fields
+    for name, value in params.items():
+        if name == TOP_K_FEATURES_KEY:
+            continue
+        if name == "feature_groups":
+            config.training.features.feature_groups = value
+        elif name in model_fields:
+            setattr(config.training.model, name, value)
+        else:
+            raise ValueError(f"Parameter '{name}' is not tunable")
+
+
 def create_objective(
     config: MLTrainingConfig,
     X_train: ndarray,
@@ -758,10 +783,10 @@ def create_objective(
     metric_name = config.tuning.metric
 
     # Determine which parameters are model vs feature parameters
-    from odds_analytics.training.config import FeatureConfig
+    from odds_analytics.training.config import TOP_K_FEATURES_KEY, FeatureConfig
 
     feature_param_names = set(FeatureConfig.model_fields.keys())
-    model_param_names = {name for name in search_spaces.keys() if name not in feature_param_names}
+    model_param_names = set(type(config.training.model).model_fields.keys())
 
     # Check if feature_groups is being tuned and we have pre-computed features
     tuning_feature_groups = "feature_groups" in search_spaces
@@ -773,7 +798,7 @@ def create_objective(
         )
 
     # Check if top_k_features is being tuned
-    tuning_top_k_features = "top_k_features" in search_spaces
+    tuning_top_k_features = TOP_K_FEATURES_KEY in search_spaces
 
     # Check if this is an LSTM strategy (feature selection not supported for 3D sequences)
     is_lstm_strategy = strategy_type == "lstm_line_movement"
@@ -794,7 +819,7 @@ def create_objective(
         strategy_type=strategy_type,
         metric=metric_name,
         search_space_size=len(search_spaces),
-        model_params=list(model_param_names),
+        model_params=sorted(model_param_names & search_spaces.keys()),
         feature_params=list(feature_param_names & search_spaces.keys()),
         tuning_feature_groups=tuning_feature_groups,
         tuning_top_k_features=tuning_top_k_features,
@@ -809,7 +834,7 @@ def create_objective(
             trial: Optuna trial object
 
         Returns:
-            Metric value to optimize (lower is better for minimize)
+            Metric value to optimize. Errors propagate and fail the trial.
         """
         # Suggest parameters from search spaces
         suggested_params = suggest_params_from_search_space(trial, search_spaces)
@@ -819,9 +844,9 @@ def create_objective(
         feature_params = {
             k: v
             for k, v in suggested_params.items()
-            if k in feature_param_names and k != "top_k_features"
+            if k in feature_param_names and k != TOP_K_FEATURES_KEY
         }
-        top_k = suggested_params.get("top_k_features")
+        top_k = suggested_params.get(TOP_K_FEATURES_KEY)
 
         logger.info(
             "trial_started",
@@ -834,15 +859,7 @@ def create_objective(
         # Create modified config with suggested parameters
         modified_config = config.model_copy(deep=True)
 
-        # Update model parameters
-        for param_name, param_value in model_params.items():
-            if hasattr(modified_config.training.model, param_name):
-                setattr(modified_config.training.model, param_name, param_value)
-
-        # Update feature parameters
-        for param_name, param_value in feature_params.items():
-            if hasattr(modified_config.training.features, param_name):
-                setattr(modified_config.training.features, param_name, param_value)
+        apply_trial_params(modified_config, suggested_params)
 
         # Select features: use pre-computed if available for feature_groups, otherwise default
         trial_X_train, trial_y_train = X_train, y_train
@@ -859,15 +876,16 @@ def create_objective(
                 data = precomputed_features[fg_key]
                 trial_X_train = data.X_train
                 trial_y_train = data.y_train
-                trial_X_val = data.X_val if data.num_val_samples > 0 else data.X_test
-                trial_y_val = data.y_val if data.num_val_samples > 0 else data.y_test
+                val_data = data.validation_data
+                trial_X_val = val_data.X if val_data else None
+                trial_y_val = val_data.y if val_data else None
                 trial_feature_names = data.feature_names
                 trial_static_train = data.static_train
-                trial_static_val = data.static_val if data.num_val_samples > 0 else data.static_test
+                trial_static_val = val_data.static if val_data else None
                 trial_event_ids = data.event_ids_train
                 trial_event_ids_val = data.event_ids_val
                 trial_masks_train = data.masks_train
-                trial_masks_val = data.masks_val if data.num_val_samples > 0 else data.masks_test
+                trial_masks_val = val_data.masks if val_data else None
                 logger.debug(
                     "using_precomputed_features",
                     trial_number=trial.number,
@@ -882,8 +900,8 @@ def create_objective(
             and config.training.feature_selection.enabled
             and not is_lstm_strategy
         ):
-            # Run feature selection once on first trial and store rankings
-            if trial.number == 0:
+            # Rank once per study: the first trial of a fresh study computes it
+            if "feature_ranking_names" not in trial.study.user_attrs:
                 from odds_analytics.training.feature_selection import get_feature_selector
 
                 logger.info(
@@ -935,11 +953,11 @@ def create_objective(
                 )
 
         # Import strategy classes
-        if strategy_type in ("xgboost", "xgboost_line_movement"):
+        if strategy_type == "xgboost_line_movement":
             from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 
             strategy = XGBoostLineMovementStrategy()
-        elif strategy_type in ("lstm", "lstm_line_movement"):
+        elif strategy_type == "lstm_line_movement":
             from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
 
             strategy = LSTMLineMovementStrategy()
@@ -950,166 +968,109 @@ def create_objective(
         use_cv = modified_config.training.data.use_kfold
 
         # Train with modified configuration
-        try:
-            if use_cv:
-                # Use cross-validation for tuning
-                from odds_analytics.training.cross_validation import run_cv
+        if use_cv:
+            # Use cross-validation for tuning
+            from odds_analytics.training.cross_validation import run_cv
 
-                # Combine train and validation sets for CV
-                if trial_X_val is not None and trial_y_val is not None:
-                    X_full = np.vstack([trial_X_train, trial_X_val])
-                    y_full = np.concatenate([trial_y_train, trial_y_val])
-                    static_full = (
-                        np.vstack([trial_static_train, trial_static_val])
-                        if trial_static_train is not None and trial_static_val is not None
-                        else trial_static_train
-                    )
-                    masks_full = (
-                        np.vstack([trial_masks_train, trial_masks_val])
-                        if trial_masks_train is not None and trial_masks_val is not None
-                        else trial_masks_train
-                    )
-                else:
-                    X_full = trial_X_train
-                    y_full = trial_y_train
-                    static_full = trial_static_train
-                    masks_full = trial_masks_train
-
-                # Recombine event_ids (train + val, chronological order preserved)
-                event_ids_full = None
-                if trial_event_ids is not None:
-                    if trial_event_ids_val is not None:
-                        event_ids_full = np.concatenate([trial_event_ids, trial_event_ids_val])
-                    else:
-                        event_ids_full = trial_event_ids
-
-                logger.debug(
-                    "using_cv_for_tuning",
-                    trial_number=trial.number,
-                    n_samples=len(X_full),
-                    cv_method=modified_config.training.data.cv_method,
+            # Combine train and validation sets for CV
+            if trial_X_val is not None and trial_y_val is not None:
+                X_full = np.vstack([trial_X_train, trial_X_val])
+                y_full = np.concatenate([trial_y_train, trial_y_val])
+                static_full = (
+                    np.vstack([trial_static_train, trial_static_val])
+                    if trial_static_train is not None and trial_static_val is not None
+                    else trial_static_train
                 )
-
-                # Run cross-validation
-                cv_result = run_cv(
-                    strategy=strategy,
-                    config=modified_config,
-                    X=X_full,
-                    y=y_full,
-                    feature_names=trial_feature_names,
-                    static_features=static_full,
-                    event_ids=event_ids_full,
-                    masks=masks_full,
-                )
-
-                # Log mean and std CV metrics if trial has set_user_attr (for MLflow logging)
-                if hasattr(trial, "set_user_attr"):
-                    trial.set_user_attr("mean_val_mse", cv_result.mean_val_mse)
-                    trial.set_user_attr("std_val_mse", cv_result.std_val_mse)
-                    trial.set_user_attr("mean_val_mae", cv_result.mean_val_mae)
-                    trial.set_user_attr("std_val_mae", cv_result.std_val_mae)
-                    trial.set_user_attr("mean_val_r2", cv_result.mean_val_r2)
-                    trial.set_user_attr("std_val_r2", cv_result.std_val_r2)
-
-                # Use mean CV metric as optimization target
-                if metric_name == "val_mse":
-                    metric_value = cv_result.mean_val_mse
-                elif metric_name == "val_mae":
-                    metric_value = cv_result.mean_val_mae
-                elif metric_name == "val_r2":
-                    metric_value = cv_result.mean_val_r2
-                elif metric_name.startswith("cv_"):
-                    # Direct CV metric access (e.g., cv_val_mse_mean)
-                    cv_dict = cv_result.to_dict()
-                    metric_value = cv_dict.get(metric_name)
-                    if metric_value is None:
-                        logger.warning(
-                            "cv_metric_not_found",
-                            trial_number=trial.number,
-                            metric=metric_name,
-                            available_metrics=list(cv_dict.keys()),
-                        )
-                        return (
-                            float("inf") if config.tuning.direction == "minimize" else float("-inf")
-                        )
-                else:
-                    logger.warning(
-                        "unsupported_cv_metric",
-                        trial_number=trial.number,
-                        metric=metric_name,
-                        message=f"Metric '{metric_name}' not directly available from CV. Using mean_val_mse as fallback.",
-                    )
-                    metric_value = cv_result.mean_val_mse
-
-                logger.info(
-                    "trial_completed_with_cv",
-                    trial_number=trial.number,
-                    metric=metric_name,
-                    value=metric_value,
-                    cv_std=cv_result.std_val_mse if metric_name == "val_mse" else None,
+                masks_full = (
+                    np.vstack([trial_masks_train, trial_masks_val])
+                    if trial_masks_train is not None and trial_masks_val is not None
+                    else trial_masks_train
                 )
             else:
-                # Use simple train/validation split (backward compatibility)
-                mask_kw: dict[str, Any] = {}
-                if trial_masks_train is not None:
-                    mask_kw["masks_train"] = trial_masks_train
-                    mask_kw["masks_val"] = trial_masks_val
+                X_full = trial_X_train
+                y_full = trial_y_train
+                static_full = trial_static_train
+                masks_full = trial_masks_train
 
-                history = strategy.train_from_config(
-                    config=modified_config,
-                    X_train=trial_X_train,
-                    y_train=trial_y_train,
-                    feature_names=trial_feature_names,
-                    X_val=trial_X_val,
-                    y_val=trial_y_val,
-                    trial=trial,  # Pass trial for pruning support
-                    static_train=trial_static_train,
-                    static_val=trial_static_val,
-                    **mask_kw,
+            # Recombine event_ids (train + val, chronological order preserved)
+            event_ids_full = None
+            if trial_event_ids is not None:
+                if trial_event_ids_val is not None:
+                    event_ids_full = np.concatenate([trial_event_ids, trial_event_ids_val])
+                else:
+                    event_ids_full = trial_event_ids
+
+            logger.debug(
+                "using_cv_for_tuning",
+                trial_number=trial.number,
+                n_samples=len(X_full),
+                cv_method=modified_config.training.data.cv_method,
+            )
+
+            # Run cross-validation
+            cv_result = run_cv(
+                strategy=strategy,
+                config=modified_config,
+                X=X_full,
+                y=y_full,
+                feature_names=trial_feature_names,
+                static_features=static_full,
+                event_ids=event_ids_full,
+                masks=masks_full,
+            )
+
+            # Log mean and std CV metrics if trial has set_user_attr (for MLflow logging)
+            if hasattr(trial, "set_user_attr"):
+                trial.set_user_attr("mean_val_mse", cv_result.mean_val_mse)
+                trial.set_user_attr("std_val_mse", cv_result.std_val_mse)
+                trial.set_user_attr("mean_val_mae", cv_result.mean_val_mae)
+                trial.set_user_attr("std_val_mae", cv_result.std_val_mae)
+                trial.set_user_attr("mean_val_r2", cv_result.mean_val_r2)
+                trial.set_user_attr("std_val_r2", cv_result.std_val_r2)
+
+            metric_value = getattr(cv_result, f"mean_{metric_name}")
+
+            logger.info(
+                "trial_completed_with_cv",
+                trial_number=trial.number,
+                metric=metric_name,
+                value=metric_value,
+                cv_std=cv_result.std_val_mse if metric_name == "val_mse" else None,
+            )
+        else:
+            # Use simple train/validation split (backward compatibility)
+            mask_kw: dict[str, Any] = {}
+            if trial_masks_train is not None:
+                mask_kw["masks_train"] = trial_masks_train
+                mask_kw["masks_val"] = trial_masks_val
+
+            history = strategy.train_from_config(
+                config=modified_config,
+                X_train=trial_X_train,
+                y_train=trial_y_train,
+                feature_names=trial_feature_names,
+                X_val=trial_X_val,
+                y_val=trial_y_val,
+                trial=trial,  # Pass trial for pruning support
+                static_train=trial_static_train,
+                static_val=trial_static_val,
+                **mask_kw,
+            )
+
+            # Extract metric value
+            metric_value = history.get(metric_name)
+            if metric_value is None:
+                raise KeyError(
+                    f"Metric '{metric_name}' missing from training history "
+                    f"(available: {sorted(history)}); a non-CV trial needs a validation set"
                 )
 
-                # Extract metric value
-                metric_value = history.get(metric_name)
-                if metric_value is None:
-                    logger.warning(
-                        "metric_not_found",
-                        trial_number=trial.number,
-                        metric=metric_name,
-                        available_metrics=list(history.keys()),
-                    )
-                    return float("inf") if config.tuning.direction == "minimize" else float("-inf")
-
-                logger.info(
-                    "trial_completed",
-                    trial_number=trial.number,
-                    metric=metric_name,
-                    value=metric_value,
-                )
-
-        except ImportError:
-            # Re-raise TrialPruned exception to let Optuna handle it
-            import optuna
-
-            if hasattr(optuna, "TrialPruned"):
-                raise
-            # If it's a different ImportError, treat as failure
-            logger.error(
-                "trial_failed",
+            logger.info(
+                "trial_completed",
                 trial_number=trial.number,
-                error="Import error during training",
+                metric=metric_name,
+                value=metric_value,
             )
-            return float("inf") if config.tuning.direction == "minimize" else float("-inf")
-        except Exception as e:
-            # Check if it's a TrialPruned exception (might not be ImportError)
-            if e.__class__.__name__ == "TrialPruned":
-                raise  # Re-raise for Optuna to handle
-            logger.error(
-                "trial_failed",
-                trial_number=trial.number,
-                error=str(e),
-            )
-            # Return worst possible value for failed trials
-            return float("inf") if config.tuning.direction == "minimize" else float("-inf")
 
         return float(metric_value)
 

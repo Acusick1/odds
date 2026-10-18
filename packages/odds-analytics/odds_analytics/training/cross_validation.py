@@ -370,21 +370,15 @@ def run_cv(
     random_seed = data_config.random_seed
     resolved_n_folds = data_config.n_folds
 
-    # Fallback: event-grouped methods require event_ids.
-    # Default to 5 folds for the timeseries fallback when n_folds not configured.
     if cv_method == "walk_forward" and event_ids is None:
-        if resolved_n_folds is None:
-            resolved_n_folds = 5
-        logger.warning(
-            "walk_forward_missing_event_ids",
-            message="cv_method='walk_forward' but event_ids not provided. "
-            f"Falling back to standard timeseries CV with n_folds={resolved_n_folds}.",
+        raise ValueError(
+            "cv_method='walk_forward' requires event_ids; the data was prepared "
+            "without event-level grouping"
         )
-        cv_method = "timeseries"
 
     # Select cross-validation splitter based on method
     if cv_method == "walk_forward":
-        assert event_ids is not None  # guarded by fallback above
+        assert event_ids is not None  # guarded above
         assert data_config.min_train_events is not None  # guaranteed by validate_walk_forward
         assert data_config.val_step_events is not None
         wf_splits = make_walk_forward_splits(
@@ -540,7 +534,12 @@ def train_with_cv(
     masks: np.ndarray | None = None,
     masks_test: np.ndarray | None = None,
 ) -> tuple[dict[str, Any], CVResult]:
-    """Run CV, train final model on all data, merge CV metrics into history."""
+    """Run CV, train final model on all data, merge CV metrics into history.
+
+    The final model is fitted on every row of ``X``. ``X_test`` is optional; without it
+    the final model is fitted without a validation set and its history has no ``val_*``
+    metrics beyond the merged CV means.
+    """
     logger.info(
         "starting_train_with_cv",
         experiment_name=config.experiment.name,

@@ -40,3 +40,57 @@ def encrypt_payload() -> Callable[..., str]:
         return base64.b64encode(outer.encode("latin1")).decode()
 
     return encrypt
+
+
+@pytest.fixture
+def make_ml_config() -> Callable[..., Any]:
+    """Factory for a small MLTrainingConfig with a tuning section."""
+    from datetime import date
+
+    from odds_analytics.training import (
+        DataConfig,
+        ExperimentConfig,
+        FeatureConfig,
+        MLTrainingConfig,
+        TrainingConfig,
+        XGBoostConfig,
+    )
+    from odds_analytics.training.config import SearchSpace, TuningConfig
+
+    def _make(
+        *,
+        search_spaces: dict[str, SearchSpace] | None = None,
+        metric: str = "val_mse",
+        use_kfold: bool = False,
+        cv_method: str = "timeseries",
+        test_split: float = 0.2,
+        strategy_type: str = "xgboost_line_movement",
+        tuning: bool = True,
+    ) -> MLTrainingConfig:
+        data_kwargs: dict[str, Any] = {}
+        if cv_method == "walk_forward":
+            data_kwargs.update(min_train_events=4, val_step_events=2)
+        elif use_kfold:
+            data_kwargs.update(n_folds=3)
+        return MLTrainingConfig(
+            experiment=ExperimentConfig(name="t"),
+            training=TrainingConfig(
+                strategy_type=strategy_type,
+                data=DataConfig(
+                    start_date=date(2024, 1, 1),
+                    end_date=date(2024, 12, 31),
+                    use_kfold=use_kfold,
+                    cv_method=cv_method,
+                    test_split=test_split,
+                    validation_split=0.0 if use_kfold or not tuning else 0.1,
+                    **data_kwargs,
+                ),
+                model=XGBoostConfig(n_estimators=10),
+                features=FeatureConfig(target_type="raw"),
+            ),
+            tuning=(
+                TuningConfig(metric=metric, search_spaces=search_spaces or {}) if tuning else None
+            ),
+        )
+
+    return _make

@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import typer
+import yaml
 from odds_analytics.training.config import (
     DataConfig,
     ExperimentConfig,
@@ -69,7 +70,6 @@ def sample_config_with_tuning(tmp_path):
         ),
         tuning=TuningConfig(
             n_trials=5,
-            direction="minimize",
             metric="val_mse",
             search_spaces={
                 "n_estimators": SearchSpace(type="int", low=50, high=500, step=50),
@@ -281,7 +281,6 @@ def test_display_tuning_summary():
         ),
         tuning=TuningConfig(
             n_trials=100,
-            direction="minimize",
             metric="val_mse",
             search_spaces={
                 "n_estimators": SearchSpace(type="int", low=50, high=500),
@@ -389,6 +388,7 @@ async def test_run_tuning_async_with_train_best(sample_config_with_tuning, tmp_p
     from odds_cli.commands.train import _run_tuning_async, load_config
 
     config = load_config(str(sample_config_with_tuning))
+    config.training.output_path = str(tmp_path / "models")
     study_name = "test_study"
     storage_url = None
     output_path = str(tmp_path / "best_config.yaml")
@@ -461,6 +461,9 @@ async def test_run_tuning_async_with_train_best(sample_config_with_tuning, tmp_p
             # Verify training was called
             assert mock_strategy.train_from_config.called
             assert mock_strategy.save_model.called
+            saved_configs = list((tmp_path / "models").glob("*.yaml"))
+            assert len(saved_configs) == 1
+            assert "features" in yaml.safe_load(saved_configs[0].read_text())["training"]
         finally:
             # Restore original strategy
             STRATEGY_CLASSES["xgboost_line_movement"] = original_strategy
@@ -538,3 +541,116 @@ async def test_run_tuning_async_optimization_error(sample_config_with_tuning, tm
             await _run_tuning_async(
                 config, "test_study", None, str(sample_config_with_tuning), None, False
             )
+
+
+# =============================================================================
+# Test Study Storage (#437)
+# =============================================================================
+
+
+class TestStudyStorage:
+    """The default study store is a local SQLite file, never DATABASE_URL."""
+
+    def test_default_is_local_sqlite_file(self, tmp_path, monkeypatch):
+        from odds_cli.commands.train import _resolve_study_storage
+
+        monkeypatch.chdir(tmp_path)
+        assert _resolve_study_storage(None, False) == "sqlite:///experiments/optuna.db"
+        assert (tmp_path / "experiments").is_dir()
+
+    def test_default_ignores_database_url(self, tmp_path, monkeypatch):
+        from odds_cli.commands.train import _resolve_study_storage
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@prod-host/odds")
+        with patch("odds_core.config.get_settings") as mock_settings:
+            storage = _resolve_study_storage(None, False)
+        assert storage is not None and storage.startswith("sqlite:///")
+        assert "prod-host" not in storage
+        mock_settings.assert_not_called()
+
+    def test_default_path_is_gitignored(self):
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", "experiments/optuna.db"],
+            cwd=Path(__file__).resolve().parents[2],
+        )
+        assert result.returncode == 0
+
+    def test_in_memory_is_explicit(self):
+        from odds_cli.commands.train import _resolve_study_storage
+
+        assert _resolve_study_storage(None, True) is None
+
+    def test_in_memory_conflicts_with_storage(self):
+        from odds_cli.commands.train import _resolve_study_storage
+
+        with pytest.raises(typer.BadParameter):
+            _resolve_study_storage("sqlite:///s.db", True)
+
+    def test_explicit_storage_wins(self):
+        from odds_cli.commands.train import _resolve_study_storage
+
+        assert _resolve_study_storage("sqlite:///s.db", False) == "sqlite:///s.db"
+
+
+class TestStrategyRegistry:
+    def test_accepted_strategy_types_are_exactly_the_implemented_strategies(self):
+        from typing import get_args
+
+        from odds_analytics.training.config import StrategyType
+        from odds_cli.commands.train import STRATEGY_CLASSES
+
+        assert set(get_args(StrategyType)) == set(STRATEGY_CLASSES)
+
+
+class TestTrainBest:
+    def test_top_k_features_search_space_is_rejected(self, cli_runner, tmp_path, make_ml_config):
+        from odds_cli.commands.train import app
+
+        config = make_ml_config(
+            search_spaces={"top_k_features": SearchSpace(type="int", low=2, high=5)}
+        )
+        path = tmp_path / "c.yaml"
+        config.to_yaml(path)
+
+        with patch("odds_cli.commands.train.asyncio.run") as mock_run:
+            result = cli_runner.invoke(app, ["tune", "--config", str(path), "--train-best"])
+
+        assert result.exit_code == 1
+        assert "top_k_features" in strip_ansi(result.output)
+        mock_run.assert_not_called()
+
+    def test_saved_yaml_is_readable_by_the_model_loader(self, tmp_path, make_ml_config):
+        import shutil
+        from unittest.mock import Mock
+
+        from odds_cli.commands.train import _save_model_with_config
+        from odds_lambda.model_loader import _load_feature_config
+
+        config = make_ml_config()
+        config.training.features.sharp_bookmakers = ["pinnacle", "betfair_exchange"]
+        strategy = Mock()
+        strategy.save_model.side_effect = lambda path: Path(path).write_bytes(b"model")
+        model_path = tmp_path / "model.pkl"
+
+        _save_model_with_config(strategy, config, str(model_path))
+
+        s3 = Mock()
+        s3.download_file.side_effect = lambda bucket, key, dest: shutil.copy(
+            model_path.with_suffix(".yaml"), dest
+        )
+        feature_config = _load_feature_config(s3, "bucket", "model")
+        assert feature_config is not None
+        assert feature_config.sharp_bookmakers == ["pinnacle", "betfair_exchange"]
+
+    def test_config_write_failure_fails_the_command(self, tmp_path):
+        from unittest.mock import Mock
+
+        from odds_cli.commands.train import _save_model_with_config
+
+        config = Mock()
+        config.to_yaml.side_effect = OSError("disk full")
+        with pytest.raises(typer.Exit):
+            _save_model_with_config(Mock(), config, str(tmp_path / "m.pkl"))

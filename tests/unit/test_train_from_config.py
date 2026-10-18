@@ -4,7 +4,6 @@ from datetime import date
 
 import numpy as np
 import pytest
-from odds_analytics.ml_strategy_example import XGBoostStrategy
 from odds_analytics.training.config import (
     DataConfig,
     ExperimentConfig,
@@ -13,7 +12,6 @@ from odds_analytics.training.config import (
     MLTrainingConfig,
     SearchSpace,
     TrainingConfig,
-    TuningConfig,
     XGBoostConfig,
     resolve_search_spaces,
 )
@@ -31,7 +29,7 @@ def sample_xgboost_config():
         ),
         training=TrainingConfig(
             features=FeatureConfig(target_type="raw"),
-            strategy_type="xgboost",
+            strategy_type="xgboost_line_movement",
             data=DataConfig(
                 start_date=date(2024, 10, 1),
                 end_date=date(2024, 12, 31),
@@ -85,7 +83,7 @@ def sample_lstm_config():
             description="Test LSTM configuration",
         ),
         training=TrainingConfig(
-            strategy_type="lstm",
+            strategy_type="lstm_line_movement",
             data=DataConfig(
                 start_date=date(2024, 10, 1),
                 end_date=date(2024, 12, 31),
@@ -106,42 +104,6 @@ def sample_lstm_config():
 
 
 @pytest.fixture
-def sample_config_with_search_spaces():
-    """Create a configuration with search spaces for testing resolution."""
-    return MLTrainingConfig(
-        experiment=ExperimentConfig(
-            name="test_with_search_spaces",
-            tags=["test", "tuning"],
-        ),
-        training=TrainingConfig(
-            features=FeatureConfig(target_type="raw"),
-            strategy_type="xgboost",
-            data=DataConfig(
-                start_date=date(2024, 10, 1),
-                end_date=date(2024, 12, 31),
-            ),
-            model=XGBoostConfig(
-                n_estimators=100,  # Will be overridden by search space
-                max_depth=6,  # Will be overridden by search space
-                learning_rate=0.1,  # Will be overridden by search space
-            ),
-        ),
-        tuning=TuningConfig(
-            n_trials=100,
-            search_spaces={
-                "n_estimators": SearchSpace(type="int", low=50, high=150),
-                "max_depth": SearchSpace(type="int", low=2, high=10),
-                "learning_rate": SearchSpace(type="float", low=0.01, high=0.3, log=True),
-                "objective": SearchSpace(
-                    type="categorical",
-                    choices=["reg:squarederror", "reg:absoluteerror"],
-                ),
-            },
-        ),
-    )
-
-
-@pytest.fixture
 def training_data():
     """Create simple training data for tests."""
     np.random.seed(42)
@@ -151,86 +113,8 @@ def training_data():
     return X_train, y_train, feature_names
 
 
-class TestXGBoostStrategyTrainFromConfig:
-    """Test XGBoostStrategy.train_from_config() method."""
-
-    @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"),
-        reason="requires xgboost",
-    )
-    def test_train_from_config_extracts_hyperparameters(self, sample_xgboost_config, training_data):
-        """Test that hyperparameters are correctly extracted from config."""
-        X_train, y_train, feature_names = training_data
-        strategy = XGBoostStrategy()
-
-        strategy.train_from_config(sample_xgboost_config, X_train, y_train, feature_names)
-
-        assert strategy.model is not None
-        # Verify model was trained with config parameters
-        assert strategy.model.n_estimators == 50
-        assert strategy.model.max_depth == 4
-        assert strategy.model.learning_rate == 0.05
-
-    @pytest.mark.skipif(
-        not pytest.importorskip("xgboost", reason="xgboost not installed"),
-        reason="requires xgboost",
-    )
-    def test_train_from_config_with_search_spaces(
-        self, sample_config_with_search_spaces, training_data
-    ):
-        """Test that search spaces are resolved to midpoint values."""
-        X_train, y_train, feature_names = training_data
-        strategy = XGBoostStrategy()
-
-        strategy.train_from_config(
-            sample_config_with_search_spaces, X_train, y_train, feature_names
-        )
-
-        # Check that search spaces were resolved to midpoints
-        # n_estimators: (50 + 150) / 2 = 100
-        assert strategy.model.n_estimators == 100
-        # max_depth: (2 + 10) / 2 = 6
-        assert strategy.model.max_depth == 6
-        # learning_rate: geometric mean of 0.01 and 0.3 (log scale)
-        # = exp((ln(0.01) + ln(0.3)) / 2) ≈ 0.0548
-        assert 0.05 < strategy.model.learning_rate < 0.06
-
-    def test_train_from_config_invalid_strategy_type(self, training_data):
-        """Test that invalid strategy type raises ValueError."""
-        X_train, y_train, feature_names = training_data
-        strategy = XGBoostStrategy()
-
-        invalid_config = MLTrainingConfig(
-            experiment=ExperimentConfig(name="invalid"),
-            training=TrainingConfig(
-                strategy_type="lstm",  # Wrong type for XGBoostStrategy
-                data=DataConfig(
-                    start_date=date(2024, 10, 1),
-                    end_date=date(2024, 12, 31),
-                ),
-                model=LSTMConfig(),  # Wrong config type
-                features=FeatureConfig(target_type="raw", adapter="lstm"),
-            ),
-        )
-
-        with pytest.raises(ValueError, match="Invalid strategy_type"):
-            strategy.train_from_config(invalid_config, X_train, y_train, feature_names)
-
-    def test_train_from_config_wrong_model_type(self, training_data):
-        """Test that wrong model config type raises TypeError."""
-        X_train, y_train, feature_names = training_data
-        strategy = XGBoostStrategy()
-
-        # Manually construct an invalid config (normally prevented by validation)
-        from unittest.mock import MagicMock
-
-        invalid_config = MagicMock()
-        invalid_config.training.strategy_type = "xgboost"
-        invalid_config.training.model = "not_a_model_config"
-        invalid_config.tuning = None
-
-        with pytest.raises(TypeError, match="Expected XGBoostConfig"):
-            strategy.train_from_config(invalid_config, X_train, y_train, feature_names)
+class TestResolveSearchSpaces:
+    """Test resolve_search_spaces()."""
 
     def test_resolve_search_spaces_int(self):
         """Test search space resolution for integer parameters."""
@@ -363,12 +247,11 @@ class TestXGBoostLineMovementStrategyTrainFromConfig:
         X_train, y_train, feature_names = training_data
         strategy = XGBoostLineMovementStrategy()
 
-        # Use xgboost instead of xgboost_line_movement
         invalid_config = MLTrainingConfig(
             experiment=ExperimentConfig(name="invalid"),
             training=TrainingConfig(
                 features=FeatureConfig(target_type="raw"),
-                strategy_type="xgboost",  # Should be xgboost_line_movement
+                strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 10, 1),
                     end_date=date(2024, 12, 31),
@@ -376,6 +259,7 @@ class TestXGBoostLineMovementStrategyTrainFromConfig:
                 model=XGBoostConfig(),
             ),
         )
+        invalid_config.training.strategy_type = "lstm_line_movement"
 
         with pytest.raises(ValueError, match="Invalid strategy_type"):
             strategy.train_from_config(invalid_config, X_train, y_train, feature_names)
@@ -412,29 +296,6 @@ class TestXGBoostLineMovementStrategyTrainFromConfig:
 
 class TestConfigValidation:
     """Test configuration validation in train_from_config methods."""
-
-    def test_xgboost_rejects_xgboost_line_movement_type(self, training_data):
-        """Test that XGBoostStrategy rejects xgboost_line_movement strategy type."""
-        X_train, y_train, feature_names = training_data
-        strategy = XGBoostStrategy()
-
-        # XGBoostStrategy should only accept "xgboost", not "xgboost_line_movement"
-        config = MLTrainingConfig(
-            experiment=ExperimentConfig(name="test"),
-            training=TrainingConfig(
-                features=FeatureConfig(target_type="raw"),
-                strategy_type="xgboost_line_movement",
-                data=DataConfig(
-                    start_date=date(2024, 10, 1),
-                    end_date=date(2024, 12, 31),
-                ),
-                model=XGBoostConfig(n_estimators=10),
-            ),
-        )
-
-        # Should raise ValueError
-        with pytest.raises(ValueError, match="Invalid strategy_type"):
-            strategy.train_from_config(config, X_train, y_train, feature_names)
 
     def test_config_extracts_all_xgboost_params(self, sample_xgboost_config):
         """Test that all XGBoost parameters are extracted from config."""

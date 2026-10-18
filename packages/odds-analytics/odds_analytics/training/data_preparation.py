@@ -34,6 +34,7 @@ Example usage:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -196,6 +197,16 @@ def save_verification_artifacts(
     )
 
 
+@dataclass(frozen=True)
+class EvalData:
+    """Validation rows a final model or a non-CV tuning trial is scored on."""
+
+    X: np.ndarray
+    y: np.ndarray
+    static: np.ndarray | None
+    masks: np.ndarray | None
+
+
 class TrainingDataResult:
     """
     Container for training data preparation results.
@@ -205,10 +216,10 @@ class TrainingDataResult:
     Attributes:
         X_train: Training features
         X_val: Validation features (optional, None if no validation split)
-        X_test: Test features
+        X_test: Test features (None when test_split is 0)
         y_train: Training targets
         y_val: Validation targets (optional, None if no validation split)
-        y_test: Test targets
+        y_test: Test targets (None when test_split is 0)
         feature_names: List of feature names
         masks_train: Training masks (LSTM only, None for XGBoost)
         masks_val: Validation masks (LSTM only, None for XGBoost)
@@ -222,9 +233,9 @@ class TrainingDataResult:
     def __init__(
         self,
         X_train: np.ndarray,
-        X_test: np.ndarray,
+        X_test: np.ndarray | None,
         y_train: np.ndarray,
-        y_test: np.ndarray,
+        y_test: np.ndarray | None,
         feature_names: list[str],
         strategy_type: str,
         masks_train: np.ndarray | None = None,
@@ -273,20 +284,25 @@ class TrainingDataResult:
     @property
     def num_test_samples(self) -> int:
         """Number of test samples."""
-        return len(self.X_test)
+        return len(self.X_test) if self.X_test is not None else 0
 
     @property
     def num_features(self) -> int:
         """Number of features."""
         return len(self.feature_names)
 
+    @property
+    def validation_data(self) -> EvalData | None:
+        """Validation rows, or None without a validation split. Never the test rows."""
+        if self.X_val is None or self.y_val is None or len(self.X_val) == 0:
+            return None
+        return EvalData(self.X_val, self.y_val, self.static_val, self.masks_val)
+
     def to_dict(self) -> dict:
         """Convert to dictionary format for backward compatibility."""
         result = {
             "X_train": self.X_train,
-            "X_test": self.X_test,
             "y_train": self.y_train,
-            "y_test": self.y_test,
             "feature_names": self.feature_names,
             "strategy_type": self.strategy_type,
             "num_train_samples": self.num_train_samples,
@@ -294,6 +310,10 @@ class TrainingDataResult:
             "num_test_samples": self.num_test_samples,
             "num_features": self.num_features,
         }
+        if self.X_test is not None:
+            result["X_test"] = self.X_test
+        if self.y_test is not None:
+            result["y_test"] = self.y_test
         if self.X_val is not None:
             result["X_val"] = self.X_val
         if self.y_val is not None:
@@ -468,8 +488,15 @@ async def prepare_training_data_from_config(
     # Split: event-level for multi-horizon, row-level for raw
     event_ids_train = None
     event_ids_test = None
+    X_test: np.ndarray | None = None
+    y_test: np.ndarray | None = None
+    masks_test: np.ndarray | None = None
+    static_test: np.ndarray | None = None
 
-    if event_ids is not None:
+    if data_config.test_split == 0:
+        X_trainval, y_trainval, masks_trainval, static_trainval = X, y, masks, static
+        event_ids_train = event_ids
+    elif event_ids is not None:
         # Event-level split: sort by event commence time, split at event boundary
         unique_events = list(dict.fromkeys(event_ids))  # preserve order
         n_test_events = max(1, int(len(unique_events) * data_config.test_split))
@@ -558,7 +585,7 @@ async def prepare_training_data_from_config(
         total_samples=len(X),
         train_samples=len(X_train),
         val_samples=len(X_val) if X_val is not None else 0,
-        test_samples=len(X_test),
+        test_samples=len(X_test) if X_test is not None else 0,
         num_features=len(feature_names),
         num_static_features=static.shape[1] if static is not None else 0,
         test_split=data_config.test_split,

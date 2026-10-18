@@ -938,6 +938,19 @@ class SearchSpace(BaseModel):
 # =============================================================================
 
 
+# Tuned through feature selection (ranked once, then top k kept), not a config field.
+TOP_K_FEATURES_KEY = "top_k_features"
+
+# Feature-config keys a search space may name: the groups are pre-computed per choice.
+TUNABLE_FEATURE_KEYS = frozenset({"feature_groups", TOP_K_FEATURES_KEY})
+
+METRIC_DIRECTIONS: dict[str, Literal["minimize", "maximize"]] = {
+    "val_mse": "minimize",
+    "val_mae": "minimize",
+    "val_r2": "maximize",
+}
+
+
 class TuningConfig(BaseModel):
     """
     Hyperparameter tuning configuration for Optuna.
@@ -958,13 +971,9 @@ class TuningConfig(BaseModel):
         gt=0,
         description="Maximum optimization time in seconds",
     )
-    direction: Literal["minimize", "maximize"] = Field(
-        default="minimize",
-        description="Optimization direction for the objective",
-    )
-    metric: str = Field(
+    metric: Literal["val_mse", "val_mae", "val_r2"] = Field(
         default="val_mse",
-        description="Metric to optimize (e.g., val_mse, val_mae, val_r2)",
+        description="Mean cross-validation metric to optimize",
     )
     pruner: Literal["median", "hyperband", "none"] = Field(
         default="median",
@@ -980,6 +989,11 @@ class TuningConfig(BaseModel):
         default_factory=dict,
         description="Search space definitions for each tunable parameter",
     )
+
+    @property
+    def direction(self) -> Literal["minimize", "maximize"]:
+        """Optimization direction implied by the metric."""
+        return METRIC_DIRECTIONS[self.metric]
 
 
 # =============================================================================
@@ -1040,6 +1054,9 @@ class TrackingConfig(BaseModel):
 # =============================================================================
 
 
+StrategyType = Literal["xgboost_line_movement", "lstm_line_movement"]
+
+
 class TrainingConfig(BaseModel):
     """
     Main training configuration with model-specific settings.
@@ -1050,11 +1067,9 @@ class TrainingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    strategy_type: Literal["xgboost", "xgboost_line_movement", "lstm", "lstm_line_movement"] = (
-        Field(
-            ...,
-            description="Type of ML strategy to train",
-        )
+    strategy_type: StrategyType = Field(
+        ...,
+        description="Type of ML strategy to train",
     )
 
     # Data configuration
@@ -1112,13 +1127,13 @@ class TrainingConfig(BaseModel):
     @model_validator(mode="after")
     def validate_model_type(self) -> TrainingConfig:
         """Ensure model config matches strategy type."""
-        if self.strategy_type in ("xgboost", "xgboost_line_movement"):
+        if self.strategy_type == "xgboost_line_movement":
             if not isinstance(self.model, XGBoostConfig):
                 raise ValueError(
                     f"Strategy '{self.strategy_type}' requires XGBoostConfig, "
                     f"got {type(self.model).__name__}"
                 )
-        elif self.strategy_type in ("lstm", "lstm_line_movement"):
+        elif self.strategy_type == "lstm_line_movement":
             if not isinstance(self.model, LSTMConfig):
                 raise ValueError(
                     f"Strategy '{self.strategy_type}' requires LSTMConfig, "
@@ -1213,7 +1228,6 @@ class MLTrainingConfig(BaseModel):
 
         tuning:
           n_trials: 100
-          direction: "minimize"
           metric: "val_mse"
           search_spaces:
             n_estimators:
@@ -1259,6 +1273,37 @@ class MLTrainingConfig(BaseModel):
         base = self.training.features.model_dump()
         for choice in self.tuning.search_spaces["feature_groups"].choices or []:
             FeatureConfig.model_validate({**base, "feature_groups": choice})
+        return self
+
+    @model_validator(mode="after")
+    def validate_search_space_keys(self) -> MLTrainingConfig:
+        """Allow only model fields, ``feature_groups`` and ``top_k_features`` in the search space.
+
+        Data is prepared once per feature-group choice, so any other feature field
+        would change nothing a trial measures.
+        """
+        if self.tuning is None:
+            return self
+        model_fields = set(type(self.training.model).model_fields)
+        allowed = (model_fields - set(FeatureConfig.model_fields)) | TUNABLE_FEATURE_KEYS
+        unknown = sorted(set(self.tuning.search_spaces) - allowed)
+        if unknown:
+            raise ValueError(
+                f"tuning.search_spaces keys {unknown} are not tunable: allowed are the "
+                f"{type(self.training.model).__name__} fields not shared with FeatureConfig, "
+                f"and {sorted(TUNABLE_FEATURE_KEYS)}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_tuning_has_validation_data(self) -> MLTrainingConfig:
+        """A non-CV tuning trial is scored on validation rows, so it needs a split."""
+        data = self.training.data
+        if self.tuning is not None and not data.use_kfold and data.validation_split == 0:
+            raise ValueError(
+                "tuning with use_kfold=false needs validation_split > 0; "
+                "test rows are never used for tuning"
+            )
         return self
 
     @classmethod
@@ -1434,9 +1479,9 @@ class MLTrainingConfig(BaseModel):
 
         # Convert dict to appropriate config type based on strategy
         if isinstance(model_data, dict):
-            if strategy_type in ("xgboost", "xgboost_line_movement"):
+            if strategy_type == "xgboost_line_movement":
                 training["model"] = XGBoostConfig.model_validate(model_data)
-            elif strategy_type in ("lstm", "lstm_line_movement"):
+            elif strategy_type == "lstm_line_movement":
                 training["model"] = LSTMConfig.model_validate(model_data)
 
         return data

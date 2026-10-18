@@ -900,25 +900,6 @@ class TestWalkForwardCV:
         # 10 events, min_train=4, val_step=2 → 3 folds
         assert result.n_folds == 3
 
-    def test_no_event_ids_falls_back_to_timeseries(self, walk_forward_config):
-        """walk_forward without event_ids falls back to timeseries."""
-        X = np.random.randn(50, 3)
-        y = np.random.randn(50)
-
-        mock_strategy = MagicMock()
-        mock_strategy.train_from_config.return_value = MOCK_HISTORY
-
-        result = run_cv(
-            strategy=mock_strategy,
-            config=walk_forward_config,
-            X=X,
-            y=y,
-            feature_names=["f1", "f2", "f3"],
-            event_ids=None,
-        )
-
-        assert result.cv_method == "timeseries"
-
     def test_derived_n_folds_matches_fold_count(self, walk_forward_config):
         """n_folds in CVResult matches actual number of folds generated."""
         X = np.random.randn(10, 3)
@@ -939,3 +920,35 @@ class TestWalkForwardCV:
 
         assert result.n_folds == len(result.fold_results)
         assert mock_strategy.train_from_config.call_count == result.n_folds
+
+
+class TestWalkForwardRequiresEventIds:
+    def test_raises_instead_of_switching_to_timeseries(self, make_ml_config):
+        config = make_ml_config(use_kfold=True, cv_method="walk_forward")
+        strategy = MagicMock()
+        with pytest.raises(ValueError, match="event_ids"):
+            run_cv(strategy, config, np.zeros((10, 1)), np.zeros(10), ["a"], event_ids=None)
+        strategy.train_from_config.assert_not_called()
+
+
+class TestTrainWithCVWithoutTestSet:
+    def test_final_model_is_fitted_without_validation_set(self, make_ml_config):
+        from odds_analytics.training.cross_validation import train_with_cv
+
+        config = make_ml_config(use_kfold=True, cv_method="walk_forward", test_split=0.0)
+        strategy = MagicMock()
+        strategy.train_from_config.return_value = MOCK_HISTORY
+
+        train_with_cv(
+            strategy,
+            config,
+            np.zeros((10, 1)),
+            np.zeros(10),
+            ["a"],
+            event_ids=np.array([f"e{i}" for i in range(10)]),
+        )
+
+        final_call = strategy.train_from_config.call_args_list[-1]
+        assert final_call.kwargs["X_val"] is None
+        assert final_call.kwargs["y_val"] is None
+        assert final_call.kwargs["static_val"] is None

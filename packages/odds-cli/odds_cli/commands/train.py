@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +17,7 @@ from odds_analytics.training import (
     prepare_training_data_from_config,
     save_verification_artifacts,
 )
+from odds_analytics.training.config import TOP_K_FEATURES_KEY, StrategyType
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from odds_core.database import async_session_maker
 from rich.console import Console
@@ -29,14 +31,69 @@ if TYPE_CHECKING:
 app = typer.Typer()
 console = Console()
 
+LineMovementStrategy = XGBoostLineMovementStrategy | LSTMLineMovementStrategy
+
 # Strategy registry mapping strategy_type to class
-STRATEGY_CLASSES = {
+STRATEGY_CLASSES: dict[StrategyType, type[LineMovementStrategy]] = {
     "xgboost_line_movement": XGBoostLineMovementStrategy,
     "lstm_line_movement": LSTMLineMovementStrategy,
 }
 
+
+DEFAULT_STUDY_STORAGE = "sqlite:///experiments/optuna.db"
+
+
+def _default_study_name(experiment_name: str, now: datetime | None = None) -> str:
+    """A fresh study name per run; resuming needs an explicit ``--study-name``."""
+    stamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
+    return f"{experiment_name}_{stamp}"
+
+
+def _existing_trial_count(study_name: str, storage_url: str | None) -> int | None:
+    """Number of trials in an existing study of that name, or None if there is none."""
+    if storage_url is None:
+        return None
+    import optuna
+
+    if study_name not in optuna.get_all_study_names(storage_url):
+        return None
+    return len(optuna.load_study(study_name=study_name, storage=storage_url).trials)
+
+
+def _resolve_study_storage(storage: str | None, in_memory: bool) -> str | None:
+    """Return the Optuna storage URL, or None for an in-memory study.
+
+    The default is a SQLite file at ``experiments/optuna.db``, relative to the working
+    directory. Optuna's tables must not share the application database, whose alembic
+    history they would clash with.
+    """
+    if in_memory:
+        if storage is not None:
+            raise typer.BadParameter("--in-memory and --storage are mutually exclusive")
+        return None
+    if storage is not None:
+        return storage
+    Path(DEFAULT_STUDY_STORAGE.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
+    return DEFAULT_STUDY_STORAGE
+
+
 # Default directory for experiment configs
 DEFAULT_CONFIG_DIR = Path("experiments")
+
+
+def _save_model_with_config(
+    strategy: LineMovementStrategy, config: MLTrainingConfig, path: str
+) -> None:
+    """Save the model and, beside it, the full training config that scoring reads."""
+    try:
+        strategy.save_model(path)
+        console.print(f"\n[green]Model saved to {path}[/green]")
+        config_output = Path(path).with_suffix(".yaml")
+        config.to_yaml(config_output)
+        console.print(f"[green]Configuration saved to {config_output}[/green]")
+    except Exception:
+        console.print_exception()
+        raise typer.Exit(1) from None
 
 
 def _save_data_verification(data_result: TrainingDataResult, output_dir: Path) -> None:
@@ -194,11 +251,6 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
     strategy_type = config.training.strategy_type
 
     # Get strategy class
-    if strategy_type not in STRATEGY_CLASSES:
-        console.print(f"[red]Error: Unknown strategy type '{strategy_type}'[/red]")
-        console.print(f"Available types: {', '.join(STRATEGY_CLASSES.keys())}")
-        raise typer.Exit(1)
-
     strategy_class = STRATEGY_CLASSES[strategy_type]
 
     console.print(f"\n[bold]Training {config.experiment.name}[/bold]")
@@ -264,10 +316,6 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
             use_kfold = config.training.data.use_kfold
             cv_result = None
 
-            # Get test data for final evaluation
-            X_test = data_result.X_test if data_result.num_test_samples > 0 else None
-            y_test = data_result.y_test if data_result.num_test_samples > 0 else None
-
             if use_kfold:
                 # Cross-Validation training
                 cv_method = config.training.data.cv_method
@@ -300,8 +348,8 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             data_result.X_train,
                             data_result.y_train,
                             data_result.feature_names,
-                            X_test=X_test,
-                            y_test=y_test,
+                            X_test=data_result.X_test,
+                            y_test=data_result.y_test,
                             event_ids=getattr(data_result, "event_ids_train", None),
                             static_features=data_result.static_train,
                             static_test=data_result.static_test,
@@ -337,8 +385,8 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             data_result.X_train,
                             data_result.y_train,
                             data_result.feature_names,
-                            X_val=X_test,
-                            y_val=y_test,
+                            X_val=data_result.X_test,
+                            y_val=data_result.y_test,
                             tracker=tracker,
                             static_train=data_result.static_train,
                             static_val=data_result.static_test,
@@ -358,20 +406,7 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
             output_path = _get_output_path(config)
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-            try:
-                strategy.save_model(output_path)
-                console.print(f"\n[green]Model saved to {output_path}[/green]")
-            except Exception:
-                console.print_exception()
-                raise typer.Exit(1) from None
-
-            # Step 4: Save configuration alongside model
-            config_output = Path(output_path).with_suffix(".yaml")
-            try:
-                config.to_yaml(config_output)
-                console.print(f"[green]Configuration saved to {config_output}[/green]")
-            except Exception as e:
-                console.print(f"[yellow]Warning: Could not save configuration: {e}[/yellow]")
+            _save_model_with_config(strategy, config, output_path)
 
             console.print("\n[bold green]Training complete![/bold green]")
 
@@ -432,13 +467,6 @@ def validate_config(
         ml_config = None
 
     if ml_config:
-        # Validate strategy type
-        if ml_config.training.strategy_type not in STRATEGY_CLASSES:
-            errors.append(
-                f"Unknown strategy_type '{ml_config.training.strategy_type}'. "
-                f"Available: {', '.join(STRATEGY_CLASSES.keys())}"
-            )
-
         # Validate date range
         data_config = ml_config.training.data
         if data_config.start_date >= data_config.end_date:
@@ -717,10 +745,15 @@ def run_tuning(
         None, "--timeout", help="Override timeout in seconds from config"
     ),
     study_name: str | None = typer.Option(
-        None, "--study-name", help="Optuna study name for persistence/resumption"
+        None,
+        "--study-name",
+        help="Study name; naming an existing study resumes it (default: experiment name + UTC timestamp)",
     ),
     storage: str | None = typer.Option(
-        None, "--storage", help="Optuna storage URL (defaults to DATABASE_URL from config)"
+        None, "--storage", help=f"Optuna storage URL (default: {DEFAULT_STUDY_STORAGE})"
+    ),
+    in_memory: bool = typer.Option(
+        False, "--in-memory", help="Keep the study in memory instead of the database"
     ),
     track: bool = typer.Option(False, "--track", help="Enable MLflow experiment tracking"),
     tracking_uri: str | None = typer.Option(
@@ -762,7 +795,6 @@ def run_tuning(
         console.print("\nAdd a tuning section to your config:")
         console.print("  tuning:")
         console.print("    n_trials: 100")
-        console.print("    direction: minimize")
         console.print("    metric: val_mse")
         console.print("    search_spaces:")
         console.print("      n_estimators:")
@@ -787,25 +819,18 @@ def run_tuning(
     if timeout is not None:
         ml_config.tuning.timeout = timeout
 
-    # Determine storage URL (default to DATABASE_URL if not specified)
-    storage_url = storage
-    if storage_url is None:
-        try:
-            from odds_core.config import get_config
+    if train_best and TOP_K_FEATURES_KEY in ml_config.tuning.search_spaces:
+        console.print(
+            "[red]Error: --train-best cannot be combined with a top_k_features search space; "
+            "the selected feature subset is not saved with the best config[/red]"
+        )
+        raise typer.Exit(1)
 
-            db_url = get_config().database.url
-            # Convert asyncpg URL to psycopg2 URL for Optuna
-            if db_url.startswith("postgresql+asyncpg://"):
-                storage_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
-            else:
-                storage_url = db_url
-        except Exception:
-            # If DATABASE_URL not available, use in-memory storage
-            storage_url = None
+    storage_url = _resolve_study_storage(storage, in_memory)
 
     # Determine study name
     if study_name is None:
-        study_name = f"{ml_config.experiment.name}_tuning"
+        study_name = _default_study_name(ml_config.experiment.name)
 
     # Override tracking configuration if flags provided
     if track:
@@ -835,11 +860,18 @@ async def _run_tuning_async(
     train_best: bool,
 ):
     """Execute tuning workflow asynchronously."""
-    from odds_analytics.training.tuner import OptunaTuner, create_objective
+    from odds_analytics.training.tuner import (
+        OptunaTuner,
+        apply_trial_params,
+        create_objective,
+    )
     from odds_core.database import async_session_maker
 
     console.print("\n[bold]Starting Hyperparameter Optimization[/bold]")
     console.print(f"Study: {study_name}")
+    existing_trials = _existing_trial_count(study_name, storage_url)
+    if existing_trials is not None:
+        console.print(f"[yellow]Resuming study with {existing_trials} existing trials[/yellow]")
     console.print(f"Trials: {ml_config.tuning.n_trials}")
     console.print(f"Direction: {ml_config.tuning.direction}")
     console.print(f"Metric: {ml_config.tuning.metric}\n")
@@ -899,9 +931,10 @@ async def _run_tuning_async(
             console.print(f"[cyan]Experiment: {ml_config.tracking.experiment_name}[/cyan]\n")
 
         # Step 3: Create objective function
-        # Use validation data for optimization if available, otherwise use test data
-        X_val = data_result.X_val if data_result.num_val_samples > 0 else data_result.X_test
-        y_val = data_result.y_val if data_result.num_val_samples > 0 else data_result.y_test
+        # Test rows are never used for tuning or for the --train-best model's validation
+        val_data = data_result.validation_data
+        X_val = val_data.X if val_data else None
+        y_val = val_data.y if val_data else None
 
         # Pre-compute features for all feature_groups choices if being tuned
         precomputed_features = None
@@ -941,9 +974,7 @@ async def _run_tuning_async(
         tune_mask_obj_kw: dict[str, Any] = {}
         if data_result.masks_train is not None:
             tune_mask_obj_kw["masks_train"] = data_result.masks_train
-            tune_mask_obj_kw["masks_val"] = (
-                data_result.masks_val if data_result.num_val_samples > 0 else data_result.masks_test
-            )
+            tune_mask_obj_kw["masks_val"] = val_data.masks if val_data else None
 
         objective = create_objective(
             config=ml_config,
@@ -954,9 +985,7 @@ async def _run_tuning_async(
             y_val=y_val,
             precomputed_features=precomputed_features,
             static_train=data_result.static_train,
-            static_val=data_result.static_val
-            if data_result.num_val_samples > 0
-            else data_result.static_test,
+            static_val=val_data.static if val_data else None,
             event_ids_train=data_result.event_ids_train,
             event_ids_val=data_result.event_ids_val,
             **tune_mask_obj_kw,
@@ -1020,11 +1049,7 @@ async def _run_tuning_async(
         best_config = ml_config.model_copy(deep=True)
 
         # Update model parameters with best values
-        for param_name, param_value in study.best_params.items():
-            if hasattr(best_config.training.model, param_name):
-                setattr(best_config.training.model, param_name, param_value)
-            elif hasattr(best_config.training.features, param_name):
-                setattr(best_config.training.features, param_name, param_value)
+        apply_trial_params(best_config, study.best_params)
 
         # Determine output path
         if output_path is None:
@@ -1043,13 +1068,7 @@ async def _run_tuning_async(
         if train_best:
             console.print("\n[bold]Training model with best parameters...[/bold]")
 
-            # Get strategy class
-            strategy_type = best_config.training.strategy_type
-            if strategy_type not in STRATEGY_CLASSES:
-                console.print(f"[red]Error: Unknown strategy type '{strategy_type}'[/red]")
-                raise typer.Exit(1)
-
-            strategy_class = STRATEGY_CLASSES[strategy_type]
+            strategy_class = STRATEGY_CLASSES[best_config.training.strategy_type]
             strategy = strategy_class()
 
             # Train with best config
@@ -1064,11 +1083,7 @@ async def _run_tuning_async(
                     tune_mask_kw: dict[str, Any] = {}
                     if data_result.masks_train is not None:
                         tune_mask_kw["masks_train"] = data_result.masks_train
-                        tune_mask_kw["masks_val"] = (
-                            data_result.masks_val
-                            if data_result.num_val_samples > 0
-                            else data_result.masks_test
-                        )
+                        tune_mask_kw["masks_val"] = val_data.masks if val_data else None
 
                     history = strategy.train_from_config(
                         config=best_config,
@@ -1078,9 +1093,7 @@ async def _run_tuning_async(
                         X_val=X_val,
                         y_val=y_val,
                         static_train=data_result.static_train,
-                        static_val=data_result.static_val
-                        if data_result.num_val_samples > 0
-                        else data_result.static_test,
+                        static_val=val_data.static if val_data else None,
                         **tune_mask_kw,
                     )
                 except Exception:
@@ -1097,25 +1110,17 @@ async def _run_tuning_async(
             output_model_path = _get_output_path(best_config)
             Path(output_model_path).parent.mkdir(parents=True, exist_ok=True)
 
-            try:
-                strategy.save_model(output_model_path)
-                console.print(f"\n[green]Model saved to {output_model_path}[/green]")
+            _save_model_with_config(strategy, best_config, output_model_path)
 
-                # Log best model to parent MLflow run if tracking enabled
-                if ml_config.tracking and ml_config.tracking.enabled:
-                    try:
-                        tuner.log_best_model(strategy.model, artifact_path="best_model")
-                        console.print(
-                            f"[cyan]Best model logged to MLflow (run_id: {tuner._parent_run_id})[/cyan]"
-                        )
-                    except Exception as e:
-                        console.print(
-                            f"[yellow]Warning: Could not log model to MLflow: {e}[/yellow]"
-                        )
-
-            except Exception:
-                console.print_exception()
-                raise typer.Exit(1) from None
+            # Log best model to parent MLflow run if tracking enabled
+            if ml_config.tracking and ml_config.tracking.enabled:
+                try:
+                    tuner.log_best_model(strategy.model, artifact_path="best_model")
+                    console.print(
+                        f"[cyan]Best model logged to MLflow (run_id: {tuner._parent_run_id})[/cyan]"
+                    )
+                except Exception as e:
+                    console.print(f"[yellow]Warning: Could not log model to MLflow: {e}[/yellow]")
 
             console.print("\n[bold green]Training complete![/bold green]")
 

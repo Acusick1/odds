@@ -12,7 +12,7 @@ status: stable
 
 # Train and publish a CLV model
 
-1. **Write a config.** Start from the production YAML `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`; its description carries no metrics, which are on [CLV model findings](../evaluation/clv-model-findings.md#deployed-model).
+1. **Write a config.** Start from the production YAML `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`; it tunes 100 `val_mse` trials and its description carries no metrics, which are on [CLV model findings](../evaluation/clv-model-findings.md#deployed-model).
    - Leave boosting length to `n_estimators`; the config has no early-stopping field.
    - Set `target_type: devigged_bookmaker` and `target_bookmaker: bet365`, the production target ([ADR-0002](../../docs/adr/0002-bet365-clv-target.md)).
    - Choose the data so `target_bookmaker` belongs to the selected `data_source` (see [Choose data](#choose-data)).
@@ -22,8 +22,8 @@ status: stable
 2. **Train.** `odds train run --config <file>`.
    - Options: `--output`, `--dry-run`, `--verbose`, `--track`, `--tracking-uri`, `--sport`.
    - It runs CV, fits a final model and writes `models/xgboost_line_movement_<experiment.name>.pkl` plus a sibling `.yaml` holding the full config ([training pipeline](training-pipeline.md)).
-3. **Or tune first.** `odds train tune --config <file> --n-trials 100`; the config needs a `tuning` section ([tuner](hyperparameter-tuner.md)). The best parameters go to `<config>_best.yaml`; then run step 2 on that file.
-   - Do not publish the output of `--train-best`: it leaves only a metadata `.yaml` beside the `.pkl`, which scoring refuses (#437).
+3. **Or tune first.** `odds train tune --config <file> --n-trials 100`; the config needs a `tuning` section ([tuner](hyperparameter-tuner.md)). Each run gets a new timestamped study in `experiments/`; pass `--study-name` to resume one. The best parameters go to `<config>_best.yaml`; then run step 2 on that file.
+   - `--train-best` trains on the best parameters and writes the same `.pkl` plus full-config `.yaml` as step 2.
 4. **Check the artifacts.** Read the CV metrics and `experiments/results/<experiment.name>/verification/`.
    - No all-NaN or constant features, and the expected feature count ([run an experiment](../evaluation/experiment-scripts.md#verification-artifacts)).
 5. **Publish.** `odds model publish --name epl-clv-home --path models/<file>.pkl [--version v1.2] [--bucket <bucket>]`.

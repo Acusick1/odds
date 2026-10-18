@@ -108,7 +108,7 @@ class TestTrainingDataResult:
             y_train=y_train,
             y_test=y_test,
             feature_names=feature_names,
-            strategy_type="xgboost",
+            strategy_type="xgboost_line_movement",
         )
 
         result_dict = result.to_dict()
@@ -139,7 +139,7 @@ class TestTrainingDataResult:
             y_train=y_train,
             y_test=y_test,
             feature_names=feature_names,
-            strategy_type="lstm",
+            strategy_type="lstm_line_movement",
             masks_train=masks_train,
             masks_test=masks_test,
         )
@@ -954,3 +954,68 @@ class TestSaveVerificationArtifacts:
         nested = tmp_path / "a" / "b" / "c"
         save_verification_artifacts(X, y, names, nested)
         assert (nested / "feature_stats.csv").exists()
+
+
+class TestTestSplitZero:
+    """`test_split: 0.0` holds out nothing and leaves the test arrays None (#437)."""
+
+    @staticmethod
+    def _events(n):
+        events = []
+        for i in range(n):
+            event = MagicMock(spec=Event)
+            event.id = f"e{i}"
+            event.status = EventStatus.FINAL
+            event.commence_time = datetime(2024, 10, 15, tzinfo=UTC)
+            events.append(event)
+        return events
+
+    async def _prepare(self, make_ml_config, test_split, with_event_ids):
+        from odds_analytics.feature_groups import PreparedFeatureData
+
+        config = make_ml_config(test_split=test_split, tuning=False)
+        n_events = 10
+        event_ids = np.repeat([f"e{i}" for i in range(n_events)], 2) if with_event_ids else None
+        prepared = PreparedFeatureData(
+            X=np.random.randn(n_events * 2, 3),
+            y=np.random.randn(n_events * 2),
+            feature_names=["a", "b", "c"],
+            event_ids=event_ids,
+        )
+        with (
+            patch(
+                "odds_analytics.training.data_preparation.filter_events_by_date_range",
+                return_value=self._events(n_events),
+            ),
+            patch("odds_analytics.feature_groups.prepare_training_data", return_value=prepared),
+        ):
+            return await prepare_training_data_from_config(config, AsyncMock())
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("with_event_ids", [True, False])
+    async def test_nothing_is_held_out(self, make_ml_config, with_event_ids):
+        result = await self._prepare(make_ml_config, 0.0, with_event_ids)
+        assert result.num_train_samples == 20
+        assert result.num_test_samples == 0
+        assert result.X_test is None and result.y_test is None
+        assert result.masks_test is None and result.static_test is None
+        assert result.validation_data is None
+
+    @pytest.mark.asyncio
+    async def test_small_positive_split_still_holds_out_one_event(self, make_ml_config):
+        result = await self._prepare(make_ml_config, 0.05, True)
+        assert result.num_test_samples == 2
+
+    def test_validation_data_never_falls_back_to_test_rows(self):
+        result = TrainingDataResult(
+            X_train=np.zeros((4, 1)),
+            X_test=np.zeros((3, 1)),
+            y_train=np.zeros(4),
+            y_test=np.zeros(3),
+            feature_names=["a"],
+            strategy_type="xgboost_line_movement",
+        )
+        assert result.validation_data is None
+        result.X_val, result.y_val = np.ones((2, 1)), np.ones(2)
+        assert result.validation_data is not None
+        assert result.validation_data.X is result.X_val

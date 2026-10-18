@@ -77,7 +77,6 @@ def sample_config(sample_search_spaces):
         ),
         tuning=TuningConfig(
             n_trials=10,
-            direction="minimize",
             metric="val_mse",
             search_spaces=sample_search_spaces,
             sampler="tpe",
@@ -370,8 +369,9 @@ def test_objective_function_execution(mock_strategy_class, sample_config, sample
 def test_objective_function_handles_training_failure(
     mock_strategy_class, sample_config, sample_training_data
 ):
-    """Test objective function handles training failures gracefully."""
+    """A training error propagates so Optuna records the trial as failed."""
     X_train, y_train, X_val, y_val, feature_names = sample_training_data
+    sample_config.training.data.use_kfold = False
 
     # Mock strategy that raises exception
     mock_strategy = MagicMock()
@@ -394,18 +394,17 @@ def test_objective_function_handles_training_failure(
     mock_trial.suggest_float.return_value = 0.05
     mock_trial.suggest_categorical.return_value = "reg:squarederror"
 
-    # Execute objective - should return inf for minimize direction
-    result = objective(mock_trial)
-
-    assert result == float("inf")  # Bad value for failed trial
+    with pytest.raises(Exception, match="Training failed"):
+        objective(mock_trial)
 
 
 @patch("odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy")
 def test_objective_function_metric_not_found(
     mock_strategy_class, sample_config, sample_training_data
 ):
-    """Test objective function when metric not found in history."""
+    """A metric missing from the history fails the trial."""
     X_train, y_train, X_val, y_val, feature_names = sample_training_data
+    sample_config.training.data.use_kfold = False
 
     # Mock strategy that returns history without the expected metric
     mock_strategy = MagicMock()
@@ -431,10 +430,8 @@ def test_objective_function_metric_not_found(
     mock_trial.suggest_float.return_value = 0.05
     mock_trial.suggest_categorical.return_value = "reg:squarederror"
 
-    # Execute objective - should return inf when metric not found
-    result = objective(mock_trial)
-
-    assert result == float("inf")
+    with pytest.raises(KeyError, match="val_mse"):
+        objective(mock_trial)
 
 
 # =============================================================================
@@ -445,6 +442,7 @@ def test_objective_function_metric_not_found(
 def test_full_optimization_workflow(sample_config, sample_training_data):
     """Test full optimization workflow (integration test)."""
     X_train, y_train, X_val, y_val, feature_names = sample_training_data
+    sample_config.training.data.use_kfold = False
 
     # Create tuner
     tuner = OptunaTuner(
@@ -1287,3 +1285,224 @@ def test_no_feature_selection_without_top_k_in_search_space(
 
     # Verify no feature selection attributes were set
     assert "feature_ranking_names" not in mock_study.user_attrs
+
+
+# =============================================================================
+# Failure handling and parameter application (#437)
+# =============================================================================
+
+
+N_ESTIMATORS = {"n_estimators": SearchSpace(type="int", low=10, high=50)}
+FULL_HISTORY = dict.fromkeys(
+    ("train_mse", "train_mae", "train_r2", "val_mse", "val_mae", "val_r2"), 0.1
+)
+
+
+def _optimize(config, strategy, n_trials=3):
+    import optuna
+
+    X = np.random.randn(20, 3)
+    y = np.random.randn(20)
+    objective = create_objective(
+        config=config,
+        X_train=X,
+        y_train=y,
+        feature_names=["a", "b", "c"],
+        X_val=X[:5],
+        y_val=y[:5],
+    )
+    study = optuna.create_study()
+    with patch(
+        "odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy",
+        return_value=strategy,
+    ):
+        study.optimize(objective, n_trials=n_trials)
+    return study
+
+
+class TestObjectiveErrors:
+    """Errors in a trial fail the trial; pruning still works."""
+
+    def test_error_marks_trial_failed_and_aborts_study(self, make_ml_config):
+        import optuna
+
+        strategy = MagicMock()
+        strategy.train_from_config.side_effect = RuntimeError("boom")
+        config = make_ml_config(search_spaces=N_ESTIMATORS)
+        study = optuna.create_study()
+        objective = create_objective(
+            config=config,
+            X_train=np.zeros((4, 1)),
+            y_train=np.zeros(4),
+            feature_names=["a"],
+            X_val=np.zeros((2, 1)),
+            y_val=np.zeros(2),
+        )
+        with patch(
+            "odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy",
+            return_value=strategy,
+        ):
+            with pytest.raises(RuntimeError, match="boom"):
+                study.optimize(objective, n_trials=3)
+        assert [t.state for t in study.trials] == [optuna.trial.TrialState.FAIL]
+
+    def test_trial_pruned_is_recorded_as_pruned(self, make_ml_config):
+        import optuna
+
+        strategy = MagicMock()
+        strategy.train_from_config.side_effect = optuna.TrialPruned()
+        study = _optimize(make_ml_config(search_spaces=N_ESTIMATORS), strategy, n_trials=2)
+        assert {t.state for t in study.trials} == {optuna.trial.TrialState.PRUNED}
+
+    def test_import_error_is_not_swallowed(self, make_ml_config):
+        strategy = MagicMock()
+        strategy.train_from_config.side_effect = ImportError("xgboost missing")
+        with pytest.raises(ImportError):
+            _optimize(make_ml_config(search_spaces=N_ESTIMATORS), strategy, n_trials=1)
+
+    def test_failed_optimize_marks_tracker_run_failed(self, make_ml_config):
+        tuner = OptunaTuner(study_name="failed_run_status", direction="minimize")
+        tuner._tracker = MagicMock()
+        objective = MagicMock(side_effect=RuntimeError("boom"))
+        with pytest.raises(RuntimeError, match="boom"):
+            tuner.optimize(objective, n_trials=1)
+        tuner._tracker.end_run.assert_called_once_with(status="FAILED")
+
+
+class TestObjectiveMetric:
+    def test_cv_objective_returns_requested_metric(self, make_ml_config):
+        import optuna
+
+        config = make_ml_config(
+            search_spaces=N_ESTIMATORS, metric="val_r2", use_kfold=True, cv_method="walk_forward"
+        )
+        strategy = MagicMock()
+        strategy.train_from_config.return_value = {**FULL_HISTORY, "val_r2": 0.4}
+        objective = create_objective(
+            config=config,
+            X_train=np.zeros((10, 1)),
+            y_train=np.zeros(10),
+            feature_names=["a"],
+            event_ids_train=np.array([f"e{i}" for i in range(10)]),
+        )
+        with patch(
+            "odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy",
+            return_value=strategy,
+        ):
+            assert objective(optuna.create_study().ask()) == pytest.approx(0.4)
+
+    def test_cv_trial_with_nothing_held_out(self, make_ml_config):
+        import optuna
+
+        config = make_ml_config(
+            search_spaces=N_ESTIMATORS, use_kfold=True, cv_method="walk_forward", test_split=0.0
+        )
+        strategy = MagicMock()
+        strategy.train_from_config.return_value = FULL_HISTORY
+        objective = create_objective(
+            config=config,
+            X_train=np.zeros((10, 1)),
+            y_train=np.zeros(10),
+            feature_names=["a"],
+            X_val=None,
+            y_val=None,
+            event_ids_train=np.array([f"e{i}" for i in range(10)]),
+        )
+        with patch(
+            "odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy",
+            return_value=strategy,
+        ):
+            assert objective(optuna.create_study().ask()) == pytest.approx(0.1)
+
+
+class TestApplyTrialParams:
+    def test_model_params_and_feature_groups_are_applied(self, make_ml_config):
+        from odds_analytics.training.tuner import apply_trial_params
+
+        config = make_ml_config()
+        apply_trial_params(config, {"n_estimators": 77, "feature_groups": ("tabular", "rest")})
+        assert config.training.model.n_estimators == 77
+        assert config.training.features.feature_groups == ("tabular", "rest")
+
+    def test_top_k_features_is_skipped(self, make_ml_config):
+        from odds_analytics.training.tuner import apply_trial_params
+
+        apply_trial_params(make_ml_config(), {"top_k_features": 4})
+
+    @pytest.mark.parametrize("name", ["no_such_param", "form_window"])
+    def test_untunable_param_raises(self, make_ml_config, name):
+        from odds_analytics.training.tuner import apply_trial_params
+
+        with pytest.raises(ValueError, match=name):
+            apply_trial_params(make_ml_config(), {name: 1})
+
+
+class TestStudyNameAndResume:
+    def test_default_study_name_is_unique_per_run(self):
+        from datetime import UTC, datetime
+
+        from odds_cli.commands.train import _default_study_name
+
+        first = _default_study_name("exp", datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC))
+        second = _default_study_name("exp", datetime(2026, 1, 2, 3, 4, 6, tzinfo=UTC))
+        assert first == "exp_20260102T030405Z"
+        assert first != second
+
+    def test_existing_trial_count(self, tmp_path):
+        import optuna
+        from odds_cli.commands.train import _existing_trial_count
+
+        storage = f"sqlite:///{tmp_path / 's.db'}"
+        assert _existing_trial_count("s", None) is None
+        assert _existing_trial_count("s", storage) is None
+        study = optuna.create_study(study_name="s", storage=storage)
+        study.optimize(lambda t: t.suggest_float("x", 0, 1), n_trials=3)
+        assert _existing_trial_count("s", storage) == 3
+
+    def test_feature_ranking_is_computed_when_study_lacks_it(self, make_ml_config):
+        import optuna
+
+        config = make_ml_config(
+            search_spaces={"top_k_features": SearchSpace(type="int", low=1, high=2)}
+        )
+        config.training.feature_selection.enabled = True
+        X = np.random.randn(30, 3)
+        y = np.random.randn(30)
+        objective = create_objective(
+            config=config,
+            X_train=X,
+            y_train=y,
+            feature_names=["a", "b", "c"],
+            X_val=X[:5],
+            y_val=y[:5],
+        )
+        study = optuna.create_study()
+        strategy = MagicMock()
+        strategy.train_from_config.return_value = FULL_HISTORY
+        with patch(
+            "odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy",
+            return_value=strategy,
+        ):
+            study.optimize(objective, n_trials=1)
+            assert "feature_ranking_names" in study.user_attrs
+            # A later trial of a resumed study reuses the stored ranking.
+            ranking = study.user_attrs["feature_ranking_names"]
+            study.optimize(objective, n_trials=1)
+        assert study.user_attrs["feature_ranking_names"] == ranking
+
+
+class TestStudyStorageSchema:
+    def test_application_alembic_table_breaks_optuna_storage(self, tmp_path):
+        """Evidence for keeping Optuna out of the application database (Optuna 4.6.0)."""
+        import sqlite3
+
+        import optuna
+
+        path = tmp_path / "app.db"
+        conn = sqlite3.connect(path)
+        conn.execute("create table alembic_version (version_num varchar(32) not null)")
+        conn.execute("insert into alembic_version values ('0042_app_migration')")
+        conn.commit()
+        conn.close()
+        with pytest.raises(RuntimeError, match="no longer compatible with the table schema"):
+            optuna.create_study(storage=f"sqlite:///{path}")
