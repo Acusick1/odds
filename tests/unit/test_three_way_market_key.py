@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.odds_math import american_to_decimal
 from odds_core.team import normalize_team_name
 from odds_core.utils import relabel_three_way_markets
 from odds_lambda.data_fetcher import TheOddsAPIClient
@@ -168,7 +169,7 @@ class TestRelabelMigration:
                         bookmaker_title="Pinnacle",
                         market_key=market_key,
                         outcome_name=name,
-                        price=100,
+                        price_decimal=american_to_decimal(100),
                         odds_timestamp=when,
                         last_update=when,
                     )
