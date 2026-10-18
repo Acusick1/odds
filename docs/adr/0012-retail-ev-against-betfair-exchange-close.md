@@ -21,14 +21,14 @@ Agreed 2026-10-18 (#515, under the map #506):
   - Hours to kick-off, book and outcome are features.
 - **Close.**
   - `p_close` is the Betfair Exchange back price, devigged proportionally across the three outcomes (`odds_core.odds_math.devig_probabilities`).
-  - It is taken from the last live Betfair job snapshot before kick-off that is not in-play. Where there is none, the FDUK closing price is used.
+  - It is taken from the last live Betfair job snapshot that is not in-play and falls within 30 minutes before kick-off. Where there is none, the FDUK closing price is used.
   - The FDUK closing price is treated as taken at kick-off, so it is never an "at or before t" price for any row.
   - Rows without a close are dropped.
 - **Target.**
   - `EV = p_close × retail_decimal_odds(t) − 1`.
   - Retail odds are used raw, margin included, because that is the price a bet gets.
 - **Baseline.**
-  - `p_BFE_fair(t) × retail_odds(t) − 1`. `p_BFE_fair(t)` is the devigged Betfair Exchange price from the latest snapshot at or before t, so the exchange's current price stands in for its close. The baseline has no parameters.
+  - `p_BFE_fair(t) × retail_odds(t) − 1`. `p_BFE_fair(t)` is the devigged Betfair Exchange price from the latest live Betfair job or FDUK opening snapshot at or before t, so the exchange's current price stands in for its close. The baseline has no parameters.
   - A row is dropped if that snapshot is more than 2 hours older than t, or if there is none. The model and the baseline are scored on the same rows.
 - **Weights.**
   - Each row's loss weight is `(1 / retail_odds²) × w_event`, with `w_event = 1 / (rows in the event)`.
