@@ -1,0 +1,10 @@
+base: xgboost_epl_cv_protocol_base.yaml
+experiment:
+  name: xgboost_epl_cv_protocol_sliding_380
+  description: "CV protocol cell sliding_380 (#452): walk-forward, sliding window, min_train_events 380, max_train_events 380, val_step_events 50, over the tuning range."
+training:
+  data:
+    window_type: sliding
+    min_train_events: 380
+    max_train_events: 380
+    val_step_events: 50

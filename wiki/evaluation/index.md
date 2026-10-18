@@ -5,7 +5,7 @@ description: The backtest engine and strategies, what the CLV model has been sho
 
 # Backtests and model research
 
-Backtests replay a strategy over stored events; experiments record what the CLV model was and was not shown to do. Start with [CLV model findings](clv-model-findings.md) for the current conclusions, then the experiment pages for the evidence. The experiment pages are the evidence for the modelling ADRs ([0002](../../docs/adr/0002-bet365-clv-target.md), [0003](../../docs/adr/0003-hybrid-sharp-reference.md), [0004](../../docs/adr/0004-walk-forward-cv-protocol.md)).
+Backtests replay a strategy over stored events; experiments record what the CLV model was and was not shown to do. Start with [CLV model findings](clv-model-findings.md) for the current conclusions, then the experiment pages for the evidence. The experiment pages are the evidence for the modelling ADRs ([0002](../../docs/adr/0002-bet365-clv-target.md), [0003](../../docs/adr/0003-hybrid-sharp-reference.md), [0010](../../docs/adr/0010-expanding-walk-forward-and-evaluation-range.md)).
 
 <!-- pages:start -->
 ### Reference
@@ -18,6 +18,7 @@ Backtests replay a strategy over stored events; experiments record what the CLV 
 
 - [Betting simulation (Exp 7, 7b)](exp-betting-simulation.md) — Whether the CLV signal survives the vig with flat stakes and with line shopping, and how to read backtest-engine metrics against it.
 - [CV protocol grid](exp-cv-protocol-grid.md) — The window-type by validation-step grid behind ADR-0004, the 32-feature rerun, and what the grid can and cannot show.
+- [CV protocol on a common validation range](exp-cv-protocol-common-range.md) — The October 2026 comparison of expanding, sliding-380 and sliding-760 walk-forward CV scored on the same validation events, the tuning-range event counts, and the fold layout the re-baseline uses.
 - [Early NBA signal search and LSTM](exp-early-nba-signal-and-lstm.md) — February 2026 NBA runs (XGBoost v1, Exp 1, Exp 2, LSTM variants): no signal at about 230-1K events, sharp-retail divergence as the best correlate, the IN_PLAY leak, and why LSTM was ruled out.
 - [EPL feature ablation and principled search space](exp-epl-feature-ablation-and-search-space.md) — The April 2026 EPL runs: per-group and FPL ablations (match_stats helps, schedule and FPL hurt), the sliding-window collapse to constant predictors, and the revised Optuna space that produced the deployed model.
 - [EPL sharp-reference experiments](exp-epl-sharp-reference.md) — The March 2026 EPL runs covering Pinnacle as sharp reference, the

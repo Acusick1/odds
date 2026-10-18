@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0010
 ---
 
 # Evaluate with walk-forward CV: sliding 380 events, 50-event steps, no test split
