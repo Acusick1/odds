@@ -50,6 +50,7 @@ On 589 overlapping events Betfair Exchange `sharp_prob` correlates 0.9994 with P
 
 ## Caveats
 
+- Each row's sharp book is the first in `sharp_bookmakers` order that quotes the requested outcome (`odds_analytics.feature_extraction.select_sharp_odds`).
 - A single training set mixes Pinnacle-based and Betfair-based `sharp_prob` values, and the model cannot tell which row is which except through the level shift ([sharp benchmark](../modelling/sharp-benchmark.md#code-copies)).
 - `experiments/configs/xgboost_epl_hybrid_sharp.yaml` predates the principled search space, and the 2026-03-18 sliding-380 feature-group numbers were a search-space artefact and should not be used.
 - The sliding-380 numbers above do not reproduce under current data and the hybrid reference; feature counts are as recorded (the results used a 7-column tabular group; the code defines 6).

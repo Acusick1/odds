@@ -13,6 +13,7 @@ from odds_analytics.feature_extraction import (
 )
 from odds_analytics.training.config import FeatureConfig
 from odds_core.models import EventStatus, Odds
+from odds_core.odds_math import calculate_implied_probability
 
 
 @pytest.fixture
@@ -1274,3 +1275,52 @@ class TestTabularExtractorPriorityFallback:
 
         assert features.sharp_prob is None
         assert features.retail_sharp_diff is None
+
+
+class TestTabularExtractorOutcomeAwareSharpFallthrough:
+    """The sharp book is the first in priority order that quotes the requested outcome."""
+
+    @pytest.fixture
+    def event(self) -> BacktestEvent:
+        return BacktestEvent(
+            id="fallthrough_test",
+            commence_time=datetime(2025, 1, 15, 15, 0, 0, tzinfo=UTC),
+            home_team="A",
+            away_team="B",
+            home_score=2,
+            away_score=1,
+            status=EventStatus.FINAL,
+        )
+
+    def test_skips_sharp_book_missing_requested_outcome(self, event: BacktestEvent) -> None:
+        odds = [
+            _make_odds("pinnacle", "B", -150, event_id=event.id),
+            _make_odds("betfair_exchange", "A", 130, event_id=event.id),
+            _make_odds("betfair_exchange", "B", -140, event_id=event.id),
+            _make_odds("fanduel", "A", 120, event_id=event.id),
+        ]
+        extractor = TabularFeatureExtractor(
+            sharp_bookmakers=["pinnacle", "betfair_exchange"],
+            retail_bookmakers=["fanduel"],
+        )
+        features = extractor.extract_features(event, odds, market="h2h", outcome="A")
+
+        expected_sharp = calculate_implied_probability(130)
+        assert features.sharp_prob == pytest.approx(expected_sharp)
+        assert features.retail_sharp_diff == pytest.approx(
+            calculate_implied_probability(120) - expected_sharp
+        )
+
+    def test_priority_kept_when_first_book_quotes_outcome(self, event: BacktestEvent) -> None:
+        odds = [
+            _make_odds("pinnacle", "A", 125, event_id=event.id),
+            _make_odds("betfair_exchange", "A", 130, event_id=event.id),
+            _make_odds("fanduel", "A", 120, event_id=event.id),
+        ]
+        extractor = TabularFeatureExtractor(
+            sharp_bookmakers=["pinnacle", "betfair_exchange"],
+            retail_bookmakers=["fanduel"],
+        )
+        features = extractor.extract_features(event, odds, market="h2h", outcome="A")
+
+        assert features.sharp_prob == pytest.approx(calculate_implied_probability(125))

@@ -55,6 +55,7 @@ __all__ = [
     "calculate_avg_price",
     "calculate_avg_probability",
     "calculate_sharp_retail_metrics",
+    "select_sharp_odds",
 ]
 
 
@@ -84,6 +85,22 @@ def filter_odds_by_bookmakers(
 ) -> list[Odds]:
     """Filter odds to only those from specified bookmakers."""
     return [o for o in odds if o.bookmaker_key in bookmakers]
+
+
+def select_sharp_odds(
+    odds: list[Odds],
+    sharp_bookmakers: list[str],
+) -> list[Odds]:
+    """Return the rows of the first bookmaker in priority order that has any in ``odds``.
+
+    Callers pass odds already narrowed to the outcome they need, so the chosen
+    bookmaker is the first one that quotes that outcome.
+    """
+    for bm in sharp_bookmakers:
+        sharp_odds = filter_odds_by_bookmakers(odds, [bm])
+        if sharp_odds:
+            return sharp_odds
+    return []
 
 
 def calculate_avg_price(odds: list[Odds]) -> float:
@@ -116,12 +133,7 @@ def calculate_sharp_retail_metrics(
     - retail_prob: Average retail bookmaker probability
     - diff: Differential (retail_prob - sharp_prob)
     """
-    # Try sharp bookmakers in priority order (fallback chain)
-    sharp_odds: list[Odds] = []
-    for bm in sharp_bookmakers:
-        sharp_odds = filter_odds_by_bookmakers(odds, [bm])
-        if sharp_odds:
-            break
+    sharp_odds = select_sharp_odds(odds, sharp_bookmakers)
     retail_odds = filter_odds_by_bookmakers(odds, retail_bookmakers)
 
     result: dict[str, float | None] = {
@@ -444,13 +456,6 @@ class TabularFeatureExtractor(FeatureExtractor):
         if not market_odds:
             return TabularFeatures(**feature_values)
 
-        # Sharp bookmaker odds — try in priority order for consistent fallback
-        # (e.g. [pinnacle, betfair_exchange] uses Pinnacle when available, BFE otherwise)
-        sharp_odds: list[Odds] = []
-        for bm in self.sharp_bookmakers:
-            sharp_odds = filter_odds_by_bookmakers(market_odds, [bm])
-            if sharp_odds:
-                break
         retail_odds = filter_odds_by_bookmakers(market_odds, self.retail_bookmakers)
 
         # Resolve outcome (team name for h2h, "Over"/"Under" for totals)
@@ -473,8 +478,13 @@ class TabularFeatureExtractor(FeatureExtractor):
                 feature_values["consensus_prob"] = avg_outcome_prob
 
         # 2. Sharp vs Retail features
-        if sharp_odds and retail_odds and outcome_team:
-            sharp_outcome = next((o for o in sharp_odds if o.outcome_name == outcome_team), None)
+        if retail_odds and outcome_team:
+            # Sharp book = first in priority order that quotes the requested outcome
+            sharp_outcome_odds = select_sharp_odds(
+                filter_odds_by_market_outcome(market_odds, market, outcome_team),
+                self.sharp_bookmakers,
+            )
+            sharp_outcome = sharp_outcome_odds[0] if sharp_outcome_odds else None
             if sharp_outcome:
                 outcome_sharp_prob = calculate_implied_probability(sharp_outcome.price)
                 feature_values["sharp_prob"] = outcome_sharp_prob
