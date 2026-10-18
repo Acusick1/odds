@@ -71,6 +71,17 @@ class TestParseMatchEvent:
         assert match is not None
         assert match.max_spread() == pytest.approx(0.06)
 
+    @pytest.mark.parametrize("bid_ask", [(0.0, 0.0), (1.0, 1.0)])
+    def test_midpoints_none_when_a_midpoint_is_not_a_probability(
+        self, gamma_event, bid_ask: tuple[float, float]
+    ) -> None:
+        match = parse_match_event(
+            gamma_event(quotes={"che": (0.2, 0.22), "draw": (0.2, 0.26), "bou": bid_ask}), EPL
+        )
+
+        assert match is not None
+        assert match.midpoints() is None
+
     def test_midpoints_none_when_a_side_has_no_book(self, gamma_event) -> None:
         event = gamma_event()
         event["markets"][0]["bestBid"] = None

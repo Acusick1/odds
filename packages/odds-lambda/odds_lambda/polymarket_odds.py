@@ -108,7 +108,7 @@ class PolymarketMatch:
 
     def midpoints(self) -> Prices | None:
         mids = {side: self.outcome_market(side).midpoint for side in SIDES}
-        if any(mid is None for mid in mids.values()):
+        if any(mid is None or not 0.0 < mid < 1.0 for mid in mids.values()):
             return None
         return Prices(**mids)  # type: ignore[arg-type]
 

@@ -51,14 +51,27 @@ if [[ ! -t 0 ]]; then
 fi
 
 scheduler_down=0
+migration_committed=0
+previous_head=""
+previous_revision=""
 report_scheduler_down() {
     local status=$?
     if (( status != 0 && scheduler_down == 1 )); then
-        echo "deploy.sh: FAILED with $SERVICE STOPPED. The scheduler is down: fix the failure, rerun ./deploy.sh, or start it with 'sudo $SYSTEMCTL start $SERVICE'." >&2
+        {
+            echo "deploy.sh: FAILED with $SERVICE STOPPED. The scheduler is down."
+            echo "To bring the OLD code back (do not just start the service: the checkout holds the new code):"
+            if (( migration_committed == 1 )); then
+                echo "  uv run alembic downgrade $previous_revision   # run first: the downgrade lives in the new code"
+                echo "  (rows the migration deleted do not come back)"
+            fi
+            echo "  git checkout $previous_head && uv sync && sudo $SYSTEMCTL start $SERVICE"
+            echo "Or fix the failure and rerun ./deploy.sh."
+        } >&2
     fi
 }
 trap report_scheduler_down EXIT
 
+previous_head="$(git rev-parse HEAD)"
 deploy_started_at="$(date +%s)"
 
 echo "==> git pull"
@@ -70,13 +83,19 @@ uv sync
 # Migration ordering: a pending migration runs with the scheduler stopped, so the
 # old code never reads a schema it does not know. The hand-run agent's MCP server
 # is not managed here: do not deploy during an agent session.
-if ! uv run alembic current | grep -q "(head)"; then
-    echo "==> migration pending: stopping $SERVICE"
+if ! current_output="$(uv run alembic current)"; then
+    echo "deploy.sh: 'alembic current' failed, so whether a migration is pending is unknown; $SERVICE was not stopped" >&2
+    exit 1
+fi
+if ! grep -q "(head)" <<<"$current_output"; then
+    previous_revision="$(grep -oE '^[0-9a-z]+' <<<"$current_output" | head -1)"
+    echo "==> migration pending (database at '${previous_revision:-no revision}'): stopping $SERVICE"
     sudo "$SYSTEMCTL" stop "$SERVICE"
     scheduler_down=1
 fi
 echo "==> alembic upgrade head"
 uv run alembic upgrade head
+migration_committed=1
 
 # Smoke runs with SCHEDULER_DRY_RUN=true so self-scheduling is a no-op: jobs do
 # their real work (gated by their cadence) but write nothing to the live
