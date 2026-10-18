@@ -1,0 +1,50 @@
+{
+ "888sport": {
+  "row_text": "888sport |  | CLAIM BONUS | \t |  | 1.36 |  | \t |  | 5.50 |  | \t |  | 7.00 |  | \t | 94.3%",
+  "hist": [
+   "ODDS MOVEMENT\n19 May, 15:33\n1.36\n-0.17\nOpening odds:\n12 May, 12:08\n1.53",
+   "ODDS MOVEMENT\n19 May, 13:32\n5.50\n+0.50\nOpening odds:\n12 May, 12:08\n5.00",
+   "ODDS MOVEMENT\n19 May, 15:33\n7.00\n+2.00\nOpening odds:\n12 May, 12:08\n5.00"
+  ]
+ },
+ "bet365": {
+  "row_text": "bet365 |  | CLAIM BONUS | \t |  | 1.38 |  | \t |  | 5.25 |  | \t |  | 7.00 |  | \t | 94.5%",
+  "hist": [
+   "ODDS MOVEMENT\n19 May, 15:41\n1.38\n-0.15\nOpening odds:\n12 May, 11:59\n1.53",
+   "ODDS MOVEMENT\n19 May, 15:48\n5.25\n+0.92\nOpening odds:\n12 May, 11:59\n4.33",
+   "ODDS MOVEMENT\n19 May, 15:28\n7.00\n+1.50\nOpening odds:\n12 May, 11:59\n5.50"
+  ]
+ },
+ "Betfred": {
+  "row_text": "Betfred |  | CLAIM BONUS | \t |  | 1.36 |  | \t |  | 5.50 |  | \t |  | 7.00 |  | \t | 94.3%",
+  "hist": [
+   "ODDS MOVEMENT\n19 May, 15:21\n1.36\n-0.17\nOpening odds:\n12 May, 12:05\n1.53",
+   "ODDS MOVEMENT\n19 May, 13:15\n5.50\n+0.90\nOpening odds:\n12 May, 12:05\n4.60",
+   "ODDS MOVEMENT\n19 May, 15:21\n7.00\n+1.50\nOpening odds:\n12 May, 12:05\n5.50"
+  ]
+ },
+ "BetUK": {
+  "row_text": "BetUK |  | CLAIM BONUS | \t |  | 1.36 |  | \t |  | 5.80 |  | \t |  | 6.75 |  | \t | 94.7%",
+  "hist": []
+ },
+ "BetVictor": {
+  "row_text": "BetVictor |  | CLAIM BONUS | \t |  | 1.36 |  | \t |  | 5.50 |  | \t |  | 7.50 |  | \t | 95.2%",
+  "hist": []
+ },
+ "Betway": {
+  "row_text": "Betway |  | CLAIM BONUS | \t |  | 1.40 |  | \t |  | 5.50 |  | \t |  | 6.00 |  | \t | 94.1%",
+  "hist": []
+ },
+ "bwin": {
+  "row_text": "bwin |  | CLAIM BONUS | \t |  | 1.39 |  | \t |  | 5.50 |  | \t |  | 6.75 |  | \t | 95.3%",
+  "hist": []
+ },
+ "Unibetuk": {
+  "row_text": "Unibetuk |  | CLAIM BONUS | \t |  | 1.37 |  | \t |  | 5.80 |  | \t |  | 7.00 |  | \t | 95.7%",
+  "hist": []
+ },
+ "William Hill": {
+  "row_text": "William Hill |  | CLAIM BONUS | \t |  | 1.44 |  | \t |  | 5.50 |  | \t |  | 7.00 |  | \t | 98.1%",
+  "hist": []
+ }
+}

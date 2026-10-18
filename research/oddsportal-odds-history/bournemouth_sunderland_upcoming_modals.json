@@ -1,0 +1,86 @@
+{
+ "10bet": {
+  "row_text": "10bet |  | CLAIM BONUS | \t |  | 2.14 |  | \t |  | 3.25 |  | \t |  | 3.65 |  | \t | -",
+  "hist": [
+   "ODDS MOVEMENT\n18 Oct, 13:53\n2.14\n+0.17\nOpening odds:\n2 Oct, 16:29\n1.97",
+   "ODDS MOVEMENT\n18 Oct, 13:49\n3.25\n-0.25\nOpening odds:\n2 Oct, 16:29\n3.50",
+   "ODDS MOVEMENT\n18 Oct, 13:53\n3.65\n+0.05\nOpening odds:\n2 Oct, 16:29\n3.60"
+  ]
+ },
+ "7BetUK": {
+  "row_text": "7BetUK |  | CLAIM BONUS | \t |  | 2.00 |  | \t |  | 3.10 |  | \t |  | 3.75 |  | \t | 91.8%",
+  "hist": []
+ },
+ "888sport": {
+  "row_text": "888sport |  | CLAIM BONUS | \t |  | 2.10 |  | \t |  | 3.00 |  | \t |  | 3.75 |  | \t | 92.9%",
+  "hist": []
+ },
+ "AllBritishCasino": {
+  "row_text": "AllBritishCasino |  | CLAIM BONUS | \t |  | 2.01 |  | \t |  | 3.27 |  | \t |  | 4.05 |  | \t | 95.2%",
+  "hist": []
+ },
+ "bet365": {
+  "row_text": "bet365 |  | CLAIM BONUS | \t |  | 2.05 |  | \t |  | 3.10 |  | \t |  | 4.20 |  | \t | 95.4%",
+  "hist": [
+   "ODDS MOVEMENT\n18 Oct, 13:56\n2.05\n+0.32\nOpening odds:\n19 Sept, 15:59\n1.73",
+   "ODDS MOVEMENT\n18 Oct, 13:45\n3.10\n-0.65\nOpening odds:\n19 Sept, 15:59\n3.75",
+   "ODDS MOVEMENT\n18 Oct, 13:56\n4.20\n-0.20\nOpening odds:\n19 Sept, 15:59\n4.40"
+  ]
+ },
+ "Betano.uk": {
+  "row_text": "Betano.uk |  | CLAIM BONUS | \t |  | 2.00 |  | \t |  | 3.25 |  | \t |  | 3.70 |  | \t | 92.8%",
+  "hist": []
+ },
+ "Betfred": {
+  "row_text": "Betfred |  | CLAIM BONUS | \t |  | 2.05 |  | \t |  | 3.30 |  | \t |  | 3.75 |  | \t | 94.6%",
+  "hist": [
+   "ODDS MOVEMENT\n18 Oct, 13:52\n2.05\n+0.32\nOpening odds:\n19 Sept, 17:02\n1.73",
+   "ODDS MOVEMENT\n18 Oct, 13:27\n3.30\n-0.70\nOpening odds:\n19 Sept, 17:02\n4.00",
+   "ODDS MOVEMENT\n18 Oct, 13:52\n3.75\n-0.75\nOpening odds:\n19 Sept, 17:02\n4.50"
+  ]
+ },
+ "BetMGM.uk": {
+  "row_text": "BetMGM.uk |  | CLAIM BONUS | \t |  | 2.02 |  | \t |  | 3.15 |  | \t |  | 3.75 |  | \t | 92.7%",
+  "hist": []
+ },
+ "BetUK": {
+  "row_text": "BetUK |  | CLAIM BONUS | \t |  | 2.05 |  | \t |  | 3.15 |  | \t |  | 3.80 |  | \t | 93.6%",
+  "hist": []
+ },
+ "BetVictor": {
+  "row_text": "BetVictor |  | CLAIM BONUS | \t |  | 2.00 |  | \t |  | 3.25 |  | \t |  | 3.70 |  | \t | 92.8%",
+  "hist": []
+ },
+ "Betway": {
+  "row_text": "Betway |  | CLAIM BONUS | \t |  | 2.05 |  | \t |  | 3.10 |  | \t |  | 3.80 |  | \t | 93.1%",
+  "hist": []
+ },
+ "bwin": {
+  "row_text": "bwin |  | CLAIM BONUS | \t |  | 2.05 |  | \t |  | 3.20 |  | \t |  | 3.80 |  | \t | 94.0%",
+  "hist": []
+ },
+ "Midnite": {
+  "row_text": "Midnite |  | CLAIM BONUS | \t |  | 2.05 |  | \t |  | 3.25 |  | \t |  | 3.60 |  | \t | 93.2%",
+  "hist": []
+ },
+ "Paddy Power": {
+  "row_text": "Paddy Power |  | CLAIM BONUS | \t |  | 2.05 |  | \t |  | 3.10 |  | \t |  | 3.80 |  | \t | 93.1%",
+  "hist": []
+ },
+ "Skybet": {
+  "row_text": "Skybet |  | CLAIM BONUS | \t |  | 2.05 |  | \t |  | 3.20 |  | \t |  | 3.80 |  | \t | 94.0%",
+  "hist": []
+ },
+ "SpreadEX": {
+  "row_text": "SpreadEX |  | CLAIM BONUS | \t |  | 2.05 |  | \t |  | 3.10 |  | \t |  | 3.90 |  | \t | 93.7%",
+  "hist": []
+ },
+ "Unibetuk": {
+  "row_text": "Unibetuk |  | CLAIM BONUS | \t |  | 2.05 |  | \t |  | 3.40 |  | \t |  | 4.00 |  | \t | 96.9%",
+  "hist": []
+ },
+ "William Hill": {
+  "row_text": "William Hill |  | CLAIM BONUS | \t |  | 2.10 |  | \t |  | 3.00 |  | \t |  | 3.80 |  | \t | 93.2%",
+  "hist": []
+ }
+}
