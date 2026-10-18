@@ -47,7 +47,7 @@ Production is the local database of one host: on the mini-PC, `DATABASE_URL` nam
 
 `.env.example` defines `LOCAL_DATABASE_URL`, `DEV_DATABASE_URL`, `PROD_DATABASE_URL` and sets `DATABASE_URL=${DEV_DATABASE_URL}`, so a fresh copy of it points at the shared dev database (#429). On existing machines `PROD_DATABASE_URL` names the Neon archive, not the mini-PC database. Lambda gets `DATABASE_URL` from Terraform, which takes the dev or production Neon connection string per environment (`deployment/aws/terraform/terraform.tfvars.example`; the provider is not verifiable from the repo beyond that template).
 
-- Production migrates only through `deploy.sh` on the mini-PC, which runs `alembic upgrade head` before restarting the scheduler ([migrations](howto-database-migration.md), [Redeploy](../scheduling/howto-run-scheduler-service.md#redeploy)). `.github/workflows/deploy-prod.yml` migrates the Neon archive and must not be run ([Where each job runs](../scheduling/job-deployment-matrix.md#dormant-aws-rules)).
+- Production migrates only through [`deploy.sh`](../scheduling/howto-run-scheduler-service.md#redeploy) on the mini-PC, which runs `alembic upgrade head` before restarting the scheduler ([migrations](howto-database-migration.md)). `.github/workflows/deploy-prod.yml` migrates the Neon archive and must not be run ([Where each job runs](../scheduling/job-deployment-matrix.md#dormant-aws-rules)).
 - No backup of the production database is configured in the repo. Data gaps are filled with [historical loads](../collection/odds-api-backfill.md).
 - `tests/migration` connects to whatever `DATABASE_URL` points at and is run only by the deploy workflows ([Test suite](test-suite.md#migration-tests)).
 

@@ -52,7 +52,7 @@ The AWS stack is dormant and production runs on the mini-PC ([ADR-0008](../../do
    - Pass the pushed tags through `image_tag` and `scraper_image_tag`.
 3. Run migrations against the dev database: `uv run alembic upgrade head` ([howto-database-migration](../foundations/howto-database-migration.md)).
    - The deploy workflows apply Terraform before `alembic upgrade head`, so new code can briefly run against the old schema (#443); keep migrations backward-compatible with the running release `(inferred)`.
-   - The production Terraform stack's database is the Neon archive; the production database itself migrates only through `deploy.sh` on the mini-PC.
+   - The production Terraform stack's database is the Neon archive; the production database itself migrates only through [`deploy.sh`](../scheduling/howto-run-scheduler-service.md#redeploy) on the mini-PC.
 4. Activate self-scheduling: invoke each scheduler and scraper job once.
    ```bash
    uv run python scripts/ci/test_lambda.py --lambda-name <function> --jobs <csv>

@@ -40,8 +40,9 @@ On a Windows host the unit runs inside WSL, which starts only when something cal
 
 ## Redeploy
 
-Run `./deploy.sh` from the repo root on the mini-PC; it is the only path to production. In order it runs `git pull --ff-only`, `uv sync`, `uv run alembic upgrade head`, `SCHEDULER_DRY_RUN=true uv run odds scheduler smoke`, `sudo systemctl restart odds-scheduler`, then status and `odds scheduler list-jobs`.
+Run `./deploy.sh` from the repo root on the mini-PC; it is the only path to production. It first puts `$HOME/.local/bin` (the uv installer's directory) on `PATH` and checks that `git`, `uv`, `sudo` and `systemctl` resolve, exiting before any change if one does not, so it also runs from a non-interactive `ssh <host> 'cd ~/odds && ./deploy.sh'`. In order it then runs `git pull --ff-only`, `uv sync`, `uv run alembic upgrade head`, `SCHEDULER_DRY_RUN=true uv run odds scheduler smoke`, `sudo systemctl restart odds-scheduler`, then status and `odds scheduler list-jobs`.
 
+- New code serves only after the restart. Until then the running scheduler keeps the modules it loaded at start, whatever the checkout holds. `systemctl status odds-scheduler` shows the start time, which must be later than the pull (`git reflog -1 --date=iso`).
 - `set -e` aborts before the restart if migration or smoke fails, so the old code keeps serving.
 - Dry-run makes self-scheduling a no-op, so the live schedule store is untouched. It does not stop the jobs' own work: smoke runs each job's real `main()`, so a due `fetch-odds` or `fetch-scores` spends Odds API quota ([CLI](local-scheduler.md#cli)).
 - `--ff-only` fails on a diverged checkout, so discard or commit local edits on the host first.

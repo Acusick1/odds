@@ -15,6 +15,17 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
+# A non-interactive shell (`ssh host ./deploy.sh`) does not read the rc file
+# that puts the uv installer's directory on PATH. Resolve every tool before the
+# pull so a missing one cannot leave the checkout ahead of the running scheduler.
+export PATH="$HOME/.local/bin:$PATH"
+for tool in git uv sudo systemctl; do
+    if ! command -v "$tool" >/dev/null; then
+        echo "deploy.sh: $tool not found on PATH ($PATH); nothing was changed" >&2
+        exit 1
+    fi
+done
+
 echo "==> git pull"
 git pull --ff-only
 

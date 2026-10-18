@@ -37,7 +37,7 @@ Quota is a per-key monthly balance that only [the client](odds-api-client.md#cos
 
 ## Scheduled spend
 
-The scheduled jobs that spend units are `fetch-odds` and `fetch-scores`, both on the mini-PC and both limited to EPL by the `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). `odds scheduler smoke`, which `deploy.sh` runs, calls their real `main()`, so a deploy spends units whenever either job is due ([local-scheduler](../scheduling/local-scheduler.md#cli)).
+The scheduled jobs that spend units are `fetch-odds` and `fetch-scores`, both on the mini-PC and both limited to EPL by the `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). `odds scheduler smoke`, which [`deploy.sh`](../scheduling/howto-run-scheduler-service.md#redeploy) runs, calls their real `main()`, so a deploy spends units whenever either job is due ([local-scheduler](../scheduling/local-scheduler.md#cli)).
 
 ## Where the views disagree
 
