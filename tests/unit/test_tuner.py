@@ -1447,7 +1447,7 @@ class TestApplyTrialParams:
                 strategy_type="lstm_line_movement",
                 data=DataConfig(start_date="2024-01-01", end_date="2024-12-31"),
                 model=LSTMConfig(lookback_hours=72, timesteps=24),
-                features=FeatureConfig(adapter="lstm"),
+                features=FeatureConfig(adapter="lstm", target_type="raw"),
             ),
         )
         apply_trial_params(config, {"lookback_hours": 48, "timesteps": 12})

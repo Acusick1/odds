@@ -50,6 +50,7 @@ def make_ml_config() -> Callable[..., Any]:
     from odds_analytics.training import (
         DataConfig,
         ExperimentConfig,
+        FeatureConfig,
         MLTrainingConfig,
         TrainingConfig,
         XGBoostConfig,
@@ -83,6 +84,7 @@ def make_ml_config() -> Callable[..., Any]:
                     **data_kwargs,
                 ),
                 model=XGBoostConfig(n_estimators=10),
+                features=FeatureConfig(target_type="raw"),
             ),
             tuning=TuningConfig(metric=metric, search_spaces=search_spaces or {}),
         )
