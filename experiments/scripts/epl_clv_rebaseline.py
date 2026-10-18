@@ -413,7 +413,7 @@ async def main(n_trials: int, n_resamples: int, bootstrap_seed: int) -> None:
                 }
             )
 
-    # The partial last block is not a walk-forward fold (ADR-0010) and does not enter the
+    # make_walk_forward_splits drops the partial last block, so it does not enter the
     # keep test. It is scored once, trained on every earlier event, for information.
     if unscored_tail:
         tail_layout = {
