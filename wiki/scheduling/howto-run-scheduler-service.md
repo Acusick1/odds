@@ -47,10 +47,10 @@ On a Windows host the unit runs inside WSL, which starts only when something cal
 
 Run `./deploy.sh` from the repo root on the mini-PC; it is the only path to production. It works from a terminal or from a non-interactive `ssh <host> 'cd ~/odds && ./deploy.sh'`.
 
-1. **Preflight.** It puts `$HOME/.local/bin` (the uv installer's directory) on `PATH` and checks that `git`, `uv`, `sudo` and `systemctl` resolve. Without a terminal it also requires the NOPASSWD rule for `systemctl restart odds-scheduler` ([Install the unit](#install-the-unit)). A failed check exits before anything changes.
+1. **Preflight.** It puts `$HOME/.local/bin` (the uv installer's directory) on `PATH` and checks that `git`, `uv`, `sudo` and `systemctl` resolve. Without a terminal it also requires the NOPASSWD rule for `systemctl restart odds-scheduler` ([Install the unit](#install-the-unit)). A failed check exits before anything changes. From a terminal without the rule, sudo prompts for a password at the restart, after the smoke run; until it is answered the checkout and environment are ahead of the running scheduler, which keeps serving the old code.
 2. **Update and validate.** `git pull --ff-only`, `uv sync`, `uv run alembic upgrade head`, `SCHEDULER_DRY_RUN=true uv run odds scheduler smoke`.
 3. **Restart.** `sudo systemctl restart odds-scheduler`. New code serves only from here: until the restart the running scheduler keeps the modules it loaded at start, whatever the checkout holds.
-4. **Verify.** After 15 s it exits non-zero, printing the unit status, unless the unit is active, its `ActiveEnterTimestamp` is later than the start of the deploy, and its `NRestarts` has not grown (no crash loop). Then it prints `odds scheduler list-jobs`.
+4. **Verify.** After 15 s it exits non-zero, printing the unit status, unless the unit is active, its `ActiveEnterTimestamp` (read as a unix timestamp) is no earlier than the start of the deploy, and its `NRestarts` has not grown (no crash loop). Then it prints `odds scheduler list-jobs`.
 
 - `set -e` aborts before the restart if migration or smoke fails, so the old code keeps serving.
 - Dry-run makes self-scheduling a no-op, so the live schedule store is untouched. It does not stop the jobs' own work: smoke runs each job's real `main()`, so a due `fetch-odds` or `fetch-scores` spends Odds API quota ([CLI](local-scheduler.md#cli)).

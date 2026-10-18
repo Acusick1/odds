@@ -72,9 +72,11 @@ fail() {
     exit 1
 }
 systemctl is-active --quiet "$SERVICE" || fail "$SERVICE is not active after the restart"
-active_since="$(systemctl show "$SERVICE" -p ActiveEnterTimestamp --value)"
-(( $(date -d "$active_since" +%s) >= deploy_started_at )) \
-    || fail "$SERVICE has been active since $active_since, before this deploy began; it is still on the old code"
+active_since="$(systemctl show "$SERVICE" --timestamp=unix -p ActiveEnterTimestamp --value)"
+active_since="${active_since#@}"
+[[ "$active_since" =~ ^[0-9]+$ ]] || fail "could not read $SERVICE's ActiveEnterTimestamp ('$active_since')"
+(( active_since >= deploy_started_at )) \
+    || fail "$SERVICE has been active since $active_since (unix), before this deploy began at $deploy_started_at; it is still on the old code"
 restarts_after="$(systemctl show "$SERVICE" -p NRestarts --value)"
 (( restarts_after == restarts_before )) \
     || fail "$SERVICE restarted $((restarts_after - restarts_before)) time(s) within 15 s of the deploy; it is crash-looping"
