@@ -1108,9 +1108,9 @@ class TestLSTMAdapter:
     def test_feature_names_sequence_only_when_no_static_groups(self):
         from odds_analytics.feature_extraction import SequenceFeatures
 
-        seq_only_config = FeatureConfig(
+        seq_only_config = FeatureConfig.model_construct(
             adapter="lstm",
-            feature_groups=["sequence"],
+            feature_groups=(),
             markets=["h2h"],
             outcome="home",
             lookback_hours=72,

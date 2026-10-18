@@ -11,14 +11,14 @@ The XGBoost CLV model predicts how far a bookmaker's line moves between a decisi
 ### Reference
 
 - [Cross-validation](cross-validation.md) — How cross_validation.py builds walk-forward folds, the other CV methods, per-fold metrics and train_with_cv.
-- [EPL context feature groups](epl-context-features.md) — The standings, match_stats, epl_schedule and epl_lineup extractors with their inputs, windows, point-in-time rules and data dependencies.
+- [EPL context feature groups](epl-context-features.md) — The standings, match_stats and epl_schedule extractors with their inputs, windows, point-in-time rules and data dependencies.
 - [Feature groups](feature-groups.md) — The catalogue of feature groups and column counts, the tabular extractor and its sharp and retail defaults, and the NBA injury, rest and Polymarket groups.
 - [Feature pipeline](feature-pipeline.md) — The five layers of odds_analytics.feature_groups, caches, samplers, adapters, orchestrator, NaN-fill and variance policy.
 - [Hyperparameter tuner (Optuna)](hyperparameter-tuner.md) — OptunaTuner, the objective, search-space schema, feature selection and CLI options, with the production search space cited by file.
 - [Line-movement strategies (XGBoost, LSTM)](line-movement-models.md) — The two strategy classes, their shared confidence mapping, defaults, save and load, and ml_strategy_example.
 - [Model store](model-store.md) — odds model publish, the S3 layout and bucket, load_model caching and model_supports_sport.
 - [Prediction scoring](prediction-scoring.md) — The score_events flow, the predictions table, where scoring runs and how failures surface.
-- [Target functions](clv-target-functions.md) — The devigged and raw target functions, the `_compute_target` dispatch, closing-snapshot selection, and the target fields of FeatureConfig.
+- [Target functions](clv-target-functions.md) — The devigged and raw target functions, the `_compute_target` dispatch, closing-snapshot selection, and the target fields of FeatureConfig (the feature group names it validates are on [Feature groups](feature-groups.md)).
 - [Training config](training-config.md) — The MLTrainingConfig schema, every section's fields and defaults, data-source selection, and values the schema accepts that cannot train.
 - [Training pipeline](training-pipeline.md) — What odds train run, tune, validate and list-configs do step by step, the splits, verification artifacts and MLflow tracking.
 

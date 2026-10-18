@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, get_args
 
 import numpy as np
 import pandas as pd
@@ -58,9 +58,9 @@ from odds_analytics.sequence_loader import (
     extract_devigged_totals_probs,
     load_sequences_for_event,
 )
+from odds_analytics.training.config import FeatureGroupName
 
 if TYPE_CHECKING:
-    from odds_analytics.epl_lineup_features import LineupCache
     from odds_analytics.match_stats_features import MatchStatsCache
     from odds_analytics.training.config import FeatureConfig
 
@@ -83,7 +83,6 @@ __all__ = [
     "FeatureGroupCaches",
     "preload_feature_group_caches",
     "load_fixtures_df",
-    "load_lineup_cache",
 ]
 
 
@@ -118,7 +117,6 @@ class EventDataBundle:
     prior_season_events: list[Event] = field(default_factory=list)
     prior_match_stats: dict[str, list[dict[str, int]]] = field(default_factory=dict)
     fixtures_df: pd.DataFrame | None = None
-    lineup_cache: LineupCache | None = None
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
@@ -151,7 +149,6 @@ async def collect_event_data(
     standings_cache: dict[str, list[Event]] | None = None,
     match_stats_cache: MatchStatsCache | None = None,
     fixtures_df: pd.DataFrame | None = None,
-    lineup_cache: LineupCache | None = None,
 ) -> EventDataBundle:
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
@@ -160,7 +157,7 @@ async def collect_event_data(
     - Finds closing snapshot (prefers target bookmaker when applicable)
     - Loads PM context (PM event, moneyline market, home_idx)
     - Bulk-loads all PM prices + orderbooks for the market (2 queries total)
-    - Loads sequences via load_sequences_for_event when trajectory features requested
+    - Loads sequences via load_sequences_for_event when the LSTM adapter is configured
     """
     from odds_lambda.storage.polymarket_reader import PolymarketReader
     from odds_lambda.storage.readers import OddsReader
@@ -288,7 +285,6 @@ async def collect_event_data(
         prior_season_events=prior_season_events,
         prior_match_stats=prior_match_stats,
         fixtures_df=fixtures_df,
-        lineup_cache=lineup_cache,
         sequences=sequences,
     )
 
@@ -520,18 +516,7 @@ class FeatureAdapter(Protocol):
         ...
 
 
-_STATIC_FEATURE_GROUPS = frozenset(
-    {
-        "tabular",
-        "polymarket",
-        "injuries",
-        "rest",
-        "standings",
-        "match_stats",
-        "epl_schedule",
-        "epl_lineup",
-    }
-)
+_STATIC_FEATURE_GROUPS = frozenset(get_args(FeatureGroupName))
 
 
 def _static_feature_group_names(config: FeatureConfig) -> list[str]:
@@ -567,10 +552,6 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
         from odds_analytics.epl_schedule_features import EplScheduleFeatures
 
         names.extend(f"eplsched_{n}" for n in EplScheduleFeatures.get_feature_names())
-    if "epl_lineup" in config.feature_groups:
-        from odds_analytics.epl_lineup_features import EplLineupFeatures
-
-        names.extend(f"epllu_{n}" for n in EplLineupFeatures.get_feature_names())
     return names
 
 
@@ -776,23 +757,6 @@ def _extract_static_feature_parts(
         except Exception:
             logger.debug("epl_schedule_feature_extraction_failed", event_id=event.id)
             parts.append(nan_block_eplsched)
-
-    # --- EPL lineup features (NaN-fill on failure to keep row) ---
-    if "epl_lineup" in config.feature_groups:
-        from odds_analytics.epl_lineup_features import (
-            EplLineupFeatures,
-            extract_epl_lineup_features,
-        )
-
-        n_epllu = len(EplLineupFeatures.get_feature_names())
-        nan_block_epllu = np.full(n_epllu, np.nan)
-
-        try:
-            epllu_feats = extract_epl_lineup_features(bundle.lineup_cache, event)
-            parts.append(epllu_feats.to_array())
-        except Exception:
-            logger.debug("epl_lineup_feature_extraction_failed", event_id=event.id)
-            parts.append(nan_block_epllu)
 
     return parts
 
@@ -1013,37 +977,6 @@ async def load_fixtures_df(session: AsyncSession) -> pd.DataFrame | None:
     return df
 
 
-async def load_lineup_cache(session: AsyncSession) -> LineupCache | None:
-    """Load all ESPN lineups from DB and build a per-team starting XI cache.
-
-    Loads the full roster (starters + subs) with player_name so that downstream
-    consumers like the FPL availability feature group can do fuzzy name matching.
-    The build_lineup_cache function filters to starters internally.
-
-    Returns None if no lineup data exists in the database.
-    """
-    from odds_lambda.storage.espn_lineup_reader import EspnLineupReader
-
-    from odds_analytics.epl_lineup_features import build_lineup_cache
-
-    reader = EspnLineupReader(session)
-    lineups = await reader.get_all_lineups()
-    if not lineups:
-        logger.warning("espn_lineups_not_found_in_db")
-        return None
-
-    rows = [
-        lu.model_dump(include={"team", "player_id", "player_name", "date", "starter"})
-        for lu in lineups
-    ]
-    df = pd.DataFrame(rows).rename(columns={"date": "datetime"})
-    df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
-    df["match_date"] = df["datetime"].dt.date
-
-    logger.info("espn_lineups_loaded_from_db", rows=len(df))
-    return build_lineup_cache(df[df["starter"]].drop(columns=["starter"]))
-
-
 @dataclass
 class FeatureGroupCaches:
     """Bulk-loaded caches shared across events during feature extraction.
@@ -1055,7 +988,6 @@ class FeatureGroupCaches:
     standings: dict[str, list[Event]] | None = None
     match_stats: MatchStatsCache | None = None
     fixtures_df: pd.DataFrame | None = None
-    lineup_cache: LineupCache | None = None
 
 
 async def preload_feature_group_caches(
@@ -1082,9 +1014,6 @@ async def preload_feature_group_caches(
 
     if "epl_schedule" in config.feature_groups:
         caches.fixtures_df = await load_fixtures_df(session)
-
-    if "epl_lineup" in config.feature_groups:
-        caches.lineup_cache = await load_lineup_cache(session)
 
     return caches
 
@@ -1179,7 +1108,6 @@ async def prepare_training_data(
             standings_cache=caches.standings,
             match_stats_cache=caches.match_stats,
             fixtures_df=caches.fixtures_df,
-            lineup_cache=caches.lineup_cache,
         )
 
         # Closing snapshot is required

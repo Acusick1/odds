@@ -58,7 +58,7 @@ Zeroed features once hid an adapter bug ([early NBA signal search](exp-early-nba
 | `exp7_backtest_simulation`, `exp7b_line_shopping` | Flat betting and line shopping | [Betting simulation](exp-betting-simulation.md) |
 | `cv_protocol_grid` | CV window and step grid | [CV protocol grid](exp-cv-protocol-grid.md) |
 | `hybrid_sharp_validation` | Pinnacle versus Betfair sharp reference | [EPL sharp reference](exp-epl-sharp-reference.md) |
-| `lineup_signal_check` | EPL lineup features | [EPL feature ablation](exp-epl-feature-ablation-and-search-space.md#lineup-signal-check), [EPL context features](../modelling/epl-context-features.md) |
+| `lineup_signal_check` | EPL lineup metrics (historical; no feature group uses them) | [EPL feature ablation](exp-epl-feature-ablation-and-search-space.md#lineup-signal-check), [EPL context features](../modelling/epl-context-features.md) |
 | `betfair_historical_analysis` | Parses Betfair historical NBA files | none |
 | `betfair_nba_explore` | Live Betfair NBA market survey | none |
 | `sharp_feature_correlation` | Pinnacle versus Betfair sharp features on overlapping events | none |

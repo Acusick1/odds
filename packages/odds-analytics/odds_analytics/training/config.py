@@ -48,6 +48,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = structlog.get_logger()
 
+# Single source of truth for valid feature group names; feature_groups.py
+# derives its static-group dispatch set from this.
+FeatureGroupName = Literal[
+    "tabular",
+    "polymarket",
+    "injuries",
+    "rest",
+    "standings",
+    "match_stats",
+    "epl_schedule",
+]
+
 # Maximum inheritance depth to prevent excessive nesting
 _MAX_INHERITANCE_DEPTH = 10
 
@@ -639,10 +651,10 @@ class FeatureConfig(BaseModel):
     )
 
     # Feature groups to compose
-    feature_groups: tuple[str, ...] = Field(
+    feature_groups: tuple[FeatureGroupName, ...] = Field(
         default=("tabular",),
         min_length=1,
-        description="Feature groups to compose. Available: tabular, trajectory, polymarket, injuries, rest, standings, match_stats, epl_schedule, epl_lineup",
+        description="Feature groups to compose. Available: tabular, polymarket, injuries, rest, standings, match_stats, epl_schedule",
     )
 
     # Standings feature configuration

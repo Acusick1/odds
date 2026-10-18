@@ -52,7 +52,7 @@ More data and a re-run at 500+ events were the next steps ([injury features and 
 
 ## Caveats
 
-- **Not reproducible as recorded.** The scripts group features as `trajectory` and `cross_source`, which are not defined in `odds_analytics.feature_groups`; the tabular group has 6 columns ([feature groups](../modelling/feature-groups.md)).
+- **Not reproducible as recorded.** The scripts group features as `trajectory` and `cross_source`, which are not defined in `odds_analytics.feature_groups` and are rejected by `odds_analytics.training.config.FeatureConfig`; the tabular group has 6 columns ([feature groups](../modelling/feature-groups.md)).
 - **Feature counts differ by denominator.** 0 of the 60 testable features survive correction; 15 of the 75 are constant (`experiments/results/exp1_feature_correlations/FINDINGS.md`).
 - **LSTM is still selectable.** Sequence features and the LSTM adapter remain in code behind `strategy_type: lstm_line_movement`; nothing prevents using them ([line-movement models](../modelling/line-movement-models.md)).
 - All LSTM runs used the Pinnacle target on NBA; no LSTM run with the bet365 target or on EPL is recorded, and neither LSTM config sets `target_bookmaker`, so the code default (Pinnacle) applies.

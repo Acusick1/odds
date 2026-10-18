@@ -21,12 +21,12 @@ status: stable
 
 # EPL context data (ESPN, FPL, FBref)
 
-Supplementary EPL data that feeds the `epl_schedule` and `epl_lineup` [feature groups](../modelling/epl-context-features.md) and the MCP team-context tool ([mcp-sport-context-tools](../agent/mcp-sport-context-tools.md)). Models are in `odds_core.epl_data_models`; fetchers and storage in `packages/odds-lambda/odds_lambda/`.
+Supplementary EPL data that feeds the `epl_schedule` [feature group](../modelling/epl-context-features.md) and the MCP team-context tool ([mcp-sport-context-tools](../agent/mcp-sport-context-tools.md)). Models are in `odds_core.epl_data_models`; fetchers and storage in `packages/odds-lambda/odds_lambda/`.
 
 | Source | Table (model) | Written by | Read by |
 |---|---|---|---|
 | ESPN fixtures | `espn_fixtures` (`odds_core.epl_data_models.EspnFixture`) | the `fetch-espn-fixtures` job; `scripts/ingest_espn_fixtures.py` | `odds_lambda.storage.espn_fixture_reader.EspnFixtureReader`, `odds_analytics.feature_groups.load_fixtures_df` |
-| ESPN lineups | `espn_lineups` (`odds_core.epl_data_models.EspnLineup`) | `scripts/ingest_espn_lineups.py` (manual) | `odds_lambda.storage.espn_lineup_reader.EspnLineupReader`, `odds_analytics.feature_groups.load_lineup_cache` |
+| ESPN lineups | `espn_lineups` (`odds_core.epl_data_models.EspnLineup`) | `scripts/ingest_espn_lineups.py` (manual) | `odds_lambda.storage.espn_lineup_reader.EspnLineupReader` |
 | FPL availability | `fpl_availability` (`odds_core.epl_data_models.FplAvailability`) | `scripts/ingest_fpl_availability.py` (manual) | `odds_lambda.storage.fpl_availability_reader.FplAvailabilityReader` |
 | FBref player stats | none | `scripts/ingest_fbref_player_stats.py` (CSV only) | n/a |
 
@@ -45,7 +45,7 @@ Supplementary EPL data that feeds the `epl_schedule` and `epl_lineup` [feature g
 
 All three are manual scripts writing CSVs under `data/`, with `--skip-db` on the lineup and FPL scripts to skip the upsert. Lineup coverage is 2020-21 onward, FPL 2021-22 onward (`scripts/ingest_espn_lineups.py`, `scripts/ingest_fpl_availability.py`). FBref pages must be saved by hand from a browser (Cloudflare) and parsed; there is no model or table.
 
-`epl_lineup` features use `espn_lineups`, with a look-ahead caveat: the XI is public about KO-60 while training samples 3-24 h out ([look-ahead-bias](../modelling/look-ahead-bias.md)). FPL availability hurt in the ablation (R² -0.017 sliding) and has no feature group ([exp-epl-feature-ablation-and-search-space](../evaluation/exp-epl-feature-ablation-and-search-space.md)).
+No feature group reads `espn_lineups`. FPL availability hurt in the ablation (R² -0.017 sliding) and has no feature group ([exp-epl-feature-ablation-and-search-space](../evaluation/exp-epl-feature-ablation-and-search-space.md)).
 
 No scheduled lineup job exists: lineups are sourced from live web research, and the manual lineup script feeds training data only ([ADR-0006](../../docs/adr/0006-lineups-from-web-research.md)). ESPN is still used for fixtures.
 

@@ -396,30 +396,3 @@ class TestLoadFixturesDf:
         df = await load_fixtures_df(pglite_async_session)
         assert df is not None
         assert df["date"].dt.tz is not None
-
-
-class TestLoadLineupCache:
-    @pytest.mark.asyncio
-    async def test_returns_none_when_empty(self, pglite_async_session):
-        from odds_analytics.feature_groups import load_lineup_cache
-
-        cache = await load_lineup_cache(pglite_async_session)
-        assert cache is None
-
-    @pytest.mark.asyncio
-    async def test_returns_cache_from_db_records(self, pglite_async_session):
-        from odds_analytics.feature_groups import load_lineup_cache
-
-        writer = EspnLineupWriter(pglite_async_session)
-        await writer.upsert_lineups(
-            [
-                _lineup_record(player_id="1", player_name="Player A", starter=True),
-                _lineup_record(player_id="2", player_name="Player B", starter=True),
-                _lineup_record(player_id="3", player_name="Sub C", starter=False),
-            ]
-        )
-        await pglite_async_session.commit()
-
-        cache = await load_lineup_cache(pglite_async_session)
-        assert cache is not None
-        assert "Arsenal" in cache

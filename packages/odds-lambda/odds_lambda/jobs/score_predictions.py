@@ -176,7 +176,6 @@ async def score_events(
                 standings_cache=caches.standings,
                 match_stats_cache=caches.match_stats,
                 fixtures_df=caches.fixtures_df,
-                lineup_cache=caches.lineup_cache,
             )
 
             for snapshot in snapshots:

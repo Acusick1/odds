@@ -5,12 +5,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_analytics.feature_groups import (
+    _STATIC_FEATURE_GROUPS,
     _should_filter_missing_sharp,
     preload_feature_group_caches,
     snapshot_has_bookmaker,
 )
 from odds_analytics.training.config import FeatureConfig
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from pydantic import ValidationError
 
 
 def _make_event() -> Event:
@@ -179,11 +181,27 @@ def _config_with_groups(*groups: str) -> FeatureConfig:
     )
 
 
+class TestFeatureGroupValidation:
+    """FeatureConfig.feature_groups rejects names no code dispatches on."""
+
+    def test_unknown_name_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            FeatureConfig(feature_groups=("tabular", "bogus"))
+
+    @pytest.mark.parametrize("name", ["epl_lineup", "trajectory"])
+    def test_removed_or_unhandled_names_rejected(self, name: str) -> None:
+        with pytest.raises(ValidationError):
+            FeatureConfig(feature_groups=("tabular", name))
+
+    def test_every_dispatched_group_accepted(self) -> None:
+        names = tuple(sorted(_STATIC_FEATURE_GROUPS))
+        assert FeatureConfig(feature_groups=names).feature_groups == names
+
+
 class TestPreloadFeatureGroupCaches:
     """Gating behaviour of the shared preload helper."""
 
     @pytest.mark.asyncio
-    @patch("odds_analytics.feature_groups.load_lineup_cache", new_callable=AsyncMock)
     @patch("odds_analytics.feature_groups.load_fixtures_df", new_callable=AsyncMock)
     @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
     @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
@@ -192,7 +210,6 @@ class TestPreloadFeatureGroupCaches:
         mock_standings: AsyncMock,
         mock_match_stats: AsyncMock,
         mock_fixtures: AsyncMock,
-        mock_lineup: AsyncMock,
     ) -> None:
         config = _config_with_groups("tabular")
         session = AsyncMock()
@@ -202,14 +219,11 @@ class TestPreloadFeatureGroupCaches:
         assert caches.standings is None
         assert caches.match_stats is None
         assert caches.fixtures_df is None
-        assert caches.lineup_cache is None
         mock_standings.assert_not_called()
         mock_match_stats.assert_not_called()
         mock_fixtures.assert_not_called()
-        mock_lineup.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("odds_analytics.feature_groups.load_lineup_cache", new_callable=AsyncMock)
     @patch("odds_analytics.feature_groups.load_fixtures_df", new_callable=AsyncMock)
     @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
     @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
@@ -218,7 +232,6 @@ class TestPreloadFeatureGroupCaches:
         mock_standings: AsyncMock,
         mock_match_stats: AsyncMock,
         mock_fixtures: AsyncMock,
-        mock_lineup: AsyncMock,
     ) -> None:
         sentinel: dict[str, list[Event]] = {"2025-26": []}
         mock_standings.return_value = sentinel
@@ -230,14 +243,11 @@ class TestPreloadFeatureGroupCaches:
         assert caches.standings is sentinel
         assert caches.match_stats is None
         assert caches.fixtures_df is None
-        assert caches.lineup_cache is None
         mock_standings.assert_awaited_once_with(session, "soccer_epl")
         mock_match_stats.assert_not_called()
         mock_fixtures.assert_not_called()
-        mock_lineup.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("odds_analytics.feature_groups.load_lineup_cache", new_callable=AsyncMock)
     @patch("odds_analytics.feature_groups.load_fixtures_df", new_callable=AsyncMock)
     @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
     @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
@@ -246,7 +256,6 @@ class TestPreloadFeatureGroupCaches:
         mock_standings: AsyncMock,
         mock_match_stats: AsyncMock,
         mock_fixtures: AsyncMock,
-        mock_lineup: AsyncMock,
     ) -> None:
         sentinel = MagicMock(name="match_stats_cache")
         mock_match_stats.return_value = sentinel
@@ -258,14 +267,11 @@ class TestPreloadFeatureGroupCaches:
         assert caches.standings is None
         assert caches.match_stats is sentinel
         assert caches.fixtures_df is None
-        assert caches.lineup_cache is None
         mock_standings.assert_not_called()
         mock_match_stats.assert_awaited_once_with(session, "soccer_epl")
         mock_fixtures.assert_not_called()
-        mock_lineup.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("odds_analytics.feature_groups.load_lineup_cache", new_callable=AsyncMock)
     @patch("odds_analytics.feature_groups.load_fixtures_df", new_callable=AsyncMock)
     @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
     @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
@@ -274,7 +280,6 @@ class TestPreloadFeatureGroupCaches:
         mock_standings: AsyncMock,
         mock_match_stats: AsyncMock,
         mock_fixtures: AsyncMock,
-        mock_lineup: AsyncMock,
     ) -> None:
         """epl_schedule pulls in standings_cache too (shared by season-rest features)."""
         standings_sentinel: dict[str, list[Event]] = {"2025-26": []}
@@ -289,42 +294,11 @@ class TestPreloadFeatureGroupCaches:
         assert caches.standings is standings_sentinel
         assert caches.match_stats is None
         assert caches.fixtures_df is fixtures_sentinel
-        assert caches.lineup_cache is None
         mock_standings.assert_awaited_once_with(session, "soccer_epl")
         mock_fixtures.assert_awaited_once_with(session)
         mock_match_stats.assert_not_called()
-        mock_lineup.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("odds_analytics.feature_groups.load_lineup_cache", new_callable=AsyncMock)
-    @patch("odds_analytics.feature_groups.load_fixtures_df", new_callable=AsyncMock)
-    @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
-    @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
-    async def test_epl_lineup_loads_lineup_cache(
-        self,
-        mock_standings: AsyncMock,
-        mock_match_stats: AsyncMock,
-        mock_fixtures: AsyncMock,
-        mock_lineup: AsyncMock,
-    ) -> None:
-        sentinel = MagicMock(name="lineup_cache")
-        mock_lineup.return_value = sentinel
-        config = _config_with_groups("tabular", "epl_lineup")
-        session = AsyncMock()
-
-        caches = await preload_feature_group_caches(session, config, "soccer_epl")
-
-        assert caches.standings is None
-        assert caches.match_stats is None
-        assert caches.fixtures_df is None
-        assert caches.lineup_cache is sentinel
-        mock_standings.assert_not_called()
-        mock_match_stats.assert_not_called()
-        mock_fixtures.assert_not_called()
-        mock_lineup.assert_awaited_once_with(session)
-
-    @pytest.mark.asyncio
-    @patch("odds_analytics.feature_groups.load_lineup_cache", new_callable=AsyncMock)
     @patch("odds_analytics.feature_groups.load_fixtures_df", new_callable=AsyncMock)
     @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
     @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
@@ -333,23 +307,19 @@ class TestPreloadFeatureGroupCaches:
         mock_standings: AsyncMock,
         mock_match_stats: AsyncMock,
         mock_fixtures: AsyncMock,
-        mock_lineup: AsyncMock,
     ) -> None:
         standings_sentinel: dict[str, list[Event]] = {"2025-26": []}
         match_stats_sentinel = MagicMock(name="match_stats_cache")
         fixtures_sentinel = MagicMock(name="fixtures_df")
-        lineup_sentinel = MagicMock(name="lineup_cache")
         mock_standings.return_value = standings_sentinel
         mock_match_stats.return_value = match_stats_sentinel
         mock_fixtures.return_value = fixtures_sentinel
-        mock_lineup.return_value = lineup_sentinel
 
         config = _config_with_groups(
             "tabular",
             "standings",
             "match_stats",
             "epl_schedule",
-            "epl_lineup",
         )
         session = AsyncMock()
 
@@ -358,14 +328,11 @@ class TestPreloadFeatureGroupCaches:
         assert caches.standings is standings_sentinel
         assert caches.match_stats is match_stats_sentinel
         assert caches.fixtures_df is fixtures_sentinel
-        assert caches.lineup_cache is lineup_sentinel
         mock_standings.assert_awaited_once_with(session, "soccer_epl")
         mock_match_stats.assert_awaited_once_with(session, "soccer_epl")
         mock_fixtures.assert_awaited_once_with(session)
-        mock_lineup.assert_awaited_once_with(session)
 
     @pytest.mark.asyncio
-    @patch("odds_analytics.feature_groups.load_lineup_cache", new_callable=AsyncMock)
     @patch("odds_analytics.feature_groups.load_fixtures_df", new_callable=AsyncMock)
     @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
     @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
@@ -374,7 +341,6 @@ class TestPreloadFeatureGroupCaches:
         mock_standings: AsyncMock,
         mock_match_stats: AsyncMock,
         mock_fixtures: AsyncMock,
-        mock_lineup: AsyncMock,
     ) -> None:
         """Standings and match_stats skip when sport_key is None; sport-agnostic caches still load."""
         fixtures_sentinel = MagicMock(name="fixtures_df")
@@ -387,8 +353,6 @@ class TestPreloadFeatureGroupCaches:
         assert caches.standings is None
         assert caches.match_stats is None
         assert caches.fixtures_df is fixtures_sentinel
-        assert caches.lineup_cache is None
         mock_standings.assert_not_called()
         mock_match_stats.assert_not_called()
         mock_fixtures.assert_awaited_once_with(session)
-        mock_lineup.assert_not_called()

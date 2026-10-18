@@ -44,7 +44,6 @@ Every model forbids unknown keys (`extra="forbid"`). A file has `experiment` (na
 
 ## Values accepted but not trainable
 
-- `feature_groups` is a free `tuple[str, ...]`, so an unknown name is ignored and its description still lists `trajectory`, which no code handles (#475, #473).
 - `strategy_type: xgboost` and `lstm` validate, but `odds_cli.commands.train.STRATEGY_CLASSES` and `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.train_from_config` reject them; under `tune` the resulting error is swallowed per trial (#437, [tuner](hyperparameter-tuner.md)).
 - Search-space keys that match nothing are dropped silently (#437).
 

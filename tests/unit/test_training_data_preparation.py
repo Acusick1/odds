@@ -35,6 +35,7 @@ from odds_analytics.training.data_preparation import (
     save_verification_artifacts,
 )
 from odds_core.models import Event, EventStatus
+from pydantic import ValidationError
 
 # =============================================================================
 # TrainingDataResult Tests
@@ -469,10 +470,9 @@ class TestPrepareTrainingDataFromConfig:
             with pytest.raises(ValueError, match="No valid training data"):
                 await prepare_training_data_from_config(basic_xgboost_config, session)
 
-    def test_unknown_feature_group_accepted(self):
-        """Unknown feature groups are accepted at config time; unknown groups produce no features at runtime."""
-        config = FeatureConfig(feature_groups=["unknown_group"])
-        assert "unknown_group" in config.feature_groups
+    def test_unknown_feature_group_rejected(self):
+        with pytest.raises(ValidationError):
+            FeatureConfig(feature_groups=["unknown_group"])
 
     @pytest.mark.asyncio
     async def test_train_test_split_ratio(self, basic_xgboost_config, mock_events):
