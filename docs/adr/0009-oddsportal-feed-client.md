@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Read OddsPortal live odds from its JSON feed instead of the rendered page
