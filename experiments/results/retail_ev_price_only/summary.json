@@ -1,0 +1,209 @@
+{
+  "git_sha": "b15b89704a06215f5bfab7be6cf9de6a18c6cb68",
+  "script_sha256": "cad4cf2753ab8d7b0e742dc285c742b8e8db83c274afa5c2a2d259bba27f5345",
+  "config_sha256": "1de29a596bc988fbf4dc18c2b66e0b301d98f1d1f2d3d33a3d114bf269516687",
+  "config": "experiments/configs/xgboost_epl_retail_ev_price_only.yaml",
+  "n_trials": 50,
+  "n_boot": 2000,
+  "rows": 113334,
+  "events": 758,
+  "features": [
+    "hours_to_kickoff",
+    "retail_implied_prob",
+    "book_fair_prob",
+    "book_overround",
+    "consensus_prob",
+    "retail_consensus_diff",
+    "num_bookmakers",
+    "sharp_prob",
+    "retail_sharp_diff",
+    "exchange_overround",
+    "exchange_age_hours",
+    "baseline_ev",
+    "is_weekend",
+    "day_of_week",
+    "outcome_home",
+    "outcome_draw",
+    "outcome_away",
+    "book_10bet",
+    "book_7bet",
+    "book_888sport",
+    "book_allbritishcasino",
+    "book_bet365",
+    "book_betano",
+    "book_betfair_sportsbook",
+    "book_betfred",
+    "book_betmgm",
+    "book_betuk",
+    "book_betvictor",
+    "book_betway",
+    "book_bwin",
+    "book_coral",
+    "book_ladbrokes",
+    "book_midnite",
+    "book_paddypower",
+    "book_skybet",
+    "book_spreadex",
+    "book_unibet_uk",
+    "book_williamhill"
+  ],
+  "tuning_range": {
+    "end": "2025-08-01T00:00:00+00:00",
+    "events": 380,
+    "rows": 3861,
+    "min_train_events": 130,
+    "n_folds": 5,
+    "baseline_mean_fold_wmse": 0.0036514802744328236,
+    "shrinkage_mean_fold_wmse": 0.0036530254504844235
+  },
+  "scored": {
+    "events": 350,
+    "rows": 108969,
+    "first_kickoff": "2025-08-15 19:00:00",
+    "last_kickoff": "2026-08-31 19:00:00"
+  },
+  "unscored_partial_block": {
+    "events": 28,
+    "rows": 504
+  },
+  "runs": [
+    {
+      "run": "direct_s42",
+      "best_trial": 30,
+      "best_tuning_cv_wmse": 0.003776336354898438,
+      "best_params": {
+        "n_estimators": 350,
+        "max_depth": 2,
+        "learning_rate": 0.010495250691428266,
+        "min_child_weight": 22,
+        "subsample": 0.5,
+        "colsample_bytree": 0.5,
+        "reg_lambda": 0.011641609056119183
+      },
+      "tune_seconds": 150.8
+    },
+    {
+      "run": "direct_s7",
+      "best_trial": 42,
+      "best_tuning_cv_wmse": 0.003777184054253181,
+      "best_params": {
+        "n_estimators": 400,
+        "max_depth": 2,
+        "learning_rate": 0.011700309996735938,
+        "min_child_weight": 25,
+        "subsample": 0.6,
+        "colsample_bytree": 0.7,
+        "reg_lambda": 3.779196193107407
+      },
+      "tune_seconds": 166.6
+    },
+    {
+      "run": "residual_s42",
+      "best_trial": 42,
+      "best_tuning_cv_wmse": 0.003660465514263183,
+      "best_params": {
+        "n_estimators": 100,
+        "max_depth": 4,
+        "learning_rate": 0.011323568671121477,
+        "min_child_weight": 1916,
+        "subsample": 0.6,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 0.4379360456496741
+      },
+      "tune_seconds": 135.9
+    },
+    {
+      "run": "residual_s7",
+      "best_trial": 49,
+      "best_tuning_cv_wmse": 0.0036974906552391116,
+      "best_params": {
+        "n_estimators": 100,
+        "max_depth": 2,
+        "learning_rate": 0.014174944867490248,
+        "min_child_weight": 422,
+        "subsample": 0.9,
+        "colsample_bytree": 0.5,
+        "reg_lambda": 0.8756519821355035
+      },
+      "tune_seconds": 133.4
+    }
+  ],
+  "seed_7_minus_seed_42_mse_gain_e6": {
+    "direct": {
+      "gain": 13.81019969596087,
+      "gain_ci_low": -5.514338333035885,
+      "gain_ci_high": 33.18626000190846
+    },
+    "residual": {
+      "gain": -16.04560681741133,
+      "gain_ci_low": -44.07657664043882,
+      "gain_ci_high": 9.840658971801986
+    }
+  },
+  "concentration": {
+    "mse_gain_direct_s42": {
+      "total": -71.47284003626285,
+      "top_10_sum": 45.782975548039914,
+      "total_without_top_10": -117.25581558430277,
+      "top_10_live_collected": 0,
+      "positive_events": 175,
+      "negative_events": 175
+    },
+    "mse_gain_direct_s7": {
+      "total": -57.6626403403034,
+      "top_10_sum": 45.93075210487075,
+      "total_without_top_10": -103.59339244517415,
+      "top_10_live_collected": 0,
+      "positive_events": 180,
+      "negative_events": 170
+    },
+    "mse_gain_residual_s42": {
+      "total": 44.52894555273133,
+      "top_10_sum": 46.06327593077724,
+      "total_without_top_10": -1.534330378045908,
+      "top_10_live_collected": 1,
+      "positive_events": 182,
+      "negative_events": 168
+    },
+    "mse_gain_residual_s7": {
+      "total": 28.483338735320217,
+      "top_10_sum": 40.71643146937791,
+      "total_without_top_10": -12.233092734057692,
+      "top_10_live_collected": 1,
+      "positive_events": 184,
+      "negative_events": 166
+    },
+    "pick_gain_direct_s42": {
+      "total": -0.2400318321603702,
+      "top_10_sum": 0.07177206596234212,
+      "total_without_top_10": -0.3118038981227123,
+      "top_10_live_collected": 2,
+      "positive_events": 53,
+      "negative_events": 63
+    },
+    "pick_gain_direct_s7": {
+      "total": -0.191700217104895,
+      "top_10_sum": 0.07871350945593854,
+      "total_without_top_10": -0.2704137265608335,
+      "top_10_live_collected": 2,
+      "positive_events": 41,
+      "negative_events": 64
+    },
+    "pick_gain_residual_s42": {
+      "total": 0.021207031143821553,
+      "top_10_sum": 0.0612821620867366,
+      "total_without_top_10": -0.040075130942915045,
+      "top_10_live_collected": 2,
+      "positive_events": 39,
+      "negative_events": 43
+    },
+    "pick_gain_residual_s7": {
+      "total": 0.022140357206669015,
+      "top_10_sum": 0.05635505937581282,
+      "total_without_top_10": -0.0342147021691438,
+      "top_10_live_collected": 2,
+      "positive_events": 36,
+      "negative_events": 35
+    }
+  }
+}

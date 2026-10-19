@@ -26,6 +26,7 @@ Group names are dispatched by string in several places, so a new group touches e
 4. **Describe it in the config.** Mention it in the `feature_groups` description of `odds_analytics.training.config.FeatureConfig`.
    - The field is validated against `FeatureGroupName`, so a name missing from step 2 fails at config load, including as a `feature_groups` tuning choice ([training config](training-config.md)).
    - A config that uses the group also sets `target_type`, which has no default.
+   - A `retail_ev` config rejects every group: the groups are computed as of kick-off, and its rows need features as of each row's decision time ([CLV and the training target](clv-target.md#the-retail-ev-target)).
 5. **Verify.** Run a training config that selects the group and check the verification artifacts for feature count and all-NaN columns ([run an experiment](../evaluation/experiment-scripts.md#verification-artifacts)).
    - Zeroed or all-NaN columns once hid an adapter bug.
 
