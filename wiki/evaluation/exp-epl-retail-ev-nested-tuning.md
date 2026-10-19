@@ -27,9 +27,10 @@ The [price-only](exp-epl-retail-ev-price-only.md) (#540) and [as-of-t groups](ex
 
 - **Nothing is a finding after correction.** None of the 48 tests in the Bonferroni family excludes zero (`bonferroni.csv`).
 - **On the 50 live-collected scored events, no model beats the baseline.** Every residual model's point gain over the baseline is between −114 and +7 × 10⁻⁶ weighted MSE, with 95% CIs that include zero.
-- **Re-tuning does not beat the frozen 2024-25 settings.** The nested price-only model is 25 to 29 below the frozen one over all events. No nested-against-frozen CI excludes zero.
+- **Re-tuning does worse than the frozen 2024-25 settings for price-only.** The nested price-only model's point estimates are 25 to 29 below the frozen one over all events, with CIs that include zero. On picks, seed 7's nested price-only model earns −0.026 [−0.056, −0.001] event units against frozen, outside the Bonferroni family. For the group variants, nested and frozen are level.
 - **The settings move only partly out of the corner.** `min_child_weight` leaves its upper bound in most folds, but the learning rate stays near 0.01 to 0.02, and the models stay close to the baseline.
-- **The new columns are barely used.** Polymarket's columns take 0.4 to 1.4% of total gain, and the move columns none. One seed's Polymarket gain over price-only on the live events is most likely a weaker price-only fit in the last fold, not Polymarket signal (inferred).
+- **The new columns are barely used.** Averaged over the outer folds, Polymarket's columns take 0.4 to 1.4% of total gain, rising to 2.2 to 6.4% in fold 9, and the move columns take none.
+- **One Polymarket model is the best in fold 9, but it is not evidence of Polymarket signal (inferred).** Seed 42's Polymarket model is the best of the 12 models in fold 9, the one fold tuned on dense live rows. Seed 7 does not replicate it, and that fold is 17 events in one week.
 
 ## Design
 
@@ -60,7 +61,7 @@ The run uses nested walk-forward. Only the last outer fold has dense live rows i
 - **Frozen reference.** Every outer fold also refits the residual-arm settings #545 tuned on 2024-25, read from `experiments/results/retail_ev_as_of_t_groups/summary.json`, on the same training rows. That isolates the tuning scheme's effect on the same scored rows.
 - **Metrics.** Gains are reference minus challenger in weighted MSE, in units of 10⁻⁶, from `odds_analytics.retail_ev_metrics.mse_gain`. They come with event-clustered bootstrap 95% CIs (2,000 resamples) in `results.csv`.
 - **Bonferroni family.** It holds the pooled weighted-MSE tests: per variant and seed, nested against the baseline and against frozen, and the two group variants against nested price-only. That is 16 comparisons in each of 3 slices (all, live-collected, FDUK-only), so 48 tests. `bonferroni.csv` gives CIs at level 1 − 0.05/48 from 200,000 event-clustered resamples, which leaves about 104 resamples beyond each tail. The pick-EV gains in `results.csv` and the per-fold CIs are outside the family and only descriptive.
-- **Provenance.** `summary.json` records the git SHA, `git_dirty`, the script and config hashes and `data_sha256`. The data hash matches #545's, so the rows are the same. The run was made from a clean tree (`git_dirty` false), and an earlier run of the same code reproduced every number in the results files exactly.
+- **Provenance.** `summary.json` records the git SHA, `git_dirty`, the script and config hashes and `data_sha256`. The data hash matches #545's, so the rows are the same. The run was made from a clean tree (`git_dirty` false), and repeated runs give identical models, tuned settings and weighted-MSE results.
 
 ## The scored rows
 
@@ -89,7 +90,7 @@ Weighted-MSE gain on the 50 live-collected events, with 95% CIs (`results.csv`, 
 | all four, 42 | −114.3 [−405.2, 122.5] | −100.0 [−314.9, 51.6] | −22.6 [−206.9, 120.8] |
 | all four, 7 | −81.3 [−389.3, 161.5] | −47.1 [−268.2, 98.8] | 1.4 [−180.3, 138.7] |
 
-- **Polymarket, seed 42.** Its gain over price-only is the only live-event CI that excludes zero at 95%. Its Bonferroni CI is [−7.5, 249.1], and seed 7's gain is a quarter of it. Most of it comes from fold 9 (below).
+- **Polymarket, seed 42.** Its gain over price-only is the only live-event CI that excludes zero at 95%. Its Bonferroni CI is [−5.8, 241.3], and seed 7's gain is a quarter of it. Most of it comes from fold 9 (below).
 - **Picks.** Every pick-EV gain over the baseline on these events is between −0.012 and −0.005 event units, and every CI includes zero.
 
 ### FDUK-only events
@@ -105,7 +106,7 @@ Weighted-MSE gain on the 120 FDUK-only events:
 | all four, 42 | 119.2 [−10.5, 241.8] | 14.6 [−30.9, 60.4] | 46.0 [13.5, 77.6] |
 | all four, 7 | 102.5 [−35.8, 241.7] | −43.0 [−97.3, 6.3] | 49.5 [5.3, 97.4] |
 
-- **All four groups on FDUK rows.** These rows carry none of the new columns except `retail_dispersion` ([CLV target](../modelling/clv-target.md#the-retail-ev-target)). Both seeds' gains over price-only exclude zero at 95% but not after correction (`bonferroni.csv`: [−7.7, 102.4] and [−20.9, 138.2]). `retail_dispersion` takes about 12% of total gain in those models (`feature_importance.csv`), so it is the likely carrier (inferred). #545 saw the same direction on these events with frozen settings: +10.2 and +31.2, with CIs including zero.
+- **All four groups on FDUK rows.** These rows carry none of the new columns except `retail_dispersion` ([CLV target](../modelling/clv-target.md#the-retail-ev-target)). Both seeds' gains over price-only exclude zero at 95% but not after correction (`bonferroni.csv`: [−7.0, 102.5] and [−22.2, 135.3]). `retail_dispersion` takes 6 to 17% of total gain in the all-four models (`feature_importance.csv`), so it is a candidate carrier (inferred). That share is over all training rows, which by fold 9 are mostly live rows, so it does not show what drives the FDUK-only predictions. Two other routes are open. These rows' NaNs in the other new columns follow each split's default branch, so a split fitted on live rows also moves FDUK-only predictions. And `colsample_bytree` samples from 69 columns instead of 38, which changes the price-column splits. #545 saw the same direction on these events with frozen settings: +10.2 and +31.2, with CIs including zero.
 
 ### All events
 
@@ -138,7 +139,7 @@ Weighted-MSE gain over the baseline per outer fold, seed 42 then seed 7 (`result
 | 9 | 2026-05-17 | 17 | 50,715 | 5605.7 | −176.7; −238.8 | −8.3; −185.7 | −348.5; −305.7 |
 
 - **Fold 9 is the only fold tuned on dense live rows, and every model in it is worse than the baseline.** No fold-9 CI over the baseline excludes zero.
-- **Polymarket's fold-9 gain over price-only.** Seed 42 gains 168.4 [74.7, 271.0] over price-only in fold 9, and seed 7 gains 53.2 [−167.1, 262.2]. But seed 42's Polymarket model is still 8.3 below the baseline there. Its price-only model is 176.7 below, and 67.0 below the frozen price-only model. Averaged over the folds, the Polymarket columns take under 1.5% of that variant's total gain. So the gap reflects the price-only model's worse fold-9 settings more than Polymarket information (inferred).
+- **Polymarket in fold 9.** Seed 42's Polymarket model has weighted MSE 5614.0, 8.3 above the baseline's 5605.7 and the best of the 12 models in the fold. It gains 168.4 [74.7, 271.0] over nested price-only and 101.3 over the frozen price-only model (5715.3), so its lead is not only a weak nested price-only fit. Its Polymarket columns take 6.4% of total gain in that fold. Still, it is not evidence of Polymarket signal (inferred). Seed 7's Polymarket model (5791.3) is worse than both frozen price-only fits (5715.3 and 5728.2). The best of 12 models on one 17-event week is a selection, and nothing in the Bonferroni family excludes zero.
 - **Folds 0 to 6** hold 6 live events between them, so they speak almost only to FDUK rows. Every model gains over the baseline in folds 2, 4, 5 and 6, and loses in folds 0 and 3.
 
 ## Where the tuned settings sit
@@ -157,7 +158,7 @@ Tuned settings per outer fold, summarised over the 10 folds (`corner.csv`, `fold
 - **Partly out of the corner.** `min_child_weight` drops below 1,000 in 33 of the 60 studies, and depth reaches 4 or 5 in 14. The learning rate stays between 0.010 and 0.021 in all but five studies, and the trees stay between 100 and 400. With mean-one weights of about 150 per event, a `min_child_weight` of 500 is still about 3 events per leaf.
 - **The models stay close to the baseline.** The weighted spread of prediction minus baseline is 0.3 to 1.4 pp, against 0.45 to 0.84 pp for the frozen settings and 6 to 8 pp for the target. Fold 9's all-four models are the widest, 1.1 and 1.4 pp, and are also the worst against the baseline.
 - **The inner folds of 2025-26 reward a model.** Unlike #540's 2024-25 tuning, in which no trial beat the baseline, every one of the 60 studies has trials that beat the baseline on its inner folds. The best trial's margin is 21 to 83 × 10⁻⁶ in mean fold weighted MSE. That margin is optimistic, since it is the best of 30 trials on the folds it was picked on. The outer folds do not reproduce it against the frozen settings.
-- **The new columns get almost no splits.** Over the outer-fold models, Polymarket's columns take 0.4 to 1.4% of total gain, schedule and standings under 0.5%, and the exchange and consensus moves none. `retail_dispersion`, which every row has, takes 11 to 12% (`feature_importance.csv`). The other columns are present on fewer than 50 of the 540 to 697 training events, so even a `min_child_weight` of a few hundred leaves little room to split on them (inferred).
+- **The new columns get few splits.** Averaged over the outer-fold models, Polymarket's columns take 0.4 to 1.4% of total gain, schedule and standings under 0.5%, and the exchange and consensus moves none. In fold 9, whose training rows include the first dense live events, the Polymarket columns take 2.2 to 6.4%, and schedule and standings up to 3.2% (`feature_importance.csv`, per fold). `retail_dispersion`, which every row has, takes 6 to 17%. The other columns are present on fewer than 50 of the 540 to 697 training events, so even a `min_child_weight` of a few hundred leaves little room to split on them (inferred).
 
 ## Caveats
 
