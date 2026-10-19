@@ -487,6 +487,18 @@ class TestDynamics:
         assert row.dynamics.consensus_moves[1] is None
         assert row.dynamics.consensus_moves[2] == pytest.approx(bet365_move)
 
+    def test_exchange_move_never_crosses_source(self, event: Event, rich_snapshots: list) -> None:
+        live_near_fduk = [
+            _live("betfair_api", 43 * 60, _betfair(LIVE_BFE)),
+            _live("oddsportal_live", 42 * 60, three_way_bookmaker("bet365", OP_BET365)),
+        ]
+        rows, _ = build_event_rows(event, [*rich_snapshots, *live_near_fduk], "1x2")
+        row = _row(rows, 42 * 60, "bet365", Outcome.HOME)
+        assert row.exchange.kind is SnapshotKind.BETFAIR_LIVE
+        assert row.dynamics.exchange_moves == (None, None, None), (
+            "the FDUK opening price lies within the cap of t - 6h but is another source"
+        )
+
     def test_fduk_opening_has_no_moves(self, event: Event, rich_snapshots: list) -> None:
         rows, _ = build_event_rows(event, rich_snapshots, "1x2")
         row = _row(rows, 48 * 60, "bet365", Outcome.HOME)
