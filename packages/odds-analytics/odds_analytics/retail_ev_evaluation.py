@@ -25,6 +25,8 @@ import pandas as pd
 import structlog
 import xgboost
 import yaml
+from odds_core.betfair_close import LIVE_CLOSE_WINDOW
+from odds_core.market_prices import THREE_WAY_MARKET, market_outcomes
 from odds_core.models import Event, EventStatus
 from odds_core.snapshot_sources import SnapshotKind, snapshot_kind
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, PositiveInt, model_validator
@@ -33,15 +35,12 @@ from odds_analytics.retail_ev import (
     BASELINE_FEATURE,
     DECISION_WINDOW,
     HORIZON_BUCKET_LABELS,
-    LIVE_CLOSE_WINDOW,
     LOSS_WEIGHT_SCALE,
     MAX_EXCHANGE_OVERROUND,
-    THREE_WAY_MARKET,
     DropCounts,
     RetailEvDataset,
     RetailEvFeatures,
     load_retail_ev_dataset,
-    market_outcomes,
 )
 from odds_analytics.retail_ev_metrics import (
     BootstrapEstimate,

@@ -18,9 +18,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from odds_core.betfair_close import LIVE_CLOSE_WINDOW, complete_exchange_prices, is_in_play
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
-from odds_core.models import AlertHistory, OddsSnapshot
+from odds_core.market_prices import THREE_WAY_MARKET, outcome_names
+from odds_core.models import AlertHistory, Event, EventStatus, OddsSnapshot
+from odds_core.snapshot_sources import SnapshotKind, SnapshotSource
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +45,10 @@ logger = structlog.get_logger()
 LEAGUE_SPORTS: tuple[str, ...] = ("soccer_epl",)
 STALE_SCHEDULED_AGE = timedelta(hours=24)
 STALE_SCHEDULED_WINDOW = timedelta(days=7)
+BETFAIR_CLOSE_SPORT = "soccer_epl"
+BETFAIR_CLOSE_JOB = "fetch-betfair-exchange"
+BETFAIR_HISTORY_WINDOW = timedelta(hours=72)
+BETFAIR_CLOSE_ALERT_TYPE = "missing_betfair_close"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +70,22 @@ class StaleSource:
             f"{self.source} has written no {self.sport_key} snapshot in "
             f"{self.active_hours:.1f} active hours (threshold: {self.threshold_hours:.1f}h, "
             f"last: {self.last_snapshot.isoformat()})"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class MissingBetfairClose:
+    """A played EPL event with no live Betfair snapshot in the window before kick-off."""
+
+    event_id: str
+    home_team: str
+    away_team: str
+    commence_time: datetime
+
+    def describe(self) -> str:
+        return (
+            f"{self.home_team} v {self.away_team} "
+            f"({self.commence_time:%Y-%m-%d %H:%M} UTC, {self.event_id})"
         )
 
 
@@ -310,6 +333,119 @@ class HealthMonitor:
                     )
                 )
         return stale
+
+    async def check_missing_betfair_closes(
+        self, now: datetime | None = None
+    ) -> list[MissingBetfairClose]:
+        """Find recent EPL events whose ADR-0012 live Betfair close was never collected.
+
+        An event is checked from its kick-off until ``betfair_close_lookback_hours``
+        later, when the Betfair job is bootstrapped and has written EPL snapshots
+        before. It is skipped when its status is postponed or cancelled, or when it
+        has no live Betfair snapshot in the ``BETFAIR_HISTORY_WINDOW`` before
+        kick-off (a ghost, a twin that carries the prices, or an unannounced
+        postponement). It is missing when no non-in-play live Betfair snapshot with
+        a price for every outcome lies within ``LIVE_CLOSE_WINDOW`` before kick-off,
+        the same definition the retail-EV builder uses for its close. Events already
+        named in an alert inside the lookback are not reported again.
+        """
+        moment = now or datetime.now(UTC)
+        if (
+            not self.settings.betfair.enabled
+            or BETFAIR_CLOSE_JOB not in self.settings.scheduler.bootstrap_jobs
+        ):
+            return []
+        if BETFAIR_CLOSE_SPORT not in resolve_target_sports(
+            BETFAIR_CLOSE_JOB, self.settings.data_collection.sports
+        ):
+            return []
+        if (
+            await latest_snapshot_time(
+                self.session, BETFAIR_CLOSE_SPORT, SnapshotSource.BETFAIR_API
+            )
+            is None
+        ):
+            logger.info("betfair_close_no_history", sport=BETFAIR_CLOSE_SPORT)
+            return []
+        lookback = timedelta(hours=self.settings.alerts.betfair_close_lookback_hours)
+        events = (
+            (
+                await self.session.execute(
+                    select(Event)
+                    .where(
+                        Event.sport_key == BETFAIR_CLOSE_SPORT,
+                        Event.commence_time <= moment,
+                        Event.commence_time > moment - lookback,
+                        Event.status.notin_((EventStatus.POSTPONED, EventStatus.CANCELLED)),  # type: ignore[attr-defined]
+                    )
+                    .order_by(Event.commence_time)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        already_alerted = await self._event_ids_alerted(BETFAIR_CLOSE_ALERT_TYPE, moment - lookback)
+        tag = OddsSnapshot.raw_data["source"].as_string()  # type: ignore[index]
+        missing: list[MissingBetfairClose] = []
+        for event in events:
+            if event.id in already_alerted:
+                continue
+            kickoff = event.commence_time
+            betfair_before = (
+                await self.session.execute(
+                    select(OddsSnapshot.id)
+                    .where(
+                        OddsSnapshot.event_id == event.id,
+                        tag == SnapshotSource.BETFAIR_API.value,
+                        OddsSnapshot.snapshot_time >= kickoff - BETFAIR_HISTORY_WINDOW,
+                        OddsSnapshot.snapshot_time <= kickoff,
+                    )
+                    .limit(1)
+                )
+            ).first()
+            if betfair_before is None:
+                continue
+            closes = (
+                await self.session.execute(
+                    select(OddsSnapshot.raw_data).where(
+                        OddsSnapshot.event_id == event.id,
+                        tag == SnapshotSource.BETFAIR_API.value,
+                        OddsSnapshot.snapshot_time >= kickoff - LIVE_CLOSE_WINDOW,
+                        OddsSnapshot.snapshot_time <= kickoff,
+                    )
+                )
+            ).scalars()
+            names = outcome_names(event, THREE_WAY_MARKET)
+            if any(
+                not is_in_play(raw_data)
+                and complete_exchange_prices(
+                    raw_data, SnapshotKind.BETFAIR_LIVE, THREE_WAY_MARKET, names
+                )
+                is not None
+                for raw_data in closes
+            ):
+                continue
+            missing.append(
+                MissingBetfairClose(
+                    event_id=event.id,
+                    home_team=event.home_team,
+                    away_team=event.away_team,
+                    commence_time=kickoff,
+                )
+            )
+        return missing
+
+    async def _event_ids_alerted(self, alert_type: str, since: datetime) -> set[str]:
+        contexts = (
+            await self.session.execute(
+                select(AlertHistory.context).where(
+                    AlertHistory.alert_type == alert_type, AlertHistory.sent_at >= since
+                )
+            )
+        ).scalars()
+        return {
+            event_id for context in contexts for event_id in (context or {}).get("event_ids", [])
+        }
 
     async def check_mlb_calendar(self, now: datetime | None = None) -> str | None:
         """Issue when the MLB schedule has not been fetched during the regular season.
@@ -570,7 +706,8 @@ class HealthMonitor:
         Perform comprehensive system health check.
 
         Checks:
-        1. Stale data per source (no rows within the source's cadence while fixtures are scheduled)
+        1. Stale data per source (no rows within the source's cadence while fixtures are scheduled),
+           and EPL events with no live Betfair close
         2. Consecutive failures
         3. API quota levels
         4. Data quality issues
@@ -613,6 +750,23 @@ class HealthMonitor:
                     rate_limit_minutes=alerts_config.stale_reminder_minutes,
                 ):
                     alerts_sent.append("mlb_calendar_stale")
+
+            missing_closes = await self.check_missing_betfair_closes()
+            if missing_closes:
+                listing = "; ".join(close.describe() for close in missing_closes)
+                issue = (
+                    f"{len(missing_closes)} {BETFAIR_CLOSE_SPORT} events have no live Betfair "
+                    f"snapshot within {LIVE_CLOSE_WINDOW} before kick-off: {listing}"
+                )
+                issues_detected.append(issue)
+                if await self._send_alert(
+                    alert_type=BETFAIR_CLOSE_ALERT_TYPE,
+                    severity="critical",
+                    message=f"🚨 {issue}",
+                    context={"event_ids": [close.event_id for close in missing_closes]},
+                    rate_limit_minutes=alerts_config.alert_rate_limit_minutes,
+                ):
+                    alerts_sent.append(BETFAIR_CLOSE_ALERT_TYPE)
 
             # Check 2: Consecutive failures
             failures_healthy, failure_count = await self.check_consecutive_failures()

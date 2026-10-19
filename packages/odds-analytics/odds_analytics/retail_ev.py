@@ -12,14 +12,20 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast, get_args
 
 import numpy as np
 import structlog
-from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS, canonical_bookmaker_key
+from odds_core.betfair_close import LIVE_CLOSE_WINDOW, complete_exchange_prices, is_in_play
+from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
+from odds_core.market_prices import (
+    Outcome,
+    book_prices,
+    market_outcomes,
+    outcome_names,
+)
 from odds_core.models import Event, OddsSnapshot
-from odds_core.odds_math import devig_probabilities, outcome_price_decimal
+from odds_core.odds_math import devig_probabilities
 from odds_core.snapshot_sources import SnapshotKind, snapshot_kind
 
 from odds_analytics.epl_schedule_features import EplScheduleFeatures
@@ -37,11 +43,9 @@ logger = structlog.get_logger()
 
 DECISION_WINDOW = timedelta(days=7)
 DECISION_CUTOFF = timedelta(minutes=5)
-LIVE_CLOSE_WINDOW = timedelta(minutes=30)
 MAX_EXCHANGE_AGE = timedelta(hours=2)
 # A wider back book is a thin market whose best backs are not a price (ADR-0014).
 MAX_EXCHANGE_OVERROUND = 0.05
-EXCHANGE_BOOKMAKER = "betfair_exchange"
 POLYMARKET_BOOKMAKER = "polymarket"
 # Twice the coarsest step of the Polymarket history grid, and the exchange's age cap.
 MAX_POLYMARKET_AGE = timedelta(hours=2)
@@ -53,13 +57,10 @@ MAX_LAGGED_PRICE_AGE = timedelta(hours=2)
 # 0.15413 in 1/odds², and 156.19 / 0.15413 = 1013 (#556).
 LOSS_WEIGHT_SCALE = 1013.0
 BASELINE_FEATURE = "baseline_ev"
-DRAW_OUTCOME_NAME = "Draw"
-THREE_WAY_MARKET = "1x2"
 # Lower edges of the reporting horizon buckets, in hours to kick-off.
 HORIZON_BUCKET_EDGES_HOURS: tuple[float, ...] = (0.0, 1.0, 6.0, 24.0, 72.0)
 HORIZON_BUCKET_LABELS: tuple[str, ...] = ("0-1h", "1-6h", "6-24h", "1-3d", "3-7d")
 SEASON_START_MONTH = 7
-TWO_WAY_MARKET = "h2h"
 
 RETAIL_KINDS: frozenset[SnapshotKind] = frozenset(
     {
@@ -74,20 +75,6 @@ UPPER_BOUND_TIME_KINDS: frozenset[SnapshotKind] = frozenset({SnapshotKind.FDUK_O
 EXCHANGE_AT_T_KINDS: frozenset[SnapshotKind] = frozenset(
     {SnapshotKind.BETFAIR_LIVE, SnapshotKind.FDUK_OPENING}
 )
-
-
-class Outcome(StrEnum):
-    HOME = "home"
-    DRAW = "draw"
-    AWAY = "away"
-
-
-def market_outcomes(market: str) -> tuple[Outcome, ...]:
-    if market == THREE_WAY_MARKET:
-        return (Outcome.HOME, Outcome.DRAW, Outcome.AWAY)
-    if market == TWO_WAY_MARKET:
-        return (Outcome.HOME, Outcome.AWAY)
-    raise ValueError(f"retail_ev has no outcomes for market {market!r}")
 
 
 @dataclass(frozen=True)
@@ -238,39 +225,6 @@ def event_weights(event_ids: np.ndarray) -> np.ndarray:
     return 1.0 / counts[inverse]
 
 
-def _outcome_names(event: Event, market: str) -> dict[str, Outcome]:
-    names = {event.home_team: Outcome.HOME, event.away_team: Outcome.AWAY}
-    if Outcome.DRAW in market_outcomes(market):
-        names[DRAW_OUTCOME_NAME] = Outcome.DRAW
-    return names
-
-
-def _book_prices(
-    raw_data: dict[str, Any], kind: SnapshotKind, market: str, names: dict[str, Outcome]
-) -> dict[str, dict[Outcome, float]]:
-    """Valid decimal prices per canonical book key; the first entry wins for an aliased book."""
-    books: dict[str, dict[Outcome, float]] = {}
-    for bookmaker in raw_data.get("bookmakers", []):
-        key = canonical_bookmaker_key(bookmaker.get("key", ""), kind)
-        if key in books:
-            continue
-        for mkt in bookmaker.get("markets", []):
-            if mkt.get("key") != market:
-                continue
-            prices: dict[Outcome, float] = {}
-            for outcome in mkt.get("outcomes", []):
-                side = names.get(outcome.get("name"))
-                if side is None:
-                    continue
-                price = outcome_price_decimal(outcome)
-                if price > 1.0:
-                    prices[side] = price
-            if prices:
-                books[key] = prices
-            break
-    return books
-
-
 def _devig(prices: dict[Outcome, float], outcomes: tuple[Outcome, ...]) -> dict[Outcome, float]:
     fair = devig_probabilities(*(1 / prices[o] for o in outcomes))
     return dict(zip(outcomes, fair, strict=True))
@@ -280,15 +234,6 @@ def _overround(prices: dict[Outcome, float], outcomes: tuple[Outcome, ...]) -> f
     return sum(1 / prices[o] for o in outcomes) - 1
 
 
-def _is_in_play(raw_data: dict[str, Any]) -> bool:
-    return any(
-        bool((bm.get("betfair_meta") or {}).get("inplay"))
-        for bm in raw_data.get("bookmakers", [])
-        if canonical_bookmaker_key(bm.get("key", ""), SnapshotKind.BETFAIR_LIVE)
-        == EXCHANGE_BOOKMAKER
-    )
-
-
 def _exchange_price(
     snapshot: OddsSnapshot,
     kind: SnapshotKind,
@@ -296,8 +241,8 @@ def _exchange_price(
     names: dict[str, Outcome],
     outcomes: tuple[Outcome, ...],
 ) -> ExchangePrice | None:
-    prices = _book_prices(snapshot.raw_data, kind, market, names).get(EXCHANGE_BOOKMAKER)
-    if prices is None or set(prices) != set(outcomes):
+    prices = complete_exchange_prices(snapshot.raw_data, kind, market, names)
+    if prices is None:
         return None
     return ExchangePrice(
         time=snapshot.snapshot_time,
@@ -311,7 +256,7 @@ def _polymarket_price(
     snapshot: OddsSnapshot, market: str, names: dict[str, Outcome], outcomes: tuple[Outcome, ...]
 ) -> PolymarketPrice | None:
     raw = snapshot.raw_data
-    prices = _book_prices(raw, SnapshotKind.POLYMARKET, market, names).get(POLYMARKET_BOOKMAKER)
+    prices = book_prices(raw, SnapshotKind.POLYMARKET, market, names).get(POLYMARKET_BOOKMAKER)
     if prices is None or set(prices) != set(outcomes):
         return None
     meta: dict[str, Any] = next(
@@ -400,7 +345,7 @@ def build_event_rows(
     """
     drops = DropCounts()
     outcomes = market_outcomes(market)
-    names = _outcome_names(event, market)
+    names = outcome_names(event, market)
     kickoff = event.commence_time
     ordered = sorted(snapshots, key=lambda s: s.snapshot_time)
     kinds = [snapshot_kind(s.raw_data) for s in ordered]
@@ -417,7 +362,7 @@ def build_event_rows(
             continue
         if kind not in EXCHANGE_AT_T_KINDS and kind is not SnapshotKind.FDUK_CLOSING:
             continue
-        if kind is SnapshotKind.BETFAIR_LIVE and _is_in_play(snapshot.raw_data):
+        if kind is SnapshotKind.BETFAIR_LIVE and is_in_play(snapshot.raw_data):
             continue
         price = _exchange_price(snapshot, kind, market, names, outcomes)
         if price is None:
@@ -459,7 +404,7 @@ def build_event_rows(
             continue
         decision = window_start <= t <= window_end
         retail: dict[str, dict[Outcome, float]] = {}
-        for book, prices in _book_prices(snapshot.raw_data, kind, market, names).items():
+        for book, prices in book_prices(snapshot.raw_data, kind, market, names).items():
             if book in UK_RETAIL_BOOKMAKERS:
                 retail[book] = prices
             elif decision:

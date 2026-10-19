@@ -79,6 +79,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in
 | `odds_core.database` | Engine and `odds_core.database.async_session_maker`, see [Databases and environments](databases-and-environments.md) |
 | `odds_core.alerts` | `odds_core.alerts.AlertManager`, `odds_core.alerts.DiscordAlert`, see [Alerts](../operations/alerts.md) |
 | `odds_core.odds_math` | Price conversion in both directions (decimal-first), implied probability, devig, see [Odds arithmetic helpers](odds-math.md) |
+| `odds_core.betfair_close` | `odds_core.betfair_close.LIVE_CLOSE_WINDOW`, `odds_core.betfair_close.is_in_play` and `odds_core.betfair_close.complete_exchange_prices`, with outcome names and per-book prices in `odds_core.market_prices`: the live Betfair close that the retail-EV builder and the [Betfair close check](../operations/health-monitor.md#betfair-close-check) share |
 | `odds_core.snapshot_utils`, `utils.py` | `odds_core.snapshot_utils.extract_odds_from_snapshot` (parse `raw_data` into `odds_core.models.Odds`), `odds_core.utils.raw_data_has_market` |
 | `odds_core.sports`, `odds_core.team`, `odds_core.time`, `odds_core.logging_setup` | [Sport keys](../collection/sport-and-market-keys.md), [team-name normalization](../storage/event-matching.md), [timezone helpers](timezones.md), structlog setup |
 | `odds_core.api_models` | The Odds API response models and event factories |

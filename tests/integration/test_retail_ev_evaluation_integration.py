@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 from odds_analytics.as_of_team_features import load_team_history
-from odds_analytics.retail_ev import RetailEvFeatures, market_outcomes
+from odds_analytics.retail_ev import RetailEvFeatures
 from odds_analytics.retail_ev_evaluation import (
     MANIFEST_FILE,
     PREDICTIONS_FILE,
@@ -22,6 +22,7 @@ from odds_analytics.retail_ev_evaluation import (
     load_evaluation_data,
     run_evaluation,
 )
+from odds_core.market_prices import market_outcomes
 from odds_core.models import Event, EventStatus
 from odds_lambda.storage.readers import OddsReader
 
