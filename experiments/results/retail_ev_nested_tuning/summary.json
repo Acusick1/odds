@@ -1,0 +1,91 @@
+{
+  "git_sha": "14293f0d9c973831e8d13ee92622e362b2ebf8b2",
+  "git_dirty": false,
+  "script_sha256": "959ba2f69a152421c4deb82dd76030e2c815fdadc00f78fc629c502a582bc7fa",
+  "config_sha256": "61bcb1bec3195e611a9bf2a84e93150a899859d66c5762f3c5900aa15271e0b9",
+  "config": "experiments/configs/xgboost_epl_retail_ev_price_only.yaml",
+  "frozen_params_from": "experiments/results/retail_ev_as_of_t_groups/summary.json",
+  "data_sha256": "0f0dcb1cd81b138478992b8d4dde612a48d60f8cf4e171cd585f0dbb41f9abb1",
+  "n_trials": 30,
+  "n_boot": 2000,
+  "n_boot_bonferroni": 20000,
+  "rows": 112455,
+  "last_kickoff": "2026-05-24T15:00:00.000000",
+  "outer": {
+    "min_train_events": 550,
+    "step_events": 17,
+    "folds": 10,
+    "scored_rows": 104163,
+    "scored_events": 170,
+    "scored_live_events": 50
+  },
+  "inner_step_events": 17,
+  "frozen_params": {
+    "price_only:s42": {
+      "n_estimators": 100,
+      "max_depth": 4,
+      "learning_rate": 0.010075960398505468,
+      "min_child_weight": 1982,
+      "subsample": 0.6,
+      "colsample_bytree": 0.7,
+      "reg_lambda": 1.9487910798188237
+    },
+    "price_only:s7": {
+      "n_estimators": 100,
+      "max_depth": 3,
+      "learning_rate": 0.011911456062205889,
+      "min_child_weight": 1556,
+      "subsample": 0.9,
+      "colsample_bytree": 0.7,
+      "reg_lambda": 1.9422922297753673
+    },
+    "polymarket_at_t:s42": {
+      "n_estimators": 100,
+      "max_depth": 4,
+      "learning_rate": 0.010075960398505468,
+      "min_child_weight": 1982,
+      "subsample": 0.6,
+      "colsample_bytree": 0.7,
+      "reg_lambda": 1.9487910798188237
+    },
+    "polymarket_at_t:s7": {
+      "n_estimators": 400,
+      "max_depth": 2,
+      "learning_rate": 0.010251016393210985,
+      "min_child_weight": 1712,
+      "subsample": 0.5,
+      "colsample_bytree": 0.6,
+      "reg_lambda": 1.6041528070331084
+    },
+    "all_groups:s42": {
+      "n_estimators": 100,
+      "max_depth": 4,
+      "learning_rate": 0.010075960398505468,
+      "min_child_weight": 1982,
+      "subsample": 0.6,
+      "colsample_bytree": 0.7,
+      "reg_lambda": 1.9487910798188237
+    },
+    "all_groups:s7": {
+      "n_estimators": 100,
+      "max_depth": 5,
+      "learning_rate": 0.01495208952430178,
+      "min_child_weight": 1825,
+      "subsample": 0.5,
+      "colsample_bytree": 0.5,
+      "reg_lambda": 3.1068544591301483
+    }
+  },
+  "variants": {
+    "price_only": [],
+    "polymarket_at_t": [
+      "polymarket_at_t"
+    ],
+    "all_groups": [
+      "polymarket_at_t",
+      "dynamics",
+      "schedule_as_of_t",
+      "standings_as_of_t"
+    ]
+  }
+}
