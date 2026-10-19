@@ -31,6 +31,7 @@ from retail_ev_price_only import (
     MODEL_LABELS,
     MODEL_RUNS,
     REPO_DIR,
+    Arm,
     RunData,
     _est,
     data_fingerprint,
@@ -96,6 +97,61 @@ def comparison_metrics(oof: pd.DataFrame, variant: str, n_boot: int) -> dict[str
     return out
 
 
+FAMILY_ALPHA = 0.05
+RESIDUAL_LABELS: tuple[str, ...] = tuple(run.label for run in MODEL_RUNS if run.arm is Arm.RESIDUAL)
+
+
+def bonferroni_table(oof: pd.DataFrame, n_boot: int) -> pd.DataFrame:
+    """Residual-arm gains over price-only with CIs at the family-wise level of each slice.
+
+    The family is every non-reference variant and residual seed, so a CI excludes zero
+    only at level 1 - FAMILY_ALPHA / (that many tests).
+    """
+    challengers = [v for v in VARIANTS if v != REFERENCE]
+    n_tests = len(challengers) * len(RESIDUAL_LABELS)
+    tail = FAMILY_ALPHA / n_tests / 2 * 100
+    slices = [("all", "all", oof)] + [
+        ("event_type", value, oof[oof["event_type"] == value])
+        for value in sorted(oof["event_type"].unique())
+    ]
+    records: list[dict[str, Any]] = []
+    for key, value, sub in slices:
+        y, w = sub["y"].to_numpy(), sub["w_loss"].to_numpy()
+        _, inverse = np.unique(sub["event_id"].to_numpy(), return_inverse=True)
+        n_events = int(inverse.max()) + 1
+        counts = np.random.default_rng(0).multinomial(
+            n_events, np.full(n_events, 1.0 / n_events), size=n_boot
+        )
+        w_event = np.bincount(inverse, weights=w)
+        for variant in challengers:
+            for label in RESIDUAL_LABELS:
+                se_ref = np.bincount(
+                    inverse, weights=w * (y - sub[f"{REFERENCE}:{label}"].to_numpy()) ** 2
+                )
+                se_var = np.bincount(
+                    inverse, weights=w * (y - sub[f"{variant}:{label}"].to_numpy()) ** 2
+                )
+                samples = (counts @ se_ref - counts @ se_var) / (counts @ w_event)
+                low, high = np.percentile(samples, [tail, 100 - tail])
+                records.append(
+                    {
+                        "slice": key,
+                        "value": value,
+                        "variant": variant,
+                        "run": label,
+                        "n_tests": n_tests,
+                        "level": 1 - FAMILY_ALPHA / n_tests,
+                        "gain_vs_price_only": (se_ref.sum() - se_var.sum())
+                        / w_event.sum()
+                        * METRIC_SCALE,
+                        "ci_low": low * METRIC_SCALE,
+                        "ci_high": high * METRIC_SCALE,
+                        "excludes_zero": bool(low > 0 or high < 0),
+                    }
+                )
+    return pd.DataFrame(records)
+
+
 def results_table(oof: pd.DataFrame, n_boot: int) -> pd.DataFrame:
     slices: list[tuple[str, str, pd.DataFrame]] = [("all", "all", oof)]
     for event_type in sorted(oof["event_type"].unique()):
@@ -159,6 +215,8 @@ async def main(n_trials: int, n_boot: int) -> None:
 
     table = results_table(oof, n_boot)
     table.to_csv(OUTPUT_DIR / "results.csv", index=False)
+    bonferroni = bonferroni_table(oof, n_boot)
+    bonferroni.to_csv(OUTPUT_DIR / "bonferroni.csv", index=False)
     folds = pd.concat(
         [r["folds"].assign(variant=name) for (name, _), r in results.items()], ignore_index=True
     )
@@ -215,6 +273,7 @@ async def main(n_trials: int, n_boot: int) -> None:
         ]
         print(label)
         print(table[["variant", "slice", "value", *cols]].round(1).to_string(index=False))
+    print(bonferroni.round(1).to_string(index=False))
 
 
 if __name__ == "__main__":

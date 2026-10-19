@@ -35,7 +35,7 @@ This run repeats the protocol of [Price-only models on the retail-EV target](exp
 
 ## Setup
 
-- **Script.** `experiments/scripts/retail_ev_as_of_t_groups.py` builds each variant from `experiments/configs/xgboost_epl_retail_ev_price_only.yaml` with `feature_groups` set. It runs the functions of `experiments/scripts/retail_ev_price_only.py`: the same tuning range, scoring folds, arms and seeds, with each variant's Optuna studies under their own name. It writes `experiments/results/retail_ev_as_of_t_groups/`.
+- **Script.** The script `experiments/scripts/retail_ev_as_of_t_groups.py` builds each variant from `experiments/configs/xgboost_epl_retail_ev_price_only.yaml` with `feature_groups` set. It runs the functions of `experiments/scripts/retail_ev_price_only.py`: the same tuning range, scoring folds, arms and seeds, with each variant's Optuna studies under their own name. It writes `experiments/results/retail_ev_as_of_t_groups/`.
 - **Rows.** All variants share the 112,650 price-only rows, and the script checks this. 108,789 rows over 340 events are scored, in five 68-event folds from 2025-08-15 to 2026-05-24.
   - Fold 4 (2026-02-28 onward) holds 102,186 rows and the 44 OddsPortal live events.
   - `summary.json` records the git SHA, `git_dirty`, the script and config hashes, and `data_sha256`.
