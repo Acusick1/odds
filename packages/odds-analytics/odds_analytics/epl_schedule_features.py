@@ -137,24 +137,32 @@ def extract_epl_schedule_features(
     prior_events: list[Event],
     event: Event,
     fixtures_df: pd.DataFrame | None = None,
+    *,
+    known_at: datetime,
 ) -> EplScheduleFeatures:
-    """Extract rest/schedule/congestion features from prior events.
+    """Extract rest/schedule/congestion features from matches that kicked off before ``known_at``.
 
     When ``fixtures_df`` is provided, rest days account for all competitions
     (EPL + cups + European) and congestion features are computed. Without it,
-    only EPL matches are considered (backward-compatible).
+    only EPL matches are considered. Rest days and the 14- and 7-day windows are
+    measured back from the event's kick-off; ``known_at`` (the kick-off for
+    event-level features, earlier for features as of a decision time) only limits
+    which matches count.
 
     Args:
-        prior_events: Completed EPL events from the same season,
-            ordered chronologically, all strictly before the current event.
+        prior_events: Completed EPL events from the same season, ordered
+            chronologically, all before the current event.
         event: The current event to extract features for.
         fixtures_df: Optional all-competition fixtures DataFrame with columns
             ``date``, ``team``, ``opponent``, ``competition``. Dates must be
             timezone-aware datetimes.
+        known_at: Only matches that kicked off strictly before this time count.
 
     Returns:
         EplScheduleFeatures with rest, congestion, and midweek fields.
     """
+    cutoff = min(known_at, event.commence_time)
+    prior_events = [e for e in prior_events if e.commence_time < cutoff]
     home_prev = _find_previous_match(prior_events, event.home_team)
     away_prev = _find_previous_match(prior_events, event.away_team)
 
@@ -168,8 +176,8 @@ def extract_epl_schedule_features(
     if fixtures_df is not None and not fixtures_df.empty:
         t = event.commence_time
 
-        home_df = _team_fixtures_before(fixtures_df, event.home_team, t)
-        away_df = _team_fixtures_before(fixtures_df, event.away_team, t)
+        home_df = _team_fixtures_before(fixtures_df, event.home_team, cutoff)
+        away_df = _team_fixtures_before(fixtures_df, event.away_team, cutoff)
 
         home_fixture_date = _last_fixture_date(home_df)
         away_fixture_date = _last_fixture_date(away_df)

@@ -39,7 +39,7 @@ import math
 from datetime import date
 from enum import Enum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import structlog
 import yaml
@@ -59,6 +59,15 @@ FeatureGroupName = Literal[
     "match_stats",
     "epl_schedule",
 ]
+
+# Groups computed as of each retail_ev row's decision time; the only groups retail_ev accepts.
+RetailEvFeatureGroupName = Literal[
+    "polymarket_at_t",
+    "dynamics",
+    "schedule_as_of_t",
+    "standings_as_of_t",
+]
+RETAIL_EV_FEATURE_GROUPS: frozenset[str] = frozenset(get_args(RetailEvFeatureGroupName))
 
 # Maximum inheritance depth to prevent excessive nesting
 _MAX_INHERITANCE_DEPTH = 10
@@ -666,9 +675,12 @@ class FeatureConfig(BaseModel):
     )
 
     # Feature groups to compose
-    feature_groups: tuple[FeatureGroupName, ...] = Field(
+    feature_groups: tuple[FeatureGroupName | RetailEvFeatureGroupName, ...] = Field(
         default=("tabular",),
-        description="Feature groups to compose. May be empty only for the lstm adapter. Available: tabular, polymarket, injuries, rest, standings, match_stats, epl_schedule",
+        description="Feature groups to compose. May be empty only for the lstm adapter and "
+        "retail_ev. Available: tabular, polymarket, injuries, rest, standings, match_stats, "
+        "epl_schedule; retail_ev takes only polymarket_at_t, dynamics, schedule_as_of_t, "
+        "standings_as_of_t.",
     )
 
     # Standings feature configuration
@@ -748,10 +760,12 @@ class FeatureConfig(BaseModel):
         if self.target_type == "retail_ev":
             if self.adapter != "xgboost":
                 raise ValueError("retail_ev supports only the xgboost adapter")
-            if self.feature_groups:
+            event_level = [g for g in self.feature_groups if g not in RETAIL_EV_FEATURE_GROUPS]
+            if event_level:
                 raise ValueError(
-                    "retail_ev builds its own price features as of each row's decision time; "
-                    f"feature_groups must be empty, got {list(self.feature_groups)}"
+                    "retail_ev features are computed as of each row's decision time; "
+                    f"feature_groups may only name {sorted(RETAIL_EV_FEATURE_GROUPS)}, "
+                    f"got {event_level}"
                 )
             set_fields = [
                 name
@@ -762,6 +776,11 @@ class FeatureConfig(BaseModel):
             if set_fields:
                 raise ValueError(f"retail_ev does not read {set_fields}; leave them unset")
             return self
+        as_of_t = [g for g in self.feature_groups if g in RETAIL_EV_FEATURE_GROUPS]
+        if as_of_t:
+            raise ValueError(
+                f"{as_of_t} are retail_ev feature groups; target_type is {self.target_type}"
+            )
         if self.adapter == "xgboost" and not self.feature_groups:
             raise ValueError("feature_groups must name at least one group for the xgboost adapter")
         return self
