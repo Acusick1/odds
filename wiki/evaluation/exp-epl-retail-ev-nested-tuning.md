@@ -52,7 +52,7 @@ The run uses nested walk-forward. Only the last outer fold has dense live rows i
   - There are 9 inner folds for the first outer fold and 18 for the last (`folds.csv`).
   - The last outer fold's inner validation holds 46 live-collected events and 26,943 live rows. Its most recent inner block is 17 dense live events. The objective is the mean fold weighted MSE, so that block counts for 1/18 of it.
   - Every earlier outer fold's inner validation holds only the 18 to 28 sparse live events, at most 1,788 rows.
-- **Trials.** 30 TPE trials per study over the #540 search space (`experiments/configs/xgboost_epl_retail_ev_price_only.yaml`), seeded by the run's seed. There are 60 studies: 3 variants × 2 seeds × 10 outer folds. The run took 14 minutes on 20 workers.
+- **Trials.** 30 TPE trials per study over the #540 search space (`experiments/configs/xgboost_epl_retail_ev_price_only.yaml`, in units of mean-one weights in this run), seeded by the run's seed. There are 60 studies: 3 variants × 2 seeds × 10 outer folds. The run took 14 minutes on 20 workers.
 
 ### Models and comparisons
 

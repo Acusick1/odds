@@ -19,7 +19,7 @@ diagnostics, per-event contributions, feature importances and the trials.
 Usage:
     uv run python experiments/scripts/retail_ev_price_only.py
     uv run python experiments/scripts/retail_ev_price_only.py --n-trials 3 --n-boot 200
-    uv run python experiments/scripts/retail_ev_price_only.py --output-dir <dir>
+    uv run python experiments/scripts/retail_ev_price_only.py --config <yaml> --output-dir <dir>
 """
 
 from __future__ import annotations
@@ -532,10 +532,10 @@ def _fmt(table: pd.DataFrame, cols: list[str], digits: int = 1) -> str:
     return table[["slice", "value", *cols]].round(digits).to_string(index=False)
 
 
-async def main(n_trials: int, n_boot: int, output_dir: Path) -> None:
+async def main(n_trials: int, n_boot: int, config_path: Path, output_dir: Path) -> None:
     sha, dirty = git_sha(), git_dirty()
     output_dir.mkdir(parents=True, exist_ok=True)
-    config = MLTrainingConfig.from_yaml(CONFIG_PATH)
+    config = MLTrainingConfig.from_yaml(config_path)
     data = await load_data(config)
     n_rows = tuning_prefix(data, config)
     print(
@@ -589,8 +589,8 @@ async def main(n_trials: int, n_boot: int, output_dir: Path) -> None:
         "git_sha": sha,
         "git_dirty": dirty,
         "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        "config_sha256": hashlib.sha256(CONFIG_PATH.read_bytes()).hexdigest(),
-        "config": str(CONFIG_PATH.relative_to(REPO_DIR)),
+        "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
+        "config": str(config_path.resolve().relative_to(REPO_DIR)),
         "data_sha256": data_fingerprint(data),
         "n_trials": n_trials,
         "n_boot": n_boot,
@@ -648,6 +648,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--n-trials", type=int, default=50)
     parser.add_argument("--n-boot", type=int, default=2000)
+    parser.add_argument("--config", type=Path, default=CONFIG_PATH)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     args = parser.parse_args()
-    asyncio.run(main(args.n_trials, args.n_boot, args.output_dir))
+    asyncio.run(main(args.n_trials, args.n_boot, args.config, args.output_dir))

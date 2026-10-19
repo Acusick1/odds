@@ -1351,6 +1351,24 @@ class MLTrainingConfig(BaseModel):
     )
 
     @model_validator(mode="after")
+    def validate_residual_arm(self) -> MLTrainingConfig:
+        """MLflow logs the bare XGBoost model, and top-k selection may drop the margin column."""
+        if self.training.features.retail_ev_arm is not RetailEvArm.RESIDUAL:
+            return self
+        if self.tracking is not None and self.tracking.enabled:
+            raise ValueError("the residual arm cannot be logged to MLflow; disable tracking")
+        if (
+            self.tuning is not None
+            and TOP_K_FEATURES_KEY in self.tuning.search_spaces
+            and self.training.feature_selection.enabled
+        ):
+            raise ValueError(
+                "the residual arm reads its base margin from baseline_ev, which top-k "
+                "feature selection may drop; remove top_k_features from the search space"
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_tuned_feature_groups(self) -> MLTrainingConfig:
         """Validate every feature_groups search choice as a FeatureConfig would."""
         if self.tuning is None or "feature_groups" not in self.tuning.search_spaces:

@@ -48,9 +48,10 @@ MAX_POLYMARKET_AGE = timedelta(hours=2)
 MOVE_WINDOWS: tuple[timedelta, ...] = (timedelta(hours=1), timedelta(hours=3), timedelta(hours=6))
 MAX_LAGGED_PRICE_AGE = timedelta(hours=2)
 # Fixed rather than fitted to the training rows, so min_child_weight and reg_lambda weigh
-# the same number of events at every refit. An event's loss weights sum to this times its
-# mean 1/odds², about 154 on development data, near its mean rows per event (#556).
-LOSS_WEIGHT_SCALE = 1000.0
+# the same number of events at every refit. The frozen 2024-25 trial was tuned with mean-one
+# weights on 112,455 rows over 720 events, 156.19 per event; development events average
+# 0.15413 in 1/odds², and 156.19 / 0.15413 = 1013 (#556).
+LOSS_WEIGHT_SCALE = 1013.0
 BASELINE_FEATURE = "baseline_ev"
 DRAW_OUTCOME_NAME = "Draw"
 THREE_WAY_MARKET = "1x2"

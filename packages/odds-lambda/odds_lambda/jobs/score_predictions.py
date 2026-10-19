@@ -114,6 +114,10 @@ async def score_events(
         logger.error("model_load_failed", error=str(e))
         return stats
 
+    if model_data.get("margin_feature") is not None:
+        logger.error("base_margin_model_unsupported", margin_feature=model_data["margin_feature"])
+        return stats
+
     model = model_data["model"]
     expected_feature_names: list[str] = model_data["feature_names"]
     model_version = get_cached_version() or "unknown"

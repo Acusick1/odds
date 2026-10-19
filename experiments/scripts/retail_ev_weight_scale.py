@@ -1,7 +1,7 @@
 """How the retail-EV loss-weight scale changes what a frozen min_child_weight means (#556).
 
 Development data only, so nothing here is a keep-bar result. Rows come from the
-price-only config (`retail_ev_price_only.load_data`), which ends before 2026-27.
+fixed-scale price-only config (`retail_ev_price_only.load_data`), which ends before 2026-27.
 
 Two outputs:
 
@@ -38,7 +38,6 @@ from odds_analytics.training.cross_validation import make_walk_forward_splits
 from odds_analytics.training.tuner import apply_trial_params
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from retail_ev_price_only import (
-    CONFIG_PATH,
     METRIC_SCALE,
     REPO_DIR,
     RunData,
@@ -51,6 +50,7 @@ from retail_ev_price_only import (
 
 EXPERIMENTS_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = EXPERIMENTS_DIR / "results" / "retail_ev_weight_scale"
+CONFIG_PATH = EXPERIMENTS_DIR / "configs" / "xgboost_epl_retail_ev_price_only_fixed_scale.yaml"
 FROZEN_SUMMARY = EXPERIMENTS_DIR / "results" / "retail_ev_as_of_t_groups" / "summary.json"
 FROZEN_VARIANT = "price_only"
 FROZEN_RUN = "residual_s42"
@@ -197,6 +197,10 @@ async def main(n_boot: int) -> None:
         "scored_events": len(set(ev.tolist())),
         "scored_rows": len(scored),
         "wmse_baseline_e6": weighted_mse(y, baseline[scored], w) * METRIC_SCALE,
+        "residual_weighted_mean": float(np.average(data.y - baseline, weights=data.loss_weights)),
+        "residual_weighted_rms": float(
+            np.sqrt(np.average((data.y - baseline) ** 2, weights=data.loss_weights))
+        ),
         "refits": results,
     }
     (OUTPUT_DIR / "summary.json").write_text(json.dumps(summary_out, indent=2) + "\n")

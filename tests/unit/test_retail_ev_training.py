@@ -135,6 +135,23 @@ class TestRetailEvProtocol:
         with pytest.raises(ValidationError, match="retail_ev"):
             MLTrainingConfig(**raw)
 
+    def test_residual_arm_rejects_top_k_feature_selection(self, config: MLTrainingConfig) -> None:
+        raw = config.model_dump()
+        raw["training"]["features"]["retail_ev_arm"] = "residual"
+        raw["tuning"] = {
+            "n_trials": 1,
+            "search_spaces": {"top_k_features": {"type": "int", "low": 5, "high": 10}},
+        }
+        with pytest.raises(ValidationError, match="top_k_features"):
+            MLTrainingConfig(**raw)
+
+    def test_residual_arm_rejects_mlflow_tracking(self, config: MLTrainingConfig) -> None:
+        raw = config.model_dump()
+        raw["training"]["features"]["retail_ev_arm"] = "residual"
+        raw["tracking"] = {"enabled": True}
+        with pytest.raises(ValidationError, match="MLflow"):
+            MLTrainingConfig(**raw)
+
     def test_accepts_walk_forward(self, config: MLTrainingConfig) -> None:
         assert MLTrainingConfig(**config.model_dump()).training.data.cv_method == "walk_forward"
 
@@ -381,7 +398,7 @@ def _learns_nothing(config: MLTrainingConfig) -> MLTrainingConfig:
 
 
 class TestResidualArm:
-    def test_matches_fitting_the_target_minus_the_baseline(
+    def test_matches_fitting_the_target_minus_the_baseline_with_no_intercept(
         self, residual_config: MLTrainingConfig, rows: dict[str, np.ndarray]
     ) -> None:
         X, y, w = rows["X"], rows["y"], rows["w"]

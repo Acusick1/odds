@@ -1,0 +1,16 @@
+base: xgboost_epl_retail_ev_price_only.yaml
+experiment:
+  name: xgboost_epl_retail_ev_price_only_fixed_scale
+  tags:
+  - xgboost
+  - epl
+  - retail_ev
+  - tuning
+  description: 'The price-only protocol (#540) rerun with the pipeline residual arm and
+    the fixed loss-weight scale (#556). Events are selected by close, so 2025-26 has 369
+    events; the 41-event step splits them into nine folds with no partial block, so the
+    live-collected events of March to May 2026 are scored. Development data to
+    2026-07-31; no keep-bar claim.'
+training:
+  data:
+    val_step_events: 41

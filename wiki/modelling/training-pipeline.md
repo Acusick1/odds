@@ -22,7 +22,7 @@ status: stable
 
 # Training pipeline
 
-`odds train run` and `odds train tune` (`odds_cli.commands.train`) turn an `odds_analytics.training.config.MLTrainingConfig` YAML (its `training.features` block is required), validated at load (strategy, feature groups, tuning metric and search-space keys) ([training config](training-config.md)), into a pickled model. `odds train validate` loads the file and checks strategy, dates and splits; it warns "Very small test split" for `test_split < 0.1`, including 0.0 (`odds_cli.commands.train.validate_config`); 0.0 is the production value and holds out nothing (step 4). `odds train list-configs` tabulates a directory.
+`odds train run` and `odds train tune` (`odds_cli.commands.train`) turn an `odds_analytics.training.config.MLTrainingConfig` YAML (its `training.features` block is required), validated at load (strategy, feature groups, tuning metric, search-space keys and the `retail_ev` residual arm's limits) ([training config](training-config.md)), into a pickled model. `odds train validate` loads the file and checks strategy, dates and splits; it warns "Very small test split" for `test_split < 0.1`, including 0.0 (`odds_cli.commands.train.validate_config`); 0.0 is the production value and holds out nothing (step 4). `odds train list-configs` tabulates a directory.
 
 ## Steps of `odds train run`
 

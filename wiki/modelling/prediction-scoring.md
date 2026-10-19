@@ -21,6 +21,7 @@ status: stable
 It is not scheduled on its own: the [fetch-oddsportal job](../collection/fetch-oddsportal-job.md) calls it after ingest when `model_supports_sport(ctx.sport)`. `main(ctx)` is also registered as `score-predictions`, so `odds scheduler run-once score-predictions-epl` runs it by hand ([job registry](../scheduling/job-registry.md)).
 
 - The scraper image lacks `odds_analytics` and xgboost and `scraper.tf` sets no `MODEL_*`, so scoring runs only where a local scheduler runs `fetch-oddsportal` (#454; [local scheduler](../scheduling/local-scheduler.md), [AWS infrastructure](../operations/aws-infrastructure.md)).
+- A model saved with a base-margin column (`margin_feature`, the `retail_ev` residual arm) is refused before scoring with `base_margin_model_unsupported`, because the job calls the bare XGBoost model, whose predictions omit the margin.
 - Every failure inside `odds_lambda.jobs.score_predictions.score_events` returns its stats dict normally (per-snapshot errors are only counted in `errors`) and the call site in fetch-oddsportal swallows exceptions, so a broken model never alerts and never fails the scrape job (#454).
 - `odds_lambda.model_loader` imports `odds_analytics` at module level (see [model store](model-store.md)).
 

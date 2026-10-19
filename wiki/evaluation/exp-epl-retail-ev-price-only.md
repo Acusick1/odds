@@ -1,10 +1,11 @@
 ---
 type: explanation
 title: Price-only models on the retail-EV target
-description: The October 2026 exploratory run of price-only XGBoost on the ADR-0012 retail-EV target against the martingale baseline and a constant shrinkage of it, on 2024-25 and 2025-26 development data, with the tuning and scoring layout, per-fold results, the keep-bar metrics by horizon and retail source, how the gain spreads over events, and feature importances.
+description: The October 2026 exploratory run, and its rerun with the pipeline residual arm and a fixed loss-weight scale, of price-only XGBoost on the ADR-0012 retail-EV target against the martingale baseline and a constant shrinkage of it, on 2024-25 and 2025-26 development data, with the tuning and scoring layout, per-fold results, the keep-bar metrics by horizon and retail source, how the gain spreads over events, and feature importances.
 sources:
   - experiments/scripts/retail_ev_price_only.py
   - experiments/configs/xgboost_epl_retail_ev_price_only.yaml
+  - experiments/configs/xgboost_epl_retail_ev_price_only_fixed_scale.yaml
   - experiments/configs/xgboost_epl_retail_ev.yaml
   - experiments/results/retail_ev_price_only/results.csv
   - experiments/results/retail_ev_price_only/summary.json
@@ -14,11 +15,6 @@ sources:
   - experiments/results/retail_ev_price_only/event_contributions.csv
   - experiments/results/retail_ev_price_only/feature_importance.csv
   - experiments/scripts/retail_ev_weight_scale.py
-  - experiments/results/retail_ev_weight_scale/drift.csv
-  - experiments/results/retail_ev_weight_scale/folds.csv
-  - experiments/results/retail_ev_weight_scale/summary.json
-  - experiments/results/retail_ev_price_only_fixed_scale/results.csv
-  - experiments/results/retail_ev_price_only_fixed_scale/summary.json
   - odds_analytics.retail_ev.LOSS_WEIGHT_SCALE
   - odds_analytics.training.config.RetailEvArm
   - odds_analytics.retail_ev.RetailEvFeatures
@@ -47,7 +43,7 @@ This page records the first model run on the retail-EV target of [ADR-0012](../.
 ## Setup
 
 - **Script and config.** `experiments/scripts/retail_ev_price_only.py` runs `experiments/configs/xgboost_epl_retail_ev_price_only.yaml` and writes `experiments/results/retail_ev_price_only/`. Its functions also run the [as-of-t group variants](exp-epl-retail-ev-as-of-t-groups.md).
-  - The config inherits `experiments/configs/xgboost_epl_retail_ev.yaml`, whose `end_date` is 2026-07-31. It sets expanding walk-forward with `min_train_events` 380, sets `n_jobs` 1, and adds the search space. This run used 68-event steps; the config's step is 41, for the [rerun](#rerun-with-the-pipeline-residual-arm-and-a-fixed-weight-scale).
+  - The config inherits `experiments/configs/xgboost_epl_retail_ev.yaml`, whose `end_date` is 2026-07-31. It sets expanding walk-forward with `min_train_events` 380 and 68-event steps, sets `n_jobs` 1, and adds the search space. The [rerun](#rerun-with-the-pipeline-residual-arm-and-a-fixed-weight-scale) uses `experiments/configs/xgboost_epl_retail_ev_price_only_fixed_scale.yaml`, which inherits it.
   - `summary.json` records the git SHA, the SHA-256 of the script and config, and a SHA-256 of the rows' event IDs and targets (`data_sha256`). The script also writes `git_dirty`, whether any tracked file differed from that SHA when the run started; this run's `summary.json` predates that field.
 - **Rows.** The rows come from the training pipeline (`odds_analytics.training.data_preparation.prepare_training_data_from_config` with `target_type: retail_ev`): 112,650 rows over 720 events. The current builder leaves 112,455, because it drops the 195 FDUK opening rows whose own snapshot has no usable exchange price ([CLV target](../modelling/clv-target.md#the-retail-ev-target)). The script fails unless they match `odds_analytics.retail_ev.load_retail_ev_dataset` row for row.
 - **Event selection.** The pipeline and the script take every event in the date range and keep those with an ADR-0012 close, whatever their status or scores. The reported results use the 720 events with scores. Selecting by close (among events that have kicked off) adds the 29 FINAL events without scores (28 from March 2026), 573 rows, for kick-offs up to 2026-07-31.
@@ -238,57 +234,14 @@ Mean share of total gain over the five fold models (`feature_importance.csv`), f
 
 The pre-registration draft (#539, PR #555) needs the residual arm as a config option and a loss-weight scale that does not move with the training rows (#556). This section reruns the protocol with both, on current development data, and measures what the old scaling did.
 
-### What the weight scale did
-
-`min_child_weight` and `reg_lambda` are sums of loss weight, so their meaning depends on the weight scale. Rescaled to mean one over a set of rows, an event weighs that set's mean rows per event, because `w_event` makes each event's raw weights sum to its mean `1/odds²`. Under the fixed scale (`odds_analytics.retail_ev.LOSS_WEIGHT_SCALE`, 1,000) an event weighs 1,000 × its mean `1/odds²`, 154 on average, in every set. Events per the frozen `min_child_weight` of 1,982 (`experiments/results/retail_ev_weight_scale/drift.csv`):
-
-| Training set | Events | Rows per event | Fixed scale | Mean one over the set |
-|---|---|---|---|---|
-| 2024-25 | 380 | 10.2 | 12.6 | 195.1 |
-| 2025-26 | 369 | 295.9 | 13.1 | 6.7 |
-| All development rows | 749 | 150.9 | 12.9 | 13.1 |
-| First scoring fold's training rows | 380 | 10.2 | 12.6 | 195.1 |
-| Last scoring fold's training rows | 708 | 16.3 | 12.9 | 121.5 |
-
-- **The #540 run was consistent with itself.** It scaled once over all rows, so tuning and scoring shared one scale, about 13 events per 1,982.
-- **Any other set of rows moves it.** A run loading only 2024-25 would make the same value 195 events, and one loading only 2025-26, 7 events. The OddsPortal live events of 2025-26 average 2,078 rows each. A refit whose training rows include a season of them would put an event's weight in the hundreds and the frozen value at a few events (inferred from the rows per event).
-- **Under the fixed scale the value stays within 12.6 to 13.1 events** in every set; what varies is only each set's mix of `1/odds²`.
-
-Refitting the frozen trial on the nine scoring folds (below) under each weighting, against the baseline's weighted MSE of 3359.5 × 10⁻⁶ (`experiments/results/retail_ev_weight_scale/summary.json`):
-
-| Weighting | MSE gain over baseline (10⁻⁶) |
-|---|---|
-| Fixed scale | 31.7 [−23.7, 86.8] |
-| Mean one over all development rows | 32.5 [−24.2, 88.0] |
-| Mean one over each fold's training rows | 2.1 [−24.1, 28.1] |
-
-Rescaling per refit, as a pipeline that prepares only each refit's training rows would, makes the frozen value worth 122 to 195 events, and the model all but disappears into the baseline. The fixed scale and the #540 scaling give the same model to within noise, because their scales differ by 2% (1,000 against 979 on these rows).
-
-### Rerun of the protocol
-
-`experiments/scripts/retail_ev_price_only.py --output-dir experiments/results/retail_ev_price_only_fixed_scale` reruns the whole protocol, tuning included, with `retail_ev_arm` and the fixed scale. The data have changed since #540: selecting events by close gives 749 events and 113,028 rows, and 369 2025-26 events. With the 68-event step, the last 29 of them, which hold 91,815 of the dense live rows, would fall in an unscored partial block, so the config steps 41 events: nine folds score all 369 events and 109,167 rows. For comparison, the same config was run on the script transform and mean-one weights (the code of #540, at `3034c08`; outputs not committed).
-
-Weighted-MSE gain over the baseline (10⁻⁶) and pick gain (event units), both with 95% CIs, over all scored events, then the 74 live-collected events (`experiments/results/retail_ev_price_only_fixed_scale/results.csv`). The baseline's weighted MSE is 3359.5, and 4473.2 on the live events:
-
-| Run | Transform, mean-one weights | Pipeline arm, fixed scale | Live events, pipeline arm | Picks, pipeline arm |
-|---|---|---|---|---|
-| Residual, seed 42 | 33.1 [−25.6, 90.7] | 31.7 [−23.7, 86.8] | 6.3 [−117.7, 123.8] | 0.016 [−0.046, 0.081] |
-| Residual, seed 7 | 13.2 [−76.0, 98.4] | 22.6 [−41.7, 86.1] | −4.9 [−138.3, 119.8] | 0.023 [−0.036, 0.089] |
-| Direct, seed 42 | −91.1 [−192.6, 0.3] | −80.6 [−176.0, 6.6] | −420.8 [−821.7, −125.4] | −0.260 [−0.454, −0.100] |
-| Direct, seed 7 | −60.8 [−148.9, 21.6] | −77.5 [−168.7, 9.4] | −405.1 [−793.4, −121.2] | −0.223 [−0.398, −0.086] |
-
-- **The residual seed-42 trial is unchanged.** Tuning picks the same trial (100 trees, depth 4, lr 0.010, `min_child_weight` 1,982, λ 1.95) under both, and its gain moves by 1.4, against a seed-to-seed difference of 9 to 20. The change is the 2% difference in scale and the base margin's missing intercept.
-- **Seed 7 tunes differently** (depth 3, `min_child_weight` 1,556, λ 1.94) and gains more, within its CI.
-- **The conclusion of #540 holds on current data.** The residual arm gains about 1% of the baseline's MSE with CIs that include zero, is level on the live-collected events and on picks, and the direct arm stays below the baseline.
-
 ## Caveats
 
 - **Development data.** The rows have been examined before (#522, #538), and the slices were chosen with the data in view. Every number here is exploratory.
 - **The fold step was set by this data.** The 68-event step was chosen after seeing that 50-event steps leave the live events unscored.
 - **Tuning on another regime.** The tuning season has only FDUK opening rows, one snapshot per event and 1 to 4 days out. The tuned hyperparameters never saw a live-collected row.
-- **One fold holds the dense data.** The live-collected rows are scored once, by models trained without them.
+- **One fold holds the dense data.** In this run the live-collected rows are scored once, by models trained without them; in the rerun they span the last folds, still without training on dense rows before them.
 - **The search space.** The `min_child_weight` range of 20 to 2,000 was scaled to the mean-one weights, about 0.13 to 13 events. Both residual seeds settled at the edges of the space that give the least model.
-- **Fifty trials per run** on five small folds.
+- **Fifty trials per run** on the five small tuning folds of 2024-25.
 
 ## Related
 
