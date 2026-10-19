@@ -180,28 +180,29 @@ def build_league_table(
 async def load_season_events_cache(
     session: AsyncSession,
     sport_key: str,
+    until: datetime | None = None,
 ) -> StandingsCache:
     """Bulk-load all completed events for a sport, grouped by season.
 
     Returns a dict mapping season key (e.g. '2024-25') to a chronologically
-    ordered list of completed events. Intended to be called once before the
-    per-event loop to avoid N+1 queries.
+    ordered list of completed events, each kicking off at or before ``until``
+    when it is given. Intended to be called once before the per-event loop to
+    avoid N+1 queries.
     """
     if sport_key not in _SUPPORTED_SPORT_KEYS:
         raise ValueError(
             f"Standings features only support {_SUPPORTED_SPORT_KEYS}, got '{sport_key}'"
         )
 
-    result = await session.execute(
-        select(Event)
-        .where(
-            Event.sport_key == sport_key,
-            Event.status == EventStatus.FINAL,
-            Event.home_score.is_not(None),
-            Event.away_score.is_not(None),
-        )
-        .order_by(Event.commence_time)
+    query = select(Event).where(
+        Event.sport_key == sport_key,
+        Event.status == EventStatus.FINAL,
+        Event.home_score.is_not(None),
+        Event.away_score.is_not(None),
     )
+    if until is not None:
+        query = query.where(Event.commence_time <= until)
+    result = await session.execute(query.order_by(Event.commence_time))
     all_events = result.scalars().all()
 
     cache: StandingsCache = defaultdict(list)

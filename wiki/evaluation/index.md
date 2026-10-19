@@ -13,6 +13,7 @@ Backtests replay a strategy over stored events; experiments record what the CLV 
 - [Backtest engine](backtest-engine.md) — BacktestEngine event loop, sizing, settlement, metrics as computed, BacktestResult and its JSON and CSV forms.
 - [Backtest strategies](backtest-strategies.md) — The registered strategies, their constructor defaults and the STRATEGIES registry.
 - [Experiment scripts and artifacts](experiment-scripts.md) — Layout of experiments/, config and script conventions, the FINDINGS.md sections, the verification artifact files, and the inventory of scripts.
+- [Retail-EV evaluation](retail-ev-evaluation.md) — The one-look evaluation of a frozen retail-EV model on a window of events, with its spec, the window-end guard, the refit blocks, the keep-bar statistics and verdict, the coverage report, the descriptive slices and the output files.
 
 ### Explanation
 
@@ -37,4 +38,5 @@ Backtests replay a strategy over stored events; experiments record what the CLV 
 - [Add a backtest strategy](howto-add-backtest-strategy.md) — Subclass BettingStrategy, implement evaluate_opportunity, register it, and test it.
 - [Run a backtest](howto-run-backtest.md) — Check data prerequisites, list strategies, run, show, compare and export, or run from code.
 - [Run and record a modelling experiment](howto-run-experiment.md) — Run an experiment script, check its verification artifacts and FINDINGS.md, and record the result in the wiki.
+- [Run the retail-EV evaluation](howto-run-retail-ev-evaluation.md) — Write the evaluation spec, run odds evaluate retail-ev once from a clean tree on a local copy of the data, and read the verdict, manifest and coverage.
 <!-- pages:end -->

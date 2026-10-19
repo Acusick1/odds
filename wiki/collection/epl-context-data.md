@@ -25,7 +25,7 @@ Supplementary EPL data that feeds the `epl_schedule` [feature group](../modellin
 
 | Source | Table (model) | Written by | Read by |
 |---|---|---|---|
-| ESPN fixtures | `espn_fixtures` (`odds_core.epl_data_models.EspnFixture`) | the `fetch-espn-fixtures` job; `scripts/ingest_espn_fixtures.py` | `odds_lambda.storage.espn_fixture_reader.EspnFixtureReader`, `odds_analytics.feature_groups.load_fixtures_df` |
+| ESPN fixtures | `espn_fixtures` (`odds_core.epl_data_models.EspnFixture`) | the `fetch-espn-fixtures` job; `scripts/ingest_espn_fixtures.py` | `odds_lambda.storage.espn_fixture_reader.EspnFixtureReader`, `odds_analytics.feature_groups.load_fixtures_df` (all fixtures, or those up to an optional date) |
 | ESPN lineups | `espn_lineups` (`odds_core.epl_data_models.EspnLineup`) | `scripts/ingest_espn_lineups.py` (manual) | `odds_lambda.storage.espn_lineup_reader.EspnLineupReader` |
 | FPL availability | `fpl_availability` (`odds_core.epl_data_models.FplAvailability`) | `scripts/ingest_fpl_availability.py` (manual) | `odds_lambda.storage.fpl_availability_reader.FplAvailabilityReader` |
 | FBref player stats | none | `scripts/ingest_fbref_player_stats.py` (CSV only) | n/a |

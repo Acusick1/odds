@@ -9,7 +9,7 @@ sources:
   - odds_mcp.tools.mlb.ProbablePitchersResponse
   - odds_core.mlb_data_models.select_latest_in_window
   - odds_core.team.normalize_team_name
-  - odds_analytics.standings_features
+  - odds_analytics.standings_features.build_league_table
   - odds_lambda.scheduling.jobs._JOB_CRON_MAP
 status: stable
 ---
@@ -38,7 +38,7 @@ Each game carries `home_pitcher_name`/`id` and `away_pitcher_name`/`id`, nullabl
 
 ## Behaviour to know
 
-- Standings use a simplified tiebreak (points, goal difference, goals for, team name) without the official head-to-head step, so tied positions are approximate (`odds_mcp.tools.epl._derive_standings`). `odds_analytics.standings_features` derives a table with the same chain from `odds_core.models.Event` rows completed before a cutoff, a second implementation on different data (#463, [EPL context features](../modelling/epl-context-features.md)).
+- Standings use a simplified tiebreak (points, goal difference, goals for, team name) without the official head-to-head step, so tied positions are approximate (`odds_mcp.tools.epl._derive_standings`). `odds_analytics.standings_features.build_league_table` derives a table with the same chain from `odds_core.models.Event` rows completed before a cutoff, a second implementation on different data (#463, [EPL context features](../modelling/epl-context-features.md)).
 - `odds_core.team.normalize_team_name` returns an unknown name unchanged, so a misspelt team yields empty lists and `team_row: null`, not an error.
 - The `team` fixture query is not season-scoped; only standings filter by season label.
 - `odds_mcp.tools.epl.get_team_context` exists only for the EPL; MLB has no equivalent form or schedule tool.

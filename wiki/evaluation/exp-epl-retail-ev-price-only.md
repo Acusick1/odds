@@ -22,6 +22,11 @@ sources:
   - experiments/results/retail_ev_price_only_fixed_scale/summary.json
   - experiments/results/retail_ev_price_only_transform_mean_one/results.csv
   - experiments/results/retail_ev_price_only_transform_mean_one/summary.json
+  - experiments/configs/retail_ev_evaluation_reproduce_price_only.yaml
+  - experiments/results/retail_ev_evaluation_reproduce_price_only/report.json
+  - experiments/configs/retail_ev_evaluation_dry_run.yaml
+  - experiments/results/retail_ev_evaluation_dry_run/report.json
+  - experiments/results/retail_ev_evaluation_dry_run/slices.csv
   - odds_analytics.retail_ev.LOSS_WEIGHT_SCALE
   - odds_analytics.training.config.RetailEvArm
   - odds_analytics.retail_ev.RetailEvFeatures
@@ -285,6 +290,15 @@ Weighted-MSE gain over the baseline (10⁻⁶) with 95% CIs, over all scored eve
 - **The residual seed-42 trial is unchanged.** Tuning picks the same trial (100 trees, depth 4, lr 0.010, `min_child_weight` 1,982, λ 1.95) under both, and its gain moves by 0.7, against a seed-to-seed difference of 20 to 22 (`seed_7_minus_seed_42_mse_gain_e6`). The pipeline arm has no intercept, where the transform fitted the residual's weighted mean, −0.002 against a weighted RMS of 0.058 (`experiments/results/retail_ev_weight_scale/summary.json`).
 - **Seed 7 picks a different trial under each** (depth 5, `min_child_weight` 1,827, λ 0.062 under the fixed scale; depth 5, 1,810, λ 0.074 under mean-one), within its CI either way.
 - **The conclusion of #540 holds on current data.** The residual arm gains about 1% of the baseline's MSE with CIs that include zero, is level on the live-collected events and on picks, and the direct arm stays below the baseline.
+
+
+### Rescored by the evaluation command
+
+The [retail-EV evaluation](retail-ev-evaluation.md) rescores the frozen residual seed-42 trial without tuning. Both runs below are dry runs on development data. They read no event after 2026-07-31, pass `--allow-incomplete op_live_ASTVIL_LIV_2026-05-17T1130` for one SCHEDULED event, were rerun with `--force` to update the manifest format (identical predictions), and are not keep-bar results.
+
+- **Same layout as the rerun.** `experiments/configs/retail_ev_evaluation_reproduce_price_only.yaml` scores from 2025-08-01 in 41-event blocks with 2,000 resamples. It reads the rerun's 749 events and 113,028 rows, with the same event IDs and targets (#557), and scores 369 events and 109,167 rows. The gain is 32.0 [−25.7, 88.9] and the pick gain 0.013 [−0.043, 0.069], against the rerun's 32.4 [−24.2, 87.7] and 0.021 (`experiments/results/retail_ev_evaluation_reproduce_price_only/report.json`). The evaluation keeps all 39 columns of `odds_analytics.retail_ev.RetailEvFeatures`, including `book_boylesports`, which has no row in this data and which the pipeline's variance filter drops; the extra column changes the columns `colsample_bytree` draws. With that column removed, the evaluation's statistics equal the rerun's exactly (#557).
+- **The draft pre-registration's shape.** `experiments/configs/retail_ev_evaluation_dry_run.yaml` scores 2026-02-01 to 2026-07-31 in 50-event blocks with 10,000 resamples, training from 2024-08-01. It scores 134 of the 146 window events and 103,167 rows in three blocks. The gain is 8.4 [−73.8, 87.9] (0.2% of the baseline's MSE) and the pick gain 0.024 [−0.006, 0.061], so the verdict is retire. On the 49 live-collected events the gain is −43.8 [−174.0, 78.6] (`experiments/results/retail_ev_evaluation_dry_run/slices.csv`).
+- **The 12 unscored events have no close.** Eleven, from 2026-04-20 to 2026-04-27, have FDUK closing snapshots, but FDUK's 2025-26 closing rows carry no Betfair Exchange price from 2026-04-20 to 2026-05-04, and the live Betfair job has no snapshot within 30 minutes of their kick-offs (#557). The twelfth, `op_live_ASTVIL_LIV_2026-05-17T1130`, is a SCHEDULED ghost of a rescheduled fixture (#440) (`experiments/results/retail_ev_evaluation_dry_run/report.json`).
 
 ## Caveats
 
