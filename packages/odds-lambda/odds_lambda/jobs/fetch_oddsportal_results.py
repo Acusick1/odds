@@ -1,15 +1,12 @@
-"""Fetch results and closing odds from OddsPortal historical pages.
+"""Settle events from OddsPortal's results pages.
 
-Scrapes recent match results, updates SCHEDULED events to FINAL with scores,
-and stores one closing odds snapshot per event. Designed for daily Lambda
-execution on the scraper Lambda (requires Playwright/Chromium).
+Reads finished matches over HTTP from the results page's archive feed (no
+browser; see docs/adr/0009-oddsportal-feed-client.md) and sets matching
+unsettled events FINAL with their scores. Sport-aware: the results page path
+comes from the shared ``LeagueSpec`` registry in ``fetch_oddsportal``.
 
-Sport-aware: resolves league configuration from the shared ``LeagueSpec``
-registry in ``fetch_oddsportal``. Derives market key, num_outcomes, and
-harvester params from the spec.
-
-Idempotency: only queries SCHEDULED/LIVE events with commence_time in the past,
-so re-runs after events are marked FINAL find nothing to process.
+Idempotency: only events past kick-off that are SCHEDULED, LIVE, or FINAL
+without scores are pending, so re-runs after settling find nothing to process.
 """
 
 from __future__ import annotations
@@ -17,61 +14,32 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import structlog
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT, LeagueSpec
-from odds_lambda.oddsportal_common import (
-    build_raw_data,
-    parse_match_date,
-    run_scraper_with_retry,
-)
+from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
+from odds_lambda.oddsportal_client import FinishedMatch, OddsPortalClient
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-# Default sport key when no --sport is provided (backward-compatible)
 DEFAULT_SPORT_KEY = "soccer_epl"
-API_REQUEST_ID = "oddsportal_closing"
-
-
-def _market_key_for_spec(spec: LeagueSpec) -> str:
-    """Derive the OddsHarvester record key for the spec's primary market.
-
-    OddsHarvester stores market data under ``{market}_market`` keys, e.g.
-    ``"1x2_market"`` or ``"home_away_market"``.
-    """
-    return f"{spec.primary_market}_market"
-
-
-def _db_market_for_spec(spec: LeagueSpec) -> str:
-    """Derive the pipeline ``db_market`` value from the spec's primary market.
-
-    Maps OddsPortal market names to the pipeline's canonical market key used
-    in ``raw_data["bookmakers"][*]["markets"][*]["key"]``.
-    """
-    if spec.primary_market == "home_away":
-        return "h2h"
-    if spec.primary_market == "1x2":
-        return "1x2"
-    raise ValueError(f"Unrecognized primary_market: {spec.primary_market!r}")
+MATCH_WINDOW = timedelta(hours=24)
 
 
 @dataclass
 class ResultsStats:
     """Tracks results of a single results-collection run."""
 
-    matches_scraped: int = 0
+    matches_fetched: int = 0
     events_updated: int = 0
-    snapshots_stored: int = 0
-    events_not_matched: int = 0
+    events_unresolved: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -80,44 +48,30 @@ class PendingEvent:
     """Plain-data snapshot of a pending event, decoupled from any DB session.
 
     The results job reads pending events into these dataclasses so the DB
-    session can be closed before the long-running scrape begins.
+    session can be closed before the network fetch begins.
     """
 
     id: str
     home_team: str
     away_team: str
-    commence_time: datetime | None
-
-
-async def run_harvester_historic(spec: LeagueSpec) -> list[dict[str, Any]]:
-    """Scrape historical results for the given league via ``run_scraper_with_retry``."""
-    from oddsharvester.utils.command_enum import CommandEnum
-
-    result = await run_scraper_with_retry(
-        command=CommandEnum.HISTORIC,
-        sport=spec.sport,
-        leagues=[spec.league],
-        season=None,
-        max_pages=1,
-        markets=[spec.primary_market],
-        headless=True,
-    )
-    return result.success
+    commence_time: datetime
 
 
 async def get_pending_events(
     session: AsyncSession, sport_key: str = DEFAULT_SPORT_KEY
 ) -> list[PendingEvent]:
-    """Get SCHEDULED or LIVE events with commence_time in the past for the given sport.
-
-    Returns plain ``PendingEvent`` dataclasses so callers can use the data after
-    the session is closed.
-    """
+    """Events of the sport past kick-off that are not FINAL with scores."""
     query = select(Event.id, Event.home_team, Event.away_team, Event.commence_time).where(
         and_(
             Event.sport_key == sport_key,
-            Event.status.in_([EventStatus.SCHEDULED, EventStatus.LIVE]),
             Event.commence_time < datetime.now(UTC),
+            or_(
+                Event.status.in_([EventStatus.SCHEDULED, EventStatus.LIVE]),
+                and_(
+                    Event.status == EventStatus.FINAL,
+                    or_(Event.home_score.is_(None), Event.away_score.is_(None)),
+                ),
+            ),
         )
     )
     result = await session.execute(query)
@@ -132,61 +86,36 @@ async def get_pending_events(
     ]
 
 
-def _parse_score(record: dict[str, Any]) -> tuple[int, int] | None:
-    """Extract home and away scores from a scraped record."""
-    home_str = str(record.get("home_score", ""))
-    away_str = str(record.get("away_score", ""))
-    if home_str.isdigit() and away_str.isdigit():
-        return int(home_str), int(away_str)
-    return None
-
-
-def _match_record_to_event(
-    record: dict[str, Any],
-    pending_events: list[PendingEvent],
+def _match_to_event(
+    match: FinishedMatch, pending_events: list[PendingEvent]
 ) -> PendingEvent | None:
-    """Match a scraped record to a pending event by team name and date window."""
-    home_team = record.get("home_team", "").strip()
-    away_team = record.get("away_team", "").strip()
-    match_date_str = record.get("match_date", "")
-
-    if not home_team or not away_team or not match_date_str:
-        return None
-
-    try:
-        match_dt = parse_match_date(match_date_str)
-    except (ValueError, TypeError):
-        return None
-
-    for event in pending_events:
-        if event.home_team != home_team or event.away_team != away_team:
-            continue
-        if event.commence_time is None:
-            continue
-        delta = abs((event.commence_time - match_dt).total_seconds())
-        if delta <= 24 * 3600:
-            return event
-
-    return None
+    """The pending event with the same teams whose kick-off is nearest the match's, within the window."""
+    candidates = [
+        event
+        for event in pending_events
+        if event.home_team == match.home_team
+        and event.away_team == match.away_team
+        and abs(event.commence_time - match.start_time) <= MATCH_WINDOW
+    ]
+    return min(candidates, key=lambda e: abs(e.commence_time - match.start_time), default=None)
 
 
 async def process_results(
-    raw_matches: list[dict[str, Any]] | None = None,
-    sport: str | None = None,
+    sport: str | None = None, matches: list[FinishedMatch] | None = None
 ) -> ResultsStats:
-    """Process scraped results: update scores and store closing snapshots.
+    """Set pending events FINAL with the scores of their finished matches.
 
     The job runs in three phases with distinct session scopes so no DB session
-    is held across the long-running OddsHarvester scrape (Neon closes idle
-    connections, which would crash the write phase):
+    is held across the network fetch (Neon closes idle connections, which would
+    crash the write phase):
 
-    1. Read phase — open a session, load pending events (detached), close session.
-    2. Scrape phase — run ``run_harvester_historic`` with no open session.
-    3. Write phase — open a fresh session, upsert scores and snapshots, commit.
+    1. Read phase: open a session, load pending events (detached), close session.
+    2. Fetch phase: read the results pages back to the oldest pending kick-off.
+    3. Write phase: open a fresh session, update each matched event, commit per event.
 
     Args:
-        raw_matches: Pre-scraped data (skips harvester call). For testing.
-        sport: Sport key to filter (e.g. "soccer_epl"). Defaults to DEFAULT_SPORT_KEY.
+        sport: Sport key (e.g. "soccer_epl"). Defaults to DEFAULT_SPORT_KEY.
+        matches: Finished matches replacing the fetch. For testing.
     """
     stats = ResultsStats()
     sport_key = sport or DEFAULT_SPORT_KEY
@@ -200,10 +129,6 @@ async def process_results(
         )
         return stats
 
-    market_key = _market_key_for_spec(spec)
-    db_market = _db_market_for_spec(spec)
-
-    # Phase 1: read pending events, then release the session
     async with async_session_maker() as session:
         pending_events = await get_pending_events(session, sport_key=sport_key)
 
@@ -213,100 +138,48 @@ async def process_results(
 
     logger.info("pending_events_found", count=len(pending_events))
 
-    # Phase 2: scrape with no open session
-    if raw_matches is None:
-        raw_matches = await run_harvester_historic(spec)
+    if matches is None:
+        oldest = min(event.commence_time for event in pending_events)
+        async with OddsPortalClient() as client:
+            matches = await client.fetch_results(
+                f"{spec.listing_path}results/", since=oldest - MATCH_WINDOW
+            )
+    stats.matches_fetched = len(matches)
 
-    stats.matches_scraped = len(raw_matches)
-
-    if not raw_matches:
-        logger.warning("no_matches_scraped")
-        return stats
-
-    logger.info("matches_scraped", count=len(raw_matches))
-
-    # Phase 3: open a fresh session and write results, committing per-record so
-    # a single failure cannot invalidate earlier writes.
     async with async_session_maker() as session:
         writer = OddsWriter(session)
 
-        for record in raw_matches:
+        for match in sorted(matches, key=lambda m: m.start_time):
+            event = _match_to_event(match, pending_events)
+            if event is None:
+                continue
             try:
-                event = _match_record_to_event(record, pending_events)
-                if event is None:
-                    stats.events_not_matched += 1
-                    continue
-
-                scores = _parse_score(record)
-                if scores is None:
-                    logger.warning(
-                        "no_scores_in_record",
-                        home=record.get("home_team"),
-                        away=record.get("away_team"),
-                    )
-                    continue
-
-                home_score, away_score = scores
-
                 await writer.update_event_status(
                     event_id=event.id,
                     status=EventStatus.FINAL,
-                    home_score=home_score,
-                    away_score=away_score,
+                    home_score=match.home_score,
+                    away_score=match.away_score,
                 )
-
-                snapshot_stored = False
-                market_data = record.get(market_key, [])
-                if market_data:
-                    match_dt = parse_match_date(record["match_date"])
-                    raw_data = build_raw_data(
-                        market_data,
-                        event.home_team,
-                        event.away_team,
-                        use_opening=False,
-                        match_dt=match_dt,
-                        num_outcomes=spec.num_outcomes,
-                        db_market=db_market,
-                    )
-                    if raw_data is not None:
-                        snapshot_time_str = raw_data.pop("_snapshot_time", None)
-                        if snapshot_time_str:
-                            snapshot_time = datetime.fromisoformat(
-                                snapshot_time_str.replace("Z", "+00:00")
-                            )
-                            snapshot, _ = await writer.store_odds_snapshot(
-                                event_id=event.id,
-                                raw_data=raw_data,
-                                snapshot_time=snapshot_time,
-                            )
-                            snapshot.api_request_id = API_REQUEST_ID
-                            snapshot_stored = True
-
                 await session.commit()
-
-                # Only advance batch state after the commit succeeds so rolled-back
-                # records don't inflate success counters or prematurely drop events
-                # from the in-flight dedupe list.
-                stats.events_updated += 1
-                if snapshot_stored:
-                    stats.snapshots_stored += 1
-                pending_events.remove(event)
-
             except Exception as e:
-                msg = f"{record.get('home_team', '?')} vs {record.get('away_team', '?')}: {e}"
+                msg = f"{match.home_team} vs {match.away_team}: {e}"
                 stats.errors.append(msg)
                 logger.error("result_processing_failed", error=msg, exc_info=True)
                 try:
                     await session.rollback()
                 except Exception:
                     logger.warning("session_rollback_failed", exc_info=True)
+                continue
 
+            stats.events_updated += 1
+            pending_events.remove(event)
+
+    stats.events_unresolved = len(pending_events)
     logger.info(
         "results_collection_complete",
-        matches_scraped=stats.matches_scraped,
+        matches_fetched=stats.matches_fetched,
         events_updated=stats.events_updated,
-        snapshots_stored=stats.snapshots_stored,
-        events_not_matched=stats.events_not_matched,
+        events_unresolved=stats.events_unresolved,
         errors=len(stats.errors),
     )
 

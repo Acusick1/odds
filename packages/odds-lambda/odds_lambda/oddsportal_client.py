@@ -13,6 +13,7 @@ import functools
 import gzip
 import hashlib
 import json
+import math
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -62,6 +63,10 @@ _FEED_ERROR_MAX_REFRESH_SECONDS = 30
 
 _PUSH_RE = re.compile(r"self\.__next_f\.push\((\[.*?\])\)</script>", re.DOTALL)
 _EVENT_KEYS = ("encodeEventId", "home-name", "away-name", "date-start-timestamp", "url", "sport-id")
+_ARCHIVE_URL_RE = re.compile(
+    r'"url":"' + re.escape(BASE_URL) + r'/(ajax-sport-country-tournament-archive_/[^"]+)"'
+)
+_STATUS_FINISHED = 3
 
 
 class OddsPortalError(Exception):
@@ -80,6 +85,22 @@ class ListingEvent:
     away_team: str
     start_time: datetime
     url: str
+
+
+@dataclass(frozen=True)
+class FinishedMatch:
+    home_team: str
+    away_team: str
+    start_time: datetime
+    home_score: int
+    away_score: int
+
+
+@dataclass(frozen=True)
+class ResultsPage:
+    matches: list[FinishedMatch]
+    oldest_start: datetime | None
+    page_count: int
 
 
 @dataclass(frozen=True)
@@ -234,6 +255,45 @@ def parse_listing(html: str) -> list[ListingEvent]:
             )
         logger.warning("oddsportal_listing_empty", product_error_type=error_match.group(1))
     return list(events.values())
+
+
+def parse_archive_path(html: str) -> str:
+    """The proxy path of a results page's paginated archive feed, without a page suffix."""
+    match = _ARCHIVE_URL_RE.search(_rsc_payload(html))
+    if match is None:
+        raise OddsPortalError("results page has no archive feed URL; page format may have changed")
+    return f"/proxy/{match.group(1)}"
+
+
+def parse_results_page(feed: Any) -> ResultsPage:
+    """Finished matches of one archive feed page, with the page's oldest kick-off."""
+    data = feed.get("d") if isinstance(feed, dict) else None
+    if not isinstance(data, dict):
+        raise OddsPortalError("unexpected archive feed shape")
+    try:
+        rows = data["rows"]
+        page_count = math.ceil(int(data["total"]) / int(data["onePage"]))
+        starts = [datetime.fromtimestamp(int(row["date-start-timestamp"]), tz=UTC) for row in rows]
+    except (KeyError, TypeError, ValueError, ZeroDivisionError) as e:
+        raise OddsPortalError(f"unexpected archive feed shape: {e!r}") from e
+
+    matches: list[FinishedMatch] = []
+    for row, start in zip(rows, starts, strict=True):
+        home, away = str(row.get("homeResult", "")), str(row.get("awayResult", ""))
+        if row.get("status-id") != _STATUS_FINISHED or not (home.isdigit() and away.isdigit()):
+            continue
+        matches.append(
+            FinishedMatch(
+                home_team=str(row["home-name"]),
+                away_team=str(row["away-name"]),
+                start_time=start,
+                home_score=int(home),
+                away_score=int(away),
+            )
+        )
+    return ResultsPage(
+        matches=matches, oldest_start=min(starts, default=None), page_count=page_count
+    )
 
 
 def _outcome_values(raw: Any, count: int) -> list[Any] | None:
@@ -410,6 +470,27 @@ class OddsPortalClient:
             BASE_URL + path, {**_BASE_HEADERS, "Accept": "text/html,application/xhtml+xml"}
         )
         return parse_listing(html)
+
+    async def fetch_results(self, path: str, since: datetime) -> list[FinishedMatch]:
+        """Finished matches on a results page, newest first, back to the page holding ``since``."""
+        html = await self._get(
+            BASE_URL + path, {**_BASE_HEADERS, "Accept": "text/html,application/xhtml+xml"}
+        )
+        archive = parse_archive_path(html)
+        matches: list[FinishedMatch] = []
+        page = 1
+        while True:
+            feed = await self._get_json(f"{BASE_URL}{archive}/page/{page}/", _XHR_HEADERS)
+            results = parse_results_page(feed)
+            matches.extend(results.matches)
+            if (
+                results.oldest_start is None
+                or results.oldest_start < since
+                or page >= results.page_count
+            ):
+                return matches
+            page += 1
+            await _sleep(self._request_delay)
 
     async def fetch_bookmaker_context(self) -> BookmakerContext:
         home = await self._get_json(f"{BASE_URL}/proxy/api/home-data", _XHR_HEADERS)

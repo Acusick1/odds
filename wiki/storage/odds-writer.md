@@ -38,7 +38,7 @@ Returns `(OddsSnapshot, list[Odds])`.
 
 ## Event handling
 
-Event upserts (`odds_lambda.storage.writers.OddsWriter.upsert_event`, `odds_lambda.storage.writers.OddsWriter.update_event_status`, `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events`) are on [Events table](events.md#upsert-verbs).
+Event upserts (`odds_lambda.storage.writers.OddsWriter.upsert_event`, `odds_lambda.storage.writers.OddsWriter.update_event_status`, `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events`) are on [Events table](events.md#upsert-verbs); `odds_lambda.storage.writers.OddsWriter.update_event_status` raises `ValueError` for FINAL without both scores.
 
 ### find_or_create_event
 

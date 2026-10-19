@@ -35,7 +35,7 @@ This run repeats the protocol of [Price-only models on the retail-EV target](exp
 
 ## Setup
 
-- **Script.** The script `experiments/scripts/retail_ev_as_of_t_groups.py` builds each variant from `experiments/configs/xgboost_epl_retail_ev_price_only.yaml` with `feature_groups` set. It runs the functions of `experiments/scripts/retail_ev_price_only.py`: the same tuning range, scoring folds, arms and seeds, with each variant's Optuna studies under their own name. It writes `experiments/results/retail_ev_as_of_t_groups/`.
+- **Script.** The script `experiments/scripts/retail_ev_as_of_t_groups.py` builds each variant from `experiments/configs/xgboost_epl_retail_ev_price_only.yaml` with `feature_groups` set. It runs the functions of `experiments/scripts/retail_ev_price_only.py`, which take every event in the date range with a close: the same tuning range, scoring folds, arms and seeds, with each variant's Optuna studies under their own name. It writes `experiments/results/retail_ev_as_of_t_groups/`.
 - **Rows.** All variants share 112,455 rows over 720 events, and the script checks this. 108,594 rows over 340 events are scored, in five 68-event folds from 2025-08-15 to 2026-05-24.
   - The 69 live-collected events hold 103,269 rows, mostly OddsPortal live snapshots. Their 44 OddsPortal live events fall in fold 4 (2026-02-28 onward).
   - The 271 FDUK-only events hold 5,325 rows, one FDUK opening snapshot each.

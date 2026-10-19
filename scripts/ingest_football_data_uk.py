@@ -141,6 +141,7 @@ class Kickoff:
 class FdukStats(IngestionStats):
     openings_withheld: int = 0
     kickoff_mismatches: int = 0
+    results_filled: int = 0
 
 
 def normalize_team(name: str) -> str:
@@ -506,6 +507,15 @@ async def _ingest_one_match(
                 f"from event kick-off {event.commence_time.isoformat()}"
             )
     commence_time = event.commence_time
+    if event.home_score is None or event.away_score is None:
+        home_score = _safe_int(row.get("FTHG"))
+        away_score = _safe_int(row.get("FTAG"))
+        if home_score is not None and away_score is not None:
+            event.status = EventStatus.FINAL
+            event.home_score = home_score
+            event.away_score = away_score
+            event.completed_at = commence_time + timedelta(hours=2)
+            stats.results_filled += 1
 
     new_snapshots: list[OddsSnapshot] = []
     for use_closing in (False, True):
@@ -669,6 +679,7 @@ async def _run(
         totals.snapshots_updated += stats.snapshots_updated
         totals.openings_withheld += stats.openings_withheld
         totals.kickoff_mismatches += stats.kickoff_mismatches
+        totals.results_filled += stats.results_filled
         totals.errors.extend(stats.errors)
 
         if not dry_run and not download_only:
@@ -691,6 +702,7 @@ async def _run(
         log.info(f"Snapshots replaced: {totals.snapshots_updated}")
         log.info(f"Openings withheld:  {totals.openings_withheld}")
         log.info(f"Kick-off mismatches: {totals.kickoff_mismatches}")
+        log.info(f"Results filled:     {totals.results_filled}")
 
     if totals.errors:
         log.info(f"Errors:             {len(totals.errors)}")

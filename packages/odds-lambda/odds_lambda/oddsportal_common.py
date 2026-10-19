@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from oddsharvester.core.scrape_result import FailedUrl
+from typing import Any
 
 import structlog
 from odds_core.odds_math import PRICE_DECIMAL_KEY
-from oddsharvester.core.scrape_result import ScrapeResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.storage.event_merge import find_historical_match_id
@@ -23,11 +18,6 @@ log = logging.getLogger(__name__)
 logger = structlog.get_logger()
 
 DRAW_OUTCOME = "Draw"
-
-MAX_SCRAPER_RETRIES = 1
-SCRAPER_RETRY_DELAY_SECONDS = 20
-MAX_FAILED_URL_RETRY_PASSES = 1
-FAILED_URL_RETRY_DELAY_SECONDS = 20
 
 # OddsPortal bookmaker name → pipeline key.
 BOOKMAKER_KEY_MAP: dict[str, str] = {
@@ -228,210 +218,6 @@ def build_raw_data(
         "source": "oddsportal",
         "_snapshot_time": snapshot_time.replace(tzinfo=UTC).isoformat() if snapshot_time else None,
     }
-
-
-def _generate_user_agent() -> str:
-    """Generate a fresh Chrome user agent string."""
-    from fake_useragent import UserAgent
-
-    return UserAgent(browsers=["Chrome"]).random
-
-
-async def run_scraper_with_retry(**scraper_kwargs: Any) -> ScrapeResult:
-    """Call oddsharvester's ``run_scraper()`` with retry-on-empty and failed-URL retry.
-
-    Two retry mechanisms:
-
-    1. **Empty-page retry**: retries the entire scrape up to
-       ``MAX_SCRAPER_RETRIES`` times when zero successes are returned
-       (Cloudflare blank page recovery).
-
-    2. **Failed-URL retry**: after a partially-successful scrape, retries all
-       failed URLs except PAGE_NOT_FOUND (404) across up to 3 passes, each
-       with a delay and fresh browser session. This bypasses the upstream
-       ``is_retryable`` flag which is unreliable.
-
-    A fresh Chrome user agent is generated per attempt (via ``fake-useragent``)
-    and passed as ``browser_user_agent`` unless the caller already supplied one.
-
-    Returns:
-        ``ScrapeResult`` containing successful matches, remaining failures,
-        and merged statistics.
-
-    Raises:
-        RuntimeError: If ``run_scraper()`` returns ``None`` (fatal init error).
-    """
-    from oddsharvester.core.scraper_app import run_scraper
-
-    caller_supplied_ua = "browser_user_agent" in scraper_kwargs
-
-    for attempt in range(1, MAX_SCRAPER_RETRIES + 1):
-        if not caller_supplied_ua:
-            ua = _generate_user_agent()
-            scraper_kwargs["browser_user_agent"] = ua
-            logger.info("generated_user_agent", user_agent=ua, attempt=attempt)
-
-        logger.info("running_harvester", attempt=attempt, **scraper_kwargs)
-
-        result = await run_scraper(**scraper_kwargs)
-
-        if result is None:
-            raise RuntimeError("OddsHarvester fatal init error (returned None)")
-
-        if result.failed:
-            logger.warning(
-                "harvester_failures",
-                failed=len(result.failed),
-                errors=result.get_error_breakdown(),
-            )
-
-        if result.success:
-            logger.info(
-                "harvester_attempt_result",
-                attempt=attempt,
-                outcome="success",
-                matches=len(result.success),
-                user_agent=scraper_kwargs.get("browser_user_agent"),
-                stats=result.stats.to_dict(),
-            )
-            # Retry failed URLs up to MAX_FAILED_URL_RETRY_PASSES times with fresh browser sessions
-            await _retry_failed_urls(result, scraper_kwargs)
-            return result
-
-        logger.warning(
-            "harvester_attempt_result",
-            attempt=attempt,
-            outcome="empty",
-            matches=0,
-            user_agent=scraper_kwargs.get("browser_user_agent"),
-        )
-
-        if attempt < MAX_SCRAPER_RETRIES:
-            logger.warning(
-                "harvester_empty_retry",
-                attempt=attempt,
-                delay=SCRAPER_RETRY_DELAY_SECONDS,
-            )
-            await asyncio.sleep(SCRAPER_RETRY_DELAY_SECONDS)
-
-    logger.error("harvester_all_retries_exhausted", attempts=MAX_SCRAPER_RETRIES)
-    return _empty_scrape_result()
-
-
-def _get_retriable_failed_urls(failed: list[FailedUrl]) -> list[str]:
-    """Return URLs from failed list that should be retried.
-
-    Retries all failures except PAGE_NOT_FOUND (404), which are permanent.
-    This bypasses the upstream ``is_retryable`` flag, which is unreliable
-    due to oddsharvester silently returning None instead of raising on
-    header-not-found errors.
-    """
-    from oddsharvester.core.scrape_result import ErrorType
-
-    return [f.url for f in failed if f.error_type != ErrorType.PAGE_NOT_FOUND]
-
-
-async def _retry_failed_urls(
-    result: ScrapeResult,
-    original_kwargs: dict[str, Any],
-) -> None:
-    """Retry failed URLs with fresh browser sessions, up to 3 passes.
-
-    Retries all failures except PAGE_NOT_FOUND (404). Each pass waits
-    a delay before launching a fresh browser session (Cloudflare cooldown).
-
-    Mutates *result* in-place: merges recovered matches into ``success``
-    and replaces ``failed`` with only the permanently-failed and
-    still-failing URLs.
-    """
-    from oddsharvester.core.scrape_result import ErrorType
-    from oddsharvester.core.scraper_app import run_scraper
-
-    sport = original_kwargs.get("sport")
-    if not sport:
-        logger.warning("failed_url_retry_skipped", reason="no sport in kwargs")
-        return
-
-    # Separate permanent failures (404) from retriable ones
-    permanent_failures = [f for f in result.failed if f.error_type == ErrorType.PAGE_NOT_FOUND]
-    pending_urls = _get_retriable_failed_urls(result.failed)
-
-    if not pending_urls:
-        return
-
-    for pass_num in range(1, MAX_FAILED_URL_RETRY_PASSES + 1):
-        logger.info(
-            "failed_url_retry_starting",
-            pass_num=pass_num,
-            retriable=len(pending_urls),
-            total_failed=len(result.failed),
-        )
-
-        await asyncio.sleep(FAILED_URL_RETRY_DELAY_SECONDS)
-
-        retry_ua = _generate_user_agent()
-        logger.info("retry_generated_user_agent", user_agent=retry_ua, pass_num=pass_num)
-
-        retry_kwargs: dict[str, Any] = {
-            "command": original_kwargs["command"],
-            "match_links": pending_urls,
-            "sport": sport,
-            "headless": original_kwargs.get("headless", True),
-            "browser_user_agent": retry_ua,
-        }
-        if "markets" in original_kwargs:
-            retry_kwargs["markets"] = original_kwargs["markets"]
-
-        retry_result = await run_scraper(**retry_kwargs)
-
-        if retry_result is None:
-            logger.warning("failed_url_retry_init_error", pass_num=pass_num)
-            break
-
-        recovered = len(retry_result.success)
-        still_failed = len(retry_result.failed)
-
-        logger.info(
-            "failed_url_retry_pass_complete",
-            pass_num=pass_num,
-            recovered=recovered,
-            still_failed=still_failed,
-            sent_to_retry=len(pending_urls),
-        )
-
-        result.success.extend(retry_result.success)
-
-        if not retry_result.failed:
-            # All recovered — no more passes needed
-            result.failed = permanent_failures
-            break
-
-        # Prepare next pass with still-failing URLs (exclude any new 404s)
-        permanent_failures.extend(
-            f for f in retry_result.failed if f.error_type == ErrorType.PAGE_NOT_FOUND
-        )
-        pending_urls = _get_retriable_failed_urls(retry_result.failed)
-
-        if not pending_urls:
-            result.failed = permanent_failures
-            break
-
-        # Last pass — finalize with remaining failures
-        if pass_num == MAX_FAILED_URL_RETRY_PASSES:
-            result.failed = permanent_failures + retry_result.failed
-
-    result.stats.successful = len(result.success)
-    result.stats.failed = len(result.failed)
-
-
-def _empty_scrape_result() -> ScrapeResult:
-    """Create an empty ``ScrapeResult`` for exhausted-retry fallback."""
-    return ScrapeResult()
-
-
-# ---------------------------------------------------------------------------
-# Shared ingestion helpers
-# ---------------------------------------------------------------------------
 
 
 @dataclass

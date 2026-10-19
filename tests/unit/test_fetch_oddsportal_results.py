@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_core.models import Event, EventStatus
-from odds_lambda.jobs.fetch_oddsportal import LeagueSpec
 from odds_lambda.jobs.fetch_oddsportal_results import (
     DEFAULT_SPORT_KEY,
     PendingEvent,
-    _db_market_for_spec,
-    _market_key_for_spec,
-    _match_record_to_event,
-    _parse_score,
+    _match_to_event,
     get_pending_events,
     process_results,
 )
+from odds_lambda.oddsportal_client import FinishedMatch
+from sqlalchemy import select
+
+KICKOFF = datetime(2026, 3, 1, 15, 0, 0, tzinfo=UTC)
 
 
 def _make_event(
@@ -25,17 +25,22 @@ def _make_event(
     event_id: str = "test_event_1",
     home_team: str = "Arsenal",
     away_team: str = "Chelsea",
-    commence_time: datetime | None = None,
+    commence_time: datetime = KICKOFF,
     status: EventStatus = EventStatus.SCHEDULED,
+    scores: tuple[int, int] | None = None,
+    sport_key: str = "soccer_epl",
 ) -> Event:
+    home_score, away_score = scores if scores is not None else (None, None)
     return Event(
         id=event_id,
-        sport_key="soccer_epl",
+        sport_key=sport_key,
         sport_title="EPL",
-        commence_time=commence_time or datetime(2026, 3, 1, 15, 0, 0, tzinfo=UTC),
+        commence_time=commence_time,
         home_team=home_team,
         away_team=away_team,
         status=status,
+        home_score=home_score,
+        away_score=away_score,
     )
 
 
@@ -44,364 +49,235 @@ def _make_pending(
     event_id: str = "test_event_1",
     home_team: str = "Arsenal",
     away_team: str = "Chelsea",
-    commence_time: datetime | None = None,
+    commence_time: datetime = KICKOFF,
 ) -> PendingEvent:
     return PendingEvent(
-        id=event_id,
-        home_team=home_team,
-        away_team=away_team,
-        commence_time=commence_time or datetime(2026, 3, 1, 15, 0, 0, tzinfo=UTC),
+        id=event_id, home_team=home_team, away_team=away_team, commence_time=commence_time
     )
 
 
-def _make_record(
+def _make_match(
     *,
     home_team: str = "Arsenal",
     away_team: str = "Chelsea",
-    match_date: str = "2026-03-01 15:00:00 UTC",
-    home_score: str = "2",
-    away_score: str = "1",
-    with_odds: bool = True,
-) -> dict:
-    record: dict = {
-        "home_team": home_team,
-        "away_team": away_team,
-        "match_date": match_date,
-        "home_score": home_score,
-        "away_score": away_score,
-    }
-    if with_odds:
-        record["1x2_market"] = [
-            {
-                "bookmaker_name": "bet365",
-                "odds_history_data": [
-                    {
-                        "opening_odds": {"timestamp": "2026-02-28T10:00:00", "odds": 2.0},
-                        "odds_history": [{"timestamp": "2026-03-01T14:50:00", "odds": 1.9}],
-                    },
-                    {
-                        "opening_odds": {"timestamp": "2026-02-28T10:00:00", "odds": 3.5},
-                        "odds_history": [{"timestamp": "2026-03-01T14:50:00", "odds": 3.4}],
-                    },
-                    {
-                        "opening_odds": {"timestamp": "2026-02-28T10:00:00", "odds": 4.0},
-                        "odds_history": [{"timestamp": "2026-03-01T14:50:00", "odds": 4.2}],
-                    },
-                ],
-            }
-        ]
-    return record
+    start_time: datetime = KICKOFF,
+    home_score: int = 2,
+    away_score: int = 1,
+) -> FinishedMatch:
+    return FinishedMatch(
+        home_team=home_team,
+        away_team=away_team,
+        start_time=start_time,
+        home_score=home_score,
+        away_score=away_score,
+    )
 
 
-class TestParseScore:
-    def test_valid_scores(self) -> None:
-        assert _parse_score({"home_score": "2", "away_score": "1"}) == (2, 1)
-
-    def test_zero_scores(self) -> None:
-        assert _parse_score({"home_score": "0", "away_score": "0"}) == (0, 0)
-
-    def test_missing_home_score(self) -> None:
-        assert _parse_score({"away_score": "1"}) is None
-
-    def test_missing_away_score(self) -> None:
-        assert _parse_score({"home_score": "2"}) is None
-
-    def test_non_digit_score(self) -> None:
-        assert _parse_score({"home_score": "N/A", "away_score": "1"}) is None
-
-    def test_empty_string_score(self) -> None:
-        assert _parse_score({"home_score": "", "away_score": "1"}) is None
-
-
-class TestMatchRecordToEvent:
-    def test_matches_by_team_and_date(self) -> None:
+class TestMatchToEvent:
+    def test_matches_by_team_and_time(self) -> None:
         event = _make_pending()
-        record = _make_record()
-        assert _match_record_to_event(record, [event]) is event
+        assert _match_to_event(_make_match(), [event]) is event
 
     def test_no_match_different_teams(self) -> None:
         event = _make_pending(home_team="Liverpool", away_team="Everton")
-        record = _make_record()
-        assert _match_record_to_event(record, [event]) is None
+        assert _match_to_event(_make_match(), [event]) is None
 
     def test_no_match_outside_24h_window(self) -> None:
-        event = _make_pending(
-            commence_time=datetime(2026, 3, 5, 15, 0, 0, tzinfo=UTC),
-        )
-        record = _make_record(match_date="2026-03-01 15:00:00 UTC")
-        assert _match_record_to_event(record, [event]) is None
+        event = _make_pending(commence_time=KICKOFF + timedelta(days=4))
+        assert _match_to_event(_make_match(), [event]) is None
 
     def test_matches_within_24h_window(self) -> None:
-        event = _make_pending(
-            commence_time=datetime(2026, 3, 1, 20, 0, 0, tzinfo=UTC),
-        )
-        record = _make_record(match_date="2026-03-01 15:00:00 UTC")
-        assert _match_record_to_event(record, [event]) is event
+        event = _make_pending(commence_time=KICKOFF + timedelta(hours=5))
+        assert _match_to_event(_make_match(), [event]) is event
 
     def test_empty_pending_events(self) -> None:
-        record = _make_record()
-        assert _match_record_to_event(record, []) is None
+        assert _match_to_event(_make_match(), []) is None
 
-    def test_missing_team_in_record(self) -> None:
-        event = _make_pending()
-        record = {"home_team": "", "away_team": "Chelsea", "match_date": "2026-03-01 15:00:00 UTC"}
-        assert _match_record_to_event(record, [event]) is None
+    def test_doubleheader_pairs_each_game_with_its_nearest_event(self) -> None:
+        game_one = _make_pending(event_id="g1", commence_time=KICKOFF)
+        game_two = _make_pending(event_id="g2", commence_time=KICKOFF + timedelta(hours=4))
 
-    def test_missing_match_date(self) -> None:
-        event = _make_pending()
-        record = {"home_team": "Arsenal", "away_team": "Chelsea", "match_date": ""}
-        assert _match_record_to_event(record, [event]) is None
+        assert _match_to_event(_make_match(start_time=KICKOFF), [game_two, game_one]) is game_one
+        assert (
+            _match_to_event(
+                _make_match(start_time=KICKOFF + timedelta(hours=4)), [game_one, game_two]
+            )
+            is game_two
+        )
 
 
 class TestGetPendingEvents:
     @pytest.mark.asyncio
-    async def test_includes_scheduled_events(self, test_session) -> None:
-        event = _make_event(status=EventStatus.SCHEDULED)
+    @pytest.mark.parametrize("status", [EventStatus.SCHEDULED, EventStatus.LIVE])
+    async def test_includes_unsettled_events(self, test_session, status: EventStatus) -> None:
+        event = _make_event(status=status)
         test_session.add(event)
         await test_session.commit()
 
         result = await get_pending_events(test_session)
-        assert len(result) == 1
-        assert result[0].id == event.id
+        assert [p.id for p in result] == [event.id]
 
     @pytest.mark.asyncio
-    async def test_includes_live_events(self, test_session) -> None:
-        event = _make_event(status=EventStatus.LIVE)
-        test_session.add(event)
-        await test_session.commit()
-
-        result = await get_pending_events(test_session)
-        assert len(result) == 1
-        assert result[0].id == event.id
-
-    @pytest.mark.asyncio
-    async def test_excludes_final_events(self, test_session) -> None:
+    async def test_includes_final_events_without_scores(self, test_session) -> None:
         event = _make_event(status=EventStatus.FINAL)
         test_session.add(event)
         await test_session.commit()
 
         result = await get_pending_events(test_session)
-        assert len(result) == 0
+        assert [p.id for p in result] == [event.id]
+
+    @pytest.mark.asyncio
+    async def test_excludes_final_events_with_scores(self, test_session) -> None:
+        test_session.add(_make_event(status=EventStatus.FINAL, scores=(1, 0)))
+        await test_session.commit()
+
+        assert await get_pending_events(test_session) == []
 
     @pytest.mark.asyncio
     async def test_excludes_future_events(self, test_session) -> None:
-        event = _make_event(
-            status=EventStatus.SCHEDULED,
-            commence_time=datetime(2099, 1, 1, 12, 0, 0, tzinfo=UTC),
-        )
-        test_session.add(event)
+        test_session.add(_make_event(commence_time=datetime.now(UTC) + timedelta(days=30)))
         await test_session.commit()
 
-        result = await get_pending_events(test_session)
-        assert len(result) == 0
+        assert await get_pending_events(test_session) == []
+
+    @pytest.mark.asyncio
+    async def test_excludes_other_sports(self, test_session) -> None:
+        test_session.add(_make_event(sport_key="baseball_mlb"))
+        await test_session.commit()
+
+        assert await get_pending_events(test_session, sport_key="soccer_epl") == []
+
+
+def _session_maker(session) -> MagicMock:
+    maker = MagicMock()
+    maker.return_value.__aenter__ = AsyncMock(return_value=session)
+    maker.return_value.__aexit__ = AsyncMock(return_value=None)
+    return maker
+
+
+async def _stored(session, event_id: str) -> Event:
+    await session.rollback()
+    result = await session.execute(select(Event).where(Event.id == event_id))
+    return result.scalar_one()
 
 
 class TestProcessResults:
     @pytest.mark.asyncio
-    async def test_early_exit_no_pending_events(self) -> None:
-        from unittest.mock import MagicMock
-
-        mock_session = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_session.execute.return_value = mock_result
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
-
-        with patch(
-            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
-            return_value=mock_session,
-        ):
-            stats = await process_results(raw_matches=[])
-            assert stats.matches_scraped == 0
-            assert stats.events_updated == 0
-
-    @pytest.mark.asyncio
-    async def test_updates_event_and_stores_snapshot(self, test_session) -> None:
-        event = _make_event()
-        test_session.add(event)
+    async def test_settles_matched_events_and_counts_the_rest(self, test_session) -> None:
+        test_session.add(_make_event(event_id="matched"))
+        test_session.add(_make_event(event_id="no_result", home_team="Fulham", away_team="Burnley"))
+        test_session.add(
+            _make_event(
+                event_id="scoreless_final",
+                home_team="Leeds",
+                away_team="Everton",
+                status=EventStatus.FINAL,
+            )
+        )
         await test_session.commit()
 
-        record = _make_record()
-
-        mock_session_maker = AsyncMock()
-        mock_session_maker.__aenter__ = AsyncMock(return_value=test_session)
-        mock_session_maker.__aexit__ = AsyncMock(return_value=None)
-
+        matches = [
+            _make_match(),
+            _make_match(home_team="Leeds", away_team="Everton", home_score=0, away_score=0),
+        ]
         with patch(
             "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
-            return_value=mock_session_maker,
+            _session_maker(test_session),
         ):
-            stats = await process_results(raw_matches=[record])
+            stats = await process_results(matches=matches)
 
+        assert (stats.matches_fetched, stats.events_updated, stats.events_unresolved) == (2, 2, 1)
+        matched = await _stored(test_session, "matched")
+        assert (matched.status, matched.home_score, matched.away_score) == (
+            EventStatus.FINAL,
+            2,
+            1,
+        )
+        assert matched.completed_at is not None
+        scoreless = await _stored(test_session, "scoreless_final")
+        assert (scoreless.home_score, scoreless.away_score) == (0, 0)
+        unresolved = await _stored(test_session, "no_result")
+        assert (unresolved.status, unresolved.home_score) == (EventStatus.SCHEDULED, None)
+
+    @pytest.mark.asyncio
+    async def test_fetches_results_back_to_the_oldest_pending_kickoff(self, test_session) -> None:
+        test_session.add(_make_event())
+        await test_session.commit()
+        client = MagicMock()
+        client.fetch_results = AsyncMock(return_value=[_make_match()])
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+                _session_maker(test_session),
+            ),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal_results.OddsPortalClient", return_value=client
+            ),
+        ):
+            stats = await process_results(sport="soccer_epl")
+
+        client.fetch_results.assert_awaited_once_with(
+            "/football/england/premier-league/results/", since=KICKOFF - timedelta(hours=24)
+        )
         assert stats.events_updated == 1
-        assert stats.snapshots_stored == 1
-
-        await test_session.refresh(event)
-        assert event.status == EventStatus.FINAL
-        assert event.home_score == 2
-        assert event.away_score == 1
 
     @pytest.mark.asyncio
-    async def test_idempotency_final_events_skipped(self, test_session) -> None:
-        event = _make_event(status=EventStatus.FINAL)
-        event.home_score = 2
-        event.away_score = 1
-        test_session.add(event)
-        await test_session.commit()
-
-        record = _make_record()
-
-        mock_session_maker = AsyncMock()
-        mock_session_maker.__aenter__ = AsyncMock(return_value=test_session)
-        mock_session_maker.__aexit__ = AsyncMock(return_value=None)
-
-        with patch(
-            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
-            return_value=mock_session_maker,
+    async def test_no_pending_events_skips_the_fetch(self, test_session) -> None:
+        with (
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+                _session_maker(test_session),
+            ),
+            patch("odds_lambda.jobs.fetch_oddsportal_results.OddsPortalClient") as client_cls,
         ):
-            stats = await process_results(raw_matches=[record])
+            stats = await process_results()
 
-        # Already FINAL → not in pending list → not matched
+        client_cls.assert_not_called()
         assert stats.events_updated == 0
 
     @pytest.mark.asyncio
-    async def test_unmatched_records_counted(self, test_session) -> None:
-        event = _make_event()
-        test_session.add(event)
+    async def test_a_failed_update_is_recorded_and_the_rest_continue(self, test_session) -> None:
+        test_session.add(_make_event(event_id="first", home_team="Fulham", away_team="Burnley"))
+        test_session.add(_make_event(event_id="second"))
         await test_session.commit()
 
-        unmatched_record = _make_record(home_team="Liverpool", away_team="Everton")
+        real_update = __import__(
+            "odds_lambda.storage.writers", fromlist=["OddsWriter"]
+        ).OddsWriter.update_event_status
 
-        mock_session_maker = AsyncMock()
-        mock_session_maker.__aenter__ = AsyncMock(return_value=test_session)
-        mock_session_maker.__aexit__ = AsyncMock(return_value=None)
+        async def flaky(self, event_id, **kwargs):
+            if event_id == "first":
+                raise RuntimeError("simulated update failure")
+            return await real_update(self, event_id, **kwargs)
 
-        with patch(
-            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
-            return_value=mock_session_maker,
+        matches = [
+            _make_match(home_team="Fulham", away_team="Burnley", start_time=KICKOFF),
+            _make_match(start_time=KICKOFF + timedelta(minutes=1)),
+        ]
+        with (
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+                _session_maker(test_session),
+            ),
+            patch("odds_lambda.storage.writers.OddsWriter.update_event_status", flaky),
         ):
-            stats = await process_results(raw_matches=[unmatched_record])
+            stats = await process_results(matches=matches)
 
-        assert stats.events_not_matched == 1
-        assert stats.events_updated == 0
-
-    @pytest.mark.asyncio
-    async def test_record_without_scores_skipped(self, test_session) -> None:
-        event = _make_event()
-        test_session.add(event)
-        await test_session.commit()
-
-        record = _make_record(home_score="", away_score="")
-
-        mock_session_maker = AsyncMock()
-        mock_session_maker.__aenter__ = AsyncMock(return_value=test_session)
-        mock_session_maker.__aexit__ = AsyncMock(return_value=None)
-
-        with patch(
-            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
-            return_value=mock_session_maker,
-        ):
-            stats = await process_results(raw_matches=[record])
-
-        assert stats.events_updated == 0
-        await test_session.refresh(event)
-        assert event.status == EventStatus.SCHEDULED
-
-    @pytest.mark.asyncio
-    async def test_snapshot_has_correct_metadata(self, test_session) -> None:
-        event = _make_event()
-        test_session.add(event)
-        await test_session.commit()
-
-        record = _make_record()
-
-        mock_session_maker = AsyncMock()
-        mock_session_maker.__aenter__ = AsyncMock(return_value=test_session)
-        mock_session_maker.__aexit__ = AsyncMock(return_value=None)
-
-        with patch(
-            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
-            return_value=mock_session_maker,
-        ):
-            await process_results(raw_matches=[record])
-
-        from odds_core.models import OddsSnapshot
-        from sqlalchemy import select
-
-        result = await test_session.execute(
-            select(OddsSnapshot).where(OddsSnapshot.event_id == event.id)
-        )
-        snapshots = list(result.scalars().all())
-        assert len(snapshots) == 1
-
-        snap = snapshots[0]
-        assert snap.api_request_id == "oddsportal_closing"
-        assert snap.fetch_tier == "closing"
-        assert snap.bookmaker_count == 1
-        assert "bookmakers" in snap.raw_data
-
-
-class TestSportResolution:
-    """Tests for sport-aware spec lookup in the results job."""
-
-    def test_default_sport_key_is_epl(self) -> None:
-        assert DEFAULT_SPORT_KEY == "soccer_epl"
-
-    def test_market_key_epl(self) -> None:
-        from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
-
-        spec = _LEAGUE_SPEC_BY_SPORT["soccer_epl"]
-        assert _market_key_for_spec(spec) == "1x2_market"
-
-    def test_market_key_mlb(self) -> None:
-        from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
-
-        spec = _LEAGUE_SPEC_BY_SPORT["baseball_mlb"]
-        assert _market_key_for_spec(spec) == "home_away_market"
-
-    def test_db_market_epl(self) -> None:
-        from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
-
-        spec = _LEAGUE_SPEC_BY_SPORT["soccer_epl"]
-        assert _db_market_for_spec(spec) == "1x2"
-
-    def test_db_market_mlb(self) -> None:
-        from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
-
-        spec = _LEAGUE_SPEC_BY_SPORT["baseball_mlb"]
-        assert _db_market_for_spec(spec) == "h2h"
-
-    def test_num_outcomes_epl(self) -> None:
-        from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
-
-        spec = _LEAGUE_SPEC_BY_SPORT["soccer_epl"]
-        assert spec.num_outcomes == 3
-
-    def test_num_outcomes_mlb(self) -> None:
-        from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
-
-        spec = _LEAGUE_SPEC_BY_SPORT["baseball_mlb"]
-        assert spec.num_outcomes == 2
-
-    def test_db_market_unknown_raises(self) -> None:
-        spec = LeagueSpec(
-            sport="test",
-            league="test-league",
-            listing_path="/test/",
-            sport_key="test_sport",
-            sport_title="Test",
-            primary_market="unknown_market",
-            num_outcomes=2,
-        )
-        with pytest.raises(ValueError, match="Unrecognized primary_market"):
-            _db_market_for_spec(spec)
+        assert len(stats.errors) == 1
+        assert stats.events_updated == 1
+        assert (await _stored(test_session, "second")).status == EventStatus.FINAL
 
     @pytest.mark.asyncio
     async def test_unknown_sport_returns_empty_stats(self) -> None:
-        stats = await process_results(raw_matches=[], sport="unknown_sport")
-        assert stats.matches_scraped == 0
+        stats = await process_results(sport="unknown_sport", matches=[])
+        assert stats.matches_fetched == 0
         assert stats.events_updated == 0
+
+    def test_default_sport_key_is_epl(self) -> None:
+        assert DEFAULT_SPORT_KEY == "soccer_epl"
 
 
 class TestMainSelfSchedules:
@@ -445,60 +321,3 @@ class TestMainSelfSchedules:
         assert len(scheduled_calls) == 1, "self-schedule must run even when process_results raises"
         assert scheduled_calls[0]["job_name"] == "fetch-oddsportal-results-epl"
         assert scheduled_calls[0]["payload"] == {"sport": "soccer_epl"}
-
-    @pytest.mark.asyncio
-    async def test_self_schedules_when_single_record_update_fails(self, test_session) -> None:
-        """A forced error in one record's update path should not block self-scheduling."""
-        from odds_lambda.jobs import fetch_oddsportal_results
-        from odds_lambda.scheduling.jobs import JobContext
-
-        event = _make_event()
-        test_session.add(event)
-        await test_session.commit()
-
-        record = _make_record()
-
-        mock_session_maker = AsyncMock()
-        mock_session_maker.__aenter__ = AsyncMock(return_value=test_session)
-        mock_session_maker.__aexit__ = AsyncMock(return_value=None)
-
-        scheduled_calls: list[dict] = []
-
-        async def mock_schedule_next(
-            job_name: str,
-            next_time: datetime,
-            payload: dict[str, object] | None = None,
-        ) -> None:
-            scheduled_calls.append(
-                {"job_name": job_name, "next_time": next_time, "payload": payload}
-            )
-
-        mock_backend = AsyncMock()
-        mock_backend.schedule_next_execution = mock_schedule_next
-        mock_backend.get_backend_name = lambda: "mock_backend"
-
-        async def failing_update_event_status(*_args, **_kwargs):
-            raise RuntimeError("simulated update failure")
-
-        with (
-            patch(
-                "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
-                return_value=mock_session_maker,
-            ),
-            patch(
-                "odds_lambda.jobs.fetch_oddsportal_results.run_harvester_historic",
-                AsyncMock(return_value=[record]),
-            ),
-            patch(
-                "odds_lambda.storage.writers.OddsWriter.update_event_status",
-                side_effect=failing_update_event_status,
-            ),
-            patch(
-                "odds_lambda.scheduling.helpers.get_scheduler_backend",
-                return_value=mock_backend,
-            ),
-        ):
-            await fetch_oddsportal_results.main(JobContext(sport="soccer_epl"))
-
-        assert len(scheduled_calls) == 1, "self-schedule must run after per-record failure"
-        assert scheduled_calls[0]["job_name"] == "fetch-oddsportal-results-epl"

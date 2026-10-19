@@ -19,7 +19,9 @@ from odds_lambda.oddsportal_client import (
     OddsPortalError,
     decrypt_payload,
     extract_market,
+    parse_archive_path,
     parse_listing,
+    parse_results_page,
 )
 from structlog.testing import capture_logs
 
@@ -429,3 +431,114 @@ class TestClientRequests:
             assert client._session is not None
             session = client._session
         assert session.closed
+
+
+ARCHIVE = "ajax-sport-country-tournament-archive_/1/AbCdEfGh/X1X2/1/0"
+RESULTS_HTML = (
+    '<script>self.__next_f.push([1,"1:{\\"url\\":\\"https://www.oddsportal.com/'
+    + ARCHIVE
+    + '\\"}\\n"])</script>'
+)
+
+
+def _ts(day: int) -> int:
+    return int(datetime(2026, 10, day, 15, 0, tzinfo=UTC).timestamp())
+
+
+def _row(
+    home: str, away: str, day: int, status: int = 3, home_result: str = "2", away_result: str = "1"
+) -> dict[str, Any]:
+    return {
+        "home-name": home,
+        "away-name": away,
+        "date-start-timestamp": _ts(day),
+        "status-id": status,
+        "homeResult": home_result,
+        "awayResult": away_result,
+    }
+
+
+def _archive_feed(rows: list[dict[str, Any]], total: int = 4, one_page: int = 2) -> dict[str, Any]:
+    return {"s": 1, "d": {"rows": rows, "total": total, "onePage": one_page}}
+
+
+class TestResultsParsing:
+    def test_archive_path_is_the_proxy_path_without_a_page(self) -> None:
+        assert parse_archive_path(RESULTS_HTML) == f"/proxy/{ARCHIVE}"
+
+    def test_page_without_archive_url_raises(self) -> None:
+        with pytest.raises(OddsPortalError, match="archive"):
+            parse_archive_path(EMPTY_LISTING)
+
+    def test_finished_rows_carry_scores(self) -> None:
+        page = parse_results_page(_archive_feed([_row("Arsenal", "Leeds", 10, away_result="0")]))
+
+        [match] = page.matches
+        assert (match.home_team, match.away_team) == ("Arsenal", "Leeds")
+        assert (match.home_score, match.away_score) == (2, 0)
+        assert match.start_time == datetime(2026, 10, 10, 15, 0, tzinfo=UTC)
+
+    def test_unfinished_and_unscored_rows_are_skipped(self) -> None:
+        rows = [
+            _row("A", "B", 10, status=1, home_result="", away_result=""),
+            _row("C", "D", 11, status=5, home_result="", away_result=""),
+            _row("E", "F", 12, home_result="", away_result=""),
+            _row("G", "H", 13),
+        ]
+
+        page = parse_results_page(_archive_feed(rows))
+
+        assert [m.home_team for m in page.matches] == ["G"]
+        assert page.oldest_start == datetime(2026, 10, 10, 15, 0, tzinfo=UTC)
+
+    def test_page_count_rounds_up(self) -> None:
+        assert parse_results_page(_archive_feed([], total=101, one_page=50)).page_count == 3
+
+    @pytest.mark.parametrize(
+        "feed", [{}, {"d": {}}, {"d": {"rows": [], "total": "x", "onePage": 1}}]
+    )
+    def test_unexpected_shape_raises(self, feed: dict[str, Any]) -> None:
+        with pytest.raises(OddsPortalError, match="archive feed"):
+            parse_results_page(feed)
+
+
+class TestFetchResults:
+    async def test_pages_until_the_page_holding_since(
+        self, encrypt_payload: Encrypt, sleeps: list[float]
+    ) -> None:
+        pages = [
+            _archive_feed([_row("A", "B", 20), _row("C", "D", 19)], total=6),
+            _archive_feed([_row("E", "F", 18), _row("G", "H", 17)], total=6),
+            _archive_feed([_row("I", "J", 16), _row("K", "L", 15)], total=6),
+        ]
+        client = FakeClient(
+            [(200, RESULTS_HTML)] + [(200, encrypt_payload(p)) for p in pages], request_delay=0.5
+        )
+
+        matches = await client.fetch_results(
+            "/football/england/premier-league/results/",
+            since=datetime(2026, 10, 18, 0, 0, tzinfo=UTC),
+        )
+
+        assert [m.home_team for m in matches] == ["A", "C", "E", "G"]
+        urls = [url for url, _ in client.requests]
+        assert urls[1:] == [
+            f"https://www.oddsportal.com/proxy/{ARCHIVE}/page/1/",
+            f"https://www.oddsportal.com/proxy/{ARCHIVE}/page/2/",
+        ]
+        assert sleeps == [0.5]
+
+    async def test_stops_at_the_last_page(
+        self, encrypt_payload: Encrypt, sleeps: list[float]
+    ) -> None:
+        client = FakeClient(
+            [
+                (200, RESULTS_HTML),
+                (200, encrypt_payload(_archive_feed([_row("A", "B", 20)], total=1))),
+            ]
+        )
+
+        matches = await client.fetch_results("/x/results/", since=datetime(2020, 1, 1, tzinfo=UTC))
+
+        assert [m.home_team for m in matches] == ["A"]
+        assert len(client.requests) == 2

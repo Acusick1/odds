@@ -52,7 +52,7 @@ Missing-tier diagnosis steps are in [Debug the AWS self-scheduling jobs](../sche
 |---|---|---|
 | `odds_lambda.tier_utils.calculate_tier` | `<=` | `<0` is IN_PLAY; used for stored tiers |
 | `odds_lambda.scheduling.decision._classify` | `<` on `max_hours` | used for scheduling |
-| `odds_lambda.oddsportal_common.hours_to_tier` | `<` | returns a string; no in-play branch, so negative hours give "closing"; called only by `scripts/ingest_oddsportal.py` and `scripts/ingest_football_data_uk.py` (which tiers its closing snapshot with it and raises an FDUK opening snapshot, whose timing basis is `odds_core.snapshot_sources.FdukTimeBasis.COLLECTION_DEADLINE`, from `closing` to `pregame`) |
+| `odds_lambda.oddsportal_common.hours_to_tier` | `<` | returns a string; no in-play branch, so negative hours give "closing"; called only by the two historical ingest scripts, `scripts/ingest_oddsportal.py` and `scripts/ingest_football_data_uk.py` (which tiers its closing snapshot with it and raises an FDUK opening snapshot, whose timing basis is `odds_core.snapshot_sources.FdukTimeBasis.COLLECTION_DEADLINE`, from `closing` to `pregame`) |
 | `odds_lambda.fetch_tier.FetchTier.max_hours` | docstring says `<` | data only |
 
 At exactly 3, 12, 24 or 72 h the writer stores the nearer tier and the scheduler's classifier picks the farther one; the historical scripts use `<` too (#446). Tier strings are ML features, so rows from `odds_lambda.oddsportal_common.hours_to_tier` scripts can differ at the instant boundary.
