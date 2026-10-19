@@ -25,13 +25,15 @@ import pandas as pd
 import structlog
 import xgboost
 import yaml
-from odds_core.models import Event
+from odds_core.models import Event, EventStatus
+from odds_core.snapshot_sources import SnapshotKind, snapshot_kind
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, PositiveInt, model_validator
 
 from odds_analytics.retail_ev import (
     BASELINE_FEATURE,
     DECISION_WINDOW,
     HORIZON_BUCKET_LABELS,
+    LIVE_CLOSE_WINDOW,
     LOSS_WEIGHT_SCALE,
     MAX_EXCHANGE_OVERROUND,
     THREE_WAY_MARKET,
@@ -50,6 +52,7 @@ from odds_analytics.retail_ev_metrics import (
 from odds_analytics.training.config import RetailEvArm, RetailEvFeatureGroupName, XGBoostConfig
 
 if TYPE_CHECKING:
+    from odds_core.models import OddsSnapshot
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from odds_analytics.as_of_team_features import TeamHistory
@@ -59,9 +62,7 @@ logger = structlog.get_logger()
 DEFAULT_BOOTSTRAP_RESAMPLES = 10_000
 # One EPL matchday; a longer run of events without live collection is reported as an outage.
 OUTAGE_MIN_EVENTS = 10
-LIVE_CLOSE_SOURCE = "betfair_live"
 FDUK_OPENING_SOURCE = "fduk_opening"
-ODDSPORTAL_LIVE_SOURCE = "oddsportal_live"
 MANIFEST_FILE = "manifest.json"
 REPORT_FILE = "report.json"
 SLICES_FILE = "slices.csv"
@@ -71,6 +72,14 @@ PREDICTIONS_FILE = "predictions.csv.gz"
 
 class WindowEndError(ValueError):
     """An event that kicks off after the evaluation window's end reached the evaluation."""
+
+
+class IncompleteWindowError(ValueError):
+    """A window event is not FINAL or has no FDUK closing snapshot."""
+
+
+class RepeatedLookError(FileExistsError):
+    """An evaluation with the same spec has already been written."""
 
 
 class Verdict(StrEnum):
@@ -132,6 +141,9 @@ class EvaluationSpec(BaseModel):
         "the block's first event.",
     )
     feature_groups: tuple[RetailEvFeatureGroupName, ...] = ()
+    feature_names: tuple[str, ...] = Field(
+        description="The expected feature columns, in order; a run that builds others is refused."
+    )
     arm: RetailEvArm = RetailEvArm.RESIDUAL
     model: XGBoostConfig = Field(
         default_factory=XGBoostConfig,
@@ -179,8 +191,8 @@ class EvaluationSpec(BaseModel):
 class EvaluationData:
     """Every row from the training start to the window end, in kick-off order.
 
-    ``window_events`` lists every event in the window, with or without rows, so events
-    with no row can be counted.
+    ``window_events`` lists every event in the window, with or without rows, with its
+    status and which sources its snapshots hold.
     """
 
     rows: pd.DataFrame
@@ -236,13 +248,57 @@ def _row_frame(dataset: RetailEvDataset) -> pd.DataFrame:
     return rows
 
 
+def _window_event_frame(
+    events: Sequence[Event], snapshots: dict[str, Sequence[OddsSnapshot]]
+) -> pd.DataFrame:
+    records: list[dict[str, Any]] = []
+    for event in events:
+        kickoff = event.commence_time
+        kinds = [(snapshot_kind(s.raw_data), s.snapshot_time) for s in snapshots[event.id]]
+        records.append(
+            {
+                "event_id": event.id,
+                "commence_time": _naive_utc(kickoff),
+                "status": event.status.value,
+                "has_fduk_closing": any(k is SnapshotKind.FDUK_CLOSING for k, _ in kinds),
+                "has_oddsportal_live": any(k is SnapshotKind.ODDSPORTAL_LIVE for k, _ in kinds),
+                "has_live_betfair_near_kickoff": any(
+                    k is SnapshotKind.BETFAIR_LIVE and kickoff - LIVE_CLOSE_WINDOW <= t <= kickoff
+                    for k, t in kinds
+                ),
+            }
+        )
+    return pd.DataFrame(
+        records,
+        columns=[
+            "event_id",
+            "commence_time",
+            "status",
+            "has_fduk_closing",
+            "has_oddsportal_live",
+            "has_live_betfair_near_kickoff",
+        ],
+    )
+
+
+def incomplete_events(window_events: pd.DataFrame) -> list[str]:
+    """Window events that are not FINAL or have no FDUK closing snapshot."""
+    incomplete = (window_events["status"] != EventStatus.FINAL.value) | ~window_events[
+        "has_fduk_closing"
+    ].astype(bool)
+    return window_events.loc[incomplete, "event_id"].tolist()
+
+
 async def load_evaluation_data(
-    session: AsyncSession, spec: EvaluationSpec, now: datetime
+    session: AsyncSession, spec: EvaluationSpec, now: datetime, allow_incomplete: bool = False
 ) -> EvaluationData:
     """Rows of every event kicking off from the training start to the window end.
 
     Refuses a window that has not ended, and raises ``WindowEndError`` if any event
-    read kicks off after the window end. Team history is read only up to the window end.
+    read kicks off after the window end. Raises ``IncompleteWindowError`` if a window
+    event is not FINAL or has no FDUK closing snapshot, unless ``allow_incomplete``.
+    Team history is read only up to the window end. Refuses feature columns other than
+    the spec's ``feature_names``.
     """
     from odds_lambda.storage.readers import OddsReader
 
@@ -251,7 +307,8 @@ async def load_evaluation_data(
             f"the window ends {spec.window.end.isoformat()}, after now ({now.isoformat()}); "
             "scoring it now would be an interim look"
         )
-    events = await OddsReader(session).get_events_by_date_range(
+    reader = OddsReader(session)
+    events = await reader.get_events_by_date_range(
         start_date=spec.training_start,
         end_date=spec.window.end,
         sport_key=spec.sport_key,
@@ -259,9 +316,18 @@ async def load_evaluation_data(
     check_window_end((e.commence_time for e in events), spec.window.end)
     training_events = [e for e in events if e.commence_time < spec.window.start]
     window_events = [e for e in events if e.commence_time >= spec.window.start]
+    window_frame = _window_event_frame(
+        window_events, {e.id: await reader.get_snapshots_for_event(e.id) for e in window_events}
+    )
+    incomplete = incomplete_events(window_frame)
+    if incomplete and not allow_incomplete:
+        raise IncompleteWindowError(
+            f"{len(incomplete)} window events are not FINAL or have no FDUK closing snapshot, "
+            f"such as {incomplete[:5]}; load the season's data or pass allow_incomplete"
+        )
 
-    train_set = await load_retail_ev_dataset(training_events, session, spec.market)
-    window_set = await load_retail_ev_dataset(window_events, session, spec.market)
+    train_set = await load_retail_ev_dataset(training_events, session, spec.market, now=now)
+    window_set = await load_retail_ev_dataset(window_events, session, spec.market, now=now)
     dataset = RetailEvDataset(rows=train_set.rows + window_set.rows)
     if not dataset.rows:
         raise ValueError("no retail_ev rows from the training start to the window end")
@@ -285,6 +351,10 @@ async def load_evaluation_data(
         teams=teams,
         events={e.id: e for e in events},
     )
+    if features.names != list(spec.feature_names):
+        raise ValueError(
+            f"the run builds features {features.names}, not the spec's {list(spec.feature_names)}"
+        )
     rows = _row_frame(dataset)
     if not rows["commence_time"].is_monotonic_increasing:
         raise ValueError("rows are not in kick-off order")
@@ -292,7 +362,7 @@ async def load_evaluation_data(
         rows=rows,
         X=features.matrix(dataset.rows),
         feature_names=features.names,
-        window_events=_event_frame(window_events),
+        window_events=window_frame,
         window_drops=_drop_counts(window_set.drops),
     )
 
@@ -301,15 +371,6 @@ def _drop_counts(drops: DropCounts) -> dict[str, Any]:
     values: dict[str, Any] = {f.name: getattr(drops, f.name) for f in fields(drops)}
     values["prices_outside_roster"] = dict(drops.prices_outside_roster)
     return values
-
-
-def _event_frame(events: Sequence[Event]) -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "event_id": [e.id for e in events],
-            "commence_time": pd.to_datetime([_naive_utc(e.commence_time) for e in events]),
-        }
-    )
 
 
 @dataclass(frozen=True)
@@ -513,15 +574,13 @@ def _counts(frame: pd.DataFrame, key: str) -> dict[str, dict[str, int]]:
     }
 
 
-def _runs_without(
-    window_events: pd.DataFrame, covered: set[str], min_events: int
-) -> list[dict[str, Any]]:
-    """Runs of at least ``min_events`` consecutive window events, in kick-off order, not covered."""
+def _runs_without(window_events: pd.DataFrame, flag: str, min_events: int) -> list[dict[str, Any]]:
+    """Runs of at least ``min_events`` consecutive window events, in kick-off order, without ``flag``."""
     runs: list[dict[str, Any]] = []
     current: list[int] = []
     ordered = window_events.sort_values(["commence_time", "event_id"]).reset_index(drop=True)
-    for i, event_id in enumerate([*ordered["event_id"], None]):
-        if event_id is not None and event_id not in covered:
+    for i, covered in enumerate([*ordered[flag].astype(bool), True]):
+        if not covered:
             current.append(i)
             continue
         if len(current) >= min_events:
@@ -536,38 +595,40 @@ def _runs_without(
     return runs
 
 
+SOURCE_FLAGS: tuple[str, ...] = (
+    "has_fduk_closing",
+    "has_oddsportal_live",
+    "has_live_betfair_near_kickoff",
+)
+
+
 def coverage(data: EvaluationData, scored: pd.DataFrame, spec: EvaluationSpec) -> dict[str, Any]:
-    """Rows and events by source, horizon and close, the unscored events, and collection gaps."""
-    window_ids = data.window_events["event_id"]
+    """Window events by status and by the sources their snapshots hold, the unscored events,
+    collection outages, and the scored rows and events by slice."""
+    window = data.window_events
     scored_ids = set(scored["event_id"])
-    event_sources = scored.groupby("event_id")["retail_source"].agg(set)
-    with_op_live = {e for e, s in event_sources.items() if ODDSPORTAL_LIVE_SOURCE in s}
-    live_close = set(scored.loc[scored["close_source"] == LIVE_CLOSE_SOURCE, "event_id"])
-    fduk_only = {e for e, s in event_sources.items() if s == {FDUK_OPENING_SOURCE}}
-    n_scored = len(scored_ids)
+    unscored = window[~window["event_id"].isin(scored_ids)]
     pre_window = data.rows[data.rows["commence_time"] < _naive_utc(spec.window.start)]
     return {
-        "window_events_kicked_off": len(window_ids),
-        "scored_events": n_scored,
+        "window_events": len(window),
+        "window_events_by_status": {
+            str(k): int(v) for k, v in window["status"].value_counts().sort_index().items()
+        },
+        "window_event_shares": {flag: float(window[flag].mean()) for flag in SOURCE_FLAGS},
+        "scored_events": len(scored_ids),
         "scored_rows": len(scored),
-        "unscored_events": sorted(set(window_ids) - scored_ids),
-        "window_drops": data.window_drops,
         "pre_window_events": int(pre_window["event_id"].nunique()),
         "pre_window_rows": len(pre_window),
-        "scored_event_shares": {
-            "with_oddsportal_live_rows": len(with_op_live) / n_scored,
-            "with_live_betfair_close": len(live_close) / n_scored,
-            "fduk_only": len(fduk_only) / n_scored,
+        "unscored_events": [
+            {**r, "commence_time": str(r["commence_time"])}
+            for r in unscored.to_dict(orient="records")
+        ],
+        "window_drops": data.window_drops,
+        "outages": {
+            f"without_{flag.removeprefix('has_')}": _runs_without(window, flag, OUTAGE_MIN_EVENTS)
+            for flag in ("has_oddsportal_live", "has_live_betfair_near_kickoff")
         },
         "rows_by": {key: _counts(scored, key) for key in SLICE_KEYS if key != "block"},
-        "outages": {
-            "without_oddsportal_live_rows": _runs_without(
-                data.window_events, with_op_live, OUTAGE_MIN_EVENTS
-            ),
-            "without_live_betfair_close": _runs_without(
-                data.window_events, live_close, OUTAGE_MIN_EVENTS
-            ),
-        },
     }
 
 
@@ -575,13 +636,40 @@ class OutputExistsError(FileExistsError):
     """The output directory already holds an evaluation."""
 
 
-def claim_output_dir(output_dir: Path, force: bool) -> None:
-    """Create the output directory, refusing one that is not empty unless ``force``."""
+def claim_output_dir(output_dir: Path, force: bool) -> str | None:
+    """Create the output directory, refusing one that is not empty unless ``force``.
+
+    Returns the ``predictions_sha256`` of the manifest a forced run overwrites, if any.
+    """
     if output_dir.exists() and any(output_dir.iterdir()) and not force:
         raise OutputExistsError(
             f"{output_dir} is not empty; an evaluation runs once (pass force to overwrite)"
         )
     output_dir.mkdir(parents=True, exist_ok=True)
+    previous = output_dir / MANIFEST_FILE
+    if not previous.exists():
+        return None
+    return json.loads(previous.read_text()).get("predictions_sha256")
+
+
+def prior_runs(results_root: Path, spec_sha256: str) -> list[Path]:
+    """Manifests under ``results_root/*/`` written for the same spec."""
+    return sorted(
+        path
+        for path in results_root.glob(f"*/{MANIFEST_FILE}")
+        if json.loads(path.read_text()).get("spec_sha256") == spec_sha256
+    )
+
+
+def check_one_look(results_root: Path, spec_sha256: str, force: bool) -> list[Path]:
+    """Refuse a spec that already has a manifest under ``results_root`` unless ``force``."""
+    runs = prior_runs(results_root, spec_sha256)
+    if runs and not force:
+        raise RepeatedLookError(
+            f"spec {spec_sha256[:12]} was already evaluated in {[str(r) for r in runs]}; "
+            "an evaluation runs once (pass force to run it again)"
+        )
+    return runs
 
 
 def _git(*args: str) -> str:
@@ -590,12 +678,27 @@ def _git(*args: str) -> str:
     ).stdout.strip()
 
 
+def _git_tag() -> str | None:
+    result = subprocess.run(
+        ["git", "describe", "--tags", "--exact-match"],
+        cwd=Path(__file__).parent,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
 def git_state() -> dict[str, Any]:
-    """HEAD and whether tracked files differ from it, so the SHA alone does not pin the code."""
+    """HEAD, its exact tag, and whether tracked files differ from it."""
     return {
         "git_sha": _git("rev-parse", "HEAD"),
+        "git_tag": _git_tag(),
         "git_dirty": bool(_git("status", "--porcelain", "--untracked-files=no")),
     }
+
+
+def default_results_root() -> Path:
+    return Path(_git("rev-parse", "--show-toplevel")) / "experiments" / "results"
 
 
 def _sha256_file(path: Path) -> str:
@@ -633,13 +736,20 @@ async def run_evaluation(
     output_dir: Path,
     now: datetime,
     force: bool = False,
+    allow_incomplete: bool = False,
+    results_root: Path | None = None,
 ) -> EvaluationReport:
-    """Load, refit, score and write the report, manifest and predictions to ``output_dir``."""
+    """Load, refit, score and write the report, manifest and predictions to ``output_dir``.
+
+    Refuses a spec already evaluated under ``results_root`` (the repo's
+    ``experiments/results`` by default) and a non-empty ``output_dir``, unless ``force``.
+    """
     spec = EvaluationSpec.from_yaml(spec_path)
-    claim_output_dir(output_dir, force)
+    earlier = check_one_look(results_root or default_results_root(), spec.sha256(), force)
+    overwritten = claim_output_dir(output_dir, force)
     model = spec.resolved_model(spec_path.parent)
     git = git_state()
-    data = await load_evaluation_data(session, spec, now)
+    data = await load_evaluation_data(session, spec, now, allow_incomplete)
     scored, block_table, bar = evaluate(
         data, spec, xgboost_fitter(data.feature_names, model, spec.arm)
     )
@@ -648,6 +758,11 @@ async def run_evaluation(
 
     manifest: dict[str, Any] = {
         **git,
+        "forced": force,
+        "earlier_runs_of_spec": [str(r) for r in earlier],
+        "overwritten_predictions_sha256": overwritten,
+        "allow_incomplete": allow_incomplete,
+        "incomplete_window_events": incomplete_events(data.window_events),
         "spec_path": str(spec_path),
         "spec_file_sha256": _sha256_file(spec_path),
         "spec_sha256": spec.sha256(),

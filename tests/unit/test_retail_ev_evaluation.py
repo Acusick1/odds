@@ -10,19 +10,27 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
-from odds_analytics.retail_ev import BASELINE_FEATURE, event_weights
+from odds_analytics.retail_ev import (
+    BASELINE_FEATURE,
+    RetailEvFeatures,
+    event_weights,
+    market_outcomes,
+)
 from odds_analytics.retail_ev_evaluation import (
     BootstrapSpec,
     EvaluationData,
     EvaluationSpec,
     KeepBar,
     OutputExistsError,
+    RepeatedLookError,
     Verdict,
     WindowEndError,
+    check_one_look,
     check_window_end,
     claim_output_dir,
     evaluate,
     evaluation_blocks,
+    incomplete_events,
     xgboost_fitter,
 )
 from odds_analytics.retail_ev_metrics import BootstrapEstimate
@@ -39,6 +47,7 @@ def _spec(**overrides: Any) -> EvaluationSpec:
         "training_start": TRAINING_START,
         "window": {"start": WINDOW_START, "end": WINDOW_END},
         "refit_every_events": 4,
+        "feature_names": RetailEvFeatures(market_outcomes("1x2")).names,
         "bootstrap": {"resamples": 500, "seed": 0},
     }
     return EvaluationSpec.model_validate(fields | overrides)
@@ -293,3 +302,47 @@ class TestOutputDirectory:
         (tmp_path / "manifest.json").write_text("{}")
 
         claim_output_dir(tmp_path, force=True)
+
+
+class TestReadiness:
+    def test_flags_events_that_are_not_final_or_have_no_fduk_close(self) -> None:
+        window = pd.DataFrame(
+            {
+                "event_id": ["done", "scheduled", "no_close"],
+                "status": ["final", "scheduled", "final"],
+                "has_fduk_closing": [True, True, False],
+            }
+        )
+
+        assert incomplete_events(window) == ["scheduled", "no_close"]
+
+
+class TestOneLook:
+    def _write(self, root: Path, name: str, spec_sha256: str) -> Path:
+        (root / name).mkdir()
+        path = root / name / "manifest.json"
+        path.write_text(json.dumps({"spec_sha256": spec_sha256, "predictions_sha256": "abc"}))
+        return path
+
+    def test_refuses_a_spec_already_evaluated(self, tmp_path: Path) -> None:
+        self._write(tmp_path, "earlier", "s1")
+
+        with pytest.raises(RepeatedLookError, match="already evaluated"):
+            check_one_look(tmp_path, "s1", force=False)
+
+    def test_other_specs_do_not_block(self, tmp_path: Path) -> None:
+        self._write(tmp_path, "earlier", "s1")
+
+        assert check_one_look(tmp_path, "s2", force=False) == []
+
+    def test_force_returns_the_earlier_runs(self, tmp_path: Path) -> None:
+        earlier = self._write(tmp_path, "earlier", "s1")
+
+        assert check_one_look(tmp_path, "s1", force=True) == [earlier]
+
+    def test_forced_overwrite_returns_the_overwritten_predictions_hash(
+        self, tmp_path: Path
+    ) -> None:
+        self._write(tmp_path, "out", "s1")
+
+        assert claim_output_dir(tmp_path / "out", force=True) == "abc"

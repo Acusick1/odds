@@ -9,12 +9,15 @@ from pathlib import Path
 import pytest
 import yaml
 from odds_analytics.as_of_team_features import load_team_history
+from odds_analytics.retail_ev import RetailEvFeatures, market_outcomes
 from odds_analytics.retail_ev_evaluation import (
     MANIFEST_FILE,
     PREDICTIONS_FILE,
     REPORT_FILE,
     EvaluationSpec,
+    IncompleteWindowError,
     OutputExistsError,
+    RepeatedLookError,
     WindowEndError,
     load_evaluation_data,
     run_evaluation,
@@ -35,10 +38,15 @@ LATE_EVENT = "fduk_after_window"
 NOW = datetime(2026, 10, 19, tzinfo=UTC)
 
 
-def _add_event(session, event_id: str, kickoff: datetime, prices: tuple[float, ...]) -> None:
-    session.add(
-        make_epl_event(event_id, kickoff, status=EventStatus.FINAL, home_score=1, away_score=0)
-    )
+def _add_event(
+    session,
+    event_id: str,
+    kickoff: datetime,
+    prices: tuple[float, ...],
+    status: EventStatus = EventStatus.FINAL,
+    with_close: bool = True,
+) -> None:
+    session.add(make_epl_event(event_id, kickoff, status=status, home_score=1, away_score=0))
     session.add(
         make_tagged_snapshot(
             event_id,
@@ -52,15 +60,16 @@ def _add_event(session, event_id: str, kickoff: datetime, prices: tuple[float, .
             "fduk_collection_deadline",
         )
     )
-    session.add(
-        make_tagged_snapshot(
-            event_id,
-            kickoff,
-            [three_way_bookmaker("betfair_exchange", (prices[2], 3.6, 4.0))],
-            "football_data_uk",
-            "kickoff",
+    if with_close:
+        session.add(
+            make_tagged_snapshot(
+                event_id,
+                kickoff,
+                [three_way_bookmaker("betfair_exchange", (prices[2], 3.6, 4.0))],
+                "football_data_uk",
+                "kickoff",
+            )
         )
-    )
 
 
 @pytest.fixture
@@ -83,6 +92,7 @@ def _spec_fields() -> dict:
         "training_start": (FIRST_KICKOFF - timedelta(days=1)).isoformat(),
         "window": {"start": WINDOW_START.isoformat(), "end": WINDOW_END.isoformat()},
         "refit_every_events": 3,
+        "feature_names": RetailEvFeatures(market_outcomes("1x2")).names,
         "model": {"n_estimators": 5, "max_depth": 2, "n_jobs": 1, "min_child_weight": 1},
         "bootstrap": {"resamples": 200, "seed": 0},
     }
@@ -129,13 +139,52 @@ class TestWindowEndGuard:
         assert "fduk_eval_0" in loaded
 
 
+class TestReadinessGuard:
+    @pytest.mark.parametrize(
+        ("status", "with_close"),
+        [(EventStatus.SCHEDULED, True), (EventStatus.FINAL, False)],
+    )
+    async def test_refuses_an_incomplete_window_unless_allowed(
+        self, evaluation_events, status: EventStatus, with_close: bool
+    ) -> None:
+        _add_event(
+            evaluation_events,
+            "fduk_incomplete",
+            WINDOW_START + timedelta(days=1),
+            (2.0, 2.1, 2.2),
+            status=status,
+            with_close=with_close,
+        )
+        await evaluation_events.commit()
+        spec = EvaluationSpec.model_validate(_spec_fields())
+
+        with pytest.raises(IncompleteWindowError, match="fduk_incomplete"):
+            await load_evaluation_data(evaluation_events, spec, NOW)
+        data = await load_evaluation_data(evaluation_events, spec, NOW, allow_incomplete=True)
+
+        assert "fduk_incomplete" in set(data.window_events["event_id"])
+
+    async def test_refuses_other_feature_columns(self, evaluation_events) -> None:
+        fields = _spec_fields()
+        fields["feature_names"] = fields["feature_names"][:-1]
+        spec = EvaluationSpec.model_validate(fields)
+
+        with pytest.raises(ValueError, match="not the spec's"):
+            await load_evaluation_data(evaluation_events, spec, NOW)
+
+
 class TestRunEvaluation:
     async def test_writes_the_outputs_once(self, evaluation_events, tmp_path: Path) -> None:
         spec_path = tmp_path / "spec.yaml"
         spec_path.write_text(yaml.safe_dump(_spec_fields()))
-        output_dir = tmp_path / "out"
 
-        report = await run_evaluation(evaluation_events, spec_path, output_dir, now=NOW)
+        results_root = tmp_path / "results"
+        results_root.mkdir()
+        output_dir = results_root / "first"
+
+        report = await run_evaluation(
+            evaluation_events, spec_path, output_dir, now=NOW, results_root=results_root
+        )
 
         manifest = json.loads((output_dir / MANIFEST_FILE).read_text())
         written = json.loads((output_dir / REPORT_FILE).read_text())
@@ -147,7 +196,27 @@ class TestRunEvaluation:
         assert manifest["spec_sha256"] == EvaluationSpec.from_yaml(spec_path).sha256()
         assert len(manifest["git_sha"]) == 40
         assert isinstance(manifest["git_dirty"], bool)
-        assert written["coverage"]["scored_event_shares"]["fduk_only"] == 1.0
+        assert written["coverage"]["window_event_shares"]["has_fduk_closing"] == 1.0
+        assert manifest["forced"] is False
+        assert manifest["git_tag"] is None or isinstance(manifest["git_tag"], str)
 
         with pytest.raises(OutputExistsError):
-            await run_evaluation(evaluation_events, spec_path, output_dir, now=NOW)
+            await run_evaluation(
+                evaluation_events, spec_path, output_dir, now=NOW, results_root=tmp_path / "none"
+            )
+        with pytest.raises(RepeatedLookError):
+            await run_evaluation(
+                evaluation_events,
+                spec_path,
+                results_root / "second",
+                now=NOW,
+                results_root=results_root,
+            )
+
+        await run_evaluation(
+            evaluation_events, spec_path, output_dir, now=NOW, force=True, results_root=results_root
+        )
+        forced = json.loads((output_dir / MANIFEST_FILE).read_text())
+        assert forced["forced"] is True
+        assert forced["overwritten_predictions_sha256"] == manifest["predictions_sha256"]
+        assert forced["earlier_runs_of_spec"] == [str(output_dir / MANIFEST_FILE)]

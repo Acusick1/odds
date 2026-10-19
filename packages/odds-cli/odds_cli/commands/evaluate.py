@@ -16,9 +16,18 @@ app = typer.Typer()
 console = Console()
 
 
-async def _run(spec: Path, output_dir: Path, force: bool) -> EvaluationReport:
+async def _run(
+    spec: Path, output_dir: Path, force: bool, allow_incomplete: bool
+) -> EvaluationReport:
     async with async_session_maker() as session:
-        return await run_evaluation(session, spec, output_dir, now=datetime.now(UTC), force=force)
+        return await run_evaluation(
+            session,
+            spec,
+            output_dir,
+            now=datetime.now(UTC),
+            force=force,
+            allow_incomplete=allow_incomplete,
+        )
 
 
 @app.command("retail-ev")
@@ -26,11 +35,20 @@ def evaluate_retail_ev(
     spec: str = typer.Option(..., "--spec", "-s", help="Evaluation spec (YAML)"),
     output_dir: str = typer.Option(..., "--output-dir", "-o", help="Directory for the outputs"),
     force: bool = typer.Option(
-        False, "--force", help="Overwrite an output directory that already holds an evaluation"
+        False,
+        "--force",
+        help="Run a spec that was already evaluated, or overwrite an output directory; "
+        "recorded in the manifest",
+    ),
+    allow_incomplete: bool = typer.Option(
+        False,
+        "--allow-incomplete",
+        help="Score window events that are not FINAL or have no FDUK closing snapshot; "
+        "recorded in the manifest",
     ),
 ) -> None:
     """Score a frozen retail-EV model once on its window and print the keep or retire verdict."""
-    report = asyncio.run(_run(Path(spec), Path(output_dir), force))
+    report = asyncio.run(_run(Path(spec), Path(output_dir), force, allow_incomplete))
     table = Table(title=f"Verdict: {report.verdict.value.upper()}")
     for column in ("condition", "point", "95% CI low", "95% CI high"):
         table.add_column(column)

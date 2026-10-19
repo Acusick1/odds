@@ -8,6 +8,46 @@ window:
   end: 2026-07-31T23:59:59Z
 refit_every_events: 41
 feature_groups: []
+feature_names:
+  - hours_to_kickoff
+  - retail_implied_prob
+  - book_fair_prob
+  - book_overround
+  - consensus_prob
+  - retail_consensus_diff
+  - num_bookmakers
+  - sharp_prob
+  - retail_sharp_diff
+  - exchange_overround
+  - exchange_age_hours
+  - baseline_ev
+  - is_weekend
+  - day_of_week
+  - outcome_home
+  - outcome_draw
+  - outcome_away
+  - book_10bet
+  - book_7bet
+  - book_888sport
+  - book_allbritishcasino
+  - book_bet365
+  - book_betano
+  - book_betfair_sportsbook
+  - book_betfred
+  - book_betmgm
+  - book_betuk
+  - book_betvictor
+  - book_betway
+  - book_boylesports
+  - book_bwin
+  - book_coral
+  - book_ladbrokes
+  - book_midnite
+  - book_paddypower
+  - book_skybet
+  - book_spreadex
+  - book_unibet_uk
+  - book_williamhill
 arm: residual
 model:
   n_jobs: 1
