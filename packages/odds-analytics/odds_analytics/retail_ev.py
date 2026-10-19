@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import bisect
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast, get_args
 
 import numpy as np
 import structlog
@@ -22,9 +22,14 @@ from odds_core.models import Event, OddsSnapshot
 from odds_core.odds_math import devig_probabilities, outcome_price_decimal
 from odds_core.snapshot_sources import SnapshotKind, snapshot_kind
 
+from odds_analytics.epl_schedule_features import EplScheduleFeatures
+from odds_analytics.standings_features import StandingsFeatures
+from odds_analytics.training.config import RETAIL_EV_FEATURE_GROUPS, RetailEvFeatureGroupName
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from odds_analytics.as_of_team_features import TeamHistory
     from odds_analytics.feature_groups import PreparedFeatureData
     from odds_analytics.training.config import FeatureConfig
 
@@ -37,6 +42,11 @@ MAX_EXCHANGE_AGE = timedelta(hours=2)
 # A wider back book is a thin market whose best backs are not a price (ADR-0014).
 MAX_EXCHANGE_OVERROUND = 0.05
 EXCHANGE_BOOKMAKER = "betfair_exchange"
+POLYMARKET_BOOKMAKER = "polymarket"
+# Twice the coarsest step of the Polymarket history grid, and the exchange's age cap.
+MAX_POLYMARKET_AGE = timedelta(hours=2)
+MOVE_WINDOWS: tuple[timedelta, ...] = (timedelta(hours=1), timedelta(hours=3), timedelta(hours=6))
+MAX_LAGGED_PRICE_AGE = timedelta(hours=2)
 DRAW_OUTCOME_NAME = "Draw"
 THREE_WAY_MARKET = "1x2"
 # Lower edges of the reporting horizon buckets, in hours to kick-off.
@@ -83,6 +93,36 @@ class ExchangePrice:
 
 
 @dataclass(frozen=True)
+class PolymarketPrice:
+    """Devigged Polymarket Yes prices from one snapshot, with the live Yes spreads."""
+
+    time: datetime
+    fair: dict[Outcome, float]
+    spread: dict[Outcome, float]
+
+
+@dataclass(frozen=True)
+class Dynamics:
+    """Moves into t over each of ``MOVE_WINDOWS``, and the spread of UK prices at t."""
+
+    exchange_moves: tuple[float | None, ...]
+    consensus_moves: tuple[float | None, ...]
+    retail_dispersion: float | None
+
+
+@dataclass(frozen=True)
+class _RetailQuote:
+    time: datetime
+    kind: SnapshotKind
+    books: dict[str, dict[Outcome, float]]
+    implied: dict[Outcome, list[float]]
+
+    def consensus(self, outcome: Outcome) -> float | None:
+        implied = self.implied[outcome]
+        return float(np.mean(implied)) if implied else None
+
+
+@dataclass(frozen=True)
 class RetailEvRow:
     event_id: str
     commence_time: datetime
@@ -97,6 +137,8 @@ class RetailEvRow:
     num_bookmakers: int
     exchange: ExchangePrice
     close: ExchangePrice
+    polymarket: PolymarketPrice | None
+    dynamics: Dynamics
 
     @property
     def hours_to_kickoff(self) -> float:
@@ -254,6 +296,71 @@ def _exchange_price(
     )
 
 
+def _polymarket_price(
+    snapshot: OddsSnapshot, market: str, names: dict[str, Outcome], outcomes: tuple[Outcome, ...]
+) -> PolymarketPrice | None:
+    raw = snapshot.raw_data
+    prices = _book_prices(raw, SnapshotKind.POLYMARKET, market, names).get(POLYMARKET_BOOKMAKER)
+    if prices is None or set(prices) != set(outcomes):
+        return None
+    meta: dict[str, Any] = next(
+        (
+            bm.get("polymarket_meta") or {}
+            for bm in raw.get("bookmakers", [])
+            if bm.get("key") == POLYMARKET_BOOKMAKER
+        ),
+        {},
+    )
+    bids: dict[str, float | None] = meta.get("best_bid") or {}
+    asks: dict[str, float | None] = meta.get("best_ask") or {}
+    spread: dict[Outcome, float] = {}
+    for outcome in outcomes:
+        bid, ask = bids.get(outcome.value), asks.get(outcome.value)
+        if bid is not None and ask is not None:
+            spread[outcome] = ask - bid
+    return PolymarketPrice(
+        time=snapshot.snapshot_time, fair=_devig(prices, outcomes), spread=spread
+    )
+
+
+def _latest_at_or_before(times: list[datetime], at: datetime, max_age: timedelta) -> int | None:
+    idx = bisect.bisect_right(times, at) - 1
+    if idx < 0 or at - times[idx] > max_age:
+        return None
+    return idx
+
+
+def _dynamics(
+    outcome: Outcome,
+    t: datetime,
+    exchange: ExchangePrice,
+    exchange_at_t: list[ExchangePrice],
+    exchange_times: list[datetime],
+    quote: _RetailQuote,
+    same_kind: list[_RetailQuote],
+    same_kind_times: list[datetime],
+) -> Dynamics:
+    consensus_now = quote.consensus(outcome)
+    exchange_moves: list[float | None] = []
+    consensus_moves: list[float | None] = []
+    for window in MOVE_WINDOWS:
+        idx = _latest_at_or_before(exchange_times, t - window, MAX_LAGGED_PRICE_AGE)
+        exchange_moves.append(
+            None if idx is None else exchange.fair[outcome] - exchange_at_t[idx].fair[outcome]
+        )
+        idx = _latest_at_or_before(same_kind_times, t - window, MAX_LAGGED_PRICE_AGE)
+        before = None if idx is None else same_kind[idx].consensus(outcome)
+        consensus_moves.append(
+            None if before is None or consensus_now is None else consensus_now - before
+        )
+    implied = quote.implied[outcome]
+    return Dynamics(
+        exchange_moves=tuple(exchange_moves),
+        consensus_moves=tuple(consensus_moves),
+        retail_dispersion=float(np.std(implied)) if len(implied) >= 2 else None,
+    )
+
+
 def build_event_rows(
     event: Event,
     snapshots: Sequence[OddsSnapshot],
@@ -267,6 +374,7 @@ def build_event_rows(
     kick-off). The exchange price at t comes only from live Betfair or FDUK opening
     snapshots at or before t, so nothing after t enters a row's inputs. Exchange
     prices whose back overround exceeds ``max_exchange_overround`` are not prices.
+    The Polymarket price and the dynamics also come only from snapshots at or before t.
     """
     drops = DropCounts()
     outcomes = market_outcomes(market)
@@ -278,7 +386,13 @@ def build_event_rows(
     exchange_at_t: list[ExchangePrice] = []
     live_closes: list[ExchangePrice] = []
     fduk_close: ExchangePrice | None = None
+    polymarket: list[PolymarketPrice] = []
     for snapshot, kind in zip(ordered, kinds, strict=True):
+        if kind is SnapshotKind.POLYMARKET:
+            pm_price = _polymarket_price(snapshot, market, names, outcomes)
+            if pm_price is not None and pm_price.time < kickoff:
+                polymarket.append(pm_price)
+            continue
         if kind not in EXCHANGE_AT_T_KINDS and kind is not SnapshotKind.FDUK_CLOSING:
             continue
         if kind is SnapshotKind.BETFAIR_LIVE and _is_in_play(snapshot.raw_data):
@@ -306,22 +420,38 @@ def build_event_rows(
         return [], drops
 
     exchange_times = [p.time for p in exchange_at_t]
+    polymarket_times = [p.time for p in polymarket]
     window_start = kickoff - DECISION_WINDOW
     window_end = kickoff - DECISION_CUTOFF
-    rows: list[RetailEvRow] = []
+    quotes_by_kind: dict[SnapshotKind, list[_RetailQuote]] = {}
+    in_window: list[_RetailQuote] = []
     for snapshot, kind in zip(ordered, kinds, strict=True):
         t = snapshot.snapshot_time
-        if kind not in RETAIL_KINDS or not window_start <= t <= window_end:
+        if kind not in RETAIL_KINDS or t >= kickoff:
             continue
+        decision = window_start <= t <= window_end
         retail: dict[str, dict[Outcome, float]] = {}
         for book, prices in _book_prices(snapshot.raw_data, kind, market, names).items():
             if book in UK_RETAIL_BOOKMAKERS:
                 retail[book] = prices
-            else:
+            elif decision:
                 drops.prices_outside_roster[book] += len(prices)
-        n_candidates = sum(len(p) for p in retail.values())
-        if n_candidates == 0:
+        if not retail:
             continue
+        implied: dict[Outcome, list[float]] = {o: [] for o in outcomes}
+        for prices in retail.values():
+            for outcome, price in prices.items():
+                implied[outcome].append(1 / price)
+        quote = _RetailQuote(time=t, kind=kind, books=retail, implied=implied)
+        quotes_by_kind.setdefault(kind, []).append(quote)
+        if decision:
+            in_window.append(quote)
+    quote_times = {kind: [q.time for q in quotes] for kind, quotes in quotes_by_kind.items()}
+
+    rows: list[RetailEvRow] = []
+    for quote in in_window:
+        t = quote.time
+        n_candidates = sum(len(p) for p in quote.books.values())
         idx = bisect.bisect_right(exchange_times, t) - 1
         if idx < 0:
             drops.rows_without_exchange += n_candidates
@@ -330,33 +460,45 @@ def build_event_rows(
         if t - exchange.time > MAX_EXCHANGE_AGE:
             drops.rows_stale_exchange += n_candidates
             continue
+        pm_idx = _latest_at_or_before(polymarket_times, t, MAX_POLYMARKET_AGE)
+        pm_price = None if pm_idx is None else polymarket[pm_idx]
+        dynamics = {
+            outcome: _dynamics(
+                outcome,
+                t,
+                exchange,
+                exchange_at_t,
+                exchange_times,
+                quote,
+                quotes_by_kind[quote.kind],
+                quote_times[quote.kind],
+            )
+            for outcome in outcomes
+        }
 
-        implied_by_outcome: dict[Outcome, list[float]] = {o: [] for o in outcomes}
-        for prices in retail.values():
-            for outcome, price in prices.items():
-                implied_by_outcome[outcome].append(1 / price)
-
-        for book, prices in retail.items():
+        for book, prices in quote.books.items():
             complete = set(prices) == set(outcomes)
             book_fair = _devig(prices, outcomes) if complete else None
             book_overround = _overround(prices, outcomes) if complete else None
             for outcome, price in prices.items():
-                implied = implied_by_outcome[outcome]
+                implied_for_outcome = quote.implied[outcome]
                 rows.append(
                     RetailEvRow(
                         event_id=event.id,
                         commence_time=kickoff,
                         outcome=outcome,
                         book=book,
-                        retail_kind=kind,
+                        retail_kind=quote.kind,
                         decision_time=t,
                         retail_decimal=price,
                         book_fair_prob=book_fair[outcome] if book_fair is not None else None,
                         book_overround=book_overround,
-                        consensus_prob=float(np.mean(implied)),
-                        num_bookmakers=len(implied),
+                        consensus_prob=float(np.mean(implied_for_outcome)),
+                        num_bookmakers=len(implied_for_outcome),
                         exchange=exchange,
                         close=close,
+                        polymarket=pm_price,
+                        dynamics=dynamics[outcome],
                     )
                 )
     return rows, drops
@@ -380,21 +522,33 @@ _PRICE_FEATURE_NAMES: tuple[str, ...] = (
     "is_weekend",
     "day_of_week",
 )
+_POLYMARKET_FEATURE_NAMES: tuple[str, ...] = (
+    "pm_prob",
+    "pm_exchange_diff",
+    "pm_consensus_diff",
+    "pm_baseline_ev",
+    "pm_spread",
+    "pm_age_hours",
+)
 
 
-def retail_ev_feature_names(outcomes: tuple[Outcome, ...]) -> list[str]:
-    return (
-        list(_PRICE_FEATURE_NAMES)
-        + [f"outcome_{o.value}" for o in outcomes]
-        + [f"book_{b}" for b in RETAIL_BOOK_COLUMNS]
-    )
+def _window_label(window: timedelta) -> str:
+    return f"{int(window.total_seconds() // 3600)}h"
+
+
+_DYNAMICS_FEATURE_NAMES: tuple[str, ...] = (
+    *(f"exchange_move_{_window_label(w)}" for w in MOVE_WINDOWS),
+    *(f"consensus_move_{_window_label(w)}" for w in MOVE_WINDOWS),
+    "retail_dispersion",
+)
+_TEAM_GROUPS: frozenset[str] = frozenset({"schedule_as_of_t", "standings_as_of_t"})
 
 
 def _nan_if_none(value: float | None) -> float:
     return np.nan if value is None else value
 
 
-def retail_ev_features(row: RetailEvRow, outcomes: tuple[Outcome, ...]) -> np.ndarray:
+def _price_features(row: RetailEvRow, outcomes: tuple[Outcome, ...]) -> list[float]:
     implied = 1 / row.retail_decimal
     sharp = row.exchange.fair[row.outcome]
     weekday = row.commence_time.weekday()
@@ -416,7 +570,105 @@ def retail_ev_features(row: RetailEvRow, outcomes: tuple[Outcome, ...]) -> np.nd
     ]
     outcome_block = [float(row.outcome is o) for o in outcomes]
     book_block = [float(row.book == b) for b in RETAIL_BOOK_COLUMNS]
-    return np.array(price_block + outcome_block + book_block, dtype=np.float64)
+    return price_block + outcome_block + book_block
+
+
+def _polymarket_features(row: RetailEvRow) -> list[float]:
+    pm = row.polymarket
+    if pm is None:
+        return [np.nan] * len(_POLYMARKET_FEATURE_NAMES)
+    prob = pm.fair[row.outcome]
+    return [
+        prob,
+        prob - row.exchange.fair[row.outcome],
+        prob - row.consensus_prob,
+        prob * row.retail_decimal - 1,
+        _nan_if_none(pm.spread.get(row.outcome)),
+        (row.decision_time - pm.time).total_seconds() / 3600,
+    ]
+
+
+def _dynamics_features(row: RetailEvRow) -> list[float]:
+    d = row.dynamics
+    return [
+        *(_nan_if_none(m) for m in d.exchange_moves),
+        *(_nan_if_none(m) for m in d.consensus_moves),
+        _nan_if_none(d.retail_dispersion),
+    ]
+
+
+class RetailEvFeatures:
+    """The feature vector of a retail-EV row: price features plus the configured as-of-t groups.
+
+    Every group reads only data at or before the row's decision time t. The schedule
+    and standings groups need ``teams`` and the rows' events.
+    """
+
+    def __init__(
+        self,
+        outcomes: tuple[Outcome, ...],
+        groups: Sequence[RetailEvFeatureGroupName] = (),
+        teams: TeamHistory | None = None,
+        events: Mapping[str, Event] | None = None,
+    ) -> None:
+        unknown = set(groups) - RETAIL_EV_FEATURE_GROUPS
+        if unknown:
+            raise ValueError(f"unknown retail_ev feature groups {sorted(unknown)}")
+        if _TEAM_GROUPS & set(groups) and (teams is None or events is None):
+            raise ValueError("schedule_as_of_t and standings_as_of_t need teams and events")
+        self.outcomes = outcomes
+        self.groups: tuple[RetailEvFeatureGroupName, ...] = tuple(
+            g for g in get_args(RetailEvFeatureGroupName) if g in groups
+        )
+        self._teams = teams
+        self._events = events or {}
+        self._team_cache: dict[tuple[str, datetime], list[float]] = {}
+
+    @property
+    def names(self) -> list[str]:
+        names = (
+            list(_PRICE_FEATURE_NAMES)
+            + [f"outcome_{o.value}" for o in self.outcomes]
+            + [f"book_{b}" for b in RETAIL_BOOK_COLUMNS]
+        )
+        for group in self.groups:
+            if group == "polymarket_at_t":
+                names += _POLYMARKET_FEATURE_NAMES
+            elif group == "dynamics":
+                names += _DYNAMICS_FEATURE_NAMES
+            elif group == "schedule_as_of_t":
+                names += [f"eplsched_{n}" for n in EplScheduleFeatures.get_feature_names()]
+            elif group == "standings_as_of_t":
+                names += [f"stnd_{n}" for n in StandingsFeatures.get_feature_names()]
+        return names
+
+    def _team_features(self, row: RetailEvRow) -> list[float]:
+        key = (row.event_id, row.decision_time)
+        if key not in self._team_cache:
+            assert self._teams is not None
+            event = self._events[row.event_id]
+            values: list[float] = []
+            if "schedule_as_of_t" in self.groups:
+                values += self._teams.schedule_at(event, row.decision_time).to_array().tolist()
+            if "standings_as_of_t" in self.groups:
+                values += self._teams.standings_at(event, row.decision_time).to_array().tolist()
+            self._team_cache[key] = values
+        return self._team_cache[key]
+
+    def row(self, row: RetailEvRow) -> np.ndarray:
+        values = _price_features(row, self.outcomes)
+        if "polymarket_at_t" in self.groups:
+            values += _polymarket_features(row)
+        if "dynamics" in self.groups:
+            values += _dynamics_features(row)
+        if _TEAM_GROUPS & set(self.groups):
+            values += self._team_features(row)
+        return np.array(values, dtype=np.float64)
+
+    def matrix(self, rows: Sequence[RetailEvRow]) -> np.ndarray:
+        return np.array([self.row(r) for r in rows], dtype=np.float32).reshape(
+            len(rows), len(self.names)
+        )
 
 
 async def load_retail_ev_dataset(
@@ -465,9 +717,25 @@ async def prepare_retail_ev_training_data(
     if not dataset.rows:
         raise ValueError(f"No retail_ev rows after processing {len(valid_events)} events")
 
-    X = np.array([retail_ev_features(r, outcomes) for r in dataset.rows], dtype=np.float32)
+    groups = cast(tuple[RetailEvFeatureGroupName, ...], config.feature_groups)
+    teams: TeamHistory | None = None
+    if _TEAM_GROUPS & set(groups):
+        from odds_analytics.as_of_team_features import load_team_history
+
+        sport_keys = {e.sport_key for e in valid_events}
+        if len(sport_keys) != 1:
+            raise ValueError(f"retail_ev team features need one sport, got {sorted(sport_keys)}")
+        teams = await load_team_history(
+            session,
+            sport_keys.pop(),
+            config.form_window,
+            with_fixtures="schedule_as_of_t" in groups,
+        )
+    features = RetailEvFeatures(
+        outcomes, groups, teams=teams, events={e.id: e for e in valid_events}
+    )
     X, feature_names, _ = apply_variance_filter(
-        X, retail_ev_feature_names(outcomes), config.variance_threshold
+        features.matrix(dataset.rows), features.names, config.variance_threshold
     )
     y = dataset.targets.astype(np.float32)
     # Mean-one scaling keeps min_child_weight and reg_lambda on their unweighted scale.

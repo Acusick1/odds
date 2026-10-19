@@ -64,10 +64,24 @@ class TestRetailEvConfig:
     def test_round_trips_through_a_full_dump(self) -> None:
         assert FeatureConfig(**_features().model_dump()).target_type == "retail_ev"
 
+    def test_accepts_as_of_t_groups(self) -> None:
+        groups = ("polymarket_at_t", "dynamics", "schedule_as_of_t", "standings_as_of_t")
+        assert _features(feature_groups=groups).feature_groups == groups
+
+    def test_other_targets_reject_as_of_t_groups(self) -> None:
+        with pytest.raises(ValidationError, match="retail_ev feature groups"):
+            FeatureConfig(
+                target_type="devigged_bookmaker",
+                target_bookmaker="bet365",
+                markets=["1x2"],
+                feature_groups=("tabular", "dynamics"),
+            )
+
     @pytest.mark.parametrize(
         "overrides",
         [
             {"feature_groups": ("tabular",)},
+            {"feature_groups": ("dynamics", "standings")},
             {"feature_groups": ("standings",)},
             {"feature_groups": ("match_stats",)},
             {"feature_groups": ("epl_schedule",)},

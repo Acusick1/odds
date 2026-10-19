@@ -5,6 +5,7 @@ description: The retail-EV row builder, its features, weights and keep-bar metri
 sources:
   - odds_analytics.retail_ev
   - odds_analytics.retail_ev_metrics
+  - odds_analytics.as_of_team_features
   - odds_core.snapshot_sources
   - odds_core.bookmakers.UK_RETAIL_BOOKMAKERS
   - odds_core.bookmakers.canonical_bookmaker_key
@@ -42,7 +43,7 @@ An exchange price, at the close or at t, counts only when its back overround is 
 
 ## Retail-EV features
 
-`odds_analytics.retail_ev.retail_ev_features` returns, for one row, values that use only the row's own snapshot at t, the exchange price at or before t, and the event's kick-off time (names from `odds_analytics.retail_ev.retail_ev_feature_names`):
+`odds_analytics.retail_ev.RetailEvFeatures` turns rows into the feature matrix and names. Its price features use only the row's own snapshot at t, the exchange price at or before t, and the event's kick-off time:
 
 - `hours_to_kickoff`, `is_weekend`, `day_of_week`;
 - the book's `retail_implied_prob` (`1 / retail_decimal`), `book_fair_prob` and `book_overround` (NaN when the book lacks an outcome);
@@ -50,7 +51,20 @@ An exchange price, at the close or at t, counts only when its back overround is 
 - `sharp_prob` (the devigged exchange price at t), `retail_sharp_diff` (`retail_implied_prob − sharp_prob`, against a devigged sharp price unlike the tabular group's), `exchange_overround`, `exchange_age_hours` and `baseline_ev`;
 - one-hot `outcome_*` and `book_*` columns over `odds_analytics.retail_ev.RETAIL_BOOK_COLUMNS`.
 
-`feature_groups` must be empty: the event-level groups (standings, match stats, EPL schedule) are computed as of kick-off, not as of t, so a match played between t and kick-off would reach the row ([look-ahead](look-ahead-bias.md#no-future-data-layer-by-layer)). The variance filter drops constant columns, such as books absent from the data ([feature pipeline](feature-pipeline.md)).
+`feature_groups` adds optional groups from `odds_analytics.training.config.RetailEvFeatureGroupName`, appended in that literal's order. Each reads only data at or before t, and a missing value is NaN:
+
+| Group | Columns | Source at or before t |
+|---|---|---|
+| `polymarket_at_t` | `pm_prob`, `pm_exchange_diff`, `pm_consensus_diff`, `pm_baseline_ev`, `pm_spread`, `pm_age_hours` | the latest complete `polymarket` snapshot before kick-off and no older than `odds_analytics.retail_ev.MAX_POLYMARKET_AGE` (2 hours), devigged proportionally (`odds_analytics.retail_ev.PolymarketPrice`). The diffs are against `sharp_prob` and `consensus_prob`, `pm_baseline_ev` is `pm_prob × retail_decimal − 1`, and `pm_spread` is the outcome's Yes ask minus bid, which only live snapshots store ([Polymarket snapshots](../collection/polymarket-odds-snapshots.md#snapshot-shape)) |
+| `dynamics` | `exchange_move_{1,3,6}h`, `consensus_move_{1,3,6}h`, `retail_dispersion` | for each of `odds_analytics.retail_ev.MOVE_WINDOWS`, the change into t of `sharp_prob` and of `consensus_prob`, against the latest exchange price, and the latest retail snapshot of the same source, at or before t − Δ and no older than `odds_analytics.retail_ev.MAX_LAGGED_PRICE_AGE` (2 hours) before it; `retail_dispersion` is the standard deviation of the outcome's implied probability across the snapshot's UK books, NaN for one book (`odds_analytics.retail_ev.Dynamics`) |
+| `schedule_as_of_t` | the 8 `eplsched_*` columns of the [EPL schedule group](epl-context-features.md) | `odds_analytics.as_of_team_features.TeamHistory.schedule_at` |
+| `standings_as_of_t` | the 11 `stnd_*` columns of the [standings group](epl-context-features.md) | `odds_analytics.as_of_team_features.TeamHistory.standings_at`, with `form_window` |
+
+A consensus move compares snapshots of one source because each source carries a different set of books, so an FDUK opening row, its event's only FDUK opening snapshot, has no consensus move.
+
+The two team groups count a match only once its result is known: it kicked off before `odds_analytics.as_of_team_features.results_known_before`, t minus `odds_analytics.as_of_team_features.RESULT_LAG` (3 hours, which covers a match to full time `(inferred)`). Rest days and the 14- and 7-day congestion windows are still measured back from the event's kick-off, so a match between t and kick-off is missing from the features rather than leaking into them. `odds_analytics.as_of_team_features.load_team_history` loads the EPL results (`odds_analytics.standings_features.load_season_events_cache`) and, for the schedule group, the ESPN fixtures, once per build; the events must share one sport.
+
+The event-level groups (`tabular`, standings, match stats, EPL schedule and the rest) are rejected under `retail_ev`, and the `retail_ev` groups under every other target: the event-level ones are computed as of kick-off, not as of t ([look-ahead](look-ahead-bias.md#no-future-data-layer-by-layer)). The variance filter drops constant columns, such as books absent from the data ([feature pipeline](feature-pipeline.md)).
 
 ## Keep-bar metrics
 

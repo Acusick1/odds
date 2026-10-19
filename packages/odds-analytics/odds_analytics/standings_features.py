@@ -221,15 +221,16 @@ async def load_season_events_cache(
 def get_prior_events_from_cache(
     cache: StandingsCache,
     event: Event,
+    before: datetime,
 ) -> list[Event]:
-    """Extract prior season events for a given event from the preloaded cache.
+    """Completed events of the event's season that kicked off strictly before ``before``.
 
-    Returns completed events from the same season with commence_time strictly
-    before the given event, in chronological order.
+    Event-level features pass the event's kick-off; features as of a decision time
+    pass the latest kick-off whose result is known by then.
     """
     season = epl_season_key(event.commence_time)
     season_events = cache.get(season, [])
-    return [e for e in season_events if e.commence_time < event.commence_time]
+    return [e for e in season_events if e.commence_time < min(before, event.commence_time)]
 
 
 def extract_standings_features(

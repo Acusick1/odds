@@ -11,12 +11,14 @@ sources:
   - odds_analytics.feature_groups.EventDataBundle
   - odds_analytics.training.config.FeatureConfig
   - odds_analytics.training.config.FeatureGroupName
+  - odds_analytics.training.config.RetailEvFeatureGroupName
+  - odds_analytics.retail_ev.RetailEvFeatures
 status: stable
 ---
 
 # Add a feature group
 
-Group names are dispatched by string in several places, so a new group touches each of them (see [Feature groups](feature-groups.md)).
+These steps add a group for the delta targets. Group names are dispatched by string in several places, so a new group touches each of them (see [Feature groups](feature-groups.md)). A `retail_ev` group is computed as of each row's decision time instead: it goes in `odds_analytics.training.config.RetailEvFeatureGroupName` and `odds_analytics.retail_ev.RetailEvFeatures`, and into the look-ahead tests of `tests/unit/test_retail_ev.py` ([retail-EV features](clv-target-functions.md#retail-ev-features)).
 
 1. **Write the extractor.** Create a dataclass with array and feature-name methods (as `odds_analytics.standings_features.StandingsFeatures.to_array` and `odds_analytics.standings_features.StandingsFeatures.get_feature_names`), and an extractor that takes only data before the snapshot.
    - The look-ahead rule per layer is on [Decision time and look-ahead bias](look-ahead-bias.md).

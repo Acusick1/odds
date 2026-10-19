@@ -282,7 +282,9 @@ async def collect_event_data(
     if {"standings", "epl_schedule"} & set(config.feature_groups) and standings_cache is not None:
         from odds_analytics.standings_features import get_prior_events_from_cache
 
-        prior_season_events = get_prior_events_from_cache(standings_cache, event)
+        prior_season_events = get_prior_events_from_cache(
+            standings_cache, event, before=event.commence_time
+        )
 
     # Prior match stats for rolling match stats features (from preloaded cache)
     prior_match_stats: dict[str, list[dict[str, int]]] = {}
@@ -775,7 +777,10 @@ def _extract_static_feature_parts(
 
         try:
             eplsched_feats = extract_epl_schedule_features(
-                bundle.prior_season_events, event, fixtures_df=bundle.fixtures_df
+                bundle.prior_season_events,
+                event,
+                fixtures_df=bundle.fixtures_df,
+                known_at=event.commence_time,
             )
             parts.append(eplsched_feats.to_array())
         except Exception:
