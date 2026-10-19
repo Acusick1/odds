@@ -27,85 +27,84 @@ This run repeats the protocol of [Price-only models on the retail-EV target](exp
 
 **Findings.**
 
-- **On the live-collected events, no group beats the price-only model.** These are the 69 events whose rows come from live collection at their true times. Every residual-arm gain over price-only has a 95% CI that includes zero. The closest is `dynamics` with seed 7: +47.3 [−0.8, 98.0] × 10⁻⁶ weighted MSE.
-- **On the FDUK-only events, no group beats price-only either.**
-- **Nothing survives a Bonferroni correction.** Over the 10 tests of five variants and two residual seeds, no gain over price-only excludes zero at level 1 − 0.05/10, overall or within either event type (`bonferroni.csv`). Uncorrected, only `dynamics` seed 7 overall excludes zero: +28.0 [3.3, 53.4].
-- **An earlier version of `polymarket_at_t` leaked time on FDUK opening rows.** On the same protocol it had shown a gain of 60 to 66 over price-only, about 84% of it from those rows. The probe below traces that gain to Polymarket prices from after the real FDUK collection time. With the fix, those rows get no Polymarket features, and the group's gain is −1.5 and +3.2.
+- **On the live-collected events, no group beats the price-only model.** These are the 69 events whose rows come from live collection at their true times. Every residual-arm gain over price-only has a 95% CI that includes zero, and all lie between −29.4 and +6.9 × 10⁻⁶ weighted MSE.
+- **On the FDUK-only events, no group beats price-only either.** Those rows carry none of the new columns except `retail_dispersion`.
+- **No gain over price-only excludes zero, even before correction.** Over all events, no group's gain over price-only excludes zero at 95%. The Bonferroni-corrected CIs at level 1 − 0.05/10, over the 10 tests of five variants and two residual seeds, exclude zero in no slice (`bonferroni.csv`).
+- **An earlier version of `polymarket_at_t` leaked time on FDUK opening rows.** On the same protocol it had shown a gain of 60 to 66 over price-only, about 84% of it from those rows. The probe below traces that gain to Polymarket prices from after the real FDUK collection time.
 - **The direct arm stays below the baseline in every variant.**
 
 ## Setup
 
 - **Script.** The script `experiments/scripts/retail_ev_as_of_t_groups.py` builds each variant from `experiments/configs/xgboost_epl_retail_ev_price_only.yaml` with `feature_groups` set. It runs the functions of `experiments/scripts/retail_ev_price_only.py`: the same tuning range, scoring folds, arms and seeds, with each variant's Optuna studies under their own name. It writes `experiments/results/retail_ev_as_of_t_groups/`.
-- **Rows.** All variants share the 112,650 price-only rows, and the script checks this. 108,789 rows over 340 events are scored, in five 68-event folds from 2025-08-15 to 2026-05-24.
-  - The 69 live-collected events hold 103,464 rows, mostly OddsPortal live snapshots. Their 44 OddsPortal live events fall in fold 4 (2026-02-28 onward).
+- **Rows.** All variants share 112,455 rows over 720 events, and the script checks this. 108,594 rows over 340 events are scored, in five 68-event folds from 2025-08-15 to 2026-05-24.
+  - The 69 live-collected events hold 103,269 rows, mostly OddsPortal live snapshots. Their 44 OddsPortal live events fall in fold 4 (2026-02-28 onward).
   - The 271 FDUK-only events hold 5,325 rows, one FDUK opening snapshot each.
-  - `summary.json` records the git SHA, `git_dirty`, the script and config hashes, and `data_sha256`.
-  - The price-only variant reproduces the #540 numbers exactly.
-- **FDUK opening times are upper bounds.** An FDUK opening row's t is FDUK's latest documented collection time, and the price was taken at or before it. Its horizon is therefore a lower bound: 1 to 3 days for most matches and under 12 hours for Friday and Tuesday evening kick-offs ([historical ingest scripts](../collection/historical-ingest-scripts.md#snapshot-shape)). Such rows get no column that reads another source's price at t, which is the Polymarket group and the exchange moves (`odds_analytics.retail_ev.RetailEvRow.decision_time_is_exact`).
-- **Tuning sees few of the new features.** Hyperparameters are tuned on 2024-25 FDUK opening rows only. Those rows have no Polymarket price and no moves, so only `retail_dispersion`, the schedule and the standings columns are populated there (`summary.json`, `coverage_tuning`). The new columns are learnt only when the frozen hyperparameters are refitted on each scoring fold's training rows.
+  - There are 195 fewer rows than in the price-only run of #540. These are FDUK opening rows whose own snapshot has no usable exchange price, which the builder drops ([CLV target](../modelling/clv-target.md#the-retail-ev-target)). The price-only variant therefore differs slightly from #540.
+  - `summary.json` records the git SHA, `git_dirty` (false for this run), the script and config hashes, and `data_sha256`.
+- **FDUK opening times are upper bounds.** An FDUK opening row's t is FDUK's latest documented collection time, and the price was taken at or before it. Its horizon is therefore a lower bound: 1 to 3 days for most matches and under 12 hours for Friday and Tuesday evening kick-offs ([historical ingest scripts](../collection/historical-ingest-scripts.md#snapshot-shape)). Such a row pairs only with its own snapshot's exchange price. It gets no Polymarket price, lagged exchange price, schedule or standings (`odds_analytics.retail_ev.RetailEvRow.decision_time_is_exact`).
+- **Tuning sees almost none of the new columns.** Hyperparameters are tuned on the 2024-25 FDUK opening rows, where every new column except `retail_dispersion` is NaN (`summary.json`, `coverage_tuning`). The new columns are learnt only when the frozen hyperparameters are refitted on each scoring fold's training rows.
 - **Coverage on scored rows** (`coverage_scored`):
-  - Polymarket columns: 93.8%, which is every non-FDUK-opening row. `pm_spread` is dropped as all NaN, because the backfill stores no bid or ask.
-  - Exchange moves: 86 to 88%. Consensus moves at 1, 3 and 6 hours: 79%, 64% and 46%.
-  - `retail_dispersion` and schedule: 100%. Standings: 99.8%.
-- **Metrics.** These are the price-only page's metrics: the weighted-MSE gain in units of 10⁻⁶, and the pick-EV gain in event units. Both come with event-clustered bootstrap 95% CIs from 2,000 resamples. "Over price-only" compares a variant's model with the price-only model of the same arm and seed. `bonferroni.csv` gives the residual arm's gains over price-only with CIs at level 1 − 0.05/10, separately for all events and for each event type.
+  - Polymarket, schedule and standings columns: 94%, which is every row that isn't an FDUK opening row. `pm_spread` is dropped as all NaN, because the backfill stores no bid or ask.
+  - Exchange moves: 86 to 88%. Consensus moves at 1, 3 and 6 hours: 79%, 65% and 46%.
+  - `retail_dispersion`: 100%.
+- **Metrics.** These are the price-only page's metrics: the weighted-MSE gain in units of 10⁻⁶, and the pick-EV gain in event units. Both come with event-clustered bootstrap 95% CIs from 2,000 resamples. "Over price-only" compares a variant's model with the price-only model of the same arm and seed. `bonferroni.csv` gives the residual arm's gains over price-only with CIs at level 1 − 0.05/10, for all events and for each event type.
 
 ## Live-collected events
 
-Residual-arm weighted-MSE gain on the 69 live-collected events (103,464 rows) (`results.csv`, slice `event_type`):
+Residual-arm weighted-MSE gain on the 69 live-collected events (103,269 rows; baseline weighted MSE 4608.8) (`results.csv`, slice `event_type`):
 
 | Variant | Seed 42 over price-only | Seed 7 over price-only | Seed 42 over baseline | Seed 7 over baseline |
 |---|---|---|---|---|
-| price-only | | | 28.8 [−93.7, 147.7] | −16.5 [−196.1, 161.4] |
-| `polymarket_at_t` | −8.2 [−22.0, 6.1] | 12.8 [−43.4, 67.7] | 20.6 [−98.1, 137.3] | −3.8 [−168.5, 159.3] |
-| `dynamics` | 6.0 [−16.4, 28.3] | 47.3 [−0.8, 98.0] | 34.8 [−75.0, 145.6] | 30.8 [−113.3, 173.8] |
-| `schedule_as_of_t` | −50.3 [−118.7, 9.1] | −9.3 [−121.6, 95.7] | −21.5 [−146.1, 97.3] | −25.9 [−170.2, 116.9] |
-| `standings_as_of_t` | −25.1 [−119.5, 68.2] | 28.2 [−109.8, 164.0] | 3.7 [−90.6, 99.9] | 11.6 [−80.4, 102.1] |
-| all four | −81.2 [−206.7, 23.1] | −6.7 [−155.9, 135.3] | −52.4 [−191.7, 69.7] | −23.2 [−146.6, 87.4] |
+| price-only | | | 26.0 [−96.3, 145.9] | 22.6 [−106.2, 147.3] |
+| `polymarket_at_t` | −6.2 [−21.0, 9.9] | −29.0 [−85.7, 27.0] | 19.8 [−100.0, 136.8] | −6.4 [−172.8, 155.9] |
+| `dynamics` | 6.6 [−15.6, 28.9] | 4.2 [−34.0, 47.4] | 32.6 [−77.9, 143.2] | 26.8 [−104.8, 159.0] |
+| `schedule_as_of_t` | 3.1 [−9.2, 16.2] | −27.8 [−85.5, 31.8] | 29.1 [−93.2, 148.9] | −5.2 [−176.2, 163.5] |
+| `standings_as_of_t` | −2.5 [−14.9, 10.2] | −29.4 [−86.1, 30.8] | 23.5 [−98.2, 142.6] | −6.8 [−177.4, 161.1] |
+| all four | 6.9 [−14.3, 27.6] | −2.0 [−39.7, 43.8] | 32.9 [−79.1, 142.8] | 20.6 [−120.9, 164.0] |
 
-- **Picks.** Every pick gain over price-only on these events is between −0.009 and 0.002 event units. With all four groups, the residual picks earn less than the baseline's: −0.013 [−0.030, −0.002] for both seeds.
+- **Picks.** Every pick gain over price-only on these events is between −0.008 and 0.007 event units, and every one has a CI that includes zero.
 
 ## FDUK-only events
 
-Residual-arm weighted-MSE gain on the 271 FDUK-only events (5,325 rows):
+Residual-arm weighted-MSE gain on the 271 FDUK-only events (5,325 rows; baseline weighted MSE 3111.2):
 
 | Variant | Seed 42 over price-only | Seed 7 over price-only | Seed 42 over baseline | Seed 7 over baseline |
 |---|---|---|---|---|
-| price-only | | | 54.0 [−12.5, 120.6] | 48.1 [−45.7, 141.4] |
-| `polymarket_at_t` | 0.3 [−8.1, 8.2] | 0.7 [−25.7, 28.1] | 54.3 [−13.0, 119.6] | 48.8 [−39.6, 136.4] |
-| `dynamics` | 8.3 [−3.6, 21.0] | 22.9 [−2.8, 52.5] | 62.2 [−1.7, 124.7] | 71.0 [−9.6, 150.6] |
-| `schedule_as_of_t` | 2.7 [−25.8, 32.5] | −0.4 [−42.5, 40.3] | 56.6 [−10.2, 121.0] | 47.7 [−22.1, 116.1] |
-| `standings_as_of_t` | −3.3 [−46.3, 41.8] | −9.6 [−72.2, 53.8] | 50.7 [0.9, 103.9] | 38.5 [−4.6, 84.1] |
-| all four | 9.7 [−55.8, 76.1] | −5.3 [−89.5, 77.7] | 63.7 [−12.0, 140.4] | 42.8 [−26.7, 112.8] |
+| price-only | | | 53.7 [−12.9, 120.0] | 40.7 [−31.1, 112.5] |
+| `polymarket_at_t` | 0.8 [−8.1, 8.8] | 7.8 [−30.6, 43.8] | 54.5 [−13.0, 120.1] | 48.6 [−39.6, 136.1] |
+| `dynamics` | 8.4 [−3.6, 21.4] | 24.5 [−11.1, 58.9] | 62.1 [−1.8, 124.2] | 65.2 [−10.8, 140.1] |
+| `schedule_as_of_t` | 5.1 [−1.9, 12.4] | 8.5 [−30.2, 47.1] | 58.8 [−9.2, 124.7] | 49.2 [−43.9, 140.5] |
+| `standings_as_of_t` | 4.5 [−3.3, 12.3] | 6.1 [−32.4, 45.4] | 58.2 [−10.2, 124.8] | 46.8 [−41.9, 135.5] |
+| all four | 10.2 [−3.8, 25.2] | 31.2 [−6.1, 66.7] | 63.9 [−0.6, 126.1] | 71.9 [−12.2, 152.7] |
 
-- **Polymarket.** It changes almost nothing on these rows, which now carry no Polymarket price.
-- **Picks.** With all four groups, the residual picks beat the baseline: 0.058 [0.016, 0.106] and 0.056 [0.016, 0.102] event units. That isn't significantly better than price-only: 0.025 [−0.036, 0.086] and 0.044 [−0.012, 0.105].
+- **Gains on rows without the columns.** These rows have no Polymarket, schedule or standings values, so the variants differ from price-only only through the trees fitted on the other events' rows.
+- **Picks.** With all four groups, seed 7's picks earn less than price-only's: −0.042 [−0.072, −0.014] event units.
 
 ## All events and folds
 
-Residual-arm gain over price-only on all 340 events. The price-only model gains 48.8 [−13.8, 105.6] and 34.7 [−52.3, 115.9] over the baseline, whose weighted MSE is 3419.6:
+Residual-arm gain over price-only on all 340 events. The price-only model gains 47.9 [−14.7, 105.0] and 37.0 [−27.8, 97.5] over the baseline, whose weighted MSE is 3421.7:
 
 | Variant | Seed 42 | Seed 7 | Bonferroni CI, seed 42 | Bonferroni CI, seed 7 |
 |---|---|---|---|---|
-| `polymarket_at_t` | −1.5 [−8.6, 5.4] | 3.2 [−21.9, 26.9] | [−11.3, 9.0] | [−33.5, 37.8] |
-| `dynamics` | 7.8 [−3.6, 19.4] | 28.0 [3.3, 53.4] | [−8.6, 25.2] | [−4.4, 64.0] |
-| `schedule_as_of_t` | −8.3 [−34.6, 18.0] | −2.2 [−42.0, 39.0] | [−43.7, 26.7] | [−54.6, 59.1] |
-| `standings_as_of_t` | −7.8 [−47.5, 34.6] | −1.7 [−58.9, 58.3] | [−67.1, 56.8] | [−80.1, 89.4] |
-| all four | −9.1 [−66.3, 51.1] | −5.6 [−76.1, 67.8] | [−96.8, 76.4] | [−99.4, 103.8] |
+| `polymarket_at_t` | −0.6 [−7.9, 6.6] | 0.2 [−32.2, 32.3] | [−10.8, 10.4] | [−43.0, 47.1] |
+| `dynamics` | 8.1 [−3.4, 19.7] | 20.3 [−12.2, 49.7] | [−8.0, 25.5] | [−25.4, 63.5] |
+| `schedule_as_of_t` | 4.7 [−1.4, 10.9] | 0.9 [−33.3, 34.5] | [−3.6, 13.0] | [−51.3, 48.3] |
+| `standings_as_of_t` | 3.0 [−3.2, 9.7] | −1.2 [−35.5, 32.4] | [−5.9, 13.6] | [−50.9, 48.8] |
+| all four | 9.5 [−3.4, 22.0] | 24.3 [−9.0, 56.1] | [−10.6, 28.4] | [−24.2, 68.7] |
 
-Per fold, residual gain over price-only, seed 42 then seed 7. Each fold has 68 events; fold 4 holds 102,186 of the rows:
+Per fold, residual gain over price-only, seed 42 then seed 7. Each fold has 68 events; fold 4 holds 101,991 of the rows:
 
 | Fold | `polymarket_at_t` | `dynamics` | `schedule_as_of_t` | `standings_as_of_t` | all four |
 |---|---|---|---|---|---|
-| 0 | −2.8; −13.4 | 12.5; 19.1 | 12.1; 24.4 | 59.5; 22.4 | 117.7; 73.2 |
-| 1 | −3.3; 15.1 | −13.7; 11.9 | 1.3; 15.6 | −33.0; −8.4 | −42.1; −14.9 |
-| 2 | −4.5; 11.7 | −4.7; 21.5 | −9.9; 26.1 | 58.0; 81.1 | 74.8; 110.1 |
-| 3 | 5.7; 3.3 | 24.3; 35.8 | −7.0; −49.6 | −97.1; −97.4 | −130.2; −179.0 |
-| 4 | −2.4; −0.9 | 20.1; 50.9 | −37.2; −26.6 | −25.7; −6.2 | −64.0; −16.3 |
+| 0 | −1.9; −11.8 | 11.1; −6.2 | 5.1; −4.8 | 2.9; −9.6 | 7.7; 0.3 |
+| 1 | −3.4; −0.1 | −13.7; 9.5 | 3.0; −19.0 | −1.5; −10.1 | −2.8; 24.1 |
+| 2 | −4.7; −33.9 | −4.9; −23.6 | −0.1; −19.5 | −7.5; −46.8 | −8.3; −32.1 |
+| 3 | 6.1; 76.4 | 25.0; 93.4 | 13.5; 83.7 | 16.8; 85.3 | 24.9; 104.5 |
+| 4 | 0.6; −29.4 | 22.3; 27.7 | 2.0; −35.7 | 4.3; −25.0 | 25.7; 24.3 |
 
-Two fold CIs exclude zero: `dynamics` seed 7 in fold 4 (+50.9 [2.2, 106.4]), and `standings_as_of_t` seed 42 in fold 3 (−97.1 [−193.4, −5.4]).
-
-- **Picks over all events.** With all four groups, the residual arm's picks beat the baseline by 0.045 [0.001, 0.096] and 0.043 [0.000, 0.093] event units. Neither is significantly better than price-only.
-- **Feature importance.** In the all-groups models, the standings goal rate and goal difference and the home rest days rank right behind `sharp_prob` and `consensus_prob` (`feature_importance.csv`). Those groups gain nothing alone, so these splits fit noise (inferred).
+- **Fold CIs that exclude zero.** Four do, all positive: seed 7 in fold 3 for `dynamics` (93.4 [10.5, 181.0]), `standings_as_of_t` (85.3 [0.8, 171.7]) and all four (104.5 [14.3, 201.3]), and all four with seed 42 in fold 4 (25.7 [1.3, 51.0]). Seed 7's fold-3 gain appears in every variant, including `polymarket_at_t` (76.4 [−12.7, 161.2]). So it is more likely a property of seed 7's refits in that fold than of any one group (inferred).
+- **Picks over all events.** With all four groups, seed 7's picks earn less than price-only's: −0.049 [−0.084, −0.021] event units. No other pick gain over price-only excludes zero.
+- **Feature importance.** In the all-groups models, `retail_dispersion` ranks third, at 0.110 of total gain, behind `sharp_prob` and `consensus_prob` (`feature_importance.csv`).
 
 ## The FDUK timing leak
 
