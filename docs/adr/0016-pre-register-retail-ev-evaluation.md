@@ -13,7 +13,7 @@ ADR-0012 keeps a model only if it passes both keep-bar conditions "on a fresh se
 - **Development results.** On 2024-25 and 2025-26, the residual arm (XGBoost on the target minus the baseline, with the baseline added back) gains 1.0 to 1.4% of the baseline's weighted MSE, with CIs that include zero. Its picks are level with the baseline's. The direct arm is worse than the baseline ([price-only](../../wiki/evaluation/exp-epl-retail-ev-price-only.md)). No as-of-t group beats price-only ([as-of-t groups](../../wiki/evaluation/exp-epl-retail-ev-as-of-t-groups.md)), and re-tuning inside 2025-26 does worse than the settings tuned on 2024-25 ([nested tuning](../../wiki/evaluation/exp-epl-retail-ev-nested-tuning.md)).
 - **Power.** One season of 380 events gives the MSE condition 80% power at a gain of about 4.5 to 6%. The pick condition needs about 16 to 21% for a diffuse edge, or exact knowledge of the move on about 2 to 2.6% of events. Pick power below about 0.15 on FDUK-only rows is not evidence of an edge ([keep-bar power](../../wiki/evaluation/exp-retail-ev-power.md)).
 - **2026-27 so far.** No model has been scored on it. The target report (#537) and an early version of the power analysis counted its rows descriptively. Its events before 2026-10-19 have FDUK opening and closing prices and live Betfair prices, but no live OddsPortal rows with bet365. Production has collected OddsPortal live with bet365 for EPL since 2026-10-19.
-- **Code gaps.** The residual arm is a script transform in `experiments/scripts/retail_ev_price_only.py`; the training pipeline fits only the direct arm. [ADR-0014](0014-ignore-wide-exchange-prices.md) (the 5% exchange-overround cap) and [ADR-0013](0013-collect-polymarket-epl-as-sharp-reference.md) (Polymarket collection) are proposed.
+- **Pipeline and evaluation command.** The residual arm is a pipeline option, `FeatureConfig.retail_ev_arm: residual`, which passes `baseline_ev` to XGBoost as its base margin (#558). `odds evaluate retail-ev --spec` runs a one-look evaluation from a YAML spec and writes a manifest (#559; [retail-EV evaluation](../../wiki/evaluation/retail-ev-evaluation.md)). [ADR-0014](0014-ignore-wide-exchange-prices.md) (the 5% exchange-overround cap) and [ADR-0013](0013-collect-polymarket-epl-as-sharp-reference.md) (Polymarket collection) are proposed.
 
 ## Decision
 
@@ -25,44 +25,47 @@ ADR-0012 keeps a model only if it passes both keep-bar conditions "on a fresh se
 
 ### Prerequisites before the freeze
 
-1. The residual arm is a pipeline option, so the frozen config can express it.
-2. The evaluation script exists and is reviewed. It is run once on development data (events up to 2026-07-31) as a dry run and must reproduce the price-only residual result on [price-only](../../wiki/evaluation/exp-epl-retail-ev-price-only.md) within seed noise.
-3. ADR-0014 is accepted or rejected, so the row rules are fixed.
-4. The loss-weight scale is fixed (see [what is frozen](#what-is-frozen)).
-5. This ADR is accepted.
+1. **Met (#558).** The residual arm is a pipeline option. It fits with no intercept, where the experiment script's transform fitted one, so a model that learns nothing predicts the baseline exactly.
+2. **Met (#559).** The evaluation command exists and is reviewed. Its dry run on development data, with the frozen trial, gains 32.0 × 10⁻⁶ [−25.7, 88.9] in weighted MSE, against 32.4 [−24.2, 87.7] for the #558 rerun of the price-only protocol. That is within seed noise (seed 42 minus seed 7 is about 20), not exact; dropping the all-zero `book_boylesports` column reproduces the rerun to every digit. A dry run shaped as this ADR drafts it, on February to July 2026, gives RETIRE.
+3. **Met (#558).** The loss-weight scale is fixed (see [what is frozen](#what-is-frozen)).
+4. **Open.** ADR-0014 is accepted or rejected, so the row rules are fixed.
+5. **Open.** This ADR is accepted, and the spec below is committed and tagged.
 
 ### What is frozen
 
-Everything the evaluation runs is the code and config at the freeze tag. The look runs that tag, not a later commit.
+Everything the evaluation runs is the code and spec at the freeze tag. The look runs that tag, not a later commit. The mechanism is an `odds_analytics.retail_ev_evaluation.EvaluationSpec` YAML, `experiments/configs/retail_ev_evaluation_2026_27.yaml`, shaped as `experiments/configs/retail_ev_evaluation_dry_run.yaml` with the window below. The spec holds every choice in this section and rejects unknown fields.
 
 - **Target, rows and baseline:** ADR-0012 as built in `odds_analytics.retail_ev`, with ADR-0014's cap if accepted, and the FDUK opening-row rule on [CLV target](../../wiki/modelling/clv-target.md#the-retail-ev-target).
-- **Model:** the residual arm on the 38 price-only columns of `odds_analytics.retail_ev.RetailEvFeatures`, including the book one-hot list at the tag. A book not in that list is scored with every book column at zero.
-- **Hyperparameters:** the residual seed-42 best trial from 2024-25 tuning, as recorded in `experiments/results/retail_ev_as_of_t_groups/summary.json` (variant `price_only`): 100 trees, depth 4, learning rate 0.0101, `min_child_weight` 1982, subsample 0.6, colsample 0.7, λ 1.95. No further tuning.
-- **Seed:** 42 for XGBoost's `random_state`. Two runs of the tagged script on the same data must give identical predictions.
-- **Weight scale:** the loss weights are scaled so that the mean weight per event equals its development value, not so that the mean row weight is one. Today's scaling ties `min_child_weight` to rows per event, so dense 2026-27 events would loosen the regularisation the tuner chose (inferred). The value is recorded at the tag.
-- **Training window and refits:** expanding walk-forward from 2024-08-01. Evaluation events are scored in blocks of 50 in kick-off order. Each block's model trains on every event that kicks off at least 7 days before the block's first event. The last block may be partial and is scored.
+- **Model:** `arm: residual` on the 39 price-only columns of `odds_analytics.retail_ev.RetailEvFeatures`, pinned in the spec's `feature_names`. They include the book one-hot list at the tag, with `book_boylesports`, which has no development row and so stays an all-zero column; the evaluation runs no variance filter. A book not in that list is scored with every book column at zero.
+- **Hyperparameters:** the residual seed-42 best trial from 2024-25 tuning, as recorded in `experiments/results/retail_ev_as_of_t_groups/summary.json` (spec `trial`: variant `price_only`, run `residual_s42`): 100 trees, depth 4, learning rate 0.0101, `min_child_weight` 1982, subsample 0.6, colsample 0.7, λ 1.95. No further tuning.
+- **Seed:** 42 for XGBoost's `random_state`. Identical runs give identical predictions (#559's tests).
+- **Weight scale:** each row's loss weight is `odds_analytics.retail_ev.LOSS_WEIGHT_SCALE × w_event / odds²`, with the constant 1013, so an event weighs about 156 in every training set. 1013 is the scale the frozen trial was tuned at: 156.19 weight units per event (112,455 rows over 720 events) divided by the mean per-event `1/odds²` of 0.15413 (#558). Under mean-one row weights, the frozen `min_child_weight` of 1,982 stands for 195 events per leaf on 2024-25 alone and 6.7 on 2025-26 alone; under the fixed scale it stands for about 12.5 to 13.
+- **Training window and refits:** expanding walk-forward from 2024-08-01 (`training_start`). Evaluation events are scored in blocks of 50 in kick-off order (`refit_every_events`). Each block's model trains on every event that kicks off at least 7 days before the block's first event. The last block may be partial and is scored.
 
 ### One look
 
-- The evaluation is run once, after the last 2026-27 match and once FDUK's final 2026-27 file is loaded.
-- It runs on a local copy of production (`odds copy from-prod`), never against production. The report records the tag, `git_dirty`, the data hash of the scored rows and the count of rows and events by retail source.
+- The evaluation is `odds evaluate retail-ev --spec experiments/configs/retail_ev_evaluation_2026_27.yaml`, run once from the tag, after the last 2026-27 match and once FDUK's final 2026-27 file is loaded ([how-to](../../wiki/evaluation/howto-run-retail-ev-evaluation.md)).
+- It runs on a local copy of production (`odds copy from-prod`), never against production. Its manifest records the git SHA and tag, `git_dirty`, the spec, trial and data hashes, the predictions hash and the coverage counts. The outputs are committed.
+- The command enforces the look. It refuses a window that has not ended, refuses a spec whose hash is already in a results manifest unless `--force`, and records any forced rerun in the manifest. A forced rerun voids the look unless it only repeats an identical run.
 - No interim result is computed. Collection health is watched through the existing alerts and heartbeats, which show no model output.
 
 ### Collection requirements and gaps
 
 - **Expected collection:** live OddsPortal (with bet365) and live Betfair Exchange for every EPL event, at the cadences on [fetch-oddsportal](../../wiki/collection/fetch-oddsportal-job.md) and [Betfair Exchange](../../wiki/collection/betfair-exchange.md), and the FDUK 2026-27 file.
-- **No exclusions for gaps.** Every evaluation event with a close and at least one row under the frozen rules is scored. Model and baseline are scored on the same rows, so a gap changes which rows exist, and with it power, but favours neither (inferred). The close falls back to FDUK as ADR-0012 sets out. An event with no row is not scored, and the report counts those events.
-- **Coverage is reported, not gated:** the share of evaluation events with OddsPortal live rows, with a live Betfair close, and FDUK-only, plus the outages longer than a matchday.
+- **No exclusions for gaps.** Every evaluation event with a close and at least one row under the frozen rules is scored. Model and baseline are scored on the same rows, so a gap changes which rows exist, and with it power, but favours neither (inferred). The close falls back to FDUK as ADR-0012 sets out. An event with no row is not scored, and the report lists those events with their status and source flags.
+- **Readiness and named exceptions.** The command refuses a window in which any event is not FINAL or has no FDUK closing snapshot, unless that event is named with `--allow-incomplete <event ID>`; the manifest records each named event. An event may be named only if it was not played as listed: a SCHEDULED ghost of a rescheduled fixture (such as `op_live_ASTVIL_LIV_2026-05-17T1130` in development, #440), or a match abandoned or postponed past the window. Each named event and its reason go in the result. A played event whose FDUK file is late waits for the file instead.
+- **The Betfair close is a collection risk (#560).** FDUK can leave Betfair Exchange closing prices blank for whole matchdays; its 2025-26 file has none for kick-offs from 2026-04-20 to 2026-05-04. The live Betfair job is then the only close, and 11 development events in that span had neither and got no rows. Until #560's alert exists, a missed live close on such a matchday is found only at the look. Gaps of this kind reduce the scored events, not the test's validity.
+- **Coverage is reported, not gated:** the share of evaluation events with OddsPortal live rows, with a live Betfair close, and FDUK-only, plus outage runs, all in the command's report.
 - **Collection fixes are allowed** during the season. A change to the target, row, feature or model code is not. If the tagged code cannot read season data, a fix limited to reading may be applied on a branch from the tag, reviewed, and named in the report.
 
 ### Statistics that decide
 
-Over all scored rows of the evaluation events:
+Over all scored rows of the evaluation events (`odds_analytics.retail_ev_evaluation.keep_bar`):
 
 1. **MSE condition:** `odds_analytics.retail_ev_metrics.mse_gain`, baseline weighted MSE minus the model's.
 2. **Pick condition:** `odds_analytics.retail_ev_metrics.pick_ev_gain`, the model's total `w_event`-weighted realised EV over rows with predicted EV > 0, minus the baseline's.
 
-Each has an event-clustered percentile bootstrap 95% CI with 10,000 resamples and seed 0. The model is **kept** if both CIs lie above zero, and **retired** otherwise. Requiring both conditions at 95% each keeps the overall false-keep rate at 5% or less, so no multiplicity correction applies (intersection–union test). Slices by horizon, retail source, event type, outcome and block are reported for description only and decide nothing.
+Each has an event-clustered percentile bootstrap 95% CI with 10,000 resamples and seed 0 (spec `bootstrap`). The model is **kept** if both CI lower bounds lie above zero, and **retired** otherwise. Requiring both conditions at 95% each keeps the overall false-keep rate at 5% or less, so no multiplicity correction applies (intersection–union test). Slices by horizon, retail source, event type, outcome and block are reported for description only and decide nothing.
 
 ## Open choices for the user
 
@@ -94,8 +97,7 @@ Each choice lists the options; the recommendation is the one drafted above.
    - (a) Price-only. *Recommended:* no group beat it on development data.
    - (b) Add a group, such as all four as-of-t groups. A Polymarket group needs ADR-0013 accepted and the live job running before the freeze.
    - (c) Several candidates at once. Each condition's CI then widens to 1 − 0.05/k for k candidates.
-8. **Weight scale.** (a) Fix the per-event weight scale before the freeze. *Recommended.* (b) Keep mean-one row weights and accept that `min_child_weight` loosens as dense events enter training.
-9. **ADR-0014.** (a) Accept it before the freeze. *Recommended:* the development baseline improves with the cap. (b) Reject it and evaluate uncapped. Either way it is settled before the freeze.
+8. **ADR-0014.** (a) Accept it before the freeze. *Recommended:* the development baseline improves with the cap. (b) Reject it and evaluate uncapped. Either way it is settled before the freeze.
 
 ## Considered options
 
@@ -108,11 +110,12 @@ The alternatives are the options above that are not recommended. Two further one
 
 - Until the look, no change to the retail-EV target, rows, features or model code can affect this evaluation, because the look runs the tag. Development on 2026-27 data for another model is allowed, but that model cannot then use 2026-27 as its fresh season.
 - A fail retires this model. It does not show the absence of an edge smaller than the minimum detectable effect.
-- The prerequisites are code work that must be merged before the freeze date. If they slip, the freeze and window start move with them.
+- The remaining prerequisites are decisions, not code. If they slip past 2026-11-02, the freeze and window start move with them, and the window loses those events.
+- The no-intercept residual arm differs slightly from the script transform the development results used, so the development numbers are a guide to the frozen model, not its exact record.
 - If ADR-0014 is rejected, its constant must be removed or disabled at the tag.
 
 ## Evidence
 
-- Issues #506, #537, #538, #539, #540, #545, #549.
-- Wiki: [keep-bar power](../../wiki/evaluation/exp-retail-ev-power.md), [price-only](../../wiki/evaluation/exp-epl-retail-ev-price-only.md), [as-of-t groups](../../wiki/evaluation/exp-epl-retail-ev-as-of-t-groups.md), [nested tuning](../../wiki/evaluation/exp-epl-retail-ev-nested-tuning.md), [CLV target](../../wiki/modelling/clv-target.md#the-retail-ev-target).
+- Issues #506, #537, #538, #539, #540, #545, #549, #560; PRs #558 and #559.
+- Wiki: [retail-EV evaluation](../../wiki/evaluation/retail-ev-evaluation.md), [keep-bar power](../../wiki/evaluation/exp-retail-ev-power.md), [price-only](../../wiki/evaluation/exp-epl-retail-ev-price-only.md), [as-of-t groups](../../wiki/evaluation/exp-epl-retail-ev-as-of-t-groups.md), [nested tuning](../../wiki/evaluation/exp-epl-retail-ev-nested-tuning.md), [CLV target](../../wiki/modelling/clv-target.md#the-retail-ev-target).
 - `experiments/results/retail_ev_as_of_t_groups/summary.json` for the frozen hyperparameters.
