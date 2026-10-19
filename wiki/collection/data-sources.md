@@ -13,7 +13,7 @@ status: stable
 
 # Data sources
 
-Five feeds write `raw_data` snapshots in The Odds API shape ([odds tables](../storage/odds-tables.md)). The Odds API's outcomes carry its integer American `price`; the others carry the source decimal as `price_decimal`; older stored snapshots can still hold an American `price` ([price encodings](../foundations/odds-math.md#price-encodings)). Each is tagged by `odds_core.models.Event.id` prefix or `odds_core.models.OddsSnapshot.api_request_id` ([events](../storage/events.md)). The keys and defaults each feed uses are in [sport-and-market-keys](sport-and-market-keys.md).
+Five feeds write `raw_data` snapshots in The Odds API shape ([odds tables](../storage/odds-tables.md)). The Odds API's outcomes carry its integer American `price`; the others carry the source decimal as `price_decimal`; older stored snapshots can still hold an American `price` ([price encodings](../foundations/odds-math.md#price-encodings)). Each is tagged by `odds_core.models.Event.id` prefix or `odds_core.models.OddsSnapshot.api_request_id` ([events](../storage/events.md)); the live jobs' tags (`oddsportal_live_`, `betfair_api_`, `odds_api_`, `polymarket_live_`) are what the per-source [stale-data check](../operations/health-monitor.md#stale-data-check) keys on. The keys and defaults each feed uses are in [sport-and-market-keys](sport-and-market-keys.md).
 
 | Source | Supplies | Collected by | Where it runs | Event ids |
 |---|---|---|---|---|

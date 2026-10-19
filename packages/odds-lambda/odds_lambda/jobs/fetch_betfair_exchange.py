@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import structlog
-from odds_core.alerts import job_alert_context, send_job_warning
+from odds_core.alerts import job_alert_context
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import FetchLog
@@ -32,6 +32,7 @@ from odds_lambda.betfair import (
     resolve_teams,
 )
 from odds_lambda.betfair.cert_loader import resolve_cert_paths
+from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
 from odds_lambda.scheduling.decision import (
     OVERNIGHT_WINDOWS,
     CadenceConfig,
@@ -55,6 +56,17 @@ CADENCE = CadenceConfig(
     opening=2.0,
     no_game=2.0,
     db_fallback=1.0,
+)
+
+LIVE_REQUEST_ID_PREFIX = "betfair_api_"
+
+SOURCE = CollectionSource(
+    key="betfair_exchange",
+    job_name="fetch-betfair-exchange",
+    request_id_prefix=LIVE_REQUEST_ID_PREFIX,
+    cadence=CADENCE,
+    fixture_horizon=timedelta(hours=12),
+    skips_overnight=True,
 )
 
 
@@ -162,7 +174,7 @@ async def ingest_sport(
                     raw_data=raw_data,
                     snapshot_time=snapshot_time,
                 )
-                snapshot.api_request_id = f"betfair_api_{snapshot_time.isoformat()}"
+                snapshot.api_request_id = f"{LIVE_REQUEST_ID_PREFIX}{snapshot_time.isoformat()}"
                 stats.snapshots_stored += 1
 
             except Exception as e:
@@ -288,18 +300,8 @@ async def main(ctx: JobContext) -> None:
                 all_stats.append(stats)
         finally:
             await asyncio.to_thread(client.logout)
-
-    # Soft warning when zero snapshots stored despite Betfair returning events
-    # — likely a parsing/filtering regression. An empty event list is treated
-    # as a benign venue-side gap (e.g. next day's MLB markets not yet posted)
-    # and does not alert.
-    total_stored = sum(s.snapshots_stored for s in all_stats)
-    total_events_seen = sum(s.events_seen for s in all_stats)
-    if total_stored == 0 and total_events_seen > 0:
-        await send_job_warning(
-            f"job_empty:{compound_job_name}",
-            f"⚠️ {compound_job_name} stored 0 snapshots from {total_events_seen} event(s) "
-            f"across {len(all_stats)} sport(s).",
+        await require_rows_for_fixtures(
+            SOURCE, {stats.sport: stats.snapshots_stored for stats in all_stats}
         )
 
     # Reschedule based on (possibly updated) next kickoff after fetch.

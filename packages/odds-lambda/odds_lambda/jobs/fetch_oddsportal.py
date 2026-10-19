@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.database import async_session_maker
 
+from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
 from odds_lambda.oddsportal_adapter import MatchOdds, convert_market
 from odds_lambda.oddsportal_client import OddsPortalClient, OddsPortalError
 from odds_lambda.scheduling.decision import (
@@ -47,6 +48,17 @@ CADENCE = CadenceConfig(
     opening=2.0,
     no_game=2.0,
     db_fallback=1.0,
+)
+
+LIVE_REQUEST_ID_PREFIX = "oddsportal_live_"
+
+SOURCE = CollectionSource(
+    key="oddsportal",
+    job_name="fetch-oddsportal",
+    request_id_prefix=LIVE_REQUEST_ID_PREFIX,
+    cadence=CADENCE,
+    fixture_horizon=timedelta(hours=48),
+    skips_overnight=True,
 )
 
 
@@ -196,7 +208,7 @@ async def ingest_league(
 
     # Ingest to database
     scraped_date = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M")
-    api_request_id = f"oddsportal_live_{scraped_date}"
+    api_request_id = f"{LIVE_REQUEST_ID_PREFIX}{scraped_date}"
 
     async with async_session_maker() as session:
         writer = OddsWriter(session)
@@ -252,7 +264,7 @@ async def main(ctx: JobContext) -> None:
     interval, pre-schedule before scraping. After successful scrape,
     re-query (new events may have appeared) and reschedule.
     """
-    from odds_core.alerts import job_alert_context, send_job_warning
+    from odds_core.alerts import job_alert_context
     from odds_core.config import get_settings
 
     settings = get_settings()
@@ -306,14 +318,14 @@ async def main(ctx: JobContext) -> None:
         )
 
         all_stats: list[IngestionStats] = []
-        leagues_failed = 0
+        failures: list[str] = []
 
         for spec in specs:
             try:
                 stats = await ingest_league(spec)
                 all_stats.append(stats)
             except Exception as e:
-                leagues_failed += 1
+                failures.append(f"{spec.league}: {type(e).__name__}: {e}")
                 logger.error(
                     "league_failed",
                     league=spec.league,
@@ -328,22 +340,21 @@ async def main(ctx: JobContext) -> None:
         logger.info(
             "fetch_oddsportal_completed",
             leagues_succeeded=len(all_stats),
-            leagues_failed=leagues_failed,
+            leagues_failed=len(failures),
             total_matches_scraped=total_scraped,
             total_snapshots_stored=total_snapshots,
             total_errors=total_errors,
         )
 
-        if total_scraped == 0:
-            detail = (
-                f"{leagues_failed}/{len(specs)} leagues failed"
-                if leagues_failed
-                else "0 matches returned"
-            )
-            await send_job_warning(
-                alert_type=f"scrape_empty:{compound_job_name}",
-                message=f"⚠️ OddsPortal scrape empty ({detail})",
-            )
+        if failures:
+            raise RuntimeError(f"{compound_job_name} failed: {'; '.join(failures)}")
+        await require_rows_for_fixtures(
+            SOURCE,
+            {
+                spec.sport_key: stats.snapshots_stored
+                for spec, stats in zip(specs, all_stats, strict=True)
+            },
+        )
 
     # Outside job_alert_context so scoring failures don't fire scrape alerts.
     try:

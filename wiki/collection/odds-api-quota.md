@@ -20,7 +20,7 @@ status: stable
 
 # Odds API quota accounting
 
-Quota is a per-key monthly balance that only [the client](odds-api-client.md#cost-per-call) spends. Four places read or act on it, and each reads it differently.
+Quota is a per-key monthly balance that only [the client](odds-api-client.md#cost-per-call) spends. A fetch-odds run that stores no snapshot while a fixture is within 48 hours fails regardless of quota ([fetch-odds-job](fetch-odds-job.md#flow)). Four places read or act on it, and each reads it differently.
 
 ## Where quota is recorded, alerted and checked
 

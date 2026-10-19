@@ -10,7 +10,7 @@ sources:
   - odds_lambda.scheduling.decision.CadenceConfig
   - odds_lambda.scheduling.decision.ScheduleDecision
   - odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS
-  - odds_lambda.scheduling.decision._classify
+  - odds_lambda.scheduling.decision.classify_tier
   - odds_lambda.scheduling.helpers.self_schedule
   - odds_lambda.scheduling.helpers.get_next_kickoff
   - odds_lambda.scheduling.helpers.apply_overnight_skip
@@ -37,7 +37,7 @@ status: stable
 
 Used by odds, scrapes, Betfair and the agent.
 
-- `decide_forward(sport_key, cadence, overnight=None, lookahead_days=7, ...)` takes the next SCHEDULED kickoff for the sport (`odds_lambda.scheduling.helpers.get_next_kickoff`). No kickoff within `lookahead_days` gives `should_execute=False` and `cadence.no_game`. Otherwise `odds_lambda.scheduling.decision._classify(hours_until)` picks a [fetch tier](../storage/fetch-tier.md) and the cadence interval. `odds_lambda.scheduling.decision._classify` uses strict `<` on `odds_lambda.fetch_tier.FetchTier.max_hours` where stored tiers use `<=`, so a kickoff exactly 3.0 h away is PREGAME here and CLOSING when stored (#446, [boundary encodings](../storage/fetch-tier.md#boundary-encodings)).
+- `decide_forward(sport_key, cadence, overnight=None, lookahead_days=7, ...)` takes the next SCHEDULED kickoff for the sport (`odds_lambda.scheduling.helpers.get_next_kickoff`). No kickoff within `lookahead_days` gives `should_execute=False` and `cadence.no_game`. Otherwise `odds_lambda.scheduling.decision.classify_tier(hours_until)` picks a [fetch tier](../storage/fetch-tier.md) and the cadence interval. `odds_lambda.scheduling.decision.classify_tier` uses strict `<` on `odds_lambda.fetch_tier.FetchTier.max_hours` where stored tiers use `<=`, so a kickoff exactly 3.0 h away is PREGAME here and CLOSING when stored (#446, [boundary encodings](../storage/fetch-tier.md#boundary-encodings)).
 - `odds_lambda.scheduling.decision.decide_forward_resilient(sport_keys, cadence, ...)` uses the soonest kickoff across sports; if the kickoff query raises it returns `should_execute=True` at `cadence.db_fallback` (default 1 h) so the chain survives a database outage.
 - Always-run jobs (`fetch-oddsportal`, `fetch-betfair-exchange`) ignore `should_execute` and use only `next_execution`. So does `agent-run`, which uses `odds_lambda.scheduling.decision.decide_forward_resilient` for its cadence and ignores the gate; a requested wake-up overrides it ([wake-up requests](../agent/agent-run-job.md#wake-up-requests)).
 

@@ -15,6 +15,8 @@ from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger(__name__)
 
+LIVE_REQUEST_ID_PREFIX = "odds_api_"
+
 
 @dataclass(slots=True)
 class EventIngestionFailure:
@@ -136,11 +138,14 @@ class OddsIngestionService:
                     writer = OddsWriter(session)
                     await writer.upsert_event(event)
                     await session.flush()
-                    await writer.store_odds_snapshot(
+                    snapshot, _ = await writer.store_odds_snapshot(
                         event_id=event.id,
                         raw_data=event_data,
                         snapshot_time=response.timestamp,
                         validate=validation_enabled,
+                    )
+                    snapshot.api_request_id = (
+                        f"{LIVE_REQUEST_ID_PREFIX}{response.timestamp.isoformat()}"
                     )
                     await session.commit()
 

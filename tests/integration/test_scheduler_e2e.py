@@ -302,6 +302,7 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
                 "odds_lambda.jobs.fetch_odds.build_event_sync_service", return_value=mock_event_sync
             ),
             patch("odds_core.database.async_session_maker", mock_session_factory),
+            patch("odds_lambda.jobs.fetch_odds.require_rows_for_fixtures", new_callable=AsyncMock),
             patch("odds_lambda.scheduling.helpers.get_scheduler_backend") as mock_backend_getter,
         ):
             mock_backend = AsyncMock()

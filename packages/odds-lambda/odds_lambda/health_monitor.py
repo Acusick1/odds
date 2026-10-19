@@ -14,6 +14,7 @@ Stale data is detected via OddsSnapshot recency; other checks use OddsReader.
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import structlog
@@ -24,6 +25,14 @@ from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.collection_calendar import (
+    CollectionSource,
+    active_hours_between,
+    fixture_calendar,
+    latest_snapshot_time,
+)
+from odds_lambda.scheduling.decision import classify_tier
+from odds_lambda.scheduling.jobs import resolve_target_sports
 from odds_lambda.storage.event_merge import EventMerger
 
 logger = structlog.get_logger()
@@ -31,6 +40,44 @@ logger = structlog.get_logger()
 LEAGUE_SPORTS: tuple[str, ...] = ("soccer_epl",)
 STALE_SCHEDULED_AGE = timedelta(hours=24)
 STALE_SCHEDULED_WINDOW = timedelta(days=7)
+
+
+@dataclass(frozen=True, slots=True)
+class StaleSource:
+    """A collection source that has written no rows for longer than its cadence allows."""
+
+    source: str
+    sport_key: str
+    last_snapshot: datetime
+    active_hours: float
+    threshold_hours: float
+
+    @property
+    def alert_type(self) -> str:
+        return f"stale_data:{self.source}:{self.sport_key}"
+
+    def describe(self) -> str:
+        return (
+            f"{self.source} has written no {self.sport_key} snapshot in "
+            f"{self.active_hours:.1f} active hours (threshold: {self.threshold_hours:.1f}h, "
+            f"last: {self.last_snapshot.isoformat()})"
+        )
+
+
+def collection_sources() -> tuple[CollectionSource, ...]:
+    from odds_lambda.jobs import (
+        fetch_betfair_exchange,
+        fetch_odds,
+        fetch_oddsportal,
+        fetch_polymarket_odds,
+    )
+
+    return (
+        fetch_oddsportal.SOURCE,
+        fetch_betfair_exchange.SOURCE,
+        fetch_odds.SOURCE,
+        fetch_polymarket_odds.SOURCE,
+    )
 
 
 class HealthMetrics(BaseModel):
@@ -167,27 +214,50 @@ class HealthMonitor:
             return None
         return (datetime.now(UTC) - latest_snapshot_time).total_seconds() / 3600
 
-    async def check_stale_data(self) -> tuple[bool, str | None]:
+    async def check_stale_sources(self, now: datetime | None = None) -> list[StaleSource]:
+        """Find sources that stopped writing while fixtures they should price are scheduled.
+
+        A source is checked per sport only when the database has a scheduled
+        fixture inside the source's horizon and the source has written before, so
+        international breaks, off-seasons and jobs that were never enabled raise
+        nothing. The gap is the time since the later of the last snapshot and the
+        moment the next fixture entered the horizon, counted without the sport's
+        overnight window. It is compared with the larger of
+        ``stale_data_hours`` and ``stale_cadence_multiplier`` polling intervals at
+        the tier of the next kickoff.
         """
-        Check for stale data by looking at the most recent odds snapshot.
-
-        Returns:
-            (is_healthy, issue_description)
-        """
-        hours_since_data = await self._get_hours_since_latest_snapshot()
-
-        if hours_since_data is None:
-            return False, "No odds snapshots found in database"
-
-        threshold_hours = self.settings.alerts.stale_data_hours
-
-        if hours_since_data > threshold_hours:
-            return (
-                False,
-                f"No new data in {hours_since_data:.1f} hours (threshold: {threshold_hours}h)",
-            )
-
-        return True, None
+        moment = now or datetime.now(UTC)
+        alerts = self.settings.alerts
+        stale: list[StaleSource] = []
+        for source in collection_sources():
+            for sport_key in resolve_target_sports(
+                source.job_name, self.settings.data_collection.sports
+            ):
+                calendar = await fixture_calendar(
+                    self.session, sport_key, now=moment, horizon=source.fixture_horizon
+                )
+                if calendar.next_kickoff is None or not calendar.kickoffs_in_horizon:
+                    continue
+                last = await latest_snapshot_time(self.session, sport_key, source.request_id_prefix)
+                if last is None:
+                    logger.info("stale_check_no_history", source=source.key, sport=sport_key)
+                    continue
+                hours_to_kickoff = (calendar.next_kickoff - moment).total_seconds() / 3600
+                interval = source.cadence.interval_for(classify_tier(hours_to_kickoff))
+                threshold = max(alerts.stale_data_hours, alerts.stale_cadence_multiplier * interval)
+                reference = max(last, calendar.next_kickoff - source.fixture_horizon)
+                active = active_hours_between(reference, moment, source.overnight_window(sport_key))
+                if active > threshold:
+                    stale.append(
+                        StaleSource(
+                            source=source.key,
+                            sport_key=sport_key,
+                            last_snapshot=last,
+                            active_hours=active,
+                            threshold_hours=threshold,
+                        )
+                    )
+        return stale
 
     async def check_consecutive_failures(self) -> tuple[bool, int]:
         """
@@ -429,7 +499,7 @@ class HealthMonitor:
         Perform comprehensive system health check.
 
         Checks:
-        1. Stale data (no recent fetches)
+        1. Stale data per source (no rows within the source's cadence while fixtures are scheduled)
         2. Consecutive failures
         3. API quota levels
         4. Data quality issues
@@ -448,17 +518,17 @@ class HealthMonitor:
             # Collect metrics
             metrics = await self.collect_metrics()
 
-            # Check 1: Stale data
-            stale_healthy, stale_issue = await self.check_stale_data()
-            if not stale_healthy and stale_issue:
-                issues_detected.append(stale_issue)
+            # Check 1: Stale data, per source
+            for stale in await self.check_stale_sources():
+                issue = stale.describe()
+                issues_detected.append(issue)
 
                 if await self._send_alert(
-                    alert_type="stale_data",
-                    severity="warning",
-                    message=f"⚠️ Stale data detected: {stale_issue}",
+                    alert_type=stale.alert_type,
+                    severity="critical",
+                    message=f"🚨 Stale data: {issue}",
                 ):
-                    alerts_sent.append("stale_data")
+                    alerts_sent.append(stale.alert_type)
 
             # Check 2: Consecutive failures
             failures_healthy, failure_count = await self.check_consecutive_failures()

@@ -205,7 +205,11 @@ class AlertConfig(BaseSettings):
     # Data staleness monitoring
     stale_data_hours: int = Field(
         default=2,
-        description="Hours without new data before triggering stale data alert",
+        description="Minimum active hours without a source's rows before a stale data alert",
+    )
+    stale_cadence_multiplier: float = Field(
+        default=3.0,
+        description="Polling intervals of a source's job that may pass without rows before alert",
     )
 
     # Alert rate limiting

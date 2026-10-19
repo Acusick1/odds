@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from odds_core.config import AlertConfig, APIConfig, Settings
 from odds_core.models import AlertHistory, FetchLog
-from odds_lambda.health_monitor import HealthMetrics, HealthMonitor, HealthStatus
+from odds_lambda.health_monitor import HealthMetrics, HealthMonitor, HealthStatus, StaleSource
 
 
 @pytest.fixture
@@ -107,35 +107,6 @@ class TestHealthMonitor:
         assert result is False
         # Should not check rate limiting or send
         mock_session.execute.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_check_stale_data_healthy(self, mock_session, mock_settings):
-        """Should return healthy when recent snapshot exists."""
-        monitor = HealthMonitor(mock_session, mock_settings)
-
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(minutes=30)
-        mock_session.execute.return_value = mock_result
-
-        is_healthy, issue = await monitor.check_stale_data()
-
-        assert is_healthy is True
-        assert issue is None
-
-    @pytest.mark.asyncio
-    async def test_check_stale_data_unhealthy(self, mock_session, mock_settings):
-        """Should return unhealthy when data is stale."""
-        monitor = HealthMonitor(mock_session, mock_settings)
-
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(hours=3)
-        mock_session.execute.return_value = mock_result
-
-        is_healthy, issue = await monitor.check_stale_data()
-
-        assert is_healthy is False
-        assert "No new data in" in issue
-        assert "3." in issue  # Should mention 3 hours
 
     @pytest.mark.asyncio
     async def test_check_consecutive_failures_healthy(self, mock_session, mock_settings):
@@ -280,7 +251,7 @@ class TestHealthMonitor:
                 events_final=50,
             )
 
-            with patch.object(monitor, "check_stale_data", return_value=(True, None)):
+            with patch.object(monitor, "check_stale_sources", return_value=[]):
                 with patch.object(monitor, "check_consecutive_failures", return_value=(True, 0)):
                     with patch.object(monitor, "check_api_quota", return_value=(True, 15000, 0.75)):
                         with patch.object(monitor, "check_data_quality", return_value=(True, 2)):
@@ -315,7 +286,17 @@ class TestHealthMonitor:
 
             # Mock checks to return unhealthy
             with patch.object(
-                monitor, "check_stale_data", return_value=(False, "Stale data issue")
+                monitor,
+                "check_stale_sources",
+                return_value=[
+                    StaleSource(
+                        source="oddsportal",
+                        sport_key="soccer_epl",
+                        last_snapshot=datetime.now(UTC) - timedelta(hours=9),
+                        active_hours=9.0,
+                        threshold_hours=3.0,
+                    )
+                ],
             ):
                 with patch.object(monitor, "check_consecutive_failures", return_value=(False, 4)):
                     with patch.object(monitor, "check_api_quota", return_value=(False, 1000, 0.05)):
@@ -331,7 +312,7 @@ class TestHealthMonitor:
             assert status.overall_healthy is False
             assert len(status.issues_detected) > 0
             # Should have attempted to send alerts
-            assert "Stale data issue" in status.issues_detected[0]
+            assert "oddsportal has written no soccer_epl snapshot" in status.issues_detected[0]
 
     @pytest.mark.asyncio
     async def test_check_system_health_handles_errors_gracefully(self, mock_session, mock_settings):

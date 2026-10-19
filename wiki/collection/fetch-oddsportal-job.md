@@ -7,6 +7,7 @@ sources:
   - odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPECS
   - odds_lambda.jobs.fetch_oddsportal.LeagueSpec
   - odds_lambda.jobs.fetch_oddsportal.CADENCE
+  - odds_lambda.jobs.fetch_oddsportal.SOURCE
   - odds_lambda.jobs.fetch_oddsportal.ingest_league
   - odds_lambda.jobs.fetch_oddsportal.scrape_league
   - odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS
@@ -28,7 +29,7 @@ status: stable
 
 1. Pre-schedule using `odds_lambda.scheduling.decision.decide_forward_resilient` with `odds_lambda.jobs.fetch_oddsportal.CADENCE` ([decision-engine](../scheduling/decision-engine.md#cadence)). This job is always-run: only `next_execution` is used, not `should_execute`.
 2. Inside `job_alert_context(compound_name)`, `odds_lambda.jobs.fetch_oddsportal.ingest_league` per spec: `odds_lambda.jobs.fetch_oddsportal.scrape_league` (listing, bookmaker context, then one feed per upcoming event and market, converted by `odds_lambda.oddsportal_adapter.convert_market` with the feed's decimal prices kept as `price_decimal`; a failed event or market is recorded in the stats errors and skipped, but a league where every market fetch failed raises `odds_lambda.oddsportal_client.OddsPortalError`, as does a listing with no events and no empty-state marker), `odds_lambda.storage.writers.OddsWriter.find_or_create_event` (which returns the canonical event, the Odds API one when it exists, and never merges) and `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` per match (tier assigned by the writer, see [fetch-tier](../storage/fetch-tier.md)), tagging `api_request_id` as `oddsportal_live_<time>`. A league failure, including those errors, is logged and the others continue.
-3. If nothing was scraped, `send_job_warning("scrape_empty:<job>")`.
+3. If any league failed, the job raises after the others finish. Otherwise `odds_lambda.collection_calendar.require_rows_for_fixtures` raises `odds_lambda.collection_calendar.EmptyCollectionError` for a sport with zero stored snapshots and a SCHEDULED fixture within 48 hours (`odds_lambda.jobs.fetch_oddsportal.SOURCE`). Both fail inside `odds_core.alerts.job_alert_context`: a critical alert and no heartbeat ([empty collection](../operations/alerting-and-heartbeats.md#empty-collection)). A sport with no fixtures in that window passes.
 4. Outside the alert context: if `model_supports_sport(ctx.sport)`, `score_events(sport=...)` runs inline ([prediction-scoring](../modelling/prediction-scoring.md)). Any exception there is logged as `fetch_oddsportal_scoring_failed` and swallowed so it cannot fire a scrape alert.
 5. Post-schedule only when at least one match was scraped. A zero-match run skips it, so the next run keeps the earlier computed time.
 

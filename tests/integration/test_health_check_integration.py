@@ -54,6 +54,32 @@ async def _create_recent_snapshot(session, *, minutes_ago: int = 30) -> None:
     session.add(snapshot)
 
 
+async def _create_stale_oddsportal_source(session, *, hours_ago: float = 40) -> None:
+    """An EPL fixture inside the horizon whose OddsPortal feed last wrote hours ago."""
+    now = datetime.now(UTC)
+    event = Event(
+        id="health_stale_epl",
+        sport_key="soccer_epl",
+        sport_title="EPL",
+        commence_time=now + timedelta(hours=6),
+        home_team="Arsenal",
+        away_team="Chelsea",
+        status=EventStatus.SCHEDULED,
+    )
+    session.add(event)
+    await session.flush()
+    session.add(
+        OddsSnapshot(
+            event_id=event.id,
+            snapshot_time=now - timedelta(hours=hours_ago),
+            raw_data={},
+            bookmaker_count=1,
+            api_request_id="oddsportal_live_2026-01-01T00:00",
+        )
+    )
+    await session.commit()
+
+
 class TestHealthCheckIntegration:
     """Integration tests for health check job."""
 
@@ -101,17 +127,7 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_health_check_detects_stale_data(self, test_session):
         """Test health check detects stale data (no recent fetches)."""
-        # Create old fetch log (5 hours ago, threshold is 2 hours)
-        fetch_log = FetchLog(
-            fetch_time=datetime.now(UTC) - timedelta(hours=5),
-            sport_key="basketball_nba",
-            events_count=10,
-            bookmakers_count=8,
-            success=True,
-            api_quota_remaining=15000,
-        )
-        test_session.add(fetch_log)
-        await test_session.commit()
+        await _create_stale_oddsportal_source(test_session)
 
         # Mock alert system
         with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock):
@@ -127,10 +143,7 @@ class TestHealthCheckIntegration:
 
         assert health_status.overall_healthy is False
         assert len(health_status.issues_detected) > 0
-        assert any(
-            "No new data in" in issue or "No odds snapshots" in issue
-            for issue in health_status.issues_detected
-        )
+        assert any("oddsportal has written no" in issue for issue in health_status.issues_detected)
 
     @pytest.mark.asyncio
     async def test_health_check_detects_consecutive_failures(self, test_session):
@@ -266,17 +279,7 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_alert_deduplication_prevents_duplicate_alerts(self, test_session):
         """Test that alert deduplication prevents duplicate alerts within rate limit window."""
-        # Create old fetch log to trigger stale data alert
-        fetch_log = FetchLog(
-            fetch_time=datetime.now(UTC) - timedelta(hours=5),
-            sport_key="basketball_nba",
-            events_count=10,
-            bookmakers_count=8,
-            success=True,
-            api_quota_remaining=15000,
-        )
-        test_session.add(fetch_log)
-        await test_session.commit()
+        await _create_stale_oddsportal_source(test_session)
 
         # Mock alert system to track calls
         with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
@@ -312,7 +315,9 @@ class TestHealthCheckIntegration:
         result = await test_session.execute(select(AlertHistory))
         alert_records = list(result.scalars().all())
         assert len(alert_records) > 0
-        assert any(record.alert_type == "stale_data" for record in alert_records)
+        assert any(
+            record.alert_type == "stale_data:oddsportal:soccer_epl" for record in alert_records
+        )
 
     @pytest.mark.asyncio
     async def test_health_check_with_configurable_thresholds(self, test_session):

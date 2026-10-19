@@ -9,7 +9,7 @@ sources:
   - odds_lambda.tier_utils.calculate_tier
   - odds_lambda.tier_utils.calculate_tier_from_timestamps
   - odds_lambda.oddsportal_common.hours_to_tier
-  - odds_lambda.scheduling.decision._classify
+  - odds_lambda.scheduling.decision.classify_tier
   - odds_lambda.storage.writers.OddsWriter.store_odds_snapshot
   - odds_lambda.storage.tier_validator.TierCoverageValidator
   - odds_lambda.storage.tier_validator.CRITICAL_TIERS
@@ -51,7 +51,7 @@ Missing-tier diagnosis steps are in [Debug the AWS self-scheduling jobs](../sche
 | Encoding | Comparison | Notes |
 |---|---|---|
 | `odds_lambda.tier_utils.calculate_tier` | `<=` | `<0` is IN_PLAY; used for stored tiers |
-| `odds_lambda.scheduling.decision._classify` | `<` on `max_hours` | used for scheduling |
+| `odds_lambda.scheduling.decision.classify_tier` | `<` on `max_hours` | used for scheduling |
 | `odds_lambda.oddsportal_common.hours_to_tier` | `<` | returns a string; no in-play branch, so negative hours give "closing"; called only by the two historical ingest scripts, `scripts/ingest_oddsportal.py` and `scripts/ingest_football_data_uk.py` (which tiers its closing snapshot with it and raises an FDUK opening snapshot, whose timing basis is `odds_core.snapshot_sources.FdukTimeBasis.COLLECTION_DEADLINE`, from `closing` to `pregame`) |
 | `odds_lambda.fetch_tier.FetchTier.max_hours` | docstring says `<` | data only |
 
