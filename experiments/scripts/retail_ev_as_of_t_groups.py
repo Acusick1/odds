@@ -34,6 +34,7 @@ from retail_ev_price_only import (
     RunData,
     _est,
     data_fingerprint,
+    git_dirty,
     git_sha,
     load_data,
     score_run,
@@ -115,6 +116,7 @@ def results_table(oof: pd.DataFrame, n_boot: int) -> pd.DataFrame:
 
 
 async def main(n_trials: int, n_boot: int) -> None:
+    sha, dirty = git_sha(), git_dirty()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     configs = {name: variant_config(groups) for name, groups in VARIANTS.items()}
     data: dict[str, RunData] = {}
@@ -168,7 +170,8 @@ async def main(n_trials: int, n_boot: int) -> None:
     importance.to_csv(OUTPUT_DIR / "feature_importance.csv", index=False)
 
     summary = {
-        "git_sha": git_sha(),
+        "git_sha": sha,
+        "git_dirty": dirty,
         "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "config_sha256": hashlib.sha256(CONFIG_PATH.read_bytes()).hexdigest(),
         "config": str(CONFIG_PATH.relative_to(REPO_DIR)),

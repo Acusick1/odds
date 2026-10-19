@@ -527,11 +527,25 @@ def git_sha() -> str:
     ).stdout.strip()
 
 
+def git_dirty() -> bool:
+    """Whether the working tree differs from HEAD, so ``git_sha`` does not pin the code run."""
+    return bool(
+        subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=REPO_DIR,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    )
+
+
 def _fmt(table: pd.DataFrame, cols: list[str], digits: int = 1) -> str:
     return table[["slice", "value", *cols]].round(digits).to_string(index=False)
 
 
 async def main(n_trials: int, n_boot: int) -> None:
+    sha, dirty = git_sha(), git_dirty()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     config = MLTrainingConfig.from_yaml(CONFIG_PATH)
     data = await load_data(config)
@@ -584,7 +598,8 @@ async def main(n_trials: int, n_boot: int) -> None:
     }
     tuning_events = data.rows["event_id"].iloc[:n_rows].nunique()
     summary = {
-        "git_sha": git_sha(),
+        "git_sha": sha,
+        "git_dirty": dirty,
         "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "config_sha256": hashlib.sha256(CONFIG_PATH.read_bytes()).hexdigest(),
         "config": str(CONFIG_PATH.relative_to(REPO_DIR)),
