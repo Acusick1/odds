@@ -37,7 +37,7 @@ This is the first model run on the retail-EV target of [ADR-0012](../../docs/adr
 
 ## Setup
 
-- **Script and config.** `experiments/scripts/retail_ev_price_only.py` runs `experiments/configs/xgboost_epl_retail_ev_price_only.yaml` and writes `experiments/results/retail_ev_price_only/`.
+- **Script and config.** `experiments/scripts/retail_ev_price_only.py` runs `experiments/configs/xgboost_epl_retail_ev_price_only.yaml` and writes `experiments/results/retail_ev_price_only/`. Its functions also run the [as-of-t group variants](exp-epl-retail-ev-as-of-t-groups.md).
   - The config inherits `experiments/configs/xgboost_epl_retail_ev.yaml`, whose `end_date` is 2026-07-31. It sets expanding walk-forward with `min_train_events` 380 and 68-event steps, sets `n_jobs` 1, and adds the search space.
   - `summary.json` records the git SHA, the SHA-256 of the script and config, and a SHA-256 of the rows' event IDs and targets (`data_sha256`).
 - **Rows.** The rows come from the training pipeline (`odds_analytics.training.data_preparation.prepare_training_data_from_config` with `target_type: retail_ev`): 112,650 rows over 720 events. The current builder leaves 112,455, because it drops the 195 FDUK opening rows whose own snapshot has no usable exchange price ([CLV target](../modelling/clv-target.md#the-retail-ev-target)). The script fails unless they match `odds_analytics.retail_ev.load_retail_ev_dataset` row for row.

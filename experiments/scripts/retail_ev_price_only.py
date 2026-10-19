@@ -221,7 +221,12 @@ def fit_target(data: RunData, arm: Arm) -> np.ndarray:
 
 
 def tune(
-    config: MLTrainingConfig, data: RunData, n_rows: int, n_trials: int, run: ModelRun
+    config: MLTrainingConfig,
+    data: RunData,
+    n_rows: int,
+    n_trials: int,
+    run: ModelRun,
+    study_prefix: str = "retail_ev_price_only",
 ) -> tuple[optuna.Study, float]:
     tune_config = config.model_copy(deep=True)
     tune_config.training.data.min_train_events = TUNING_MIN_TRAIN_EVENTS
@@ -229,8 +234,8 @@ def tune(
     tune_config.training.model.random_state = run.seed
     assert tune_config.tuning is not None
     OPTUNA_DIR.mkdir(parents=True, exist_ok=True)
-    storage = f"sqlite:///{OPTUNA_DIR / f'retail_ev_price_only_{run.label}.db'}"
-    study_name = f"retail_ev_price_only_{run.label}"
+    study_name = f"{study_prefix}_{run.label}"
+    storage = f"sqlite:///{OPTUNA_DIR / f'{study_name}.db'}"
     try:
         optuna.delete_study(study_name=study_name, storage=storage)
     except KeyError:
@@ -274,10 +279,15 @@ def _importances(strategy: XGBoostLineMovementStrategy, names: list[str]) -> dic
 
 
 def score_run(
-    config: MLTrainingConfig, data: RunData, n_rows: int, n_trials: int, run: ModelRun
+    config: MLTrainingConfig,
+    data: RunData,
+    n_rows: int,
+    n_trials: int,
+    run: ModelRun,
+    study_prefix: str = "retail_ev_price_only",
 ) -> dict[str, Any]:
     """Tune on the tuning range, then refit the best trial on every scoring fold."""
-    study, tune_seconds = tune(config, data, n_rows, n_trials, run)
+    study, tune_seconds = tune(config, data, n_rows, n_trials, run, study_prefix)
     best = config.model_copy(deep=True)
     apply_trial_params(best, study.best_params)
     best.training.model.random_state = run.seed
