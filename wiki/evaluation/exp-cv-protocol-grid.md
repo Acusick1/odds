@@ -33,7 +33,7 @@ This grid is the evidence for [ADR-0004](../../docs/adr/0004-walk-forward-cv-pro
 | 50 | 0.000757 | 0.000748 | 0.000756 | **0.000732** | 0.000794 |
 | 150 | 0.000793 | 0.000758 | 0.000742 | 0.000752 | 0.000758 |
 
-- Sliding-380 (one season, about 380 EPL matches) is the best window; shorter windows starve the model and longer ones include stale data. PR #234 states this as the rationale but the CSV does not measure it.
+- Sliding-380 (one season, about 380 EPL matches, with no gap between training and validation events) is the best window; shorter windows starve the model and longer ones include stale data. PR #234 states this as the rationale but the CSV does not measure it.
 - `val_step = 10` gives the lowest MSE but leads the tuner to pick identical hyperparameters for every feature set. `val_step = 50` (about 5 matchdays) keeps the sliding-380 advantage with enough per-fold signal.
 - A rerun with 32 features (2026-03-19) gave the same lowest-MSE cell (sliding-380:10, 0.000693), but R² favoured expanding windows: expanding:50 0.061, expanding:150 0.052, sliding-380:50 -0.013. Recorded reading at the time: expanding windows favour more features, sliding-380 penalises them. Sliding-380's penalty on extra features was later traced to the default search space, not the protocol (PRs #361 and #362). The 32-feature figures are recorded only in MODELING.md (commit d34c267); they are not in `grid_results.csv`, which holds the tabular run.
 - MSE favours sliding-380:10 while R² in the same CSV does not (sliding-380:10 R² -0.038, sliding-380:50 +0.026 on tabular only); the choice of step trades the two. Lowest MSE alone reflects target variance as much as skill.

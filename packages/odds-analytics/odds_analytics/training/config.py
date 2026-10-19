@@ -1162,6 +1162,18 @@ class TrainingConfig(BaseModel):
     )
 
     @model_validator(mode="after")
+    def validate_retail_ev_protocol(self) -> TrainingConfig:
+        """retail_ev is evaluated only by walk-forward CV with its decision-window gap."""
+        if self.features.target_type != "retail_ev":
+            return self
+        data = self.data
+        if not data.use_kfold or data.cv_method != "walk_forward":
+            raise ValueError("retail_ev requires use_kfold and cv_method='walk_forward'")
+        if data.test_split > 0 or data.validation_split > 0:
+            raise ValueError("retail_ev requires test_split and validation_split of 0")
+        return self
+
+    @model_validator(mode="after")
     def validate_model_type(self) -> TrainingConfig:
         """Ensure model config matches strategy type."""
         if self.strategy_type == "xgboost_line_movement":

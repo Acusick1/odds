@@ -86,6 +86,29 @@ class TestRetailEvConfig:
             _features(**overrides)
 
 
+class TestRetailEvProtocol:
+    @pytest.mark.parametrize(
+        "data_overrides",
+        [
+            {"test_split": 0.2},
+            {"use_kfold": False, "validation_split": 0.2},
+            {"use_kfold": False},
+            {"cv_method": "kfold", "n_folds": 2},
+            {"cv_method": "timeseries", "n_folds": 2},
+        ],
+    )
+    def test_rejects_holdout_and_non_walk_forward(
+        self, config: MLTrainingConfig, data_overrides: dict[str, object]
+    ) -> None:
+        raw = config.model_dump()
+        raw["training"]["data"].update(data_overrides)
+        with pytest.raises(ValidationError, match="retail_ev"):
+            MLTrainingConfig(**raw)
+
+    def test_accepts_walk_forward(self, config: MLTrainingConfig) -> None:
+        assert MLTrainingConfig(**config.model_dump()).training.data.cv_method == "walk_forward"
+
+
 class TestWeightedMetrics:
     def test_weights_change_every_metric(self) -> None:
         y = np.array([0.0, 1.0, 2.0])

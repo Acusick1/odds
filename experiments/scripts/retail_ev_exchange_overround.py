@@ -35,6 +35,8 @@ structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.
 SPORT_KEY = "soccer_epl"
 MARKET = "1x2"
 BANDS: tuple[float, ...] = (0.0, 0.01, 0.02, 0.03, 0.05, 0.10, math.inf)
+HORIZONS: tuple[float, ...] = (0.0, 1.0, 6.0, 24.0, 72.0, 168.0 + 1e-9)
+HORIZON_LABELS: tuple[str, ...] = ("0-1h", "1-6h", "6-24h", "1-3d", "3-7d")
 
 
 def gaps(dataset: RetailEvDataset) -> pd.DataFrame:
@@ -43,6 +45,12 @@ def gaps(dataset: RetailEvDataset) -> pd.DataFrame:
             "event_id": dataset.event_ids,
             "exchange_time": [r.exchange.time for r in dataset.rows],
             "overround": [r.exchange.overround for r in dataset.rows],
+            "horizon": pd.cut(
+                [r.hours_to_kickoff for r in dataset.rows],
+                list(HORIZONS),
+                labels=list(HORIZON_LABELS),
+                right=False,
+            ),
             "gap": [r.close.fair[r.outcome] - r.exchange.fair[r.outcome] for r in dataset.rows],
         }
     )
@@ -51,14 +59,17 @@ def gaps(dataset: RetailEvDataset) -> pd.DataFrame:
 def band_table(df: pd.DataFrame) -> str:
     df = df.assign(band=pd.cut(df["overround"], list(BANDS), right=True, include_lowest=True))
     lines = [
-        "| back overround | rows | exchange snapshots | gap std (pp) |",
-        "|---|---|---|---|",
+        "| horizon | back overround | rows | exchange snapshots | gap std (pp) |",
+        "|---|---|---|---|---|",
     ]
-    for band, group in df.groupby("band", observed=True):
-        snapshots = group[["event_id", "exchange_time"]].drop_duplicates()
-        lines.append(
-            f"| {band} | {len(group):,} | {len(snapshots):,} | {group['gap'].std() * 100:.2f} |"
-        )
+    for horizon in (*HORIZON_LABELS, "all"):
+        part = df if horizon == "all" else df[df["horizon"] == horizon]
+        for band, group in part.groupby("band", observed=True):
+            snapshots = group[["event_id", "exchange_time"]].drop_duplicates()
+            lines.append(
+                f"| {horizon} | {band} | {len(group):,} | {len(snapshots):,} "
+                f"| {group['gap'].std() * 100:.2f} |"
+            )
     return "\n".join(lines)
 
 
@@ -86,7 +97,7 @@ async def main(start: date, end: date) -> None:
 
     df = gaps(uncapped)
     print(f"Finished {SPORT_KEY} events {start} to {end}: {len(events)}\n")
-    print("### Exchange price at t minus close, by the exchange snapshot's back overround\n")
+    print("### Exchange price at t minus close, by horizon and back overround\n")
     print(band_table(df))
     narrow = np.array([r.exchange.overround <= MAX_EXCHANGE_OVERROUND for r in uncapped.rows])
     print(f"\n### Policies for books over {MAX_EXCHANGE_OVERROUND:.0%}\n")

@@ -296,6 +296,8 @@ def make_walk_forward_splits(
         commence_times: Per-row kick-off times, required when ``gap`` is positive.
         gap: Training events must kick off at least this long before the first
             validation event, so no training close falls after a validation decision.
+            The filter runs after the window is cut, so a sliding window then holds
+            fewer than ``max_train_events`` events.
 
     Returns:
         List of (train_row_indices, val_row_indices) tuples, one per fold.

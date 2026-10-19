@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 from odds_analytics.retail_ev import (
+    RETAIL_KINDS,
     Outcome,
     RetailEvDataset,
     build_event_rows,
@@ -259,7 +260,14 @@ class TestNoLookAhead:
                 if r.decision_time == t
             }
 
-        for t in sorted({r.decision_time for r in rows}):
+        retail_times = {
+            s.snapshot_time
+            for s in snapshots
+            if snapshot_kind(s.raw_data) in RETAIL_KINDS
+            and timedelta(minutes=5) <= KICKOFF - s.snapshot_time <= timedelta(days=7)
+        }
+        assert {r.decision_time for r in rows} < retail_times
+        for t in sorted(retail_times):
             past = [s for s in snapshots if s.snapshot_time <= t]
             truncated, _ = build_event_rows(
                 event, past + [c for c in closes if c.snapshot_time > t], "1x2"
