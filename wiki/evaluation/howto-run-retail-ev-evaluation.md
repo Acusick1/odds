@@ -28,7 +28,7 @@ The spec fields, the window-end guard, the statistics and the output files are o
    ```
 
    - The command prints the verdict and both keep-bar statistics with their CIs.
-   - Every window event must be FINAL with an FDUK closing snapshot. `--allow-incomplete` scores the window anyway and the manifest lists the incomplete events; a dry run on development data needs it.
+   - Every window event must be FINAL with an FDUK closing snapshot. `--allow-incomplete <event ID>`, repeated for each, scores the named events anyway; any other incomplete event is still refused, and the manifest lists both.
    - A spec already evaluated under `experiments/results/`, or a non-empty output directory, is refused. `--force` runs anyway and the manifest records it; use it only for dry runs.
 5. **Check the manifest.** In `manifest.json`, confirm `git_dirty` is false, the `git_sha` is the intended commit, `spec_sha256` matches the registered spec, and the event counts are plausible.
 6. **Read the coverage.** In `report.json`, the coverage section lists the window events with no row, the share of events with live collection and the collection outages. They describe power, not the verdict.

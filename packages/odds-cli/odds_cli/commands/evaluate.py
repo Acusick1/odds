@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from odds_analytics.retail_ev_evaluation import EvaluationReport, run_evaluation
@@ -17,7 +18,7 @@ console = Console()
 
 
 async def _run(
-    spec: Path, output_dir: Path, force: bool, allow_incomplete: bool
+    spec: Path, output_dir: Path, force: bool, allow_incomplete: list[str]
 ) -> EvaluationReport:
     async with async_session_maker() as session:
         return await run_evaluation(
@@ -40,15 +41,17 @@ def evaluate_retail_ev(
         help="Run a spec that was already evaluated, or overwrite an output directory; "
         "recorded in the manifest",
     ),
-    allow_incomplete: bool = typer.Option(
-        False,
-        "--allow-incomplete",
-        help="Score window events that are not FINAL or have no FDUK closing snapshot; "
-        "recorded in the manifest",
-    ),
+    allow_incomplete: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--allow-incomplete",
+            help="Score this window event although it is not FINAL or has no FDUK closing "
+            "snapshot (repeatable); recorded in the manifest",
+        ),
+    ] = None,
 ) -> None:
     """Score a frozen retail-EV model once on its window and print the keep or retire verdict."""
-    report = asyncio.run(_run(Path(spec), Path(output_dir), force, allow_incomplete))
+    report = asyncio.run(_run(Path(spec), Path(output_dir), force, allow_incomplete or []))
     table = Table(title=f"Verdict: {report.verdict.value.upper()}")
     for column in ("condition", "point", "95% CI low", "95% CI high"):
         table.add_column(column)

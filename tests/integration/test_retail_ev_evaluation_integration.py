@@ -160,7 +160,13 @@ class TestReadinessGuard:
 
         with pytest.raises(IncompleteWindowError, match="fduk_incomplete"):
             await load_evaluation_data(evaluation_events, spec, NOW)
-        data = await load_evaluation_data(evaluation_events, spec, NOW, allow_incomplete=True)
+        with pytest.raises(IncompleteWindowError, match="fduk_incomplete"):
+            await load_evaluation_data(
+                evaluation_events, spec, NOW, allow_incomplete=["fduk_other"]
+            )
+        data = await load_evaluation_data(
+            evaluation_events, spec, NOW, allow_incomplete=["fduk_incomplete"]
+        )
 
         assert "fduk_incomplete" in set(data.window_events["event_id"])
 
@@ -199,6 +205,13 @@ class TestRunEvaluation:
         assert written["coverage"]["window_event_shares"]["has_fduk_closing"] == 1.0
         assert manifest["forced"] is False
         assert manifest["git_tag"] is None or isinstance(manifest["git_tag"], str)
+
+        refused_dir = results_root / "refused"
+        with pytest.raises(RepeatedLookError):
+            await run_evaluation(
+                evaluation_events, spec_path, refused_dir, now=NOW, results_root=results_root
+            )
+        assert not refused_dir.exists()
 
         with pytest.raises(OutputExistsError):
             await run_evaluation(

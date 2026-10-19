@@ -39,7 +39,7 @@ status: stable
 - the window ends after the time the run starts;
 - any event or row it reads kicks off after `window.end` (`odds_analytics.retail_ev_evaluation.check_window_end`).
 
-It raises `odds_analytics.retail_ev_evaluation.IncompleteWindowError` when a window event is not FINAL or has no FDUK closing snapshot (`odds_analytics.retail_ev_evaluation.incomplete_events`), unless `allow_incomplete` is set. The run time is passed to `odds_analytics.retail_ev.load_retail_ev_dataset` as `now`.
+It raises `odds_analytics.retail_ev_evaluation.IncompleteWindowError` when a window event is not FINAL or has no FDUK closing snapshot (`odds_analytics.retail_ev_evaluation.incomplete_events`), unless `allow_incomplete` names that event. The run time is passed to `odds_analytics.retail_ev.load_retail_ev_dataset` as `now`.
 
 It reads the sport's events whose kick-off falls between `training_start` and `window.end`, in kick-off order, and builds their rows with `odds_analytics.retail_ev.load_retail_ev_dataset`. Team history for the schedule and standings groups is read only up to `window.end` (`odds_analytics.as_of_team_features.load_team_history`).
 
@@ -75,11 +75,13 @@ Both CIs are event-clustered percentile bootstraps drawn from the spec's resampl
 `odds_analytics.retail_ev_evaluation.run_evaluation` writes to the output directory. Unless forced, it refuses:
 
 - a spec whose `spec_sha256` already appears in a `manifest.json` under `experiments/results/*/` (`odds_analytics.retail_ev_evaluation.check_one_look`);
-- an output directory that is not empty (`odds_analytics.retail_ev_evaluation.claim_output_dir`).
+- an output directory that is not empty (`odds_analytics.retail_ev_evaluation.check_output_dir`).
+
+Both checks, and the data guards, run before the output directory is created. A manifest that cannot be parsed is skipped with a warning (`odds_analytics.retail_ev_evaluation.prior_runs`). The check catches an accidental rerun, not a deliberate one: `--force` or another results directory gets past it, so the frozen tag and the committed outputs are what show that a look happened once.
 
 | File | Contents |
 |---|---|
-| `manifest.json` | Git SHA, its exact tag or null, and whether tracked files differ from it; whether the run was forced, the earlier manifests of the same spec and the `predictions_sha256` it overwrote; whether incomplete events were allowed and which they were; the spec and its hashes, the trial file's hash, the resolved XGBoost parameters, the retail-EV constants, the feature names, the data and prediction hashes, row, event and block counts, library versions and the run time |
+| `manifest.json` | Git SHA, its exact tag or null, and whether tracked files differ from it; whether the run was forced, the earlier manifests of the same spec and the `predictions_sha256` it overwrote; the incomplete window events and the ones allowed by ID; the spec and its hashes, the trial file's hash, the resolved XGBoost parameters, the retail-EV constants, the feature names, the data and prediction hashes, row, event and block counts, library versions and the run time |
 | `report.json` | The verdict, both statistics with their CIs and the coverage report |
 | `slices.csv` | The slice table |
 | `blocks.csv` | Per block: the training cutoff, training and scored events and rows, kick-off ranges and both weighted MSEs |

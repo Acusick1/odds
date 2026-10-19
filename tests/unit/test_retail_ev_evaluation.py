@@ -26,8 +26,8 @@ from odds_analytics.retail_ev_evaluation import (
     Verdict,
     WindowEndError,
     check_one_look,
+    check_output_dir,
     check_window_end,
-    claim_output_dir,
     evaluate,
     evaluation_blocks,
     incomplete_events,
@@ -284,24 +284,24 @@ class TestKnownAnswerVerdict:
 
 
 class TestOutputDirectory:
-    def test_creates_a_missing_directory(self, tmp_path: Path) -> None:
-        claim_output_dir(tmp_path / "out", force=False)
+    def test_creates_nothing(self, tmp_path: Path) -> None:
+        check_output_dir(tmp_path / "out", force=False)
 
-        assert (tmp_path / "out").is_dir()
+        assert not (tmp_path / "out").exists()
 
     def test_accepts_an_empty_directory(self, tmp_path: Path) -> None:
-        claim_output_dir(tmp_path, force=False)
+        check_output_dir(tmp_path, force=False)
 
     def test_refuses_a_directory_holding_an_evaluation(self, tmp_path: Path) -> None:
         (tmp_path / "manifest.json").write_text("{}")
 
         with pytest.raises(OutputExistsError):
-            claim_output_dir(tmp_path, force=False)
+            check_output_dir(tmp_path, force=False)
 
     def test_force_overrides_the_refusal(self, tmp_path: Path) -> None:
         (tmp_path / "manifest.json").write_text("{}")
 
-        claim_output_dir(tmp_path, force=True)
+        check_output_dir(tmp_path, force=True)
 
 
 class TestReadiness:
@@ -335,6 +335,13 @@ class TestOneLook:
 
         assert check_one_look(tmp_path, "s2", force=False) == []
 
+    def test_skips_unreadable_manifests(self, tmp_path: Path) -> None:
+        (tmp_path / "broken").mkdir()
+        (tmp_path / "broken" / "manifest.json").write_text("{not json")
+        earlier = self._write(tmp_path, "earlier", "s1")
+
+        assert check_one_look(tmp_path, "s1", force=True) == [earlier]
+
     def test_force_returns_the_earlier_runs(self, tmp_path: Path) -> None:
         earlier = self._write(tmp_path, "earlier", "s1")
 
@@ -345,4 +352,4 @@ class TestOneLook:
     ) -> None:
         self._write(tmp_path, "out", "s1")
 
-        assert claim_output_dir(tmp_path / "out", force=True) == "abc"
+        assert check_output_dir(tmp_path / "out", force=True) == "abc"

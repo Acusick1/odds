@@ -290,13 +290,16 @@ def incomplete_events(window_events: pd.DataFrame) -> list[str]:
 
 
 async def load_evaluation_data(
-    session: AsyncSession, spec: EvaluationSpec, now: datetime, allow_incomplete: bool = False
+    session: AsyncSession,
+    spec: EvaluationSpec,
+    now: datetime,
+    allow_incomplete: Sequence[str] = (),
 ) -> EvaluationData:
     """Rows of every event kicking off from the training start to the window end.
 
     Refuses a window that has not ended, and raises ``WindowEndError`` if any event
     read kicks off after the window end. Raises ``IncompleteWindowError`` if a window
-    event is not FINAL or has no FDUK closing snapshot, unless ``allow_incomplete``.
+    event is not FINAL or has no FDUK closing snapshot, unless ``allow_incomplete`` names it.
     Team history is read only up to the window end. Refuses feature columns other than
     the spec's ``feature_names``.
     """
@@ -320,10 +323,11 @@ async def load_evaluation_data(
         window_events, {e.id: await reader.get_snapshots_for_event(e.id) for e in window_events}
     )
     incomplete = incomplete_events(window_frame)
-    if incomplete and not allow_incomplete:
+    refused = [e for e in incomplete if e not in set(allow_incomplete)]
+    if refused:
         raise IncompleteWindowError(
-            f"{len(incomplete)} window events are not FINAL or have no FDUK closing snapshot, "
-            f"such as {incomplete[:5]}; load the season's data or pass allow_incomplete"
+            f"{len(refused)} window events are not FINAL or have no FDUK closing snapshot, "
+            f"such as {refused[:5]}; load the season's data or allow each by event ID"
         )
 
     train_set = await load_retail_ev_dataset(training_events, session, spec.market, now=now)
@@ -636,16 +640,15 @@ class OutputExistsError(FileExistsError):
     """The output directory already holds an evaluation."""
 
 
-def claim_output_dir(output_dir: Path, force: bool) -> str | None:
-    """Create the output directory, refusing one that is not empty unless ``force``.
+def check_output_dir(output_dir: Path, force: bool) -> str | None:
+    """Refuse an output directory that is not empty unless ``force``; create nothing.
 
-    Returns the ``predictions_sha256`` of the manifest a forced run overwrites, if any.
+    Returns the ``predictions_sha256`` of the manifest a forced run would overwrite, if any.
     """
     if output_dir.exists() and any(output_dir.iterdir()) and not force:
         raise OutputExistsError(
             f"{output_dir} is not empty; an evaluation runs once (pass force to overwrite)"
         )
-    output_dir.mkdir(parents=True, exist_ok=True)
     previous = output_dir / MANIFEST_FILE
     if not previous.exists():
         return None
@@ -653,12 +656,17 @@ def claim_output_dir(output_dir: Path, force: bool) -> str | None:
 
 
 def prior_runs(results_root: Path, spec_sha256: str) -> list[Path]:
-    """Manifests under ``results_root/*/`` written for the same spec."""
-    return sorted(
-        path
-        for path in results_root.glob(f"*/{MANIFEST_FILE}")
-        if json.loads(path.read_text()).get("spec_sha256") == spec_sha256
-    )
+    """Manifests under ``results_root/*/`` written for the same spec; unreadable ones are skipped."""
+    runs: list[Path] = []
+    for path in sorted(results_root.glob(f"*/{MANIFEST_FILE}")):
+        try:
+            manifest = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as error:
+            logger.warning("unreadable_evaluation_manifest", path=str(path), error=str(error))
+            continue
+        if isinstance(manifest, dict) and manifest.get("spec_sha256") == spec_sha256:
+            runs.append(path)
+    return runs
 
 
 def check_one_look(results_root: Path, spec_sha256: str, force: bool) -> list[Path]:
@@ -736,7 +744,7 @@ async def run_evaluation(
     output_dir: Path,
     now: datetime,
     force: bool = False,
-    allow_incomplete: bool = False,
+    allow_incomplete: Sequence[str] = (),
     results_root: Path | None = None,
 ) -> EvaluationReport:
     """Load, refit, score and write the report, manifest and predictions to ``output_dir``.
@@ -746,7 +754,7 @@ async def run_evaluation(
     """
     spec = EvaluationSpec.from_yaml(spec_path)
     earlier = check_one_look(results_root or default_results_root(), spec.sha256(), force)
-    overwritten = claim_output_dir(output_dir, force)
+    overwritten = check_output_dir(output_dir, force)
     model = spec.resolved_model(spec_path.parent)
     git = git_state()
     data = await load_evaluation_data(session, spec, now, allow_incomplete)
@@ -761,7 +769,7 @@ async def run_evaluation(
         "forced": force,
         "earlier_runs_of_spec": [str(r) for r in earlier],
         "overwritten_predictions_sha256": overwritten,
-        "allow_incomplete": allow_incomplete,
+        "allowed_incomplete_events": sorted(allow_incomplete),
         "incomplete_window_events": incomplete_events(data.window_events),
         "spec_path": str(spec_path),
         "spec_file_sha256": _sha256_file(spec_path),
@@ -811,6 +819,7 @@ async def run_evaluation(
         },
         "coverage": cover,
     }
+    output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / MANIFEST_FILE).write_text(json.dumps(manifest, indent=2, default=str) + "\n")
     (output_dir / REPORT_FILE).write_text(json.dumps(report, indent=2, default=str) + "\n")
     slices.to_csv(output_dir / SLICES_FILE, index=False)
