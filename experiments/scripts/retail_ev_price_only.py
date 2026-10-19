@@ -531,7 +531,7 @@ def git_dirty() -> bool:
     """Whether the working tree differs from HEAD, so ``git_sha`` does not pin the code run."""
     return bool(
         subprocess.run(
-            ["git", "status", "--porcelain"],
+            ["git", "status", "--porcelain", "--untracked-files=no"],
             cwd=REPO_DIR,
             capture_output=True,
             text=True,

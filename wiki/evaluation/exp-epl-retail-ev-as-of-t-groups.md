@@ -109,7 +109,7 @@ Two fold CIs exclude zero: `dynamics` seed 7 in fold 4 (+50.9 [2.2, 106.4]), and
 
 ## The FDUK timing leak
 
-An earlier version of `polymarket_at_t` read the latest Polymarket price at or before every row's t, including FDUK opening rows. The Polymarket grid has a point exactly on the FDUK stamp, so `pm_age_hours` was 0 on 96% of the FDUK-only rows. But FDUK took its price at or before that stamp, possibly much earlier. A Polymarket price at the stamp can therefore include the market's moves after FDUK's real collection. The models picked those moves up: Polymarket's moves in the hours before the stamp correlated 0.17 with the residual on FDUK rows, but not on live rows.
+An earlier version of `polymarket_at_t` read the latest Polymarket price at or before every row's t, including FDUK opening rows. The Polymarket grid has a point exactly on the FDUK stamp, so `pm_age_hours` was 0 on 96% of the FDUK-only rows. But FDUK took its price at or before that stamp, possibly much earlier. A Polymarket price at the stamp can therefore include the market's moves after FDUK's real collection. The models picked those moves up: Polymarket's moves in the hours before the stamp correlated 0.17 with the residual on FDUK rows, but not on live rows `(inferred)`.
 
 The independent review of #548 tested this with a robustness probe on the earlier features. It shifted every Polymarket lookup back by k hours, refitted the frozen residual-arm hyperparameters of the earlier run, and scored each shift against price-only. CIs come from 1,000 event-clustered resamples:
 
