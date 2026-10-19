@@ -42,7 +42,7 @@ This is the first model run on the retail-EV target of [ADR-0012](../../docs/adr
   - `summary.json` records the git SHA, the SHA-256 of the script and config, and a SHA-256 of the rows' event IDs and targets (`data_sha256`).
 - **Rows.** The rows come from the training pipeline (`odds_analytics.training.data_preparation.prepare_training_data_from_config` with `target_type: retail_ev`): 112,650 rows over 720 events. The script fails unless they match `odds_analytics.retail_ev.load_retail_ev_dataset` row for row.
 - **Dropped events.** The pipeline passes events through `odds_analytics.feature_groups.filter_completed_events`, which keeps only FINAL events with both scores. That drops FINAL events with null scores, among them 28 of the 32 FINAL March 2026 events in the local database, although the retail-EV target needs no result. This is tracked on #546.
-- **Features.** These are the 38 price-at-t columns of `odds_analytics.retail_ev.RetailEvFeatures` with no optional groups: hours to kick-off, retail, book-fair, consensus and exchange probabilities and their differences, the overrounds, the exchange price's age, `baseline_ev`, weekday, and one-hot outcome and book. There are no event-level groups, because `target_type: retail_ev` rejects them, and no as-of-t groups ([training config](../modelling/training-config.md)).
+- **Features.** These are the 38 price columns of `odds_analytics.retail_ev.RetailEvFeatures` with no optional groups, each from the row's own snapshot or the exchange price at or before t: hours to kick-off, retail, book-fair, consensus and exchange probabilities and their differences, the overrounds, the exchange price's age, `baseline_ev`, weekday, and one-hot outcome and book. There are no event-level groups, because `target_type: retail_ev` rejects them, and no as-of-t groups ([training config](../modelling/training-config.md)).
 - **Loss weights.** Each row is weighted by `(1/odds²) × w_event`, scaled to mean one over all rows. The tuning subset keeps that scale, so `min_child_weight` means the same number of events in tuning as in scoring (about 150 weight units per event).
 - **Tuning range.** Hyperparameters are tuned only on the 380 events of 2024-25 (3,861 rows, all from FDUK opening snapshots).
   - The tuning folds are expanding walk-forward inside that season: `min_train_events` 130, 50-event steps and the 7-day gap, which makes 5 folds.
@@ -63,7 +63,7 @@ This is the first model run on the retail-EV target of [ADR-0012](../../docs/adr
   - Both come with event-clustered bootstrap 95% CIs over per-event totals (2,000 resamples, the same resampled events for every comparison).
   - A pick total is in event units: `w_event` sums to 1 per event, so 0.28 is 0.28 of one event's worth of EV.
   - Shrinkage by β > 0 never changes the sign of a prediction, so its picks equal the baseline's and its pick gain is zero by construction.
-  - The horizon buckets and season labels are properties of each `odds_analytics.retail_ev.RetailEvRow`.
+  - The horizon buckets and season labels are properties of each `odds_analytics.retail_ev.RetailEvRow`, computed from its decision time and kick-off.
 
 ## The scored rows
 

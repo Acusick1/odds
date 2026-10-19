@@ -63,6 +63,8 @@ RETAIL_KINDS: frozenset[SnapshotKind] = frozenset(
         SnapshotKind.FDUK_OPENING,
     }
 )
+# Stamped at FDUK's latest documented collection time, an upper bound on when the price was taken.
+UPPER_BOUND_TIME_KINDS: frozenset[SnapshotKind] = frozenset({SnapshotKind.FDUK_OPENING})
 EXCHANGE_AT_T_KINDS: frozenset[SnapshotKind] = frozenset(
     {SnapshotKind.BETFAIR_LIVE, SnapshotKind.FDUK_OPENING}
 )
@@ -135,6 +137,11 @@ class RetailEvRow:
     close: ExchangePrice
     polymarket: PolymarketPrice | None
     dynamics: Dynamics
+
+    @property
+    def decision_time_is_exact(self) -> bool:
+        """Whether the retail price was taken at ``decision_time``, not at some time before it."""
+        return self.retail_kind not in UPPER_BOUND_TIME_KINDS
 
     @property
     def hours_to_kickoff(self) -> float:
@@ -549,8 +556,11 @@ def _window_label(window: timedelta) -> str:
     return f"{int(window.total_seconds() // 3600)}h"
 
 
+_EXCHANGE_MOVE_NAMES: tuple[str, ...] = tuple(
+    f"exchange_move_{_window_label(w)}" for w in MOVE_WINDOWS
+)
 _DYNAMICS_FEATURE_NAMES: tuple[str, ...] = (
-    *(f"exchange_move_{_window_label(w)}" for w in MOVE_WINDOWS),
+    *_EXCHANGE_MOVE_NAMES,
     *(f"consensus_move_{_window_label(w)}" for w in MOVE_WINDOWS),
     "retail_dispersion",
 )
@@ -619,9 +629,26 @@ _STANDINGS_FEATURE_NAMES: tuple[str, ...] = tuple(
 
 @dataclass(frozen=True)
 class _FeatureGroup:
+    """A group's columns and extractor.
+
+    ``exact_time_columns`` read another source's price at the decision time, so they
+    are NaN for a row whose decision time is only an upper bound on when its retail
+    price was taken: a price from the gap would reach the row.
+    """
+
     names: tuple[str, ...]
     values: Callable[[RetailEvFeatures, RetailEvRow], list[float]]
     needs_teams: bool = False
+    exact_time_columns: frozenset[str] = frozenset()
+
+    def row_values(self, features: RetailEvFeatures, row: RetailEvRow) -> list[float]:
+        values = self.values(features, row)
+        if row.decision_time_is_exact or not self.exact_time_columns:
+            return values
+        return [
+            np.nan if name in self.exact_time_columns else value
+            for name, value in zip(self.names, values, strict=True)
+        ]
 
 
 def _schedule_features(features: RetailEvFeatures, row: RetailEvRow) -> list[float]:
@@ -634,9 +661,15 @@ def _standings_features(features: RetailEvFeatures, row: RetailEvRow) -> list[fl
 
 _FEATURE_GROUPS: dict[RetailEvFeatureGroupName, _FeatureGroup] = {
     "polymarket_at_t": _FeatureGroup(
-        _POLYMARKET_FEATURE_NAMES, lambda _, row: _polymarket_features(row)
+        _POLYMARKET_FEATURE_NAMES,
+        lambda _, row: _polymarket_features(row),
+        exact_time_columns=frozenset(_POLYMARKET_FEATURE_NAMES),
     ),
-    "dynamics": _FeatureGroup(_DYNAMICS_FEATURE_NAMES, lambda _, row: _dynamics_features(row)),
+    "dynamics": _FeatureGroup(
+        _DYNAMICS_FEATURE_NAMES,
+        lambda _, row: _dynamics_features(row),
+        exact_time_columns=frozenset(_EXCHANGE_MOVE_NAMES),
+    ),
     "schedule_as_of_t": _FeatureGroup(
         _SCHEDULE_FEATURE_NAMES, _schedule_features, needs_teams=True
     ),
@@ -709,7 +742,7 @@ class RetailEvFeatures:
     def row(self, row: RetailEvRow) -> np.ndarray:
         values = _price_features(row, self.outcomes)
         for group in self.groups:
-            values += _FEATURE_GROUPS[group].values(self, row)
+            values += _FEATURE_GROUPS[group].row_values(self, row)
         return np.array(values, dtype=np.float64)
 
     def matrix(self, rows: Sequence[RetailEvRow]) -> np.ndarray:
