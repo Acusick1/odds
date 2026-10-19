@@ -1055,6 +1055,8 @@ class PreparedFeatureData:
         event_ids: np.ndarray | None = None,
         static_features: np.ndarray | None = None,
         static_feature_names: list[str] | None = None,
+        sample_weights: np.ndarray | None = None,
+        commence_times: np.ndarray | None = None,
     ) -> None:
         self.X = X
         self.y = y
@@ -1063,6 +1065,8 @@ class PreparedFeatureData:
         self.event_ids = event_ids
         self.static_features = static_features
         self.static_feature_names = static_feature_names
+        self.sample_weights = sample_weights
+        self.commence_times = commence_times
 
     @property
     def num_samples(self) -> int:
@@ -1086,6 +1090,7 @@ async def prepare_training_data(
       - config.sampling.strategy="time_range"  → multiple rows per event
       - config.target_type="raw"               → avg implied-prob delta
       - config.target_type="devigged_bookmaker" → devigged bookmaker delta
+      - config.target_type="retail_ev"          → ADR-0012 rows (odds_analytics.retail_ev)
 
     For devigged_bookmaker, events without target bookmaker closing data are dropped.
     Polymarket features NaN-fill when PM data is unavailable, so events are
@@ -1100,6 +1105,13 @@ async def prepare_training_data(
     Returns:
         PreparedFeatureData with X, y, feature_names, masks, and event_ids for CV
     """
+    if config.target_type == "retail_ev":
+        if sampler is not None:
+            raise ValueError("retail_ev builds a row per retail snapshot and takes no sampler")
+        from odds_analytics.retail_ev import prepare_retail_ev_training_data
+
+        return await prepare_retail_ev_training_data(events, session, config)
+
     valid_events = filter_completed_events(events)
     if not valid_events:
         raise ValueError(f"No valid events found in {len(events)} total events")

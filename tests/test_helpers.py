@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from odds_core.api_models import EventsResponse, HistoricalOddsResponse, OddsResponse
-from odds_core.models import Event, EventStatus
+from odds_core.models import Event, EventStatus, OddsSnapshot
 
 
 class StubOddsClient:
@@ -143,4 +143,50 @@ def make_epl_event(
         home_team=home_team,
         away_team=away_team,
         **fields,
+    )
+
+
+def three_way_bookmaker(
+    key: str,
+    prices: tuple[float, float, float],
+    home_team: str = "Arsenal",
+    away_team: str = "Chelsea",
+    **extra: Any,
+) -> dict[str, Any]:
+    """A ``raw_data`` bookmaker entry with 1x2 decimal prices (home, draw, away)."""
+    names = (home_team, "Draw", away_team)
+    return {
+        "key": key,
+        "title": key,
+        "markets": [
+            {
+                "key": "1x2",
+                "outcomes": [
+                    {"name": name, "price_decimal": price}
+                    for name, price in zip(names, prices, strict=True)
+                ],
+            }
+        ],
+        **extra,
+    }
+
+
+def make_tagged_snapshot(
+    event_id: str,
+    snapshot_time: datetime,
+    bookmakers: list[dict[str, Any]],
+    source: str | None,
+    fduk_basis: str | None = None,
+) -> OddsSnapshot:
+    """A snapshot whose ``raw_data`` carries a source tag and, for FDUK, a timing basis."""
+    raw_data: dict[str, Any] = {"bookmakers": bookmakers}
+    if source is not None:
+        raw_data["source"] = source
+    if fduk_basis is not None:
+        raw_data["timing"] = {"basis": fduk_basis, "kickoff_time_assumed": False}
+    return OddsSnapshot(
+        event_id=event_id,
+        snapshot_time=snapshot_time,
+        raw_data=raw_data,
+        bookmaker_count=len(bookmakers),
     )

@@ -87,7 +87,7 @@ Every other model field keeps its value in the base config.
 
 `summary.json` `rebaseline_fold_layout` gives the layout #496 uses. The hyperparameters are frozen at the values above, and nothing is re-tuned on the evaluation range.
 
-- **Data:** the base config with `end_date` extended over the evaluation range and `start_date: 2019-08-01`. The rows stay in chronological order, as `odds_analytics.training.cross_validation.make_walk_forward_splits` assumes.
+- **Data:** the base config with `end_date` extended over the evaluation range and `start_date: 2019-08-01`. The rows stay in chronological order, which `odds_analytics.training.cross_validation.make_walk_forward_splits` assumes and does not check.
 - **Window:** `window_type: expanding`, `val_step_events: 50`.
 - **First fold:** `min_train_events: 1900`, the tuning-range event count, so the first validation block starts at the first event on or after 2024-08-01. The 1,900th event must kick off at 2024-05-19 15:00 UTC, the last tuning-range kick-off. Ten events share it, so which one is 1,900th depends on the tie order: `op_2023-2024_ARS_EVE_2024-05-19` in the recorded run, and `op_2023-2024_SHEUTD_TOT_2024-05-19` under event-ID order. If the tuning-range event set has changed, recount it before trusting the layout. The re-baseline that uses this layout is [EPL CLV re-baseline against the simple baseline](exp-epl-clv-rebaseline.md).
 - **Later folds:** each fold trains on every earlier event, including earlier evaluation-range events, and the last partial block is dropped.

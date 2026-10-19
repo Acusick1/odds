@@ -15,6 +15,7 @@ sources:
   - odds_mcp.server.find_retail_edges
   - packages/odds-mcp/agents/common.md
   - odds_core.models.Odds
+  - odds_core.bookmakers.UK_RETAIL_BOOKMAKERS
 status: stable
 ---
 
@@ -24,14 +25,16 @@ The sharp benchmark is the price treated as closest to fair: Pinnacle, with Betf
 
 `polymarket` is a further reference for EPL matches from 2025-08: its midpoints sit within 0.35-0.5 pp of Betfair Exchange from three days out ([#518](https://github.com/Acusick1/odds/issues/518)) and are stored as snapshots holding no other bookmaker ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#snapshot-shape)). Whether it adds information beyond Betfair is untested.
 
-It anchors the model's strongest feature, the retail-sharp divergence, and the agent's retail screener ([MCP market tools](../agent/mcp-market-tools.md#retail-edges)). Because the agent sees the same quantity directly through `odds_mcp.server.find_retail_edges`, the model adds little for it ([betting agent](../agent/betting-agent.md)).
+The [retail-EV target](clv-target.md#the-retail-ev-target) does not use this priority list for its close: ADR-0012 fixes the close and the baseline to Betfair Exchange, and its retail rows come from the UK roster `odds_core.bookmakers.UK_RETAIL_BOOKMAKERS` rather than from every non-sharp book ([target functions](clv-target-functions.md#retail-ev-rows)).
+
+The sharp reference anchors the delta model's strongest feature, the retail-sharp divergence, and the agent's retail screener ([MCP market tools](../agent/mcp-market-tools.md#retail-edges)). Because the agent sees the same quantity directly through `odds_mcp.server.find_retail_edges`, the model adds little for it ([betting agent](../agent/betting-agent.md)).
 
 ## Priority semantics
 
 `sharp_bookmakers` is an ordered list and the first bookmaker that has odds for the requested outcome wins (`odds_analytics.feature_extraction.select_sharp_odds`):
 
 - Features: `odds_analytics.feature_extraction.TabularFeatureExtractor` and `odds_analytics.feature_extraction.calculate_sharp_retail_metrics` both pick the sharp bookmaker with `odds_analytics.feature_extraction.select_sharp_odds`, which filters to the requested outcome itself. `odds_analytics.feature_extraction.SequenceFeatureExtractor` called without an outcome leaves its sharp features unset. None of the three reads the target fields.
-- Sampling: `odds_analytics.feature_groups.TierSampler` keeps only snapshots containing any (not all) of `required_bookmakers`, and `odds_analytics.feature_groups.prepare_training_data` drops events lacking every sharp bookmaker at close (a check that does not depend on the sampler), after `odds_analytics.feature_groups.collect_event_data` has already loaded the event's group data. That function leaves out snapshots whose only bookmaker is a prediction market (`odds_core.bookmakers.is_reference_only_snapshot`), so no sampler can pick a `polymarket` snapshot as a decision row. This filter always applies to a raw target, and to a devigged target only when `set(sharp_bookmakers) != {target_bookmaker}` ([feature pipeline](feature-pipeline.md)).
+- Sampling: `odds_analytics.feature_groups.TierSampler` keeps only snapshots containing any (not all) of `required_bookmakers`, and `odds_analytics.feature_groups.prepare_training_data` drops events lacking every sharp bookmaker at close (a check that does not depend on the sampler), after `odds_analytics.feature_groups.collect_event_data` has already loaded the event's group data. That function leaves out snapshots whose only bookmaker is a prediction market (`odds_core.bookmakers.is_reference_only_snapshot`), so no sampler can pick a `polymarket` snapshot as a decision row; the retail-EV builder reads its own snapshots and ignores `polymarket` ones by source. This filter always applies to a raw target, and to a devigged target only when `set(sharp_bookmakers) != {target_bookmaker}` ([feature pipeline](feature-pipeline.md)).
 - MCP: `odds_lambda.storage.readers.OddsReader.get_sharp_prices` scans snapshots newest-first within a 2 h lookback and resolves the priority order per outcome ([odds reader](../storage/odds-reader.md)); `odds_mcp.server.find_retail_edges` defaults to `[pinnacle, betfair_exchange]` and never lists `odds_core.bookmakers.NON_BETTABLE_BOOKMAKERS` (Pinnacle, `polymarket`) as retail.
 
 ## Why a sharp reference

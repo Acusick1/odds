@@ -29,7 +29,6 @@ import logging
 import math
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
@@ -38,6 +37,7 @@ from zoneinfo import ZoneInfo
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.odds_math import PRICE_DECIMAL_KEY
+from odds_core.snapshot_sources import FdukTimeBasis, SnapshotSource
 from odds_core.team import team_abbrev
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.oddsportal_common import (
@@ -58,7 +58,7 @@ log = logging.getLogger("ingest_football_data_uk")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "football_data_uk"
 BASE_URL = "https://www.football-data.co.uk/mmz4281"
-SOURCE_TAG = "football_data_uk"
+SOURCE_TAG = SnapshotSource.FOOTBALL_DATA_UK.value
 SPORT_KEY = "soccer_epl"
 SPORT_TITLE = "EPL"
 EVENT_ID_PREFIX = "fduk"
@@ -129,11 +129,6 @@ class CollectionSlot:
 WEEKEND_SLOT = CollectionSlot(weekday=4, latest=time(17, 0))
 MIDWEEK_SLOT = CollectionSlot(weekday=1, latest=time(13, 0))
 MIDWEEK_WEEKDAYS = frozenset({1, 2, 3})
-
-
-class TimeBasis(StrEnum):
-    COLLECTION_DEADLINE = "fduk_collection_deadline"
-    KICKOFF = "kickoff"
 
 
 @dataclass(frozen=True)
@@ -353,7 +348,7 @@ def _build_snapshot_raw_data(
     if not bookmakers:
         return None
 
-    basis = TimeBasis.KICKOFF if use_closing else TimeBasis.COLLECTION_DEADLINE
+    basis = FdukTimeBasis.KICKOFF if use_closing else FdukTimeBasis.COLLECTION_DEADLINE
     raw_data: dict[str, Any] = {
         "bookmakers": bookmakers,
         "source": SOURCE_TAG,

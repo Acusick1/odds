@@ -30,6 +30,7 @@ Example usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 import numpy as np
@@ -55,6 +56,8 @@ class TrainableStrategy(Protocol):
         trial: Any | None = ...,
         static_train: np.ndarray | None = ...,
         static_val: np.ndarray | None = ...,
+        sample_weight_train: np.ndarray | None = ...,
+        sample_weight_val: np.ndarray | None = ...,
     ) -> dict[str, Any]: ...
 
 
@@ -251,12 +254,31 @@ class CVResult:
         }
 
 
+def _require_retail_ev_inputs(
+    config: MLTrainingConfig,
+    sample_weights: np.ndarray | None,
+    commence_times: np.ndarray | None,
+) -> timedelta:
+    """The walk-forward gap for the config's target; retail_ev needs weights and kick-offs."""
+    if config.training.features.target_type != "retail_ev":
+        return timedelta(0)
+    if sample_weights is None or commence_times is None:
+        raise ValueError("retail_ev cross-validation needs sample_weights and commence_times")
+    if config.training.data.cv_method != "walk_forward":
+        raise ValueError("retail_ev cross-validation must use cv_method='walk_forward'")
+    from odds_analytics.retail_ev import DECISION_WINDOW
+
+    return DECISION_WINDOW
+
+
 def make_walk_forward_splits(
     event_ids: np.ndarray,
     min_train_events: int,
     val_step_events: int,
     window_type: str = "expanding",
     max_train_events: int | None = None,
+    commence_times: np.ndarray | None = None,
+    gap: timedelta = timedelta(0),
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Return walk-forward row-level splits with configurable step size.
 
@@ -271,6 +293,11 @@ def make_walk_forward_splits(
         val_step_events: Number of events per validation fold.
         window_type: "expanding" or "sliding".
         max_train_events: Cap for sliding window (required when window_type="sliding").
+        commence_times: Per-row kick-off times, required when ``gap`` is positive.
+        gap: Training events must kick off at least this long before the first
+            validation event, so no training close falls after a validation decision.
+            The filter runs after the window is cut, so a sliding window then holds
+            fewer than ``max_train_events`` events.
 
     Returns:
         List of (train_row_indices, val_row_indices) tuples, one per fold.
@@ -293,6 +320,13 @@ def make_walk_forward_splits(
     for row_idx, eid in enumerate(event_ids):
         event_to_rows.setdefault(eid, []).append(row_idx)
 
+    event_kickoff: dict[object, np.datetime64] = {}
+    if gap > timedelta(0):
+        if commence_times is None:
+            raise ValueError("a walk-forward gap needs per-row commence_times")
+        event_kickoff = {eid: commence_times[rows[0]] for eid, rows in event_to_rows.items()}
+    gap_td = np.timedelta64(int(gap.total_seconds() * 1e6), "us")
+
     splits: list[tuple[np.ndarray, np.ndarray]] = []
     val_start = min_train_events
 
@@ -307,6 +341,13 @@ def make_walk_forward_splits(
 
         train_events = unique_events[train_start:val_start]
         val_events = unique_events[val_start:val_end]
+        if event_kickoff:
+            cutoff = event_kickoff[val_events[0]] - gap_td
+            train_events = [eid for eid in train_events if event_kickoff[eid] <= cutoff]
+            if not train_events:
+                raise ValueError(
+                    f"No training events kick off {gap} before validation block at {val_start}"
+                )
 
         train_rows = np.array([r for eid in train_events for r in event_to_rows[eid]])
         val_rows = np.array([r for eid in val_events for r in event_to_rows[eid]])
@@ -326,6 +367,8 @@ def run_cv(
     event_ids: np.ndarray | None = None,
     static_features: np.ndarray | None = None,
     masks: np.ndarray | None = None,
+    sample_weights: np.ndarray | None = None,
+    commence_times: np.ndarray | None = None,
 ) -> CVResult:
     """
     Run cross-validation on the provided data.
@@ -370,6 +413,8 @@ def run_cv(
     random_seed = data_config.random_seed
     resolved_n_folds = data_config.n_folds
 
+    gap = _require_retail_ev_inputs(config, sample_weights, commence_times)
+
     if cv_method == "walk_forward" and event_ids is None:
         raise ValueError(
             "cv_method='walk_forward' requires event_ids; the data was prepared "
@@ -387,6 +432,8 @@ def run_cv(
             val_step_events=data_config.val_step_events,
             window_type=data_config.window_type,
             max_train_events=data_config.max_train_events,
+            commence_times=commence_times,
+            gap=gap,
         )
         n_folds = len(wf_splits)
 
@@ -451,10 +498,13 @@ def run_cv(
         static_train_fold = static_features[train_idx] if static_features is not None else None
         static_val_fold = static_features[val_idx] if static_features is not None else None
 
-        mask_kwargs: dict[str, Any] = {}
+        fold_kwargs: dict[str, Any] = {}
         if masks is not None:
-            mask_kwargs["masks_train"] = masks[train_idx]
-            mask_kwargs["masks_val"] = masks[val_idx]
+            fold_kwargs["masks_train"] = masks[train_idx]
+            fold_kwargs["masks_val"] = masks[val_idx]
+        if sample_weights is not None:
+            fold_kwargs["sample_weight_train"] = sample_weights[train_idx]
+            fold_kwargs["sample_weight_val"] = sample_weights[val_idx]
 
         logger.debug(
             "training_fold",
@@ -475,7 +525,7 @@ def run_cv(
             y_val=y_val_fold,
             static_train=static_train_fold,
             static_val=static_val_fold,
-            **mask_kwargs,
+            **fold_kwargs,
         )
 
         fold_result = CVFoldResult(
@@ -533,6 +583,9 @@ def train_with_cv(
     static_test: np.ndarray | None = None,
     masks: np.ndarray | None = None,
     masks_test: np.ndarray | None = None,
+    sample_weights: np.ndarray | None = None,
+    sample_weights_test: np.ndarray | None = None,
+    commence_times: np.ndarray | None = None,
 ) -> tuple[dict[str, Any], CVResult]:
     """Run CV, train final model on all data, merge CV metrics into history.
 
@@ -557,6 +610,8 @@ def train_with_cv(
         event_ids=event_ids,
         static_features=static_features,
         masks=masks,
+        sample_weights=sample_weights,
+        commence_times=commence_times,
     )
 
     logger.info(
@@ -565,10 +620,13 @@ def train_with_cv(
         cv_val_r2=f"{cv_result.mean_val_r2:.4f} ± {cv_result.std_val_r2:.4f}",
     )
 
-    mask_kwargs: dict[str, Any] = {}
+    fold_kwargs: dict[str, Any] = {}
     if masks is not None:
-        mask_kwargs["masks_train"] = masks
-        mask_kwargs["masks_val"] = masks_test
+        fold_kwargs["masks_train"] = masks
+        fold_kwargs["masks_val"] = masks_test
+    if sample_weights is not None:
+        fold_kwargs["sample_weight_train"] = sample_weights
+        fold_kwargs["sample_weight_val"] = sample_weights_test
 
     history = strategy.train_from_config(
         config=config,
@@ -579,7 +637,7 @@ def train_with_cv(
         y_val=y_test,
         static_train=static_features,
         static_val=static_test,
-        **mask_kwargs,
+        **fold_kwargs,
     )
 
     history.update(cv_result.to_dict())

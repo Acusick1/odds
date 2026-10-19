@@ -1,0 +1,48 @@
+experiment:
+  name: xgboost_epl_retail_ev
+  tags:
+  - xgboost
+  - epl
+  - retail_ev
+  description: 'ADR-0012 retail-EV target (#522): one row per event, outcome, UK retail
+    book and retail snapshot from 7 d to 5 min before kick-off, weighted by 1/odds² per
+    event row count. Rows exist from 2024-25, the first season with Betfair Exchange
+    closing prices. History is development data; the keep bar is judged only on a
+    pre-registered fresh season.'
+training:
+  strategy_type: xgboost_line_movement
+  data:
+    start_date: '2024-08-01'
+    end_date: '2026-07-31'
+    sport_key: soccer_epl
+    data_source: null
+    test_split: 0.0
+    validation_split: 0.0
+    random_seed: 42
+    shuffle: false
+    use_kfold: true
+    cv_method: walk_forward
+    window_type: expanding
+    min_train_events: 380
+    max_train_events: null
+    val_step_events: 50
+  model:
+    n_estimators: 200
+    max_depth: 3
+    min_child_weight: 20
+    learning_rate: 0.05
+    gamma: 0.0
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_alpha: 0.0
+    reg_lambda: 1.5
+    objective: reg:squarederror
+    random_state: 42
+    n_jobs: 4
+  features:
+    adapter: xgboost
+    markets:
+    - 1x2
+    feature_groups: []
+    target_type: retail_ev
+  output_path: models
