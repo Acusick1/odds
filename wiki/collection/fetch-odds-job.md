@@ -5,6 +5,7 @@ description: Event sync, gate, pre/post-schedule, quota alerts and log events of
 sources:
   - odds_lambda.jobs.fetch_odds.main
   - odds_lambda.jobs.fetch_odds.CADENCE
+  - odds_lambda.jobs.fetch_odds.SOURCE
   - odds_lambda.event_sync.EventSyncService
   - odds_lambda.scheduling.helpers.get_next_kickoff
   - odds_lambda.storage.writers.OddsWriter.store_odds_snapshot
@@ -28,7 +29,8 @@ It runs `sports` as `[ctx.sport]` or `data_collection.sports`:
 3. **Pre-schedule** under the compound name, then return if the gate says skip.
 4. **Ingest**: `odds_lambda.ingestion.OddsIngestionService.ingest_sports`.
 5. **Quota alerts**: per sport, `quota_remaining / settings.api.quota` below `quota_critical_threshold` sends `odds_core.alerts.send_critical`; below `quota_warning_threshold` sends `odds_core.alerts.send_warning` ([odds-api-quota](odds-api-quota.md)). These calls use no `alert_type`, so they repeat on every run below threshold and are not recorded in `alert_history` (#442).
-6. **Post-schedule** after re-querying the next kickoff.
+6. **Empty-run check**: `odds_lambda.collection_calendar.require_rows_for_fixtures` raises `odds_lambda.collection_calendar.EmptyCollectionError` for an EPL run that stored no snapshot while a SCHEDULED fixture lies within 48 hours (`odds_lambda.jobs.fetch_odds.SOURCE`; sports it does not cover are skipped); the failure handler below sends the critical.
+7. **Post-schedule** after re-querying the next kickoff.
 
 ## Failure behaviour
 

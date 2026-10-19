@@ -9,10 +9,12 @@ This job:
 """
 
 import asyncio
+from datetime import timedelta
 
 import structlog
 from odds_core.config import Settings, get_settings
 
+from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.event_sync import EventSyncService
 from odds_lambda.ingestion import OddsIngestionService
@@ -35,6 +37,15 @@ CADENCE = CadenceConfig(
     early=24.0,
     opening=48.0,
     no_game=24.0,
+)
+
+SOURCE = CollectionSource(
+    key="odds_api",
+    job_name="fetch-odds",
+    snapshot_source=None,
+    cadence=CADENCE,
+    fixture_horizons={"soccer_epl": timedelta(hours=48)},
+    skips_overnight=False,
 )
 
 
@@ -202,6 +213,10 @@ async def main(ctx: JobContext) -> None:
                         f"⚠️ API quota low: {sport_result.quota_remaining} requests remaining "
                         f"({percentage_remaining}% of {app_settings.api.quota})"
                     )
+
+        await require_rows_for_fixtures(
+            SOURCE, {r.sport_key: r.processed_events for r in results.sport_results}
+        )
 
         logger.info(
             "fetch_odds_completed",

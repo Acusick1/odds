@@ -13,6 +13,10 @@ from odds_core.models import utc_now
 # ---------------------------------------------------------------------------
 
 
+IF_NECESSARY_STATUS = "If Necessary"
+UNPLAYED_GAME_STATUSES = ("Postponed", "Cancelled", IF_NECESSARY_STATUS)
+
+
 @dataclass(slots=True)
 class MlbProbablePitchersRecord:
     """Parsed MLB probable-pitchers record ready for database storage.
@@ -32,6 +36,8 @@ class MlbProbablePitchersRecord:
     home_pitcher_id: int | None = None
     away_pitcher_name: str | None = None
     away_pitcher_id: int | None = None
+    game_status: str | None = None
+    start_time_tbd: bool = False
 
 
 def select_latest_in_window(
@@ -87,6 +93,9 @@ class MlbProbablePitchers(SQLModel, table=True):
     home_pitcher_id: int | None = Field(default=None)
     away_pitcher_name: str | None = Field(default=None)
     away_pitcher_id: int | None = Field(default=None)
+
+    game_status: str | None = Field(default=None)
+    start_time_tbd: bool = Field(default=False)
 
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), server_default=func.now()),

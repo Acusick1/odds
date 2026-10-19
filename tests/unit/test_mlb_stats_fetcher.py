@@ -66,19 +66,27 @@ def _game_payload(
     home_pitcher: dict[str, Any] | None = None,
     away_pitcher: dict[str, Any] | None = None,
     game_type: str = "R",
+    status: dict[str, Any] | None = None,
+    if_necessary: str | None = None,
+    team_ids: tuple[int | None, int | None] = (1, 2),
 ) -> dict[str, Any]:
-    home_team_block: dict[str, Any] = {"team": {"name": home_team}}
-    away_team_block: dict[str, Any] = {"team": {"name": away_team}}
+    home_team_block: dict[str, Any] = {"team": {"name": home_team, "id": team_ids[0]}}
+    away_team_block: dict[str, Any] = {"team": {"name": away_team, "id": team_ids[1]}}
     if home_pitcher is not None:
         home_team_block["probablePitcher"] = home_pitcher
     if away_pitcher is not None:
         away_team_block["probablePitcher"] = away_pitcher
-    return {
+    payload: dict[str, Any] = {
         "gamePk": game_pk,
         "gameDate": game_date,
         "gameType": game_type,
         "teams": {"home": home_team_block, "away": away_team_block},
     }
+    if status is not None:
+        payload["status"] = status
+    if if_necessary is not None:
+        payload["ifNecessary"] = if_necessary
+    return payload
 
 
 def _schedule_payload(games_by_date: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
@@ -294,3 +302,33 @@ class TestMlbStatsFetcher:
         async with MlbStatsFetcher(request_delay_seconds=0.0) as fetcher:
             records = await fetcher.fetch_dates([])
         assert records == []
+
+
+class TestRecordFromGame:
+    FETCHED = datetime(2026, 7, 1, tzinfo=UTC)
+
+    def _record(self, **fields: Any) -> Any:
+        from odds_lambda.mlb_stats_fetcher import _record_from_game
+
+        game = _game_payload(
+            game_pk=1, game_date="2026-07-02T23:05:00Z", home_team="A", away_team="B", **fields
+        )
+        return _record_from_game(game, fetched_at=self.FETCHED)
+
+    def test_records_status_and_tbd_start(self) -> None:
+        record = self._record(status={"detailedState": "Postponed", "startTimeTBD": True})
+
+        assert (record.game_status, record.start_time_tbd) == ("Postponed", True)
+
+    def test_a_game_without_status_has_no_status(self) -> None:
+        record = self._record()
+
+        assert (record.game_status, record.start_time_tbd) == (None, False)
+
+    def test_if_necessary_games_are_marked(self) -> None:
+        record = self._record(status={"detailedState": "Scheduled"}, if_necessary="Y")
+
+        assert record.game_status == "If Necessary"
+
+    def test_a_placeholder_team_without_an_id_is_dropped(self) -> None:
+        assert self._record(team_ids=(1, None)) is None

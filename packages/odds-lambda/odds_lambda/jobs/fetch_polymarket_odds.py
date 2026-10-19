@@ -16,9 +16,11 @@ from odds_core.alerts import job_alert_context, send_job_warning
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, FetchLog
+from odds_core.snapshot_sources import SnapshotSource
 from odds_core.sports import SportKey
 from sqlalchemy import select
 
+from odds_lambda.collection_calendar import CollectionSource
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.polymarket_fetcher import PolymarketClient
 from odds_lambda.polymarket_odds import (
@@ -61,6 +63,15 @@ CADENCE = CadenceConfig(
     opening=_hours(FetchTier.OPENING),
     no_game=_NO_GAME_HOURS,
     db_fallback=1.0,
+)
+
+SOURCE = CollectionSource(
+    key="polymarket",
+    job_name="fetch-polymarket-odds",
+    snapshot_source=SnapshotSource.POLYMARKET,
+    cadence=CADENCE,
+    fixture_horizons=dict.fromkeys(MATCH_ODDS_SPORTS, LISTING_CHECK_HORIZON),
+    skips_overnight=True,
 )
 
 

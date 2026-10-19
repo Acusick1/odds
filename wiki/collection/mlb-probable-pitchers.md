@@ -22,7 +22,7 @@ Point-in-time snapshots of MLBAM's announced probable starters, stored in `mlb_p
 ## Flow
 
 1. `odds_lambda.jobs.fetch_mlb_probables.main` computes `dates_for_window(now, 72h)`: UTC dates from today to D+3, padded one day each side because MLBAM resolves `date=` in US Eastern, not UTC.
-2. `odds_lambda.mlb_stats_fetcher.MlbStatsFetcher.fetch_dates` calls `https://statsapi.mlb.com/api/v1/schedule` with `hydrate=probablePitcher` (httpx, 3 attempts, 0.25 s pacing). One `odds_core.mlb_data_models.MlbProbablePitchersRecord` per game; a missing `probablePitcher` yields null name/id fields, deliberately kept as the "not announced" signal.
+2. `odds_lambda.mlb_stats_fetcher.MlbStatsFetcher.fetch_dates` calls `https://statsapi.mlb.com/api/v1/schedule` with `hydrate=probablePitcher` (httpx, 3 attempts, 0.25 s pacing). One `odds_core.mlb_data_models.MlbProbablePitchersRecord` per game; a missing `probablePitcher` yields null name/id fields, deliberately kept as the "not announced" signal. The record also carries MLBAM's `detailedState` as `game_status` ("If Necessary" when `ifNecessary` is `Y`) and `startTimeTBD` as `start_time_tbd`; a game whose team lacks an `id` is a placeholder and is dropped. The stale-data check reads the latest fetch as the MLB fixture calendar, excluding TBD start times and Postponed, Cancelled and If Necessary games ([stale-data check](../operations/health-monitor.md#stale-data-check)).
 3. `odds_lambda.storage.mlb_pitcher_writer.MlbPitcherWriter.insert_snapshots` is append-only, `ON CONFLICT DO NOTHING` on `(game_pk, fetched_at)`. All records in one run share one `fetched_at`, and it returns the input count, not rows inserted.
 
 The job raises unless `ctx.sport` is `baseball_mlb`.

@@ -228,7 +228,12 @@ async def main(ctx: JobContext) -> None:
     try:
         async with job_alert_context(schedule_job_name):
             logger.info("fetch_oddsportal_results_started", sport=sport)
-            await process_results(sport=sport)
+            stats = await process_results(sport=sport)
+            if stats.errors:
+                raise RuntimeError(
+                    f"{schedule_job_name} failed to settle {len(stats.errors)} event(s); "
+                    f"first: {stats.errors[0]}"
+                )
     finally:
         # Self-schedule: run again tomorrow at 08:00 UTC, regardless of outcome.
         # This is a once-a-day results sweep, not a proximity-driven fetch, so

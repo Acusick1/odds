@@ -137,7 +137,10 @@ class TestProximityScheduling:
             ),
             patch("odds_core.config.get_settings") as mock_settings,
             patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
-            patch("odds_core.alerts.send_job_warning", new_callable=AsyncMock),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal.require_rows_for_fixtures",
+                new_callable=AsyncMock,
+            ),
             patch(
                 "odds_lambda.scheduling.decision.get_next_kickoff",
                 new_callable=AsyncMock,
@@ -172,7 +175,6 @@ class TestProximityScheduling:
             ),
             patch("odds_core.config.get_settings") as mock_settings,
             patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
-            patch("odds_core.alerts.send_job_warning", new_callable=AsyncMock),
             patch(
                 "odds_lambda.scheduling.decision.get_next_kickoff",
                 new_callable=AsyncMock,
@@ -180,7 +182,8 @@ class TestProximityScheduling:
             ),
         ):
             mock_settings.return_value.scheduler.dry_run = False
-            await main(JobContext())
+            with pytest.raises(RuntimeError, match="simulated timeout"):
+                await main(JobContext())
 
         # Only the pre-schedule fires
         assert mock_backend.schedule_next_execution.call_count == 1

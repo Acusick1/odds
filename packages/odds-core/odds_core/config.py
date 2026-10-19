@@ -205,7 +205,27 @@ class AlertConfig(BaseSettings):
     # Data staleness monitoring
     stale_data_hours: int = Field(
         default=2,
-        description="Hours without new data before triggering stale data alert",
+        description="Minimum active hours without a source's rows before a stale data alert",
+    )
+    stale_cadence_multiplier: float = Field(
+        default=3.0,
+        description="Polling intervals of a source's job that may pass without rows before alert",
+    )
+
+    stale_last_interval_multiplier: float = Field(
+        default=1.5,
+        description="Intervals the job chose at its last write that may pass before alert",
+    )
+    stale_reminder_minutes: int = Field(
+        default=360,
+        description="Minutes between repeat alerts while a source stays stale",
+    )
+
+    mlb_season_first_month: int = Field(
+        default=3, description="First month the MLB schedule must be fresh every day"
+    )
+    mlb_season_last_month: int = Field(
+        default=11, description="Last month the MLB schedule must be fresh every day"
     )
 
     # Alert rate limiting
@@ -230,6 +250,7 @@ class AlertConfig(BaseSettings):
             "fetch-oddsportal-results-epl": 26,
             "fetch-oddsportal-mlb": 12,
             "fetch-oddsportal-results-mlb": 26,
+            "fetch-mlb-probables": 30,
             "check-health": 2,
         },
         description="Max hours between job completions before alerting (job_name -> hours)",

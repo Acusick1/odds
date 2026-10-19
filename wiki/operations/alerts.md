@@ -46,8 +46,9 @@ On AWS, the Lambda handler also sends its own critical on any exception ([lambda
 |---|---|---|
 | `job_failure:<job>` | `odds_core.alerts.job_alert_context` | critical |
 | `heartbeat:<job>` | `odds_core.alerts.job_alert_context` on success | info, never sent to Discord |
-| `scrape_empty:<job>`, `job_empty:<job>` | `odds_core.alerts.send_job_warning` in the scrape and Betfair jobs | warning |
-| `stale_data` | `odds_lambda.health_monitor.HealthMonitor` | warning |
+| `job_empty:<job>` | `odds_core.alerts.send_job_warning` in the Polymarket odds job | warning |
+| `mlb_calendar_stale` (March to November, same repeat window) | `odds_lambda.health_monitor.HealthMonitor` | critical |
+| `stale_data:<source>:<sport>` (repeats every `stale_reminder_minutes`, not the common window) | `odds_lambda.health_monitor.HealthMonitor` | critical |
 | `consecutive_failures` | `odds_lambda.health_monitor.HealthMonitor` | error |
 | `quota_low`, `quota_critical` | `odds_lambda.health_monitor.HealthMonitor` | warning, critical |
 | `data_quality_errors` | `odds_lambda.health_monitor.HealthMonitor` | warning |

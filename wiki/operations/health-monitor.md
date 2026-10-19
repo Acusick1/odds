@@ -5,6 +5,12 @@ description: HealthMonitor, the check-health job's six checks, heartbeat purge, 
 sources:
   - odds_lambda.health_monitor.HealthMonitor
   - odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats
+  - odds_lambda.health_monitor.HealthMonitor.check_stale_sources
+  - odds_lambda.health_monitor.StaleSource
+  - odds_lambda.health_monitor.collection_sources
+  - odds_lambda.collection_calendar.CollectionSource
+  - odds_lambda.collection_calendar.fixture_calendar
+  - odds_lambda.collection_calendar.active_hours_between
   - odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats
   - odds_lambda.health_monitor.HealthMonitor.check_consecutive_failures
   - odds_lambda.health_monitor.HealthMonitor.check_api_quota
@@ -28,7 +34,7 @@ status: stable
 
 `odds_lambda.jobs.check_health.main` runs `odds_lambda.health_monitor.check_system_health` inside `job_alert_context("check-health")` and then books itself 60 minutes ahead through a raw backend call (no pre-schedule; see [self-scheduling](../scheduling/self-scheduling.md)). It is global and in the default production `odds_core.config.SchedulerConfig.bootstrap_jobs`, so it runs on the mini-PC against the production database, where every job's heartbeat lands ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Nothing alerts when the host itself stops (#489). `odds_lambda.health_monitor.check_system_health` collects `odds_lambda.health_monitor.HealthMetrics`, then runs, in order:
 
-1. `odds_lambda.health_monitor.HealthMonitor.check_stale_data`: hours since `max(OddsSnapshot.snapshot_time)` over all sources versus `stale_data_hours` (2). An empty table is unhealthy.
+1. `odds_lambda.health_monitor.HealthMonitor.check_stale_sources`: per collection source and sport, active hours without a new snapshot versus a threshold derived from the source's cadence, only while the database has fixtures the source should price. Each stale source sends its own critical `stale_data:<source>:<sport>` ([Stale-data check](#stale-data-check)).
 2. `odds_lambda.health_monitor.HealthMonitor.check_consecutive_failures`: leading run of `success=False` among the latest 10 `odds_core.models.FetchLog` rows versus `consecutive_failures_threshold` (3). It reads rows of any sport or source; API outages write no row (#472) and `odds_lambda.jobs.fetch_betfair_exchange` writes `success=False` when a run stores no snapshots, so those runs count as failures ([fetch logs](../collection/odds-ingestion-service.md#fetch-logs)).
 3. `odds_lambda.health_monitor.HealthMonitor.check_api_quota`: `api_quota_remaining` of the latest row that has one, divided by `settings.api.quota`; below 0.1 alert `quota_critical`, below 0.2 `quota_low`. This is the same fraction fetch-odds applies, but rate-limited ([odds-api-quota](../collection/odds-api-quota.md)).
 4. `odds_lambda.health_monitor.HealthMonitor.check_data_quality`: `error` plus `critical` `odds_core.models.DataQualityLog` rows in 24 h (each query capped at 1000) versus `data_quality_error_threshold` (10). The validator itself only emits `warning` and `error`, so `critical` never occurs ([odds-validator](../storage/odds-validator.md)).
@@ -36,6 +42,26 @@ status: stable
 6. `odds_lambda.health_monitor.HealthMonitor.check_event_identity`: per sport, matches stored as several events, EPL fixtures stored twice in a season, and events still `scheduled` a day after a kick-off in the last seven days, each its own warning (`duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `stale_scheduled_events:<sport>`). Nothing is merged; `odds events merge-twins --sport <sport> --apply` clears twins ([Event merge](../storage/event-merge.md#detection)).
 
 Then `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` runs on every health check: it deletes `heartbeat:%` rows older than `heartbeat_retention_days` (7) and is the only retention sweep in the system.
+
+## Stale-data check
+
+`odds_lambda.health_monitor.collection_sources` lists the `odds_lambda.collection_calendar.CollectionSource` each collection job declares at module level: its name, the `raw_data["source"]` tag of its snapshots (`odds_core.snapshot_sources.SnapshotSource`; the Odds API writes none, so untagged snapshots are its), cadence, a fixture horizon per sport and whether it honours the overnight window. The check runs for each source whose job is in `odds_core.config.SchedulerConfig.bootstrap_jobs` and each sport the job covers (`odds_lambda.scheduling.jobs.resolve_target_sports`) and flags a source when all of these hold:
+
+- `odds_lambda.collection_calendar.fixture_calendar` finds a fixture of the sport inside the source's horizon, so international breaks, off-seasons and the days before the first fixture raise nothing. EPL fixtures are SCHEDULED events; MLB fixtures are the games of the latest `odds_core.mlb_data_models.MlbProbablePitchers` fetch (every row of a fetch shares one `fetched_at`, and the scheduled job is the only writer) when that fetch is under 36 h old, with a priced game type, a known start time and a status other than Postponed, Cancelled or If Necessary. So the MLB calendar does not depend on the monitored collectors creating events. When no fetch is under 36 h old between `mlb_season_first_month` and `mlb_season_last_month` (March to November), `odds_lambda.health_monitor.HealthMonitor.check_mlb_calendar` sends the critical `mlb_calendar_stale` instead of letting the MLB checks go quiet.
+- The source has written a snapshot for the sport before, the same no-history rule as heartbeats, so a job that was never enabled raises nothing (#384).
+- The job's own failure alert is not a recent, unanswered one: `job_failure:<job>` newer than its heartbeat and newer than the larger of the threshold and the reminder window. While that holds, the job's critical covers the outage and no stale alert is added; an older failure with no heartbeat since does not suppress.
+- `odds_lambda.collection_calendar.active_hours_between` the later of the last snapshot and the moment the next kickoff entered the horizon, and now, excluding the sport's overnight window when the job honours it (`odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS`), exceeds the largest of `stale_data_hours` (2), `stale_cadence_multiplier` (3) times the job's cadence interval at the tier of the next kickoff, and `stale_last_interval_multiplier` (1.5) times the interval at the tier the next kickoff had when the last snapshot was written. The last term allows for the wait the job chose then, which can be longer than the one that applies now.
+
+A stale source alerts once and then repeats every `stale_reminder_minutes` (360) while it stays stale ([alerts](alerts.md)). The window is a rate limit, not a state: a source that recovers and goes stale again within 6 h of its last stale alert is muted until the window ends. The last-snapshot lookup takes the newest matching row through the `snapshot_time` index (`ORDER BY snapshot_time DESC LIMIT 1`), so a source with no recent rows scans back further.
+
+| Source | Fixture horizon | Overnight window | Threshold (active hours) |
+|---|---|---|---|
+| OddsPortal | 48 h | yes | 2 h under 3 h to kickoff, 3 h at 3-12 h, 6 h beyond (cadence 0.5, 1, then 2 h) |
+| Betfair Exchange | 72 h EPL, 6 h MLB | yes | 2 h under 12 h to kickoff, 6 h beyond (cadence 0.25, 0.5, then 2 h) |
+| Odds API | 48 h EPL | no | 2 h under 3 h to kickoff, 9 h at 3-12 h, 36 h at 12-24 h, 72 h at 24-72 h (cadence 0.5, 3, 12, 24 h) |
+| Polymarket odds | 5 days | yes | not checked until the job is in `bootstrap_jobs`; then 2 h under 3 h to kickoff, then 3 times the tier step (0.25 to 2 h, floored) |
+
+The thresholds are computed from each job's cadence, not configured. The Odds API horizon bounds the gap measured before a fixture is 12 h away, so that source is effectively checked only inside 12 h of kickoff. Betfair's MLB horizon is short because its markets are posted late, and its MLB name parsing is a separate defect.
 
 ## Heartbeats
 
@@ -51,7 +77,7 @@ A job inside `odds_core.alerts.job_alert_context` inserts `heartbeat:<name>` on 
 | fetch-betfair-exchange | yes | none |
 | fetch-polymarket-odds (per sport) | yes | none until the job is bootstrapped |
 | score-predictions | yes | none |
-| fetch-mlb-probables | yes | none |
+| fetch-mlb-probables | yes | 30 h |
 | fetch-espn-fixtures | yes | none |
 | fetch-odds, fetch-scores, fetch-polymarket, backfill-polymarket, agent-run | no: not wrapped in `odds_core.alerts.job_alert_context` (#438) | none |
 

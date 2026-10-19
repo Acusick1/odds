@@ -153,7 +153,7 @@ def _decide_from_kickoff(
         )
 
     hours_until = (next_kickoff - now).total_seconds() / 3600
-    tier = _classify(hours_until)
+    tier = classify_tier(hours_until)
     interval = cadence.interval_for(tier)
 
     return ScheduleDecision(
@@ -358,7 +358,7 @@ async def decide_backward_resilient(
         )
 
 
-def _classify(hours_until: float) -> FetchTier:
+def classify_tier(hours_until: float) -> FetchTier:
     """Classify hours-until-kickoff into a canonical ``FetchTier``.
 
     Reads the boundaries straight off ``FetchTier.max_hours`` so the canonical

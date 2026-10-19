@@ -102,7 +102,7 @@ class TestDecideForward:
         [
             # Exactly on a boundary: strict ``<`` means the game falls into the
             # NEXT tier up, not the tier whose ``max_hours`` it equals. This is
-            # where _classify intentionally differs from calculate_tier (``<=``).
+            # where classify_tier intentionally differs from calculate_tier (``<=``).
             (0.0, FetchTier.CLOSING, 0.5),  # IN_PLAY is only < 0
             (3.0, FetchTier.PREGAME, 3.0),  # not CLOSING (max 3.0)
             (12.0, FetchTier.SHARP, 12.0),  # not PREGAME (max 12.0)
