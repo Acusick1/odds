@@ -14,16 +14,15 @@ from odds_analytics.retail_ev import (
     _FEATURE_GROUPS,
     LOSS_WEIGHT_SCALE,
     RETAIL_KINDS,
-    Outcome,
     RetailEvDataset,
     RetailEvFeatures,
     RetailEvRow,
     build_event_rows,
-    market_outcomes,
 )
 from odds_analytics.standings_features import epl_season_key
 from odds_analytics.training.config import RetailEvFeatureGroupName
 from odds_core.bookmakers import canonical_bookmaker_key
+from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.odds_math import devig_probabilities
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotKind, snapshot_kind

@@ -11,6 +11,7 @@ sources:
   - odds_lambda.health_monitor.MissingBetfairClose
   - odds_core.betfair_close.LIVE_CLOSE_WINDOW
   - odds_core.betfair_close.is_in_play
+  - odds_core.betfair_close.complete_exchange_prices
   - odds_lambda.health_monitor.collection_sources
   - odds_lambda.collection_calendar.CollectionSource
   - odds_lambda.collection_calendar.fixture_calendar
@@ -25,6 +26,8 @@ sources:
   - odds_lambda.jobs.check_health.main
   - odds_core.config.AlertConfig
   - odds_core.config.SchedulerConfig.bootstrap_jobs
+  - odds_core.config.BetfairConfig.enabled
+  - odds_lambda.scheduling.jobs.resolve_target_sports
   - odds_core.models.FetchLog
   - odds_cli.commands.status
   - odds_cli.commands.status._show_quota
@@ -69,14 +72,16 @@ The thresholds are computed from each job's cadence, not configured. The Odds AP
 
 ## Betfair close check
 
-`odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes` guards the close that [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md) takes from the live Betfair job. FDUK can leave Betfair closing prices blank for whole matchdays (2026-04-20 to 2026-05-04), and then the live snapshot is the only close. An EPL event is missing its close when all of these hold:
+`odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes` records which EPL events lack the close that [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md) takes from the live Betfair job. FDUK can leave Betfair closing prices blank for whole matchdays (2026-04-20 to 2026-05-04), and then the live snapshot is the only close. An EPL event is missing its close when all of these hold:
 
-- Its kick-off passed within `odds_core.config.AlertConfig.betfair_close_lookback_hours` (24).
-- `fetch-betfair-exchange` is in `odds_core.config.SchedulerConfig.bootstrap_jobs`, covers `soccer_epl`, and has written an EPL snapshot before.
-- Its status is not postponed or cancelled, and some snapshot of any source falls in the 6 h before kick-off, so a ghost or an unannounced postponement raises nothing.
-- No live Betfair snapshot (`odds_core.snapshot_sources.SnapshotSource.BETFAIR_API`) that is not in-play (`odds_core.betfair_close.is_in_play`) lies within `odds_core.betfair_close.LIVE_CLOSE_WINDOW` (30 min) before kick-off. The retail-EV builder uses the same window and in-play test.
+- Its kick-off passed within `odds_core.config.AlertConfig.betfair_close_lookback_hours` (24; environment variable `BETFAIR_CLOSE_LOOKBACK_HOURS`, since `odds_core.config.AlertConfig` has no prefix).
+- `odds_core.config.BetfairConfig.enabled` is true, `fetch-betfair-exchange` is in `odds_core.config.SchedulerConfig.bootstrap_jobs`, `soccer_epl` is among its target sports (`odds_lambda.scheduling.jobs.resolve_target_sports`), and Betfair has written an EPL snapshot before.
+- Its status is not postponed or cancelled, and it has at least one live Betfair snapshot (`odds_core.snapshot_sources.SnapshotSource.BETFAIR_API`) in the 72 h before kick-off. A ghost, an unannounced postponement and a twin whose prices sit on the other event therefore raise nothing.
+- No live Betfair snapshot within `odds_core.betfair_close.LIVE_CLOSE_WINDOW` (30 min) before kick-off is both not in-play (`odds_core.betfair_close.is_in_play`) and priced for every outcome (`odds_core.betfair_close.complete_exchange_prices`). The retail-EV builder uses the same two tests for its close.
 
-The missing events of a run are one critical `missing_betfair_close` listing every event, so a matchday cannot storm. Its `alert_history` context holds the event ids, and an event named in an alert inside the lookback is not reported again; the common `alert_rate_limit_minutes` window still applies between alerts. The check reads the snapshot's presence, not its price quality, so a snapshot with a wide back book (ADR-0014) still counts. The alert fires after kick-off, when the close cannot be collected; it shows that the live job missed the window, so the FDUK fallback or a gap is known before a retail-EV evaluation.
+The missing events of a run are one critical `missing_betfair_close` listing every event, so a matchday cannot storm. Its `alert_history` context holds the event ids. A later run reports only events not named in an alert inside the lookback, so an event drops out of `issues_detected` once its alert was recorded; a run whose send was rate-limited (`odds_core.config.AlertConfig.alert_rate_limit_minutes`) records nothing and lists the events again next run. The check reads the snapshot's prices, not their quality, so a wide back book (ADR-0014) still counts.
+
+The alert fires after kick-off, when the close cannot be collected. It is a coverage record for the retail-EV evaluation and does not catch a gap in time to fill it; protection before kick-off is tracked in [#562](https://github.com/Acusick1/odds/issues/562).
 
 ## Heartbeats
 

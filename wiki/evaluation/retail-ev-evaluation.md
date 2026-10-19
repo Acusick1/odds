@@ -62,7 +62,7 @@ Both CIs are event-clustered percentile bootstraps drawn from the spec's resampl
 
 `odds_analytics.retail_ev_evaluation.coverage` reports:
 
-- the window events, by status, and the share whose snapshots include an FDUK closing price, a live OddsPortal snapshot, and a live Betfair snapshot within `odds_core.betfair_close.LIVE_CLOSE_WINDOW` before kick-off;
+- the window events, by status, and the share whose snapshots include an FDUK closing price, a live OddsPortal snapshot, and a live Betfair snapshot within `odds_core.betfair_close.LIVE_CLOSE_WINDOW` before kick-off (the window the [Betfair close check](../operations/health-monitor.md#betfair-close-check) alerts on);
 - the scored events and rows, and the events and rows before the window;
 - each unscored window event with its status and those three source flags, and the window's drop counts;
 - runs of at least `odds_analytics.retail_ev_evaluation.OUTAGE_MIN_EVENTS` consecutive window events with no live OddsPortal snapshot, and with no live Betfair snapshot near kick-off;

@@ -18,11 +18,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from odds_core.betfair_close import LIVE_CLOSE_WINDOW, is_in_play
+from odds_core.betfair_close import LIVE_CLOSE_WINDOW, complete_exchange_prices, is_in_play
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
+from odds_core.market_prices import THREE_WAY_MARKET, outcome_names
 from odds_core.models import AlertHistory, Event, EventStatus, OddsSnapshot
-from odds_core.snapshot_sources import SnapshotSource
+from odds_core.snapshot_sources import SnapshotKind, SnapshotSource
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,7 +47,7 @@ STALE_SCHEDULED_AGE = timedelta(hours=24)
 STALE_SCHEDULED_WINDOW = timedelta(days=7)
 BETFAIR_CLOSE_SPORT = "soccer_epl"
 BETFAIR_CLOSE_JOB = "fetch-betfair-exchange"
-PRICED_BEFORE_KICKOFF = timedelta(hours=6)
+BETFAIR_HISTORY_WINDOW = timedelta(hours=72)
 BETFAIR_CLOSE_ALERT_TYPE = "missing_betfair_close"
 
 
@@ -340,14 +341,19 @@ class HealthMonitor:
 
         An event is checked from its kick-off until ``betfair_close_lookback_hours``
         later, when the Betfair job is bootstrapped and has written EPL snapshots
-        before. It is skipped when its status is postponed or cancelled, or when no
-        source priced it in the ``PRICED_BEFORE_KICKOFF`` before kick-off (a ghost
-        or an unannounced postponement). It is missing when no non-in-play live
-        Betfair snapshot lies within ``LIVE_CLOSE_WINDOW`` before kick-off. Events
-        already named in an alert inside the lookback are not reported again.
+        before. It is skipped when its status is postponed or cancelled, or when it
+        has no live Betfair snapshot in the ``BETFAIR_HISTORY_WINDOW`` before
+        kick-off (a ghost, a twin that carries the prices, or an unannounced
+        postponement). It is missing when no non-in-play live Betfair snapshot with
+        a price for every outcome lies within ``LIVE_CLOSE_WINDOW`` before kick-off,
+        the same definition the retail-EV builder uses for its close. Events already
+        named in an alert inside the lookback are not reported again.
         """
         moment = now or datetime.now(UTC)
-        if BETFAIR_CLOSE_JOB not in self.settings.scheduler.bootstrap_jobs:
+        if (
+            not self.settings.betfair.enabled
+            or BETFAIR_CLOSE_JOB not in self.settings.scheduler.bootstrap_jobs
+        ):
             return []
         if BETFAIR_CLOSE_SPORT not in resolve_target_sports(
             BETFAIR_CLOSE_JOB, self.settings.data_collection.sports
@@ -385,18 +391,19 @@ class HealthMonitor:
             if event.id in already_alerted:
                 continue
             kickoff = event.commence_time
-            priced = (
+            betfair_before = (
                 await self.session.execute(
                     select(OddsSnapshot.id)
                     .where(
                         OddsSnapshot.event_id == event.id,
-                        OddsSnapshot.snapshot_time >= kickoff - PRICED_BEFORE_KICKOFF,
+                        tag == SnapshotSource.BETFAIR_API.value,
+                        OddsSnapshot.snapshot_time >= kickoff - BETFAIR_HISTORY_WINDOW,
                         OddsSnapshot.snapshot_time <= kickoff,
                     )
                     .limit(1)
                 )
             ).first()
-            if priced is None:
+            if betfair_before is None:
                 continue
             closes = (
                 await self.session.execute(
@@ -408,7 +415,15 @@ class HealthMonitor:
                     )
                 )
             ).scalars()
-            if any(not is_in_play(raw_data) for raw_data in closes):
+            names = outcome_names(event, THREE_WAY_MARKET)
+            if any(
+                not is_in_play(raw_data)
+                and complete_exchange_prices(
+                    raw_data, SnapshotKind.BETFAIR_LIVE, THREE_WAY_MARKET, names
+                )
+                is not None
+                for raw_data in closes
+            ):
                 continue
             missing.append(
                 MissingBetfairClose(

@@ -10,12 +10,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
-from odds_analytics.retail_ev import (
-    BASELINE_FEATURE,
-    RetailEvFeatures,
-    event_weights,
-    market_outcomes,
-)
+from odds_analytics.retail_ev import BASELINE_FEATURE, RetailEvFeatures, event_weights
 from odds_analytics.retail_ev_evaluation import (
     BootstrapSpec,
     EvaluationData,
@@ -35,6 +30,7 @@ from odds_analytics.retail_ev_evaluation import (
 )
 from odds_analytics.retail_ev_metrics import BootstrapEstimate
 from odds_analytics.training.config import RetailEvArm, XGBoostConfig
+from odds_core.market_prices import market_outcomes
 
 TRAINING_START = datetime(2024, 8, 1, tzinfo=UTC)
 WINDOW_START = datetime(2025, 8, 1, tzinfo=UTC)
