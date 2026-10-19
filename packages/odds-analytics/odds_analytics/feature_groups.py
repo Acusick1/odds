@@ -198,11 +198,7 @@ async def collect_event_data(
     # Derive closing snapshot from already-loaded snapshots (avoid extra DB query)
     closing_tier_value = config.closing_tier.value
     closing_candidates = [s for s in all_snapshots if s.fetch_tier == closing_tier_value]
-    closing_snapshot = (
-        None
-        if config.target_type == "retail_ev"
-        else _select_closing_snapshot(closing_candidates, event, config)
-    )
+    closing_snapshot = _select_closing_snapshot(closing_candidates, event, config)
 
     # PM context (optional)
     pm_context: PMEventContext | None = None
@@ -709,17 +705,6 @@ def _extract_static_feature_parts(
                 logger.debug("injury_feature_extraction_failed", event_id=event.id)
                 parts.append(nan_block_inj)
 
-    parts.extend(_extract_event_context_parts(bundle, config))
-    return parts
-
-
-def _extract_event_context_parts(
-    bundle: EventDataBundle, config: FeatureConfig
-) -> list[np.ndarray]:
-    """Feature arrays of the configured groups that depend on the event, not a snapshot."""
-    event = bundle.event
-    parts: list[np.ndarray] = []
-
     # --- Rest/schedule features (NaN-fill when unavailable to keep row) ---
     if "rest" in config.feature_groups:
         from odds_analytics.schedule_features import RestScheduleFeatures, extract_rest_features
@@ -1071,6 +1056,7 @@ class PreparedFeatureData:
         static_features: np.ndarray | None = None,
         static_feature_names: list[str] | None = None,
         sample_weights: np.ndarray | None = None,
+        commence_times: np.ndarray | None = None,
     ) -> None:
         self.X = X
         self.y = y
@@ -1080,6 +1066,7 @@ class PreparedFeatureData:
         self.static_features = static_features
         self.static_feature_names = static_feature_names
         self.sample_weights = sample_weights
+        self.commence_times = commence_times
 
     @property
     def num_samples(self) -> int:

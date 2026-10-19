@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from odds_analytics.retail_ev import event_weights
 from odds_analytics.retail_ev_metrics import (
-    event_weights,
     mse_gain,
     pick_ev_gain,
     weighted_mse,

@@ -743,6 +743,8 @@ def create_objective(
     masks_val: ndarray | None = None,
     sample_weights_train: ndarray | None = None,
     sample_weights_val: ndarray | None = None,
+    commence_times_train: ndarray | None = None,
+    commence_times_val: ndarray | None = None,
 ) -> Callable[[Any], float]:
     """
     Create objective function for hyperparameter optimization.
@@ -782,6 +784,10 @@ def create_objective(
     """
     if config.tuning is None or not config.tuning.search_spaces:
         raise ValueError("No search spaces defined in tuning configuration")
+    if config.training.features.target_type == "retail_ev" and (
+        sample_weights_train is None or commence_times_train is None
+    ):
+        raise ValueError("retail_ev tuning needs sample weights and commence times")
 
     strategy_type = config.training.strategy_type
     search_spaces = config.tuning.search_spaces
@@ -875,6 +881,7 @@ def create_objective(
         trial_event_ids_val = event_ids_val
         trial_masks_train, trial_masks_val = masks_train, masks_val
         trial_weights_train, trial_weights_val = sample_weights_train, sample_weights_val
+        trial_kickoffs_train, trial_kickoffs_val = commence_times_train, commence_times_val
 
         if "feature_groups" in feature_params and precomputed_features is not None:
             fg_key = feature_params["feature_groups"]
@@ -894,6 +901,8 @@ def create_objective(
                 trial_masks_val = val_data.masks if val_data else None
                 trial_weights_train = data.sample_weights_train
                 trial_weights_val = val_data.sample_weights if val_data else None
+                trial_kickoffs_train = data.commence_times_train
+                trial_kickoffs_val = data.commence_times_val
                 logger.debug(
                     "using_precomputed_features",
                     trial_number=trial.number,
@@ -999,12 +1008,18 @@ def create_objective(
                     if trial_weights_train is not None and trial_weights_val is not None
                     else trial_weights_train
                 )
+                kickoffs_full = (
+                    np.concatenate([trial_kickoffs_train, trial_kickoffs_val])
+                    if trial_kickoffs_train is not None and trial_kickoffs_val is not None
+                    else trial_kickoffs_train
+                )
             else:
                 X_full = trial_X_train
                 y_full = trial_y_train
                 static_full = trial_static_train
                 masks_full = trial_masks_train
                 weights_full = trial_weights_train
+                kickoffs_full = trial_kickoffs_train
 
             # Recombine event_ids (train + val, chronological order preserved)
             event_ids_full = None
@@ -1032,6 +1047,7 @@ def create_objective(
                 event_ids=event_ids_full,
                 masks=masks_full,
                 sample_weights=weights_full,
+                commence_times=kickoffs_full,
             )
 
             # Log mean and std CV metrics if trial has set_user_attr (for MLflow logging)

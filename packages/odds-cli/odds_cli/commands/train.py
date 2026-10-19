@@ -355,6 +355,7 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             static_test=data_result.static_test,
                             sample_weights=data_result.sample_weights_train,
                             sample_weights_test=data_result.sample_weights_test,
+                            commence_times=data_result.commence_times_train,
                             **mask_kw,
                         )
                     except Exception:
@@ -994,6 +995,8 @@ async def _run_tuning_async(
             event_ids_val=data_result.event_ids_val,
             sample_weights_train=data_result.sample_weights_train,
             sample_weights_val=val_data.sample_weights if val_data else None,
+            commence_times_train=data_result.commence_times_train,
+            commence_times_val=data_result.commence_times_val,
             **tune_mask_obj_kw,
         )
 

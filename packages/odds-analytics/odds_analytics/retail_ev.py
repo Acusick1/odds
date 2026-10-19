@@ -8,9 +8,10 @@ exchange price at or before t as the close.
 from __future__ import annotations
 
 import bisect
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -33,7 +34,7 @@ DECISION_WINDOW = timedelta(days=7)
 DECISION_CUTOFF = timedelta(minutes=5)
 LIVE_CLOSE_WINDOW = timedelta(minutes=30)
 MAX_EXCHANGE_AGE = timedelta(hours=2)
-# A wider back book is a thin market whose best backs are not a price.
+# A wider back book is a thin market whose best backs are not a price (ADR-0014).
 MAX_EXCHANGE_OVERROUND = 0.05
 EXCHANGE_BOOKMAKER = "betfair_exchange"
 DRAW_OUTCOME_NAME = "Draw"
@@ -116,12 +117,14 @@ class DropCounts:
     rows_without_exchange: int = 0
     rows_stale_exchange: int = 0
     wide_exchange_snapshots: int = 0
+    prices_outside_roster: Counter[str] = field(default_factory=Counter)
 
     def add(self, other: DropCounts) -> None:
         self.events_without_close += other.events_without_close
         self.rows_without_exchange += other.rows_without_exchange
         self.rows_stale_exchange += other.rows_stale_exchange
         self.wide_exchange_snapshots += other.wide_exchange_snapshots
+        self.prices_outside_roster.update(other.prices_outside_roster)
 
 
 @dataclass
@@ -142,15 +145,26 @@ class RetailEvDataset:
         return np.array([r.baseline for r in self.rows], dtype=np.float64)
 
     @property
-    def event_weights(self) -> np.ndarray:
-        from odds_analytics.retail_ev_metrics import event_weights
+    def commence_times(self) -> np.ndarray:
+        return np.array(
+            [r.commence_time.astimezone(UTC).replace(tzinfo=None) for r in self.rows],
+            dtype="datetime64[us]",
+        )
 
+    @property
+    def event_weights(self) -> np.ndarray:
         return event_weights(self.event_ids)
 
     @property
     def loss_weights(self) -> np.ndarray:
         odds = np.array([r.retail_decimal for r in self.rows], dtype=np.float64)
         return self.event_weights / odds**2
+
+
+def event_weights(event_ids: np.ndarray) -> np.ndarray:
+    """``w_event = 1 / (rows in the event)`` for each row."""
+    _, inverse, counts = np.unique(event_ids, return_inverse=True, return_counts=True)
+    return 1.0 / counts[inverse]
 
 
 def _outcome_names(event: Event, market: str) -> dict[str, Outcome]:
@@ -223,7 +237,10 @@ def _exchange_price(
 
 
 def build_event_rows(
-    event: Event, snapshots: Sequence[OddsSnapshot], market: str
+    event: Event,
+    snapshots: Sequence[OddsSnapshot],
+    market: str,
+    max_exchange_overround: float = MAX_EXCHANGE_OVERROUND,
 ) -> tuple[list[RetailEvRow], DropCounts]:
     """Build every decision row for one event from its snapshots, in time order.
 
@@ -231,7 +248,7 @@ def build_event_rows(
     ``LIVE_CLOSE_WINDOW`` before kick-off, else the FDUK closing price (stamped at
     kick-off). The exchange price at t comes only from live Betfair or FDUK opening
     snapshots at or before t, so nothing after t enters a row's inputs. Exchange
-    prices whose back overround exceeds ``MAX_EXCHANGE_OVERROUND`` are not prices.
+    prices whose back overround exceeds ``max_exchange_overround`` are not prices.
     """
     drops = DropCounts()
     outcomes = market_outcomes(market)
@@ -251,7 +268,7 @@ def build_event_rows(
         price = _exchange_price(snapshot, kind, market, names, outcomes)
         if price is None:
             continue
-        if price.overround > MAX_EXCHANGE_OVERROUND:
+        if price.overround > max_exchange_overround:
             drops.wide_exchange_snapshots += 1
             continue
         if kind is SnapshotKind.FDUK_CLOSING:
@@ -278,11 +295,12 @@ def build_event_rows(
         t = snapshot.snapshot_time
         if kind not in RETAIL_KINDS or not window_start <= t <= window_end:
             continue
-        retail = {
-            book: prices
-            for book, prices in _book_prices(snapshot.raw_data, kind, market, names).items()
-            if book in UK_RETAIL_BOOKMAKERS
-        }
+        retail: dict[str, dict[Outcome, float]] = {}
+        for book, prices in _book_prices(snapshot.raw_data, kind, market, names).items():
+            if book in UK_RETAIL_BOOKMAKERS:
+                retail[book] = prices
+            else:
+                drops.prices_outside_roster[book] += len(prices)
         n_candidates = sum(len(p) for p in retail.values())
         if n_candidates == 0:
             continue
@@ -384,33 +402,39 @@ def retail_ev_features(row: RetailEvRow, outcomes: tuple[Outcome, ...]) -> np.nd
 
 
 async def load_retail_ev_dataset(
-    events: Sequence[Event], session: AsyncSession, market: str
+    events: Sequence[Event],
+    session: AsyncSession,
+    market: str,
+    max_exchange_overround: float = MAX_EXCHANGE_OVERROUND,
 ) -> RetailEvDataset:
-    """Decision rows for every event, in the events' order."""
+    """Decision rows for every event, in the events' order, from all its snapshots."""
     from odds_lambda.storage.readers import OddsReader
 
     reader = OddsReader(session)
     dataset = RetailEvDataset()
     for event in events:
         snapshots = await reader.get_snapshots_for_event(event.id)
-        rows, drops = build_event_rows(event, snapshots, market)
+        rows, drops = build_event_rows(event, snapshots, market, max_exchange_overround)
         dataset.rows.extend(rows)
         dataset.drops.add(drops)
+    logger.info(
+        "retail_ev_rows_built",
+        events=len(events),
+        rows=len(dataset.rows),
+        events_without_close=dataset.drops.events_without_close,
+        rows_without_exchange=dataset.drops.rows_without_exchange,
+        rows_stale_exchange=dataset.drops.rows_stale_exchange,
+        wide_exchange_snapshots=dataset.drops.wide_exchange_snapshots,
+        prices_outside_roster=dict(dataset.drops.prices_outside_roster.most_common()),
+    )
     return dataset
 
 
 async def prepare_retail_ev_training_data(
     events: list[Event], session: AsyncSession, config: FeatureConfig
 ) -> PreparedFeatureData:
-    """Feature matrix, targets and loss weights for ``target_type: retail_ev``."""
-    from odds_analytics.feature_groups import (
-        PreparedFeatureData,
-        _extract_event_context_parts,
-        _static_feature_group_names,
-        collect_event_data,
-        filter_completed_events,
-        preload_feature_group_caches,
-    )
+    """Feature matrix, targets, loss weights and kick-off times for ``retail_ev``."""
+    from odds_analytics.feature_groups import PreparedFeatureData, filter_completed_events
     from odds_analytics.training.feature_selection import apply_variance_filter
 
     valid_events = filter_completed_events(events)
@@ -419,36 +443,14 @@ async def prepare_retail_ev_training_data(
 
     market = config.primary_market
     outcomes = market_outcomes(market)
-    sport_key = config.sport_key or valid_events[0].sport_key
-    caches = await preload_feature_group_caches(session, config, sport_key)
-
-    dataset = RetailEvDataset()
-    feature_rows: list[np.ndarray] = []
-    for event in valid_events:
-        bundle = await collect_event_data(
-            event,
-            session,
-            config,
-            standings_cache=caches.standings,
-            match_stats_cache=caches.match_stats,
-            fixtures_df=caches.fixtures_df,
-        )
-        rows, drops = build_event_rows(event, bundle.snapshots, market)
-        dataset.drops.add(drops)
-        if not rows:
-            continue
-        context_parts = _extract_event_context_parts(bundle, config)
-        context = np.concatenate(context_parts) if context_parts else np.empty(0)
-        for row in rows:
-            feature_rows.append(np.concatenate([retail_ev_features(row, outcomes), context]))
-        dataset.rows.extend(rows)
-
+    dataset = await load_retail_ev_dataset(valid_events, session, market)
     if not dataset.rows:
         raise ValueError(f"No retail_ev rows after processing {len(valid_events)} events")
 
-    feature_names = retail_ev_feature_names(outcomes) + _static_feature_group_names(config)
-    X = np.array(feature_rows, dtype=np.float32)
-    X, feature_names, _ = apply_variance_filter(X, feature_names, config.variance_threshold)
+    X = np.array([retail_ev_features(r, outcomes) for r in dataset.rows], dtype=np.float32)
+    X, feature_names, _ = apply_variance_filter(
+        X, retail_ev_feature_names(outcomes), config.variance_threshold
+    )
     y = dataset.targets.astype(np.float32)
     # Mean-one scaling keeps min_child_weight and reg_lambda on their unweighted scale.
     weights = dataset.loss_weights / dataset.loss_weights.mean()
@@ -458,10 +460,6 @@ async def prepare_retail_ev_training_data(
         num_samples=len(y),
         num_events=len(set(dataset.event_ids.tolist())),
         num_features=len(feature_names),
-        events_without_close=dataset.drops.events_without_close,
-        rows_without_exchange=dataset.drops.rows_without_exchange,
-        rows_stale_exchange=dataset.drops.rows_stale_exchange,
-        wide_exchange_snapshots=dataset.drops.wide_exchange_snapshots,
         target_mean=float(np.mean(y)),
         target_std=float(np.std(y)),
     )
@@ -472,4 +470,5 @@ async def prepare_retail_ev_training_data(
         feature_names=feature_names,
         event_ids=dataset.event_ids,
         sample_weights=weights,
+        commence_times=dataset.commence_times,
     )

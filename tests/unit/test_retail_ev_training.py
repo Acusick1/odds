@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from odds_analytics.retail_ev import DECISION_WINDOW
 from odds_analytics.training import (
     DataConfig,
     ExperimentConfig,
@@ -15,7 +16,11 @@ from odds_analytics.training import (
     TrainingConfig,
     XGBoostConfig,
     run_cv,
+    train_with_cv,
 )
+from odds_analytics.training.config import SearchSpace, TuningConfig
+from odds_analytics.training.cross_validation import make_walk_forward_splits
+from odds_analytics.training.tuner import create_objective
 from odds_analytics.training.utils import compute_regression_metrics
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from pydantic import ValidationError
@@ -53,13 +58,24 @@ def config() -> MLTrainingConfig:
 
 
 class TestRetailEvConfig:
-    def test_accepts_context_groups(self) -> None:
-        assert _features(feature_groups=("standings", "match_stats")).target_type == "retail_ev"
+    def test_accepts_defaults(self) -> None:
+        assert _features().target_type == "retail_ev"
+
+    def test_round_trips_through_a_full_dump(self) -> None:
+        assert FeatureConfig(**_features().model_dump()).target_type == "retail_ev"
 
     @pytest.mark.parametrize(
         "overrides",
         [
             {"feature_groups": ("tabular",)},
+            {"feature_groups": ("standings",)},
+            {"feature_groups": ("match_stats",)},
+            {"feature_groups": ("epl_schedule",)},
+            {"outcome": "away"},
+            {"sharp_bookmakers": ["betfair_exchange"]},
+            {"retail_bookmakers": ["bet365"]},
+            {"closing_source_priority": ["football_data_uk"]},
+            {"sampling": {"strategy": "tier"}},
             {"target_bookmaker": "bet365"},
             {"markets": ["totals"], "outcome": "over"},
             {"adapter": "lstm"},
@@ -116,18 +132,31 @@ class TestXGBoostSampleWeights:
         assert eval_rmse == pytest.approx(np.sqrt(expected["mse"]), rel=1e-4)
 
 
+KICKOFF0 = np.datetime64("2025-08-16T14:00", "us")
+
+
+def _kickoffs(event_ids: np.ndarray, spacing_hours: float) -> np.ndarray:
+    return KICKOFF0 + (event_ids * spacing_hours * 3600 * 1e6).astype("timedelta64[us]")
+
+
 class TestRunCvSampleWeights:
     def test_fold_weights_follow_fold_rows(self, config: MLTrainingConfig) -> None:
         event_ids = np.repeat(np.arange(8), 2)
         X = np.arange(16, dtype=float).reshape(-1, 1)
         y = np.zeros(16)
         weights = np.linspace(0.1, 1.6, 16)
-        strategy = MagicMock()
-        strategy.train_from_config.return_value = dict.fromkeys(
-            ("train_mse", "train_mae", "train_r2", "val_mse", "val_mae", "val_r2"), 0.0
-        )
+        strategy = _stub_strategy()
 
-        run_cv(strategy, config, X, y, ["x"], event_ids=event_ids, sample_weights=weights)
+        run_cv(
+            strategy,
+            config,
+            X,
+            y,
+            ["x"],
+            event_ids=event_ids,
+            sample_weights=weights,
+            commence_times=_kickoffs(event_ids, 24 * 7),
+        )
 
         assert strategy.train_from_config.call_count == 2
         for call in strategy.train_from_config.call_args_list:
@@ -142,17 +171,122 @@ class TestRunCvSampleWeights:
     def test_weighted_cv_metric_end_to_end(self, config: MLTrainingConfig) -> None:
         rng = np.random.default_rng(5)
         event_ids = np.repeat(np.arange(8), 25)
+        kickoffs = _kickoffs(event_ids, 24 * 7)
         X = rng.normal(size=(200, 2))
         y = X[:, 0] + rng.normal(size=200)
         weights = rng.uniform(0.1, 3.0, size=200)
-        weighted = run_cv(
-            XGBoostLineMovementStrategy(),
-            config,
-            X,
-            y,
-            ["a", "b"],
+
+        def mean_val_mse(w: np.ndarray) -> float:
+            result = run_cv(
+                XGBoostLineMovementStrategy(),
+                config,
+                X,
+                y,
+                ["a", "b"],
+                event_ids,
+                sample_weights=w,
+                commence_times=kickoffs,
+            )
+            return result.mean_val_mse
+
+        assert mean_val_mse(weights) != pytest.approx(mean_val_mse(np.ones(200)))
+
+
+def _stub_strategy() -> MagicMock:
+    strategy = MagicMock()
+    strategy.train_from_config.return_value = dict.fromkeys(
+        ("train_mse", "train_mae", "train_r2", "val_mse", "val_mae", "val_r2"), 0.0
+    )
+    return strategy
+
+
+class TestRetailEvWalkForwardGap:
+    def test_drops_training_events_within_the_decision_window(self) -> None:
+        event_ids = np.repeat(np.arange(8), 2)
+        splits = make_walk_forward_splits(
             event_ids,
-            sample_weights=weights,
+            min_train_events=4,
+            val_step_events=2,
+            commence_times=_kickoffs(event_ids, 84),
+            gap=DECISION_WINDOW,
         )
-        unweighted = run_cv(XGBoostLineMovementStrategy(), config, X, y, ["a", "b"], event_ids)
-        assert weighted.mean_val_mse != pytest.approx(unweighted.mean_val_mse)
+        train_events = [sorted(set(event_ids[train].tolist())) for train, _ in splits]
+        val_events = [sorted(set(event_ids[val].tolist())) for _, val in splits]
+        assert val_events == [[4, 5], [6, 7]]
+        assert train_events == [[0, 1, 2], [0, 1, 2, 3, 4]]
+
+    def test_run_cv_applies_the_gap_for_retail_ev(self, config: MLTrainingConfig) -> None:
+        event_ids = np.repeat(np.arange(8), 2)
+        strategy = _stub_strategy()
+        run_cv(
+            strategy,
+            config,
+            np.zeros((16, 1)),
+            np.zeros(16),
+            ["x"],
+            event_ids=event_ids,
+            sample_weights=np.ones(16),
+            commence_times=_kickoffs(event_ids, 84),
+        )
+        first_fold = strategy.train_from_config.call_args_list[0].kwargs
+        assert len(first_fold["X_train"]) == 3 * 2
+
+    def test_gap_needs_commence_times(self) -> None:
+        with pytest.raises(ValueError, match="commence_times"):
+            make_walk_forward_splits(np.arange(8), 4, 2, gap=DECISION_WINDOW)
+
+
+class TestRetailEvRequiresWeights:
+    @pytest.mark.parametrize("missing", ["sample_weights", "commence_times"])
+    def test_run_cv(self, config: MLTrainingConfig, missing: str) -> None:
+        event_ids = np.repeat(np.arange(8), 2)
+        inputs = {"sample_weights": np.ones(16), "commence_times": _kickoffs(event_ids, 168)}
+        inputs[missing] = None
+        with pytest.raises(ValueError, match="retail_ev"):
+            run_cv(
+                _stub_strategy(),
+                config,
+                np.zeros((16, 1)),
+                np.zeros(16),
+                ["x"],
+                event_ids,
+                **inputs,
+            )
+
+    def test_train_with_cv(self, config: MLTrainingConfig) -> None:
+        event_ids = np.repeat(np.arange(8), 2)
+        with pytest.raises(ValueError, match="retail_ev"):
+            train_with_cv(
+                _stub_strategy(),
+                config,
+                np.zeros((16, 1)),
+                np.zeros(16),
+                ["x"],
+                event_ids=event_ids,
+            )
+
+    def test_rejects_non_walk_forward(self, config: MLTrainingConfig) -> None:
+        kfold = config.model_copy(deep=True)
+        kfold.training.data.cv_method = "kfold"
+        kfold.training.data.n_folds = 2
+        event_ids = np.repeat(np.arange(8), 2)
+        with pytest.raises(ValueError, match="walk_forward"):
+            run_cv(
+                _stub_strategy(),
+                kfold,
+                np.zeros((16, 1)),
+                np.zeros(16),
+                ["x"],
+                event_ids,
+                sample_weights=np.ones(16),
+                commence_times=_kickoffs(event_ids, 168),
+            )
+
+    def test_create_objective(self, config: MLTrainingConfig) -> None:
+        tuned = config.model_copy(deep=True)
+        tuned.tuning = TuningConfig(
+            n_trials=1,
+            search_spaces={"max_depth": SearchSpace(type="int", low=2, high=3)},
+        )
+        with pytest.raises(ValueError, match="retail_ev"):
+            create_objective(tuned, np.zeros((16, 1)), np.zeros(16), ["x"])

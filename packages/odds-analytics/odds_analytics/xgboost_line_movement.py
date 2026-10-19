@@ -549,6 +549,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         static_test: np.ndarray | None = None,
         sample_weights: np.ndarray | None = None,
         sample_weights_test: np.ndarray | None = None,
+        commence_times: np.ndarray | None = None,
     ) -> tuple[dict[str, Any], CVResult]:
         from odds_analytics.training.cross_validation import (
             train_with_cv as _train_with_cv,
@@ -567,6 +568,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             static_test=static_test,
             sample_weights=sample_weights,
             sample_weights_test=sample_weights_test,
+            commence_times=commence_times,
         )
 
     def save_model(self, filepath: str | Path) -> None:

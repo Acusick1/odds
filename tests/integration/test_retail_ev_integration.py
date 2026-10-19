@@ -93,6 +93,8 @@ class TestRetailEvTrainingData:
         )
         assert result.event_ids_train is not None
         assert len(set(result.event_ids_train.tolist())) == 3
+        assert result.commence_times_train is not None
+        assert len(set(result.commence_times_train.tolist())) == 3
 
     async def test_rejects_a_sampler(self, retail_ev_events) -> None:
         config = _config().training.features

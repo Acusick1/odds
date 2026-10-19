@@ -574,8 +574,16 @@ class SamplingConfig(BaseModel):
 
 _DEVIGGED_MARKETS = frozenset({"h2h", "1x2", "totals"})
 _RETAIL_EV_MARKETS = frozenset({"h2h", "1x2"})
-EVENT_CONTEXT_GROUPS: frozenset[str] = frozenset(
-    {"rest", "standings", "match_stats", "epl_schedule"}
+# FeatureConfig fields retail_ev does not read; a value other than the default is rejected.
+_RETAIL_EV_UNUSED_FIELDS: tuple[str, ...] = (
+    "sharp_bookmakers",
+    "retail_bookmakers",
+    "outcome",
+    "closing_tier",
+    "closing_source_priority",
+    "sampling",
+    "lookback_hours",
+    "timesteps",
 )
 
 
@@ -740,12 +748,19 @@ class FeatureConfig(BaseModel):
         if self.target_type == "retail_ev":
             if self.adapter != "xgboost":
                 raise ValueError("retail_ev supports only the xgboost adapter")
-            extra = set(self.feature_groups) - EVENT_CONTEXT_GROUPS
-            if extra:
+            if self.feature_groups:
                 raise ValueError(
-                    f"retail_ev builds its own price features; feature_groups may name only "
-                    f"{sorted(EVENT_CONTEXT_GROUPS)}, got {sorted(extra)}"
+                    "retail_ev builds its own price features as of each row's decision time; "
+                    f"feature_groups must be empty, got {list(self.feature_groups)}"
                 )
+            set_fields = [
+                name
+                for name in _RETAIL_EV_UNUSED_FIELDS
+                if getattr(self, name)
+                != type(self).model_fields[name].get_default(call_default_factory=True)
+            ]
+            if set_fields:
+                raise ValueError(f"retail_ev does not read {set_fields}; leave them unset")
             return self
         if self.adapter == "xgboost" and not self.feature_groups:
             raise ValueError("feature_groups must name at least one group for the xgboost adapter")

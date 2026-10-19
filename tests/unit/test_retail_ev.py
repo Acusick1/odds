@@ -150,6 +150,13 @@ class TestBuildEventRows:
         assert len(rows) == 9
         assert drops.rows_stale_exchange == 3
         assert drops.rows_without_exchange == 0
+        assert drops.prices_outside_roster == {
+            "interwetten": 3,
+            "market_avg": 3,
+            "pinnacle": 3,
+            "betfair_exchange": 6,
+            "stakecom": 3,
+        }
 
     def test_decision_window_bounds(self, event: Event, snapshots: list[OddsSnapshot]) -> None:
         rows, _ = build_event_rows(event, snapshots, "1x2")
@@ -238,27 +245,30 @@ class TestNoLookAhead:
     ) -> None:
         rows, _ = build_event_rows(event, snapshots, "1x2")
         assert rows
-        for row in rows:
-            closes = [
-                s
-                for s in snapshots
-                if s.snapshot_time > row.decision_time
-                and snapshot_kind(s.raw_data)
-                in {SnapshotKind.BETFAIR_LIVE, SnapshotKind.FDUK_CLOSING}
-                and s.snapshot_time >= KICKOFF - timedelta(minutes=30)
-            ]
-            past = [s for s in snapshots if s.snapshot_time <= row.decision_time]
-            truncated, _ = build_event_rows(event, past + closes, "1x2")
-            match = next(
-                r
-                for r in truncated
-                if (r.decision_time, r.retail_kind, r.book, r.outcome)
-                == (row.decision_time, row.retail_kind, row.book, row.outcome)
+        closes = [
+            s
+            for s in snapshots
+            if snapshot_kind(s.raw_data) in {SnapshotKind.BETFAIR_LIVE, SnapshotKind.FDUK_CLOSING}
+            and s.snapshot_time >= KICKOFF - timedelta(minutes=30)
+        ]
+
+        def at(built: list, t: datetime) -> dict:
+            return {
+                (r.retail_kind, r.book, r.outcome): retail_ev_features(r, OUTCOMES)
+                for r in built
+                if r.decision_time == t
+            }
+
+        for t in sorted({r.decision_time for r in rows}):
+            past = [s for s in snapshots if s.snapshot_time <= t]
+            truncated, _ = build_event_rows(
+                event, past + [c for c in closes if c.snapshot_time > t], "1x2"
             )
-            np.testing.assert_array_equal(
-                retail_ev_features(row, OUTCOMES), retail_ev_features(match, OUTCOMES)
-            )
-            assert row.exchange.time <= row.decision_time
+            full_at_t, truncated_at_t = at(rows, t), at(truncated, t)
+            assert full_at_t.keys() == truncated_at_t.keys()
+            for key, features in full_at_t.items():
+                np.testing.assert_array_equal(features, truncated_at_t[key])
+        assert all(r.exchange.time <= r.decision_time for r in rows)
 
     def test_future_exchange_move_does_not_reach_earlier_rows(
         self, event: Event, snapshots: list[OddsSnapshot]

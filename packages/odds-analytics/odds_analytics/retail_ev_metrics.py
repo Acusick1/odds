@@ -21,12 +21,6 @@ class BootstrapEstimate:
         return self.ci_low > 0 or self.ci_high < 0
 
 
-def event_weights(event_ids: np.ndarray) -> np.ndarray:
-    """``w_event = 1 / (rows in the event)`` for each row."""
-    _, inverse, counts = np.unique(event_ids, return_inverse=True, return_counts=True)
-    return 1.0 / counts[inverse]
-
-
 def weighted_mse(y: np.ndarray, pred: np.ndarray, weights: np.ndarray) -> float:
     return float(np.sum(weights * (y - pred) ** 2) / np.sum(weights))
 

@@ -258,6 +258,9 @@ class TrainingDataResult:
         sample_weights_train: np.ndarray | None = None,
         sample_weights_val: np.ndarray | None = None,
         sample_weights_test: np.ndarray | None = None,
+        commence_times_train: np.ndarray | None = None,
+        commence_times_val: np.ndarray | None = None,
+        commence_times_test: np.ndarray | None = None,
     ):
         """Initialize training data result."""
         self.X_train = X_train
@@ -281,6 +284,9 @@ class TrainingDataResult:
         self.sample_weights_train = sample_weights_train
         self.sample_weights_val = sample_weights_val
         self.sample_weights_test = sample_weights_test
+        self.commence_times_train = commence_times_train
+        self.commence_times_val = commence_times_val
+        self.commence_times_test = commence_times_test
 
     @property
     def num_train_samples(self) -> int:
@@ -497,6 +503,7 @@ async def prepare_training_data_from_config(
     event_ids = prep_result.event_ids
     static = prep_result.static_features
     weights = prep_result.sample_weights
+    kickoffs = prep_result.commence_times
 
     if len(X) == 0:
         raise ValueError(f"No valid training data after processing {len(events)} events")
@@ -509,10 +516,12 @@ async def prepare_training_data_from_config(
     masks_test: np.ndarray | None = None
     static_test: np.ndarray | None = None
     weights_test: np.ndarray | None = None
+    kickoffs_test: np.ndarray | None = None
 
     if data_config.test_split == 0:
         X_trainval, y_trainval, masks_trainval, static_trainval = X, y, masks, static
         weights_trainval = weights
+        kickoffs_trainval = kickoffs
         event_ids_train = event_ids
     elif event_ids is not None:
         # Event-level split: sort by event commence time, split at event boundary
@@ -535,9 +544,11 @@ async def prepare_training_data_from_config(
         static_test = static[test_mask] if static is not None else None
         weights_trainval = weights[train_mask] if weights is not None else None
         weights_test = weights[test_mask] if weights is not None else None
+        kickoffs_trainval = kickoffs[train_mask] if kickoffs is not None else None
+        kickoffs_test = kickoffs[test_mask] if kickoffs is not None else None
     else:
         split_result = _split_aligned_arrays(
-            [X, y, masks, static, weights],
+            [X, y, masks, static, weights, kickoffs],
             test_size=data_config.test_split,
             random_state=data_config.random_seed,
             shuffle=data_config.shuffle,
@@ -547,6 +558,7 @@ async def prepare_training_data_from_config(
         masks_trainval, masks_test = split_result[4], split_result[5]
         static_trainval, static_test = split_result[6], split_result[7]
         weights_trainval, weights_test = split_result[8], split_result[9]
+        kickoffs_trainval, kickoffs_test = split_result[10], split_result[11]
 
     # Second split: separate validation set from training set (if validation_split > 0)
     X_val = None
@@ -557,6 +569,8 @@ async def prepare_training_data_from_config(
     static_train = None
     weights_val: np.ndarray | None = None
     weights_train: np.ndarray | None = None
+    kickoffs_val: np.ndarray | None = None
+    kickoffs_train: np.ndarray | None = None
     event_ids_val: np.ndarray | None = None
 
     if data_config.validation_split > 0:
@@ -583,11 +597,21 @@ async def prepare_training_data_from_config(
             if weights_trainval is not None:
                 weights_train = weights_trainval[tv_train_mask]
                 weights_val = weights_trainval[tv_val_mask]
+            if kickoffs_trainval is not None:
+                kickoffs_train = kickoffs_trainval[tv_train_mask]
+                kickoffs_val = kickoffs_trainval[tv_val_mask]
             event_ids_val = event_ids_train[tv_val_mask]
             event_ids_train = event_ids_train[tv_train_mask]
         else:
             val_result = _split_aligned_arrays(
-                [X_trainval, y_trainval, masks_trainval, static_trainval, weights_trainval],
+                [
+                    X_trainval,
+                    y_trainval,
+                    masks_trainval,
+                    static_trainval,
+                    weights_trainval,
+                    kickoffs_trainval,
+                ],
                 test_size=val_size_relative,
                 random_state=data_config.random_seed,
                 shuffle=data_config.shuffle,
@@ -597,12 +621,14 @@ async def prepare_training_data_from_config(
             masks_train, masks_val = val_result[4], val_result[5]
             static_train, static_val = val_result[6], val_result[7]
             weights_train, weights_val = val_result[8], val_result[9]
+            kickoffs_train, kickoffs_val = val_result[10], val_result[11]
     else:
         X_train = X_trainval
         y_train = y_trainval
         masks_train = masks_trainval
         static_train = static_trainval
         weights_train = weights_trainval
+        kickoffs_train = kickoffs_trainval
 
     logger.info(
         "training_data_prepared_from_config",
@@ -642,4 +668,7 @@ async def prepare_training_data_from_config(
         sample_weights_train=weights_train,
         sample_weights_val=weights_val,
         sample_weights_test=weights_test,
+        commence_times_train=kickoffs_train,
+        commence_times_val=kickoffs_val,
+        commence_times_test=kickoffs_test,
     )

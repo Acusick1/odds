@@ -24,11 +24,11 @@ status: stable
 
 ## Retail-EV rows
 
-`odds_analytics.feature_groups.prepare_training_data` hands a `retail_ev` config to `odds_analytics.retail_ev.prepare_retail_ev_training_data` and raises if a sampler is passed. That function loads each FINAL event with `odds_analytics.feature_groups.collect_event_data` (snapshots holding the primary market, without prediction-market-only snapshots) and calls `odds_analytics.retail_ev.build_event_rows`.
+`odds_analytics.feature_groups.prepare_training_data` hands a `retail_ev` config to `odds_analytics.retail_ev.prepare_retail_ev_training_data` and raises if a sampler is passed. That function and the report scripts both go through `odds_analytics.retail_ev.load_retail_ev_dataset`, which reads every snapshot of each event (`odds_lambda.storage.readers.OddsReader.get_snapshots_for_event`), calls `odds_analytics.retail_ev.build_event_rows`, and logs the drop counts once per build.
 
 **Snapshot kinds.** `odds_core.snapshot_sources.snapshot_kind` reads a snapshot's `raw_data` tags into an `odds_core.snapshot_sources.SnapshotKind`: no `source` is the Odds API, and an FDUK snapshot is opening or closing by its `timing.basis` (`odds_core.snapshot_sources.FdukTimeBasis`), never by `fetch_tier`. An unknown source tag raises `ValueError`.
 
-**Rows.** For each snapshot of a kind in `odds_analytics.retail_ev.RETAIL_KINDS` (Odds API, OddsPortal, OddsPortal live, FDUK opening) whose time t lies between `odds_analytics.retail_ev.DECISION_WINDOW` and `odds_analytics.retail_ev.DECISION_CUTOFF` before kick-off, every outcome priced by a book in `odds_core.bookmakers.UK_RETAIL_BOOKMAKERS` is a row. Book keys pass through `odds_core.bookmakers.canonical_bookmaker_key` first, which maps aliases such as `betfred_uk` to one key and the Odds API's `betmgm` (US BetMGM) to `betmgm_us`, outside the UK roster. FDUK closing snapshots, at kick-off, never give rows. Outcomes are matched by name to the event's home and away teams and `Draw` (`odds_analytics.retail_ev.market_outcomes`: three for `1x2`, two for `h2h`).
+**Rows.** For each snapshot of a kind in `odds_analytics.retail_ev.RETAIL_KINDS` (Odds API, OddsPortal, OddsPortal live, FDUK opening) whose time t lies between `odds_analytics.retail_ev.DECISION_WINDOW` and `odds_analytics.retail_ev.DECISION_CUTOFF` before kick-off, every outcome priced by a book in `odds_core.bookmakers.UK_RETAIL_BOOKMAKERS` is a row. Book keys pass through `odds_core.bookmakers.canonical_bookmaker_key` first, which maps aliases such as `betfred_uk` to one key and the Odds API's `betmgm` (US BetMGM) to `betmgm_us`, outside the UK roster. FDUK closing snapshots, at kick-off, never give rows. Prices from books outside the roster in a decision-window snapshot are counted per key in `odds_analytics.retail_ev.DropCounts.prices_outside_roster`. Outcomes are matched by name to the event's home and away teams and `Draw` (`odds_analytics.retail_ev.market_outcomes`: three for `1x2`, two for `h2h`).
 
 **Close.** The last `betfair_exchange` price from a live Betfair snapshot (`odds_core.snapshot_sources.SnapshotKind.BETFAIR_LIVE`) with all outcomes, not in-play (`betfair_meta.inplay`) and within `odds_analytics.retail_ev.LIVE_CLOSE_WINDOW` before kick-off; otherwise the FDUK closing snapshot's `betfair_exchange` price. With neither, the event gives no rows and counts in `odds_analytics.retail_ev.DropCounts.events_without_close`.
 
@@ -38,7 +38,7 @@ An exchange price, at the close or at t, counts only when its back overround is 
 
 **Devig, target and baseline.** Exchange and book prices are devigged proportionally with `odds_core.odds_math.devig_probabilities` on `price_decimal`. `odds_analytics.retail_ev.RetailEvRow.target` is `close × retail_decimal − 1` and `odds_analytics.retail_ev.RetailEvRow.baseline` is `exchange-at-t × retail_decimal − 1`, both for the row's outcome.
 
-**Weights.** `odds_analytics.retail_ev.RetailEvDataset.loss_weights` is `event_weights / retail_decimal²`, with `odds_analytics.retail_ev_metrics.event_weights` giving `1 / (rows in the event)`. The training matrix scales them to mean 1, which leaves weighted metrics unchanged and keeps `min_child_weight` and `reg_lambda` on their unweighted scale; they reach XGBoost through [the training pipeline](training-pipeline.md#sample-weights).
+**Weights.** `odds_analytics.retail_ev.RetailEvDataset.loss_weights` is `event_weights / retail_decimal²`, with `odds_analytics.retail_ev.event_weights` giving `1 / (rows in the event)`. The training matrix scales them to mean 1, which leaves weighted metrics unchanged and keeps `min_child_weight` and `reg_lambda` on their unweighted scale; they reach XGBoost through [the training pipeline](training-pipeline.md#sample-weights), with each row's kick-off time (`odds_analytics.retail_ev.RetailEvDataset.commence_times`) for the [walk-forward gap](cross-validation.md#how-folds-are-built).
 
 ## Retail-EV features
 
@@ -50,7 +50,7 @@ An exchange price, at the close or at t, counts only when its back overround is 
 - `sharp_prob` (the devigged exchange price at t), `retail_sharp_diff` (`retail_implied_prob − sharp_prob`, against a devigged sharp price unlike the tabular group's), `exchange_overround`, `exchange_age_hours` and `baseline_ev`;
 - one-hot `outcome_*` and `book_*` columns over `odds_analytics.retail_ev.RETAIL_BOOK_COLUMNS`.
 
-`feature_groups` may add only the event-level groups in `odds_analytics.training.config.EVENT_CONTEXT_GROUPS`, appended per row by `odds_analytics.feature_groups._extract_event_context_parts`; the variance filter then drops constant columns, such as books absent from the data ([feature pipeline](feature-pipeline.md)).
+`feature_groups` must be empty: the event-level groups (standings, match stats, EPL schedule) are computed as of kick-off, not as of t, so a match played between t and kick-off would reach the row ([look-ahead](look-ahead-bias.md#no-future-data-layer-by-layer)). The variance filter drops constant columns, such as books absent from the data ([feature pipeline](feature-pipeline.md)).
 
 ## Keep-bar metrics
 
