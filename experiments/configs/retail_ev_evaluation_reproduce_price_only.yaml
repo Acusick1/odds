@@ -1,0 +1,21 @@
+# Dry run of the one-look evaluation on development data: the price-only residual
+# seed-42 run of experiments/results/retail_ev_price_only_fixed_scale, rescored with the
+# evaluation code. Same events, blocks, hyperparameters, seed and bootstrap, so the
+# keep-bar statistics must equal that run's. No event after 2026-07-31 is read.
+training_start: 2024-08-01T00:00:00Z
+window:
+  start: 2025-08-01T00:00:00Z
+  end: 2026-07-31T23:59:59Z
+refit_every_events: 41
+feature_groups: []
+arm: residual
+model:
+  n_jobs: 1
+trial:
+  path: ../results/retail_ev_as_of_t_groups/summary.json
+  variant: price_only
+  run: residual_s42
+seed: 42
+bootstrap:
+  resamples: 2000
+  seed: 0

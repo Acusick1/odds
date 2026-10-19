@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import structlog
 from odds_core.epl_data_models import EspnFixture
 from sqlalchemy import select
@@ -16,12 +18,14 @@ class EspnFixtureReader:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def get_all_fixtures(self) -> list[EspnFixture]:
-        """Load all ESPN fixtures ordered by date.
+    async def get_all_fixtures(self, until: datetime | None = None) -> list[EspnFixture]:
+        """Load all ESPN fixtures ordered by date, up to ``until`` when it is given.
 
         Returns the full dataset for in-memory filtering by the feature group.
         """
         query = select(EspnFixture).order_by(EspnFixture.date)
+        if until is not None:
+            query = query.where(EspnFixture.date <= until)
         result = await self.session.execute(query)
         rows = list(result.scalars().all())
         logger.info("espn_fixtures_loaded", count=len(rows))

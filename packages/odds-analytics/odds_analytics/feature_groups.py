@@ -987,15 +987,17 @@ def _select_closing_snapshot(
 # =============================================================================
 
 
-async def load_fixtures_df(session: AsyncSession) -> pd.DataFrame | None:
-    """Load all ESPN fixtures from DB into a DataFrame.
+async def load_fixtures_df(
+    session: AsyncSession, until: datetime | None = None
+) -> pd.DataFrame | None:
+    """Load all ESPN fixtures, up to ``until`` when it is given, from DB into a DataFrame.
 
     Returns None if no fixtures exist in the database.
     """
     from odds_lambda.storage.espn_fixture_reader import EspnFixtureReader
 
     reader = EspnFixtureReader(session)
-    fixtures = await reader.get_all_fixtures()
+    fixtures = await reader.get_all_fixtures(until)
     if not fixtures:
         logger.warning("espn_fixtures_not_found_in_db")
         return None

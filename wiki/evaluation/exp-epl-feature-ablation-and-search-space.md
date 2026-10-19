@@ -8,13 +8,13 @@ sources:
   - experiments/configs/xgboost_epl_production_tabular_only.yaml
   - experiments/configs/xgboost_epl_hybrid_sharp.yaml
   - experiments/scripts/lineup_signal_check.py
-  - odds_analytics.feature_groups
+  - odds_analytics.feature_groups.prepare_training_data
 status: stable
 ---
 
 # EPL feature ablation and principled search space
 
-Two linked questions on EPL, both answered in April 2026: which feature groups (assembled into training arrays by `odds_analytics.feature_groups`, as of kick-off) help predict the bet365 CLV delta, and why sliding-380:50 tuning produced identical, degenerate models. Answers: `match_stats` is the best single addition, `standings` is neutral, `epl_schedule` hurts slightly, `rest` produces nothing for EPL and FPL availability degrades results; and the original Optuna space, not the protocol, caused the collapse ([EPL context features](../modelling/epl-context-features.md), [feature groups](../modelling/feature-groups.md)).
+Two linked questions on EPL, both answered in April 2026: which feature groups (assembled into training arrays by `odds_analytics.feature_groups.prepare_training_data`, as of kick-off) help predict the bet365 CLV delta, and why sliding-380:50 tuning produced identical, degenerate models. Answers: `match_stats` is the best single addition, `standings` is neutral, `epl_schedule` hurts slightly, `rest` produces nothing for EPL and FPL availability degrades results; and the original Optuna space, not the protocol, caused the collapse ([EPL context features](../modelling/epl-context-features.md), [feature groups](../modelling/feature-groups.md)).
 
 ## Per-group ablation (2026-04-23)
 

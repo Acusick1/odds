@@ -12,7 +12,8 @@ sources:
   - odds_analytics.sequence_loader.calculate_devigged_bookmaker_target
   - odds_analytics.sequence_loader.DeviggedProbs
   - odds_analytics.sequence_loader.DeviggedTotalsProbs
-  - odds_analytics.feature_groups
+  - odds_analytics.feature_groups._compute_target
+  - odds_analytics.feature_groups.prepare_training_data
   - odds_analytics.training.config.FeatureConfig
   - odds_mcp.server.find_retail_edges
 status: stable

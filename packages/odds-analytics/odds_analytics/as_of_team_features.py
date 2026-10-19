@@ -89,12 +89,17 @@ class TeamHistory:
 
 
 async def load_team_history(
-    session: AsyncSession, sport_key: str, form_window: int, with_fixtures: bool
+    session: AsyncSession,
+    sport_key: str,
+    form_window: int,
+    with_fixtures: bool,
+    until: datetime | None = None,
 ) -> TeamHistory:
+    """Team history from matches up to ``until`` when it is given, else from every match."""
     from odds_analytics.feature_groups import load_fixtures_df
 
     return TeamHistory(
-        season_results=await load_season_events_cache(session, sport_key),
-        fixtures=await load_fixtures_df(session) if with_fixtures else None,
+        season_results=await load_season_events_cache(session, sport_key, until),
+        fixtures=await load_fixtures_df(session, until) if with_fixtures else None,
         form_window=form_window,
     )
