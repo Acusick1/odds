@@ -22,9 +22,9 @@ import numpy as np
 import pandas as pd
 import structlog
 from odds_analytics.retail_ev import (
+    HORIZON_BUCKET_LABELS,
     MAX_EXCHANGE_OVERROUND,
     RetailEvDataset,
-    RetailEvRow,
     load_retail_ev_dataset,
 )
 from odds_analytics.retail_ev_metrics import weighted_mse
@@ -36,36 +36,16 @@ structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.
 
 SPORT_KEY = "soccer_epl"
 MARKET = "1x2"
-HORIZON_BUCKETS: tuple[tuple[float, float, str], ...] = (
-    (0.0, 1.0, "0-1h"),
-    (1.0, 6.0, "1-6h"),
-    (6.0, 24.0, "6-24h"),
-    (24.0, 72.0, "1-3d"),
-    (72.0, 168.0 + 1e-9, "3-7d"),
-)
-
-
-def season_of(row: RetailEvRow) -> str:
-    start = row.commence_time.year if row.commence_time.month >= 7 else row.commence_time.year - 1
-    return f"{start}-{str(start + 1)[2:]}"
-
-
-def horizon_bucket(row: RetailEvRow) -> str:
-    hours = row.hours_to_kickoff
-    for low, high, label in HORIZON_BUCKETS:
-        if low <= hours < high:
-            return label
-    raise ValueError(f"hours to kick-off {hours} outside the decision window")
 
 
 def frame(dataset: RetailEvDataset) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "event_id": dataset.event_ids,
-            "season": [season_of(r) for r in dataset.rows],
+            "season": [r.season for r in dataset.rows],
             "retail_source": [r.retail_kind.value for r in dataset.rows],
             "close_source": [r.close.kind.value for r in dataset.rows],
-            "horizon": [horizon_bucket(r) for r in dataset.rows],
+            "horizon": [r.horizon_bucket for r in dataset.rows],
             "book": [r.book for r in dataset.rows],
             "target": dataset.targets,
             "baseline": dataset.baselines,
@@ -137,12 +117,11 @@ async def main(start: date, end: date) -> None:
         f"{MAX_EXCHANGE_OVERROUND:.0%} ignored"
     )
     print(f"All rows: baseline wMSE {weighted_mse(df['target'], df['baseline'], df['w_loss']):.5f}")
-    bucket_order = [label for _, _, label in HORIZON_BUCKETS]
     for key, order in (
         ("season", lambda idx: idx.sort_values()),
         ("retail_source", None),
         ("close_source", None),
-        ("horizon", lambda idx: pd.Index([b for b in bucket_order if b in idx])),
+        ("horizon", lambda idx: pd.Index([b for b in HORIZON_BUCKET_LABELS if b in idx])),
         ("book", None),
     ):
         print(f"\n### By {key.replace('_', ' ')}\n")

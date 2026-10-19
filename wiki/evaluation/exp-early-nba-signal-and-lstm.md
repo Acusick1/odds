@@ -43,7 +43,7 @@ Rows recorded in #160 (2026-02-21) and #166 (2026-02-28); no results directory h
 
 Config for the Pinnacle runs: `experiments/configs/lstm_pinnacle_tuning.yaml` (also `experiments/configs/lstm_line_movement_tuning.yaml`, which does not load: it sets `validation_split: 0.1` with `use_kfold: true`, and `odds_analytics.training.config.DataConfig` rejects that pair). Best of the first tuning: hidden 48, 2 layers; the static branch increased overfitting. The 2026-02-28 result is worse than a constant predictor. The 2026-02-28 row has only the config behind it, no results file, so it is unverified.
 
-- **2026-02-27 mask fix (#163).** The log row says packed sequences were introduced so the mask is applied correctly (code: `odds_analytics.lstm_line_movement._compact_sequences` in `odds_analytics.lstm_line_movement`). The experiment log files it as a bug fix with no result.
+- **2026-02-27 mask fix (#163).** The log row says packed sequences were introduced so the mask is applied correctly (code: `odds_analytics.lstm_line_movement._compact_sequences` in `odds_analytics.lstm_line_movement`). The experiment log records it as a bug fix with no result.
 - **Exp 2 cross-check:** LSTM at both decision times is R² about 0 once the `IN_PLAY` leak is fixed; the earlier LSTM +0.02 was contaminated.
 
 ## Conclusion
@@ -52,7 +52,7 @@ More data and a re-run at 500+ events were the next steps ([injury features and 
 
 ## Caveats
 
-- **Not reproducible as recorded.** The scripts group features as `trajectory` and `cross_source`, which are not among the group names that `odds_analytics.feature_groups` dispatches on, so `odds_analytics.training.config.FeatureConfig` rejects them as unknown names; the tabular group has 6 columns ([feature groups](../modelling/feature-groups.md)).
+- **Not reproducible as recorded.** The scripts group features as `trajectory` and `cross_source`, which are not among the group names that `odds_analytics.feature_groups` dispatches on, so `odds_analytics.training.config.FeatureConfig` rejects them at config load as unknown names; the tabular group has 6 columns ([feature groups](../modelling/feature-groups.md)).
 - **Feature counts differ by denominator.** 0 of the 60 testable features survive correction; 15 of the 75 are constant (`experiments/results/exp1_feature_correlations/FINDINGS.md`).
 - **LSTM is still selectable.** Sequence features and the LSTM adapter remain in code behind `strategy_type: lstm_line_movement`; nothing prevents using them ([line-movement models](../modelling/line-movement-models.md)).
 - All LSTM runs used the Pinnacle target on NBA; no LSTM run with the bet365 target or on EPL is recorded, and neither LSTM config sets `target_bookmaker`, so the code default (Pinnacle) applies.
