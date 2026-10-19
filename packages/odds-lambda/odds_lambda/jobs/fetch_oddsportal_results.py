@@ -18,19 +18,27 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus
+from odds_core.team import normalize_team_name
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
-from odds_lambda.oddsportal_client import FinishedMatch, OddsPortalClient
+from odds_lambda.oddsportal_client import (
+    FetchedResults,
+    FinishedMatch,
+    OddsPortalClient,
+    OddsPortalError,
+)
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
+from odds_lambda.storage.event_merge import EVENT_MATCH_WINDOW, find_match_id
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
 DEFAULT_SPORT_KEY = "soccer_epl"
-MATCH_WINDOW = timedelta(hours=24)
+SCHEDULED_LOOKBACK = timedelta(days=14)
+STALE_AFTER = timedelta(hours=24)
 
 
 @dataclass
@@ -52,56 +60,45 @@ class PendingEvent:
     """
 
     id: str
-    home_team: str
-    away_team: str
     commence_time: datetime
 
 
 async def get_pending_events(
-    session: AsyncSession, sport_key: str = DEFAULT_SPORT_KEY
+    session: AsyncSession, sport_key: str = DEFAULT_SPORT_KEY, since: datetime | None = None
 ) -> list[PendingEvent]:
-    """Events of the sport past kick-off that are not FINAL with scores."""
-    query = select(Event.id, Event.home_team, Event.away_team, Event.commence_time).where(
-        and_(
-            Event.sport_key == sport_key,
-            Event.commence_time < datetime.now(UTC),
-            or_(
-                Event.status.in_([EventStatus.SCHEDULED, EventStatus.LIVE]),
-                and_(
-                    Event.status == EventStatus.FINAL,
-                    or_(Event.home_score.is_(None), Event.away_score.is_(None)),
-                ),
+    """Events of the sport past kick-off (and not before ``since``) that are not FINAL with scores."""
+    conditions = [
+        Event.sport_key == sport_key,
+        Event.commence_time < datetime.now(UTC),
+        or_(
+            Event.status.in_([EventStatus.SCHEDULED, EventStatus.LIVE]),
+            and_(
+                Event.status == EventStatus.FINAL,
+                or_(Event.home_score.is_(None), Event.away_score.is_(None)),
             ),
-        )
-    )
-    result = await session.execute(query)
-    return [
-        PendingEvent(
-            id=row.id,
-            home_team=row.home_team,
-            away_team=row.away_team,
-            commence_time=row.commence_time,
-        )
-        for row in result.all()
+        ),
     ]
+    if since is not None:
+        conditions.append(Event.commence_time >= since)
+    result = await session.execute(select(Event.id, Event.commence_time).where(and_(*conditions)))
+    return [PendingEvent(id=row.id, commence_time=row.commence_time) for row in result.all()]
 
 
-def _match_to_event(
-    match: FinishedMatch, pending_events: list[PendingEvent]
-) -> PendingEvent | None:
-    """The pending event with the same teams whose kick-off is nearest the match's, within the window."""
-    candidates = [
-        event
-        for event in pending_events
-        if event.home_team == match.home_team
-        and event.away_team == match.away_team
-        and abs(event.commence_time - match.start_time) <= MATCH_WINDOW
-    ]
-    return min(candidates, key=lambda e: abs(e.commence_time - match.start_time), default=None)
+def _raise_if_feed_parsed_nothing(fetched: FetchedResults, pending: list[PendingEvent]) -> None:
+    """A feed with rows but no finished match, while old events wait, means the parser broke."""
+    stale_before = datetime.now(UTC) - STALE_AFTER
+    stale = sum(1 for event in pending if event.commence_time < stale_before)
+    if stale and fetched.rows_seen and not fetched.matches:
+        raise OddsPortalError(
+            f"results feed returned {fetched.rows_seen} rows but no finished match, "
+            f"with {stale} pending events older than {STALE_AFTER}; page format may have changed"
+        )
 
 
 async def process_results(
-    sport: str | None = None, matches: list[FinishedMatch] | None = None
+    sport: str | None = None,
+    lookback: timedelta | None = SCHEDULED_LOOKBACK,
+    fetched: FetchedResults | None = None,
 ) -> ResultsStats:
     """Set pending events FINAL with the scores of their finished matches.
 
@@ -115,7 +112,8 @@ async def process_results(
 
     Args:
         sport: Sport key (e.g. "soccer_epl"). Defaults to DEFAULT_SPORT_KEY.
-        matches: Finished matches replacing the fetch. For testing.
+        lookback: How far back pending events are considered; None for all of them.
+        fetched: Results replacing the fetch. For testing.
     """
     stats = ResultsStats()
     sport_key = sport or DEFAULT_SPORT_KEY
@@ -129,8 +127,9 @@ async def process_results(
         )
         return stats
 
+    since = datetime.now(UTC) - lookback if lookback is not None else None
     async with async_session_maker() as session:
-        pending_events = await get_pending_events(session, sport_key=sport_key)
+        pending_events = await get_pending_events(session, sport_key=sport_key, since=since)
 
     if not pending_events:
         logger.info("no_pending_events", sport_key=sport_key)
@@ -138,20 +137,47 @@ async def process_results(
 
     logger.info("pending_events_found", count=len(pending_events))
 
-    if matches is None:
+    if fetched is None:
         oldest = min(event.commence_time for event in pending_events)
         async with OddsPortalClient() as client:
-            matches = await client.fetch_results(
-                f"{spec.listing_path}results/", since=oldest - MATCH_WINDOW
+            fetched = await client.fetch_results(
+                f"{spec.listing_path}results/", since=oldest - EVENT_MATCH_WINDOW
             )
-    stats.matches_fetched = len(matches)
+    _raise_if_feed_parsed_nothing(fetched, pending_events)
+    if not fetched.complete:
+        logger.warning("results_fetch_incomplete", matches=len(fetched.matches))
+    stats.matches_fetched = len(fetched.matches)
+
+    matches = [
+        FinishedMatch(
+            home_team=normalize_team_name(m.home_team),
+            away_team=normalize_team_name(m.away_team),
+            start_time=m.start_time,
+            home_score=m.home_score,
+            away_score=m.away_score,
+        )
+        for m in fetched.matches
+    ]
+    starts_by_teams: dict[tuple[str, str], list[datetime]] = {}
+    for match in matches:
+        starts_by_teams.setdefault((match.home_team, match.away_team), []).append(match.start_time)
+    pending_by_id = {event.id: event for event in pending_events}
 
     async with async_session_maker() as session:
         writer = OddsWriter(session)
 
         for match in sorted(matches, key=lambda m: m.start_time):
-            event = _match_to_event(match, pending_events)
+            event_id = await find_match_id(
+                session, match.home_team, match.away_team, match.start_time, sport_key
+            )
+            event = pending_by_id.get(event_id) if event_id is not None else None
             if event is None:
+                continue
+            nearest = min(
+                starts_by_teams[(match.home_team, match.away_team)],
+                key=lambda start: abs(start - event.commence_time),
+            )
+            if nearest != match.start_time:
                 continue
             try:
                 await writer.update_event_status(
@@ -172,9 +198,9 @@ async def process_results(
                 continue
 
             stats.events_updated += 1
-            pending_events.remove(event)
+            del pending_by_id[event.id]
 
-    stats.events_unresolved = len(pending_events)
+    stats.events_unresolved = len(pending_by_id)
     logger.info(
         "results_collection_complete",
         matches_fetched=stats.matches_fetched,

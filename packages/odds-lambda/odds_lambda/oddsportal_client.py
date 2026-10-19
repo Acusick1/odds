@@ -99,8 +99,16 @@ class FinishedMatch:
 @dataclass(frozen=True)
 class ResultsPage:
     matches: list[FinishedMatch]
+    rows_seen: int
     oldest_start: datetime | None
     page_count: int
+
+
+@dataclass(frozen=True)
+class FetchedResults:
+    matches: list[FinishedMatch]
+    rows_seen: int
+    complete: bool
 
 
 @dataclass(frozen=True)
@@ -292,7 +300,10 @@ def parse_results_page(feed: Any) -> ResultsPage:
             )
         )
     return ResultsPage(
-        matches=matches, oldest_start=min(starts, default=None), page_count=page_count
+        matches=matches,
+        rows_seen=len(rows),
+        oldest_start=min(starts, default=None),
+        page_count=page_count,
     )
 
 
@@ -471,24 +482,36 @@ class OddsPortalClient:
         )
         return parse_listing(html)
 
-    async def fetch_results(self, path: str, since: datetime) -> list[FinishedMatch]:
-        """Finished matches on a results page, newest first, back to the page holding ``since``."""
+    async def fetch_results(self, path: str, since: datetime) -> FetchedResults:
+        """Finished matches on a results page, newest first, back to the page holding ``since``.
+
+        A page that fails after the first keeps the earlier pages and marks the result
+        incomplete; a failure on the first page raises.
+        """
         html = await self._get(
             BASE_URL + path, {**_BASE_HEADERS, "Accept": "text/html,application/xhtml+xml"}
         )
         archive = parse_archive_path(html)
         matches: list[FinishedMatch] = []
+        rows_seen = 0
         page = 1
         while True:
-            feed = await self._get_json(f"{BASE_URL}{archive}/page/{page}/", _XHR_HEADERS)
-            results = parse_results_page(feed)
+            try:
+                feed = await self._get_json(f"{BASE_URL}{archive}/page/{page}/", _XHR_HEADERS)
+                results = parse_results_page(feed)
+            except OddsPortalError as e:
+                if page == 1:
+                    raise
+                logger.error("oddsportal_results_page_failed", page=page, error=str(e))
+                return FetchedResults(matches, rows_seen, complete=False)
             matches.extend(results.matches)
+            rows_seen += results.rows_seen
             if (
                 results.oldest_start is None
                 or results.oldest_start < since
                 or page >= results.page_count
             ):
-                return matches
+                return FetchedResults(matches, rows_seen, complete=True)
             page += 1
             await _sleep(self._request_delay)
 

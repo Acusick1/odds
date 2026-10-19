@@ -748,11 +748,16 @@ async def load_retail_ev_dataset(
     market: str,
     max_exchange_overround: float = MAX_EXCHANGE_OVERROUND,
 ) -> RetailEvDataset:
-    """Decision rows for every event, in the events' order, from all its snapshots."""
+    """Decision rows for every event that has kicked off, in the events' order, from all its snapshots.
+
+    An event that has not kicked off has no close yet, whatever snapshots it holds.
+    """
     from odds_lambda.storage.readers import OddsReader
 
     reader = OddsReader(session)
     dataset = RetailEvDataset()
+    now = datetime.now(UTC)
+    events = [event for event in events if event.commence_time <= now]
     for event in events:
         snapshots = await reader.get_snapshots_for_event(event.id)
         rows, drops = build_event_rows(event, snapshots, market, max_exchange_overround)

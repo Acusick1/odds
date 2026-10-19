@@ -9,15 +9,13 @@ import pytest
 from odds_core.models import Event, EventStatus
 from odds_lambda.jobs.fetch_oddsportal_results import (
     DEFAULT_SPORT_KEY,
-    PendingEvent,
-    _match_to_event,
     get_pending_events,
     process_results,
 )
-from odds_lambda.oddsportal_client import FinishedMatch
+from odds_lambda.oddsportal_client import FetchedResults, FinishedMatch, OddsPortalError
 from sqlalchemy import select
 
-KICKOFF = datetime(2026, 3, 1, 15, 0, 0, tzinfo=UTC)
+KICKOFF = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(days=3)
 
 
 def _make_event(
@@ -44,18 +42,6 @@ def _make_event(
     )
 
 
-def _make_pending(
-    *,
-    event_id: str = "test_event_1",
-    home_team: str = "Arsenal",
-    away_team: str = "Chelsea",
-    commence_time: datetime = KICKOFF,
-) -> PendingEvent:
-    return PendingEvent(
-        id=event_id, home_team=home_team, away_team=away_team, commence_time=commence_time
-    )
-
-
 def _make_match(
     *,
     home_team: str = "Arsenal",
@@ -71,39 +57,6 @@ def _make_match(
         home_score=home_score,
         away_score=away_score,
     )
-
-
-class TestMatchToEvent:
-    def test_matches_by_team_and_time(self) -> None:
-        event = _make_pending()
-        assert _match_to_event(_make_match(), [event]) is event
-
-    def test_no_match_different_teams(self) -> None:
-        event = _make_pending(home_team="Liverpool", away_team="Everton")
-        assert _match_to_event(_make_match(), [event]) is None
-
-    def test_no_match_outside_24h_window(self) -> None:
-        event = _make_pending(commence_time=KICKOFF + timedelta(days=4))
-        assert _match_to_event(_make_match(), [event]) is None
-
-    def test_matches_within_24h_window(self) -> None:
-        event = _make_pending(commence_time=KICKOFF + timedelta(hours=5))
-        assert _match_to_event(_make_match(), [event]) is event
-
-    def test_empty_pending_events(self) -> None:
-        assert _match_to_event(_make_match(), []) is None
-
-    def test_doubleheader_pairs_each_game_with_its_nearest_event(self) -> None:
-        game_one = _make_pending(event_id="g1", commence_time=KICKOFF)
-        game_two = _make_pending(event_id="g2", commence_time=KICKOFF + timedelta(hours=4))
-
-        assert _match_to_event(_make_match(start_time=KICKOFF), [game_two, game_one]) is game_one
-        assert (
-            _match_to_event(
-                _make_match(start_time=KICKOFF + timedelta(hours=4)), [game_one, game_two]
-            )
-            is game_two
-        )
 
 
 class TestGetPendingEvents:
@@ -155,6 +108,10 @@ def _session_maker(session) -> MagicMock:
     return maker
 
 
+def _fetched(*matches: FinishedMatch, rows_seen: int | None = None) -> FetchedResults:
+    return FetchedResults(list(matches), rows_seen or len(matches), complete=True)
+
+
 async def _stored(session, event_id: str) -> Event:
     await session.rollback()
     result = await session.execute(select(Event).where(Event.id == event_id))
@@ -184,7 +141,7 @@ class TestProcessResults:
             "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
             _session_maker(test_session),
         ):
-            stats = await process_results(matches=matches)
+            stats = await process_results(fetched=_fetched(*matches))
 
         assert (stats.matches_fetched, stats.events_updated, stats.events_unresolved) == (2, 2, 1)
         matched = await _stored(test_session, "matched")
@@ -204,7 +161,7 @@ class TestProcessResults:
         test_session.add(_make_event())
         await test_session.commit()
         client = MagicMock()
-        client.fetch_results = AsyncMock(return_value=[_make_match()])
+        client.fetch_results = AsyncMock(return_value=_fetched(_make_match()))
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=None)
 
@@ -220,7 +177,7 @@ class TestProcessResults:
             stats = await process_results(sport="soccer_epl")
 
         client.fetch_results.assert_awaited_once_with(
-            "/football/england/premier-league/results/", since=KICKOFF - timedelta(hours=24)
+            "/football/england/premier-league/results/", since=KICKOFF - timedelta(hours=2)
         )
         assert stats.events_updated == 1
 
@@ -264,15 +221,125 @@ class TestProcessResults:
             ),
             patch("odds_lambda.storage.writers.OddsWriter.update_event_status", flaky),
         ):
-            stats = await process_results(matches=matches)
+            stats = await process_results(fetched=_fetched(*matches))
 
         assert len(stats.errors) == 1
         assert stats.events_updated == 1
         assert (await _stored(test_session, "second")).status == EventStatus.FINAL
 
     @pytest.mark.asyncio
+    async def test_series_games_hours_apart_each_get_their_own_result(self, test_session) -> None:
+        test_session.add(
+            _make_event(
+                event_id="game_one",
+                status=EventStatus.FINAL,
+                scores=(5, 4),
+                sport_key="baseball_mlb",
+            )
+        )
+        test_session.add(
+            _make_event(
+                event_id="game_two",
+                commence_time=KICKOFF + timedelta(hours=20),
+                sport_key="baseball_mlb",
+            )
+        )
+        await test_session.commit()
+        matches = [
+            _make_match(start_time=KICKOFF, home_score=5, away_score=4),
+            _make_match(start_time=KICKOFF + timedelta(hours=20), home_score=1, away_score=0),
+        ]
+
+        with patch(
+            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+            _session_maker(test_session),
+        ):
+            await process_results(sport="baseball_mlb", fetched=_fetched(*matches))
+
+        game_two = await _stored(test_session, "game_two")
+        assert (game_two.home_score, game_two.away_score) == (1, 0)
+
+    @pytest.mark.asyncio
+    async def test_a_result_more_than_the_match_window_away_is_not_applied(
+        self, test_session
+    ) -> None:
+        test_session.add(_make_event())
+        await test_session.commit()
+
+        with patch(
+            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+            _session_maker(test_session),
+        ):
+            stats = await process_results(
+                fetched=_fetched(_make_match(start_time=KICKOFF + timedelta(hours=5)))
+            )
+
+        assert stats.events_updated == 0
+
+    @pytest.mark.asyncio
+    async def test_feed_team_names_are_normalised(self, test_session) -> None:
+        test_session.add(_make_event(home_team="Manchester Utd", away_team="Wolves"))
+        await test_session.commit()
+
+        with patch(
+            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+            _session_maker(test_session),
+        ):
+            stats = await process_results(
+                fetched=_fetched(
+                    _make_match(home_team="Manchester United", away_team="Wolverhampton Wanderers")
+                )
+            )
+
+        assert stats.events_updated == 1
+
+    @pytest.mark.asyncio
+    async def test_raises_when_rows_came_back_but_none_parsed_as_finished(
+        self, test_session
+    ) -> None:
+        test_session.add(_make_event())
+        await test_session.commit()
+
+        with (
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+                _session_maker(test_session),
+            ),
+            pytest.raises(OddsPortalError, match="no finished match"),
+        ):
+            await process_results(fetched=_fetched(rows_seen=50))
+
+    @pytest.mark.asyncio
+    async def test_an_empty_feed_does_not_raise(self, test_session) -> None:
+        test_session.add(_make_event())
+        await test_session.commit()
+
+        with patch(
+            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+            _session_maker(test_session),
+        ):
+            stats = await process_results(fetched=_fetched())
+
+        assert stats.events_unresolved == 1
+
+    @pytest.mark.asyncio
+    async def test_events_older_than_the_lookback_are_left_unless_it_is_lifted(
+        self, test_session
+    ) -> None:
+        test_session.add(_make_event(commence_time=KICKOFF - timedelta(days=30)))
+        await test_session.commit()
+        old = _make_match(start_time=KICKOFF - timedelta(days=30))
+
+        maker = _session_maker(test_session)
+        with patch("odds_lambda.jobs.fetch_oddsportal_results.async_session_maker", maker):
+            within = await process_results(fetched=_fetched(old))
+            lifted = await process_results(lookback=None, fetched=_fetched(old))
+
+        assert (within.events_updated, lifted.events_updated) == (0, 1)
+
+    @pytest.mark.asyncio
     async def test_unknown_sport_returns_empty_stats(self) -> None:
-        stats = await process_results(sport="unknown_sport", matches=[])
+        stats = await process_results(sport="unknown_sport", fetched=_fetched())
         assert stats.matches_fetched == 0
         assert stats.events_updated == 0
 

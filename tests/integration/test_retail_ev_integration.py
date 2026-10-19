@@ -177,6 +177,24 @@ class TestRetailEvTrainingData:
             "fduk_final_without_scores",
         }
 
+    async def test_events_that_have_not_kicked_off_are_not_selected(self, retail_ev_events) -> None:
+        _add_fduk_event(
+            retail_ev_events,
+            "fduk_upcoming",
+            datetime.now(UTC) + timedelta(days=2),
+            status=EventStatus.SCHEDULED,
+            scores=None,
+            with_close=True,
+        )
+        await retail_ev_events.commit()
+        config = _config()
+        config.training.data.end_date = date(2099, 1, 1)
+
+        result = await prepare_training_data_from_config(config, retail_ev_events)
+
+        assert result.event_ids_train is not None
+        assert "fduk_upcoming" not in set(result.event_ids_train.tolist())
+
     async def test_rejects_a_sampler(self, retail_ev_events) -> None:
         config = _config().training.features
         with pytest.raises(ValueError, match="sampler"):

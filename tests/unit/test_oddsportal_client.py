@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -515,12 +516,13 @@ class TestFetchResults:
             [(200, RESULTS_HTML)] + [(200, encrypt_payload(p)) for p in pages], request_delay=0.5
         )
 
-        matches = await client.fetch_results(
+        fetched = await client.fetch_results(
             "/football/england/premier-league/results/",
             since=datetime(2026, 10, 18, 0, 0, tzinfo=UTC),
         )
 
-        assert [m.home_team for m in matches] == ["A", "C", "E", "G"]
+        assert [m.home_team for m in fetched.matches] == ["A", "C", "E", "G"]
+        assert (fetched.rows_seen, fetched.complete) == (4, True)
         urls = [url for url, _ in client.requests]
         assert urls[1:] == [
             f"https://www.oddsportal.com/proxy/{ARCHIVE}/page/1/",
@@ -538,7 +540,49 @@ class TestFetchResults:
             ]
         )
 
-        matches = await client.fetch_results("/x/results/", since=datetime(2020, 1, 1, tzinfo=UTC))
+        fetched = await client.fetch_results("/x/results/", since=datetime(2020, 1, 1, tzinfo=UTC))
 
-        assert [m.home_team for m in matches] == ["A"]
+        assert [m.home_team for m in fetched.matches] == ["A"]
         assert len(client.requests) == 2
+
+    async def test_a_failing_later_page_keeps_the_earlier_ones(
+        self, encrypt_payload: Encrypt, sleeps: list[float]
+    ) -> None:
+        client = FakeClient(
+            [
+                (200, RESULTS_HTML),
+                (200, encrypt_payload(_archive_feed([_row("A", "B", 20)], total=6))),
+                (404, ""),
+            ]
+        )
+
+        fetched = await client.fetch_results("/x/results/", since=datetime(2020, 1, 1, tzinfo=UTC))
+
+        assert [m.home_team for m in fetched.matches] == ["A"]
+        assert fetched.complete is False
+
+    async def test_a_failing_first_page_raises(self, sleeps: list[float]) -> None:
+        client = FakeClient([(200, RESULTS_HTML), (404, "")])
+
+        with pytest.raises(OddsPortalError):
+            await client.fetch_results("/x/results/", since=datetime(2020, 1, 1, tzinfo=UTC))
+
+
+class TestRecordedResultsFeed:
+    def test_archive_path_from_a_real_page(self, oddsportal_fixtures: Path) -> None:
+        path = parse_archive_path(_read(oddsportal_fixtures, "mlb_results_page.html"))
+
+        assert path.startswith("/proxy/ajax-sport-country-tournament-archive_/6/")
+
+    def test_rows_from_a_real_feed_page(self, oddsportal_fixtures: Path) -> None:
+        feed = json.loads(_read(oddsportal_fixtures, "mlb_results_feed.json"))
+
+        page = parse_results_page(feed)
+
+        assert page.rows_seen == 5
+        assert page.page_count == 50
+        assert [(m.home_team, m.away_team, m.home_score, m.away_score) for m in page.matches] == [
+            ("Cleveland Guardians", "Tampa Bay Rays", 1, 3),
+            ("Cleveland Guardians", "Tampa Bay Rays", 3, 7),
+            ("Los Angeles Dodgers", "Milwaukee Brewers", 4, 6),
+        ]

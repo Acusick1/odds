@@ -56,7 +56,6 @@ from odds_analytics.retail_ev_metrics import (
 )
 from odds_analytics.training.data_preparation import filter_events_by_date_range
 from odds_core.database import async_session_maker
-from odds_core.models import EventStatus
 from odds_core.snapshot_sources import SnapshotKind
 from retail_ev_target_report import MARKET, SPORT_KEY
 
@@ -487,7 +486,7 @@ async def load_rows(start: date, end: date) -> pd.DataFrame:
             session,
             start_date=datetime.combine(start, datetime.min.time(), tzinfo=UTC),
             end_date=datetime.combine(end, datetime.max.time(), tzinfo=UTC),
-            status=EventStatus.FINAL,
+            status=None,
             sport_key=SPORT_KEY,
         )
         dataset = await load_retail_ev_dataset(events, session, MARKET)

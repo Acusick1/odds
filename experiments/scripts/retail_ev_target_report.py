@@ -30,7 +30,6 @@ from odds_analytics.retail_ev import (
 from odds_analytics.retail_ev_metrics import weighted_mse
 from odds_analytics.training.data_preparation import filter_events_by_date_range
 from odds_core.database import async_session_maker
-from odds_core.models import EventStatus
 
 structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.WARNING))
 
@@ -100,7 +99,7 @@ async def main(start: date, end: date) -> None:
             session,
             start_date=datetime.combine(start, datetime.min.time(), tzinfo=UTC),
             end_date=datetime.combine(end, datetime.max.time(), tzinfo=UTC),
-            status=EventStatus.FINAL,
+            status=None,
             sport_key=SPORT_KEY,
         )
         dataset = await load_retail_ev_dataset(events, session, MARKET)
