@@ -56,7 +56,7 @@ The run uses nested walk-forward. Only the last outer fold has dense live rows i
 
 ### Models and comparisons
 
-- **Residual arm only.** XGBoost fits the target minus the martingale baseline, and the baseline is added back to its prediction ([price-only setup](exp-epl-retail-ev-price-only.md#setup)).
+- **Residual arm only.** XGBoost fits the target minus the martingale baseline, and the baseline is added back to its prediction ([price-only setup](exp-epl-retail-ev-price-only.md#setup)). In this run that was a script transform on mean-one weights; the script sets the pipeline's `retail_ev_arm: residual` on the fixed weight scale ([retail-EV arm](../modelling/training-config.md#retail-ev-arm)).
 - **Variants.** Price-only (38 columns), price plus `polymarket_at_t` (43), and price plus all four as-of-t groups (69) ([retail-EV features](../modelling/clv-target-functions.md#retail-ev-features)). Seeds 42 and 7.
 - **Frozen reference.** Every outer fold also refits the residual-arm settings #545 tuned on 2024-25, read from `experiments/results/retail_ev_as_of_t_groups/summary.json`, on the same training rows. That isolates the tuning scheme's effect on the same scored rows.
 - **Metrics.** Gains are reference minus challenger in weighted MSE, in units of 10⁻⁶, from `odds_analytics.retail_ev_metrics.mse_gain`. They come with event-clustered bootstrap 95% CIs (2,000 resamples) in `results.csv`.

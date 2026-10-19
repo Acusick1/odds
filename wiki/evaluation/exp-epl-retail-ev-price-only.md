@@ -13,6 +13,9 @@ sources:
   - experiments/results/retail_ev_price_only/trials.csv
   - experiments/results/retail_ev_price_only/event_contributions.csv
   - experiments/results/retail_ev_price_only/feature_importance.csv
+  - experiments/scripts/retail_ev_weight_scale.py
+  - odds_analytics.retail_ev.LOSS_WEIGHT_SCALE
+  - odds_analytics.training.config.RetailEvArm
   - odds_analytics.retail_ev.RetailEvFeatures
   - odds_analytics.retail_ev.RetailEvRow
   - odds_analytics.retail_ev_metrics.mse_gain
@@ -24,7 +27,7 @@ status: stable
 
 # Price-only models on the retail-EV target
 
-This is the first model run on the retail-EV target of [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md) (#540, under the map #506): a UK retail bet's EV against the devigged Betfair Exchange close, one row per event, outcome, book and retail snapshot ([CLV and the training target](../modelling/clv-target.md#the-retail-ev-target)). XGBoost sees only the price features at t. It is compared with the parameter-free martingale baseline, which takes the exchange price at t as the close.
+This page records the first model run on the retail-EV target of [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md) (#540, under the map #506): a UK retail bet's EV against the devigged Betfair Exchange close, one row per event, outcome, book and retail snapshot ([CLV and the training target](../modelling/clv-target.md#the-retail-ev-target)). XGBoost sees only the price features at t. It is compared with the parameter-free martingale baseline, which takes the exchange price at t as the close.
 
 **This is development data, and the results are exploratory.** ADR-0012 judges a model only on a pre-registered fresh season, so nothing here is a keep-bar result or a claim of skill. The run reads 2024-25 and 2025-26 only. 2026-27 is left untouched, because it is the candidate fresh season.
 
@@ -34,16 +37,17 @@ This is the first model run on the retail-EV target of [ADR-0012](../../docs/adr
 - XGBoost fitted on the target minus the baseline (the residual arm) beats it by 35 to 49 × 10⁻⁶ weighted MSE, 1.0 to 1.4% of the baseline's MSE. Neither seed's CI excludes zero.
 - The residual arm gains in 4 of the 5 folds, and is level with the baseline on the live-collected events. Its gain is spread over events rather than carried by a few.
 - On picks, the residual arm is level with the baseline.
+- A rerun on current data, with the residual arm and a fixed loss-weight scale in the pipeline, agrees ([rerun](#rerun-with-the-pipeline-residual-arm-and-a-fixed-weight-scale)).
 
 ## Setup
 
 - **Script and config.** `experiments/scripts/retail_ev_price_only.py` runs `experiments/configs/xgboost_epl_retail_ev_price_only.yaml` and writes `experiments/results/retail_ev_price_only/`. Its functions also run the [as-of-t group variants](exp-epl-retail-ev-as-of-t-groups.md).
-  - The config inherits `experiments/configs/xgboost_epl_retail_ev.yaml`, whose `end_date` is 2026-07-31. It sets expanding walk-forward with `min_train_events` 380 and 68-event steps, sets `n_jobs` 1, and adds the search space.
+  - The config inherits `experiments/configs/xgboost_epl_retail_ev.yaml`, whose `end_date` is 2026-07-31. It sets expanding walk-forward with `min_train_events` 380, sets `n_jobs` 1, and adds the search space. This run used 68-event steps; the config's step is 41, for the [rerun](#rerun-with-the-pipeline-residual-arm-and-a-fixed-weight-scale).
   - `summary.json` records the git SHA, the SHA-256 of the script and config, and a SHA-256 of the rows' event IDs and targets (`data_sha256`). The script also writes `git_dirty`, whether any tracked file differed from that SHA when the run started; this run's `summary.json` predates that field.
 - **Rows.** The rows come from the training pipeline (`odds_analytics.training.data_preparation.prepare_training_data_from_config` with `target_type: retail_ev`): 112,650 rows over 720 events. The current builder leaves 112,455, because it drops the 195 FDUK opening rows whose own snapshot has no usable exchange price ([CLV target](../modelling/clv-target.md#the-retail-ev-target)). The script fails unless they match `odds_analytics.retail_ev.load_retail_ev_dataset` row for row.
 - **Event selection.** The pipeline and the script take every event in the date range and keep those with an ADR-0012 close, whatever their status or scores. The reported results use the 720 events with scores. Selecting by close (among events that have kicked off) adds the 29 FINAL events without scores (28 from March 2026), 573 rows, for kick-offs up to 2026-07-31.
 - **Features.** These are the 38 price columns of `odds_analytics.retail_ev.RetailEvFeatures` with no optional groups, each from the row's own snapshot or the exchange price at or before t: hours to kick-off, retail, book-fair, consensus and exchange probabilities and their differences, the overrounds, the exchange price's age, `baseline_ev`, weekday, and one-hot outcome and book. There are no event-level groups, because `target_type: retail_ev` rejects them, and no as-of-t groups ([training config](../modelling/training-config.md)).
-- **Loss weights.** Each row is weighted by `(1/odds²) × w_event`, scaled to mean one over all rows. The tuning subset keeps that scale, so `min_child_weight` means the same number of events in tuning as in scoring (about 150 weight units per event).
+- **Loss weights.** Each row is weighted by `(1/odds²) × w_event`, in this run scaled to mean one over all rows. The tuning subset keeps that scale, so `min_child_weight` means the same number of events in tuning as in scoring (about 150 weight units per event). The pipeline's weights have a fixed scale instead ([CLV target](../modelling/clv-target.md#the-retail-ev-target)).
 - **Tuning range.** Hyperparameters are tuned only on the 380 events of 2024-25 (3,861 rows, all from FDUK opening snapshots).
   - The tuning folds are expanding walk-forward inside that season: `min_train_events` 130, 50-event steps and the 7-day gap, which makes 5 folds.
   - Each run gets 50 TPE trials, with the Optuna study in sqlite under `experiments/optuna/`.
@@ -55,7 +59,7 @@ This is the first model run on the retail-EV target of [ADR-0012](../../docs/adr
   - **Baseline:** `p_BFE_fair(t) × odds − 1` (ADR-0012).
   - **Shrinkage:** baseline × β, with β fitted by weighted least squares through the origin on the fold's training rows.
   - **Direct arm, two seeds:** XGBoost fitted on the EV target.
-  - **Residual arm, two seeds:** XGBoost fitted on target minus baseline, with the baseline added back to its prediction. A model that learns nothing then reproduces the baseline. This is a script-level target transform; the pipeline has no such option.
+  - **Residual arm, two seeds:** XGBoost fitted on target minus baseline, with the baseline added back to its prediction. In this run it was a script-level target transform, so XGBoost also fitted an intercept, the residual's weighted mean. The script sets the pipeline's `retail_ev_arm: residual`, which passes the baseline as XGBoost's base margin with no intercept, so a model that learns nothing reproduces the baseline exactly ([retail-EV arm](../modelling/training-config.md#retail-ev-arm)).
   - The seeds are 42 and 7, used both as the Optuna sampler seed and as XGBoost's `random_state`.
 - **Metrics.**
   - `odds_analytics.retail_ev_metrics.mse_gain` gives baseline weighted MSE minus challenger weighted MSE.
@@ -225,14 +229,17 @@ Mean share of total gain over the five fold models (`feature_importance.csv`), f
 - **Book identity.** No book one-hot carries more than 0.5%.
 - **Exchange age.** `exchange_age_hours` has zero gain, because nearly all of the training rows are FDUK openings, whose exchange price is read from the same snapshot.
 
+## Rerun with the pipeline residual arm and a fixed weight scale
+
+The pre-registration draft (#539, PR #555) needs the residual arm as a config option and a loss-weight scale that does not move with the training rows (#556). This section reruns the protocol with both, on current development data, and measures what the old scaling did.
+
 ## Caveats
 
 - **Development data.** The rows have been examined before (#522, #538), and the slices were chosen with the data in view. Every number here is exploratory.
 - **The fold step was set by this data.** The 68-event step was chosen after seeing that 50-event steps leave the live events unscored.
 - **Tuning on another regime.** The tuning season has only FDUK opening rows, one snapshot per event and 1 to 4 days out. The tuned hyperparameters never saw a live-collected row.
 - **One fold holds the dense data.** The live-collected rows are scored once, by models trained without them.
-- **The residual arm is a script transform.** The pipeline's `retail_ev` target and its tuner fit the EV directly, which is the direct arm.
-- **The search space.** The `min_child_weight` range of 20 to 2,000 was scaled to the mean-one weights. Both residual seeds settled at the edges of the space that give the least model.
+- **The search space.** The `min_child_weight` range of 20 to 2,000 was scaled to the mean-one weights, about 0.13 to 13 events. Both residual seeds settled at the edges of the space that give the least model.
 - **Fifty trials per run** on five small folds.
 
 ## Related

@@ -10,14 +10,16 @@ The config ends before 2026-27, the candidate fresh season.
 Each scored row carries the martingale baseline (the exchange price at t as the
 close), a constant shrinkage of it (baseline × β, β fitted by weighted least squares
 on the fold's training rows) and four tuned models: two arms, each with two seeds.
-The direct arm fits the EV target; the residual arm fits the target minus the
-baseline and adds the baseline back, so a model that learns nothing is the baseline.
+The direct arm fits the EV target; the residual arm sets the config's
+``retail_ev_arm: residual``, so XGBoost takes the baseline as each row's base margin
+and a model that learns nothing is the baseline.
 The script writes per-slice keep-bar metrics with event-clustered bootstrap CIs, fold
 diagnostics, per-event contributions, feature importances and the trials.
 
 Usage:
     uv run python experiments/scripts/retail_ev_price_only.py
     uv run python experiments/scripts/retail_ev_price_only.py --n-trials 3 --n-boot 200
+    uv run python experiments/scripts/retail_ev_price_only.py --output-dir <dir>
 """
 
 from __future__ import annotations
@@ -33,7 +35,6 @@ from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +53,7 @@ from odds_analytics.retail_ev_metrics import (
     pick_ev_gain,
     weighted_mse,
 )
-from odds_analytics.training.config import MLTrainingConfig
+from odds_analytics.training.config import MLTrainingConfig, RetailEvArm
 from odds_analytics.training.cross_validation import make_walk_forward_splits
 from odds_analytics.training.data_preparation import (
     filter_events_by_date_range,
@@ -78,14 +79,9 @@ METRIC_SCALE = 1e6
 TOP_EVENTS = 10
 
 
-class Arm(StrEnum):
-    DIRECT = "direct"
-    RESIDUAL = "residual"
-
-
 @dataclass(frozen=True)
 class ModelRun:
-    arm: Arm
+    arm: RetailEvArm
     seed: int
 
     @property
@@ -93,7 +89,9 @@ class ModelRun:
         return f"{self.arm.value}_s{self.seed}"
 
 
-MODEL_RUNS: tuple[ModelRun, ...] = tuple(ModelRun(arm, seed) for arm in Arm for seed in SEEDS)
+MODEL_RUNS: tuple[ModelRun, ...] = tuple(
+    ModelRun(arm, seed) for arm in RetailEvArm for seed in SEEDS
+)
 MODEL_LABELS: tuple[str, ...] = tuple(run.label for run in MODEL_RUNS)
 PREDICTIONS: tuple[str, ...] = ("baseline", "shrinkage", *MODEL_LABELS)
 CHALLENGERS: tuple[str, ...] = PREDICTIONS[1:]
@@ -212,12 +210,6 @@ def tuning_fold_references(data: RunData, n_rows: int) -> dict[str, float]:
     }
 
 
-def fit_target(data: RunData, arm: Arm) -> np.ndarray:
-    if arm is Arm.DIRECT:
-        return data.y
-    return (data.y - data.rows["baseline"].to_numpy()).astype(np.float32)
-
-
 def tune(
     config: MLTrainingConfig,
     data: RunData,
@@ -230,6 +222,7 @@ def tune(
     tune_config.training.data.min_train_events = TUNING_MIN_TRAIN_EVENTS
     tune_config.training.data.val_step_events = TUNING_VAL_STEP_EVENTS
     tune_config.training.model.random_state = run.seed
+    tune_config.training.features.retail_ev_arm = run.arm
     assert tune_config.tuning is not None
     OPTUNA_DIR.mkdir(parents=True, exist_ok=True)
     study_name = f"{study_prefix}_{run.label}"
@@ -250,7 +243,7 @@ def tune(
     objective = create_objective(
         config=tune_config,
         X_train=data.X[:n_rows],
-        y_train=fit_target(data, run.arm)[:n_rows],
+        y_train=data.y[:n_rows],
         feature_names=data.feature_names,
         event_ids_train=data.event_ids[:n_rows],
         sample_weights_train=data.loss_weights[:n_rows],
@@ -289,7 +282,7 @@ def score_run(
     best = config.model_copy(deep=True)
     apply_trial_params(best, study.best_params)
     best.training.model.random_state = run.seed
-    y_fit = fit_target(data, run.arm)
+    best.training.features.retail_ev_arm = run.arm
 
     wf = best.training.data
     assert wf.min_train_events is not None and wf.val_step_events is not None
@@ -314,14 +307,11 @@ def score_run(
         strategy.train_from_config(
             config=best,
             X_train=data.X[train_idx],
-            y_train=y_fit[train_idx],
+            y_train=data.y[train_idx],
             feature_names=data.feature_names,
             sample_weight_train=data.loss_weights[train_idx],
         )
-        assert strategy.model is not None
-        pred = strategy.model.predict(data.X[val_idx]).astype(np.float64)
-        if run.arm is Arm.RESIDUAL:
-            pred += baseline[val_idx]
+        pred = strategy.predict(data.X[val_idx]).astype(np.float64)
         w_tr = data.loss_weights[train_idx]
         b_tr = baseline[train_idx]
         beta = float(np.sum(w_tr * data.y[train_idx] * b_tr) / np.sum(w_tr * b_tr**2))
@@ -542,9 +532,9 @@ def _fmt(table: pd.DataFrame, cols: list[str], digits: int = 1) -> str:
     return table[["slice", "value", *cols]].round(digits).to_string(index=False)
 
 
-async def main(n_trials: int, n_boot: int) -> None:
+async def main(n_trials: int, n_boot: int, output_dir: Path) -> None:
     sha, dirty = git_sha(), git_dirty()
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     config = MLTrainingConfig.from_yaml(CONFIG_PATH)
     data = await load_data(config)
     n_rows = tuning_prefix(data, config)
@@ -570,14 +560,14 @@ async def main(n_trials: int, n_boot: int) -> None:
     oof = oof.loc[scored_rows].reset_index(drop=True)
 
     table = slice_table(oof, n_boot)
-    table.to_csv(OUTPUT_DIR / "results.csv", index=False)
+    table.to_csv(output_dir / "results.csv", index=False)
     contrib = event_contributions(oof)
-    contrib.to_csv(OUTPUT_DIR / "event_contributions.csv", index=False)
-    fold_event_types(oof).to_csv(OUTPUT_DIR / "fold_event_types.csv", index=False)
-    pd.concat([r["folds"] for r in results]).to_csv(OUTPUT_DIR / "folds.csv", index=False)
-    pd.concat([r["trials"] for r in results]).to_csv(OUTPUT_DIR / "trials.csv", index=False)
+    contrib.to_csv(output_dir / "event_contributions.csv", index=False)
+    fold_event_types(oof).to_csv(output_dir / "fold_event_types.csv", index=False)
+    pd.concat([r["folds"] for r in results]).to_csv(output_dir / "folds.csv", index=False)
+    pd.concat([r["trials"] for r in results]).to_csv(output_dir / "trials.csv", index=False)
     importance = pd.concat([r["importance"] for r in results])
-    importance.to_csv(OUTPUT_DIR / "feature_importance.csv", index=False)
+    importance.to_csv(output_dir / "feature_importance.csv", index=False)
 
     seed_diffs = {
         arm.value: _est(
@@ -592,7 +582,7 @@ async def main(n_trials: int, n_boot: int) -> None:
             ),
             METRIC_SCALE,
         )
-        for arm in Arm
+        for arm in RetailEvArm
     }
     tuning_events = data.rows["event_id"].iloc[:n_rows].nunique()
     summary = {
@@ -641,7 +631,7 @@ async def main(n_trials: int, n_boot: int) -> None:
         f"seed_{SEEDS[1]}_minus_seed_{SEEDS[0]}_mse_gain_e6": seed_diffs,
         "concentration": concentration(contrib),
     }
-    (OUTPUT_DIR / "summary.json").write_text(json.dumps(summary, indent=2, default=str) + "\n")
+    (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str) + "\n")
 
     pd.set_option("display.width", 250)
     print(json.dumps(summary["runs"], indent=2, default=str))
@@ -658,5 +648,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--n-trials", type=int, default=50)
     parser.add_argument("--n-boot", type=int, default=2000)
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     args = parser.parse_args()
-    asyncio.run(main(args.n_trials, args.n_boot))
+    asyncio.run(main(args.n_trials, args.n_boot, args.output_dir))

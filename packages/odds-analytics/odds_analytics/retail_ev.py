@@ -47,6 +47,11 @@ POLYMARKET_BOOKMAKER = "polymarket"
 MAX_POLYMARKET_AGE = timedelta(hours=2)
 MOVE_WINDOWS: tuple[timedelta, ...] = (timedelta(hours=1), timedelta(hours=3), timedelta(hours=6))
 MAX_LAGGED_PRICE_AGE = timedelta(hours=2)
+# Fixed rather than fitted to the training rows, so min_child_weight and reg_lambda weigh
+# the same number of events at every refit. An event's loss weights sum to this times its
+# mean 1/odds², about 154 on development data, near its mean rows per event (#556).
+LOSS_WEIGHT_SCALE = 1000.0
+BASELINE_FEATURE = "baseline_ev"
 DRAW_OUTCOME_NAME = "Draw"
 THREE_WAY_MARKET = "1x2"
 # Lower edges of the reporting horizon buckets, in hours to kick-off.
@@ -223,7 +228,7 @@ class RetailEvDataset:
     @property
     def loss_weights(self) -> np.ndarray:
         odds = np.array([r.retail_decimal for r in self.rows], dtype=np.float64)
-        return self.event_weights / odds**2
+        return LOSS_WEIGHT_SCALE * self.event_weights / odds**2
 
 
 def event_weights(event_ids: np.ndarray) -> np.ndarray:
@@ -549,7 +554,7 @@ _PRICE_FEATURE_NAMES: tuple[str, ...] = (
     "retail_sharp_diff",
     "exchange_overround",
     "exchange_age_hours",
-    "baseline_ev",
+    BASELINE_FEATURE,
     "is_weekend",
     "day_of_week",
 )
@@ -813,8 +818,6 @@ async def prepare_retail_ev_training_data(
         features.matrix(dataset.rows), features.names, config.variance_threshold
     )
     y = dataset.targets.astype(np.float32)
-    # Mean-one scaling keeps min_child_weight and reg_lambda on their unweighted scale.
-    weights = dataset.loss_weights / dataset.loss_weights.mean()
 
     logger.info(
         "prepared_retail_ev_training_data",
@@ -830,6 +833,6 @@ async def prepare_retail_ev_training_data(
         y=y,
         feature_names=feature_names,
         event_ids=dataset.event_ids,
-        sample_weights=weights,
+        sample_weights=dataset.loss_weights,
         commence_times=dataset.commence_times,
     )

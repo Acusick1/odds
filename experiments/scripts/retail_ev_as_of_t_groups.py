@@ -24,14 +24,17 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from odds_analytics.retail_ev_metrics import mse_gain, pick_ev_gain, weighted_mse
-from odds_analytics.training.config import MLTrainingConfig, RetailEvFeatureGroupName
+from odds_analytics.training.config import (
+    MLTrainingConfig,
+    RetailEvArm,
+    RetailEvFeatureGroupName,
+)
 from retail_ev_price_only import (
     CONFIG_PATH,
     METRIC_SCALE,
     MODEL_LABELS,
     MODEL_RUNS,
     REPO_DIR,
-    Arm,
     RunData,
     _est,
     data_fingerprint,
@@ -98,7 +101,9 @@ def comparison_metrics(oof: pd.DataFrame, variant: str, n_boot: int) -> dict[str
 
 
 FAMILY_ALPHA = 0.05
-RESIDUAL_LABELS: tuple[str, ...] = tuple(run.label for run in MODEL_RUNS if run.arm is Arm.RESIDUAL)
+RESIDUAL_LABELS: tuple[str, ...] = tuple(
+    run.label for run in MODEL_RUNS if run.arm is RetailEvArm.RESIDUAL
+)
 
 
 def bonferroni_table(oof: pd.DataFrame, n_boot: int) -> pd.DataFrame:

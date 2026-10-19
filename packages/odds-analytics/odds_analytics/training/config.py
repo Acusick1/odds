@@ -37,7 +37,7 @@ import copy
 import json
 import math
 from datetime import date
-from enum import Enum
+from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -68,6 +68,12 @@ RetailEvFeatureGroupName = Literal[
     "standings_as_of_t",
 ]
 RETAIL_EV_FEATURE_GROUPS: frozenset[str] = frozenset(get_args(RetailEvFeatureGroupName))
+
+
+class RetailEvArm(StrEnum):
+    DIRECT = "direct"
+    RESIDUAL = "residual"
+
 
 # Maximum inheritance depth to prevent excessive nesting
 _MAX_INHERITANCE_DEPTH = 10
@@ -736,6 +742,13 @@ class FeatureConfig(BaseModel):
         "'retail_ev': a UK retail bet's EV against the Betfair Exchange close (ADR-0012).",
     )
 
+    retail_ev_arm: RetailEvArm = Field(
+        default=RetailEvArm.DIRECT,
+        description="retail_ev only. 'direct': the model predicts the EV. 'residual': the "
+        "model predicts the EV minus the baseline, which XGBoost takes as each row's base "
+        "margin, so a model that learns nothing predicts the baseline.",
+    )
+
     target_bookmaker: str | None = Field(
         default=None,
         description="Bookmaker key for the devigged target and closing-snapshot selection. "
@@ -776,6 +789,10 @@ class FeatureConfig(BaseModel):
             if set_fields:
                 raise ValueError(f"retail_ev does not read {set_fields}; leave them unset")
             return self
+        if self.retail_ev_arm is not RetailEvArm.DIRECT:
+            raise ValueError(
+                f"retail_ev_arm applies only to retail_ev; target_type is {self.target_type}"
+            )
         as_of_t = [g for g in self.feature_groups if g in RETAIL_EV_FEATURE_GROUPS]
         if as_of_t:
             raise ValueError(

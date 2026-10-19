@@ -40,7 +40,11 @@ import optuna
 import pandas as pd
 from odds_analytics.retail_ev import DECISION_WINDOW
 from odds_analytics.retail_ev_metrics import mse_gain, pick_ev_gain, weighted_mse
-from odds_analytics.training.config import MLTrainingConfig, RetailEvFeatureGroupName
+from odds_analytics.training.config import (
+    MLTrainingConfig,
+    RetailEvArm,
+    RetailEvFeatureGroupName,
+)
 from odds_analytics.training.cross_validation import make_walk_forward_splits
 from odds_analytics.training.tuner import OptunaTuner, apply_trial_params, create_objective
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
@@ -121,10 +125,6 @@ def inner_min_train_events(n_tune_events: int) -> int:
     return n_tune_events - n_blocks * INNER_STEP_EVENTS
 
 
-def residual_target(data: RunData) -> np.ndarray:
-    return (data.y - data.rows["baseline"].to_numpy()).astype(np.float32)
-
-
 def inner_references(data: RunData, n_rows: int, min_train: int) -> dict[str, Any]:
     """Baseline mean fold weighted MSE on the inner folds, and what their validation rows hold."""
     splits = make_walk_forward_splits(
@@ -159,6 +159,7 @@ def tune_fold(
     tune_config.training.data.min_train_events = min_train
     tune_config.training.data.val_step_events = INNER_STEP_EVENTS
     tune_config.training.model.random_state = job.seed
+    tune_config.training.features.retail_ev_arm = RetailEvArm.RESIDUAL
     assert tune_config.tuning is not None
     tuner = OptunaTuner(
         study_name=f"retail_ev_nested_{job.variant}_s{job.seed}_f{job.fold}",
@@ -172,7 +173,7 @@ def tune_fold(
     objective = create_objective(
         config=tune_config,
         X_train=data.X[:n_rows],
-        y_train=residual_target(data)[:n_rows],
+        y_train=data.y[:n_rows],
         feature_names=data.feature_names,
         event_ids_train=data.event_ids[:n_rows],
         sample_weights_train=data.loss_weights[:n_rows],
@@ -194,17 +195,16 @@ def fit_predict(
     fitted = config.model_copy(deep=True)
     apply_trial_params(fitted, params)
     fitted.training.model.random_state = seed
+    fitted.training.features.retail_ev_arm = RetailEvArm.RESIDUAL
     strategy = XGBoostLineMovementStrategy()
     strategy.train_from_config(
         config=fitted,
         X_train=data.X[train_idx],
-        y_train=residual_target(data)[train_idx],
+        y_train=data.y[train_idx],
         feature_names=data.feature_names,
         sample_weight_train=data.loss_weights[train_idx],
     )
-    assert strategy.model is not None
-    pred = strategy.model.predict(data.X[val_idx]).astype(np.float64)
-    pred += data.rows["baseline"].to_numpy()[val_idx]
+    pred = strategy.predict(data.X[val_idx]).astype(np.float64)
     return pred, _importances(strategy, data.feature_names)
 
 
