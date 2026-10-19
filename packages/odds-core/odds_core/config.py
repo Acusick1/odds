@@ -221,6 +221,11 @@ class AlertConfig(BaseSettings):
         description="Minutes between repeat alerts while a source stays stale",
     )
 
+    betfair_close_lookback_hours: int = Field(
+        default=24,
+        description="Hours after kick-off an EPL event is still checked for a live Betfair close",
+    )
+
     mlb_season_first_month: int = Field(
         default=3, description="First month the MLB schedule must be fresh every day"
     )

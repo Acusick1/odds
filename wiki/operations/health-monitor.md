@@ -7,6 +7,10 @@ sources:
   - odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats
   - odds_lambda.health_monitor.HealthMonitor.check_stale_sources
   - odds_lambda.health_monitor.StaleSource
+  - odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes
+  - odds_lambda.health_monitor.MissingBetfairClose
+  - odds_core.betfair_close.LIVE_CLOSE_WINDOW
+  - odds_core.betfair_close.is_in_play
   - odds_lambda.health_monitor.collection_sources
   - odds_lambda.collection_calendar.CollectionSource
   - odds_lambda.collection_calendar.fixture_calendar
@@ -34,7 +38,7 @@ status: stable
 
 `odds_lambda.jobs.check_health.main` runs `odds_lambda.health_monitor.check_system_health` inside `job_alert_context("check-health")` and then books itself 60 minutes ahead through a raw backend call (no pre-schedule; see [self-scheduling](../scheduling/self-scheduling.md)). It is global and in the default production `odds_core.config.SchedulerConfig.bootstrap_jobs`, so it runs on the mini-PC against the production database, where every job's heartbeat lands ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Nothing alerts when the host itself stops (#489). `odds_lambda.health_monitor.check_system_health` collects `odds_lambda.health_monitor.HealthMetrics`, then runs, in order:
 
-1. `odds_lambda.health_monitor.HealthMonitor.check_stale_sources`: per collection source and sport, active hours without a new snapshot versus a threshold derived from the source's cadence, only while the database has fixtures the source should price. Each stale source sends its own critical `stale_data:<source>:<sport>` ([Stale-data check](#stale-data-check)).
+1. `odds_lambda.health_monitor.HealthMonitor.check_stale_sources`: per collection source and sport, active hours without a new snapshot versus a threshold derived from the source's cadence, only while the database has fixtures the source should price. Each stale source sends its own critical `stale_data:<source>:<sport>` ([Stale-data check](#stale-data-check)). It is followed by the MLB schedule check and by `odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes`, one critical `missing_betfair_close` listing EPL events whose Betfair close was not collected ([Betfair close check](#betfair-close-check)).
 2. `odds_lambda.health_monitor.HealthMonitor.check_consecutive_failures`: leading run of `success=False` among the latest 10 `odds_core.models.FetchLog` rows versus `consecutive_failures_threshold` (3). It reads rows of any sport or source; API outages write no row (#472) and `odds_lambda.jobs.fetch_betfair_exchange` writes `success=False` when a run stores no snapshots, so those runs count as failures ([fetch logs](../collection/odds-ingestion-service.md#fetch-logs)).
 3. `odds_lambda.health_monitor.HealthMonitor.check_api_quota`: `api_quota_remaining` of the latest row that has one, divided by `settings.api.quota`; below 0.1 alert `quota_critical`, below 0.2 `quota_low`. This is the same fraction fetch-odds applies, but rate-limited ([odds-api-quota](../collection/odds-api-quota.md)).
 4. `odds_lambda.health_monitor.HealthMonitor.check_data_quality`: `error` plus `critical` `odds_core.models.DataQualityLog` rows in 24 h (each query capped at 1000) versus `data_quality_error_threshold` (10). The validator itself only emits `warning` and `error`, so `critical` never occurs ([odds-validator](../storage/odds-validator.md)).
@@ -62,6 +66,17 @@ A stale source alerts once and then repeats every `stale_reminder_minutes` (360)
 | Polymarket odds | 5 days | yes | not checked until the job is in `bootstrap_jobs`; then 2 h under 3 h to kickoff, then 3 times the tier step (0.25 to 2 h, floored) |
 
 The thresholds are computed from each job's cadence, not configured. The Odds API horizon bounds the gap measured before a fixture is 12 h away, so that source is effectively checked only inside 12 h of kickoff. Betfair's MLB horizon is short because its markets are posted late, and its MLB name parsing is a separate defect.
+
+## Betfair close check
+
+`odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes` guards the close that [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md) takes from the live Betfair job. FDUK can leave Betfair closing prices blank for whole matchdays (2026-04-20 to 2026-05-04), and then the live snapshot is the only close. An EPL event is missing its close when all of these hold:
+
+- Its kick-off passed within `odds_core.config.AlertConfig.betfair_close_lookback_hours` (24).
+- `fetch-betfair-exchange` is in `odds_core.config.SchedulerConfig.bootstrap_jobs`, covers `soccer_epl`, and has written an EPL snapshot before.
+- Its status is not postponed or cancelled, and some snapshot of any source falls in the 6 h before kick-off, so a ghost or an unannounced postponement raises nothing.
+- No live Betfair snapshot (`odds_core.snapshot_sources.SnapshotSource.BETFAIR_API`) that is not in-play (`odds_core.betfair_close.is_in_play`) lies within `odds_core.betfair_close.LIVE_CLOSE_WINDOW` (30 min) before kick-off. The retail-EV builder uses the same window and in-play test.
+
+The missing events of a run are one critical `missing_betfair_close` listing every event, so a matchday cannot storm. Its `alert_history` context holds the event ids, and an event named in an alert inside the lookback is not reported again; the common `alert_rate_limit_minutes` window still applies between alerts. The check reads the snapshot's presence, not its price quality, so a snapshot with a wide back book (ADR-0014) still counts. The alert fires after kick-off, when the close cannot be collected; it shows that the live job missed the window, so the FDUK fallback or a gap is known before a retail-EV evaluation.
 
 ## Heartbeats
 

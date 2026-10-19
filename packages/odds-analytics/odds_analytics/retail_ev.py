@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 
 import numpy as np
 import structlog
+from odds_core.betfair_close import EXCHANGE_BOOKMAKER, LIVE_CLOSE_WINDOW, is_in_play
 from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS, canonical_bookmaker_key
 from odds_core.models import Event, OddsSnapshot
 from odds_core.odds_math import devig_probabilities, outcome_price_decimal
@@ -37,11 +38,9 @@ logger = structlog.get_logger()
 
 DECISION_WINDOW = timedelta(days=7)
 DECISION_CUTOFF = timedelta(minutes=5)
-LIVE_CLOSE_WINDOW = timedelta(minutes=30)
 MAX_EXCHANGE_AGE = timedelta(hours=2)
 # A wider back book is a thin market whose best backs are not a price (ADR-0014).
 MAX_EXCHANGE_OVERROUND = 0.05
-EXCHANGE_BOOKMAKER = "betfair_exchange"
 POLYMARKET_BOOKMAKER = "polymarket"
 # Twice the coarsest step of the Polymarket history grid, and the exchange's age cap.
 MAX_POLYMARKET_AGE = timedelta(hours=2)
@@ -280,15 +279,6 @@ def _overround(prices: dict[Outcome, float], outcomes: tuple[Outcome, ...]) -> f
     return sum(1 / prices[o] for o in outcomes) - 1
 
 
-def _is_in_play(raw_data: dict[str, Any]) -> bool:
-    return any(
-        bool((bm.get("betfair_meta") or {}).get("inplay"))
-        for bm in raw_data.get("bookmakers", [])
-        if canonical_bookmaker_key(bm.get("key", ""), SnapshotKind.BETFAIR_LIVE)
-        == EXCHANGE_BOOKMAKER
-    )
-
-
 def _exchange_price(
     snapshot: OddsSnapshot,
     kind: SnapshotKind,
@@ -417,7 +407,7 @@ def build_event_rows(
             continue
         if kind not in EXCHANGE_AT_T_KINDS and kind is not SnapshotKind.FDUK_CLOSING:
             continue
-        if kind is SnapshotKind.BETFAIR_LIVE and _is_in_play(snapshot.raw_data):
+        if kind is SnapshotKind.BETFAIR_LIVE and is_in_play(snapshot.raw_data):
             continue
         price = _exchange_price(snapshot, kind, market, names, outcomes)
         if price is None:

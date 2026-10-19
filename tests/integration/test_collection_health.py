@@ -503,6 +503,224 @@ class TestCheckStaleSources:
         assert await self._monitor(pglite_async_session).check_stale_sources(NOW) == []
 
 
+class TestCheckMissingBetfairCloses:
+    KICKOFF = NOW - timedelta(hours=3)
+
+    @staticmethod
+    def _monitor(session: Any) -> HealthMonitor:
+        return HealthMonitor(session, get_settings())
+
+    @staticmethod
+    def _betfair(inplay: bool = False) -> dict[str, Any]:
+        return {
+            "source": BETFAIR.value,
+            "bookmakers": [{"key": "betfair_exchange", "betfair_meta": {"inplay": inplay}}],
+        }
+
+    @pytest.fixture
+    def seed_event(self, pglite_async_session: Any) -> Callable[..., Any]:
+        counter = 0
+
+        async def add(
+            kickoff: datetime,
+            snapshots: tuple[tuple[datetime, dict[str, Any]], ...],
+            status: EventStatus = EventStatus.FINAL,
+        ) -> str:
+            nonlocal counter
+            counter += 1
+            event_id = f"close_{counter}"
+            pglite_async_session.add(
+                Event(
+                    id=event_id,
+                    sport_key="soccer_epl",
+                    sport_title="EPL",
+                    commence_time=kickoff,
+                    home_team=f"Home {counter}",
+                    away_team=f"Away {counter}",
+                    status=status,
+                )
+            )
+            await pglite_async_session.flush()
+            for taken, raw_data in snapshots:
+                pglite_async_session.add(
+                    OddsSnapshot(
+                        event_id=event_id,
+                        snapshot_time=taken,
+                        raw_data=raw_data,
+                        bookmaker_count=1,
+                    )
+                )
+            await pglite_async_session.commit()
+            return event_id
+
+        return add
+
+    @staticmethod
+    def _earlier_betfair(kickoff: datetime) -> tuple[datetime, dict[str, Any]]:
+        return kickoff - timedelta(hours=2), TestCheckMissingBetfairCloses._betfair()
+
+    @staticmethod
+    def _op(kickoff: datetime, minutes_before: int = 20) -> tuple[datetime, dict[str, Any]]:
+        return kickoff - timedelta(minutes=minutes_before), {"source": OP.value}
+
+    async def test_event_without_a_snapshot_in_the_window_is_missing(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any]
+    ) -> None:
+        event_id = await seed_event(
+            self.KICKOFF, (self._earlier_betfair(self.KICKOFF), self._op(self.KICKOFF))
+        )
+
+        missing = await self._monitor(pglite_async_session).check_missing_betfair_closes(NOW)
+
+        assert [m.event_id for m in missing] == [event_id]
+
+    async def test_snapshot_inside_the_window_is_a_close(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any]
+    ) -> None:
+        await seed_event(
+            self.KICKOFF,
+            (
+                self._earlier_betfair(self.KICKOFF),
+                (self.KICKOFF - timedelta(minutes=29), self._betfair()),
+            ),
+        )
+
+        assert await self._monitor(pglite_async_session).check_missing_betfair_closes(NOW) == []
+
+    async def test_snapshot_just_outside_the_window_is_not_a_close(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any]
+    ) -> None:
+        await seed_event(
+            self.KICKOFF,
+            (
+                (self.KICKOFF - timedelta(minutes=31), self._betfair()),
+                self._op(self.KICKOFF),
+            ),
+        )
+
+        missing = await self._monitor(pglite_async_session).check_missing_betfair_closes(NOW)
+
+        assert len(missing) == 1
+
+    async def test_in_play_snapshot_is_not_a_close(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any]
+    ) -> None:
+        await seed_event(
+            self.KICKOFF,
+            (
+                self._earlier_betfair(self.KICKOFF),
+                (self.KICKOFF - timedelta(minutes=5), self._betfair(inplay=True)),
+            ),
+        )
+
+        missing = await self._monitor(pglite_async_session).check_missing_betfair_closes(NOW)
+
+        assert len(missing) == 1
+
+    async def test_event_priced_by_no_source_before_kickoff_is_a_ghost(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any]
+    ) -> None:
+        await seed_event(self.KICKOFF, ((self.KICKOFF - timedelta(hours=8), self._betfair()),))
+
+        assert await self._monitor(pglite_async_session).check_missing_betfair_closes(NOW) == []
+
+    @pytest.mark.parametrize("status", [EventStatus.POSTPONED, EventStatus.CANCELLED])
+    async def test_postponed_or_cancelled_event_is_skipped(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any], status: EventStatus
+    ) -> None:
+        await seed_event(self.KICKOFF, (self._op(self.KICKOFF),), status=status)
+        await seed_event(self.KICKOFF, (self._earlier_betfair(self.KICKOFF),))
+
+        missing = await self._monitor(pglite_async_session).check_missing_betfair_closes(NOW)
+
+        assert len(missing) == 1
+
+    async def test_events_outside_the_lookback_or_not_yet_kicked_off_are_ignored(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any]
+    ) -> None:
+        for kickoff in (NOW - timedelta(hours=25), NOW + timedelta(minutes=10)):
+            await seed_event(kickoff, (self._earlier_betfair(kickoff), self._op(kickoff)))
+
+        assert await self._monitor(pglite_async_session).check_missing_betfair_closes(NOW) == []
+
+    async def test_job_that_is_not_bootstrapped_is_not_checked(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any]
+    ) -> None:
+        await seed_event(
+            self.KICKOFF, (self._earlier_betfair(self.KICKOFF), self._op(self.KICKOFF))
+        )
+        settings = get_settings().model_copy(deep=True)
+        settings.scheduler.bootstrap_jobs = ["check-health"]
+
+        monitor = HealthMonitor(pglite_async_session, settings)
+
+        assert await monitor.check_missing_betfair_closes(NOW) == []
+
+    async def test_betfair_source_that_never_wrote_is_not_checked(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any]
+    ) -> None:
+        await seed_event(self.KICKOFF, (self._op(self.KICKOFF),))
+
+        assert await self._monitor(pglite_async_session).check_missing_betfair_closes(NOW) == []
+
+    async def test_events_are_aggregated_and_alerted_once(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any]
+    ) -> None:
+        ids = [
+            await seed_event(
+                self.KICKOFF - timedelta(minutes=offset),
+                (
+                    self._earlier_betfair(self.KICKOFF - timedelta(minutes=offset)),
+                    self._op(self.KICKOFF - timedelta(minutes=offset)),
+                ),
+            )
+            for offset in (0, 60)
+        ]
+        monitor = self._monitor(pglite_async_session)
+        settings = get_settings()
+        sent: list[str] = []
+
+        async def alert(message: str, severity: str) -> None:
+            sent.append(message)
+
+        with (
+            patch("odds_core.alerts.alert_manager.alert", side_effect=alert),
+            patch.object(settings.alerts, "alert_enabled", True),
+        ):
+            first = await monitor.check_system_health()
+            second = await monitor.check_system_health()
+
+        close_alerts = [
+            message for message in sent if "Betfair" in message and "snapshot" in message
+        ]
+        assert len(close_alerts) == 1
+        assert all(event_id in close_alerts[0] for event_id in ids)
+        assert "missing_betfair_close" in first.alerts_sent
+        assert "missing_betfair_close" not in second.alerts_sent
+
+    async def test_new_event_is_alerted_after_an_earlier_alert(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any]
+    ) -> None:
+        first = await seed_event(
+            self.KICKOFF, (self._earlier_betfair(self.KICKOFF), self._op(self.KICKOFF))
+        )
+        pglite_async_session.add(
+            AlertHistory(
+                alert_type="missing_betfair_close",
+                severity="critical",
+                message="earlier",
+                context={"event_ids": [first]},
+                sent_at=NOW - timedelta(hours=1),
+            )
+        )
+        later = NOW - timedelta(hours=1)
+        second = await seed_event(later, (self._earlier_betfair(later), self._op(later)))
+
+        missing = await self._monitor(pglite_async_session).check_missing_betfair_closes(NOW)
+
+        assert [m.event_id for m in missing] == [second]
+
+
 class TestMlbCalendar:
     @staticmethod
     def _game(
