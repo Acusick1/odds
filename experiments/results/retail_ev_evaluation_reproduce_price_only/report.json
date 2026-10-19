@@ -1,0 +1,171 @@
+{
+  "verdict": "retire",
+  "keep_bar": {
+    "mse_gain": {
+      "point": 3.200516338520226e-05,
+      "ci_low": -2.5696840155420145e-05,
+      "ci_high": 8.890757575365875e-05
+    },
+    "pick_ev_gain": {
+      "point": 0.01346519310860479,
+      "ci_low": -0.04253815814775333,
+      "ci_high": 0.06913011792028335
+    },
+    "bootstrap": {
+      "resamples": 2000,
+      "seed": 0
+    }
+  },
+  "coverage": {
+    "window_events_kicked_off": 381,
+    "scored_events": 369,
+    "scored_rows": 109167,
+    "unscored_events": [
+      "op_live_ARS_NEW_2026-04-25",
+      "op_live_ASTVIL_LIV_2026-05-17T1130",
+      "op_live_BOU_LEE_2026-04-22",
+      "op_live_BRI_CHE_2026-04-21",
+      "op_live_BUR_MANCIT_2026-04-22",
+      "op_live_CRYPAL_WESHAM_2026-04-20",
+      "op_live_FUL_ASTVIL_2026-04-25",
+      "op_live_LIV_CRYPAL_2026-04-25",
+      "op_live_MANUTD_BRE_2026-04-27",
+      "op_live_SUN_NOT_2026-04-24",
+      "op_live_WESHAM_EVE_2026-04-25",
+      "op_live_WOL_TOT_2026-04-25"
+    ],
+    "window_drops": {
+      "events_without_close": 12,
+      "rows_without_exchange": 26106,
+      "rows_stale_exchange": 17655,
+      "rows_without_own_exchange": 195,
+      "wide_exchange_snapshots": 160,
+      "prices_outside_roster": {
+        "pinnacle": 7464,
+        "betfair_exchange": 9219,
+        "market_max": 1107,
+        "market_avg": 1107,
+        "1xbetir": 2199,
+        "betfury": 1662,
+        "betinasia": 2790,
+        "betsio": 1650,
+        "cloudbet": 1386,
+        "roobet": 1662,
+        "shuffle": 1659,
+        "stakecom": 1665,
+        "unibet": 2784,
+        "fanduel": 7038,
+        "draftkings": 6876,
+        "betrivers": 7032,
+        "betmgm_us": 5949,
+        "bovada": 5418,
+        "1xbetie": 612
+      }
+    },
+    "pre_window_events": 380,
+    "pre_window_rows": 3861,
+    "scored_event_shares": {
+      "with_oddsportal_live_rows": 0.13279132791327913,
+      "with_live_betfair_close": 0.1111111111111111,
+      "fduk_only": 0.7994579945799458
+    },
+    "rows_by": {
+      "horizon": {
+        "0-1h": {
+          "rows": 1998,
+          "events": 29
+        },
+        "1-3d": {
+          "rows": 31668,
+          "events": 212
+        },
+        "1-6h": {
+          "rows": 10770,
+          "events": 43
+        },
+        "3-7d": {
+          "rows": 54597,
+          "events": 56
+        },
+        "6-24h": {
+          "rows": 10134,
+          "events": 169
+        }
+      },
+      "retail_source": {
+        "fduk_opening": {
+          "rows": 6972,
+          "events": 359
+        },
+        "oddsportal": {
+          "rows": 1149,
+          "events": 25
+        },
+        "oddsportal_live": {
+          "rows": 101046,
+          "events": 49
+        }
+      },
+      "close_source": {
+        "betfair_live": {
+          "rows": 101481,
+          "events": 41
+        },
+        "fduk_closing": {
+          "rows": 7686,
+          "events": 328
+        }
+      },
+      "event_type": {
+        "fduk_only": {
+          "rows": 5697,
+          "events": 295
+        },
+        "live_collected": {
+          "rows": 103470,
+          "events": 74
+        }
+      },
+      "outcome": {
+        "away": {
+          "rows": 36389,
+          "events": 369
+        },
+        "draw": {
+          "rows": 36389,
+          "events": 369
+        },
+        "home": {
+          "rows": 36389,
+          "events": 369
+        }
+      }
+    },
+    "outages": {
+      "without_oddsportal_live_rows": [
+        {
+          "events": 294,
+          "first_kickoff": "2025-08-15 19:00:00",
+          "last_kickoff": "2026-03-14 17:30:00"
+        },
+        {
+          "events": 19,
+          "first_kickoff": "2026-03-20 20:00:00",
+          "last_kickoff": "2026-04-18 11:30:00"
+        },
+        {
+          "events": 11,
+          "first_kickoff": "2026-04-20 19:00:00",
+          "last_kickoff": "2026-04-27 19:00:00"
+        }
+      ],
+      "without_live_betfair_close": [
+        {
+          "events": 339,
+          "first_kickoff": "2025-08-15 19:00:00",
+          "last_kickoff": "2026-04-27 19:00:00"
+        }
+      ]
+    }
+  }
+}
