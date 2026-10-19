@@ -173,7 +173,7 @@ def extract_epl_schedule_features(
     home_european_7d: float | None = None
     away_european_7d: float | None = None
 
-    if fixtures_df is not None:
+    if fixtures_df is not None and not fixtures_df.empty:
         t = event.commence_time
 
         home_df = _team_fixtures_before(fixtures_df, event.home_team, cutoff)

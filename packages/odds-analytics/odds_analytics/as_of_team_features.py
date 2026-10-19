@@ -26,6 +26,15 @@ if TYPE_CHECKING:
 
 # A match counts at t only once its result is known; kick-off plus this covers full time (inferred).
 RESULT_LAG = timedelta(hours=3)
+# ESPN statuses of a match that was played; rows left behind by a rescheduled match carry others.
+FINISHED_FIXTURE_STATUSES: frozenset[str] = frozenset(
+    {
+        "Full Time",
+        "Final Score - After Extra Time",
+        "Final Score - After Penalties",
+        "Final Score - After Golden Goal",
+    }
+)
 
 
 def results_known_before(t: datetime) -> datetime:
@@ -47,16 +56,30 @@ class TeamHistory:
             df = self.fixtures
             if df is not None:
                 teams = {event.home_team, event.away_team}
-                df = df.loc[df["team"].isin(teams) | df["opponent"].isin(teams)]
+                df = df.loc[
+                    (df["team"].isin(teams) | df["opponent"].isin(teams))
+                    & df["status"].isin(FINISHED_FIXTURE_STATUSES)
+                ]
             self._fixtures_by_event[event.id] = df
         return self._fixtures_by_event[event.id]
 
     def schedule_at(self, event: Event, t: datetime) -> EplScheduleFeatures:
+        """Schedule features from played matches known at t; NaN congestion for a team with none."""
         known = results_known_before(t)
         prior = get_prior_events_from_cache(self.season_results, event, before=known)
-        return extract_epl_schedule_features(
-            prior, event, fixtures_df=self._event_fixtures(event), known_at=known
-        )
+        fixtures = self._event_fixtures(event)
+        if fixtures is None:
+            return extract_epl_schedule_features(prior, event, known_at=known)
+        fixtures = fixtures.loc[fixtures["date"] < known]
+        features = extract_epl_schedule_features(prior, event, fixtures_df=fixtures, known_at=known)
+        played = set(fixtures["team"]) | set(fixtures["opponent"])
+        if event.home_team not in played:
+            features.home_matches_last_14d = None
+            features.home_european_last_7d = None
+        if event.away_team not in played:
+            features.away_matches_last_14d = None
+            features.away_european_last_7d = None
+        return features
 
     def standings_at(self, event: Event, t: datetime) -> StandingsFeatures:
         prior = get_prior_events_from_cache(

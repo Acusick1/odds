@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import get_args
 
 import numpy as np
 import pandas as pd
 import pytest
-from odds_analytics.as_of_team_features import TeamHistory
+from odds_analytics.as_of_team_features import TeamHistory, results_known_before
 from odds_analytics.retail_ev import (
+    _FEATURE_GROUPS,
     RETAIL_KINDS,
     Outcome,
     RetailEvDataset,
@@ -19,6 +21,7 @@ from odds_analytics.retail_ev import (
     market_outcomes,
 )
 from odds_analytics.standings_features import epl_season_key
+from odds_analytics.training.config import RetailEvFeatureGroupName
 from odds_core.bookmakers import canonical_bookmaker_key
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.odds_math import devig_probabilities
@@ -136,6 +139,7 @@ def rich_snapshots(snapshots: list[OddsSnapshot]) -> list[OddsSnapshot]:
         _polymarket(260, PM_EARLY),
         _polymarket(245, (2.4, 3.3, 3.2)),
         _live("oddsportal_live", 230, three_way_bookmaker("bet365", (1.9, 3.6, 4.3))),
+        _live("oddsportal", 245, three_way_bookmaker("bet365", (1.8, 3.7, 4.6))),
         _polymarket(
             190,
             PM_LATE,
@@ -469,13 +473,25 @@ class TestDynamics:
         row = _row(rows, 180, "bet365", Outcome.HOME)
         now = _fair(LIVE_BFE)[Outcome.HOME]
         one_h, three_h, six_h = row.dynamics.exchange_moves
-        assert one_h == pytest.approx(0.0)
+        assert one_h is None, "the latest exchange price at t - 1h is the price at t itself"
         assert three_h == pytest.approx(now - _fair(BFE_400)[Outcome.HOME])
-        assert six_h is None
-        consensus_250 = np.mean([1 / 2.0, 1 / 2.1])
-        assert row.dynamics.consensus_moves[0] == pytest.approx(row.consensus_prob - consensus_250)
+        assert six_h is None, "only the FDUK opening price lies within the cap of t - 6h"
+
+    def test_consensus_moves_compare_books_of_one_source(
+        self, event: Event, rich_snapshots: list
+    ) -> None:
+        rows, _ = build_event_rows(event, rich_snapshots, "1x2")
+        row = _row(rows, 180, "bet365", Outcome.HOME)
+        bet365_move = 1 / 2.05 - 1 / 2.0
+        assert row.dynamics.consensus_moves[0] == pytest.approx(bet365_move)
         assert row.dynamics.consensus_moves[1] is None
-        assert row.dynamics.consensus_moves[2] == pytest.approx(row.consensus_prob - 1 / 2.0)
+        assert row.dynamics.consensus_moves[2] == pytest.approx(bet365_move)
+
+    def test_fduk_opening_has_no_moves(self, event: Event, rich_snapshots: list) -> None:
+        rows, _ = build_event_rows(event, rich_snapshots, "1x2")
+        row = _row(rows, 48 * 60, "bet365", Outcome.HOME)
+        assert row.dynamics.exchange_moves == (None, None, None)
+        assert row.dynamics.consensus_moves == (None, None, None)
 
     def test_dispersion_across_uk_books(self, event: Event, rich_snapshots: list) -> None:
         rows, _ = build_event_rows(event, rich_snapshots, "1x2")
@@ -504,6 +520,8 @@ TEAM_T = (
     KICKOFF - timedelta(days=7),
     KICKOFF - timedelta(days=4),
     datetime(2025, 10, 1, 20, 30, tzinfo=UTC),
+    datetime(2025, 10, 1, 21, 0, tzinfo=UTC),
+    datetime(2025, 10, 1, 21, 30, tzinfo=UTC),
     datetime(2025, 10, 1, 23, 30, tzinfo=UTC),
     KICKOFF - timedelta(days=1),
     KICKOFF - timedelta(minutes=5),
@@ -548,14 +566,15 @@ def season(event: Event) -> list[Event]:
 @pytest.fixture
 def fixtures() -> pd.DataFrame:
     rows = [
-        ("2025-09-27T14:00:00Z", "Arsenal", "Fulham", "Premier League"),
-        ("2025-09-28T14:00:00Z", "Chelsea", "Everton", "Premier League"),
-        ("2025-09-30T19:00:00Z", "Chelsea", "Benfica", "Champions League"),
-        ("2025-10-01T19:45:00Z", "Arsenal", "Fulham", "Premier League"),
-        ("2025-10-04T14:00:00Z", "Arsenal", "Chelsea", "Premier League"),
-        ("2025-10-07T19:00:00Z", "Chelsea", "Ajax", "Champions League"),
+        ("2025-09-27T14:00:00Z", "Arsenal", "Fulham", "Premier League", "Full Time"),
+        ("2025-09-28T14:00:00Z", "Chelsea", "Everton", "Premier League", "Full Time"),
+        ("2025-09-30T19:00:00Z", "Chelsea", "Benfica", "Champions League", "Full Time"),
+        ("2025-10-01T19:30:00Z", "Chelsea", "Brighton", "League Cup", "Postponed"),
+        ("2025-10-01T19:45:00Z", "Arsenal", "Fulham", "Premier League", "Full Time"),
+        ("2025-10-04T14:00:00Z", "Arsenal", "Chelsea", "Premier League", "Full Time"),
+        ("2025-10-07T19:00:00Z", "Chelsea", "Ajax", "Champions League", "Scheduled"),
     ]
-    df = pd.DataFrame(rows, columns=["date", "team", "opponent", "competition"])
+    df = pd.DataFrame(rows, columns=["date", "team", "opponent", "competition", "status"])
     df["date"] = pd.to_datetime(df["date"], utc=True)
     return df
 
@@ -593,15 +612,33 @@ class TestTeamFeaturesAsOfT:
         self, event: Event, season: list[Event], fixtures: pd.DataFrame
     ) -> None:
         history = _history(season, fixtures)
-        in_play, after = TEAM_T[2], TEAM_T[3]
+        in_play, after = TEAM_T[2], TEAM_T[5]
         assert history.schedule_at(event, in_play).home_rest_days == pytest.approx(7.0)
         assert history.schedule_at(event, after).home_rest_days == pytest.approx(
             (KICKOFF - datetime(2025, 10, 1, 19, 45, tzinfo=UTC)).total_seconds() / 86400
         )
         assert history.standings_at(event, in_play).home_goal_difference == 0.0
         assert history.standings_at(event, after).home_goal_difference == 4.0
-        assert history.schedule_at(event, TEAM_T[0]).away_european_last_7d == 0.0
+        assert history.schedule_at(event, TEAM_T[1]).away_european_last_7d == 0.0
         assert history.schedule_at(event, TEAM_T[-1]).away_european_last_7d == 1.0
+
+    def test_result_known_three_hours_after_kick_off(self) -> None:
+        assert results_known_before(KICKOFF) == KICKOFF - timedelta(hours=3)
+
+    def test_unplayed_fixture_rows_do_not_count(
+        self, event: Event, season: list[Event], fixtures: pd.DataFrame
+    ) -> None:
+        features = _history(season, fixtures).schedule_at(event, TEAM_T[-1])
+        assert features.away_matches_last_14d == 2.0
+
+    def test_team_without_played_fixtures_has_no_congestion(
+        self, season: list[Event], fixtures: pd.DataFrame
+    ) -> None:
+        newcomer = make_epl_event("new", KICKOFF, "Brentford", "Chelsea")
+        features = _history(season, fixtures).schedule_at(newcomer, TEAM_T[-1])
+        assert features.home_matches_last_14d is None
+        assert features.home_european_last_7d is None
+        assert features.away_matches_last_14d == 2.0
 
     def test_feature_vector_includes_team_groups(
         self,
@@ -629,3 +666,8 @@ class TestTeamFeaturesAsOfT:
     def test_team_groups_need_history(self) -> None:
         with pytest.raises(ValueError, match="teams"):
             RetailEvFeatures(OUTCOMES, ("schedule_as_of_t",))
+
+
+class TestFeatureGroupTable:
+    def test_every_config_group_has_an_entry(self) -> None:
+        assert set(_FEATURE_GROUPS) == set(get_args(RetailEvFeatureGroupName))

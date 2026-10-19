@@ -733,6 +733,24 @@ class TestCongestionFeatures:
         assert features.home_european_last_7d is None
         assert features.away_european_last_7d is None
 
+    def test_congestion_without_rows_before_kickoff_is_nan(self) -> None:
+        event = _make_event(commence_time=datetime(2025, 1, 11, 15, 0, tzinfo=UTC))
+        df = _make_fixtures_df(
+            [
+                {
+                    "date": "2025-01-20T15:00Z",
+                    "team": "Arsenal",
+                    "opponent": "Chelsea",
+                    "competition": "Premier League",
+                },
+            ]
+        )
+        features = extract_epl_schedule_features(
+            [], event, known_at=event.commence_time, fixtures_df=df.iloc[0:0]
+        )
+        assert features.home_matches_last_14d is None
+        assert features.away_european_last_7d is None
+
     def test_congestion_with_empty_df(self) -> None:
         """Empty DataFrame produces zero counts (not None)."""
         event = _make_event(commence_time=datetime(2025, 1, 11, 15, 0, tzinfo=UTC))

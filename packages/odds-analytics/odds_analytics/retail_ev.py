@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import bisect
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -24,7 +24,7 @@ from odds_core.snapshot_sources import SnapshotKind, snapshot_kind
 
 from odds_analytics.epl_schedule_features import EplScheduleFeatures
 from odds_analytics.standings_features import StandingsFeatures
-from odds_analytics.training.config import RETAIL_EV_FEATURE_GROUPS, RetailEvFeatureGroupName
+from odds_analytics.training.config import RetailEvFeatureGroupName
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -116,10 +116,6 @@ class _RetailQuote:
     kind: SnapshotKind
     books: dict[str, dict[Outcome, float]]
     implied: dict[Outcome, list[float]]
-
-    def consensus(self, outcome: Outcome) -> float | None:
-        implied = self.implied[outcome]
-        return float(np.mean(implied)) if implied else None
 
 
 @dataclass(frozen=True)
@@ -330,28 +326,39 @@ def _latest_at_or_before(times: list[datetime], at: datetime, max_age: timedelta
     return idx
 
 
+def _consensus_move(now: _RetailQuote, before: _RetailQuote, outcome: Outcome) -> float | None:
+    moves = [
+        1 / prices[outcome] - 1 / before.books[book][outcome]
+        for book, prices in now.books.items()
+        if outcome in prices and outcome in before.books.get(book, {})
+    ]
+    return float(np.mean(moves)) if moves else None
+
+
 def _dynamics(
     outcome: Outcome,
     t: datetime,
     exchange: ExchangePrice,
-    exchange_at_t: list[ExchangePrice],
-    exchange_times: list[datetime],
+    same_kind_exchange: list[ExchangePrice],
+    same_kind_exchange_times: list[datetime],
     quote: _RetailQuote,
     same_kind: list[_RetailQuote],
     same_kind_times: list[datetime],
 ) -> Dynamics:
-    consensus_now = quote.consensus(outcome)
+    """Moves compare prices from one source, so a change of source is never a move."""
     exchange_moves: list[float | None] = []
     consensus_moves: list[float | None] = []
     for window in MOVE_WINDOWS:
-        idx = _latest_at_or_before(exchange_times, t - window, MAX_LAGGED_PRICE_AGE)
+        idx = _latest_at_or_before(same_kind_exchange_times, t - window, MAX_LAGGED_PRICE_AGE)
+        lagged = None if idx is None else same_kind_exchange[idx]
         exchange_moves.append(
-            None if idx is None else exchange.fair[outcome] - exchange_at_t[idx].fair[outcome]
+            None
+            if lagged is None or lagged.time == exchange.time
+            else exchange.fair[outcome] - lagged.fair[outcome]
         )
         idx = _latest_at_or_before(same_kind_times, t - window, MAX_LAGGED_PRICE_AGE)
-        before = None if idx is None else same_kind[idx].consensus(outcome)
         consensus_moves.append(
-            None if before is None or consensus_now is None else consensus_now - before
+            None if idx is None else _consensus_move(quote, same_kind[idx], outcome)
         )
     implied = quote.implied[outcome]
     return Dynamics(
@@ -420,6 +427,12 @@ def build_event_rows(
         return [], drops
 
     exchange_times = [p.time for p in exchange_at_t]
+    exchange_by_kind: dict[SnapshotKind, list[ExchangePrice]] = {}
+    for price in exchange_at_t:
+        exchange_by_kind.setdefault(price.kind, []).append(price)
+    exchange_times_by_kind = {
+        kind: [p.time for p in prices] for kind, prices in exchange_by_kind.items()
+    }
     polymarket_times = [p.time for p in polymarket]
     window_start = kickoff - DECISION_WINDOW
     window_end = kickoff - DECISION_CUTOFF
@@ -467,8 +480,8 @@ def build_event_rows(
                 outcome,
                 t,
                 exchange,
-                exchange_at_t,
-                exchange_times,
+                exchange_by_kind[exchange.kind],
+                exchange_times_by_kind[exchange.kind],
                 quote,
                 quotes_by_kind[quote.kind],
                 quote_times[quote.kind],
@@ -541,7 +554,6 @@ _DYNAMICS_FEATURE_NAMES: tuple[str, ...] = (
     *(f"consensus_move_{_window_label(w)}" for w in MOVE_WINDOWS),
     "retail_dispersion",
 )
-_TEAM_GROUPS: frozenset[str] = frozenset({"schedule_as_of_t", "standings_as_of_t"})
 
 
 def _nan_if_none(value: float | None) -> float:
@@ -597,6 +609,43 @@ def _dynamics_features(row: RetailEvRow) -> list[float]:
     ]
 
 
+_SCHEDULE_FEATURE_NAMES: tuple[str, ...] = tuple(
+    f"eplsched_{n}" for n in EplScheduleFeatures.get_feature_names()
+)
+_STANDINGS_FEATURE_NAMES: tuple[str, ...] = tuple(
+    f"stnd_{n}" for n in StandingsFeatures.get_feature_names()
+)
+
+
+@dataclass(frozen=True)
+class _FeatureGroup:
+    names: tuple[str, ...]
+    values: Callable[[RetailEvFeatures, RetailEvRow], list[float]]
+    needs_teams: bool = False
+
+
+def _schedule_features(features: RetailEvFeatures, row: RetailEvRow) -> list[float]:
+    return features.team_features(row, "schedule_as_of_t", lambda h, e, t: h.schedule_at(e, t))
+
+
+def _standings_features(features: RetailEvFeatures, row: RetailEvRow) -> list[float]:
+    return features.team_features(row, "standings_as_of_t", lambda h, e, t: h.standings_at(e, t))
+
+
+_FEATURE_GROUPS: dict[RetailEvFeatureGroupName, _FeatureGroup] = {
+    "polymarket_at_t": _FeatureGroup(
+        _POLYMARKET_FEATURE_NAMES, lambda _, row: _polymarket_features(row)
+    ),
+    "dynamics": _FeatureGroup(_DYNAMICS_FEATURE_NAMES, lambda _, row: _dynamics_features(row)),
+    "schedule_as_of_t": _FeatureGroup(
+        _SCHEDULE_FEATURE_NAMES, _schedule_features, needs_teams=True
+    ),
+    "standings_as_of_t": _FeatureGroup(
+        _STANDINGS_FEATURE_NAMES, _standings_features, needs_teams=True
+    ),
+}
+
+
 class RetailEvFeatures:
     """The feature vector of a retail-EV row: price features plus the configured as-of-t groups.
 
@@ -611,18 +660,24 @@ class RetailEvFeatures:
         teams: TeamHistory | None = None,
         events: Mapping[str, Event] | None = None,
     ) -> None:
-        unknown = set(groups) - RETAIL_EV_FEATURE_GROUPS
+        unknown = set(groups) - set(_FEATURE_GROUPS)
         if unknown:
             raise ValueError(f"unknown retail_ev feature groups {sorted(unknown)}")
-        if _TEAM_GROUPS & set(groups) and (teams is None or events is None):
-            raise ValueError("schedule_as_of_t and standings_as_of_t need teams and events")
         self.outcomes = outcomes
         self.groups: tuple[RetailEvFeatureGroupName, ...] = tuple(
             g for g in get_args(RetailEvFeatureGroupName) if g in groups
         )
+        if any(_FEATURE_GROUPS[g].needs_teams for g in self.groups) and (
+            teams is None or events is None
+        ):
+            raise ValueError("schedule_as_of_t and standings_as_of_t need teams and events")
         self._teams = teams
         self._events = events or {}
-        self._team_cache: dict[tuple[str, datetime], list[float]] = {}
+        self._team_cache: dict[tuple[RetailEvFeatureGroupName, str, datetime], list[float]] = {}
+
+    @staticmethod
+    def needs_teams(groups: Sequence[RetailEvFeatureGroupName]) -> bool:
+        return any(_FEATURE_GROUPS[g].needs_teams for g in groups)
 
     @property
     def names(self) -> list[str]:
@@ -632,37 +687,29 @@ class RetailEvFeatures:
             + [f"book_{b}" for b in RETAIL_BOOK_COLUMNS]
         )
         for group in self.groups:
-            if group == "polymarket_at_t":
-                names += _POLYMARKET_FEATURE_NAMES
-            elif group == "dynamics":
-                names += _DYNAMICS_FEATURE_NAMES
-            elif group == "schedule_as_of_t":
-                names += [f"eplsched_{n}" for n in EplScheduleFeatures.get_feature_names()]
-            elif group == "standings_as_of_t":
-                names += [f"stnd_{n}" for n in StandingsFeatures.get_feature_names()]
+            names += _FEATURE_GROUPS[group].names
         return names
 
-    def _team_features(self, row: RetailEvRow) -> list[float]:
-        key = (row.event_id, row.decision_time)
+    def team_features(
+        self,
+        row: RetailEvRow,
+        group: RetailEvFeatureGroupName,
+        extract: Callable[[TeamHistory, Event, datetime], EplScheduleFeatures | StandingsFeatures],
+    ) -> list[float]:
+        """One group's team features, computed once per event and decision time."""
+        key = (group, row.event_id, row.decision_time)
         if key not in self._team_cache:
             assert self._teams is not None
             event = self._events[row.event_id]
-            values: list[float] = []
-            if "schedule_as_of_t" in self.groups:
-                values += self._teams.schedule_at(event, row.decision_time).to_array().tolist()
-            if "standings_as_of_t" in self.groups:
-                values += self._teams.standings_at(event, row.decision_time).to_array().tolist()
-            self._team_cache[key] = values
+            self._team_cache[key] = (
+                extract(self._teams, event, row.decision_time).to_array().tolist()
+            )
         return self._team_cache[key]
 
     def row(self, row: RetailEvRow) -> np.ndarray:
         values = _price_features(row, self.outcomes)
-        if "polymarket_at_t" in self.groups:
-            values += _polymarket_features(row)
-        if "dynamics" in self.groups:
-            values += _dynamics_features(row)
-        if _TEAM_GROUPS & set(self.groups):
-            values += self._team_features(row)
+        for group in self.groups:
+            values += _FEATURE_GROUPS[group].values(self, row)
         return np.array(values, dtype=np.float64)
 
     def matrix(self, rows: Sequence[RetailEvRow]) -> np.ndarray:
@@ -719,7 +766,7 @@ async def prepare_retail_ev_training_data(
 
     groups = cast(tuple[RetailEvFeatureGroupName, ...], config.feature_groups)
     teams: TeamHistory | None = None
-    if _TEAM_GROUPS & set(groups):
+    if RetailEvFeatures.needs_teams(groups):
         from odds_analytics.as_of_team_features import load_team_history
 
         sport_keys = {e.sport_key for e in valid_events}
