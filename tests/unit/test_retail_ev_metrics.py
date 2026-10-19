@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import astuple
+
 import numpy as np
 import pytest
 from odds_analytics.retail_ev import event_weights
 from odds_analytics.retail_ev_metrics import (
     mse_gain,
+    mse_gain_of_event_totals,
     pick_ev_gain,
+    pick_ev_gain_of_event_totals,
     weighted_mse,
 )
 
@@ -111,3 +115,32 @@ class TestPickEvGain:
         baseline = rng.normal(size=n)
         result = pick_ev_gain(y, model, baseline, np.ones(n), ids)
         assert result.ci_low > 0
+
+
+class TestEventTotals:
+    def test_match_the_row_level_tests(self) -> None:
+        rng = np.random.default_rng(5)
+        ids = rng.integers(0, 30, size=300)
+        y = rng.normal(size=300)
+        model = y + rng.normal(scale=0.5, size=300)
+        baseline = rng.normal(size=300)
+        w = rng.uniform(0.5, 2.0, size=300)
+        order = np.unique(ids)
+        se_model = np.array([np.sum(w[ids == e] * (y - model)[ids == e] ** 2) for e in order])
+        se_base = np.array([np.sum(w[ids == e] * (y - baseline)[ids == e] ** 2) for e in order])
+        w_totals = np.array([w[ids == e].sum() for e in order])
+        picks = w * y * ((model > 0).astype(float) - (baseline > 0))
+        pick_totals = np.array([picks[ids == e].sum() for e in order])
+
+        pairs = [
+            (
+                mse_gain_of_event_totals(se_model, se_base, w_totals, seed=3),
+                mse_gain(y, model, baseline, w, ids, seed=3),
+            ),
+            (
+                pick_ev_gain_of_event_totals(pick_totals, seed=3),
+                pick_ev_gain(y, model, baseline, w, ids, seed=3),
+            ),
+        ]
+        for totals, rows in pairs:
+            assert astuple(totals) == pytest.approx(astuple(rows))

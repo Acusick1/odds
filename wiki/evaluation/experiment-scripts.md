@@ -6,6 +6,7 @@ sources:
   - odds_analytics.training.data_preparation.save_verification_artifacts
   - experiments/scripts/cv_protocol_grid.py
   - experiments/scripts/retail_ev_target_report.py
+  - experiments/scripts/retail_ev_power.py
   - experiments/configs/xgboost_epl_production_tabular_match_stats.yaml
   - experiments/results/exp4_hours_to_game/FINDINGS.md
 status: stable
@@ -61,6 +62,7 @@ Zeroed features once hid an adapter bug ([early NBA signal search](exp-early-nba
 | `cv_protocol_common_range` | CV protocol cells scored on a common validation range | [CV protocol on a common validation range](exp-cv-protocol-common-range.md) |
 | `retail_ev_target_report` | Row counts by season, source, horizon bucket and book for the retail-EV target (the season and bucket are `odds_analytics.retail_ev.RetailEvRow` properties), with the baseline's weighted MSE; trains no model | [CLV and the training target](../modelling/clv-target.md#the-retail-ev-target) |
 | `retail_ev_price_only` | Price-only XGBoost on the retail-EV target, direct and residual arms over two seeds, against the martingale baseline and a constant shrinkage | [Price-only models on the retail-EV target](exp-epl-retail-ev-price-only.md) |
+| `retail_ev_power` | Simulated power of the retail-EV keep-bar tests on resampled fresh seasons, for calibrated, sparse and no-information synthetic models, with a noise-seed sweep at one season | [Power of the retail-EV keep bar](exp-retail-ev-power.md) |
 | `epl_clv_rebaseline` | EPL CLV model against the OLS baseline over two seeds on the evaluation range | [EPL CLV re-baseline](exp-epl-clv-rebaseline.md) |
 | `epl_clv_pinnacle_retest` | Pinnacle and bet365 CLV targets on a common event set, with the Pinnacle keep test | [Pinnacle against bet365](exp-epl-clv-pinnacle-retest.md) |
 | `hybrid_sharp_validation` | Pinnacle versus Betfair sharp reference | [EPL sharp reference](exp-epl-sharp-reference.md) |

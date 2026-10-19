@@ -57,9 +57,20 @@ def mse_gain(
         loss_weights * (y - pred_baseline) ** 2,
         loss_weights,
     )
-    point = (se_base.sum() - se_model.sum()) / w.sum()
-    counts = _resample_counts(len(w), n_boot, seed)
-    samples = (counts @ se_base - counts @ se_model) / (counts @ w)
+    return mse_gain_of_event_totals(se_model, se_base, w, n_boot, seed)
+
+
+def mse_gain_of_event_totals(
+    se_model: np.ndarray,
+    se_base: np.ndarray,
+    weight_totals: np.ndarray,
+    n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
+    seed: int = 0,
+) -> BootstrapEstimate:
+    """``mse_gain`` from each event's weighted squared errors and loss-weight total."""
+    point = (se_base.sum() - se_model.sum()) / weight_totals.sum()
+    counts = _resample_counts(len(weight_totals), n_boot, seed)
+    samples = (counts @ se_base - counts @ se_model) / (counts @ weight_totals)
     low, high = _percentile_ci(samples)
     return BootstrapEstimate(float(point), low, high)
 
@@ -80,6 +91,13 @@ def pick_ev_gain(
     (diff,) = _event_sums(
         event_ids, w_event * y * ((pred_model > 0).astype(float) - (pred_baseline > 0))
     )
+    return pick_ev_gain_of_event_totals(diff, n_boot, seed)
+
+
+def pick_ev_gain_of_event_totals(
+    diff: np.ndarray, n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES, seed: int = 0
+) -> BootstrapEstimate:
+    """``pick_ev_gain`` from each event's model-minus-baseline pick total."""
     counts = _resample_counts(len(diff), n_boot, seed)
     low, high = _percentile_ci(counts @ diff)
     return BootstrapEstimate(float(diff.sum()), low, high)

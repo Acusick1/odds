@@ -1,0 +1,240 @@
+{
+  "start": "2024-08-01",
+  "end": "2026-07-31",
+  "sims": 250,
+  "n_boot": 2000,
+  "seed": 42,
+  "noise_replicates": 256,
+  "target_power": 0.8,
+  "season_sizes": [
+    100,
+    190,
+    380,
+    760,
+    1140
+  ],
+  "calibrated_gains": [
+    0.005,
+    0.01,
+    0.02,
+    0.03,
+    0.05,
+    0.075,
+    0.1,
+    0.15,
+    0.2,
+    0.3,
+    0.4
+  ],
+  "sparse_shares": [
+    0.01,
+    0.02,
+    0.05,
+    0.1,
+    0.2
+  ],
+  "sparse_informed_gains": [
+    0.5,
+    1.0
+  ],
+  "no_information_scales": [
+    0.05,
+    0.2,
+    0.5
+  ],
+  "odds_band_edges": [
+    2.0,
+    3.0,
+    4.5,
+    7.0
+  ],
+  "pools": [
+    {
+      "regime": "fduk_only",
+      "events": 739,
+      "rows": 10833,
+      "seasons": {
+        "2024-25": 380,
+        "2025-26": 359
+      },
+      "rows_per_event_median": 12.0,
+      "exchange_snapshots_per_event_median": 1.0,
+      "baseline_wmse": 0.0033259375977916115,
+      "dp_rms_pp": 2.2625829760926637,
+      "baseline_pick_share": 0.01024120969993771,
+      "by_horizon": [
+        {
+          "bucket": "1-6h",
+          "rows": 282,
+          "events": 20,
+          "sum_w_event": 20.0,
+          "baseline_wmse": 0.00139367258020135,
+          "dp_rms_pp": 1.4899605165095795
+        },
+        {
+          "bucket": "6-24h",
+          "rows": 4389,
+          "events": 302,
+          "sum_w_event": 302.0,
+          "baseline_wmse": 0.0030584012746770694,
+          "dp_rms_pp": 2.18561750926435
+        },
+        {
+          "bucket": "1-3d",
+          "rows": 5640,
+          "events": 381,
+          "sum_w_event": 381.0,
+          "baseline_wmse": 0.0036207311503663347,
+          "dp_rms_pp": 2.347789079987779
+        },
+        {
+          "bucket": "3-7d",
+          "rows": 522,
+          "events": 36,
+          "sum_w_event": 36.0,
+          "baseline_wmse": 0.0036370456197990894,
+          "dp_rms_pp": 2.333352751359789
+        }
+      ],
+      "by_odds_band": [
+        {
+          "band": "1-2",
+          "rows": 2164,
+          "events": 463,
+          "sum_w_event": 148.04603174603176,
+          "baseline_wmse": 0.0021035702271157627,
+          "dp_rms_pp": 2.977414422804006
+        },
+        {
+          "band": "2-3",
+          "rows": 2051,
+          "events": 313,
+          "sum_w_event": 140.68412698412698,
+          "baseline_wmse": 0.005123085038843549,
+          "dp_rms_pp": 2.993820606418063
+        },
+        {
+          "band": "3-4.5",
+          "rows": 4339,
+          "events": 588,
+          "sum_w_event": 288.18730158730153,
+          "baseline_wmse": 0.0035643545954312994,
+          "dp_rms_pp": 1.6462750652597613
+        },
+        {
+          "band": "4.5-7",
+          "rows": 1599,
+          "events": 326,
+          "sum_w_event": 111.8642857142857,
+          "baseline_wmse": 0.007882536195967666,
+          "dp_rms_pp": 1.716420624745136
+        },
+        {
+          "band": "7-inf",
+          "rows": 680,
+          "events": 146,
+          "sum_w_event": 50.218253968253975,
+          "baseline_wmse": 0.015265686523067033,
+          "dp_rms_pp": 1.40520038267096
+        }
+      ]
+    },
+    {
+      "regime": "dense_live",
+      "events": 49,
+      "rows": 102003,
+      "seasons": {
+        "2025-26": 49
+      },
+      "rows_per_event_median": 2145.0,
+      "exchange_snapshots_per_event_median": 43.0,
+      "baseline_wmse": 0.005547756516766081,
+      "dp_rms_pp": 2.9561195555184825,
+      "baseline_pick_share": 0.012534324061852618,
+      "by_horizon": [
+        {
+          "bucket": "0-1h",
+          "rows": 1998,
+          "events": 29,
+          "sum_w_event": 0.7331513267207646,
+          "baseline_wmse": 0.0004037296774074824,
+          "dp_rms_pp": 0.7955587002896154
+        },
+        {
+          "bucket": "1-6h",
+          "rows": 10626,
+          "events": 35,
+          "sum_w_event": 4.270513554549211,
+          "baseline_wmse": 0.005232031571233884,
+          "dp_rms_pp": 2.8564826154616267
+        },
+        {
+          "bucket": "6-24h",
+          "rows": 6723,
+          "events": 29,
+          "sum_w_event": 3.8760528870224853,
+          "baseline_wmse": 0.006374134284365268,
+          "dp_rms_pp": 3.1985711833021417
+        },
+        {
+          "bucket": "1-3d",
+          "rows": 28311,
+          "events": 47,
+          "sum_w_event": 15.759582102761406,
+          "baseline_wmse": 0.004331643549183074,
+          "dp_rms_pp": 2.6157431595072573
+        },
+        {
+          "bucket": "3-7d",
+          "rows": 54345,
+          "events": 42,
+          "sum_w_event": 24.360700128946135,
+          "baseline_wmse": 0.006414130418216337,
+          "dp_rms_pp": 3.173894333550652
+        }
+      ],
+      "by_odds_band": [
+        {
+          "band": "1-2",
+          "rows": 22620,
+          "events": 39,
+          "sum_w_event": 11.121710484282021,
+          "baseline_wmse": 0.0037913383732737335,
+          "dp_rms_pp": 3.920486373551356
+        },
+        {
+          "band": "2-3",
+          "rows": 17610,
+          "events": 24,
+          "sum_w_event": 8.283077463819875,
+          "baseline_wmse": 0.008240293284283388,
+          "dp_rms_pp": 3.7810300289694503
+        },
+        {
+          "band": "3-4.5",
+          "rows": 44852,
+          "events": 43,
+          "sum_w_event": 20.583150664510075,
+          "baseline_wmse": 0.006003587147213524,
+          "dp_rms_pp": 2.0975828278465865
+        },
+        {
+          "band": "4.5-7",
+          "rows": 9367,
+          "events": 25,
+          "sum_w_event": 6.008788794157603,
+          "baseline_wmse": 0.014324945430450972,
+          "dp_rms_pp": 2.316667898153883
+        },
+        {
+          "band": "7-inf",
+          "rows": 7554,
+          "events": 11,
+          "sum_w_event": 3.0032725932304283,
+          "baseline_wmse": 0.0411937540966455,
+          "dp_rms_pp": 2.3097489471207613
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+regime,noise,n_events,mde_mse,mde_pick,mde_both,mde_mse_absolute
+dense_live,per_exchange_snapshot,100,0.044,0.354902,0.354902,0.000244101
+dense_live,per_exchange_snapshot,190,0.0205,0.190909,0.190909,0.000113729
+dense_live,per_exchange_snapshot,380,0.00943396,0.0852273,0.0852273,5.23373e-05
+dense_live,per_exchange_snapshot,760,0.005,0.03,0.03,2.77388e-05
+dense_live,per_exchange_snapshot,1140,0.005,0.0248276,0.0248276,2.77388e-05
+dense_live,per_outcome,100,0.178788,,,0.000991872
+dense_live,per_outcome,190,0.0948276,0.284127,0.284127,0.00052608
+dense_live,per_outcome,380,0.0538462,0.181429,0.181429,0.000298725
+dense_live,per_outcome,760,0.0251429,0.116964,0.116964,0.000139486
+dense_live,per_outcome,1140,0.0166234,0.0854839,0.0854839,9.22224e-05
+fduk_only,per_outcome,100,0.202778,,,0.000674426
+fduk_only,per_outcome,190,0.097973,0.29863,0.29863,0.000325852
+fduk_only,per_outcome,380,0.0622093,0.196154,0.196154,0.000206904
+fduk_only,per_outcome,760,0.0273333,0.123333,0.123333,9.0909e-05
+fduk_only,per_outcome,1140,0.0190361,0.0890625,0.0890625,6.3313e-05

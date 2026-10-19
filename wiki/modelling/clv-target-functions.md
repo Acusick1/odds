@@ -58,6 +58,7 @@ An exchange price, at the close or at t, counts only when its back overround is 
 
 - `odds_analytics.retail_ev_metrics.mse_gain`: baseline weighted MSE minus the model's, with the loss weights; positive means the model is better.
 - `odds_analytics.retail_ev_metrics.pick_ev_gain`: the total `w_event × target` over rows the model predicts EV > 0, minus the same total over rows the baseline predicts EV > 0. An empty pick set totals zero.
+- `odds_analytics.retail_ev_metrics.mse_gain_of_event_totals` and `odds_analytics.retail_ev_metrics.pick_ev_gain_of_event_totals` run the same bootstraps on per-event totals (weighted squared errors and loss-weight totals, or pick-EV differences), which the row-level functions compute and pass to them. The [keep-bar power simulation](../evaluation/exp-retail-ev-power.md) calls them directly.
 
 ## Devigged delta
 

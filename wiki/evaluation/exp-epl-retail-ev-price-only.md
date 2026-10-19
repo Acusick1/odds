@@ -60,7 +60,7 @@ This is the first model run on the retail-EV target of [ADR-0012](../../docs/adr
 - **Metrics.**
   - `odds_analytics.retail_ev_metrics.mse_gain` gives baseline weighted MSE minus challenger weighted MSE.
   - `odds_analytics.retail_ev_metrics.pick_ev_gain` gives the total `w_event`-weighted realised EV of rows with predicted EV > 0, challenger minus baseline.
-  - Both come with event-clustered bootstrap 95% CIs (2,000 resamples, the same resampled events for every comparison).
+  - Both come with event-clustered bootstrap 95% CIs over per-event totals (2,000 resamples, the same resampled events for every comparison).
   - A pick total is in event units: `w_event` sums to 1 per event, so 0.28 is 0.28 of one event's worth of EV.
   - Shrinkage by β > 0 never changes the sign of a prediction, so its picks equal the baseline's and its pick gain is zero by construction.
   - The horizon buckets and season labels are `odds_analytics.retail_ev.RetailEvRow` properties.
