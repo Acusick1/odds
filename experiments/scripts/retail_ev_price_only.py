@@ -41,7 +41,6 @@ import numpy as np
 import optuna
 import pandas as pd
 import structlog
-from odds_analytics.feature_groups import filter_completed_events
 from odds_analytics.retail_ev import (
     DECISION_WINDOW,
     HORIZON_BUCKET_LABELS,
@@ -62,7 +61,6 @@ from odds_analytics.training.data_preparation import (
 from odds_analytics.training.tuner import OptunaTuner, apply_trial_params, create_objective
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from odds_core.database import async_session_maker
-from odds_core.models import EventStatus
 
 structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.WARNING))
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -125,11 +123,11 @@ async def load_data(config: MLTrainingConfig) -> RunData:
             session,
             start_date=datetime.combine(data_cfg.start_date, datetime.min.time(), tzinfo=UTC),
             end_date=datetime.combine(data_cfg.end_date, datetime.max.time(), tzinfo=UTC),
-            status=EventStatus.FINAL,
+            status=None,
             sport_key=data_cfg.sport_key,
         )
         dataset = await load_retail_ev_dataset(
-            filter_completed_events(events), session, config.training.features.primary_market
+            events, session, config.training.features.primary_market
         )
     if prepared.X_test is not None or prepared.validation_data is not None:
         raise ValueError("expected every row in the training arrays (no val or test split)")

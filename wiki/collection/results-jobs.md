@@ -12,8 +12,13 @@ sources:
   - odds_lambda.jobs.fetch_oddsportal_results.main
   - odds_lambda.jobs.fetch_oddsportal_results.process_results
   - odds_lambda.jobs.fetch_oddsportal_results.get_pending_events
-  - odds_lambda.jobs.fetch_oddsportal_results._match_record_to_event
-  - odds_lambda.jobs.fetch_oddsportal_results._db_market_for_spec
+  - odds_lambda.jobs.fetch_oddsportal_results.SCHEDULED_LOOKBACK
+  - odds_lambda.jobs.fetch_oddsportal_results._raise_if_feed_parsed_nothing
+  - odds_lambda.storage.event_merge.find_match_id
+  - odds_cli.commands.fetch.fetch_results
+  - odds_lambda.oddsportal_client.OddsPortalClient.fetch_results
+  - odds_lambda.oddsportal_client.parse_results_page
+  - odds_lambda.oddsportal_client.parse_archive_path
   - odds_lambda.scheduling.decision.decide_backward
   - odds_lambda.scheduling.decision.decide_backward_resilient
   - odds_cli.commands.fetch.fetch_scores
@@ -50,13 +55,13 @@ Per-event failures are logged and skipped. A whole-job failure sends `odds_core.
 
 ## fetch-oddsportal-results
 
-`odds_lambda.jobs.fetch_oddsportal_results.main(ctx)` scrapes OddsPortal's historic results page (one page, the spec's primary market) for past matches, sets events FINAL with scores and stores one closing snapshot per event. League config is `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` ([fetch-oddsportal-job](fetch-oddsportal-job.md#leagues)); only its `sport` and `league` names are used, since the live job's `listing_path` is HTTP-only. `odds_lambda.jobs.fetch_oddsportal_results.process_results` uses three session scopes so no connection is held across the browser run (Neon closes idle connections):
+`odds_lambda.jobs.fetch_oddsportal_results.main(ctx)` reads finished matches from OddsPortal's results page over HTTP, with no browser, and sets the matching events FINAL with scores. It stores no odds. League config is `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` ([fetch-oddsportal-job](fetch-oddsportal-job.md#leagues)); only its `listing_path` and `sport_key` are used. `odds_lambda.jobs.fetch_oddsportal_results.process_results` uses three session scopes so no connection is held across the fetch (Neon closes idle connections):
 
-1. **Read**: `odds_lambda.jobs.fetch_oddsportal_results.get_pending_events` returns plain `odds_lambda.jobs.fetch_oddsportal_results.PendingEvent` dataclasses for SCHEDULED or LIVE events of the sport with `commence_time` in the past. None means exit.
-2. **Scrape**: `run_harvester_historic(spec)` with no open session. The call does not take the Playwright semaphore.
-3. **Write**: for each record, `odds_lambda.jobs.fetch_oddsportal_results._match_record_to_event` matches on exact home and away team strings and a commence-time delta of at most 24 h; `update_event_status(FINAL, scores)`; `build_raw_data(... use_opening=False)` and `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` tagged `api_request_id="oddsportal_closing"`; commit per record with rollback on error. Records with no digit scores are skipped.
+1. **Read**: `odds_lambda.jobs.fetch_oddsportal_results.get_pending_events` returns plain `odds_lambda.jobs.fetch_oddsportal_results.PendingEvent` dataclasses for events of the sport with `commence_time` in the past, and within `odds_lambda.jobs.fetch_oddsportal_results.SCHEDULED_LOOKBACK` (14 days) unless the lookback is lifted, that are SCHEDULED, LIVE, or FINAL without both scores. None means exit.
+2. **Fetch**: `odds_lambda.oddsportal_client.OddsPortalClient.fetch_results` loads `<listing_path>results/` for the archive feed URL in its RSC payload (`odds_lambda.oddsportal_client.parse_archive_path`; a page without one raises `odds_lambda.oddsportal_client.OddsPortalError`), then pages through `<feed>/page/N/`, newest first, until a page holds a kick-off older than the oldest pending event minus 2 h or the pages run out. A page that fails after the first keeps the earlier pages and the run settles from them; a failing first page raises. `odds_lambda.oddsportal_client.parse_results_page` keeps rows with status 3 (finished) and digit scores; cancelled, scheduled and unscored rows are dropped. The pages are the current season's, so a pending event from an earlier season stays pending.
+3. **Write**: each finished match has its teams normalised with `odds_core.team.normalize_team_name` and is looked up with `odds_lambda.storage.event_merge.find_match_id`, the read-only finder that the other loaders use (same teams, within `odds_lambda.storage.event_merge.EVENT_MATCH_WINDOW` of 2 h, canonical event of any twins). It applies only when that event is pending and the match is the nearest result of those teams to the event's kick-off, so two games of a series a few hours apart never take each other's score. `update_event_status(FINAL, scores)` sets it; commit per event with rollback on error.
 
-An unmatched scrape increments `events_not_matched` and nothing alerts ([event-matching](../storage/event-matching.md)). Rerunning is idempotent because finished events leave the pending query. `odds_lambda.jobs.fetch_oddsportal_results._db_market_for_spec` maps `home_away` to `h2h` and `1x2` to `1x2`, and raises for other primary markets.
+An event with no finished match stays pending and is counted in `events_unresolved`; that count does not alert ([event-matching](../storage/event-matching.md)). `odds_lambda.jobs.fetch_oddsportal_results._raise_if_feed_parsed_nothing` raises when pending events older than 24 h exist, the feed returned rows and none parsed as finished, because that means the parser cannot read the page. `odds fetch results --sport S [--lookback-days N]` (`odds_cli.commands.fetch.fetch_results`) runs the same settle with a chosen lookback, or with every pending event when the option is omitted, for backfills. Rerunning is idempotent because settled events leave the pending query. Postponed and cancelled matches never settle, so they stay pending.
 
 `main` runs `odds_lambda.jobs.fetch_oddsportal_results.process_results` inside `odds_core.alerts.job_alert_context`, then in `finally` books tomorrow 08:00 UTC through `odds_lambda.scheduling.helpers.self_schedule`, ignoring overnight windows. A scheduling failure sends `odds_core.alerts.send_critical` (wrapped so it cannot mask the original exception). It has no pre-schedule, so a kill before `finally` (the scraper Lambda timeout is 900 s) skips the reschedule and ends the chain (#438). With `ctx.sport=None` it processes `odds_lambda.jobs.fetch_oddsportal_results.DEFAULT_SPORT_KEY` (`soccer_epl`) but reschedules under the bare job name, which matches no per-sport rule (#470).
 

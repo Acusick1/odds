@@ -23,7 +23,7 @@ Two fixes were considered in #484: rewrite the fork's selectors for the new mark
 
 The live odds job reads OddsPortal over plain HTTP with an in-repo client, `odds_lambda.oddsportal_client`. It parses the listing payload for events, fetches one feed per event and market, and decrypts it with the site's published key. The live path uses no browser and no OddsHarvester.
 
-The results job (`fetch-oddsportal-results`) is outside this decision and still uses OddsHarvester.
+The results job (`fetch-oddsportal-results`) is outside this decision and still uses OddsHarvester ([ADR-0015](0015-oddsportal-results-over-http.md) moves it to this client).
 
 ## Consequences
 

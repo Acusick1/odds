@@ -10,12 +10,13 @@ sources:
   - odds_lambda.jobs.fetch_oddsportal_results.process_results
   - odds_lambda.scheduling.helpers.get_next_kickoff
   - odds_lambda.paper_trading
+  - scripts/ingest_football_data_uk.py
 status: stable
 ---
 
 # Event status lifecycle
 
-`odds_core.models.EventStatus` has five values: `scheduled`, `live`, `final`, `cancelled`, `postponed`. New [events](../storage/events.md) default to SCHEDULED. All transitions go through `odds_lambda.storage.writers.OddsWriter.update_event_status`, which stamps `updated_at` and, only for FINAL with both scores, sets `home_score`, `away_score` and `completed_at` ([odds-writer](../storage/odds-writer.md)). Three jobs and two commands write status; only LIVE and FINAL are ever written. The jobs themselves are described on [results-jobs](results-jobs.md).
+`odds_core.models.EventStatus` has five values: `scheduled`, `live`, `final`, `cancelled`, `postponed`. New [events](../storage/events.md) default to SCHEDULED. Every transition but one goes through `odds_lambda.storage.writers.OddsWriter.update_event_status` (the FDUK loader sets FINAL on the event directly), which stamps `updated_at`, refuses FINAL without both scores, and for FINAL sets `home_score`, `away_score` and `completed_at` ([odds-writer](../storage/odds-writer.md)). Three jobs, the FDUK loader and two commands write status; only LIVE and FINAL are ever written. The jobs themselves are described on [results-jobs](results-jobs.md).
 
 ## Who sets what
 
@@ -24,7 +25,8 @@ status: stable
 | (new) → SCHEDULED | event sync (`odds_lambda.storage.writers.OddsWriter.bulk_upsert_events`), `odds_lambda.storage.writers.OddsWriter.find_or_create_event` (only when no event matches), `odds discover games` | default status |
 | SCHEDULED → LIVE | `odds_lambda.jobs.update_status._update_event_statuses` | events already past `commence_time` within `odds_lambda.jobs.update_status.STATUS_WINDOW`; `reader.get_events_by_date_range(status=SCHEDULED)` |
 | → FINAL | `odds_lambda.jobs.fetch_scores._fetch_and_update_scores` | Odds API `/scores` ([results-jobs](results-jobs.md#fetch-scores)), only when `completed` and both scores parse |
-| → FINAL | `odds_lambda.jobs.fetch_oddsportal_results.process_results` | OddsPortal results for SCHEDULED/LIVE events already past kickoff (`odds_lambda.jobs.fetch_oddsportal_results.get_pending_events`) |
+| → FINAL | `odds_lambda.jobs.fetch_oddsportal_results.process_results` | OddsPortal finished matches for events already past kickoff that are SCHEDULED, LIVE, or FINAL without scores (`odds_lambda.jobs.fetch_oddsportal_results.get_pending_events`) |
+| → FINAL | `scripts/ingest_football_data_uk.py` | an existing event with no scores gets FDUK's full-time score and FINAL ([historical-ingest-scripts](historical-ingest-scripts.md)) |
 | → FINAL | `odds fetch scores` (`odds_cli.commands.fetch.fetch_scores`), `odds backfill scores` | manual; `backfill scores` sets FINAL from NBA game logs ([odds-api-backfill](odds-api-backfill.md)) |
 
 No code sets `cancelled` or `postponed`. A cancelled game stays SCHEDULED or LIVE until a results job finalises it or it ages out of the status and scores windows ([results-jobs](results-jobs.md)) (#440).

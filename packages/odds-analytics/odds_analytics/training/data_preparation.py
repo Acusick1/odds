@@ -350,7 +350,7 @@ async def filter_events_by_date_range(
     session: AsyncSession,
     start_date: datetime,
     end_date: datetime,
-    status: EventStatus = EventStatus.FINAL,
+    status: EventStatus | None = EventStatus.FINAL,
     data_source: Literal["oddsportal", "oddsapi", "football_data_uk"] | None = None,
     min_snapshots: int | None = None,
     sport_key: str | None = None,
@@ -362,7 +362,7 @@ async def filter_events_by_date_range(
         session: Async database session
         start_date: Start date (inclusive)
         end_date: End date (inclusive)
-        status: Event status to filter by (default: FINAL)
+        status: Event status to filter by (default: FINAL; None keeps every status)
         data_source: Filter by data source ('oddsportal', 'oddsapi', or None)
         min_snapshots: Minimum number of snapshots required per event
         sport_key: Filter by sport key (e.g. 'basketball_nba', 'soccer_epl')
@@ -396,7 +396,7 @@ async def filter_events_by_date_range(
         start_date=start_date.isoformat(),
         end_date=end_date.isoformat(),
         num_events=len(events),
-        status=status.value,
+        status=status.value if status else None,
         data_source=data_source,
         min_snapshots=min_snapshots,
         sport_key=sport_key,
@@ -478,7 +478,7 @@ async def prepare_training_data_from_config(
         session=session,
         start_date=start_datetime,
         end_date=end_datetime,
-        status=EventStatus.FINAL,
+        status=None if features_config.target_type == "retail_ev" else EventStatus.FINAL,
         data_source=data_source,
         min_snapshots=data_config.min_snapshots,
         sport_key=data_config.sport_key,

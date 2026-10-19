@@ -38,7 +38,7 @@ The scripts load `odds_core.models.Event` and `odds_core.models.OddsSnapshot` ro
    - Matches that already have an `op_` event of the same sport within 24 hours get no new event; their snapshots are still written.
    - Prices are stored as the CSV decimal (`price_decimal`). Snapshots loaded before the decimal price migration keep the old American `price` until this script is re-run ([Price encodings](../foundations/odds-math.md#price-encodings)).
 4. Rerun any step to fill gaps.
-   - OddsPortal snapshots are skipped if one with the same `api_request_id` already exists. FDUK snapshots are replaced from the CSV, so reruns do not duplicate and pick up refreshed files. Each snapshot's `raw_data.timing.basis` is an `odds_core.snapshot_sources.FdukTimeBasis` value.
+   - OddsPortal snapshots are skipped if one with the same `api_request_id` already exists. FDUK snapshots are replaced from the CSV, so reruns do not duplicate and pick up refreshed files; a rerun also fills the scores of matched events that have none. Each snapshot's `raw_data.timing.basis` is an `odds_core.snapshot_sources.FdukTimeBasis` value.
 5. Check the load with the database, not the repo: event and snapshot counts per season are data facts.
 
 ## Related

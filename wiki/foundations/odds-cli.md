@@ -52,7 +52,7 @@ status: stable
 
 | Command | Default |
 |---|---|
-| `odds_cli.commands.fetch` (`current`, `scores`) | `basketball_nba` |
+| `odds_cli.commands.fetch` (`current`, `scores`) | `basketball_nba`; `results` defaults to `soccer_epl` |
 | `odds_cli.commands.discover` | `basketball_nba` |
 | `odds_cli.commands.quality` | `basketball_nba` |
 | `odds_cli.commands.polymarket.discover` | `basketball_nba` |

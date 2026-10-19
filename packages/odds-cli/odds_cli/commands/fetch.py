@@ -1,6 +1,7 @@
 """CLI commands for fetching odds data."""
 
 import asyncio
+from datetime import timedelta
 
 import typer
 from odds_core.api_models import parse_scores_from_api_dict
@@ -8,6 +9,7 @@ from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.ingestion import OddsIngestionCallbacks, OddsIngestionService
+from odds_lambda.jobs.fetch_oddsportal_results import process_results
 from odds_lambda.storage.writers import OddsWriter
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -81,6 +83,24 @@ async def _fetch_current(sport: str):
             progress.update(task, description="Failed!", completed=True)
             console.print(f"\n[bold red]✗ Fetch failed: {str(e)}[/bold red]")
             raise typer.Exit(code=1) from e
+
+
+@app.command("results")
+def fetch_results(
+    sport: str = typer.Option("soccer_epl", "--sport", "-s", help="Sport to settle"),
+    lookback_days: int | None = typer.Option(
+        None, "--lookback-days", help="Only events this recent; omit for every pending event"
+    ),
+) -> None:
+    """Settle past events from OddsPortal results pages."""
+    lookback = timedelta(days=lookback_days) if lookback_days is not None else None
+    stats = asyncio.run(process_results(sport=sport, lookback=lookback))
+    console.print(
+        f"fetched={stats.matches_fetched} updated={stats.events_updated} "
+        f"unresolved={stats.events_unresolved} errors={len(stats.errors)}"
+    )
+    if stats.errors:
+        raise typer.Exit(code=1)
 
 
 @app.command("scores")

@@ -180,6 +180,53 @@ class TestMatchedAndAmbiguousEvents:
         assert event.commence_time == datetime(2024, 8, 17, 11, 30, tzinfo=UTC)
 
 
+def _unsettled_event(event_id: str, kickoff: datetime, status: EventStatus) -> Event:
+    event = _event(event_id, kickoff)
+    event.status = status
+    event.home_score = None
+    event.away_score = None
+    event.completed_at = None
+    return event
+
+
+class TestResultsOnExistingEvents:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", [EventStatus.FINAL, EventStatus.SCHEDULED, EventStatus.LIVE])
+    async def test_fills_result_of_an_event_without_scores(
+        self, pglite_async_session, status: EventStatus
+    ) -> None:
+        session = pglite_async_session
+        kickoff = datetime(2024, 8, 17, 12, 30, tzinfo=UTC)
+        event = _unsettled_event(OP_ID, kickoff, status)
+        session.add(event)
+        await session.flush()
+
+        stats = FdukStats()
+        await ingest_row(session, ROW, "2024-2025", stats)
+        await session.flush()
+        await session.refresh(event)
+
+        assert (event.status, event.home_score, event.away_score) == (EventStatus.FINAL, 2, 0)
+        assert event.completed_at == kickoff + timedelta(hours=2)
+        assert stats.results_filled == 1
+
+    @pytest.mark.asyncio
+    async def test_keeps_existing_scores(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        event = _event(OP_ID, datetime(2024, 8, 17, 12, 30, tzinfo=UTC))
+        event.home_score, event.away_score = 3, 3
+        session.add(event)
+        await session.flush()
+
+        stats = FdukStats()
+        await ingest_row(session, ROW, "2024-2025", stats)
+        await session.flush()
+        await session.refresh(event)
+
+        assert (event.home_score, event.away_score) == (3, 3)
+        assert stats.results_filled == 0
+
+
 class TestOpeningWithheld:
     @pytest.mark.asyncio
     async def test_deadline_after_kickoff_writes_closing_only(self, pglite_async_session) -> None:

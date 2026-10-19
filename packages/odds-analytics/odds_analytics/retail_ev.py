@@ -748,11 +748,16 @@ async def load_retail_ev_dataset(
     market: str,
     max_exchange_overround: float = MAX_EXCHANGE_OVERROUND,
 ) -> RetailEvDataset:
-    """Decision rows for every event, in the events' order, from all its snapshots."""
+    """Decision rows for every event that has kicked off, in the events' order, from all its snapshots.
+
+    An event that has not kicked off has no close yet, whatever snapshots it holds.
+    """
     from odds_lambda.storage.readers import OddsReader
 
     reader = OddsReader(session)
     dataset = RetailEvDataset()
+    now = datetime.now(UTC)
+    events = [event for event in events if event.commence_time <= now]
     for event in events:
         snapshots = await reader.get_snapshots_for_event(event.id)
         rows, drops = build_event_rows(event, snapshots, market, max_exchange_overround)
@@ -776,18 +781,16 @@ async def prepare_retail_ev_training_data(
     events: list[Event], session: AsyncSession, config: FeatureConfig
 ) -> PreparedFeatureData:
     """Feature matrix, targets, loss weights and kick-off times for ``retail_ev``."""
-    from odds_analytics.feature_groups import PreparedFeatureData, filter_completed_events
+    from odds_analytics.feature_groups import PreparedFeatureData
     from odds_analytics.training.feature_selection import apply_variance_filter
-
-    valid_events = filter_completed_events(events)
-    if not valid_events:
-        raise ValueError(f"No valid events found in {len(events)} total events")
 
     market = config.primary_market
     outcomes = market_outcomes(market)
-    dataset = await load_retail_ev_dataset(valid_events, session, market)
+    dataset = await load_retail_ev_dataset(events, session, market)
     if not dataset.rows:
-        raise ValueError(f"No retail_ev rows after processing {len(valid_events)} events")
+        raise ValueError(f"No retail_ev rows after processing {len(events)} events")
+    row_event_ids = set(dataset.event_ids.tolist())
+    valid_events = [e for e in events if e.id in row_event_ids]
 
     groups = cast(tuple[RetailEvFeatureGroupName, ...], config.feature_groups)
     teams: TeamHistory | None = None

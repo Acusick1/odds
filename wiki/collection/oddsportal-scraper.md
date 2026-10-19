@@ -1,7 +1,7 @@
 ---
 type: reference
 title: OddsPortal scraper
-description: The OddsPortal HTTP feed client, the adapter that converts its prices, the shared oddsportal_common helpers, the results job's OddsHarvester retries, and odds scrape upcoming.
+description: The OddsPortal HTTP feed client, the adapter that converts its prices, the shared oddsportal_common helpers, the results page archive reader, and odds scrape upcoming.
 sources:
   - odds_lambda.oddsportal_client
   - odds_lambda.oddsportal_client.OddsPortalClient
@@ -14,15 +14,13 @@ sources:
   - odds_lambda.oddsportal_client.FEED_MARKETS
   - odds_lambda.oddsportal_client.OddsPortalError
   - odds_lambda.oddsportal_adapter.convert_market
-  - odds_lambda.oddsportal_common.run_scraper_with_retry
+  - odds_lambda.oddsportal_client.OddsPortalClient.fetch_results
   - odds_lambda.oddsportal_common.build_raw_data
   - odds_lambda.oddsportal_common.find_existing_event
   - odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP
   - odds_lambda.oddsportal_common.normalize_bookmaker_key
   - odds_core.odds_math.PRICE_DECIMAL_KEY
   - odds_lambda.oddsportal_common.hours_to_tier
-  - odds_lambda.oddsportal_common.MAX_SCRAPER_RETRIES
-  - odds_lambda.oddsportal_common.MAX_FAILED_URL_RETRY_PASSES
   - odds_cli.commands.scrape.scrape_upcoming
   - pyproject.toml
 status: stable
@@ -30,14 +28,14 @@ status: stable
 
 # OddsPortal scraper
 
-Live pre-match odds from OddsPortal (UK bookmakers [the Odds API](odds-api-client.md) lacks) are read over plain HTTP, with no browser. The results job ([results-jobs](results-jobs.md)) still drives headless Chromium through the OddsHarvester fork, pinned in `pyproject.toml` (git tag `odds-fork-2026.05.29`). The HTTP client serves [the fetch-oddsportal job](fetch-oddsportal-job.md) and `odds scrape upcoming`. Historical bulk loads use scripts instead ([historical-ingest-scripts](historical-ingest-scripts.md)). The reasons for reading the feed are in [ADR 0009](../../docs/adr/0009-oddsportal-feed-client.md).
+Live pre-match odds from OddsPortal (UK bookmakers [the Odds API](odds-api-client.md) lacks) and finished-match results are read over plain HTTP, with no browser. The HTTP client serves [the fetch-oddsportal job](fetch-oddsportal-job.md) and `odds scrape upcoming`. Historical bulk loads use scripts instead ([historical-ingest-scripts](historical-ingest-scripts.md)). The reasons for reading the feed are in [ADR 0009](../../docs/adr/0009-oddsportal-feed-client.md).
 
 ## Modules
 
 - `odds_lambda.jobs.fetch_oddsportal`: `odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPECS`, `odds_lambda.jobs.fetch_oddsportal.scrape_league`, `odds_lambda.jobs.fetch_oddsportal.ingest_league`. `odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPEC_BY_NAME` serves the CLI and MCP scrape tools.
-- `odds_lambda.oddsportal_client`: `odds_lambda.oddsportal_client.OddsPortalClient` (async context manager owning one `aiohttp` session), the pure functions `odds_lambda.oddsportal_client.parse_listing`, `odds_lambda.oddsportal_client.extract_market` and `odds_lambda.oddsportal_client.decrypt_payload`, and the market table `odds_lambda.oddsportal_client.FEED_MARKETS`. Every failure it cannot recover from is an `odds_lambda.oddsportal_client.OddsPortalError`.
+- `odds_lambda.oddsportal_client`: `odds_lambda.oddsportal_client.OddsPortalClient` (async context manager owning one `aiohttp` session), the pure functions `odds_lambda.oddsportal_client.parse_listing`, `odds_lambda.oddsportal_client.extract_market`, `odds_lambda.oddsportal_client.decrypt_payload`, `odds_lambda.oddsportal_client.parse_archive_path` and `odds_lambda.oddsportal_client.parse_results_page`, and the market table `odds_lambda.oddsportal_client.FEED_MARKETS`. Every failure it cannot recover from is an `odds_lambda.oddsportal_client.OddsPortalError`.
 - `odds_lambda.oddsportal_adapter`: pure conversion of feed prices to the `raw_data` shape (`odds_lambda.oddsportal_adapter.convert_market`).
-- `odds_lambda.oddsportal_common`: `odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP`/`odds_lambda.oddsportal_common.normalize_bookmaker_key`, `odds_lambda.oddsportal_common.hours_to_tier`, `odds_lambda.oddsportal_common.build_raw_data` (historical records), `odds_lambda.oddsportal_common.run_scraper_with_retry` (results job), `odds_lambda.oddsportal_common.find_existing_event`. Besides these helpers it holds the retry state machine and a DB query. `odds_lambda.betfair.adapter.build_raw_data` is an unrelated function of the same name.
+- `odds_lambda.oddsportal_common`: `odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP`/`odds_lambda.oddsportal_common.normalize_bookmaker_key`, `odds_lambda.oddsportal_common.hours_to_tier`, `odds_lambda.oddsportal_common.build_raw_data` (historical records), `odds_lambda.oddsportal_common.find_existing_event`. Besides these helpers it holds a DB query. `odds_lambda.betfair.adapter.build_raw_data` is an unrelated function of the same name.
 
 ## Feed client
 
@@ -56,15 +54,18 @@ Behaviour:
 - A feed whose `d` object holds an `E` key is an error envelope. The client waits the envelope's `refresh` seconds (default 20, capped at 30) and retries twice before raising.
 - `odds_lambda.oddsportal_client.extract_market` reads `oddsdata.back["E-{type}-{scope}-0-{line}-0"]`. A missing market key, or an `oddsdata` or `back` that is absent or an empty list (no odds posted yet), yields no bookmakers. A `d` that is not an object, or an `oddsdata` or `back` of any other type, raises `odds_lambda.oddsportal_client.OddsPortalError`. It skips a bookmaker whose `act` flag is false (a suspended price), whose id is not in the name map, or whose prices are missing, at or below 1.0 or the wrong length. Prices and volumes arrive either as lists or as dicts keyed by outcome index, and both are accepted. `volume` (Betfair Exchange matched amounts) and the latest `changeTime` are carried through when present.
 
+## Results archive
+
+`odds_lambda.oddsportal_client.OddsPortalClient.fetch_results` reads a league's results page the same way as a listing: the page's RSC payload carries the URL of the paginated archive feed, which `odds_lambda.oddsportal_client.parse_archive_path` returns as a `/proxy/` path. Each `<path>/page/N/` response is encrypted like the odds feed and holds up to `onePage` rows (50) plus `total`, in descending kick-off order. A row has team names, a kick-off timestamp, a status id (3 is finished, 5 cancelled) and `homeResult` / `awayResult`. `odds_lambda.oddsportal_client.parse_results_page` turns finished rows into `odds_lambda.oddsportal_client.FinishedMatch` values and counts the rows it saw. `odds_lambda.oddsportal_client.OddsPortalClient.fetch_results` returns them as `odds_lambda.oddsportal_client.FetchedResults`; a page that fails after the first leaves `complete` false and keeps the earlier pages, and a failing first page raises. A real archive page is recorded in `tests/fixtures/oddsportal/mlb_results_feed.json`. The results page lists the current season only ([results-jobs](results-jobs.md#fetch-oddsportal-results)).
+
 ## Adapter
 
 - `odds_lambda.oddsportal_adapter.convert_market` emits The Odds API `raw_data` shape with `source: oddsportal_live`, stored by `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` ([odds-writer](../storage/odds-writer.md)). It looks the market up in `odds_lambda.oddsportal_client.FEED_MARKETS`: the pipeline key is `1x2`, `totals` (with point 2.5) or `h2h`, outcome names come from the spec labels (`home` and `away` are the event teams), and an unsupported market raises `ValueError("Unsupported market")` ([sport-and-market-keys](sport-and-market-keys.md#market-key-dialects)).
 - Feed decimal prices are stored unconverted under `price_decimal`, with no `price` key (`odds_core.odds_math.PRICE_DECIMAL_KEY`); `odds_lambda.oddsportal_common.build_raw_data` writes the same encoding for historical records, skipping a bookmaker with any price at or below 1.0 ([odds-math](../foundations/odds-math.md)). Each bookmaker's `last_update` is its latest feed change time, capped at the scrape time, or the scrape time when the feed gives none. Bookmakers with volumes get a `betfair_matched` entry keyed by the spec outcome labels. Each `odds_lambda.oddsportal_adapter.MatchOdds` carries the market key it was converted for. A market with no bookmakers converts to nothing.
 - Events resolve by `odds_lambda.storage.writers.OddsWriter.find_or_create_event` (±2 h, `op_live_` ids from `odds_core.event_ids.LIVE_EVENT_ID_PREFIX`, returning the canonical event, the Odds API one when it exists, and never merging) ([event-matching](../storage/event-matching.md)). `odds_lambda.oddsportal_common.find_existing_event` (±24 h, same sport, read-only) is a different matcher from the writer's.
 
-## Results job and shared helpers
+## Shared helpers
 
-- `odds_lambda.oddsportal_common.run_scraper_with_retry` retries an all-empty OddsHarvester scrape and then re-scrapes failed URLs (except 404s) in fresh browser sessions, with a fresh `fake_useragent` Chrome UA each time. It raises `RuntimeError` if OddsHarvester returns `None`. `odds_lambda.oddsportal_common.MAX_SCRAPER_RETRIES` and `odds_lambda.oddsportal_common.MAX_FAILED_URL_RETRY_PASSES` are 1, so an empty scrape is not retried and failed URLs get one pass; the docstring's "up to 3 passes" does not match (#447).
 - `odds_lambda.oddsportal_common.hours_to_tier` has different edge behaviour from the copy used by live writes ([fetch-tier](../storage/fetch-tier.md#boundary-encodings)).
 
 ## odds scrape upcoming

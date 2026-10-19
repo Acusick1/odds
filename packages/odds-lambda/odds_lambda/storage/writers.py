@@ -303,7 +303,13 @@ class OddsWriter:
 
         Returns:
             Updated Event or None if not found
+
+        Raises:
+            ValueError: If ``status`` is FINAL and either score is missing
         """
+        if status == EventStatus.FINAL and (home_score is None or away_score is None):
+            raise ValueError(f"event {event_id} cannot be FINAL without both scores")
+
         result = await self.session.execute(select(Event).where(Event.id == event_id))
         event = result.scalar_one_or_none()
 
@@ -314,7 +320,7 @@ class OddsWriter:
         event.status = status
         event.updated_at = datetime.now(UTC)
 
-        if status == EventStatus.FINAL and home_score is not None and away_score is not None:
+        if status == EventStatus.FINAL:
             event.home_score = home_score
             event.away_score = away_score
             event.completed_at = datetime.now(UTC)
