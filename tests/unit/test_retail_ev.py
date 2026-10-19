@@ -686,31 +686,44 @@ class TestFeatureGroupTable:
 
 
 class TestUpperBoundDecisionTime:
-    def test_fduk_opening_row_has_no_polymarket_features(
+    def test_fduk_opening_row_takes_no_polymarket_price(
         self, event: Event, rich_snapshots: list
     ) -> None:
         pm_before_fduk = _polymarket(48 * 60 + 30, PM_EARLY)
         rows, _ = build_event_rows(event, [*rich_snapshots, pm_before_fduk], "1x2")
         fduk = _row(rows, 48 * 60, "bet365", Outcome.HOME)
         live = _row(rows, 180, "bet365", Outcome.HOME)
-        assert fduk.polymarket is not None
         assert not fduk.decision_time_is_exact
-        assert live.decision_time_is_exact
-        features = RetailEvFeatures(OUTCOMES, ("polymarket_at_t",))
-        pm_columns = slice(len(features.names) - 6, None)
-        assert np.isnan(features.row(fduk)[pm_columns]).all()
-        assert not np.isnan(features.row(live)[pm_columns]).any()
+        assert fduk.polymarket is None
+        assert live.polymarket is not None
 
-    def test_exchange_moves_need_an_exact_decision_time(
-        self, event: Event, rich_snapshots: list
+    def test_fduk_opening_row_pairs_only_with_its_own_exchange_price(self, event: Event) -> None:
+        snapshots = [
+            _live("betfair_api", 49 * 60, _betfair(LIVE_BFE)),
+            _fduk(48, FdukTimeBasis.COLLECTION_DEADLINE, three_way_bookmaker("bet365", OP_BET365)),
+            _live("betfair_api", 10, _betfair(LIVE_CLOSE)),
+        ]
+        rows, drops = build_event_rows(event, snapshots, "1x2")
+        assert rows == []
+        assert drops.rows_without_own_exchange == 3
+        assert drops.rows_stale_exchange == 0
+
+    def test_fduk_opening_row_has_no_team_features(
+        self,
+        event: Event,
+        snapshots: list[OddsSnapshot],
+        season: list[Event],
+        fixtures: pd.DataFrame,
     ) -> None:
-        rows, _ = build_event_rows(event, rich_snapshots, "1x2")
+        rows, _ = build_event_rows(event, snapshots, "1x2")
+        fduk = _row(rows, 48 * 60, "bet365", Outcome.HOME)
         live = _row(rows, 180, "bet365", Outcome.HOME)
-        stamped = replace(live, retail_kind=SnapshotKind.FDUK_OPENING)
-        features = RetailEvFeatures(OUTCOMES, ("dynamics",))
-        live_values = dict(zip(features.names, features.row(live), strict=True))
-        stamped_values = dict(zip(features.names, features.row(stamped), strict=True))
-        assert not np.isnan(live_values["exchange_move_3h"])
-        assert np.isnan(stamped_values["exchange_move_3h"])
-        assert stamped_values["consensus_move_1h"] == live_values["consensus_move_1h"]
-        assert stamped_values["retail_dispersion"] == live_values["retail_dispersion"]
+        features = RetailEvFeatures(
+            OUTCOMES,
+            ("schedule_as_of_t", "standings_as_of_t"),
+            teams=_history(season, fixtures),
+            events={event.id: event},
+        )
+        team_columns = slice(len(features.names) - 19, None)
+        assert np.isnan(features.row(fduk)[team_columns]).all()
+        assert not np.isnan(features.row(live)[team_columns][:4]).any()

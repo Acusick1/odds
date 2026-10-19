@@ -179,6 +179,7 @@ class DropCounts:
     events_without_close: int = 0
     rows_without_exchange: int = 0
     rows_stale_exchange: int = 0
+    rows_without_own_exchange: int = 0
     wide_exchange_snapshots: int = 0
     prices_outside_roster: Counter[str] = field(default_factory=Counter)
 
@@ -186,6 +187,7 @@ class DropCounts:
         self.events_without_close += other.events_without_close
         self.rows_without_exchange += other.rows_without_exchange
         self.rows_stale_exchange += other.rows_stale_exchange
+        self.rows_without_own_exchange += other.rows_without_own_exchange
         self.wide_exchange_snapshots += other.wide_exchange_snapshots
         self.prices_outside_roster.update(other.prices_outside_roster)
 
@@ -472,23 +474,32 @@ def build_event_rows(
     for quote in in_window:
         t = quote.time
         n_candidates = sum(len(p) for p in quote.books.values())
-        idx = bisect.bisect_right(exchange_times, t) - 1
-        if idx < 0:
-            drops.rows_without_exchange += n_candidates
-            continue
-        exchange = exchange_at_t[idx]
-        if t - exchange.time > MAX_EXCHANGE_AGE:
-            drops.rows_stale_exchange += n_candidates
-            continue
-        pm_idx = _latest_at_or_before(polymarket_times, t, MAX_POLYMARKET_AGE)
+        exact = quote.kind not in UPPER_BOUND_TIME_KINDS
+        if exact:
+            idx = bisect.bisect_right(exchange_times, t) - 1
+            if idx < 0:
+                drops.rows_without_exchange += n_candidates
+                continue
+            exchange = exchange_at_t[idx]
+            if t - exchange.time > MAX_EXCHANGE_AGE:
+                drops.rows_stale_exchange += n_candidates
+                continue
+        else:
+            # t only bounds when the price was taken, so no other snapshot is known to precede it.
+            own = [p for p in exchange_by_kind.get(quote.kind, []) if p.time == t]
+            if not own:
+                drops.rows_without_own_exchange += n_candidates
+                continue
+            exchange = own[-1]
+        pm_idx = _latest_at_or_before(polymarket_times, t, MAX_POLYMARKET_AGE) if exact else None
         pm_price = None if pm_idx is None else polymarket[pm_idx]
         dynamics = {
             outcome: _dynamics(
                 outcome,
                 t,
                 exchange,
-                exchange_by_kind[exchange.kind],
-                exchange_times_by_kind[exchange.kind],
+                exchange_by_kind[exchange.kind] if exact else [],
+                exchange_times_by_kind[exchange.kind] if exact else [],
                 quote,
                 quotes_by_kind[quote.kind],
                 quote_times[quote.kind],
@@ -556,11 +567,8 @@ def _window_label(window: timedelta) -> str:
     return f"{int(window.total_seconds() // 3600)}h"
 
 
-_EXCHANGE_MOVE_NAMES: tuple[str, ...] = tuple(
-    f"exchange_move_{_window_label(w)}" for w in MOVE_WINDOWS
-)
 _DYNAMICS_FEATURE_NAMES: tuple[str, ...] = (
-    *_EXCHANGE_MOVE_NAMES,
+    *(f"exchange_move_{_window_label(w)}" for w in MOVE_WINDOWS),
     *(f"consensus_move_{_window_label(w)}" for w in MOVE_WINDOWS),
     "retail_dispersion",
 )
@@ -629,26 +637,9 @@ _STANDINGS_FEATURE_NAMES: tuple[str, ...] = tuple(
 
 @dataclass(frozen=True)
 class _FeatureGroup:
-    """A group's columns and extractor.
-
-    ``exact_time_columns`` read another source's price at the decision time, so they
-    are NaN for a row whose decision time is only an upper bound on when its retail
-    price was taken: a price from the gap would reach the row.
-    """
-
     names: tuple[str, ...]
     values: Callable[[RetailEvFeatures, RetailEvRow], list[float]]
     needs_teams: bool = False
-    exact_time_columns: frozenset[str] = frozenset()
-
-    def row_values(self, features: RetailEvFeatures, row: RetailEvRow) -> list[float]:
-        values = self.values(features, row)
-        if row.decision_time_is_exact or not self.exact_time_columns:
-            return values
-        return [
-            np.nan if name in self.exact_time_columns else value
-            for name, value in zip(self.names, values, strict=True)
-        ]
 
 
 def _schedule_features(features: RetailEvFeatures, row: RetailEvRow) -> list[float]:
@@ -661,15 +652,9 @@ def _standings_features(features: RetailEvFeatures, row: RetailEvRow) -> list[fl
 
 _FEATURE_GROUPS: dict[RetailEvFeatureGroupName, _FeatureGroup] = {
     "polymarket_at_t": _FeatureGroup(
-        _POLYMARKET_FEATURE_NAMES,
-        lambda _, row: _polymarket_features(row),
-        exact_time_columns=frozenset(_POLYMARKET_FEATURE_NAMES),
+        _POLYMARKET_FEATURE_NAMES, lambda _, row: _polymarket_features(row)
     ),
-    "dynamics": _FeatureGroup(
-        _DYNAMICS_FEATURE_NAMES,
-        lambda _, row: _dynamics_features(row),
-        exact_time_columns=frozenset(_EXCHANGE_MOVE_NAMES),
-    ),
+    "dynamics": _FeatureGroup(_DYNAMICS_FEATURE_NAMES, lambda _, row: _dynamics_features(row)),
     "schedule_as_of_t": _FeatureGroup(
         _SCHEDULE_FEATURE_NAMES, _schedule_features, needs_teams=True
     ),
@@ -729,7 +714,13 @@ class RetailEvFeatures:
         group: RetailEvFeatureGroupName,
         extract: Callable[[TeamHistory, Event, datetime], EplScheduleFeatures | StandingsFeatures],
     ) -> list[float]:
-        """One group's team features, computed once per event and decision time."""
+        """One group's team features, computed once per event and decision time.
+
+        NaN for a row whose decision time is only an upper bound: its price may predate
+        results the team history holds at that time.
+        """
+        if not row.decision_time_is_exact:
+            return [np.nan] * len(_FEATURE_GROUPS[group].names)
         key = (group, row.event_id, row.decision_time)
         if key not in self._team_cache:
             assert self._teams is not None
@@ -742,7 +733,7 @@ class RetailEvFeatures:
     def row(self, row: RetailEvRow) -> np.ndarray:
         values = _price_features(row, self.outcomes)
         for group in self.groups:
-            values += _FEATURE_GROUPS[group].row_values(self, row)
+            values += _FEATURE_GROUPS[group].values(self, row)
         return np.array(values, dtype=np.float64)
 
     def matrix(self, rows: Sequence[RetailEvRow]) -> np.ndarray:
@@ -774,6 +765,7 @@ async def load_retail_ev_dataset(
         events_without_close=dataset.drops.events_without_close,
         rows_without_exchange=dataset.drops.rows_without_exchange,
         rows_stale_exchange=dataset.drops.rows_stale_exchange,
+        rows_without_own_exchange=dataset.drops.rows_without_own_exchange,
         wide_exchange_snapshots=dataset.drops.wide_exchange_snapshots,
         prices_outside_roster=dict(dataset.drops.prices_outside_roster.most_common()),
     )
