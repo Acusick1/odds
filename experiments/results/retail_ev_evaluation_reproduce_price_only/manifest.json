@@ -1,11 +1,15 @@
 {
-  "git_sha": "4a09b05aeaf7a7e3a14c25a6d96f07d803b29d93",
+  "git_sha": "ade80c5ae2a3e2e76dc117464ed8b0f8cc14afc8",
   "git_tag": null,
   "git_dirty": false,
-  "forced": false,
-  "earlier_runs_of_spec": [],
-  "overwritten_predictions_sha256": null,
-  "allow_incomplete": true,
+  "forced": true,
+  "earlier_runs_of_spec": [
+    "/home/andrew/code/odds/worktrees/557-retail-ev-evaluation-script/experiments/results/retail_ev_evaluation_reproduce_price_only/manifest.json"
+  ],
+  "overwritten_predictions_sha256": "8c0513a0bf60da3c3c906a22d59f29eea1e2dbef75ff9ddaea28a45f4edcbb5f",
+  "allowed_incomplete_events": [
+    "op_live_ASTVIL_LIV_2026-05-17T1130"
+  ],
   "incomplete_window_events": [
     "op_live_ASTVIL_LIV_2026-05-17T1130"
   ],
@@ -178,5 +182,5 @@
     "pandas": "2.3.3",
     "xgboost": "3.1.1"
   },
-  "run_at": "2026-10-19T10:27:15.335772+00:00"
+  "run_at": "2026-10-19T10:44:02.485915+00:00"
 }
