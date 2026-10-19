@@ -470,11 +470,8 @@ async def main(n_trials: int, n_boot: int, n_boot_bonferroni: int) -> None:
     corner.to_csv(OUTPUT_DIR / "corner.csv", index=False)
     pd.concat([r["trials"] for r in results]).to_csv(OUTPUT_DIR / "trials.csv", index=False)
     importance = pd.concat([r["importance"] for r in results], ignore_index=True)
-    (
-        importance.groupby(["variant", "seed", "tuning", "feature"], sort=False)["gain_share"]
-        .mean()
-        .reset_index()
-        .to_csv(OUTPUT_DIR / "feature_importance.csv", index=False)
+    importance.sort_values(["variant", "seed", "tuning", "fold"], kind="stable").to_csv(
+        OUTPUT_DIR / "feature_importance.csv", index=False
     )
 
     summary = {
@@ -518,6 +515,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--n-trials", type=int, default=30)
     parser.add_argument("--n-boot", type=int, default=2000)
-    parser.add_argument("--n-boot-bonferroni", type=int, default=20000)
+    parser.add_argument("--n-boot-bonferroni", type=int, default=200000)
     args = parser.parse_args()
     asyncio.run(main(args.n_trials, args.n_boot, args.n_boot_bonferroni))
