@@ -74,7 +74,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in
 |---|---|
 | `models.py` | `odds_core.models.Event`, `odds_core.models.OddsSnapshot`, `odds_core.models.Odds`, `odds_core.models.FetchLog`, `odds_core.models.DataQualityLog`, `odds_core.models.AlertHistory`, `odds_core.models.utc_now` ([events](../storage/events.md), [odds tables](../storage/odds-tables.md)) |
 | `odds_core.prediction_models`, `odds_core.match_brief_models`, `odds_core.paper_trade_models`, `odds_core.agent_wakeup_models` | Prediction and agent tables ([match briefs](../agent/match-briefs.md), [paper trading](../agent/paper-trading.md)) |
-| `odds_core.epl_data_models`, `odds_core.mlb_data_models`, `odds_core.injury_models`, `odds_core.game_log_models`, `odds_core.player_stats_models`, `odds_core.polymarket_models` | Sport-context and Polymarket tables |
+| `odds_core.epl_data_models`, `odds_core.mlb_data_models`, `odds_core.injury_models`, `odds_core.game_log_models`, `odds_core.player_stats_models`, `odds_core.polymarket_models` | Sport-context and Polymarket tables (the MLB schedule table also feeds the MLB fixture calendar) |
 | `config.py` | Pydantic Settings, see [Configuration](configuration.md) |
 | `odds_core.database` | Engine and `odds_core.database.async_session_maker`, see [Databases and environments](databases-and-environments.md) |
 | `odds_core.alerts` | `odds_core.alerts.AlertManager`, `odds_core.alerts.DiscordAlert`, see [Alerts](../operations/alerts.md) |

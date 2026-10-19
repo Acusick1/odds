@@ -221,6 +221,13 @@ class AlertConfig(BaseSettings):
         description="Minutes between repeat alerts while a source stays stale",
     )
 
+    mlb_season_first_month: int = Field(
+        default=4, description="First month the MLB schedule must be fresh every day"
+    )
+    mlb_season_last_month: int = Field(
+        default=9, description="Last month the MLB schedule must be fresh every day"
+    )
+
     # Alert rate limiting
     alert_rate_limit_minutes: int = Field(
         default=30,
@@ -243,6 +250,7 @@ class AlertConfig(BaseSettings):
             "fetch-oddsportal-results-epl": 26,
             "fetch-oddsportal-mlb": 12,
             "fetch-oddsportal-results-mlb": 26,
+            "fetch-mlb-probables": 30,
             "check-health": 2,
         },
         description="Max hours between job completions before alerting (job_name -> hours)",

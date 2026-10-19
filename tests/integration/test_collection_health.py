@@ -344,6 +344,24 @@ class TestCheckStaleSources:
 
         assert await self._monitor(pglite_async_session).check_stale_sources(NOW) == []
 
+    async def test_an_old_failure_without_a_heartbeat_no_longer_suppresses(
+        self, pglite_async_session: Any, seed: Callable[..., Any]
+    ) -> None:
+        await seed(NOW + timedelta(hours=3), snapshots=((OP, NOW - timedelta(hours=9)),))
+        pglite_async_session.add(
+            AlertHistory(
+                alert_type="job_failure:fetch-oddsportal-epl",
+                severity="critical",
+                message="failed",
+                sent_at=NOW - timedelta(days=3),
+            )
+        )
+        await pglite_async_session.commit()
+
+        stale = await self._monitor(pglite_async_session).check_stale_sources(NOW)
+
+        assert [s.source for s in stale] == ["oddsportal"]
+
     async def test_a_heartbeat_after_the_failure_means_the_job_recovered(
         self, pglite_async_session: Any, seed: Callable[..., Any]
     ) -> None:
@@ -483,6 +501,107 @@ class TestCheckStaleSources:
         await seed(NOW + timedelta(days=9), snapshots=((OP, NOW - timedelta(hours=30)),))
 
         assert await self._monitor(pglite_async_session).check_stale_sources(NOW) == []
+
+
+class TestMlbCalendar:
+    @staticmethod
+    def _game(
+        game_pk: int, kickoff: datetime, fetched: datetime, **fields: Any
+    ) -> MlbProbablePitchers:
+        return MlbProbablePitchers(
+            game_pk=game_pk,
+            commence_time=kickoff,
+            fetched_at=fetched,
+            home_team="A",
+            away_team="B",
+            game_type=fields.pop("game_type", "R"),
+            **fields,
+        )
+
+    @staticmethod
+    async def _count(session: Any) -> int:
+        calendar = await fixture_calendar(
+            session, "baseball_mlb", now=NOW, horizon=timedelta(hours=48)
+        )
+        return calendar.kickoffs_in_horizon
+
+    async def test_only_the_latest_fetch_is_the_calendar(self, pglite_async_session: Any) -> None:
+        kickoff = NOW + timedelta(hours=5)
+        pglite_async_session.add_all(
+            [
+                self._game(1, kickoff, NOW - timedelta(hours=20)),
+                self._game(2, kickoff, NOW - timedelta(hours=20)),
+                self._game(1, kickoff, NOW - timedelta(hours=2)),
+            ]
+        )
+        await pglite_async_session.commit()
+
+        assert await self._count(pglite_async_session) == 1
+
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {"start_time_tbd": True},
+            {"game_status": "Postponed"},
+            {"game_status": "Cancelled"},
+            {"game_status": "If Necessary"},
+        ],
+    )
+    async def test_unplayed_or_untimed_games_are_not_fixtures(
+        self, pglite_async_session: Any, fields: dict[str, Any]
+    ) -> None:
+        pglite_async_session.add(
+            self._game(1, NOW + timedelta(hours=5), NOW - timedelta(hours=2), **fields)
+        )
+        await pglite_async_session.commit()
+
+        assert await self._count(pglite_async_session) == 0
+
+    async def test_a_scheduled_game_is_a_fixture(self, pglite_async_session: Any) -> None:
+        pglite_async_session.add(
+            self._game(
+                1, NOW + timedelta(hours=5), NOW - timedelta(hours=2), game_status="Scheduled"
+            )
+        )
+        await pglite_async_session.commit()
+
+        assert await self._count(pglite_async_session) == 1
+
+    async def test_a_missing_schedule_in_season_is_an_issue(
+        self, pglite_async_session: Any
+    ) -> None:
+        in_season = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
+        monitor = HealthMonitor(pglite_async_session, get_settings())
+
+        issue = await monitor.check_mlb_calendar(in_season)
+
+        assert issue is not None and "never" in issue
+
+    async def test_a_fresh_schedule_in_season_is_healthy(self, pglite_async_session: Any) -> None:
+        in_season = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
+        pglite_async_session.add(
+            self._game(1, in_season + timedelta(hours=5), in_season - timedelta(hours=5))
+        )
+        await pglite_async_session.commit()
+        monitor = HealthMonitor(pglite_async_session, get_settings())
+
+        assert await monitor.check_mlb_calendar(in_season) is None
+
+    async def test_an_old_schedule_in_season_is_an_issue(self, pglite_async_session: Any) -> None:
+        in_season = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
+        pglite_async_session.add(
+            self._game(1, in_season + timedelta(hours=5), in_season - timedelta(hours=50))
+        )
+        await pglite_async_session.commit()
+        monitor = HealthMonitor(pglite_async_session, get_settings())
+
+        assert await monitor.check_mlb_calendar(in_season) is not None
+
+    async def test_no_schedule_out_of_season_is_fine(self, pglite_async_session: Any) -> None:
+        winter = datetime(2026, 12, 10, 12, 0, tzinfo=UTC)
+        monitor = HealthMonitor(pglite_async_session, get_settings())
+
+        assert await monitor.check_mlb_calendar(winter) is None
 
 
 class _AlertRecorder:

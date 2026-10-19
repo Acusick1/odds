@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from odds_core.config import get_settings
+from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import (
     AlertHistory,
     DataQualityLog,
@@ -21,6 +22,15 @@ async def _create_recent_heartbeats(session) -> None:
     from odds_core.config import AlertConfig
 
     now = datetime.now(UTC)
+    session.add(
+        MlbProbablePitchers(
+            game_pk=1,
+            commence_time=now + timedelta(hours=5),
+            fetched_at=now - timedelta(minutes=10),
+            home_team="A",
+            away_team="B",
+        )
+    )
     for job_name in AlertConfig().heartbeat_expectations:
         session.add(
             AlertHistory(

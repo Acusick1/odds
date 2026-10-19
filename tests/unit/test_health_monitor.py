@@ -251,7 +251,10 @@ class TestHealthMonitor:
                 events_final=50,
             )
 
-            with patch.object(monitor, "check_stale_sources", return_value=[]):
+            with (
+                patch.object(monitor, "check_stale_sources", return_value=[]),
+                patch.object(monitor, "check_mlb_calendar", return_value=None),
+            ):
                 with patch.object(monitor, "check_consecutive_failures", return_value=(True, 0)):
                     with patch.object(monitor, "check_api_quota", return_value=(True, 15000, 0.75)):
                         with patch.object(monitor, "check_data_quality", return_value=(True, 2)):
@@ -285,18 +288,21 @@ class TestHealthMonitor:
             )
 
             # Mock checks to return unhealthy
-            with patch.object(
-                monitor,
-                "check_stale_sources",
-                return_value=[
-                    StaleSource(
-                        source="oddsportal",
-                        sport_key="soccer_epl",
-                        last_snapshot=datetime.now(UTC) - timedelta(hours=9),
-                        active_hours=9.0,
-                        threshold_hours=3.0,
-                    )
-                ],
+            with (
+                patch.object(monitor, "check_mlb_calendar", return_value=None),
+                patch.object(
+                    monitor,
+                    "check_stale_sources",
+                    return_value=[
+                        StaleSource(
+                            source="oddsportal",
+                            sport_key="soccer_epl",
+                            last_snapshot=datetime.now(UTC) - timedelta(hours=9),
+                            active_hours=9.0,
+                            threshold_hours=3.0,
+                        )
+                    ],
+                ),
             ):
                 with patch.object(monitor, "check_consecutive_failures", return_value=(False, 4)):
                     with patch.object(monitor, "check_api_quota", return_value=(False, 1000, 0.05)):

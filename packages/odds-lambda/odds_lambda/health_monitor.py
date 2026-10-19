@@ -26,9 +26,11 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.collection_calendar import (
+    MLB_SCHEDULE_MAX_AGE,
     CollectionSource,
     active_hours_between,
     fixture_calendar,
+    latest_mlb_schedule_fetch,
     latest_snapshot_time,
 )
 from odds_lambda.scheduling.decision import classify_tier
@@ -224,8 +226,8 @@ class HealthMonitor:
             return None
         return (datetime.now(UTC) - latest_snapshot_time).total_seconds() / 3600
 
-    async def _job_is_failing(self, job_name: str) -> bool:
-        """Whether the job's latest failure alert is newer than its latest heartbeat."""
+    async def _job_is_failing(self, job_name: str, now: datetime, recent: timedelta) -> bool:
+        """Whether the job's latest failure alert is within ``recent`` and newer than its heartbeat."""
         latest: dict[str, datetime | None] = {}
         for kind in ("job_failure", "heartbeat"):
             latest[kind] = (
@@ -236,7 +238,11 @@ class HealthMonitor:
                 )
             ).scalar_one_or_none()
         failure, heartbeat = latest["job_failure"], latest["heartbeat"]
-        return failure is not None and (heartbeat is None or failure > heartbeat)
+        return (
+            failure is not None
+            and failure > now - recent
+            and (heartbeat is None or failure > heartbeat)
+        )
 
     async def check_stale_sources(self, now: datetime | None = None) -> list[StaleSource]:
         """Find sources that stopped writing while fixtures they should price are scheduled.
@@ -288,7 +294,10 @@ class HealthMonitor:
                 active = active_hours_between(reference, moment, source.overnight_window(sport_key))
                 if active <= threshold:
                     continue
-                if await self._job_is_failing(make_compound_job_name(source.job_name, sport_key)):
+                recent = timedelta(hours=max(threshold, alerts.stale_reminder_minutes / 60))
+                if await self._job_is_failing(
+                    make_compound_job_name(source.job_name, sport_key), moment, recent
+                ):
                     logger.info("stale_source_job_failing", source=source.key, sport=sport_key)
                     continue
                 stale.append(
@@ -301,6 +310,25 @@ class HealthMonitor:
                     )
                 )
         return stale
+
+    async def check_mlb_calendar(self, now: datetime | None = None) -> str | None:
+        """Issue when the MLB schedule has not been fetched during the regular season.
+
+        Without a fresh schedule the MLB stale-data and empty-run checks see no
+        fixtures and stay quiet, so a missing schedule is itself an alert.
+        """
+        moment = now or datetime.now(UTC)
+        alerts = self.settings.alerts
+        if not alerts.mlb_season_first_month <= moment.month <= alerts.mlb_season_last_month:
+            return None
+        latest = await latest_mlb_schedule_fetch(self.session)
+        if latest is not None and latest >= moment - MLB_SCHEDULE_MAX_AGE:
+            return None
+        last = latest.isoformat() if latest else "never"
+        return (
+            f"MLB schedule not fetched within {MLB_SCHEDULE_MAX_AGE} (last: {last}); "
+            "MLB data-collection checks are disarmed"
+        )
 
     async def check_consecutive_failures(self) -> tuple[bool, int]:
         """
@@ -574,6 +602,17 @@ class HealthMonitor:
                     rate_limit_minutes=alerts_config.stale_reminder_minutes,
                 ):
                     alerts_sent.append(stale.alert_type)
+
+            mlb_issue = await self.check_mlb_calendar()
+            if mlb_issue:
+                issues_detected.append(mlb_issue)
+                if await self._send_alert(
+                    alert_type="mlb_calendar_stale",
+                    severity="critical",
+                    message=f"🚨 {mlb_issue}",
+                    rate_limit_minutes=alerts_config.stale_reminder_minutes,
+                ):
+                    alerts_sent.append("mlb_calendar_stale")
 
             # Check 2: Consecutive failures
             failures_healthy, failure_count = await self.check_consecutive_failures()

@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from odds_core.database import async_session_maker
-from odds_core.mlb_data_models import MlbProbablePitchers
+from odds_core.mlb_data_models import UNPLAYED_GAME_STATUSES, MlbProbablePitchers
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.snapshot_sources import SnapshotSource
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.scheduling.decision import OVERNIGHT_WINDOWS, CadenceConfig, OvernightWindow
@@ -82,20 +82,37 @@ async def fixture_calendar(
     return FixtureCalendar(next_kickoff=next_kickoff, kickoffs_in_horizon=in_horizon)
 
 
+async def latest_mlb_schedule_fetch(session: AsyncSession) -> datetime | None:
+    return (await session.execute(select(func.max(MlbProbablePitchers.fetched_at)))).scalar_one()
+
+
 async def _mlb_schedule_calendar(
     session: AsyncSession, *, now: datetime, horizon: timedelta
 ) -> FixtureCalendar:
+    """Games of the latest schedule fetch, which is the job's only write path.
+
+    Every row of a fetch shares one ``fetched_at``, so the latest fetch is the
+    current schedule; a fetch older than ``MLB_SCHEDULE_MAX_AGE`` is no calendar.
+    """
+    latest = await latest_mlb_schedule_fetch(session)
+    if latest is None or latest < now - MLB_SCHEDULE_MAX_AGE:
+        return FixtureCalendar(next_kickoff=None, kickoffs_in_horizon=0)
     scheduled = (
-        MlbProbablePitchers.fetched_at >= now - MLB_SCHEDULE_MAX_AGE,
+        MlbProbablePitchers.fetched_at == latest,
         MlbProbablePitchers.commence_time > now,
         MlbProbablePitchers.game_type.in_(MLB_PRICED_GAME_TYPES),  # type: ignore[attr-defined]
+        MlbProbablePitchers.start_time_tbd.is_(False),  # type: ignore[attr-defined]
+        or_(
+            MlbProbablePitchers.game_status.is_(None),  # type: ignore[union-attr]
+            MlbProbablePitchers.game_status.notin_(UNPLAYED_GAME_STATUSES),  # type: ignore[union-attr]
+        ),
     )
     next_kickoff = (
         await session.execute(select(func.min(MlbProbablePitchers.commence_time)).where(*scheduled))
     ).scalar_one()
     in_horizon = (
         await session.execute(
-            select(func.count(func.distinct(MlbProbablePitchers.game_pk))).where(
+            select(func.count(MlbProbablePitchers.game_pk)).where(
                 *scheduled, MlbProbablePitchers.commence_time <= now + horizon
             )
         )
@@ -109,14 +126,16 @@ async def latest_snapshot_time(
     tag = OddsSnapshot.raw_data["source"].as_string()  # type: ignore[index]
     return (
         await session.execute(
-            select(func.max(OddsSnapshot.snapshot_time))
+            select(OddsSnapshot.snapshot_time)
             .join(Event, Event.id == OddsSnapshot.event_id)
             .where(
                 Event.sport_key == sport_key,
                 tag.is_(None) if source is None else tag == source.value,
             )
+            .order_by(OddsSnapshot.snapshot_time.desc())
+            .limit(1)
         )
-    ).scalar_one()
+    ).scalar_one_or_none()
 
 
 def active_hours_between(

@@ -33,6 +33,8 @@ def _to_record(row: MlbProbablePitchers) -> MlbProbablePitchersRecord:
         home_pitcher_id=row.home_pitcher_id,
         away_pitcher_name=row.away_pitcher_name,
         away_pitcher_id=row.away_pitcher_id,
+        game_status=row.game_status,
+        start_time_tbd=row.start_time_tbd,
     )
 
 

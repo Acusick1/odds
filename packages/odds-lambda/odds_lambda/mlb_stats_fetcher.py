@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 import structlog
-from odds_core.mlb_data_models import MlbProbablePitchersRecord
+from odds_core.mlb_data_models import IF_NECESSARY_STATUS, MlbProbablePitchersRecord
 
 logger = structlog.get_logger()
 
@@ -219,7 +219,8 @@ def _record_from_game(
     """Convert a raw MLBAM ``games[]`` entry into a record.
 
     Returns ``None`` when the entry is missing the minimum identifiers
-    (``gamePk``, ``gameDate``, both team names) needed to write a usable row.
+    (``gamePk``, ``gameDate``, both team names and ids; a team without an id is a
+    placeholder) needed to write a usable row.
     """
     game_pk = game.get("gamePk")
     game_date = game.get("gameDate")
@@ -228,11 +229,19 @@ def _record_from_game(
     away = teams.get("away") or {}
     home_team = (home.get("team") or {}).get("name")
     away_team = (away.get("team") or {}).get("name")
+    teams_identified = (home.get("team") or {}).get("id") and (away.get("team") or {}).get("id")
 
-    if not isinstance(game_pk, int) or not game_date or not home_team or not away_team:
+    if (
+        not isinstance(game_pk, int)
+        or not game_date
+        or not home_team
+        or not away_team
+        or not teams_identified
+    ):
         logger.warning("mlb_game_missing_core_fields", raw=game)
         return None
 
+    status = game.get("status") or {}
     home_pitcher = home.get("probablePitcher") or {}
     away_pitcher = away.get("probablePitcher") or {}
 
@@ -247,4 +256,8 @@ def _record_from_game(
         home_pitcher_id=home_pitcher.get("id"),
         away_pitcher_name=away_pitcher.get("fullName"),
         away_pitcher_id=away_pitcher.get("id"),
+        game_status=(
+            IF_NECESSARY_STATUS if game.get("ifNecessary") == "Y" else status.get("detailedState")
+        ),
+        start_time_tbd=bool(status.get("startTimeTBD")),
     )
