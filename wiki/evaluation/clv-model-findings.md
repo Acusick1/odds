@@ -64,6 +64,7 @@ Every result below that predates the training and CV validity fixes (#474, #434,
 - 2026-10-18 (#496): [EPL CLV re-baseline against the simple baseline](exp-epl-clv-rebaseline.md).
 - 2026-10-18 (#482): [Pinnacle against bet365 as the EPL CLV target](exp-epl-clv-pinnacle-retest.md).
 - 2026-10-19 (#540): [Price-only models on the retail-EV target](exp-epl-retail-ev-price-only.md).
+- 2026-10-19 (#538): [power of the retail-EV keep bar](exp-retail-ev-power.md).
 
 ## Caveats
 
