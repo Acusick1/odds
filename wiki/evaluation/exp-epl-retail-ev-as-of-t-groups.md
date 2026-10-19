@@ -29,9 +29,9 @@ This run repeats the protocol of [Price-only models on the retail-EV target](exp
 
 - **On the live-collected events, no group beats the price-only model.** These are the 69 events whose rows come from live collection at their true times. Every residual-arm gain over price-only has a 95% CI that includes zero, and all lie between −29.4 and +6.9 × 10⁻⁶ weighted MSE.
 - **On the FDUK-only events, no group beats price-only either.** Those rows carry none of the new columns except `retail_dispersion`.
-- **No gain over price-only excludes zero, even before correction.** Over all events, no group's gain over price-only excludes zero at 95%. The Bonferroni-corrected CIs at level 1 − 0.05/10, over the 10 tests of five variants and two residual seeds, exclude zero in no slice (`bonferroni.csv`).
+- **No residual-arm gain over price-only excludes zero, even before correction.** Over all events, no group's residual-arm weighted-MSE gain over price-only excludes zero at 95%. The Bonferroni-corrected CIs at level 1 − 0.05/10, over the 10 tests of five variants and two residual seeds, exclude zero in no slice (`bonferroni.csv`).
 - **An earlier version of `polymarket_at_t` leaked time on FDUK opening rows.** On the same protocol it had shown a gain of 60 to 66 over price-only, about 84% of it from those rows. The probe below traces that gain to Polymarket prices from after the real FDUK collection time.
-- **The direct arm stays below the baseline in every variant.**
+- **The direct arm stays below the baseline in every variant.** Some direct-arm gains over the direct price-only model do exclude zero. Polymarket's picks gain +0.085 event units with both seeds. On the live events, `dynamics` gains +64.4 and +101.7 in weighted MSE, and seed 7 gains +155.7 with Polymarket and +82.4 with all four. But they improve on a direct price-only model that is itself 60 to 77 below the baseline overall and 394 to 443 below it on the live events. The direct variants stay 50 to 126 below the baseline overall, so the conclusion stands.
 
 ## Setup
 
@@ -40,7 +40,7 @@ This run repeats the protocol of [Price-only models on the retail-EV target](exp
   - The 69 live-collected events hold 103,269 rows, mostly OddsPortal live snapshots. Their 44 OddsPortal live events fall in fold 4 (2026-02-28 onward).
   - The 271 FDUK-only events hold 5,325 rows, one FDUK opening snapshot each.
   - There are 195 fewer rows than in the price-only run of #540. These are FDUK opening rows whose own snapshot has no usable exchange price, which the builder drops ([CLV target](../modelling/clv-target.md#the-retail-ev-target)). The price-only variant therefore differs slightly from #540.
-  - `summary.json` records the git SHA, `git_dirty` (false for this run), the script and config hashes, and `data_sha256`.
+  - `summary.json` records the git SHA, `git_dirty` (false for this run), the script and config hashes, and `data_sha256`. Its `git_sha` `d9c035d` is the commit the run was made from before the branch was rebased onto main. It has the same code as `68091b8`: no change to `packages/`, `experiments/scripts/` or `experiments/configs/`.
 - **FDUK opening times are upper bounds.** An FDUK opening row's t is FDUK's latest documented collection time, and the price was taken at or before it. Its horizon is therefore a lower bound: 1 to 3 days for most matches and under 12 hours for Friday and Tuesday evening kick-offs ([historical ingest scripts](../collection/historical-ingest-scripts.md#snapshot-shape)). Such a row pairs only with its own snapshot's exchange price. It gets no Polymarket price, lagged exchange price, schedule or standings (`odds_analytics.retail_ev.RetailEvRow.decision_time_is_exact`).
 - **Tuning sees almost none of the new columns.** Hyperparameters are tuned on the 2024-25 FDUK opening rows, where every new column except `retail_dispersion` is NaN (`summary.json`, `coverage_tuning`). The new columns are learnt only when the frozen hyperparameters are refitted on each scoring fold's training rows.
 - **Coverage on scored rows** (`coverage_scored`):
@@ -62,7 +62,7 @@ Residual-arm weighted-MSE gain on the 69 live-collected events (103,269 rows; ba
 | `standings_as_of_t` | −2.5 [−14.9, 10.2] | −29.4 [−86.1, 30.8] | 23.5 [−98.2, 142.6] | −6.8 [−177.4, 161.1] |
 | all four | 6.9 [−14.3, 27.6] | −2.0 [−39.7, 43.8] | 32.9 [−79.1, 142.8] | 20.6 [−120.9, 164.0] |
 
-- **Picks.** Every pick gain over price-only on these events is between −0.008 and 0.007 event units, and every one has a CI that includes zero.
+- **Picks.** Every residual-arm pick gain over price-only on these events is between −0.008 and 0.007 event units, and every one has a CI that includes zero.
 
 ## FDUK-only events
 
@@ -103,7 +103,7 @@ Per fold, residual gain over price-only, seed 42 then seed 7. Each fold has 68 e
 | 4 | 0.6; −29.4 | 22.3; 27.7 | 2.0; −35.7 | 4.3; −25.0 | 25.7; 24.3 |
 
 - **Fold CIs that exclude zero.** Four do, all positive: seed 7 in fold 3 for `dynamics` (93.4 [10.5, 181.0]), `standings_as_of_t` (85.3 [0.8, 171.7]) and all four (104.5 [14.3, 201.3]), and all four with seed 42 in fold 4 (25.7 [1.3, 51.0]). Seed 7's fold-3 gain appears in every variant, including `polymarket_at_t` (76.4 [−12.7, 161.2]). So it is more likely a property of seed 7's refits in that fold than of any one group (inferred).
-- **Picks over all events.** With all four groups, seed 7's picks earn less than price-only's: −0.049 [−0.084, −0.021] event units. No other pick gain over price-only excludes zero.
+- **Picks over all events.** With all four groups, seed 7's residual-arm picks earn less than price-only's: −0.049 [−0.084, −0.021] event units. No other residual-arm pick gain over price-only excludes zero.
 - **Feature importance.** In the all-groups models, `retail_dispersion` ranks third, at 0.110 of total gain, behind `sharp_prob` and `consensus_prob` (`feature_importance.csv`).
 
 ## The FDUK timing leak
