@@ -196,6 +196,42 @@ class LocalSchedulerBackend(SchedulerBackend):
             status=JobStatus.SCHEDULED,
         )
 
+    async def get_one_off_run(self, job_name: str) -> datetime | None:
+        """Next fire time of the job's schedule when it is a one-off ``DateTrigger`` run."""
+        from apscheduler import current_async_scheduler
+
+        live = self._scheduler or current_async_scheduler.get(None)
+        if live is not None:
+            return await self._fetch_one_off_run(live, job_name)
+
+        async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
+            return await self._fetch_one_off_run(scheduler, job_name)
+
+    @staticmethod
+    async def _fetch_one_off_run(scheduler: AsyncScheduler, job_name: str) -> datetime | None:
+        from apscheduler import ScheduleLookupError
+
+        try:
+            sched = await scheduler.get_schedule(job_name)
+        except ScheduleLookupError:
+            return None
+        return sched.next_fire_time if isinstance(sched.trigger, DateTrigger) else None
+
+    async def get_outstanding_job_names(self) -> set[str]:
+        """Schedule ids of jobs that have been released but not finished (queued or running)."""
+        from apscheduler import current_async_scheduler
+
+        live = self._scheduler or current_async_scheduler.get(None)
+        if live is not None:
+            return await self._fetch_outstanding(live)
+
+        async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
+            return await self._fetch_outstanding(scheduler)
+
+    @staticmethod
+    async def _fetch_outstanding(scheduler: AsyncScheduler) -> set[str]:
+        return {job.schedule_id for job in await scheduler.get_jobs() if job.schedule_id}
+
     async def schedule_next_execution(
         self,
         job_name: str,

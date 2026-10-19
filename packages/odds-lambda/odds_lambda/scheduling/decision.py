@@ -54,6 +54,10 @@ OVERNIGHT_WINDOWS: dict[str, OvernightWindow] = {
     "baseball_mlb": (5, 14),
 }
 
+# A close run due within this gap would rerun the job straight away; the run
+# in progress already sits at the close.
+MIN_CLOSE_RUN_GAP = timedelta(seconds=60)
+
 
 @dataclass(slots=True, frozen=True)
 class ScheduleDecision:
@@ -165,7 +169,7 @@ def _decide_from_kickoff(
 
     if cadence.close_lead is not None and close_kickoff is not None:
         close_run = close_kickoff - cadence.close_lead
-        if close_run < next_execution:
+        if close_run - now >= MIN_CLOSE_RUN_GAP and close_run < next_execution:
             next_execution = close_run
             reason += f", close run {cadence.close_lead} before {close_kickoff:%H:%M} UTC"
 

@@ -6,6 +6,7 @@ sources:
   - odds_lambda.scheduling.backends.local.LocalSchedulerBackend
   - odds_lambda.scheduling.backends.local.utc_cron_trigger
   - odds_lambda.scheduling.bootstrap.bootstrap_job
+  - odds_lambda.scheduling.backends.local.LocalSchedulerBackend.get_one_off_run
   - odds_cli.commands.scheduler.start_local
   - odds_cli.commands.scheduler.info
   - odds_cli.commands.scheduler.smoke
@@ -52,8 +53,8 @@ In `odds_cli.commands.scheduler`:
 `odds_lambda.scheduling.bootstrap.bootstrap_job` installs one job, per target sport for a per-sport job:
 
 - A job in `odds_lambda.scheduling.jobs._JOB_CRON_MAP` has its cron re-applied on every start, so an edit to the expression takes effect.
-- A self-scheduling job that has a pending run keeps it. A restart, such as a deploy, therefore never moves the run the job booked for itself.
-- A self-scheduling job without a pending run runs its bootstrap function inline, which for the data jobs is a full run that books the next one.
+- A self-scheduling job that has a pending one-off run (`odds_lambda.scheduling.backends.local.LocalSchedulerBackend.get_one_off_run`) keeps it. A restart, such as a deploy, therefore never moves the run the job booked for itself.
+- A self-scheduling job without one has any other stored schedule removed (such as a cron stored for it under an older `_JOB_CRON_MAP`), then runs its bootstrap function inline. For the data jobs that is a full run that books the next one.
 
 `odds_lambda.scheduling.jobs._JOB_CRON_MAP` holds the fixed cron expressions: `daily-digest` `0 8 * * *`, `fetch-espn-fixtures` `0 6 * * *`, `fetch-mlb-probables` `0 6 * * *`. A cron and a self-schedule share one schedule id, so a self-scheduling job never has a cron entry.
 

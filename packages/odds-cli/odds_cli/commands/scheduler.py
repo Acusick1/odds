@@ -51,18 +51,18 @@ def _print_scheduled_jobs(con: Console, jobs: list[ScheduledJob]) -> None:
 def _print_bootstrap_result(con: Console, result: BootstrapResult) -> None:
     from odds_lambda.scheduling.bootstrap import BootstrapAction
 
-    if result.pending_run is not None and result.action != BootstrapAction.PENDING_KEPT:
+    if result.existing_run is not None and result.action != BootstrapAction.PENDING_KEPT:
         con.print(
-            f"[dim]  {result.job_name} existing schedule at {result.pending_run:%H:%M:%S UTC}[/dim]"
+            f"[dim]  {result.job_name} existing schedule at {result.existing_run:%H:%M:%S UTC}[/dim]"
         )
     match result.action:
         case BootstrapAction.CRON_APPLIED:
             con.print(f"[green]  {result.job_name} cron scheduled ({result.cron_expr})[/green]")
         case BootstrapAction.PENDING_KEPT:
-            assert result.pending_run is not None
+            assert result.existing_run is not None
             con.print(
                 f"[dim]  {result.job_name} already scheduled "
-                f"at {result.pending_run:%H:%M:%S UTC} — keeping[/dim]"
+                f"at {result.existing_run:%H:%M:%S UTC} — keeping[/dim]"
             )
         case BootstrapAction.BOOTSTRAPPED:
             con.print(f"[green]  {result.job_name} bootstrapped[/green]")

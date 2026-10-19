@@ -14,8 +14,10 @@ Stale data is detected via OddsSnapshot recency; other checks use OddsReader.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 import structlog
 from odds_core.betfair_close import LIVE_CLOSE_WINDOW, complete_exchange_prices, is_in_play
@@ -36,8 +38,15 @@ from odds_lambda.collection_calendar import (
     latest_mlb_schedule_fetch,
     latest_snapshot_time,
 )
+from odds_lambda.scheduling.backends.base import ScheduledJob
 from odds_lambda.scheduling.decision import classify_tier
-from odds_lambda.scheduling.jobs import make_compound_job_name, resolve_target_sports
+from odds_lambda.scheduling.jobs import (
+    expected_compound_job_names,
+    get_job_cron,
+    make_compound_job_name,
+    resolve_job_name,
+    resolve_target_sports,
+)
 from odds_lambda.storage.event_merge import EventMerger
 
 logger = structlog.get_logger()
@@ -49,6 +58,37 @@ BETFAIR_CLOSE_SPORT = "soccer_epl"
 BETFAIR_CLOSE_JOB = "fetch-betfair-exchange"
 BETFAIR_HISTORY_WINDOW = timedelta(hours=72)
 BETFAIR_CLOSE_ALERT_TYPE = "missing_betfair_close"
+SCHEDULE_OVERDUE_GRACE = timedelta(minutes=15)
+
+# Self-scheduling jobs that return before booking a next run while disabled.
+_JOB_ENABLED: dict[str, Callable[[Settings], bool]] = {
+    "fetch-betfair-exchange": lambda settings: settings.betfair.enabled,
+    "fetch-polymarket-odds": lambda settings: settings.polymarket.enabled,
+    "fetch-polymarket": lambda settings: settings.polymarket.enabled,
+}
+
+
+class ScheduleReader(Protocol):
+    async def get_scheduled_jobs(self) -> list[ScheduledJob]: ...
+
+    async def get_outstanding_job_names(self) -> set[str]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class DeadChain:
+    """A bootstrapped self-scheduling job with no run booked, or one long overdue."""
+
+    job_name: str
+    next_run: datetime | None
+
+    @property
+    def alert_type(self) -> str:
+        return f"dead_schedule_chain:{self.job_name}"
+
+    def describe(self) -> str:
+        if self.next_run is None:
+            return f"{self.job_name} has no scheduled run and is not running"
+        return f"{self.job_name} run due at {self.next_run:%Y-%m-%d %H:%M} UTC has not started"
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,16 +171,24 @@ class HealthStatus(BaseModel):
 class HealthMonitor:
     """Monitors system health and dispatches alerts."""
 
-    def __init__(self, session: AsyncSession, settings: Settings):
+    def __init__(
+        self,
+        session: AsyncSession,
+        settings: Settings,
+        schedules: ScheduleReader | None = None,
+    ):
         """
         Initialize health monitor.
 
         Args:
             session: Database session
             settings: Application settings
+            schedules: Scheduler store to check self-scheduling chains against;
+                without one the chain check is skipped
         """
         self.session = session
         self.settings = settings
+        self.schedules = schedules
 
     async def _should_send_alert(
         self, alert_type: str, rate_limit_minutes: int | None = None
@@ -680,6 +728,32 @@ class HealthMonitor:
 
         return issues
 
+    async def check_schedule_chains(self, now: datetime | None = None) -> list[DeadChain]:
+        """Bootstrapped self-scheduling jobs whose chain has ended or stalled."""
+        if self.schedules is None:
+            return []
+        now = now or datetime.now(UTC)
+        expected = expected_compound_job_names(
+            self.settings.scheduler.bootstrap_jobs, self.settings.data_collection.sports
+        )
+        next_runs = {
+            job.job_name: job.next_run_time for job in await self.schedules.get_scheduled_jobs()
+        }
+        outstanding = await self.schedules.get_outstanding_job_names()
+
+        dead: list[DeadChain] = []
+        for job_name in sorted(expected):
+            base_name, _ = resolve_job_name(job_name)
+            if get_job_cron(base_name) is not None or job_name in outstanding:
+                continue
+            enabled = _JOB_ENABLED.get(base_name)
+            if enabled is not None and not enabled(self.settings):
+                continue
+            next_run = next_runs.get(job_name)
+            if next_run is None or next_run < now - SCHEDULE_OVERDUE_GRACE:
+                dead.append(DeadChain(job_name, next_run))
+        return dead
+
     async def purge_old_heartbeats(self) -> int:
         """Delete heartbeat rows older than the configured retention period.
 
@@ -713,6 +787,7 @@ class HealthMonitor:
         4. Data quality issues
         5. Job heartbeats (missing completions)
         6. Event identity: twins, repeated fixtures, stale scheduled events
+        7. Self-scheduling chains with no run booked or an overdue run
 
         Returns:
             HealthStatus with metrics and alerts sent
@@ -843,6 +918,17 @@ class HealthMonitor:
             # Check 6: One event per match
             issues_detected.extend(await self.check_event_identity())
 
+            # Check 7: Self-scheduling chains
+            for chain in await self.check_schedule_chains():
+                issue = chain.describe()
+                issues_detected.append(issue)
+                if await self._send_alert(
+                    alert_type=chain.alert_type,
+                    severity="critical",
+                    message=f"🚨 Dead schedule chain: {issue}",
+                ):
+                    alerts_sent.append(chain.alert_type)
+
             # Housekeeping: purge old heartbeat rows
             await self.purge_old_heartbeats()
 
@@ -909,7 +995,12 @@ async def check_system_health() -> HealthStatus:
         HealthStatus with results
     """
     settings = get_settings()
+    schedules: ScheduleReader | None = None
+    if settings.scheduler.backend == "local":
+        from odds_lambda.scheduling.backends.local import LocalSchedulerBackend
+
+        schedules = LocalSchedulerBackend()
 
     async with async_session_maker() as session:
-        monitor = HealthMonitor(session, settings)
+        monitor = HealthMonitor(session, settings, schedules)
         return await monitor.check_system_health()

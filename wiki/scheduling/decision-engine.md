@@ -63,7 +63,7 @@ Values are each job module's cadence constant (`odds_lambda.jobs.fetch_odds.CADE
 
 ## Close run
 
-`odds_lambda.scheduling.decision.CadenceConfig.close_lead`, when set, adds a run just before each kickoff. The forward decisions look up the earliest kickoff more than `close_lead` away. If the cadence's next time falls after that kickoff minus `close_lead`, the run moves to that time, and the overnight skip does not apply to it. Only `odds_lambda.jobs.fetch_betfair_exchange.CADENCE` sets it, at 5 min, so the Betfair close does not depend on where the 15-minute cadence happens to fall ([Betfair job](../collection/betfair-exchange.md#flow)).
+`odds_lambda.scheduling.decision.CadenceConfig.close_lead`, when set, adds a run just before each kickoff. The forward decisions look up the earliest kickoff more than `close_lead` away. If the cadence's next time falls after that kickoff minus `close_lead`, the run moves to that time, and the overnight skip does not apply to it. A close run less than `odds_lambda.scheduling.decision.MIN_CLOSE_RUN_GAP` (60 s) away is dropped, because the run deciding it is already at the close. Only `odds_lambda.jobs.fetch_betfair_exchange.CADENCE` sets it, at 5 min, so the Betfair close does not depend on where the 15-minute cadence happens to fall ([Betfair job](../collection/betfair-exchange.md#flow)).
 
 ## Overnight windows
 

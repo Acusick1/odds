@@ -92,6 +92,21 @@ class TestBootstrapSelfSchedulingJob:
         assert recorded_bootstraps == [JobContext(sport="soccer_epl")]
 
     @pytest.mark.asyncio
+    async def test_leftover_cron_is_replaced_by_bootstrap(
+        self, recorded_bootstraps: list[JobContext]
+    ) -> None:
+        """A cron stored before the job self-scheduled is not a pending run of the job's own."""
+        async with LocalSchedulerBackend() as backend:
+            await backend.schedule_cron("fetch-betfair-exchange-epl", "*/30 * * * *")
+
+            result = await bootstrap_job(backend, "fetch-betfair-exchange", "soccer_epl")
+
+            assert result.action == BootstrapAction.BOOTSTRAPPED
+            assert result.existing_run is not None
+            assert await backend.get_job_status("fetch-betfair-exchange-epl") is None
+        assert recorded_bootstraps == [JobContext(sport="soccer_epl")]
+
+    @pytest.mark.asyncio
     async def test_bootstrap_failure_is_reported(self) -> None:
         async def failing(ctx: JobContext) -> None:
             raise RuntimeError("betfair login failed")

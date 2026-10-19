@@ -28,7 +28,7 @@ class BootstrapAction(StrEnum):
 class BootstrapResult:
     job_name: str
     action: BootstrapAction
-    pending_run: datetime | None
+    existing_run: datetime | None
     cron_expr: str | None = None
     error: str | None = None
 
@@ -39,24 +39,29 @@ async def bootstrap_job(
     """Install the schedule for a job, per sport when ``sport`` is set, on scheduler start.
 
     A cron job has its cron re-applied, so an edit to ``_JOB_CRON_MAP`` takes
-    effect. A self-scheduling job keeps any pending run, which it computed
-    itself; only without one does its bootstrap function run.
+    effect. A self-scheduling job keeps a pending one-off run, which it
+    computed itself. Without one, any other stored schedule (such as a cron
+    left from before the job self-scheduled) is removed and the job's
+    bootstrap function runs.
     """
     job_name = make_compound_job_name(base_name, sport)
     cron_expr = get_job_cron(base_name)
-    pending = await backend.get_job_status(job_name)
-    pending_run = pending.next_run_time if pending is not None else None
+    existing = await backend.get_job_status(job_name)
+    existing_run = existing.next_run_time if existing is not None else None
     try:
         if cron_expr is not None:
             await backend.schedule_cron(job_name, cron_expr)
             return BootstrapResult(
-                job_name, BootstrapAction.CRON_APPLIED, pending_run, cron_expr=cron_expr
+                job_name, BootstrapAction.CRON_APPLIED, existing_run, cron_expr=cron_expr
             )
-        if pending_run is not None:
-            return BootstrapResult(job_name, BootstrapAction.PENDING_KEPT, pending_run)
+        one_off_run = await backend.get_one_off_run(job_name)
+        if one_off_run is not None:
+            return BootstrapResult(job_name, BootstrapAction.PENDING_KEPT, one_off_run)
+        if existing is not None:
+            await backend.cancel_scheduled_execution(job_name)
         await get_bootstrap_function(base_name)(JobContext(sport=sport))
-        return BootstrapResult(job_name, BootstrapAction.BOOTSTRAPPED, pending_run)
+        return BootstrapResult(job_name, BootstrapAction.BOOTSTRAPPED, existing_run)
     except Exception as e:
         return BootstrapResult(
-            job_name, BootstrapAction.FAILED, pending_run, cron_expr=cron_expr, error=str(e)
+            job_name, BootstrapAction.FAILED, existing_run, cron_expr=cron_expr, error=str(e)
         )

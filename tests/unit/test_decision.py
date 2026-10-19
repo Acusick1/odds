@@ -273,6 +273,17 @@ class TestCloseLead:
         assert decision.next_execution == second - timedelta(minutes=5)
 
     @pytest.mark.asyncio
+    async def test_close_run_within_a_minute_is_skipped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A run that started just before its close run does not book a second one seconds later."""
+        self._kickoffs(monkeypatch, [NOW + timedelta(minutes=5, seconds=30)])
+
+        decision = await decide_forward_resilient(["soccer_epl"], self.CLOSE_CADENCE, now=NOW)
+
+        assert decision.next_execution == NOW + timedelta(minutes=15)
+
+    @pytest.mark.asyncio
     async def test_close_run_overrides_overnight_skip(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
