@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable
-from datetime import datetime
+from datetime import UTC, datetime
 from types import TracebackType
 from typing import TYPE_CHECKING
 
@@ -69,6 +69,16 @@ def build_scheduler(
         event_broker=event_broker,
         role=role,
     )
+
+
+def utc_cron_trigger(cron_expr: str, *, now: datetime) -> CronTrigger:
+    """A UTC ``CronTrigger`` whose fields are matched from ``now`` in UTC.
+
+    APScheduler defaults ``start_time`` to the naive local time, and reads its
+    fields as if they were in the trigger's time zone, so on a host in BST a
+    UTC cron's first fire lands an hour late.
+    """
+    return CronTrigger.from_crontab(cron_expr, timezone=UTC, start_time=now.astimezone(UTC))
 
 
 class LocalSchedulerBackend(SchedulerBackend):
@@ -186,6 +196,42 @@ class LocalSchedulerBackend(SchedulerBackend):
             status=JobStatus.SCHEDULED,
         )
 
+    async def get_one_off_run(self, job_name: str) -> datetime | None:
+        """Next fire time of the job's schedule when it is a one-off ``DateTrigger`` run."""
+        from apscheduler import current_async_scheduler
+
+        live = self._scheduler or current_async_scheduler.get(None)
+        if live is not None:
+            return await self._fetch_one_off_run(live, job_name)
+
+        async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
+            return await self._fetch_one_off_run(scheduler, job_name)
+
+    @staticmethod
+    async def _fetch_one_off_run(scheduler: AsyncScheduler, job_name: str) -> datetime | None:
+        from apscheduler import ScheduleLookupError
+
+        try:
+            sched = await scheduler.get_schedule(job_name)
+        except ScheduleLookupError:
+            return None
+        return sched.next_fire_time if isinstance(sched.trigger, DateTrigger) else None
+
+    async def get_outstanding_job_names(self) -> set[str]:
+        """Schedule ids of jobs that have been released but not finished (queued or running)."""
+        from apscheduler import current_async_scheduler
+
+        live = self._scheduler or current_async_scheduler.get(None)
+        if live is not None:
+            return await self._fetch_outstanding(live)
+
+        async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
+            return await self._fetch_outstanding(scheduler)
+
+    @staticmethod
+    async def _fetch_outstanding(scheduler: AsyncScheduler) -> set[str]:
+        return {job.schedule_id for job in await scheduler.get_jobs() if job.schedule_id}
+
     async def schedule_next_execution(
         self,
         job_name: str,
@@ -202,9 +248,18 @@ class LocalSchedulerBackend(SchedulerBackend):
             return
 
         try:
-            from odds_lambda.scheduling.jobs import JobContext, get_job_function, resolve_job_name
+            from odds_lambda.scheduling.jobs import (
+                JobContext,
+                get_job_cron,
+                get_job_function,
+                resolve_job_name,
+            )
 
             base_name, resolved_sport = resolve_job_name(job_name)
+            if get_job_cron(base_name) is not None:
+                raise SchedulingFailedError(
+                    f"{job_name} is a cron job; a one-off run would replace its cron schedule"
+                )
             job_func = get_job_function(base_name)
             ctx_payload: dict[str, object] = {}
             if resolved_sport:
@@ -221,6 +276,8 @@ class LocalSchedulerBackend(SchedulerBackend):
                 next_time=next_time.isoformat(),
             )
 
+        except SchedulingFailedError:
+            raise
         except KeyError as e:
             raise SchedulingFailedError(str(e)) from e
         except Exception as e:
@@ -324,7 +381,7 @@ class LocalSchedulerBackend(SchedulerBackend):
 
         await scheduler.add_schedule(
             job_func,
-            trigger=CronTrigger.from_crontab(cron_expr, timezone="UTC"),
+            trigger=utc_cron_trigger(cron_expr, now=datetime.now(UTC)),
             id=job_name,
             args=[ctx],
             conflict_policy=ConflictPolicy.replace,

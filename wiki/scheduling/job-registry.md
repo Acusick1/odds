@@ -32,7 +32,7 @@ status: stable
 - `odds_lambda.scheduling.jobs.get_job_function` imports the module on first use and caches it, so the scraper Lambda never imports xgboost-dependent modules unless asked.
 - `_JOB_BOOTSTRAP_MAP`: jobs whose local bootstrap uses a different function; only `agent-run` (`odds_lambda.jobs.agent_run.schedule_next`). `odds_lambda.scheduling.jobs.get_bootstrap_function` wraps it to the `(JobContext)` signature. As a result `odds scheduler start` never launches the agent run itself; it only books its next wake-up.
 - `_SMOKE_UNSAFE_JOBS` (`agent-run`) and `_OUTWARD_POSTING_JOBS` (`daily-digest`) drive [`odds scheduler smoke`](local-scheduler.md#cli); smoke skips `agent-run` unless `--include-agent`.
-- `_JOB_CRON_MAP` maps each local cron job (including `fetch-polymarket-odds`) to its cron expression ([cron table](local-scheduler.md#bootstrap-jobs-and-cron-table)). At import the registry asserts every `_JOB_CRON_MAP` key is a registered job.
+- `_JOB_CRON_MAP` maps each local cron job to its cron expression; a self-scheduling job has no entry ([cron table](local-scheduler.md#bootstrap-jobs-and-cron-table)). At import the registry asserts every `_JOB_CRON_MAP` key is a registered job.
 - `_JOB_SPORTS` maps a per-sport job, cron or self-scheduling, to the sports it may run for; `odds_lambda.scheduling.jobs.get_job_sports` returns `None` for a job with no entry, and `odds_lambda.scheduling.jobs.resolve_target_sports` then falls back to every configured sport; otherwise it keeps the configured sports that are in the allowlist. At import the registry asserts every `_JOB_SPORTS` key is in `_PER_SPORT_JOBS`.
 
 ## Compound job names

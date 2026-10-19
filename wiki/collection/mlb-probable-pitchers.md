@@ -29,7 +29,7 @@ The job raises unless `ctx.sport` is `baseball_mlb`.
 
 ## Where it runs
 
-Its fixed cron `0 6 * * *` (`odds_lambda.scheduling.jobs._JOB_CRON_MAP`) runs it, MLB only through `odds_lambda.scheduling.jobs._JOB_SPORTS`, in the default local bootstrap, so it runs on the mini-PC ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Terraform declares no rule for it. It keeps running through the MLB off-season (#487). The MLB overnight window (05:00-14:00 UTC) belongs to the self-scheduling jobs, not this cron ([decision-engine](../scheduling/decision-engine.md#overnight-windows)).
+Its fixed cron `0 6 * * *` UTC (`odds_lambda.scheduling.jobs._JOB_CRON_MAP`) runs it, MLB only through `odds_lambda.scheduling.jobs._JOB_SPORTS`, in the default local bootstrap, so it runs on the mini-PC ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Terraform declares no rule for it. It keeps running through the MLB off-season (#487). The MLB overnight window (05:00-14:00 UTC) belongs to the self-scheduling jobs, not this cron ([decision-engine](../scheduling/decision-engine.md#overnight-windows)).
 
 ## Reading
 

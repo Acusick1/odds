@@ -18,7 +18,7 @@ status: stable
 
 # The daily-digest job
 
-`odds_lambda.jobs.daily_digest` posts one Discord embed per sport with model predictions. It is opt-in and local-only: no EventBridge rule exists, it is commented out of the default `bootstrap_jobs`, and when listed in `SCHEDULER_BOOTSTRAP_JOBS` it runs as the fixed cron in its `_JOB_CRON_MAP` entry at `0 8 * * *`, for EPL only through its `_JOB_SPORTS` allowlist. `odds scheduler smoke --no-side-effects` drops it ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs), [local-scheduler](../scheduling/local-scheduler.md)). It writes heartbeat key `daily-digest-epl`, but `heartbeat_expectations` has no entry for it, so a missed digest does not alert ([alerting-and-heartbeats](alerting-and-heartbeats.md#heartbeats)).
+`odds_lambda.jobs.daily_digest` posts one Discord embed per sport with model predictions. It is opt-in and local-only: no EventBridge rule exists, it is commented out of the default `bootstrap_jobs`, and when listed in `SCHEDULER_BOOTSTRAP_JOBS` it runs as the fixed cron in its `_JOB_CRON_MAP` entry at `0 8 * * *` UTC, for EPL only through its `_JOB_SPORTS` allowlist. `odds scheduler smoke --no-side-effects` drops it ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs), [local-scheduler](../scheduling/local-scheduler.md)). It writes heartbeat key `daily-digest-epl`, but `heartbeat_expectations` has no entry for it, so a missed digest does not alert ([alerting-and-heartbeats](alerting-and-heartbeats.md#heartbeats)).
 
 ## Flow
 

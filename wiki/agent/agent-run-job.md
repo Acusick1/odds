@@ -40,7 +40,7 @@ Two entry paths: the scheduled `agent-run` job, and `odds agent run --sport S` f
 
 ## The agent-run job
 
-The job is opt-in and local-only: no EventBridge rule exists for it, and the default `SCHEDULER_BOOTSTRAP_JOBS` has `agent-run` commented out, so the loop starts only when you add it ([where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs), [configuration](../foundations/configuration.md)). Its bootstrap function in `_JOB_BOOTSTRAP_MAP` is `odds_lambda.jobs.agent_run.schedule_next`, not `odds_lambda.jobs.agent_run.main`, so `odds scheduler start` never launches the agent itself.
+The job is opt-in and local-only: no EventBridge rule exists for it, and the default `SCHEDULER_BOOTSTRAP_JOBS` has `agent-run` commented out, so the loop starts only when you add it ([where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs), [configuration](../foundations/configuration.md)). Its bootstrap function in `_JOB_BOOTSTRAP_MAP` is `odds_lambda.jobs.agent_run.schedule_next`, not `odds_lambda.jobs.agent_run.main`, so `odds scheduler start` never launches the agent itself, and it calls even that only when no wake-up is pending ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
 
 ### Flow
 

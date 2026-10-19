@@ -36,7 +36,7 @@ Helpers:
 
 On AWS, the Lambda handler also sends its own critical on any exception ([lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
 
-`odds_core.config.AlertConfig` (no env prefix; its docstring says "infrastructure for future use", yet it drives deployed alerting): `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED` (default false), quota thresholds 0.2 and 0.1, `CONSECUTIVE_FAILURES_THRESHOLD` 3, `STALE_DATA_HOURS` 2, `ALERT_RATE_LIMIT_MINUTES` 30, `DATA_QUALITY_ERROR_THRESHOLD` 10, `heartbeat_expectations` (hours per job, 2 to 26 by default), `heartbeat_retention_days` 7 ([configuration](../foundations/configuration.md)).
+`odds_core.config.AlertConfig` (no env prefix; its docstring says "infrastructure for future use", yet it drives deployed alerting): `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED` (default false), quota thresholds 0.2 and 0.1, `CONSECUTIVE_FAILURES_THRESHOLD` 3, `STALE_DATA_HOURS` 2, `ALERT_RATE_LIMIT_MINUTES` 30, `DATA_QUALITY_ERROR_THRESHOLD` 10, `heartbeat_expectations` (hours per compound job name, 2 to 30 by default), `heartbeat_retention_days` 7 ([configuration](../foundations/configuration.md)).
 
 ## Alert history
 
@@ -55,6 +55,7 @@ On AWS, the Lambda handler also sends its own critical on any exception ([lambda
 | `data_quality_errors` | `odds_lambda.health_monitor.HealthMonitor` | warning |
 | `duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `stale_scheduled_events:<sport>` (kick-off within the last 7 days) | `odds_lambda.health_monitor.HealthMonitor` | warning |
 | `missing_heartbeat:<job>` | `odds_lambda.health_monitor.HealthMonitor` | warning |
+| `dead_schedule_chain:<job>` (a bootstrapped self-scheduling job with no run booked or one overdue) | `odds_lambda.health_monitor.HealthMonitor` | critical |
 | `health_check_failure` | `odds_lambda.health_monitor.HealthMonitor` | critical |
 
 The default window is 30 minutes (`odds_core.alerts.check_rate_limit`'s argument for jobs, `odds_core.config.AlertConfig.alert_rate_limit_minutes` for the monitor). The key is `alert_type` alone, so a warning suppresses a critical of the same type for the window; the quota pair works only because the types differ (#384).

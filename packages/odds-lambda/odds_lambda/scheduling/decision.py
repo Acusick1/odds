@@ -54,6 +54,10 @@ OVERNIGHT_WINDOWS: dict[str, OvernightWindow] = {
     "baseball_mlb": (5, 14),
 }
 
+# A close run due within this gap would rerun the job straight away; the run
+# in progress already sits at the close.
+MIN_CLOSE_RUN_GAP = timedelta(seconds=60)
+
 
 @dataclass(slots=True, frozen=True)
 class ScheduleDecision:
@@ -84,7 +88,10 @@ class CadenceConfig:
     ``no_game`` is the check-in interval used when there is no upcoming game
     (off-season / fixtures not yet posted). ``db_fallback`` is the interval a
     caller should use when the kickoff query itself fails (DB unreachable),
-    so scheduling never blocks on DB availability.
+    so scheduling never blocks on DB availability. ``close_lead``, when set,
+    pulls ``next_execution`` forward to ``close_lead`` before the next kickoff
+    the cadence would otherwise step over, so a run always lands just before
+    each kickoff.
     """
 
     closing: float
@@ -94,6 +101,7 @@ class CadenceConfig:
     opening: float
     no_game: float
     db_fallback: float = 1.0
+    close_lead: timedelta | None = None
 
     def interval_for(self, tier: FetchTier) -> float:
         """Return the polling interval (hours) for a tier.
@@ -137,6 +145,7 @@ def _decide_from_kickoff(
     now: datetime,
     overnight: OvernightWindow | None,
     lookahead_days: int,
+    close_kickoff: datetime | None,
 ) -> ScheduleDecision:
     """Classify an already-resolved kickoff into a decision (no DB access).
 
@@ -155,13 +164,30 @@ def _decide_from_kickoff(
     hours_until = (next_kickoff - now).total_seconds() / 3600
     tier = classify_tier(hours_until)
     interval = cadence.interval_for(tier)
+    next_execution = _next_time(now, interval, overnight)
+    reason = f"Next {sport_key} game in {hours_until:.1f}h ({tier.value} tier)"
+
+    if cadence.close_lead is not None and close_kickoff is not None:
+        close_run = close_kickoff - cadence.close_lead
+        if close_run - now >= MIN_CLOSE_RUN_GAP and close_run < next_execution:
+            next_execution = close_run
+            reason += f", close run {cadence.close_lead} before {close_kickoff:%H:%M} UTC"
 
     return ScheduleDecision(
         should_execute=True,
-        reason=f"Next {sport_key} game in {hours_until:.1f}h ({tier.value} tier)",
-        next_execution=_next_time(now, interval, overnight),
+        reason=reason,
+        next_execution=next_execution,
         tier=tier,
     )
+
+
+async def _get_close_kickoff(
+    sport_key: str, cadence: CadenceConfig, *, now: datetime
+) -> datetime | None:
+    """Earliest kickoff whose close run (``close_lead`` before it) is still ahead of ``now``."""
+    if cadence.close_lead is None:
+        return None
+    return await get_next_kickoff(sport_key, now=now + cadence.close_lead)
 
 
 async def decide_forward(
@@ -202,6 +228,7 @@ async def decide_forward(
         now=now,
         overnight=overnight,
         lookahead_days=lookahead_days,
+        close_kickoff=await _get_close_kickoff(sport_key, cadence, now=now),
     )
 
 
@@ -224,10 +251,14 @@ async def decide_forward_resilient(
     try:
         soonest: datetime | None = None
         soonest_sport = sport_keys[0]
+        close_kickoff: datetime | None = None
         for sk in sport_keys:
             ko = await get_next_kickoff(sk, now=now)
             if ko is not None and (soonest is None or ko < soonest):
                 soonest, soonest_sport = ko, sk
+            close_ko = await _get_close_kickoff(sk, cadence, now=now)
+            if close_ko is not None and (close_kickoff is None or close_ko < close_kickoff):
+                close_kickoff = close_ko
         return _decide_from_kickoff(
             soonest_sport,
             cadence,
@@ -235,6 +266,7 @@ async def decide_forward_resilient(
             now=now,
             overnight=overnight,
             lookahead_days=lookahead_days,
+            close_kickoff=close_kickoff,
         )
     except Exception as e:
         logger.warning("next_kickoff_query_failed", error=str(e), exc_info=True)

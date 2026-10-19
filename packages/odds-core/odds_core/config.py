@@ -256,6 +256,8 @@ class AlertConfig(BaseSettings):
             "fetch-oddsportal-mlb": 12,
             "fetch-oddsportal-results-mlb": 26,
             "fetch-mlb-probables": 30,
+            "fetch-betfair-exchange-epl": 10,
+            "fetch-betfair-exchange-mlb": 11,
             "check-health": 2,
         },
         description="Max hours between job completions before alerting (job_name -> hours)",

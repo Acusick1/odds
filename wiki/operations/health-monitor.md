@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Health monitor, check-health job and odds status
-description: HealthMonitor, the check-health job's six checks, heartbeat purge, its own alert path, and what odds status show, quota and events print and read.
+description: HealthMonitor, the check-health job's seven checks, heartbeat purge, its own alert path, and what odds status show, quota and events print and read.
 sources:
   - odds_lambda.health_monitor.HealthMonitor
   - odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats
@@ -20,6 +20,10 @@ sources:
   - odds_lambda.health_monitor.HealthMonitor.check_consecutive_failures
   - odds_lambda.health_monitor.HealthMonitor.check_api_quota
   - odds_lambda.health_monitor.HealthMonitor.check_event_identity
+  - odds_lambda.health_monitor.HealthMonitor.check_schedule_chains
+  - odds_lambda.health_monitor.DeadChain
+  - odds_lambda.health_monitor.SCHEDULE_OVERDUE_GRACE
+  - odds_lambda.scheduling.backends.local.LocalSchedulerBackend.get_outstanding_job_names
   - odds_lambda.health_monitor.check_system_health
   - odds_lambda.health_monitor.HealthMetrics
   - odds_lambda.health_monitor.HealthStatus
@@ -47,8 +51,19 @@ status: stable
 4. `odds_lambda.health_monitor.HealthMonitor.check_data_quality`: `error` plus `critical` `odds_core.models.DataQualityLog` rows in 24 h (each query capped at 1000) versus `data_quality_error_threshold` (10). The validator itself only emits `warning` and `error`, so `critical` never occurs ([odds-validator](../storage/odds-validator.md)).
 5. `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats`: compares the newest `heartbeat:<job>` row per key in `odds_core.config.AlertConfig.heartbeat_expectations` to its allowed hours. The default keys and allowed hours are in [Heartbeats](#heartbeats). A job with no history is not alerted (#384).
 6. `odds_lambda.health_monitor.HealthMonitor.check_event_identity`: per sport, matches stored as several events, EPL fixtures stored twice in a season, and events still `scheduled` a day after a kick-off in the last seven days, each its own warning (`duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `stale_scheduled_events:<sport>`). Nothing is merged; `odds events merge-twins --sport <sport> --apply` clears twins ([Event merge](../storage/event-merge.md#detection)).
+7. `odds_lambda.health_monitor.HealthMonitor.check_schedule_chains`: dead self-scheduling chains, each its own critical `dead_schedule_chain:<job>` ([Schedule chain check](#schedule-chain-check)).
 
 Then `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` runs on every health check: it deletes `heartbeat:%` rows older than `heartbeat_retention_days` (7) and is the only retention sweep in the system.
+
+## Schedule chain check
+
+`odds_lambda.health_monitor.HealthMonitor.check_schedule_chains` catches a self-scheduling job whose chain has ended, before its data goes stale. It runs only when `odds_lambda.health_monitor.check_system_health` is given the local scheduler store (`SCHEDULER_BACKEND=local`); a `odds_lambda.health_monitor.HealthMonitor` built without one skips it. It covers every compound job that `odds_core.config.SchedulerConfig.bootstrap_jobs` expands to, except:
+
+- cron jobs, which APScheduler re-fires on its own;
+- jobs that return before booking a run while disabled (Betfair while `odds_core.config.BetfairConfig.enabled` is false, both Polymarket jobs while Polymarket is disabled);
+- jobs with a released, unfinished APScheduler job under their schedule id (`odds_lambda.scheduling.backends.local.LocalSchedulerBackend.get_outstanding_job_names`). A job that books its next run only after its work, such as check-health itself, has no schedule while it runs.
+
+A covered job is dead when it has no stored schedule, or when its next run is more than `odds_lambda.health_monitor.SCHEDULE_OVERDUE_GRACE` (15 min) in the past. Restarting the scheduler with `deploy.sh` restarts a dead chain ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
 
 ## Stale-data check
 
@@ -81,7 +96,12 @@ The thresholds are computed from each job's cadence, not configured. The Odds AP
 
 The missing events of a run are one critical `missing_betfair_close` listing every event, so a matchday cannot storm. Its `alert_history` context holds the event ids. A later run reports only events not named in an alert inside the lookback, so an event drops out of `issues_detected` once its alert was recorded; a run whose send was rate-limited (`odds_core.config.AlertConfig.alert_rate_limit_minutes`) records nothing and lists the events again next run. The check reads the snapshot's prices, not their quality, so a wide back book (ADR-0014) still counts.
 
-The alert fires after kick-off, when the close cannot be collected. It is a coverage record for the retail-EV evaluation and does not catch a gap in time to fill it; protection before kick-off is tracked in [#562](https://github.com/Acusick1/odds/issues/562).
+The alert fires after kick-off, when the close cannot be collected. It is a coverage record for the retail-EV evaluation and does not catch a gap in time to fill it. Protection before kick-off is in the job's schedule: it books a run 5 min before each kickoff ([close run](../scheduling/decision-engine.md#close-run)), and a scheduler restart keeps that pending run ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)). An alert therefore has one of these causes:
+
+- the close run failed;
+- the scheduler was down at the close;
+- the job's chain had ended ([Schedule chain check](#schedule-chain-check));
+- the kickoff was added or moved after the job's last run booked its next one, so no close run was booked for it.
 
 ## Heartbeats
 
@@ -94,7 +114,7 @@ A job inside `odds_core.alerts.job_alert_context` inserts `heartbeat:<name>` on 
 | daily-digest (EPL) | yes | none |
 | check-health | yes | 2 h |
 | update-status | yes | none |
-| fetch-betfair-exchange | yes | none |
+| fetch-betfair-exchange (per sport) | yes | 10 h EPL, 11 h MLB (overnight window plus the 2 h interval) |
 | fetch-polymarket-odds (per sport) | yes | none until the job is bootstrapped |
 | score-predictions | yes | none |
 | fetch-mlb-probables | yes | 30 h |

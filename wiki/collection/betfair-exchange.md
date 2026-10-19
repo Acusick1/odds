@@ -10,7 +10,6 @@ sources:
   - odds_lambda.jobs.fetch_betfair_exchange.main
   - odds_lambda.jobs.fetch_betfair_exchange.ingest_sport
   - odds_lambda.jobs.fetch_betfair_exchange.CADENCE
-  - odds_lambda.scheduling.jobs._JOB_CRON_MAP
   - odds_lambda.scheduling.jobs._JOB_SPORTS
   - odds_core.config.BetfairConfig
   - deployment/aws/terraform/lambda.tf
@@ -36,13 +35,13 @@ Package `packages/odds-lambda/odds_lambda/betfair/`, driven by the fetch-betfair
 
 ### Where it runs
 
-- Production (mini-PC): in default `bootstrap_jobs`, installed as the fixed cron `*/30 * * * *` (`odds_lambda.scheduling.jobs._JOB_CRON_MAP`) for every sport in `odds_lambda.betfair.constants.SPORT_CONFIG` (its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist is derived from that map, as the `fetch-polymarket-odds` allowlist is from `odds_lambda.polymarket_sports.MATCH_ODDS_SPORTS`). How the cron and the self-schedule interact is on [local-scheduler](../scheduling/local-scheduler.md).
+- Production (mini-PC): in default `bootstrap_jobs`, self-scheduling for every sport in `odds_lambda.betfair.constants.SPORT_CONFIG` (its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist is derived from that map, as the `fetch-polymarket-odds` allowlist is from `odds_lambda.polymarket_sports.MATCH_ODDS_SPORTS`). A scheduler restart keeps the pending run; with none, bootstrap runs the job once to start the chain ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
 - AWS (dormant): per-sport rule on the scheduler Lambda, created only when Terraform `betfair_enabled` is true (default false); Betfair credentials and SSM cert parameter names are set in `deployment/aws/terraform/lambda.tf` ([aws-infrastructure](../operations/aws-infrastructure.md)). The dev deploy invokes `fetch-betfair-exchange-epl` as a smoke test ([ci-cd-workflows](../operations/ci-cd-workflows.md)).
 
 ### Flow
 
 1. Resolve target sports: `ctx.sport`, else `settings.betfair.sports` or every `odds_lambda.betfair.constants.SPORT_CONFIG` key.
-2. Pre-schedule with `odds_lambda.scheduling.decision.decide_forward_resilient` and `odds_lambda.jobs.fetch_betfair_exchange.CADENCE`: 15 min under 3 h, 30 min at 3-12 h, 2 h beyond or with no games, 1 h database fallback. Always-run (no gate); the overnight window applies only to single-sport runs ([decision-engine](../scheduling/decision-engine.md#cadence)).
+2. Pre-schedule with `odds_lambda.scheduling.decision.decide_forward_resilient` and `odds_lambda.jobs.fetch_betfair_exchange.CADENCE`: 15 min under 3 h, 30 min at 3-12 h, 2 h beyond or with no games, 1 h database fallback. Its `close_lead` of 5 min moves the next run to 5 min before a kickoff whenever the cadence would step past that time, so every kickoff gets a snapshot at the last [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md) decision time, inside the live close window. Always-run (no gate); the overnight window applies only to single-sport runs ([decision-engine](../scheduling/decision-engine.md#close-run)).
 3. Inside `odds_core.alerts.job_alert_context`, login, `odds_lambda.jobs.fetch_betfair_exchange.ingest_sport` per sport, logout in `finally`. Blocking client calls run in `asyncio.to_thread`; the job tags `api_request_id` `betfair_api_<time>`.
 4. `odds_lambda.jobs.fetch_betfair_exchange.ingest_sport` skips in-play, CLOSED/INACTIVE and under-populated books, resolves team names (`odds_lambda.betfair.adapter.resolve_teams`), calls `odds_lambda.storage.writers.OddsWriter.find_or_create_event` (which returns the canonical event, the Odds API one when it exists, and never merges) and stores the snapshot, then adds one sport-level `odds_core.models.FetchLog` row without quota ([fetch logs](odds-ingestion-service.md#fetch-logs)).
 5. Still inside the alert context, `odds_lambda.collection_calendar.require_rows_for_fixtures` raises `odds_lambda.collection_calendar.EmptyCollectionError` for a sport with zero stored snapshots and a SCHEDULED fixture within 72 hours for EPL or 6 hours for MLB (`odds_lambda.jobs.fetch_betfair_exchange.SOURCE`); the message carries the run's errors, which sends the critical alert and skips the heartbeat. A shorter horizon than the other sources, because markets for later fixtures may not be posted yet ([empty collection](../operations/alerting-and-heartbeats.md#empty-collection)).

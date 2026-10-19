@@ -25,7 +25,7 @@ status: stable
 
 Use when data looks stale or a tier is missing. Background: [Self-scheduling](self-scheduling.md), [Where each job runs](job-deployment-matrix.md), [Scheduler backends](scheduler-backends.md#aws-eventbridge-backend).
 
-Deployed Lambda and rule state cannot be verified from the repo; every command below checks the live account. The AWS stack is dormant, with its rules disabled, and production runs on the mini-PC ([Where each job runs](job-deployment-matrix.md#dormant-aws-rules)); a disabled rule is the expected state, not a dead chain. For stale data in production, start from `odds scheduler list-jobs` on the mini-PC ([Local scheduler](local-scheduler.md#cli)).
+Deployed Lambda and rule state cannot be verified from the repo; every command below checks the live account. The AWS stack is dormant, with its rules disabled, and production runs on the mini-PC ([Where each job runs](job-deployment-matrix.md#dormant-aws-rules)); a disabled rule is the expected state, not a dead chain. For stale data in production, start from `odds scheduler list-jobs` on the mini-PC and any `dead_schedule_chain` alert ([Local scheduler](local-scheduler.md#cli)).
 
 **Safety:** against production use only the read-only `scripts/check_*.py` scripts. Never run migrations, `odds fetch` or any write there ([Databases and environments](../foundations/databases-and-environments.md)). The Lambdas' database is the Neon archive, which `PROD_DATABASE_URL` names on existing machines; point a script at it with `DATABASE_URL="<archive_url>"` ([environments](../foundations/databases-and-environments.md#environments)).
 
@@ -36,7 +36,7 @@ Region `eu-west-1`. Scheduler function `odds-scheduler`, log group `/aws/lambda/
 ## Workflow
 
 1. **Context.** `date -u` and `grep "^DATABASE_URL=" .env`. Daily validation checks the previous day and names its file after the day it checked, so the file dated D covers D ([CI/CD workflows](../operations/ci-cd-workflows.md)).
-2. **Last and next run.** The last run should fall within the interval of the nearest game's tier ([Fetch tier](../storage/fetch-tier.md)).
+2. **Last and next run.** The last run should fall within the job's cadence for the nearest game's [tier](../storage/fetch-tier.md) ([cadence](decision-engine.md#cadence)).
    ```bash
    aws events list-rules --name-prefix odds- | jq -r '.Rules[] | "\(.Name) | \(.State) | \(.ScheduleExpression)"'
 

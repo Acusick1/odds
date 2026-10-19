@@ -1,12 +1,14 @@
 """Unit tests for health monitoring system."""
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from odds_core.config import AlertConfig, APIConfig, Settings
+from odds_core.config import AlertConfig, APIConfig, SchedulerConfig, Settings
 from odds_core.models import AlertHistory, FetchLog
 from odds_lambda.health_monitor import HealthMetrics, HealthMonitor, HealthStatus, StaleSource
+from odds_lambda.scheduling.backends.base import JobStatus, ScheduledJob
 
 
 @pytest.fixture
@@ -384,3 +386,145 @@ class TestHealthMonitor:
             issues = await monitor.check_job_heartbeats()
 
         assert len(issues) == len(mock_settings.alerts.heartbeat_expectations)
+
+
+class FakeSchedules:
+    def __init__(self, next_runs: dict[str, datetime | None], outstanding: set[str]) -> None:
+        self.next_runs = next_runs
+        self.outstanding = outstanding
+
+    async def get_scheduled_jobs(self) -> list[ScheduledJob]:
+        return [
+            ScheduledJob(job_name=name, next_run_time=run, status=JobStatus.SCHEDULED)
+            for name, run in self.next_runs.items()
+        ]
+
+    async def get_outstanding_job_names(self) -> set[str]:
+        return self.outstanding
+
+
+class TestCheckScheduleChains:
+    NOW = datetime(2026, 10, 17, 13, 5, tzinfo=UTC)
+
+    @pytest.fixture
+    def chain_settings(self, mock_settings):
+        mock_settings.scheduler = SchedulerConfig(
+            bootstrap_jobs=["fetch-betfair-exchange", "fetch-oddsportal", "fetch-espn-fixtures"]
+        )
+        mock_settings.data_collection = SimpleNamespace(sports=["soccer_epl"])
+        mock_settings.betfair = SimpleNamespace(enabled=True)
+        mock_settings.polymarket = SimpleNamespace(enabled=False)
+        return mock_settings
+
+    async def _dead(
+        self,
+        session,
+        settings,
+        next_runs: dict[str, datetime | None],
+        outstanding: set[str] = frozenset(),
+    ) -> list[str]:
+        monitor = HealthMonitor(session, settings, FakeSchedules(next_runs, set(outstanding)))
+        return [chain.job_name for chain in await monitor.check_schedule_chains(now=self.NOW)]
+
+    @pytest.mark.asyncio
+    async def test_booked_runs_are_alive(self, mock_session, chain_settings):
+        soon = self.NOW + timedelta(minutes=10)
+        dead = await self._dead(
+            mock_session,
+            chain_settings,
+            {"fetch-betfair-exchange-epl": soon, "fetch-oddsportal-epl": soon},
+        )
+        assert dead == []
+
+    @pytest.mark.asyncio
+    async def test_missing_schedule_is_dead(self, mock_session, chain_settings):
+        dead = await self._dead(
+            mock_session,
+            chain_settings,
+            {"fetch-oddsportal-epl": self.NOW + timedelta(minutes=10)},
+        )
+        assert dead == ["fetch-betfair-exchange-epl"]
+
+    @pytest.mark.asyncio
+    async def test_overdue_run_is_dead(self, mock_session, chain_settings):
+        soon = self.NOW + timedelta(minutes=10)
+        dead = await self._dead(
+            mock_session,
+            chain_settings,
+            {
+                "fetch-betfair-exchange-epl": self.NOW - timedelta(minutes=16),
+                "fetch-oddsportal-epl": soon,
+            },
+        )
+        assert dead == ["fetch-betfair-exchange-epl"]
+
+    @pytest.mark.asyncio
+    async def test_running_job_without_schedule_is_alive(self, mock_session, chain_settings):
+        dead = await self._dead(
+            mock_session,
+            chain_settings,
+            {"fetch-oddsportal-epl": self.NOW + timedelta(minutes=10)},
+            outstanding={"fetch-betfair-exchange-epl"},
+        )
+        assert dead == []
+
+    @pytest.mark.asyncio
+    async def test_cron_jobs_and_disabled_jobs_are_not_checked(self, mock_session, chain_settings):
+        chain_settings.betfair = SimpleNamespace(enabled=False)
+        dead = await self._dead(
+            mock_session,
+            chain_settings,
+            {"fetch-oddsportal-epl": self.NOW + timedelta(minutes=10)},
+        )
+        assert dead == []
+
+    @pytest.mark.asyncio
+    async def test_without_schedule_reader_check_is_skipped(self, mock_session, chain_settings):
+        monitor = HealthMonitor(mock_session, chain_settings)
+        assert await monitor.check_schedule_chains(now=self.NOW) == []
+
+    @pytest.mark.asyncio
+    async def test_dead_chain_sends_critical_alert(self, mock_session, chain_settings):
+        monitor = HealthMonitor(
+            mock_session,
+            chain_settings,
+            FakeSchedules({"fetch-oddsportal-epl": datetime.now(UTC) + timedelta(hours=1)}, set()),
+        )
+        healthy = [
+            patch.object(monitor, name, return_value=value)
+            for name, value in (
+                ("check_stale_sources", []),
+                ("check_mlb_calendar", None),
+                ("check_missing_betfair_closes", []),
+                ("check_consecutive_failures", (True, 0)),
+                ("check_api_quota", (True, None, None)),
+                ("check_data_quality", (True, 0)),
+                ("check_job_heartbeats", []),
+                ("check_event_identity", []),
+                ("purge_old_heartbeats", 0),
+                (
+                    "collect_metrics",
+                    HealthMetrics(
+                        fetch_success_rate_24h=100.0,
+                        hours_since_last_fetch=0.1,
+                        api_quota_remaining=None,
+                        consecutive_failures=0,
+                        data_quality_errors_24h=0,
+                        events_scheduled=1,
+                        events_live=0,
+                        events_final=0,
+                    ),
+                ),
+            )
+        ]
+        for p in healthy:
+            p.start()
+        try:
+            with patch.object(monitor, "_send_alert", return_value=True) as send:
+                status = await monitor.check_system_health()
+        finally:
+            for p in healthy:
+                p.stop()
+
+        assert status.alerts_sent == ["dead_schedule_chain:fetch-betfair-exchange-epl"]
+        assert send.call_args.kwargs["severity"] == "critical"
