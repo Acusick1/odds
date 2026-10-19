@@ -222,10 +222,10 @@ class AlertConfig(BaseSettings):
     )
 
     mlb_season_first_month: int = Field(
-        default=4, description="First month the MLB schedule must be fresh every day"
+        default=3, description="First month the MLB schedule must be fresh every day"
     )
     mlb_season_last_month: int = Field(
-        default=9, description="Last month the MLB schedule must be fresh every day"
+        default=11, description="Last month the MLB schedule must be fresh every day"
     )
 
     # Alert rate limiting

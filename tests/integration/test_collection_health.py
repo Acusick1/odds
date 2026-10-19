@@ -597,6 +597,15 @@ class TestMlbCalendar:
 
         assert await monitor.check_mlb_calendar(in_season) is not None
 
+    @pytest.mark.parametrize("month", [3, 11])
+    async def test_the_season_runs_from_march_to_november(
+        self, pglite_async_session: Any, month: int
+    ) -> None:
+        moment = datetime(2026, month, 15, 12, 0, tzinfo=UTC)
+        monitor = HealthMonitor(pglite_async_session, get_settings())
+
+        assert await monitor.check_mlb_calendar(moment) is not None
+
     async def test_no_schedule_out_of_season_is_fine(self, pglite_async_session: Any) -> None:
         winter = datetime(2026, 12, 10, 12, 0, tzinfo=UTC)
         monitor = HealthMonitor(pglite_async_session, get_settings())
