@@ -16,7 +16,7 @@ Backtests replay a strategy over stored events; experiments record what the CLV 
 
 ### Explanation
 
-- [As-of-t feature groups on the retail-EV target](exp-epl-retail-ev-as-of-t-groups.md) — The October 2026 exploratory rerun of the price-only retail-EV protocol with the Polymarket, dynamics, schedule and standings groups added one at a time and together, against the baseline and the price-only model, overall, by event type and per fold.
+- [As-of-t feature groups on the retail-EV target](exp-epl-retail-ev-as-of-t-groups.md) — The October 2026 exploratory rerun of the price-only retail-EV protocol with the Polymarket, dynamics, schedule and standings groups added one at a time and together, against the price-only model, on live-collected and FDUK-only events, per fold and after a Bonferroni correction, with the timing leak an earlier version of the Polymarket group had on FDUK opening rows.
 - [Betting simulation (Exp 7, 7b)](exp-betting-simulation.md) — Whether the CLV signal survives the vig with flat stakes and with line shopping, and how to read backtest-engine metrics against it.
 - [CV protocol grid](exp-cv-protocol-grid.md) — The window-type by validation-step grid behind ADR-0004, the 32-feature rerun, and what the grid can and cannot show.
 - [CV protocol on a common validation range](exp-cv-protocol-common-range.md) — The October 2026 comparison of expanding, sliding-380 and sliding-760 walk-forward CV scored on the same validation events, the tuning-range event counts, and the fold layout the re-baseline uses.
