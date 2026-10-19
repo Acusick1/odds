@@ -45,20 +45,23 @@ Then `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` runs on eve
 
 ## Stale-data check
 
-`odds_lambda.health_monitor.collection_sources` lists the `odds_lambda.collection_calendar.CollectionSource` each collection job declares at module level: its name, `api_request_id` prefix, cadence, fixture horizon and whether it honours the overnight window. The check runs for each source and each sport the job covers (`odds_lambda.scheduling.jobs.resolve_target_sports`) and flags a source when all of these hold:
+`odds_lambda.health_monitor.collection_sources` lists the `odds_lambda.collection_calendar.CollectionSource` each collection job declares at module level: its name, the `raw_data["source"]` tag of its snapshots (`odds_core.snapshot_sources.SnapshotSource`; the Odds API writes none, so untagged snapshots are its), cadence, a fixture horizon per sport and whether it honours the overnight window. The check runs for each source whose job is in `odds_core.config.SchedulerConfig.bootstrap_jobs` and each sport the job covers (`odds_lambda.scheduling.jobs.resolve_target_sports`) and flags a source when all of these hold:
 
-- `odds_lambda.collection_calendar.fixture_calendar` finds a SCHEDULED event of the sport inside the source's fixture horizon, so international breaks, off-seasons and the days before the first fixture raise nothing.
-- The source has written a snapshot for the sport before (`api_request_id` starts with its prefix), the same no-history rule as heartbeats, so a job that was never enabled raises nothing (#384).
-- `odds_lambda.collection_calendar.active_hours_between` the later of the last snapshot and the moment the next kickoff entered the horizon, and now, excluding the sport's overnight window when the job honours it (`odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS`), exceeds the larger of `stale_data_hours` (2) and `stale_cadence_multiplier` (3) times the job's cadence interval at the tier of the next kickoff.
+- `odds_lambda.collection_calendar.fixture_calendar` finds a fixture of the sport inside the source's horizon, so international breaks, off-seasons and the days before the first fixture raise nothing. EPL fixtures are SCHEDULED events; MLB fixtures are games of `odds_core.mlb_data_models.MlbProbablePitchers` fetched in the last 36 h with a priced game type, so the MLB calendar does not depend on the monitored collectors creating events. It is only as fresh as `fetch-mlb-probables`.
+- The source has written a snapshot for the sport before, the same no-history rule as heartbeats, so a job that was never enabled raises nothing (#384).
+- The job's own failure alert is not newer than its heartbeat. While `job_failure:<job>` is the latest of the two, the job's critical covers the outage and no stale alert is added.
+- `odds_lambda.collection_calendar.active_hours_between` the later of the last snapshot and the moment the next kickoff entered the horizon, and now, excluding the sport's overnight window when the job honours it (`odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS`), exceeds the largest of `stale_data_hours` (2), `stale_cadence_multiplier` (3) times the job's cadence interval at the tier of the next kickoff, and `stale_last_interval_multiplier` (1.5) times the interval at the tier the next kickoff had when the last snapshot was written. The last term allows for the wait the job chose then, which can be longer than the one that applies now.
 
-| Source | `api_request_id` prefix | Fixture horizon | Overnight window | Threshold (active hours) |
-|---|---|---|---|---|
-| OddsPortal | `oddsportal_live_` | 48 h | yes | 3 h under 12 h to kickoff, 6 h beyond (cadence 0.5, 1, then 2 h) |
-| Betfair Exchange | `betfair_api_` | 12 h | yes | 2 h (cadence 0.25 to 2 h, floored) |
-| Odds API | `odds_api_` | 48 h | no | 2 h under 3 h to kickoff, 9 h at 3-12 h, 36 h at 12-24 h, 72 h beyond |
-| Polymarket odds | `polymarket_live_` | 5 days | yes | 2 h under 3 h to kickoff, then 3 times the tier step (0.25 to 2 h, floored) |
+A stale source alerts once and then repeats every `stale_reminder_minutes` (360) while it stays stale ([alerts](alerts.md)).
 
-The thresholds are computed, not configured: they follow each job's cadence. Odds API snapshots written before the `odds_api_` tag existed have a null `api_request_id` and are not counted, so that source is checked only after its first run with the tag.
+| Source | Fixture horizon | Overnight window | Threshold (active hours) |
+|---|---|---|---|
+| OddsPortal | 48 h | yes | 2 h under 3 h to kickoff, 3 h at 3-12 h, 6 h beyond (cadence 0.5, 1, then 2 h) |
+| Betfair Exchange | 72 h EPL, 6 h MLB | yes | 2 h under 12 h to kickoff, 6 h beyond (cadence 0.25, 0.5, then 2 h) |
+| Odds API | 48 h EPL | no | 2 h under 3 h to kickoff, 9 h at 3-12 h, 36 h at 12-24 h, 72 h at 24-72 h (cadence 0.5, 3, 12, 24 h) |
+| Polymarket odds | 5 days | yes | not checked until the job is in `bootstrap_jobs`; then 2 h under 3 h to kickoff, then 3 times the tier step (0.25 to 2 h, floored) |
+
+The thresholds are computed from each job's cadence, not configured. The Odds API horizon bounds the gap measured before a fixture is 12 h away, so that source is effectively checked only inside 12 h of kickoff. Betfair's MLB horizon is short because its markets are posted late, and its MLB name parsing is a separate defect.
 
 ## Heartbeats
 

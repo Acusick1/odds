@@ -32,7 +32,7 @@ from odds_lambda.collection_calendar import (
     latest_snapshot_time,
 )
 from odds_lambda.scheduling.decision import classify_tier
-from odds_lambda.scheduling.jobs import resolve_target_sports
+from odds_lambda.scheduling.jobs import make_compound_job_name, resolve_target_sports
 from odds_lambda.storage.event_merge import EventMerger
 
 logger = structlog.get_logger()
@@ -117,7 +117,9 @@ class HealthMonitor:
         self.session = session
         self.settings = settings
 
-    async def _should_send_alert(self, alert_type: str) -> bool:
+    async def _should_send_alert(
+        self, alert_type: str, rate_limit_minutes: int | None = None
+    ) -> bool:
         """
         Check if alert should be sent based on rate limiting.
 
@@ -127,7 +129,8 @@ class HealthMonitor:
         Returns:
             True if alert should be sent (no recent alert of this type)
         """
-        rate_limit_minutes = self.settings.alerts.alert_rate_limit_minutes
+        if rate_limit_minutes is None:
+            rate_limit_minutes = self.settings.alerts.alert_rate_limit_minutes
         cutoff_time = datetime.now(UTC) - timedelta(minutes=rate_limit_minutes)
 
         # Query for recent alerts of this type
@@ -169,7 +172,12 @@ class HealthMonitor:
         logger.info("alert_recorded", alert_type=alert_type, severity=severity)
 
     async def _send_alert(
-        self, alert_type: str, severity: str, message: str, context: dict | None = None
+        self,
+        alert_type: str,
+        severity: str,
+        message: str,
+        context: dict | None = None,
+        rate_limit_minutes: int | None = None,
     ):
         """
         Send alert if rate limiting allows.
@@ -179,6 +187,7 @@ class HealthMonitor:
             severity: Alert severity level
             message: Alert message
             context: Additional context data
+            rate_limit_minutes: Overrides the configured window for this alert
 
         Returns:
             True if alert was sent
@@ -187,11 +196,12 @@ class HealthMonitor:
             logger.debug("alert_skipped_disabled", alert_type=alert_type)
             return False
 
-        if not await self._should_send_alert(alert_type):
+        if not await self._should_send_alert(alert_type, rate_limit_minutes):
             logger.debug(
                 "alert_rate_limited",
                 alert_type=alert_type,
-                rate_limit_minutes=self.settings.alerts.alert_rate_limit_minutes,
+                rate_limit_minutes=rate_limit_minutes
+                or self.settings.alerts.alert_rate_limit_minutes,
             )
             return False
 
@@ -214,49 +224,82 @@ class HealthMonitor:
             return None
         return (datetime.now(UTC) - latest_snapshot_time).total_seconds() / 3600
 
+    async def _job_is_failing(self, job_name: str) -> bool:
+        """Whether the job's latest failure alert is newer than its latest heartbeat."""
+        latest: dict[str, datetime | None] = {}
+        for kind in ("job_failure", "heartbeat"):
+            latest[kind] = (
+                await self.session.execute(
+                    select(func.max(AlertHistory.sent_at)).where(
+                        AlertHistory.alert_type == f"{kind}:{job_name}"
+                    )
+                )
+            ).scalar_one_or_none()
+        failure, heartbeat = latest["job_failure"], latest["heartbeat"]
+        return failure is not None and (heartbeat is None or failure > heartbeat)
+
     async def check_stale_sources(self, now: datetime | None = None) -> list[StaleSource]:
         """Find sources that stopped writing while fixtures they should price are scheduled.
 
-        A source is checked per sport only when the database has a scheduled
-        fixture inside the source's horizon and the source has written before, so
-        international breaks, off-seasons and jobs that were never enabled raise
-        nothing. The gap is the time since the later of the last snapshot and the
-        moment the next fixture entered the horizon, counted without the sport's
-        overnight window. It is compared with the larger of
-        ``stale_data_hours`` and ``stale_cadence_multiplier`` polling intervals at
-        the tier of the next kickoff.
+        Only sources whose job is bootstrapped are checked, per sport, and only when
+        a scheduled fixture lies inside the source's horizon for that sport and the
+        source has written before, so international breaks, off-seasons and jobs
+        that were never enabled raise nothing. A source whose job is already
+        failing is left to that job's own alert. The gap is the time since the
+        later of the last snapshot and the moment the next fixture entered the
+        horizon, counted without the sport's overnight window. It is compared with
+        the largest of ``stale_data_hours``, ``stale_cadence_multiplier`` polling
+        intervals at the tier of the next kickoff, and 1.5 intervals at the tier
+        the next kickoff had when the last snapshot was written (the interval the
+        job then chose to wait).
         """
         moment = now or datetime.now(UTC)
         alerts = self.settings.alerts
+        bootstrapped = set(self.settings.scheduler.bootstrap_jobs)
         stale: list[StaleSource] = []
         for source in collection_sources():
+            if source.job_name not in bootstrapped:
+                continue
             for sport_key in resolve_target_sports(
                 source.job_name, self.settings.data_collection.sports
             ):
+                if sport_key not in source.fixture_horizons:
+                    continue
+                horizon = source.fixture_horizon(sport_key)
                 calendar = await fixture_calendar(
-                    self.session, sport_key, now=moment, horizon=source.fixture_horizon
+                    self.session, sport_key, now=moment, horizon=horizon
                 )
                 if calendar.next_kickoff is None or not calendar.kickoffs_in_horizon:
                     continue
-                last = await latest_snapshot_time(self.session, sport_key, source.request_id_prefix)
+                last = await latest_snapshot_time(self.session, sport_key, source.snapshot_source)
                 if last is None:
                     logger.info("stale_check_no_history", source=source.key, sport=sport_key)
                     continue
                 hours_to_kickoff = (calendar.next_kickoff - moment).total_seconds() / 3600
-                interval = source.cadence.interval_for(classify_tier(hours_to_kickoff))
-                threshold = max(alerts.stale_data_hours, alerts.stale_cadence_multiplier * interval)
-                reference = max(last, calendar.next_kickoff - source.fixture_horizon)
+                hours_at_last = (calendar.next_kickoff - last).total_seconds() / 3600
+                threshold = max(
+                    alerts.stale_data_hours,
+                    alerts.stale_cadence_multiplier
+                    * source.cadence.interval_for(classify_tier(hours_to_kickoff)),
+                    alerts.stale_last_interval_multiplier
+                    * source.cadence.interval_for(classify_tier(hours_at_last)),
+                )
+                reference = max(last, calendar.next_kickoff - horizon)
                 active = active_hours_between(reference, moment, source.overnight_window(sport_key))
-                if active > threshold:
-                    stale.append(
-                        StaleSource(
-                            source=source.key,
-                            sport_key=sport_key,
-                            last_snapshot=last,
-                            active_hours=active,
-                            threshold_hours=threshold,
-                        )
+                if active <= threshold:
+                    continue
+                if await self._job_is_failing(make_compound_job_name(source.job_name, sport_key)):
+                    logger.info("stale_source_job_failing", source=source.key, sport=sport_key)
+                    continue
+                stale.append(
+                    StaleSource(
+                        source=source.key,
+                        sport_key=sport_key,
+                        last_snapshot=last,
+                        active_hours=active,
+                        threshold_hours=threshold,
                     )
+                )
         return stale
 
     async def check_consecutive_failures(self) -> tuple[bool, int]:
@@ -519,6 +562,7 @@ class HealthMonitor:
             metrics = await self.collect_metrics()
 
             # Check 1: Stale data, per source
+            alerts_config = self.settings.alerts
             for stale in await self.check_stale_sources():
                 issue = stale.describe()
                 issues_detected.append(issue)
@@ -527,6 +571,7 @@ class HealthMonitor:
                     alert_type=stale.alert_type,
                     severity="critical",
                     message=f"🚨 Stale data: {issue}",
+                    rate_limit_minutes=alerts_config.stale_reminder_minutes,
                 ):
                     alerts_sent.append(stale.alert_type)
 

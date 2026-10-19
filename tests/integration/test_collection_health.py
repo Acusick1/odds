@@ -6,11 +6,13 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_core.config import get_settings
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.mlb_data_models import MlbProbablePitchers
+from odds_core.models import AlertHistory, Event, EventStatus, OddsSnapshot
+from odds_core.snapshot_sources import SnapshotSource
 from odds_lambda import collection_calendar
 from odds_lambda.collection_calendar import (
     EmptyCollectionError,
@@ -29,9 +31,9 @@ from odds_lambda.scheduling.decision import ScheduleDecision
 from odds_lambda.scheduling.jobs import JobContext
 
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
-OP = fetch_oddsportal.LIVE_REQUEST_ID_PREFIX
-BETFAIR = fetch_betfair_exchange.LIVE_REQUEST_ID_PREFIX
-ODDS_API = fetch_odds.LIVE_REQUEST_ID_PREFIX
+OP = SnapshotSource.ODDSPORTAL_LIVE
+BETFAIR = SnapshotSource.BETFAIR_API
+ODDS_API = None
 
 
 class SessionMaker:
@@ -57,7 +59,7 @@ def seed(pglite_async_session: Any) -> Callable[..., Any]:
         *,
         sport_key: str = "soccer_epl",
         status: EventStatus = EventStatus.SCHEDULED,
-        snapshots: tuple[tuple[str, datetime], ...] = (),
+        snapshots: tuple[tuple[SnapshotSource | None, datetime], ...] = (),
     ) -> None:
         nonlocal counter
         counter += 1
@@ -73,16 +75,37 @@ def seed(pglite_async_session: Any) -> Callable[..., Any]:
             )
         )
         await pglite_async_session.flush()
-        for prefix, taken in snapshots:
+        for source, taken in snapshots:
             pglite_async_session.add(
                 OddsSnapshot(
                     event_id=f"event_{counter}",
                     snapshot_time=taken,
-                    raw_data={},
+                    raw_data={} if source is None else {"source": source.value},
                     bookmaker_count=1,
-                    api_request_id=f"{prefix}{taken.isoformat()}",
                 )
             )
+        await pglite_async_session.commit()
+
+    return add
+
+
+@pytest.fixture
+def seed_mlb_game(pglite_async_session: Any) -> Callable[..., Any]:
+    counter = 0
+
+    async def add(kickoff: datetime) -> None:
+        nonlocal counter
+        counter += 1
+        pglite_async_session.add(
+            MlbProbablePitchers(
+                game_pk=counter,
+                commence_time=kickoff,
+                fetched_at=NOW - timedelta(hours=2),
+                home_team="A",
+                away_team="B",
+                game_type="R",
+            )
+        )
         await pglite_async_session.commit()
 
     return add
@@ -165,21 +188,57 @@ class TestRequireRowsForFixtures:
         await require_rows_for_fixtures(fetch_oddsportal.SOURCE, {"soccer_epl": 0}, now=NOW)
 
     async def test_one_empty_sport_raises_although_another_wrote_rows(
-        self, seed: Callable[..., Any]
+        self, seed_mlb_game: Callable[..., Any]
     ) -> None:
-        await seed(NOW + timedelta(hours=5), sport_key="baseball_mlb")
+        await seed_mlb_game(NOW + timedelta(hours=5))
 
         with pytest.raises(EmptyCollectionError, match="baseball_mlb"):
             await require_rows_for_fixtures(
                 fetch_oddsportal.SOURCE, {"soccer_epl": 6, "baseball_mlb": 0}, now=NOW
             )
 
-    async def test_betfair_horizon_ignores_fixtures_it_has_not_listed_yet(
-        self, seed: Callable[..., Any]
+    async def test_the_runs_errors_are_in_the_message(self, seed: Callable[..., Any]) -> None:
+        await seed(NOW + timedelta(hours=5))
+
+        with pytest.raises(EmptyCollectionError, match="errors: unusable_outcomes: A v B"):
+            await require_rows_for_fixtures(
+                fetch_betfair_exchange.SOURCE,
+                {"soccer_epl": 0},
+                errors_by_sport={"soccer_epl": ["unusable_outcomes: A v B"]},
+                now=NOW,
+            )
+
+    async def test_betfair_mlb_horizon_ignores_fixtures_it_has_not_listed_yet(
+        self, seed_mlb_game: Callable[..., Any]
     ) -> None:
-        await seed(NOW + timedelta(hours=30), sport_key="baseball_mlb")
+        await seed_mlb_game(NOW + timedelta(hours=30))
 
         await require_rows_for_fixtures(fetch_betfair_exchange.SOURCE, {"baseball_mlb": 0}, now=NOW)
+
+    async def test_betfair_mlb_game_inside_its_horizon_raises(
+        self, seed_mlb_game: Callable[..., Any]
+    ) -> None:
+        await seed_mlb_game(NOW + timedelta(hours=4))
+
+        with pytest.raises(EmptyCollectionError, match="baseball_mlb"):
+            await require_rows_for_fixtures(
+                fetch_betfair_exchange.SOURCE, {"baseball_mlb": 0}, now=NOW
+            )
+
+    async def test_betfair_epl_horizon_is_three_days(self, seed: Callable[..., Any]) -> None:
+        await seed(NOW + timedelta(hours=70))
+
+        with pytest.raises(EmptyCollectionError, match="soccer_epl"):
+            await require_rows_for_fixtures(
+                fetch_betfair_exchange.SOURCE, {"soccer_epl": 0}, now=NOW
+            )
+
+    async def test_a_sport_the_source_does_not_cover_is_ignored(
+        self, seed_mlb_game: Callable[..., Any]
+    ) -> None:
+        await seed_mlb_game(NOW + timedelta(hours=1))
+
+        await require_rows_for_fixtures(fetch_odds.SOURCE, {"baseball_mlb": 0}, now=NOW)
 
 
 class TestCheckStaleSources:
@@ -224,14 +283,152 @@ class TestCheckStaleSources:
 
         assert await self._monitor(pglite_async_session).check_stale_sources(NOW) == []
 
-    async def test_a_slow_cadence_source_is_stale_once_a_tight_tier_applies(
+    async def test_a_slow_cadence_wait_chosen_earlier_is_not_stale(
         self, pglite_async_session: Any, seed: Callable[..., Any]
     ) -> None:
         await seed(NOW + timedelta(hours=10), snapshots=((ODDS_API, NOW - timedelta(hours=20)),))
 
+        assert await self._monitor(pglite_async_session).check_stale_sources(NOW) == []
+
+    async def test_a_slow_cadence_source_is_stale_past_the_interval_it_chose(
+        self, pglite_async_session: Any, seed: Callable[..., Any]
+    ) -> None:
+        await seed(NOW + timedelta(hours=2), snapshots=((ODDS_API, NOW - timedelta(hours=20)),))
+
         stale = await self._monitor(pglite_async_session).check_stale_sources(NOW)
 
-        assert [(s.source, s.threshold_hours) for s in stale] == [("odds_api", 9.0)]
+        assert [(s.source, s.threshold_hours) for s in stale] == [("odds_api", 18.0)]
+
+    async def test_betfair_epl_is_checked_72_hours_ahead(
+        self, pglite_async_session: Any, seed: Callable[..., Any]
+    ) -> None:
+        await seed(NOW + timedelta(hours=50), snapshots=((BETFAIR, NOW - timedelta(hours=30)),))
+
+        stale = await self._monitor(pglite_async_session).check_stale_sources(NOW)
+
+        assert [s.source for s in stale] == ["betfair_exchange"]
+
+    async def test_betfair_mlb_is_not_checked_beyond_its_short_horizon(
+        self, pglite_async_session: Any, seed: Callable[..., Any]
+    ) -> None:
+        await seed(
+            NOW + timedelta(hours=20),
+            sport_key="baseball_mlb",
+            snapshots=((BETFAIR, NOW - timedelta(hours=30)),),
+        )
+
+        assert await self._monitor(pglite_async_session).check_stale_sources(NOW) == []
+
+    async def test_a_source_whose_job_is_not_bootstrapped_is_not_checked(
+        self, pglite_async_session: Any, seed: Callable[..., Any]
+    ) -> None:
+        await seed(NOW + timedelta(hours=3), snapshots=((OP, NOW - timedelta(hours=9)),))
+        settings = get_settings().model_copy(deep=True)
+        settings.scheduler.bootstrap_jobs = ["check-health"]
+
+        assert await HealthMonitor(pglite_async_session, settings).check_stale_sources(NOW) == []
+
+    async def test_a_failing_job_is_left_to_its_own_alert(
+        self, pglite_async_session: Any, seed: Callable[..., Any]
+    ) -> None:
+        await seed(NOW + timedelta(hours=3), snapshots=((OP, NOW - timedelta(hours=9)),))
+        pglite_async_session.add(
+            AlertHistory(
+                alert_type="job_failure:fetch-oddsportal-epl",
+                severity="critical",
+                message="failed",
+                sent_at=NOW - timedelta(hours=1),
+            )
+        )
+        await pglite_async_session.commit()
+
+        assert await self._monitor(pglite_async_session).check_stale_sources(NOW) == []
+
+    async def test_a_heartbeat_after_the_failure_means_the_job_recovered(
+        self, pglite_async_session: Any, seed: Callable[..., Any]
+    ) -> None:
+        await seed(NOW + timedelta(hours=3), snapshots=((OP, NOW - timedelta(hours=9)),))
+        for alert_type, ago in (("job_failure", 3), ("heartbeat", 1)):
+            pglite_async_session.add(
+                AlertHistory(
+                    alert_type=f"{alert_type}:fetch-oddsportal-epl",
+                    severity="info",
+                    message="x",
+                    sent_at=NOW - timedelta(hours=ago),
+                )
+            )
+        await pglite_async_session.commit()
+
+        stale = await self._monitor(pglite_async_session).check_stale_sources(NOW)
+
+        assert [s.source for s in stale] == ["oddsportal"]
+
+    async def test_mlb_fixtures_come_from_the_stats_api_schedule(
+        self, pglite_async_session: Any, seed: Callable[..., Any]
+    ) -> None:
+        evening = NOW + timedelta(hours=8)
+        await seed(
+            NOW - timedelta(days=30),
+            sport_key="baseball_mlb",
+            status=EventStatus.FINAL,
+            snapshots=((OP, evening - timedelta(hours=9)),),
+        )
+        pglite_async_session.add(
+            MlbProbablePitchers(
+                game_pk=1,
+                commence_time=evening + timedelta(hours=8),
+                fetched_at=evening - timedelta(hours=2),
+                home_team="A",
+                away_team="B",
+                game_type="R",
+            )
+        )
+        await pglite_async_session.commit()
+
+        stale = await self._monitor(pglite_async_session).check_stale_sources(evening)
+
+        assert [(s.source, s.sport_key) for s in stale] == [("oddsportal", "baseball_mlb")]
+
+    async def test_an_old_or_exhibition_mlb_schedule_is_no_calendar(
+        self, pglite_async_session: Any, seed: Callable[..., Any]
+    ) -> None:
+        await seed(
+            NOW - timedelta(days=30),
+            sport_key="baseball_mlb",
+            status=EventStatus.FINAL,
+            snapshots=((OP, NOW - timedelta(hours=9)),),
+        )
+        for game_pk, fetched, game_type in ((1, NOW - timedelta(days=3), "R"), (2, NOW, "S")):
+            pglite_async_session.add(
+                MlbProbablePitchers(
+                    game_pk=game_pk,
+                    commence_time=NOW + timedelta(hours=8),
+                    fetched_at=fetched,
+                    home_team="A",
+                    away_team="B",
+                    game_type=game_type,
+                )
+            )
+        await pglite_async_session.commit()
+
+        assert await self._monitor(pglite_async_session).check_stale_sources(NOW) == []
+
+    async def test_a_stale_alert_repeats_only_after_the_reminder_window(
+        self, pglite_async_session: Any
+    ) -> None:
+        monitor = self._monitor(pglite_async_session)
+        monitor.settings.alerts.alert_enabled = True
+        reminder = monitor.settings.alerts.stale_reminder_minutes
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock):
+            first = await monitor._send_alert(
+                "stale_data:x:y", "critical", "m", rate_limit_minutes=reminder
+            )
+            again = await monitor._send_alert(
+                "stale_data:x:y", "critical", "m", rate_limit_minutes=reminder
+            )
+
+        assert (first, again) == (True, False)
+        assert reminder == 360
 
     async def test_overnight_pause_is_not_counted(
         self, pglite_async_session: Any, seed: Callable[..., Any]
@@ -249,8 +446,8 @@ class TestCheckStaleSources:
     ) -> None:
         morning = datetime(2026, 10, 19, 7, 0, tzinfo=UTC)
         await seed(
-            morning + timedelta(hours=8),
-            snapshots=((ODDS_API, datetime(2026, 10, 18, 21, 0, tzinfo=UTC)),),
+            morning + timedelta(hours=1),
+            snapshots=((ODDS_API, datetime(2026, 10, 18, 9, 0, tzinfo=UTC)),),
         )
 
         stale = await self._monitor(pglite_async_session).check_stale_sources(morning)

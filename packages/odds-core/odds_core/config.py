@@ -212,6 +212,15 @@ class AlertConfig(BaseSettings):
         description="Polling intervals of a source's job that may pass without rows before alert",
     )
 
+    stale_last_interval_multiplier: float = Field(
+        default=1.5,
+        description="Intervals the job chose at its last write that may pass before alert",
+    )
+    stale_reminder_minutes: int = Field(
+        default=360,
+        description="Minutes between repeat alerts while a source stays stale",
+    )
+
     # Alert rate limiting
     alert_rate_limit_minutes: int = Field(
         default=30,

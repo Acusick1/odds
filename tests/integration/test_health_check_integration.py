@@ -33,7 +33,7 @@ async def _create_recent_heartbeats(session) -> None:
 
 
 async def _create_recent_snapshot(session, *, minutes_ago: int = 30) -> None:
-    """Insert an Event + OddsSnapshot so check_stale_data sees recent data."""
+    """Insert an Event + OddsSnapshot so the health check finds recent data."""
     event = Event(
         id=f"health_test_{minutes_ago}",
         sport_key="basketball_nba",
@@ -72,9 +72,8 @@ async def _create_stale_oddsportal_source(session, *, hours_ago: float = 40) -> 
         OddsSnapshot(
             event_id=event.id,
             snapshot_time=now - timedelta(hours=hours_ago),
-            raw_data={},
+            raw_data={"source": "oddsportal_live"},
             bookmaker_count=1,
-            api_request_id="oddsportal_live_2026-01-01T00:00",
         )
     )
     await session.commit()

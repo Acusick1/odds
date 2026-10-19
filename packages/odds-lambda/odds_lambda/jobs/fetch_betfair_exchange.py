@@ -21,6 +21,7 @@ from odds_core.alerts import job_alert_context
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import FetchLog
+from odds_core.snapshot_sources import SnapshotSource
 from odds_core.sports import SportKey
 
 from odds_lambda.betfair import (
@@ -63,9 +64,9 @@ LIVE_REQUEST_ID_PREFIX = "betfair_api_"
 SOURCE = CollectionSource(
     key="betfair_exchange",
     job_name="fetch-betfair-exchange",
-    request_id_prefix=LIVE_REQUEST_ID_PREFIX,
+    snapshot_source=SnapshotSource.BETFAIR_API,
     cadence=CADENCE,
-    fixture_horizon=timedelta(hours=12),
+    fixture_horizons={"soccer_epl": timedelta(hours=72), "baseball_mlb": timedelta(hours=6)},
     skips_overnight=True,
 )
 
@@ -301,7 +302,9 @@ async def main(ctx: JobContext) -> None:
         finally:
             await asyncio.to_thread(client.logout)
         await require_rows_for_fixtures(
-            SOURCE, {stats.sport: stats.snapshots_stored for stats in all_stats}
+            SOURCE,
+            {stats.sport: stats.snapshots_stored for stats in all_stats},
+            errors_by_sport={stats.sport: stats.errors for stats in all_stats},
         )
 
     # Reschedule based on (possibly updated) next kickoff after fetch.

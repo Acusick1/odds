@@ -17,7 +17,7 @@ from odds_core.config import Settings, get_settings
 from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.event_sync import EventSyncService
-from odds_lambda.ingestion import LIVE_REQUEST_ID_PREFIX, OddsIngestionService
+from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.scheduling.decision import (
     CadenceConfig,
     ScheduleDecision,
@@ -42,9 +42,9 @@ CADENCE = CadenceConfig(
 SOURCE = CollectionSource(
     key="odds_api",
     job_name="fetch-odds",
-    request_id_prefix=LIVE_REQUEST_ID_PREFIX,
+    snapshot_source=None,
     cadence=CADENCE,
-    fixture_horizon=timedelta(hours=48),
+    fixture_horizons={"soccer_epl": timedelta(hours=48)},
     skips_overnight=False,
 )
 

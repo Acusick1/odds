@@ -23,6 +23,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.database import async_session_maker
+from odds_core.snapshot_sources import SnapshotSource
 
 from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
 from odds_lambda.oddsportal_adapter import MatchOdds, convert_market
@@ -55,9 +56,9 @@ LIVE_REQUEST_ID_PREFIX = "oddsportal_live_"
 SOURCE = CollectionSource(
     key="oddsportal",
     job_name="fetch-oddsportal",
-    request_id_prefix=LIVE_REQUEST_ID_PREFIX,
+    snapshot_source=SnapshotSource.ODDSPORTAL_LIVE,
     cadence=CADENCE,
-    fixture_horizon=timedelta(hours=48),
+    fixture_horizons={"soccer_epl": timedelta(hours=48), "baseball_mlb": timedelta(hours=48)},
     skips_overnight=True,
 )
 
@@ -353,6 +354,9 @@ async def main(ctx: JobContext) -> None:
             {
                 spec.sport_key: stats.snapshots_stored
                 for spec, stats in zip(specs, all_stats, strict=True)
+            },
+            errors_by_sport={
+                spec.sport_key: stats.errors for spec, stats in zip(specs, all_stats, strict=True)
             },
         )
 
