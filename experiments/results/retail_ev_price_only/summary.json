@@ -1,6 +1,6 @@
 {
-  "git_sha": "1be10c9ea5c3c5325795815b6392e5ce6516f1b4",
-  "script_sha256": "4c5c012943a0eeb5e0ed4d4b971206e1a18cf16151f60e4e2c866c83cf441e86",
+  "git_sha": "d8438e9dd4d0c73d3bbb0db52404473810922a2c",
+  "script_sha256": "3294447d9535c3990c0e36ec44af3187d33b5a9a665f6ad3e9e8525cc0d62ee9",
   "config_sha256": "61bcb1bec3195e611a9bf2a84e93150a899859d66c5762f3c5900aa15271e0b9",
   "config": "experiments/configs/xgboost_epl_retail_ev_price_only.yaml",
   "data_sha256": "1d3d2d9e1293c8f4d6cb4a9ee284ca169645dc52498b129f507cd0931dfc7fa0",
@@ -82,7 +82,7 @@
         "colsample_bytree": 0.5,
         "reg_lambda": 0.05298915035599541
       },
-      "tune_seconds": 152.8
+      "tune_seconds": 162.7
     },
     {
       "run": "direct_s7",
@@ -97,7 +97,7 @@
         "colsample_bytree": 0.5,
         "reg_lambda": 2.3954782800229637
       },
-      "tune_seconds": 177.0
+      "tune_seconds": 226.1
     },
     {
       "run": "residual_s42",
@@ -112,7 +112,7 @@
         "colsample_bytree": 0.7,
         "reg_lambda": 1.9487910798188237
       },
-      "tune_seconds": 161.1
+      "tune_seconds": 181.6
     },
     {
       "run": "residual_s7",
@@ -127,7 +127,7 @@
         "colsample_bytree": 0.9,
         "reg_lambda": 0.06247746471518893
       },
-      "tune_seconds": 166.5
+      "tune_seconds": 195.0
     }
   ],
   "seed_7_minus_seed_42_mse_gain_e6": {

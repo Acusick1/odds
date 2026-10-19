@@ -9,6 +9,7 @@ sources:
   - experiments/results/retail_ev_price_only/results.csv
   - experiments/results/retail_ev_price_only/summary.json
   - experiments/results/retail_ev_price_only/folds.csv
+  - experiments/results/retail_ev_price_only/fold_event_types.csv
   - experiments/results/retail_ev_price_only/trials.csv
   - experiments/results/retail_ev_price_only/event_contributions.csv
   - experiments/results/retail_ev_price_only/feature_importance.csv
@@ -31,7 +32,7 @@ This is the first model run on the retail-EV target of [ADR-0012](../../docs/adr
 
 - XGBoost fitted directly on the EV target is worse than the baseline.
 - XGBoost fitted on the target minus the baseline (the residual arm) beats it by 35 to 49 × 10⁻⁶ weighted MSE, 1.0 to 1.4% of the baseline's MSE. Neither seed's CI excludes zero.
-- The residual arm gains in 4 of the 5 folds, including the fold that holds the live-collected events. Its gain is spread over events rather than carried by a few.
+- The residual arm gains in 4 of the 5 folds, and is level with the baseline on the live-collected events. Its gain is spread over events rather than carried by a few.
 - On picks, the residual arm is level with the baseline.
 
 ## Setup
@@ -145,7 +146,17 @@ Weighted MSE per fold, in units of 10⁻⁶ (`folds.csv`). Each fold has 68 vali
 
 - **Residual arm.** Both seeds beat the baseline in folds 0, 1, 3 and 4, and lose in fold 2.
 - **Direct arm.** It beats the baseline only in fold 3.
-- **The live fold.** The residual arm gains there by 35 and 20. The direct arm loses.
+- **The live fold.** The residual arm's gain of 35 and 20 in fold 4 does not come from the live events.
+
+Fold 4 split by event type, weighted MSE in units of 10⁻⁶ (`fold_event_types.csv`):
+
+| Fold 4 events | Events | Rows | Baseline | Shrinkage | Direct 42 | Direct 7 | Residual 42 | Residual 7 |
+|---|---|---|---|---|---|---|---|---|
+| FDUK-only | 24 | 384 | 2762.5 | 2751.8 | 2852.6 | 2803.4 | 2655.2 | 2629.2 |
+| Live-collected | 44 | 101,802 | 5882.6 | 5883.2 | 5970.4 | 5969.1 | 5884.4 | 5921.0 |
+
+- **Live events.** On the 44 live-collected events the residual arm is level with or worse than the baseline. Its fold-4 gain comes from the 24 FDUK-only events.
+- **The live slices over all folds agree.** The residual gain is −1.0 and −39.7 on OddsPortal live rows, +4.5 and −30.9 where the close is from live Betfair, and +28.8 [−93.7, 147.7] and −16.5 [−196.1, 161.4] on live-collected events.
 
 ### By slice
 
@@ -167,9 +178,9 @@ Gain over the baseline in weighted MSE (10⁻⁶), for the residual arm, with th
 | Draw | 340 | 2602.6 | 83.9 [36.4, 132.3] | 97.3 [25.8, 169.2] | 95.5 [15.8, 177.9] |
 | Away | 340 | 4389.1 | −32.1 [−136.7, 69.7] | −64.5 [−214.9, 74.2] | −215.1 [−418.5, −51.9] |
 
-`results.csv` has 17 slices per run, and the two seeds of an arm are fitted on the same rows, so they are not independent tests.
+`results.csv` has 16 slices per run, counting the total. The two seeds of an arm are fitted on the same rows, so they are not independent tests.
 
-- **Multiple comparisons.** Under a Bonferroni correction over the 17 slices, a gain needs a z-score of about 3.0. Approximating the standard error from each CI's width (CI width / 3.92), only residual seed 42 on draws (z ≈ 3.4) gets past that. Seed 7's draw slice does not (z ≈ 2.7). No slice is a finding.
+- **Multiple comparisons.** Across 4 runs × 16 slices, a Bonferroni correction needs a z-score of about 3.4. Approximating the standard error from each CI's width (CI width / 3.92), residual seed 42 on draws (z ≈ 3.4) only just reaches it, and seed 7's draw slice (z ≈ 2.7) does not. No slice is a finding.
 - **Strongest slices.** Draws and home rows are the strongest for the residual arm, and 6–24 h for seed 42. The near-kick-off buckets (0–1 h, 1–6 h) and 3–7 d go the other way.
 - **Shrinkage on draws and home.** Its draw slice is −42.3 [−57.3, −26.8] and its home slice +26.3 [13.2, 39.1]: scaling every EV by β > 1 helps home rows and hurts draws.
 

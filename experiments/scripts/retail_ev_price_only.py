@@ -421,7 +421,6 @@ def slice_metrics(oof: pd.DataFrame, n_boot: int) -> dict[str, Any]:
 
 def slice_table(oof: pd.DataFrame, n_boot: int) -> pd.DataFrame:
     keys: list[tuple[str, Callable[[list[str]], list[str]]]] = [
-        ("season", sorted),
         ("horizon", lambda vals: [b for b in HORIZON_BUCKET_LABELS if b in vals]),
         ("retail_source", sorted),
         ("close_source", sorted),
@@ -433,6 +432,26 @@ def slice_table(oof: pd.DataFrame, n_boot: int) -> pd.DataFrame:
         for value in order(oof[key].unique().tolist()):
             sub = oof[oof[key] == value]
             records.append({"slice": key, "value": value, **slice_metrics(sub, n_boot)})
+    return pd.DataFrame(records)
+
+
+def fold_event_types(oof: pd.DataFrame) -> pd.DataFrame:
+    """Weighted MSE of every prediction per fold, split into FDUK-only and live-collected events."""
+    records = []
+    for (fold, event_type), sub in oof.groupby(["fold", "event_type"]):
+        y, w = sub["y"].to_numpy(), sub["w_loss"].to_numpy()
+        records.append(
+            {
+                "fold": int(fold),
+                "event_type": event_type,
+                "events": sub["event_id"].nunique(),
+                "rows": len(sub),
+                **{
+                    f"wmse_{p}": weighted_mse(y, sub[p].to_numpy(), w) * METRIC_SCALE
+                    for p in PREDICTIONS
+                },
+            }
+        )
     return pd.DataFrame(records)
 
 
@@ -532,6 +551,7 @@ async def main(n_trials: int, n_boot: int) -> None:
     table.to_csv(OUTPUT_DIR / "results.csv", index=False)
     contrib = event_contributions(oof)
     contrib.to_csv(OUTPUT_DIR / "event_contributions.csv", index=False)
+    fold_event_types(oof).to_csv(OUTPUT_DIR / "fold_event_types.csv", index=False)
     pd.concat([r["folds"] for r in results]).to_csv(OUTPUT_DIR / "folds.csv", index=False)
     pd.concat([r["trials"] for r in results]).to_csv(OUTPUT_DIR / "trials.csv", index=False)
     importance = pd.concat([r["importance"] for r in results])

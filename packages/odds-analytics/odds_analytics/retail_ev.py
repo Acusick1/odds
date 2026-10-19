@@ -104,7 +104,10 @@ class RetailEvRow:
 
     @property
     def horizon_bucket(self) -> str:
-        idx = bisect.bisect_right(HORIZON_BUCKET_EDGES_HOURS, self.hours_to_kickoff) - 1
+        hours = self.hours_to_kickoff
+        if not 0 <= hours <= DECISION_WINDOW.total_seconds() / 3600:
+            raise ValueError(f"hours to kick-off {hours} outside the decision window")
+        idx = bisect.bisect_right(HORIZON_BUCKET_EDGES_HOURS, hours) - 1
         return HORIZON_BUCKET_LABELS[idx]
 
     @property

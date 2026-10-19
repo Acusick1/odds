@@ -349,3 +349,12 @@ class TestRowLabels:
     ) -> None:
         rows, _ = build_event_rows(event, snapshots, "1x2")
         assert replace(rows[0], commence_time=kickoff).season == season
+
+    @pytest.mark.parametrize("hours", [-0.1, 168.1])
+    def test_horizon_bucket_rejects_hours_outside_decision_window(
+        self, event: Event, snapshots: list[OddsSnapshot], hours: float
+    ) -> None:
+        rows, _ = build_event_rows(event, snapshots, "1x2")
+        row = replace(rows[0], decision_time=rows[0].commence_time - timedelta(hours=hours))
+        with pytest.raises(ValueError, match="outside the decision window"):
+            _ = row.horizon_bucket
