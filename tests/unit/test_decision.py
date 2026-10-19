@@ -217,6 +217,86 @@ class TestDecideForwardResilient:
         assert _hours_after(NOW, decision.next_execution) == CADENCE.db_fallback
 
 
+class TestCloseLead:
+    """``close_lead`` adds a run just before each kickoff the cadence would step over."""
+
+    CLOSE_CADENCE = CadenceConfig(
+        closing=0.25,
+        pregame=0.5,
+        sharp=2.0,
+        early=2.0,
+        opening=2.0,
+        no_game=2.0,
+        close_lead=timedelta(minutes=5),
+    )
+
+    @staticmethod
+    def _kickoffs(monkeypatch: pytest.MonkeyPatch, kickoffs: list[datetime]) -> None:
+        async def fake_kickoff(sport_key: str, *, now: datetime) -> datetime | None:
+            return min((ko for ko in kickoffs if ko > now), default=None)
+
+        monkeypatch.setattr("odds_lambda.scheduling.decision.get_next_kickoff", fake_kickoff)
+
+    @pytest.mark.asyncio
+    async def test_pulls_next_run_to_close_lead_before_kickoff(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        kickoff = NOW + timedelta(minutes=12)
+        self._kickoffs(monkeypatch, [kickoff])
+
+        decision = await decide_forward_resilient(["soccer_epl"], self.CLOSE_CADENCE, now=NOW)
+
+        assert decision.tier == FetchTier.CLOSING
+        assert decision.next_execution == kickoff - timedelta(minutes=5)
+
+    @pytest.mark.asyncio
+    async def test_keeps_cadence_when_it_lands_before_close_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._kickoffs(monkeypatch, [NOW + timedelta(minutes=50)])
+
+        decision = await decide_forward_resilient(["soccer_epl"], self.CLOSE_CADENCE, now=NOW)
+
+        assert decision.next_execution == NOW + timedelta(minutes=15)
+
+    @pytest.mark.asyncio
+    async def test_close_run_moves_to_next_kickoff_once_inside_lead(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """At the close run itself, the next close run belongs to a later kickoff."""
+        first = NOW + timedelta(minutes=5)
+        second = NOW + timedelta(minutes=15)
+        self._kickoffs(monkeypatch, [first, second])
+
+        decision = await decide_forward_resilient(["soccer_epl"], self.CLOSE_CADENCE, now=NOW)
+
+        assert decision.next_execution == second - timedelta(minutes=5)
+
+    @pytest.mark.asyncio
+    async def test_close_run_overrides_overnight_skip(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = datetime(2026, 6, 2, 21, 50, tzinfo=UTC)
+        kickoff = datetime(2026, 6, 2, 22, 30, tzinfo=UTC)
+        self._kickoffs(monkeypatch, [kickoff])
+
+        decision = await decide_forward_resilient(
+            ["soccer_epl"], self.CLOSE_CADENCE, now=now, overnight=(22, 6)
+        )
+
+        assert decision.next_execution == kickoff - timedelta(minutes=5)
+
+    @pytest.mark.asyncio
+    async def test_without_close_lead_cadence_is_unchanged(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._kickoffs(monkeypatch, [NOW + timedelta(minutes=12)])
+
+        decision = await decide_forward_resilient(["soccer_epl"], CADENCE, now=NOW)
+
+        assert _hours_after(NOW, decision.next_execution) == CADENCE.closing
+
+
 class TestDecideBackward:
     """Recent-games gate for scores / status jobs."""
 

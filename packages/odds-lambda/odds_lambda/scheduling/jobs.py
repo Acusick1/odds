@@ -122,17 +122,12 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
 
 # Jobs with fixed cron schedules in the local scheduler. Keys are base job
 # names (no sport suffix); the scheduler CLI expands per-sport jobs into one
-# schedule per target sport, each with its own compound job name.
+# schedule per target sport, each with its own compound job name. A job that
+# self-schedules must not be listed: bootstrap re-applies every cron, which
+# would replace the job's pending run under the shared schedule id.
 _JOB_CRON_MAP: dict[str, str] = {
     "daily-digest": "0 8 * * *",
     "fetch-espn-fixtures": "0 6 * * *",
-    # Betfair Exchange direct ingestion. The job self-schedules a tighter
-    # cadence near kickoff; this cron is the safety floor that catches
-    # cold-start gaps and backfills if self-scheduling stalls.
-    "fetch-betfair-exchange": "*/30 * * * *",
-    # Polymarket match prices. The cron starts the chain; the job's first
-    # self-schedule replaces it (same schedule id).
-    "fetch-polymarket-odds": "*/15 * * * *",
     # MLB probable pitchers — once daily at 06:00 UTC. Backstop only:
     # the MCP ``get_probable_pitchers`` tool writes through every call.
     "fetch-mlb-probables": "0 6 * * *",

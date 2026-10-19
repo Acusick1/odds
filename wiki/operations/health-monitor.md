@@ -81,7 +81,7 @@ The thresholds are computed from each job's cadence, not configured. The Odds AP
 
 The missing events of a run are one critical `missing_betfair_close` listing every event, so a matchday cannot storm. Its `alert_history` context holds the event ids. A later run reports only events not named in an alert inside the lookback, so an event drops out of `issues_detected` once its alert was recorded; a run whose send was rate-limited (`odds_core.config.AlertConfig.alert_rate_limit_minutes`) records nothing and lists the events again next run. The check reads the snapshot's prices, not their quality, so a wide back book (ADR-0014) still counts.
 
-The alert fires after kick-off, when the close cannot be collected. It is a coverage record for the retail-EV evaluation and does not catch a gap in time to fill it; protection before kick-off is tracked in [#562](https://github.com/Acusick1/odds/issues/562).
+The alert fires after kick-off, when the close cannot be collected. It is a coverage record for the retail-EV evaluation and does not catch a gap in time to fill it. Protection before kick-off is in the job's schedule: it books a run 5 min before each kickoff ([close run](../scheduling/decision-engine.md#close-run)), and a scheduler restart keeps that pending run ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)). An alert therefore points to a failed run, or a scheduler that was down at the close.
 
 ## Heartbeats
 

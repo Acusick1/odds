@@ -32,6 +32,8 @@ The cadence of a data job follows how close the next kickoff is, which only the 
 4. Do the work (usually inside `odds_core.alerts.job_alert_context`, see [Alerts](../operations/alerts.md)).
 5. Re-decide and reschedule, because ingestion may have created events that move the tier.
 
+A local scheduler restart keeps each job's pending run; only a job without one runs its bootstrap function to start the chain ([bootstrap](local-scheduler.md#bootstrap-jobs-and-cron-table)).
+
 `fetch-odds` syncs events from the free `/events` endpoint before deciding, so `odds_lambda.scheduling.helpers.get_next_kickoff` sees upstream fixtures ([fetch-odds job](../collection/fetch-odds-job.md)).
 
 ## Failure policy by job

@@ -48,7 +48,9 @@ logger = structlog.get_logger()
 
 # Proximity-based polling cadence (hours): cheap delayed API — poll more
 # aggressively than browser-driven fetch-oddsportal. 12h+ to kickoff (and
-# no-game) all poll at 2h, matching the previous "far" band.
+# no-game) all poll at 2h, matching the previous "far" band. ``close_lead``
+# adds a run 5 minutes before every kickoff: the latest decision time and
+# inside the live close window of ADR-0012.
 CADENCE = CadenceConfig(
     closing=0.25,
     pregame=0.5,
@@ -57,6 +59,7 @@ CADENCE = CadenceConfig(
     opening=2.0,
     no_game=2.0,
     db_fallback=1.0,
+    close_lead=timedelta(minutes=5),
 )
 
 LIVE_REQUEST_ID_PREFIX = "betfair_api_"

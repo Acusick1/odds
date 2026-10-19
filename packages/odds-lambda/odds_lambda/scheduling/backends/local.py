@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable
-from datetime import datetime
+from datetime import UTC, datetime
 from types import TracebackType
 from typing import TYPE_CHECKING
 
@@ -69,6 +69,16 @@ def build_scheduler(
         event_broker=event_broker,
         role=role,
     )
+
+
+def utc_cron_trigger(cron_expr: str, *, now: datetime) -> CronTrigger:
+    """A UTC ``CronTrigger`` whose fields are matched from ``now`` in UTC.
+
+    APScheduler defaults ``start_time`` to the naive local time, and reads its
+    fields as if they were in the trigger's time zone, so on a host in BST a
+    UTC cron's first fire lands an hour late.
+    """
+    return CronTrigger.from_crontab(cron_expr, timezone=UTC, start_time=now.astimezone(UTC))
 
 
 class LocalSchedulerBackend(SchedulerBackend):
@@ -202,9 +212,18 @@ class LocalSchedulerBackend(SchedulerBackend):
             return
 
         try:
-            from odds_lambda.scheduling.jobs import JobContext, get_job_function, resolve_job_name
+            from odds_lambda.scheduling.jobs import (
+                JobContext,
+                get_job_cron,
+                get_job_function,
+                resolve_job_name,
+            )
 
             base_name, resolved_sport = resolve_job_name(job_name)
+            if get_job_cron(base_name) is not None:
+                raise SchedulingFailedError(
+                    f"{job_name} is a cron job; a one-off run would replace its cron schedule"
+                )
             job_func = get_job_function(base_name)
             ctx_payload: dict[str, object] = {}
             if resolved_sport:
@@ -221,6 +240,8 @@ class LocalSchedulerBackend(SchedulerBackend):
                 next_time=next_time.isoformat(),
             )
 
+        except SchedulingFailedError:
+            raise
         except KeyError as e:
             raise SchedulingFailedError(str(e)) from e
         except Exception as e:
@@ -324,7 +345,7 @@ class LocalSchedulerBackend(SchedulerBackend):
 
         await scheduler.add_schedule(
             job_func,
-            trigger=CronTrigger.from_crontab(cron_expr, timezone="UTC"),
+            trigger=utc_cron_trigger(cron_expr, now=datetime.now(UTC)),
             id=job_name,
             args=[ctx],
             conflict_policy=ConflictPolicy.replace,

@@ -61,6 +61,10 @@ Hours per tier:
 
 Values are each job module's cadence constant (`odds_lambda.jobs.fetch_odds.CADENCE`, `odds_lambda.jobs.fetch_oddsportal.CADENCE`, `odds_lambda.jobs.fetch_betfair_exchange.CADENCE`, `odds_lambda.jobs.fetch_polymarket_odds.CADENCE`, `odds_lambda.jobs.agent_run.CADENCE`); they replace the `interval_hours` argument of `odds_lambda.scheduling.helpers.self_schedule`, which is only logged. `odds_lambda.scheduling.decision.CadenceConfig.interval_for` maps `IN_PLAY` to `closing`. Scores: 3-day window, 6 h active, 12 h idle. Status: 4 h window, 1 h active, 6 h idle.
 
+## Close run
+
+`odds_lambda.scheduling.decision.CadenceConfig.close_lead`, when set, adds a run just before each kickoff. The forward decisions look up the earliest kickoff more than `close_lead` away. If the cadence's next time falls after that kickoff minus `close_lead`, the run moves to that time, and the overnight skip does not apply to it. Only `odds_lambda.jobs.fetch_betfair_exchange.CADENCE` sets it, at 5 min, so the Betfair close does not depend on where the 15-minute cadence happens to fall ([Betfair job](../collection/betfair-exchange.md#flow)).
+
 ## Overnight windows
 
 `odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` suppresses runs in `soccer_epl` 22:00-06:00 UTC and `baseball_mlb` 05:00-14:00 UTC via `odds_lambda.scheduling.helpers.apply_overnight_skip`, which pushes a candidate time to the resume hour and never raises. It applies only if the caller passes `overnight`: the fetch-oddsportal job passes its `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` window, Betfair looks the sport up with `.get()` for single-sport runs (no window for a sport missing from the map), `agent-run` indexes the map and raises `ValueError` for a sport missing from it (`odds_lambda.jobs.agent_run.schedule_next`), and `fetch-odds`, scores and status pass none. The same windows are also kept in the `overnight_*_utc` fields of `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` (#463).
