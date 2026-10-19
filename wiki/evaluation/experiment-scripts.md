@@ -59,7 +59,7 @@ Zeroed features once hid an adapter bug ([early NBA signal search](exp-early-nba
 | `exp7_backtest_simulation`, `exp7b_line_shopping` | Flat betting and line shopping | [Betting simulation](exp-betting-simulation.md) |
 | `cv_protocol_grid` | CV window and step grid | [CV protocol grid](exp-cv-protocol-grid.md) |
 | `cv_protocol_common_range` | CV protocol cells scored on a common validation range | [CV protocol on a common validation range](exp-cv-protocol-common-range.md) |
-| `retail_ev_target_report` | Row counts by season, source, horizon and book for the retail-EV target, with the baseline's weighted MSE; trains no model | [CLV and the training target](../modelling/clv-target.md#the-retail-ev-target) |
+| `retail_ev_target_report` | Row counts by season, source, horizon bucket and book for the retail-EV target (season and bucket from `odds_analytics.retail_ev.RetailEvRow`), with the baseline's weighted MSE; trains no model | [CLV and the training target](../modelling/clv-target.md#the-retail-ev-target) |
 | `retail_ev_price_only` | Price-only XGBoost on the retail-EV target, direct and residual arms over two seeds, against the martingale baseline and a constant shrinkage | [Price-only models on the retail-EV target](exp-epl-retail-ev-price-only.md) |
 | `epl_clv_rebaseline` | EPL CLV model against the OLS baseline over two seeds on the evaluation range | [EPL CLV re-baseline](exp-epl-clv-rebaseline.md) |
 | `epl_clv_pinnacle_retest` | Pinnacle and bet365 CLV targets on a common event set, with the Pinnacle keep test | [Pinnacle against bet365](exp-epl-clv-pinnacle-retest.md) |

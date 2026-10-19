@@ -4,7 +4,8 @@ Development data only, so nothing here is a keep-bar result. Rows come from the
 retail_ev pipeline (`prepare_training_data_from_config`). Hyperparameters are tuned
 with Optuna on 2024-25 events only, on expanding walk-forward folds inside that
 season, then frozen. The scoring folds walk forward from the first 2025-26 event in
-50-event blocks with the 7-day gap, so no tuned trial has seen a scored row.
+the config's event blocks with the 7-day gap, so no tuned trial has seen a scored row.
+The config ends before 2026-27, the candidate fresh season.
 
 Each scored row carries the martingale baseline (the exchange price at t as the
 close), a constant shrinkage of it (baseline × β, β fitted by weighted least squares
@@ -41,7 +42,11 @@ import optuna
 import pandas as pd
 import structlog
 from odds_analytics.feature_groups import filter_completed_events
-from odds_analytics.retail_ev import DECISION_WINDOW, load_retail_ev_dataset
+from odds_analytics.retail_ev import (
+    DECISION_WINDOW,
+    HORIZON_BUCKET_LABELS,
+    load_retail_ev_dataset,
+)
 from odds_analytics.retail_ev_metrics import (
     BootstrapEstimate,
     mse_gain,
@@ -58,7 +63,6 @@ from odds_analytics.training.tuner import OptunaTuner, apply_trial_params, creat
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from odds_core.database import async_session_maker
 from odds_core.models import EventStatus
-from retail_ev_target_report import HORIZON_BUCKETS, horizon_bucket, season_of
 
 structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.WARNING))
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -70,6 +74,7 @@ OUTPUT_DIR = EXPERIMENTS_DIR / "results" / "retail_ev_price_only"
 OPTUNA_DIR = EXPERIMENTS_DIR / "optuna"
 TUNING_END = datetime(2025, 8, 1, tzinfo=UTC)
 TUNING_MIN_TRAIN_EVENTS = 130
+TUNING_VAL_STEP_EVENTS = 50
 SEEDS: tuple[int, ...] = (42, 7)
 METRIC_SCALE = 1e6
 TOP_EVENTS = 10
@@ -140,8 +145,8 @@ async def load_data(config: MLTrainingConfig) -> RunData:
         {
             "event_id": dataset.event_ids,
             "commence_time": pd.to_datetime(dataset.commence_times),
-            "season": [season_of(r) for r in dataset.rows],
-            "horizon": [horizon_bucket(r) for r in dataset.rows],
+            "season": [r.season for r in dataset.rows],
+            "horizon": [r.horizon_bucket for r in dataset.rows],
             "retail_source": [r.retail_kind.value for r in dataset.rows],
             "close_source": [r.close.kind.value for r in dataset.rows],
             "outcome": [r.outcome.value for r in dataset.rows],
@@ -184,12 +189,12 @@ def tuning_prefix(data: RunData, config: MLTrainingConfig) -> int:
     return n_rows
 
 
-def tuning_fold_references(data: RunData, n_rows: int, val_step: int) -> dict[str, float]:
+def tuning_fold_references(data: RunData, n_rows: int) -> dict[str, float]:
     """Mean fold weighted MSE of the baseline and the shrinkage on the tuner's folds."""
     splits = make_walk_forward_splits(
         event_ids=data.event_ids[:n_rows],
         min_train_events=TUNING_MIN_TRAIN_EVENTS,
-        val_step_events=val_step,
+        val_step_events=TUNING_VAL_STEP_EVENTS,
         commence_times=data.kickoffs[:n_rows],
         gap=DECISION_WINDOW,
     )
@@ -220,6 +225,7 @@ def tune(
 ) -> tuple[optuna.Study, float]:
     tune_config = config.model_copy(deep=True)
     tune_config.training.data.min_train_events = TUNING_MIN_TRAIN_EVENTS
+    tune_config.training.data.val_step_events = TUNING_VAL_STEP_EVENTS
     tune_config.training.model.random_state = run.seed
     assert tune_config.tuning is not None
     OPTUNA_DIR.mkdir(parents=True, exist_ok=True)
@@ -414,10 +420,9 @@ def slice_metrics(oof: pd.DataFrame, n_boot: int) -> dict[str, Any]:
 
 
 def slice_table(oof: pd.DataFrame, n_boot: int) -> pd.DataFrame:
-    bucket_order = [label for _, _, label in HORIZON_BUCKETS]
     keys: list[tuple[str, Callable[[list[str]], list[str]]]] = [
         ("season", sorted),
-        ("horizon", lambda vals: [b for b in bucket_order if b in vals]),
+        ("horizon", lambda vals: [b for b in HORIZON_BUCKET_LABELS if b in vals]),
         ("retail_source", sorted),
         ("close_source", sorted),
         ("event_type", sorted),
@@ -455,20 +460,36 @@ def event_contributions(oof: pd.DataFrame) -> pd.DataFrame:
 
 
 def concentration(contrib: pd.DataFrame) -> dict[str, Any]:
-    out: dict[str, Any] = {}
+    """How evenly each run's gain spreads over events: both tails, trimmed total and median."""
+    fduk_share = float((contrib["event_type"] == "fduk_only").mean())
+    out: dict[str, Any] = {"fduk_only_share_of_scored_events": fduk_share}
     for col in [f"{kind}_{p}" for kind in ("mse_gain", "pick_gain") for p in MODEL_LABELS]:
         ranked = contrib.sort_values(col, ascending=False)
-        total = float(ranked[col].sum())
         top = ranked.head(TOP_EVENTS)
+        bottom = ranked.tail(TOP_EVENTS)
+        total = float(ranked[col].sum())
         out[col] = {
             "total": total,
             f"top_{TOP_EVENTS}_sum": float(top[col].sum()),
-            f"total_without_top_{TOP_EVENTS}": total - float(top[col].sum()),
-            f"top_{TOP_EVENTS}_live_collected": int((top["event_type"] == "live_collected").sum()),
+            f"bottom_{TOP_EVENTS}_sum": float(bottom[col].sum()),
+            f"total_without_top_and_bottom_{TOP_EVENTS}": total
+            - float(top[col].sum())
+            - float(bottom[col].sum()),
+            "median_event_gain": float(ranked[col].median()),
+            f"top_{TOP_EVENTS}_fduk_only": int((top["event_type"] == "fduk_only").sum()),
+            f"bottom_{TOP_EVENTS}_fduk_only": int((bottom["event_type"] == "fduk_only").sum()),
             "positive_events": int((ranked[col] > 0).sum()),
             "negative_events": int((ranked[col] < 0).sum()),
         }
     return out
+
+
+def data_fingerprint(data: RunData) -> str:
+    """SHA-256 over the rows' event IDs and targets, to tell whether a rerun saw the same data."""
+    digest = hashlib.sha256()
+    digest.update("\n".join(data.event_ids.astype(str).tolist()).encode())
+    digest.update(np.ascontiguousarray(data.y, dtype=np.float64).tobytes())
+    return digest.hexdigest()
 
 
 def git_sha() -> str:
@@ -532,13 +553,12 @@ async def main(n_trials: int, n_boot: int) -> None:
         for arm in Arm
     }
     tuning_events = data.rows["event_id"].iloc[:n_rows].nunique()
-    val_step = config.training.data.val_step_events
-    assert val_step is not None
     summary = {
         "git_sha": git_sha(),
         "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "config_sha256": hashlib.sha256(CONFIG_PATH.read_bytes()).hexdigest(),
         "config": str(CONFIG_PATH.relative_to(REPO_DIR)),
+        "data_sha256": data_fingerprint(data),
         "n_trials": n_trials,
         "n_boot": n_boot,
         "rows": len(data.y),
@@ -549,7 +569,8 @@ async def main(n_trials: int, n_boot: int) -> None:
             "events": int(tuning_events),
             "rows": n_rows,
             "min_train_events": TUNING_MIN_TRAIN_EVENTS,
-            **tuning_fold_references(data, n_rows, val_step),
+            "val_step_events": TUNING_VAL_STEP_EVENTS,
+            **tuning_fold_references(data, n_rows),
         },
         "scored": {
             "events": int(oof["event_id"].nunique()),

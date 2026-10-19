@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
@@ -314,3 +315,37 @@ class TestFeaturesAndWeights:
         odds = np.array([r.retail_decimal for r in rows])
         np.testing.assert_allclose(dataset.event_weights, 1 / len(rows))
         np.testing.assert_allclose(dataset.loss_weights, 1 / odds**2 / len(rows))
+
+
+class TestRowLabels:
+    @pytest.mark.parametrize(
+        ("hours", "bucket"),
+        [
+            (0.1, "0-1h"),
+            (1.0, "1-6h"),
+            (23.9, "6-24h"),
+            (24.0, "1-3d"),
+            (72.0, "3-7d"),
+            (168.0, "3-7d"),
+        ],
+    )
+    def test_horizon_bucket_by_hours_to_kickoff(
+        self, event: Event, snapshots: list[OddsSnapshot], hours: float, bucket: str
+    ) -> None:
+        rows, _ = build_event_rows(event, snapshots, "1x2")
+        row = replace(rows[0], decision_time=rows[0].commence_time - timedelta(hours=hours))
+        assert row.horizon_bucket == bucket
+
+    @pytest.mark.parametrize(
+        ("kickoff", "season"),
+        [
+            (datetime(2025, 8, 15, 19, tzinfo=UTC), "2025-26"),
+            (datetime(2026, 5, 24, 15, tzinfo=UTC), "2025-26"),
+            (datetime(2026, 7, 1, 12, tzinfo=UTC), "2026-27"),
+        ],
+    )
+    def test_season_starts_in_july(
+        self, event: Event, snapshots: list[OddsSnapshot], kickoff: datetime, season: str
+    ) -> None:
+        rows, _ = build_event_rows(event, snapshots, "1x2")
+        assert replace(rows[0], commence_time=kickoff).season == season

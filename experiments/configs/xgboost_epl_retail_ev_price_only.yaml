@@ -7,16 +7,17 @@ experiment:
   - retail_ev
   - tuning
   description: 'First price-only run on the ADR-0012 retail-EV target (#540): the
-    retail_ev config over every finished event to 2026-10-18, with the walk-forward
-    window that scores from the first 2025-26 event (min_train_events is the 2024-25
-    event count) and a search space scaled to the mean-one loss weights. Tuning runs
-    on 2024-25 only (experiments/scripts/retail_ev_price_only.py). Development data;
-    no keep-bar claim.'
+    retail_ev config to 2026-07-31, leaving 2026-27 untouched as the candidate fresh
+    season. Scoring folds start at the first 2025-26 event (min_train_events is the
+    2024-25 event count); the 68-event step splits the 340 scored 2025-26 events into
+    five folds with no partial block, so the last fold holds every live-collected
+    event of April and May 2026. The search space is scaled to the mean-one loss
+    weights. Tuning runs on 2024-25 only (experiments/scripts/retail_ev_price_only.py).
+    Development data; no keep-bar claim.'
 training:
   data:
-    end_date: '2026-10-18'
     min_train_events: 380
-    val_step_events: 50
+    val_step_events: 68
   model:
     n_jobs: 1
 tuning:

@@ -39,6 +39,10 @@ MAX_EXCHANGE_OVERROUND = 0.05
 EXCHANGE_BOOKMAKER = "betfair_exchange"
 DRAW_OUTCOME_NAME = "Draw"
 THREE_WAY_MARKET = "1x2"
+# Lower edges of the reporting horizon buckets, in hours to kick-off.
+HORIZON_BUCKET_EDGES_HOURS: tuple[float, ...] = (0.0, 1.0, 6.0, 24.0, 72.0)
+HORIZON_BUCKET_LABELS: tuple[str, ...] = ("0-1h", "1-6h", "6-24h", "1-3d", "3-7d")
+SEASON_START_MONTH = 7
 TWO_WAY_MARKET = "h2h"
 
 RETAIL_KINDS: frozenset[SnapshotKind] = frozenset(
@@ -97,6 +101,17 @@ class RetailEvRow:
     @property
     def hours_to_kickoff(self) -> float:
         return (self.commence_time - self.decision_time).total_seconds() / 3600
+
+    @property
+    def horizon_bucket(self) -> str:
+        idx = bisect.bisect_right(HORIZON_BUCKET_EDGES_HOURS, self.hours_to_kickoff) - 1
+        return HORIZON_BUCKET_LABELS[idx]
+
+    @property
+    def season(self) -> str:
+        year = self.commence_time.year
+        start = year if self.commence_time.month >= SEASON_START_MONTH else year - 1
+        return f"{start}-{(start + 1) % 100:02d}"
 
     @property
     def exchange_age_hours(self) -> float:
