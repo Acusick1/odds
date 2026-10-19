@@ -1,0 +1,254 @@
+{
+  "verdict": "retire",
+  "keep_bar": {
+    "mse_gain": {
+      "point": 3.200516338520226e-05,
+      "ci_low": -2.5696840155420145e-05,
+      "ci_high": 8.890757575365875e-05
+    },
+    "pick_ev_gain": {
+      "point": 0.01346519310860479,
+      "ci_low": -0.04253815814775333,
+      "ci_high": 0.06913011792028335
+    },
+    "bootstrap": {
+      "resamples": 2000,
+      "seed": 0
+    }
+  },
+  "coverage": {
+    "window_events": 381,
+    "window_events_by_status": {
+      "final": 380,
+      "scheduled": 1
+    },
+    "window_event_shares": {
+      "has_fduk_closing": 0.9973753280839895,
+      "has_oddsportal_live": 0.2677165354330709,
+      "has_live_betfair_near_kickoff": 0.10761154855643044
+    },
+    "scored_events": 369,
+    "scored_rows": 109167,
+    "pre_window_events": 380,
+    "pre_window_rows": 3861,
+    "unscored_events": [
+      {
+        "event_id": "op_live_CRYPAL_WESHAM_2026-04-20",
+        "commence_time": "2026-04-20 19:00:00",
+        "status": "final",
+        "has_fduk_closing": true,
+        "has_oddsportal_live": true,
+        "has_live_betfair_near_kickoff": false
+      },
+      {
+        "event_id": "op_live_BRI_CHE_2026-04-21",
+        "commence_time": "2026-04-21 19:00:00",
+        "status": "final",
+        "has_fduk_closing": true,
+        "has_oddsportal_live": true,
+        "has_live_betfair_near_kickoff": false
+      },
+      {
+        "event_id": "op_live_BOU_LEE_2026-04-22",
+        "commence_time": "2026-04-22 19:00:00",
+        "status": "final",
+        "has_fduk_closing": true,
+        "has_oddsportal_live": true,
+        "has_live_betfair_near_kickoff": false
+      },
+      {
+        "event_id": "op_live_BUR_MANCIT_2026-04-22",
+        "commence_time": "2026-04-22 19:00:00",
+        "status": "final",
+        "has_fduk_closing": true,
+        "has_oddsportal_live": true,
+        "has_live_betfair_near_kickoff": false
+      },
+      {
+        "event_id": "op_live_SUN_NOT_2026-04-24",
+        "commence_time": "2026-04-24 19:00:00",
+        "status": "final",
+        "has_fduk_closing": true,
+        "has_oddsportal_live": true,
+        "has_live_betfair_near_kickoff": false
+      },
+      {
+        "event_id": "op_live_FUL_ASTVIL_2026-04-25",
+        "commence_time": "2026-04-25 11:30:00",
+        "status": "final",
+        "has_fduk_closing": true,
+        "has_oddsportal_live": true,
+        "has_live_betfair_near_kickoff": false
+      },
+      {
+        "event_id": "op_live_LIV_CRYPAL_2026-04-25",
+        "commence_time": "2026-04-25 14:00:00",
+        "status": "final",
+        "has_fduk_closing": true,
+        "has_oddsportal_live": true,
+        "has_live_betfair_near_kickoff": false
+      },
+      {
+        "event_id": "op_live_WESHAM_EVE_2026-04-25",
+        "commence_time": "2026-04-25 14:00:00",
+        "status": "final",
+        "has_fduk_closing": true,
+        "has_oddsportal_live": true,
+        "has_live_betfair_near_kickoff": false
+      },
+      {
+        "event_id": "op_live_WOL_TOT_2026-04-25",
+        "commence_time": "2026-04-25 14:00:00",
+        "status": "final",
+        "has_fduk_closing": true,
+        "has_oddsportal_live": true,
+        "has_live_betfair_near_kickoff": false
+      },
+      {
+        "event_id": "op_live_ARS_NEW_2026-04-25",
+        "commence_time": "2026-04-25 16:30:00",
+        "status": "final",
+        "has_fduk_closing": true,
+        "has_oddsportal_live": true,
+        "has_live_betfair_near_kickoff": false
+      },
+      {
+        "event_id": "op_live_MANUTD_BRE_2026-04-27",
+        "commence_time": "2026-04-27 19:00:00",
+        "status": "final",
+        "has_fduk_closing": true,
+        "has_oddsportal_live": true,
+        "has_live_betfair_near_kickoff": false
+      },
+      {
+        "event_id": "op_live_ASTVIL_LIV_2026-05-17T1130",
+        "commence_time": "2026-05-17 11:30:00",
+        "status": "scheduled",
+        "has_fduk_closing": false,
+        "has_oddsportal_live": true,
+        "has_live_betfair_near_kickoff": false
+      }
+    ],
+    "window_drops": {
+      "events_without_close": 12,
+      "rows_without_exchange": 26106,
+      "rows_stale_exchange": 17655,
+      "rows_without_own_exchange": 195,
+      "wide_exchange_snapshots": 160,
+      "prices_outside_roster": {
+        "pinnacle": 7464,
+        "betfair_exchange": 9219,
+        "market_max": 1107,
+        "market_avg": 1107,
+        "1xbetir": 2199,
+        "betfury": 1662,
+        "betinasia": 2790,
+        "betsio": 1650,
+        "cloudbet": 1386,
+        "roobet": 1662,
+        "shuffle": 1659,
+        "stakecom": 1665,
+        "unibet": 2784,
+        "fanduel": 7038,
+        "draftkings": 6876,
+        "betrivers": 7032,
+        "betmgm_us": 5949,
+        "bovada": 5418,
+        "1xbetie": 612
+      }
+    },
+    "outages": {
+      "without_oddsportal_live": [
+        {
+          "events": 75,
+          "first_kickoff": "2025-08-15 19:00:00",
+          "last_kickoff": "2025-10-18 14:00:00"
+        },
+        {
+          "events": 202,
+          "first_kickoff": "2025-10-20 19:00:00",
+          "last_kickoff": "2026-03-01 16:30:00"
+        }
+      ],
+      "without_live_betfair_near_kickoff": [
+        {
+          "events": 339,
+          "first_kickoff": "2025-08-15 19:00:00",
+          "last_kickoff": "2026-04-27 19:00:00"
+        }
+      ]
+    },
+    "rows_by": {
+      "horizon": {
+        "0-1h": {
+          "rows": 1998,
+          "events": 29
+        },
+        "1-3d": {
+          "rows": 31668,
+          "events": 212
+        },
+        "1-6h": {
+          "rows": 10770,
+          "events": 43
+        },
+        "3-7d": {
+          "rows": 54597,
+          "events": 56
+        },
+        "6-24h": {
+          "rows": 10134,
+          "events": 169
+        }
+      },
+      "retail_source": {
+        "fduk_opening": {
+          "rows": 6972,
+          "events": 359
+        },
+        "oddsportal": {
+          "rows": 1149,
+          "events": 25
+        },
+        "oddsportal_live": {
+          "rows": 101046,
+          "events": 49
+        }
+      },
+      "close_source": {
+        "betfair_live": {
+          "rows": 101481,
+          "events": 41
+        },
+        "fduk_closing": {
+          "rows": 7686,
+          "events": 328
+        }
+      },
+      "event_type": {
+        "fduk_only": {
+          "rows": 5697,
+          "events": 295
+        },
+        "live_collected": {
+          "rows": 103470,
+          "events": 74
+        }
+      },
+      "outcome": {
+        "away": {
+          "rows": 36389,
+          "events": 369
+        },
+        "draw": {
+          "rows": 36389,
+          "events": 369
+        },
+        "home": {
+          "rows": 36389,
+          "events": 369
+        }
+      }
+    }
+  }
+}
