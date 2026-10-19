@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 import numpy as np
 import pytest
 from odds_analytics.feature_groups import TierSampler, prepare_training_data
+from odds_analytics.retail_ev import LOSS_WEIGHT_SCALE
 from odds_analytics.training import (
     DataConfig,
     ExperimentConfig,
@@ -129,9 +130,8 @@ class TestRetailEvTrainingData:
         assert result.sample_weights_train is not None
         names = result.feature_names
         implied = result.X_train[:, names.index("retail_implied_prob")].astype(np.float64)
-        expected = implied**2 / 6
         np.testing.assert_allclose(
-            result.sample_weights_train, expected / expected.mean(), rtol=1e-5
+            result.sample_weights_train, LOSS_WEIGHT_SCALE * implied**2 / 6, rtol=1e-5
         )
         assert result.event_ids_train is not None
         assert len(set(result.event_ids_train.tolist())) == 3

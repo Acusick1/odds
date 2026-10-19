@@ -151,6 +151,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
 
         self.model: Any = None  # XGBoost regressor
         self.feature_names: list[str] = feature_names or []
+        self.margin_feature: str | None = None
         self.feature_extractor = feature_extractor or TabularFeatureExtractor()
 
         if model_path:
@@ -260,8 +261,20 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         Returns:
             Predicted movement delta (positive = favorable movement expected)
         """
-        prediction = self.model.predict(feature_vector.reshape(1, -1))
-        return float(prediction[0])
+        return float(self.predict(feature_vector.reshape(1, -1))[0])
+
+    def _margin(self, X: np.ndarray) -> np.ndarray | None:
+        if self.margin_feature is None:
+            return None
+        if self.margin_feature not in self.feature_names:
+            raise ValueError(f"base-margin column {self.margin_feature!r} is not a feature")
+        return X[:, self.feature_names.index(self.margin_feature)]
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Predictions on the target's scale, the base-margin column added back when set."""
+        if self.model is None:
+            raise ValueError("Model not trained. Train or load model first.")
+        return self.model.predict(X, base_margin=self._margin(X))
 
     def train(
         self,
@@ -273,6 +286,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         tracker: ExperimentTracker | None = None,
         sample_weight_train: np.ndarray | None = None,
         sample_weight_val: np.ndarray | None = None,
+        margin_feature: str | None = None,
         **xgb_params,
     ) -> dict[str, Any]:
         """
@@ -285,6 +299,8 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             X_val: Validation features (optional)
             y_val: Validation targets (optional)
             tracker: Optional experiment tracker for logging (optional)
+            margin_feature: Feature column XGBoost takes as each row's base margin, so the
+                trees fit the target minus that column (optional)
             **xgb_params: Additional XGBoost parameters
 
         Returns:
@@ -300,6 +316,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             raise ImportError("xgboost not installed. Install with: uv add xgboost") from e
 
         self.feature_names = feature_names
+        self.margin_feature = margin_feature
 
         # Default parameters optimized for regression
         default_params = {
@@ -318,26 +335,32 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         self.model = XGBRegressor(**params)
 
         # Prepare eval set if validation data provided
+        margin_train = self._margin(X_train)
         eval_set = None
         eval_weights = None
+        eval_margins = None
         if X_val is not None and y_val is not None:
             eval_set = [(X_train, y_train), (X_val, y_val)]
             if sample_weight_train is not None:
                 eval_weights = [sample_weight_train, sample_weight_val]
+            if margin_train is not None:
+                eval_margins = [margin_train, self._margin(X_val)]
 
         self.model.fit(
             X_train,
             y_train,
             sample_weight=sample_weight_train,
+            base_margin=margin_train,
             eval_set=eval_set,
             sample_weight_eval_set=eval_weights,
+            base_margin_eval_set=eval_margins,
             verbose=False,
         )
 
         # Calculate training metrics
         from odds_analytics.training.utils import compute_regression_metrics
 
-        train_predictions = self.model.predict(X_train)
+        train_predictions = self.predict(X_train)
         train_metrics = compute_regression_metrics(y_train, train_predictions, sample_weight_train)
 
         history: dict[str, Any] = {
@@ -349,7 +372,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         }
 
         if X_val is not None and y_val is not None:
-            val_predictions = self.model.predict(X_val)
+            val_predictions = self.predict(X_val)
             val_metrics = compute_regression_metrics(y_val, val_predictions, sample_weight_val)
             history.update(
                 {
@@ -413,7 +436,8 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             >>> strategy = XGBoostLineMovementStrategy()
             >>> history = strategy.train_from_config(config, X_train, y_train, feature_names)
         """
-        from odds_analytics.training.config import XGBoostConfig
+        from odds_analytics.retail_ev import BASELINE_FEATURE
+        from odds_analytics.training.config import RetailEvArm, XGBoostConfig
 
         # Validate strategy type
         if config.training.strategy_type != "xgboost_line_movement":
@@ -430,6 +454,13 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             )
 
         model_config = config.training.model
+        features = config.training.features
+        margin_feature = (
+            BASELINE_FEATURE
+            if features.target_type == "retail_ev"
+            and features.retail_ev_arm is RetailEvArm.RESIDUAL
+            else None
+        )
 
         # Extract hyperparameters from config
         xgb_params = {
@@ -497,6 +528,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             tracker=tracker,
             sample_weight_train=sample_weight_train,
             sample_weight_val=sample_weight_val,
+            margin_feature=margin_feature,
             **xgb_params,
         )
 
@@ -593,6 +625,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         model_data = {
             "model": self.model,
             "feature_names": self.feature_names,
+            "margin_feature": self.margin_feature,
             "params": self.params,
         }
 
@@ -605,6 +638,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             "saved_at": datetime.now(UTC).isoformat(),
             "params": self.params,
             "feature_names": self.feature_names,
+            "margin_feature": self.margin_feature,
             "n_features": len(self.feature_names),
         }
 
@@ -643,6 +677,7 @@ class XGBoostLineMovementStrategy(BettingStrategy):
 
         self.model = model_data["model"]
         self.feature_names = model_data["feature_names"]
+        self.margin_feature = model_data.get("margin_feature")
 
         # Update params if saved (for backward compatibility)
         if "params" in model_data:

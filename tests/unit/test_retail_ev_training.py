@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
+import optuna
 import pytest
-from odds_analytics.retail_ev import DECISION_WINDOW
+from odds_analytics.retail_ev import BASELINE_FEATURE, DECISION_WINDOW
+from odds_analytics.retail_ev_metrics import weighted_mse
 from odds_analytics.training import (
     DataConfig,
     ExperimentConfig,
@@ -18,12 +21,13 @@ from odds_analytics.training import (
     run_cv,
     train_with_cv,
 )
-from odds_analytics.training.config import SearchSpace, TuningConfig
+from odds_analytics.training.config import RetailEvArm, SearchSpace, TuningConfig
 from odds_analytics.training.cross_validation import make_walk_forward_splits
 from odds_analytics.training.tuner import create_objective
 from odds_analytics.training.utils import compute_regression_metrics
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from pydantic import ValidationError
+from xgboost import XGBRegressor
 
 
 def _features(**overrides: object) -> FeatureConfig:
@@ -63,6 +67,18 @@ class TestRetailEvConfig:
 
     def test_round_trips_through_a_full_dump(self) -> None:
         assert FeatureConfig(**_features().model_dump()).target_type == "retail_ev"
+
+    def test_accepts_the_residual_arm(self) -> None:
+        assert _features(retail_ev_arm="residual").retail_ev_arm is RetailEvArm.RESIDUAL
+
+    def test_other_targets_reject_the_residual_arm(self) -> None:
+        with pytest.raises(ValidationError, match="retail_ev_arm"):
+            FeatureConfig(
+                target_type="devigged_bookmaker",
+                target_bookmaker="bet365",
+                markets=["1x2"],
+                retail_ev_arm="residual",
+            )
 
     def test_accepts_as_of_t_groups(self) -> None:
         groups = ("polymarket_at_t", "dynamics", "schedule_as_of_t", "standings_as_of_t")
@@ -117,6 +133,23 @@ class TestRetailEvProtocol:
         raw = config.model_dump()
         raw["training"]["data"].update(data_overrides)
         with pytest.raises(ValidationError, match="retail_ev"):
+            MLTrainingConfig(**raw)
+
+    def test_residual_arm_rejects_top_k_feature_selection(self, config: MLTrainingConfig) -> None:
+        raw = config.model_dump()
+        raw["training"]["features"]["retail_ev_arm"] = "residual"
+        raw["tuning"] = {
+            "n_trials": 1,
+            "search_spaces": {"top_k_features": {"type": "int", "low": 5, "high": 10}},
+        }
+        with pytest.raises(ValidationError, match="top_k_features"):
+            MLTrainingConfig(**raw)
+
+    def test_residual_arm_rejects_mlflow_tracking(self, config: MLTrainingConfig) -> None:
+        raw = config.model_dump()
+        raw["training"]["features"]["retail_ev_arm"] = "residual"
+        raw["tracking"] = {"enabled": True}
+        with pytest.raises(ValidationError, match="MLflow"):
             MLTrainingConfig(**raw)
 
     def test_accepts_walk_forward(self, config: MLTrainingConfig) -> None:
@@ -327,3 +360,152 @@ class TestRetailEvRequiresWeights:
         )
         with pytest.raises(ValueError, match="retail_ev"):
             create_objective(tuned, np.zeros((16, 1)), np.zeros(16), ["x"])
+
+
+FEATURES = ["a", BASELINE_FEATURE, "b"]
+N_EVENTS = 8
+ROWS_PER_EVENT = 25
+
+
+@pytest.fixture
+def residual_config(config: MLTrainingConfig) -> MLTrainingConfig:
+    residual = config.model_copy(deep=True)
+    residual.training.features.retail_ev_arm = RetailEvArm.RESIDUAL
+    return residual
+
+
+@pytest.fixture
+def rows() -> dict[str, np.ndarray]:
+    rng = np.random.default_rng(11)
+    n = N_EVENTS * ROWS_PER_EVENT
+    X = rng.normal(size=(n, 3)).astype(np.float32)
+    X[:, 1] = rng.normal(scale=0.1, size=n)
+    y = (X[:, 1] + 0.05 * X[:, 0] + 0.02 + rng.normal(scale=0.02, size=n)).astype(np.float32)
+    event_ids = np.repeat(np.arange(N_EVENTS), ROWS_PER_EVENT)
+    return {
+        "X": X,
+        "y": y,
+        "w": rng.uniform(0.5, 2.0, size=n),
+        "event_ids": event_ids,
+        "kickoffs": _kickoffs(event_ids, 24 * 7),
+    }
+
+
+def _learns_nothing(config: MLTrainingConfig) -> MLTrainingConfig:
+    frozen = config.model_copy(deep=True)
+    frozen.training.model.min_child_weight = 10**9
+    return frozen
+
+
+class TestResidualArm:
+    def test_matches_fitting_the_target_minus_the_baseline_with_no_intercept(
+        self, residual_config: MLTrainingConfig, rows: dict[str, np.ndarray]
+    ) -> None:
+        X, y, w = rows["X"], rows["y"], rows["w"]
+        strategy = XGBoostLineMovementStrategy()
+        strategy.train_from_config(residual_config, X, y, FEATURES, sample_weight_train=w)
+        assert strategy.model is not None
+
+        baseline = X[:, 1]
+        script = XGBRegressor(**{**strategy.model.get_params(), "base_score": 0.0})
+        script.fit(X, y - baseline, sample_weight=w)
+        np.testing.assert_allclose(
+            strategy.predict(X), script.predict(X) + baseline, rtol=1e-5, atol=1e-6
+        )
+
+    def test_a_model_that_learns_nothing_predicts_the_baseline(
+        self, residual_config: MLTrainingConfig, rows: dict[str, np.ndarray]
+    ) -> None:
+        X = rows["X"]
+        strategy = XGBoostLineMovementStrategy()
+        strategy.train_from_config(
+            _learns_nothing(residual_config), X, rows["y"], FEATURES, sample_weight_train=rows["w"]
+        )
+        np.testing.assert_array_equal(strategy.predict(X), X[:, 1])
+
+    def test_direct_arm_has_no_margin(
+        self, config: MLTrainingConfig, rows: dict[str, np.ndarray]
+    ) -> None:
+        strategy = XGBoostLineMovementStrategy()
+        strategy.train_from_config(
+            _learns_nothing(config), rows["X"], rows["y"], FEATURES, sample_weight_train=rows["w"]
+        )
+        assert strategy.margin_feature is None
+        assert np.unique(strategy.predict(rows["X"])).size == 1
+
+    def test_cv_scores_predictions_on_the_target_scale(
+        self, residual_config: MLTrainingConfig, rows: dict[str, np.ndarray]
+    ) -> None:
+        X, y, w = rows["X"], rows["y"], rows["w"]
+        result = run_cv(
+            XGBoostLineMovementStrategy(),
+            _learns_nothing(residual_config),
+            X,
+            y,
+            FEATURES,
+            rows["event_ids"],
+            sample_weights=w,
+            commence_times=rows["kickoffs"],
+        )
+        splits = make_walk_forward_splits(
+            rows["event_ids"],
+            min_train_events=4,
+            val_step_events=2,
+            commence_times=rows["kickoffs"],
+            gap=DECISION_WINDOW,
+        )
+        expected = [weighted_mse(y[v], X[v, 1], w[v]) for _, v in splits]
+        assert [f.val_mse for f in result.fold_results] == pytest.approx(expected, rel=1e-6)
+
+    def test_tuning_objective_scores_the_residual_arm(
+        self, residual_config: MLTrainingConfig, rows: dict[str, np.ndarray]
+    ) -> None:
+        tuned = _learns_nothing(residual_config)
+        tuned.tuning = TuningConfig(
+            n_trials=1,
+            search_spaces={"max_depth": SearchSpace(type="int", low=2, high=3)},
+        )
+        objective = create_objective(
+            tuned,
+            rows["X"],
+            rows["y"],
+            FEATURES,
+            event_ids_train=rows["event_ids"],
+            sample_weights_train=rows["w"],
+            commence_times_train=rows["kickoffs"],
+        )
+        study = optuna.create_study()
+        study.optimize(objective, n_trials=1)
+
+        reference = run_cv(
+            XGBoostLineMovementStrategy(),
+            tuned,
+            rows["X"],
+            rows["y"],
+            FEATURES,
+            rows["event_ids"],
+            sample_weights=rows["w"],
+            commence_times=rows["kickoffs"],
+        )
+        assert study.best_value == pytest.approx(reference.mean_val_mse, rel=1e-6)
+
+    def test_save_and_load_keep_the_margin(
+        self, residual_config: MLTrainingConfig, rows: dict[str, np.ndarray], tmp_path: Path
+    ) -> None:
+        strategy = XGBoostLineMovementStrategy()
+        strategy.train_from_config(
+            residual_config, rows["X"], rows["y"], FEATURES, sample_weight_train=rows["w"]
+        )
+        path = tmp_path / "residual.joblib"
+        strategy.save_model(path)
+        loaded = XGBoostLineMovementStrategy(model_path=str(path))
+        assert loaded.margin_feature == BASELINE_FEATURE
+        np.testing.assert_array_equal(loaded.predict(rows["X"]), strategy.predict(rows["X"]))
+
+    def test_needs_the_baseline_column(
+        self, residual_config: MLTrainingConfig, rows: dict[str, np.ndarray]
+    ) -> None:
+        with pytest.raises(ValueError, match=BASELINE_FEATURE):
+            XGBoostLineMovementStrategy().train_from_config(
+                residual_config, rows["X"], rows["y"], ["a", "c", "b"]
+            )

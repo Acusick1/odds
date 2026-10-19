@@ -6,6 +6,8 @@ sources:
   - odds_analytics.training.config.MLTrainingConfig
   - odds_analytics.training.config.DataConfig
   - odds_analytics.training.config.FeatureConfig
+  - odds_analytics.training.config.RetailEvArm
+  - odds_analytics.retail_ev.BASELINE_FEATURE
   - odds_analytics.training.config.SamplingConfig
   - odds_analytics.training.config.TuningConfig
   - odds_cli.commands.train.STRATEGY_CLASSES
@@ -33,10 +35,10 @@ Every model forbids unknown keys (`extra="forbid"`). A file has `experiment` (na
 
 **`training.features`**
 
-- `target_type` (required: `raw`, `devigged_bookmaker` or `retail_ev`), `target_bookmaker` (required for `devigged_bookmaker`, omitted otherwise), `sharp_bookmakers` (priority order, default `["pinnacle"]`), `retail_bookmakers`, `closing_source_priority`, `outcome`, `markets`, `feature_groups`, `form_window`, `match_stats_window`, `variance_threshold`, `sampling` ([target functions](clv-target-functions.md), [sharp benchmark](sharp-benchmark.md), [decision time](look-ahead-bias.md), [feature pipeline](feature-pipeline.md)).
+- `target_type` (required: `raw`, `devigged_bookmaker` or `retail_ev`), `retail_ev_arm` (`direct` default, or `residual` under `retail_ev` only; [retail-EV arm](#retail-ev-arm)), `target_bookmaker` (required for `devigged_bookmaker`, omitted otherwise), `sharp_bookmakers` (priority order, default `["pinnacle"]`), `retail_bookmakers`, `closing_source_priority`, `outcome`, `markets`, `feature_groups`, `form_window`, `match_stats_window`, `variance_threshold`, `sampling` ([target functions](clv-target-functions.md), [sharp benchmark](sharp-benchmark.md), [decision time](look-ahead-bias.md), [feature pipeline](feature-pipeline.md)).
 - `odds_analytics.training.config.SamplingConfig`: `strategy` (`time_range` default, or `tier`), `decision_tier` (default `pregame`, used by `tier`), and `min_hours` 3.0, `max_hours` 12.0 and `max_samples_per_event` 5 (used by `time_range`). Production sets `strategy: tier` with `decision_tier: sharp` ([feature pipeline](feature-pipeline.md)).
 - `training.features` and `target_type` have no defaults; the suspended model's target is devigged bet365 ([ADR-0002](../../docs/adr/0002-bet365-clv-target.md), superseded by [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md), the `retail_ev` target).
-- `retail_ev` needs the `xgboost` adapter, market `1x2` or `h2h` and `feature_groups` drawn only from `odds_analytics.training.config.RetailEvFeatureGroupName` (`polymarket_at_t`, `dynamics`, `schedule_as_of_t`, `standings_as_of_t`; empty is the price features alone) (`odds_analytics.training.config.FeatureConfig`), and `use_kfold` with `cv_method: walk_forward`, `test_split: 0` and `validation_split: 0` (`odds_analytics.training.config.TrainingConfig`, and again in `odds_analytics.training.cross_validation.run_cv`). It rejects a value other than the default for the fields it does not read: `outcome`, `sampling`, `sharp_bookmakers`, `retail_bookmakers`, `closing_tier`, `closing_source_priority`, `lookback_hours` and `timesteps`. Its price features are built in, and `standings_as_of_t` reads `form_window` ([target functions](clv-target-functions.md#retail-ev-features)). `experiments/configs/xgboost_epl_retail_ev.yaml` is its EPL config, from 2024-08-01 under expanding-380:50.
+- `retail_ev` needs the `xgboost` adapter, market `1x2` or `h2h` and `feature_groups` drawn only from `odds_analytics.training.config.RetailEvFeatureGroupName` (`polymarket_at_t`, `dynamics`, `schedule_as_of_t`, `standings_as_of_t`; empty is the price features alone) (`odds_analytics.training.config.FeatureConfig`), and `use_kfold` with `cv_method: walk_forward`, `test_split: 0` and `validation_split: 0` (`odds_analytics.training.config.TrainingConfig`, and again in `odds_analytics.training.cross_validation.run_cv`). It rejects a value other than the default for the fields it does not read: `outcome`, `sampling`, `sharp_bookmakers`, `retail_bookmakers`, `closing_tier`, `closing_source_priority`, `lookback_hours` and `timesteps`. Its price features are built in, and `standings_as_of_t` reads `form_window` ([target functions](clv-target-functions.md#retail-ev-features)). `experiments/configs/xgboost_epl_retail_ev.yaml` is its EPL config, from 2024-08-01 under expanding-380:50. Its loss weights have a fixed scale, so `min_child_weight` and `reg_lambda` are in units of about 156 per event ([target functions](clv-target-functions.md#retail-ev-rows)).
 - `sharp_bookmakers` defaults to Pinnacle only, while the hybrid reference sets `[pinnacle, betfair_exchange]`; the MCP default differs on purpose (#421, [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md)).
 - `feature_groups` accepts the names in `odds_analytics.training.config.FeatureGroupName` for the delta targets and only `retail_ev`'s own groups for `retail_ev`, must be non-empty for the `xgboost` adapter under a delta target (the `lstm` adapter may leave it empty), and each `feature_groups` choice in a tuning search space is validated by `odds_analytics.training.config.MLTrainingConfig` at load.
 - The primary market is `markets[0]` by position (#475). `odds_analytics.training.config.FeatureConfig` carries bookmaker rosters, sampling, LSTM, Polymarket and EPL settings, so every committed YAML serialises about 30 unrelated fields.
@@ -45,6 +47,15 @@ Every model forbids unknown keys (`extra="forbid"`). A file has `experiment` (na
 **`tuning`**
 
 `metric` is `val_mse`, `val_mae` or `val_r2`; the optimization direction follows from it and is not configurable. Search-space keys must be model fields, `feature_groups` or `top_k_features`, and a non-CV `tuning` section needs `validation_split > 0` ([tuner](hyperparameter-tuner.md)).
+
+## Retail-EV arm
+
+`retail_ev_arm` (`odds_analytics.training.config.RetailEvArm`) chooses what XGBoost fits under `target_type: retail_ev`:
+
+- `direct`: the EV target.
+- `residual`: the EV target minus the baseline. `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.train_from_config` names the `baseline_ev` feature (`odds_analytics.retail_ev.BASELINE_FEATURE`) as each row's base margin, so the trees start from the baseline, with no fitted intercept, and a model that learns nothing predicts the baseline. Training, CV, tuning and prediction all score the target itself, because the margin is read from the feature matrix ([XGBoost strategy](line-movement-models.md)). A feature matrix without that column raises `ValueError`.
+
+Any other target rejects `residual`. `odds_analytics.training.config.MLTrainingConfig` also rejects a residual-arm config with MLflow `tracking` enabled, because MLflow logs the bare XGBoost model, whose predictions omit the margin, and one that tunes `top_k_features` with feature selection enabled, which could drop `baseline_ev`. A saved residual model carries its `margin_feature`, and the scoring job refuses it ([prediction scoring](prediction-scoring.md)). XGBoost ignores `base_score` when given a base margin, so the residual arm has no intercept; a script that fits the target minus the baseline with XGBoost's default fits one, the residual's weighted mean.
 
 ## Data source and bookmaker
 

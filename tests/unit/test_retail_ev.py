@@ -12,6 +12,7 @@ import pytest
 from odds_analytics.as_of_team_features import TeamHistory, results_known_before
 from odds_analytics.retail_ev import (
     _FEATURE_GROUPS,
+    LOSS_WEIGHT_SCALE,
     RETAIL_KINDS,
     Outcome,
     RetailEvDataset,
@@ -381,7 +382,16 @@ class TestFeaturesAndWeights:
         dataset = RetailEvDataset(rows=rows)
         odds = np.array([r.retail_decimal for r in rows])
         np.testing.assert_allclose(dataset.event_weights, 1 / len(rows))
-        np.testing.assert_allclose(dataset.loss_weights, 1 / odds**2 / len(rows))
+        np.testing.assert_allclose(dataset.loss_weights, LOSS_WEIGHT_SCALE / odds**2 / len(rows))
+
+    def test_loss_weights_do_not_depend_on_other_events(
+        self, event: Event, snapshots: list[OddsSnapshot]
+    ) -> None:
+        rows, _ = build_event_rows(event, snapshots, "1x2")
+        dense_rows = [replace(r, event_id="dense") for r in rows for _ in range(10)]
+        alone = RetailEvDataset(rows=rows).loss_weights
+        with_dense = RetailEvDataset(rows=rows + dense_rows).loss_weights
+        np.testing.assert_array_equal(with_dense[: len(rows)], alone)
 
 
 class TestRowLabels:

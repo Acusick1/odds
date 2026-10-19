@@ -1,0 +1,40 @@
+{
+  "git_sha": "9ecd208c30f37747393d6433d1b8161dba2d4756",
+  "git_dirty": false,
+  "config": "experiments/configs/xgboost_epl_retail_ev_price_only_fixed_scale.yaml",
+  "data_sha256": "ac18d520300ebc6aa4cc13de310e793289924b5d948bb5d9bb328b1619bcbb58",
+  "frozen_params": {
+    "n_estimators": 100,
+    "max_depth": 4,
+    "learning_rate": 0.010075960398505468,
+    "min_child_weight": 1982,
+    "subsample": 0.6,
+    "colsample_bytree": 0.7,
+    "reg_lambda": 1.9487910798188237
+  },
+  "frozen_source": "experiments/results/retail_ev_as_of_t_groups/summary.json price_only residual_s42",
+  "loss_weight_scale": 1013.0,
+  "n_boot": 2000,
+  "scored_events": 369,
+  "scored_rows": 109167,
+  "wmse_baseline_e6": 3359.4975464956706,
+  "residual_weighted_mean": -0.0020071265865234367,
+  "residual_weighted_rms": 0.058485781558647414,
+  "refits": {
+    "fixed": {
+      "mse_gain_e6": 32.418022132009035,
+      "mse_gain_e6_ci_low": -24.180797909658217,
+      "mse_gain_e6_ci_high": 87.72997927520497
+    },
+    "mean_one_all_rows": {
+      "mse_gain_e6": 32.53285511529429,
+      "mse_gain_e6_ci_low": -24.212214226096695,
+      "mse_gain_e6_ci_high": 87.98354528579641
+    },
+    "mean_one_per_fold": {
+      "mse_gain_e6": 2.099113777419598,
+      "mse_gain_e6_ci_low": -24.10262847029788,
+      "mse_gain_e6_ci_high": 28.104142655660873
+    }
+  }
+}

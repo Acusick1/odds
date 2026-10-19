@@ -184,6 +184,27 @@ class TestAdapterTabular:
 
 class TestScoreEvents:
     @pytest.mark.asyncio
+    @patch("odds_lambda.jobs.score_predictions.async_session_maker")
+    @patch("odds_lambda.jobs.score_predictions.load_model")
+    async def test_refuses_a_model_with_a_base_margin(
+        self, mock_load: MagicMock, mock_session_maker: MagicMock
+    ) -> None:
+        mock_model = MagicMock()
+        mock_load.return_value = {
+            "model": mock_model,
+            "feature_names": _EXPECTED_FEATURE_NAMES,
+            "margin_feature": "baseline_ev",
+            "params": {},
+            "feature_config": _TEST_FEATURE_CONFIG,
+        }
+
+        stats = await score_events(model_name="epl-clv-home", bucket="test-bucket")
+
+        assert stats["snapshots_scored"] == 0
+        mock_model.predict.assert_not_called()
+        mock_session_maker.assert_not_called()
+
+    @pytest.mark.asyncio
     @patch("odds_lambda.jobs.score_predictions.collect_event_data")
     @patch("odds_lambda.jobs.score_predictions.load_model")
     @patch("odds_lambda.jobs.score_predictions.get_cached_version")

@@ -37,7 +37,7 @@ import copy
 import json
 import math
 from datetime import date
-from enum import Enum
+from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -68,6 +68,12 @@ RetailEvFeatureGroupName = Literal[
     "standings_as_of_t",
 ]
 RETAIL_EV_FEATURE_GROUPS: frozenset[str] = frozenset(get_args(RetailEvFeatureGroupName))
+
+
+class RetailEvArm(StrEnum):
+    DIRECT = "direct"
+    RESIDUAL = "residual"
+
 
 # Maximum inheritance depth to prevent excessive nesting
 _MAX_INHERITANCE_DEPTH = 10
@@ -736,6 +742,13 @@ class FeatureConfig(BaseModel):
         "'retail_ev': a UK retail bet's EV against the Betfair Exchange close (ADR-0012).",
     )
 
+    retail_ev_arm: RetailEvArm = Field(
+        default=RetailEvArm.DIRECT,
+        description="retail_ev only. 'direct': the model predicts the EV. 'residual': the "
+        "model predicts the EV minus the baseline, which XGBoost takes as each row's base "
+        "margin, so a model that learns nothing predicts the baseline.",
+    )
+
     target_bookmaker: str | None = Field(
         default=None,
         description="Bookmaker key for the devigged target and closing-snapshot selection. "
@@ -776,6 +789,10 @@ class FeatureConfig(BaseModel):
             if set_fields:
                 raise ValueError(f"retail_ev does not read {set_fields}; leave them unset")
             return self
+        if self.retail_ev_arm is not RetailEvArm.DIRECT:
+            raise ValueError(
+                f"retail_ev_arm applies only to retail_ev; target_type is {self.target_type}"
+            )
         as_of_t = [g for g in self.feature_groups if g in RETAIL_EV_FEATURE_GROUPS]
         if as_of_t:
             raise ValueError(
@@ -1332,6 +1349,24 @@ class MLTrainingConfig(BaseModel):
         default=None,
         description="Experiment tracking configuration (optional)",
     )
+
+    @model_validator(mode="after")
+    def validate_residual_arm(self) -> MLTrainingConfig:
+        """MLflow logs the bare XGBoost model, and top-k selection may drop the margin column."""
+        if self.training.features.retail_ev_arm is not RetailEvArm.RESIDUAL:
+            return self
+        if self.tracking is not None and self.tracking.enabled:
+            raise ValueError("the residual arm cannot be logged to MLflow; disable tracking")
+        if (
+            self.tuning is not None
+            and TOP_K_FEATURES_KEY in self.tuning.search_spaces
+            and self.training.feature_selection.enabled
+        ):
+            raise ValueError(
+                "the residual arm reads its base margin from baseline_ev, which top-k "
+                "feature selection may drop; remove top_k_features from the search space"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_tuned_feature_groups(self) -> MLTrainingConfig:

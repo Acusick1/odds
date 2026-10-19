@@ -52,11 +52,11 @@ The run uses nested walk-forward. Only the last outer fold has dense live rows i
   - There are 9 inner folds for the first outer fold and 18 for the last (`folds.csv`).
   - The last outer fold's inner validation holds 46 live-collected events and 26,943 live rows. Its most recent inner block is 17 dense live events. The objective is the mean fold weighted MSE, so that block counts for 1/18 of it.
   - Every earlier outer fold's inner validation holds only the 18 to 28 sparse live events, at most 1,788 rows.
-- **Trials.** 30 TPE trials per study over the #540 search space (`experiments/configs/xgboost_epl_retail_ev_price_only.yaml`), seeded by the run's seed. There are 60 studies: 3 variants × 2 seeds × 10 outer folds. The run took 14 minutes on 20 workers.
+- **Trials.** 30 TPE trials per study over the #540 search space (`experiments/configs/xgboost_epl_retail_ev_price_only.yaml`, in units of mean-one weights in this run), seeded by the run's seed. There are 60 studies: 3 variants × 2 seeds × 10 outer folds. The run took 14 minutes on 20 workers.
 
 ### Models and comparisons
 
-- **Residual arm only.** XGBoost fits the target minus the martingale baseline, and the baseline is added back to its prediction ([price-only setup](exp-epl-retail-ev-price-only.md#setup)).
+- **Residual arm only.** XGBoost fits the target minus the martingale baseline, and the baseline is added back to its prediction ([price-only setup](exp-epl-retail-ev-price-only.md#setup)). In this run that was a script transform on mean-one weights; the script sets the pipeline's `retail_ev_arm: residual` on the fixed weight scale ([retail-EV arm](../modelling/training-config.md#retail-ev-arm)).
 - **Variants.** Price-only (38 columns), price plus `polymarket_at_t` (43), and price plus all four as-of-t groups (69) ([retail-EV features](../modelling/clv-target-functions.md#retail-ev-features)). Seeds 42 and 7.
 - **Frozen reference.** Every outer fold also refits the residual-arm settings #545 tuned on 2024-25, read from `experiments/results/retail_ev_as_of_t_groups/summary.json`, on the same training rows. That isolates the tuning scheme's effect on the same scored rows.
 - **Metrics.** Gains are reference minus challenger in weighted MSE, in units of 10⁻⁶, from `odds_analytics.retail_ev_metrics.mse_gain`. They come with event-clustered bootstrap 95% CIs (2,000 resamples) in `results.csv`.

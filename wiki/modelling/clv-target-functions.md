@@ -39,7 +39,7 @@ An exchange price, at the close or at t, counts only when its back overround is 
 
 **Devig, target and baseline.** Exchange and book prices are devigged proportionally with `odds_core.odds_math.devig_probabilities` on `price_decimal`. `odds_analytics.retail_ev.RetailEvRow.target` is `close × retail_decimal − 1` and `odds_analytics.retail_ev.RetailEvRow.baseline` is `exchange-at-t × retail_decimal − 1`, both for the row's outcome.
 
-**Weights.** `odds_analytics.retail_ev.RetailEvDataset.loss_weights` is `event_weights / retail_decimal²`, with `odds_analytics.retail_ev.event_weights` giving `1 / (rows in the event)`. The training matrix scales them to mean 1, which leaves weighted metrics unchanged and keeps `min_child_weight` and `reg_lambda` on their unweighted scale; they reach XGBoost through [the training pipeline](training-pipeline.md#sample-weights), with each row's kick-off time (`odds_analytics.retail_ev.RetailEvDataset.commence_times`) for the [walk-forward gap](cross-validation.md#how-folds-are-built).
+**Weights.** `odds_analytics.retail_ev.RetailEvDataset.loss_weights` is `odds_analytics.retail_ev.LOSS_WEIGHT_SCALE × event_weights / retail_decimal²`, with `odds_analytics.retail_ev.event_weights` giving `1 / (rows in the event)` and the scale fixed at 1,013. An event's weights therefore sum to 1,013 times its mean `1 / retail_decimal²`: 125 to 291, mean 156, on development data, whatever other events the training rows hold. 1,013 makes that mean equal the scale the frozen 2024-25 residual trial was tuned at: mean-one weights over 112,455 rows and 720 events, 156.2 per event. The weighted metrics do not depend on the scale; `min_child_weight` and `reg_lambda` do, so a fixed scale keeps a tuned value worth the same number of events at every refit ([weight scale](clv-target.md#the-retail-ev-target)). The training matrix passes the weights unchanged; they reach XGBoost through [the training pipeline](training-pipeline.md#sample-weights), with each row's kick-off time (`odds_analytics.retail_ev.RetailEvDataset.commence_times`) for the [walk-forward gap](cross-validation.md#how-folds-are-built).
 
 ## Retail-EV features
 
@@ -89,7 +89,7 @@ The event-level groups (`tabular`, standings, match stats, EPL schedule and the 
 - `"devigged_bookmaker"` uses the functions above.
 - `"raw"` uses `odds_analytics.sequence_loader.calculate_regression_target`, the mean vig-inclusive implied-probability delta. Devigging therefore applies to a delta target only when the YAML sets `target_type: devigged_bookmaker`.
 
-`odds_analytics.training.config.FeatureConfig` requires `target_type`. `target_bookmaker` is required for `devigged_bookmaker` and must be omitted otherwise; `devigged_bookmaker` is valid only for `h2h`, `1x2` and `totals`, and `retail_ev` only for `h2h` and `1x2` with the `xgboost` adapter; `outcome` must be `over` or `under` exactly when the market is `totals`, and `retail_ev` ignores it. A config that breaks these rules fails validation.
+`odds_analytics.training.config.FeatureConfig` requires `target_type`. `retail_ev_arm` (`odds_analytics.training.config.RetailEvArm`) is `direct` unless `target_type` is `retail_ev`; its `residual` value makes the model fit the target minus the baseline ([residual arm](training-config.md#retail-ev-arm)). `target_bookmaker` is required for `devigged_bookmaker` and must be omitted otherwise; `devigged_bookmaker` is valid only for `h2h`, `1x2` and `totals`, and `retail_ev` only for `h2h` and `1x2` with the `xgboost` adapter; `outcome` must be `over` or `under` exactly when the market is `totals`, and `retail_ev` ignores it. A config that breaks these rules fails validation.
 
 `odds_analytics.feature_groups._compute_target` passes `outcome` to every branch, so the target and the tabular features describe the same side.
 
@@ -99,4 +99,4 @@ The event-level groups (`tabular`, standings, match stats, EPL schedule and the 
 
 ## Config fields
 
-`odds_analytics.training.config.FeatureConfig` carries `target_type`, `target_bookmaker`, `closing_tier` and `closing_source_priority`; all fields and defaults are on [Training config](training-config.md). The tabular group's `retail_sharp_diff` is the strongest predictor of the delta target ([sharp benchmark](sharp-benchmark.md)).
+`odds_analytics.training.config.FeatureConfig` carries `target_type`, `retail_ev_arm`, `target_bookmaker`, `closing_tier` and `closing_source_priority`; all fields and defaults are on [Training config](training-config.md). The tabular group's `retail_sharp_diff` is the strongest predictor of the delta target ([sharp benchmark](sharp-benchmark.md)).
