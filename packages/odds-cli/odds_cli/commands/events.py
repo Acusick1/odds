@@ -7,6 +7,7 @@ import typer
 from odds_core.database import async_session_maker
 from odds_core.models import Event
 from odds_lambda.storage.event_merge import EventMerger, source_pair
+from odds_lambda.storage.event_name_repair import repair_team_names
 from rich.console import Console
 from rich.table import Table
 
@@ -89,3 +90,39 @@ def merge(
         odds events merge KEEP_ID DROP_ID --apply
     """
     asyncio.run(_merge(keep_id, drop_id, apply))
+
+
+async def _repair_names(sport: str, apply: bool) -> None:
+    async with async_session_maker() as session:
+        report = await repair_team_names(session, sport)
+        statuses = {s.value: n for s, n in report.renamed_in_place_statuses.items()}
+        console.print(
+            f"Events with a non-canonical team name: {len(report.renamed_ids)}; "
+            f"merged into a real event: {report.merged_count}; "
+            f"renamed in place: {len(report.renamed_in_place_ids)} "
+            f"({statuses or 'none'})"
+        )
+        for line in report.describe_merges():
+            console.print(f"  {line}")
+        if not apply:
+            await session.rollback()
+            console.print("Dry run: nothing written. Re-run with --apply.")
+            return
+        await session.commit()
+
+
+@app.command("repair-names")
+def repair_names(
+    sport: str = typer.Option("baseball_mlb", "--sport", "-s", help="Sport key"),
+    apply: bool = typer.Option(False, "--apply", help="Write; without it the plan is rolled back"),
+) -> None:
+    """Give events the canonical team names (no pitcher annotation, truncation or game suffix).
+
+    Betfair-created events take the full runner names from their snapshots. Events that
+    then duplicate a real event are merged into it; the rest are renamed in place so the
+    results job can settle them. Doubleheader games stay separate. Safe to re-run.
+
+    Example:
+        odds events repair-names --sport baseball_mlb --apply
+    """
+    asyncio.run(_repair_names(sport, apply))
