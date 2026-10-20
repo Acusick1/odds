@@ -25,7 +25,7 @@ status: stable
 
 # Polymarket pipeline and tables
 
-Collection of Polymarket prices and order books, built for NBA. The NBA pipeline is not being extended ([ADR-0007](../../docs/adr/0007-deprioritise-polymarket.md)); what was observed about each sport's markets is on [polymarket-market-research](polymarket-market-research.md). EPL match prices are stored as odds snapshots instead of in these tables ([polymarket-odds-snapshots](polymarket-odds-snapshots.md)).
+Collection of Polymarket prices and order books, built for NBA. The NBA pipeline is not being extended ([ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md)); what was observed about each sport's markets is on [polymarket-market-research](polymarket-market-research.md). EPL match prices are stored as odds snapshots instead of in these tables ([polymarket-odds-snapshots](polymarket-odds-snapshots.md)).
 
 ## Components
 

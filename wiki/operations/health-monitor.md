@@ -81,7 +81,7 @@ A stale source alerts once and then repeats every `stale_reminder_minutes` (360)
 | OddsPortal | 48 h | yes | 2 h under 3 h to kickoff, 3 h at 3-12 h, 6 h beyond (cadence 0.5, 1, then 2 h) |
 | Betfair Exchange | 72 h EPL, 6 h MLB | yes | 2 h under 12 h to kickoff, 6 h beyond (cadence 0.25, 0.5, then 2 h) |
 | Odds API | 48 h EPL | no | 2 h under 3 h to kickoff, 9 h at 3-12 h, 36 h at 12-24 h, 72 h at 24-72 h (cadence 0.5, 3, 12, 24 h) |
-| Polymarket odds | 5 days | yes | not checked until the job is in `bootstrap_jobs`; then 2 h under 3 h to kickoff, then 3 times the tier step (0.25 to 2 h, floored) |
+| Polymarket odds | 5 days | yes | 2 h under 3 h to kickoff, then 3 times the tier step (0.25 to 2 h, floored) |
 
 The thresholds are computed from each job's cadence, not configured. The Odds API horizon bounds the gap measured before a fixture is 12 h away, so that source is effectively checked only inside 12 h of kickoff. Betfair's MLB horizon is short because its markets are posted late, and its MLB name parsing is a separate defect.
 
@@ -115,7 +115,7 @@ A job inside `odds_core.alerts.job_alert_context` inserts `heartbeat:<name>` on 
 | check-health | yes | 2 h |
 | update-status | yes | none |
 | fetch-betfair-exchange (per sport) | yes | 10 h EPL, 11 h MLB (overnight window plus the 2 h interval) |
-| fetch-polymarket-odds (per sport) | yes | none until the job is bootstrapped |
+| fetch-polymarket-odds (per sport) | yes | 11 h EPL (overnight window plus polling interval) |
 | score-predictions | yes | none |
 | fetch-mlb-probables | yes | 30 h |
 | fetch-espn-fixtures | yes | none |

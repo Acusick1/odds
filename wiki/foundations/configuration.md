@@ -20,7 +20,7 @@ status: stable
 
 # Configuration (Settings)
 
-`odds_core.config` is authoritative for every setting and default (including the per-job heartbeat hours, which allow for each job's overnight pause, and the default bootstrap job list), apart from the per-sport Polymarket identifiers in `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`. `odds_core.config.Settings` composes one `BaseSettings` class per concern; `odds_core.config.get_settings()` returns a cached instance and `odds_core.config.reset_settings_cache()` clears it. `.env.example` is the variable template. The `project_root` field of `odds_core.config.Settings` is the repo root derived from the file location. To add a field, see [Set up and run locally](howto-add-setting.md).
+`odds_core.config` is authoritative for every setting and default (including the per-job heartbeat hours, which allow for each job's overnight pause, and the default bootstrap job list, which includes `fetch-polymarket-odds`), apart from the per-sport Polymarket identifiers in `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`. `odds_core.config.Settings` composes one `BaseSettings` class per concern; `odds_core.config.get_settings()` returns a cached instance and `odds_core.config.reset_settings_cache()` clears it. `.env.example` is the variable template. The `project_root` field of `odds_core.config.Settings` is the repo root derived from the file location. To add a field, see [Set up and run locally](howto-add-setting.md).
 
 Model and feature settings (`target_type`, `sharp_bookmakers`) are not here: they live in the training YAML ([Training config](../modelling/training-config.md)).
 

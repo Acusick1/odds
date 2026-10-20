@@ -48,7 +48,7 @@ In `odds_cli.commands.scheduler`:
 
 ## Bootstrap jobs and cron table
 
-`odds_core.config.SchedulerConfig.bootstrap_jobs` is the production job set; `agent-run` and `daily-digest` are commented out there, so they are opt-in via `SCHEDULER_BOOTSTRAP_JOBS`, as is the registered `fetch-polymarket-odds` until [ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md) is accepted. On a development machine the default set includes `fetch-odds` and `fetch-scores`, so `odds scheduler start` there spends Odds API quota; set `SCHEDULER_BOOTSTRAP_JOBS` to the jobs you need. For `agent-run` the bootstrap function is `odds_lambda.jobs.agent_run.schedule_next`, not `odds_lambda.jobs.agent_run.main`.
+`odds_core.config.SchedulerConfig.bootstrap_jobs` is the production job set; `agent-run` and `daily-digest` are commented out there, so they are opt-in via `SCHEDULER_BOOTSTRAP_JOBS`. `fetch-polymarket-odds` is bootstrapped for EPL ([ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md)). On a development machine the default set includes `fetch-odds` and `fetch-scores`, so `odds scheduler start` there spends Odds API quota; set `SCHEDULER_BOOTSTRAP_JOBS` to the jobs you need. For `agent-run` the bootstrap function is `odds_lambda.jobs.agent_run.schedule_next`, not `odds_lambda.jobs.agent_run.main`.
 
 `odds_lambda.scheduling.bootstrap.bootstrap_job` installs one job, per target sport for a per-sport job:
 

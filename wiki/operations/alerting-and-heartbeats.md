@@ -29,7 +29,7 @@ Event-driven alerts fire only if the job runs far enough to raise. A job that ne
 
 On clean exit a job inside `job_alert_context(name)` inserts `heartbeat:<name>`. The check-health job compares the newest row per expectation key to its allowed hours and purges old heartbeat rows; the defaults and mechanics are on [health-monitor](health-monitor.md#heartbeats). Nothing checks that a job's `odds_core.alerts.job_alert_context` name matches a `heartbeat_expectations` key, and a key with no history is not alerted, so a rename leaves a stale key and the check passes silently (#384).
 
-Which jobs write a heartbeat, and their default expectations, are in [health-monitor](health-monitor.md#heartbeats).
+Which jobs write a heartbeat (the EPL Polymarket job included), and their default expectations, are in [health-monitor](health-monitor.md#heartbeats).
 
 fetch-odds, fetch-scores and the NBA Polymarket jobs send hand-rolled criticals on failure instead of a heartbeat, so only the per-source stale-data check catches a stalled chain ([fetch-odds-job](../collection/fetch-odds-job.md), [results-jobs](../collection/results-jobs.md), [polymarket](../collection/polymarket.md)).
 
