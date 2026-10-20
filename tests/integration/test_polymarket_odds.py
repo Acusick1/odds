@@ -411,7 +411,7 @@ class TestMain:
         monkeypatch.setattr(fetch_polymarket_odds, "job_alert_context", spy)
         monkeypatch.setattr(
             fetch_polymarket_odds,
-            "decide_forward_resilient",
+            "decide_collection_run",
             AsyncMock(
                 return_value=SimpleNamespace(
                     next_execution=KICKOFF, reason="test", should_execute=True

@@ -27,6 +27,7 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 import structlog
 from odds_core.database import async_session_maker
@@ -53,6 +54,16 @@ OVERNIGHT_WINDOWS: dict[str, OvernightWindow] = {
     "soccer_epl": (22, 6),
     "baseball_mlb": (5, 14),
 }
+
+# A collector that discovers its own events goes dormant when its sport has no
+# fixture inside this horizon. It is longer than any gap between two Premier
+# League fixtures (about 20 days) so dormancy only ever means an off-season.
+DORMANCY_HORIZON_DAYS = 28
+
+
+class KickoffLookup(Protocol):
+    async def __call__(self, sport_key: str, *, now: datetime) -> datetime | None: ...
+
 
 # A close run due within this gap would rerun the job straight away; the run
 # in progress already sits at the close.
@@ -86,9 +97,11 @@ class CadenceConfig:
     than a browser-driven scrape).
 
     ``no_game`` is the check-in interval used when there is no upcoming game
-    (off-season / fixtures not yet posted). ``db_fallback`` is the interval a
-    caller should use when the kickoff query itself fails (DB unreachable),
-    so scheduling never blocks on DB availability. ``close_lead``, when set,
+    (off-season / fixtures not yet posted); the check-in does no overnight skip
+    and is brought forward to the moment the next fixture enters the lookahead.
+    ``db_fallback`` is the interval a caller should use when the kickoff query
+    itself fails (DB unreachable), so scheduling never blocks on DB
+    availability. ``close_lead``, when set,
     pulls ``next_execution`` forward to ``close_lead`` before the next kickoff
     the cadence would otherwise step over, so a run always lands just before
     each kickoff.
@@ -137,6 +150,24 @@ def _next_time(
     )
 
 
+def _idle_next_execution(
+    now: datetime,
+    cadence: CadenceConfig,
+    next_kickoff: datetime | None,
+    *,
+    lookahead_days: int,
+) -> datetime:
+    """Check-in time while no fixture is within the lookahead.
+
+    The check-in is brought forward to the moment a known fixture enters the
+    lookahead, so the job is awake exactly when its fixtures are.
+    """
+    check_in = now + timedelta(hours=cadence.no_game)
+    if next_kickoff is None:
+        return check_in
+    return min(check_in, next_kickoff - timedelta(days=lookahead_days))
+
+
 def _decide_from_kickoff(
     sport_key: str,
     cadence: CadenceConfig,
@@ -157,7 +188,9 @@ def _decide_from_kickoff(
         return ScheduleDecision(
             should_execute=False,
             reason=f"No upcoming {sport_key} game within {lookahead_days}d",
-            next_execution=_next_time(now, cadence.no_game, overnight),
+            next_execution=_idle_next_execution(
+                now, cadence, next_kickoff, lookahead_days=lookahead_days
+            ),
             tier=None,
         )
 
@@ -239,6 +272,7 @@ async def decide_forward_resilient(
     overnight: OvernightWindow | None = None,
     lookahead_days: int = 7,
     now: datetime | None = None,
+    next_kickoff_lookup: KickoffLookup | None = None,
 ) -> ScheduleDecision:
     """``decide_forward`` over one-or-more sports, resilient to query failure.
 
@@ -248,12 +282,13 @@ async def decide_forward_resilient(
     never blocks on DB availability — preserving the self-scheduling chain.
     """
     now = now or datetime.now(UTC)
+    lookup = next_kickoff_lookup or get_next_kickoff
     try:
         soonest: datetime | None = None
         soonest_sport = sport_keys[0]
         close_kickoff: datetime | None = None
         for sk in sport_keys:
-            ko = await get_next_kickoff(sk, now=now)
+            ko = await lookup(sk, now=now)
             if ko is not None and (soonest is None or ko < soonest):
                 soonest, soonest_sport = ko, sk
             close_ko = await _get_close_kickoff(sk, cadence, now=now)

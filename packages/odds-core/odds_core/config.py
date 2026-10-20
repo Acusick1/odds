@@ -221,13 +221,6 @@ class AlertConfig(BaseSettings):
         description="Hours after kick-off an EPL event is still checked for a live Betfair close",
     )
 
-    mlb_season_first_month: int = Field(
-        default=3, description="First month the MLB schedule must be fresh every day"
-    )
-    mlb_season_last_month: int = Field(
-        default=11, description="Last month the MLB schedule must be fresh every day"
-    )
-
     # Alert rate limiting
     alert_rate_limit_minutes: int = Field(
         default=30,

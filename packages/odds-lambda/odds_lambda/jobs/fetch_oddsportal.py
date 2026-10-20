@@ -3,15 +3,18 @@
 Scrapes pre-match odds for configured leagues, converts to pipeline format,
 and stores via OddsWriter. Self-schedules based on proximity to next kickoff.
 
-Scheduling strategy: query DB for next kickoff, compute interval from game
+Scheduling strategy: look up the next kickoff, compute interval from game
 proximity, pre-schedule before scraping so the chain survives Lambda
 timeouts. After a successful scrape, re-query (scrape may have created new
-events) and reschedule at the updated interval.
+events) and reschedule at the updated interval. With no fixture in the stored
+events or the published schedule within ``DORMANCY_HORIZON_DAYS`` the run only
+books its next check-in.
 
 Interval table:
   < 3h  (CLOSING)   → 30 min
   3–12h (PREGAME)   → 1h
-  12h+  or no games → 2h
+  12h+              → 2h
+  no fixture in 28d → 6h check-in, no scrape
   DB unreachable    → 1h (fallback)
 """
 
@@ -25,14 +28,14 @@ import structlog
 from odds_core.database import async_session_maker
 from odds_core.snapshot_sources import SnapshotSource
 
-from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
+from odds_lambda.collection_calendar import (
+    CollectionSource,
+    decide_collection_run,
+    require_rows_for_fixtures,
+)
 from odds_lambda.oddsportal_adapter import MatchOdds, convert_market
 from odds_lambda.oddsportal_client import OddsPortalClient, OddsPortalError
-from odds_lambda.scheduling.decision import (
-    CadenceConfig,
-    ScheduleDecision,
-    decide_forward_resilient,
-)
+from odds_lambda.scheduling.decision import CadenceConfig, ScheduleDecision
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
@@ -40,14 +43,14 @@ from odds_lambda.storage.writers import OddsWriter
 logger = structlog.get_logger()
 
 # Proximity-based polling cadence (hours): feed scrape — moderate cadence.
-# 12h+ to kickoff (and no-game) all poll at 2h, matching the previous "far" band.
+# 12h+ to kickoff all poll at 2h, matching the previous "far" band.
 CADENCE = CadenceConfig(
     closing=0.5,
     pregame=1.0,
     sharp=2.0,
     early=2.0,
     opening=2.0,
-    no_game=2.0,
+    no_game=6.0,
     db_fallback=1.0,
 )
 
@@ -288,10 +291,8 @@ async def main(ctx: JobContext) -> None:
     overnight = (primary_spec.overnight_start_utc, primary_spec.overnight_resume_utc)
     sport_keys = [s.sport_key for s in specs]
 
-    # This is a always-run scraper (no execution gate): we only use the
-    # decision's proximity-derived next_execution, not should_execute.
     async def _reschedule(label: str) -> ScheduleDecision:
-        decision = await decide_forward_resilient(sport_keys, CADENCE, overnight=overnight)
+        decision = await decide_collection_run(sport_keys, CADENCE, overnight=overnight)
         assert decision.next_execution is not None  # noqa: S101
         try:
             await self_schedule(
@@ -309,7 +310,12 @@ async def main(ctx: JobContext) -> None:
 
     # Pre-schedule before scraping so the chain survives Lambda timeouts
     # or a hung scrape.
-    await _reschedule("pre-schedule")
+    decision = await _reschedule("pre-schedule")
+
+    if not decision.should_execute:
+        async with job_alert_context(compound_job_name):
+            logger.info("fetch_oddsportal_dormant", sport=sport, reason=decision.reason)
+        return
 
     async with job_alert_context(compound_job_name):
         logger.info(
