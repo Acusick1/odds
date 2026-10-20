@@ -69,11 +69,11 @@ PRIMARY_LEAGUE_SLUG = "eng.1"
 
 
 class EspnUpcomingFetchError(RuntimeError):
-    """The Premier League's upcoming-fixture request to ESPN failed, or every competition's did."""
+    """The Premier League's upcoming-fixture request to ESPN failed."""
 
 
 class EspnSeasonFetchError(RuntimeError):
-    """Every team's schedule requests to ESPN failed for the season."""
+    """The Premier League schedule request failed for every team in the season."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -409,7 +409,7 @@ class EspnFixtureFetcher:
                 new_fixtures=new_count,
             )
 
-        if PRIMARY_LEAGUE_SLUG in failed_leagues or len(failed_leagues) == len(LEAGUE_SLUGS):
+        if PRIMARY_LEAGUE_SLUG in failed_leagues:
             raise EspnUpcomingFetchError(
                 f"ESPN scoreboard request failed for: {', '.join(failed_leagues)}"
             )
@@ -429,13 +429,12 @@ class EspnFixtureFetcher:
 
         all_records: list[EspnFixtureRecord] = []
         seen: set[tuple[str, str, str]] = set()
-        failed_teams = 0
+        primary_failures = 0
 
         for idx, team in enumerate(teams):
             team_id = team["id"]
             team_name = normalize_team_name(team["name"])
             team_records = 0
-            failed_requests = 0
 
             for league_slug in LEAGUE_SLUGS:
                 if self.request_delay_seconds > 0:
@@ -443,7 +442,8 @@ class EspnFixtureFetcher:
                 try:
                     fixtures = await self.fetch_team_schedule(league_slug, team_id, season)
                 except httpx.HTTPError as e:
-                    failed_requests += 1
+                    if league_slug == PRIMARY_LEAGUE_SLUG:
+                        primary_failures += 1
                     logger.warning(
                         "espn_schedule_fetch_failed",
                         team=team_name,
@@ -460,8 +460,6 @@ class EspnFixtureFetcher:
                     all_records.append(record)
                     team_records += 1
 
-            if failed_requests == len(LEAGUE_SLUGS):
-                failed_teams += 1
             logger.info(
                 "espn_team_schedule_loaded",
                 season=season,
@@ -471,9 +469,9 @@ class EspnFixtureFetcher:
                 total=len(teams),
             )
 
-        if teams and failed_teams == len(teams):
+        if teams and primary_failures == len(teams):
             raise EspnSeasonFetchError(
-                f"ESPN schedule requests failed for all {len(teams)} teams in season {season}"
+                f"ESPN Premier League schedule request failed for all {len(teams)} teams in season {season}"
             )
 
         all_records.sort(key=lambda r: r.date)

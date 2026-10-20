@@ -6,8 +6,8 @@ Flow:
 2. Upsert into ``espn_fixtures`` via ``EspnFixtureWriter`` (idempotent on
    ``(date, team, competition)``).
 3. Alerts on failure via ``job_alert_context``; the run fails when the Premier
-   League upcoming request failed (or every one did), every team's season
-   request failed, or ESPN lists no upcoming Premier League fixture while EPL
+   League upcoming request failed (or every one did), the Premier League
+   schedule request failed for every team, or ESPN lists no upcoming Premier League fixture while EPL
    events are scheduled. Rows fetched before a failure are upserted first.
 
 Scheduler cadence is a fixed daily cron (06:00 UTC, pre-matchday) in
@@ -31,6 +31,7 @@ from odds_lambda.espn_fixture_fetcher import (
     LEAGUE_SLUGS,
     PRIMARY_LEAGUE_SLUG,
     EspnFixtureFetcher,
+    EspnSeasonFetchError,
     EspnUpcomingFetchError,
     current_season,
 )
@@ -112,12 +113,20 @@ async def _fetch_and_upsert(season: int) -> tuple[int, int, int]:
     ``(past_count, upcoming_count, total_upserted)``.
     """
     async with EspnFixtureFetcher() as fetcher:
-        past_records = await fetcher.fetch_season(season)
+        try:
+            past_records = await fetcher.fetch_season(season)
+            season_error: EspnSeasonFetchError | None = None
+        except EspnSeasonFetchError as e:
+            past_records, season_error = [], e
         try:
             upcoming = await fetcher.fetch_upcoming(days_ahead=_UPCOMING_DAYS_AHEAD)
         except EspnUpcomingFetchError:
             await _upsert(past_records)
             raise
+
+    if season_error is not None:
+        await _upsert(upcoming.records)
+        raise season_error
 
     if upcoming.failed_leagues:
         await send_job_warning(

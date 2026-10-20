@@ -96,12 +96,20 @@ class TestFetchAndUpsertFailures:
         upsert.assert_awaited_once_with(past)
 
     @pytest.mark.asyncio
-    async def test_season_failure_propagates(self, calendar: AsyncMock) -> None:
-        fetcher = _fetcher(season_error=EspnSeasonFetchError("all teams"))
+    async def test_season_failure_propagates_after_upserting_upcoming(
+        self, calendar: AsyncMock, upsert: AsyncMock
+    ) -> None:
+        upcoming = [_record("Premier League")]
+        fetcher = _fetcher(
+            upcoming=UpcomingFixtures(records=upcoming, failed_leagues=[]),
+            season_error=EspnSeasonFetchError("all teams"),
+        )
 
         with patch.object(fetch_espn_fixtures, "EspnFixtureFetcher", return_value=fetcher):
             with pytest.raises(EspnSeasonFetchError):
                 await fetch_espn_fixtures._fetch_and_upsert(2026)
+
+        upsert.assert_awaited_once_with(upcoming)
 
     @pytest.mark.asyncio
     async def test_empty_premier_league_with_scheduled_events_raises_after_upsert(

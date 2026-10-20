@@ -583,14 +583,14 @@ class TestFetchUpcoming:
 
 class TestFetchSeasonFailures:
     @staticmethod
-    def _client(*, failing: bool) -> httpx.AsyncClient:
+    def _client(*, failing: bool, failing_slug: str | None = None) -> httpx.AsyncClient:
         def handler(request: httpx.Request) -> httpx.Response:
             url = str(request.url)
             if url.endswith("/teams?season=2026"):
                 return httpx.Response(
                     200, json=_team_list_payload([("1", "Arsenal"), ("2", "Chelsea")])
                 )
-            if failing:
+            if failing or (failing_slug and f"/{failing_slug}/" in url):
                 return httpx.Response(500, json={})
             return httpx.Response(200, json={"events": []})
 
@@ -606,6 +606,16 @@ class TestFetchSeasonFailures:
             client=self._client(failing=True), request_delay_seconds=0.0
         ) as fetcher:
             with pytest.raises(EspnSeasonFetchError, match="all 2 teams"):
+                await fetcher.fetch_season(2026)
+
+    @pytest.mark.asyncio
+    async def test_premier_league_failing_for_all_teams_raises_although_cups_succeed(
+        self,
+    ) -> None:
+        async with EspnFixtureFetcher(
+            client=self._client(failing=False, failing_slug="eng.1"), request_delay_seconds=0.0
+        ) as fetcher:
+            with pytest.raises(EspnSeasonFetchError, match="Premier League"):
                 await fetcher.fetch_season(2026)
 
     @pytest.mark.asyncio
