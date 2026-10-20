@@ -20,7 +20,7 @@ Loads historical Odds API snapshots and scores for NBA. It spends paid quota and
    ```bash
    uv run odds discover games --start 2025-01-01 --end 2025-01-07
    ```
-   - It upserts the events as SCHEDULED. Events already in the database lose their status and scores, so use ranges you have not finalised (#440).
+   - It upserts the events as SCHEDULED. Events already in the database keep their status and scores.
 2. Build a plan.
    ```bash
    uv run odds backfill plan --start 2025-01-01 --end 2025-01-07 --games 20 --output plan.json

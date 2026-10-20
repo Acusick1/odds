@@ -28,7 +28,7 @@ status: stable
 ## Columns
 
 - `id` (str PK), `sport_key`, `sport_title`, `commence_time` (tz-aware), `home_team`, `away_team`: `sport_key`, `commence_time` and both team columns are indexed.
-- `odds_core.models.Event.status`: `odds_core.models.EventStatus` = scheduled, live, final, cancelled, postponed. Which job sets which status is on [Event status lifecycle](../collection/event-status-lifecycle.md). Only LIVE and FINAL are ever written; CANCELLED and POSTPONED are never set.
+- `odds_core.models.Event.status`: `odds_core.models.EventStatus` = scheduled, live, final, cancelled, postponed. Which job sets which status is on [Event status lifecycle](../collection/event-status-lifecycle.md). `odds_core.models.EventStatus.can_become` defines the allowed moves, FINAL being terminal.
 - `home_score`, `away_score`, `completed_at`: set only on completion (`odds_lambda.storage.writers.OddsWriter.update_event_status`).
 - `created_at`, `updated_at`.
 
@@ -55,8 +55,8 @@ The two share no data.
 ## Upsert verbs
 
 - `odds_lambda.storage.writers.OddsWriter.upsert_event`: select-then-update. On an existing row it overwrites sport, teams, `commence_time` and `updated_at` only; status and scores are untouched.
-- `odds_lambda.storage.writers.OddsWriter.update_event_status`: raises `ValueError` for `FINAL` unless both scores are given, so a FINAL event written through it always has scores; it then sets the scores and `completed_at`. Scores passed with any other status are ignored.
-- `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events`: dedupes by id, then `ON CONFLICT (id) DO UPDATE` over every column except the key and `created_at`; returns approximate inserted/updated counts. It is used by `odds discover games` and by `odds_lambda.event_sync.EventSyncService.sync_sport`, i.e. every fetch-odds run, which then runs `odds_lambda.storage.event_merge.EventMerger.adopt_twins` ([Event merge](event-merge.md)). The incoming `odds_core.models.Event` has status `scheduled` and null scores, so a re-discovered FINAL event returns to SCHEDULED with null scores (#440).
+- `odds_lambda.storage.writers.OddsWriter.update_event_status`: raises `ValueError` for `FINAL` unless both scores are given, and for a move `odds_core.models.EventStatus.can_become` refuses (a FINAL event never changes status), so a FINAL event written through it always has scores; it then sets the scores and `completed_at`. Scores passed with any other status are ignored.
+- `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events`: dedupes by id, then `ON CONFLICT (id) DO UPDATE` over every column except the key, `created_at`, status, the scores and `completed_at`; returns approximate inserted/updated counts. It is used by `odds discover games` and by `odds_lambda.event_sync.EventSyncService.sync_sport`, i.e. every fetch-odds run, which then runs `odds_lambda.storage.event_merge.EventMerger.adopt_twins` ([Event merge](event-merge.md)). The incoming `odds_core.models.Event` is a discovery record (status `scheduled`, null scores), so a re-discovered event keeps its stored status and scores; the exceptions are a POSTPONED event whose incoming `commence_time` differs and a LIVE event whose incoming `commence_time` is after the `now` passed to the call, both of which become SCHEDULED.
 - `odds_lambda.storage.writers.OddsWriter.find_or_create_event` creates `op_live_` events: [OddsWriter](odds-writer.md#find_or_create_event).
 
 ## Related

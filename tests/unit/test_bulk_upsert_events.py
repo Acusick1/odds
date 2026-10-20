@@ -142,9 +142,9 @@ class TestBulkUpsertEvents:
         db_result = await test_session.execute(select(Event).where(Event.id == "event1"))
         updated_event1 = db_result.scalar_one()
 
-        assert updated_event1.status == EventStatus.FINAL
-        assert updated_event1.home_score == 110
-        assert updated_event1.away_score == 105
+        assert updated_event1.status == EventStatus.SCHEDULED
+        assert updated_event1.home_score is None
+        assert updated_event1.away_score is None
 
         # Verify created_at preserved, updated_at changed
         assert updated_event1.created_at == original_created_at
@@ -153,7 +153,7 @@ class TestBulkUpsertEvents:
         # Verify second event
         db_result = await test_session.execute(select(Event).where(Event.id == "event2"))
         updated_event2 = db_result.scalar_one()
-        assert updated_event2.status == EventStatus.LIVE
+        assert updated_event2.status == EventStatus.SCHEDULED
 
     async def test_mixed_insert_and_update(self, test_session: AsyncSession):
         """Test mixed scenario with both new and existing events."""
@@ -217,7 +217,7 @@ class TestBulkUpsertEvents:
         # Verify event1 was updated
         db_result = await test_session.execute(select(Event).where(Event.id == "event1"))
         event1 = db_result.scalar_one()
-        assert event1.status == EventStatus.LIVE
+        assert event1.status == EventStatus.SCHEDULED
 
     async def test_performance_100_events(self, test_session: AsyncSession):
         """Test performance with 100+ events (should complete in under 2 seconds)."""
@@ -400,4 +400,112 @@ class TestBulkUpsertEvents:
         final_event = db_result.scalar_one()
 
         assert final_event.updated_at > original_updated_at
-        assert final_event.status == EventStatus.LIVE
+        assert final_event.status == EventStatus.SCHEDULED
+
+
+def _discovered(
+    event_id: str, commence_time: datetime, status: EventStatus = EventStatus.SCHEDULED
+) -> Event:
+    return Event(
+        status=status,
+        id=event_id,
+        sport_key="soccer_epl",
+        sport_title="EPL",
+        commence_time=commence_time,
+        home_team="Arsenal",
+        away_team="Chelsea",
+    )
+
+
+@pytest.mark.asyncio
+class TestBulkUpsertKeepsResults:
+    async def test_rediscovery_keeps_status_and_scores(self, test_session: AsyncSession) -> None:
+        kickoff = datetime(2026, 8, 22, 14, 0, tzinfo=UTC)
+        completed_at = datetime(2026, 8, 22, 16, 0, tzinfo=UTC)
+        test_session.add(
+            Event(
+                id="final",
+                sport_key="soccer_epl",
+                sport_title="EPL",
+                commence_time=kickoff,
+                home_team="Arsenal",
+                away_team="Chelsea",
+                status=EventStatus.FINAL,
+                home_score=2,
+                away_score=1,
+                completed_at=completed_at,
+            )
+        )
+        test_session.add(_discovered("live", kickoff, EventStatus.LIVE))
+        await test_session.commit()
+
+        await OddsWriter(test_session).bulk_upsert_events(
+            [_discovered("final", kickoff), _discovered("live", kickoff)]
+        )
+        await test_session.commit()
+
+        test_session.expire_all()
+        final = await test_session.get(Event, "final")
+        live = await test_session.get(Event, "live")
+        assert final is not None and live is not None
+        assert (final.status, final.home_score, final.away_score, final.completed_at) == (
+            EventStatus.FINAL,
+            2,
+            1,
+            completed_at,
+        )
+        assert live.status == EventStatus.LIVE
+
+    async def test_rediscovery_still_updates_kickoff(self, test_session: AsyncSession) -> None:
+        kickoff = datetime(2026, 8, 22, 14, 0, tzinfo=UTC)
+        test_session.add(_discovered("evt", kickoff))
+        await test_session.commit()
+
+        moved = kickoff + timedelta(days=1)
+        await OddsWriter(test_session).bulk_upsert_events([_discovered("evt", moved)])
+        await test_session.commit()
+
+        test_session.expire_all()
+        event = await test_session.get(Event, "evt")
+        assert event is not None
+        assert event.commence_time == moved
+
+    async def test_postponed_event_with_a_new_kickoff_is_scheduled_again(
+        self, test_session: AsyncSession
+    ) -> None:
+        kickoff = datetime(2026, 8, 22, 14, 0, tzinfo=UTC)
+        for event_id in ("moved", "same"):
+            test_session.add(_discovered(event_id, kickoff, EventStatus.POSTPONED))
+        await test_session.commit()
+
+        await OddsWriter(test_session).bulk_upsert_events(
+            [_discovered("moved", kickoff + timedelta(days=7)), _discovered("same", kickoff)]
+        )
+        await test_session.commit()
+
+        test_session.expire_all()
+        moved = await test_session.get(Event, "moved")
+        same = await test_session.get(Event, "same")
+        assert moved is not None and same is not None
+        assert (moved.status, same.status) == (EventStatus.SCHEDULED, EventStatus.POSTPONED)
+
+    async def test_live_event_with_a_future_kickoff_is_scheduled_again(
+        self, test_session: AsyncSession
+    ) -> None:
+        now = datetime(2026, 8, 22, 14, 30, tzinfo=UTC)
+        kickoff = datetime(2026, 8, 22, 14, 0, tzinfo=UTC)
+        for event_id in ("delayed", "started"):
+            test_session.add(_discovered(event_id, kickoff, EventStatus.LIVE))
+        await test_session.commit()
+
+        await OddsWriter(test_session).bulk_upsert_events(
+            [_discovered("delayed", now + timedelta(hours=3)), _discovered("started", kickoff)],
+            now=now,
+        )
+        await test_session.commit()
+
+        test_session.expire_all()
+        delayed = await test_session.get(Event, "delayed")
+        started = await test_session.get(Event, "started")
+        assert delayed is not None and started is not None
+        assert (delayed.status, started.status) == (EventStatus.SCHEDULED, EventStatus.LIVE)

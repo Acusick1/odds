@@ -59,6 +59,38 @@ class TestEventModel:
         assert event.completed_at is not None
 
 
+class TestEventStatusTransitions:
+    @pytest.mark.parametrize(
+        ("current", "target"),
+        [
+            (EventStatus.SCHEDULED, EventStatus.LIVE),
+            (EventStatus.SCHEDULED, EventStatus.POSTPONED),
+            (EventStatus.LIVE, EventStatus.FINAL),
+            (EventStatus.LIVE, EventStatus.SCHEDULED),
+            (EventStatus.LIVE, EventStatus.CANCELLED),
+            (EventStatus.POSTPONED, EventStatus.SCHEDULED),
+            (EventStatus.CANCELLED, EventStatus.FINAL),
+            (EventStatus.FINAL, EventStatus.FINAL),
+        ],
+    )
+    def test_allowed(self, current: EventStatus, target: EventStatus) -> None:
+        assert current.can_become(target)
+
+    @pytest.mark.parametrize("target", [s for s in EventStatus if s is not EventStatus.FINAL])
+    def test_final_never_moves_to_another_status(self, target: EventStatus) -> None:
+        assert not EventStatus.FINAL.can_become(target)
+
+    @pytest.mark.parametrize(
+        ("current", "target"),
+        [
+            (EventStatus.CANCELLED, EventStatus.SCHEDULED),
+            (EventStatus.CANCELLED, EventStatus.POSTPONED),
+        ],
+    )
+    def test_refused(self, current: EventStatus, target: EventStatus) -> None:
+        assert not current.can_become(target)
+
+
 class TestOddsSnapshotModel:
     """Tests for OddsSnapshot model."""
 

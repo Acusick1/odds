@@ -30,6 +30,25 @@ class EventStatus(str, Enum):
     CANCELLED = "cancelled"
     POSTPONED = "postponed"
 
+    def can_become(self, target: "EventStatus") -> bool:
+        """Whether a stored event in this status may be moved to ``target``."""
+        return target is self or target in _STATUS_TRANSITIONS[self]
+
+
+_STATUS_TRANSITIONS: dict[EventStatus, frozenset[EventStatus]] = {
+    EventStatus.SCHEDULED: frozenset(
+        {EventStatus.LIVE, EventStatus.FINAL, EventStatus.CANCELLED, EventStatus.POSTPONED}
+    ),
+    EventStatus.LIVE: frozenset(
+        {EventStatus.SCHEDULED, EventStatus.FINAL, EventStatus.CANCELLED, EventStatus.POSTPONED}
+    ),
+    EventStatus.POSTPONED: frozenset(
+        {EventStatus.SCHEDULED, EventStatus.FINAL, EventStatus.CANCELLED}
+    ),
+    EventStatus.CANCELLED: frozenset({EventStatus.FINAL}),
+    EventStatus.FINAL: frozenset(),
+}
+
 
 class Event(SQLModel, table=True):
     """Event (game) model."""

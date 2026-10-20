@@ -479,10 +479,19 @@ class TestResultsParsing:
         assert (match.home_score, match.away_score) == (2, 0)
         assert match.start_time == datetime(2026, 10, 10, 15, 0, tzinfo=UTC)
 
+    def test_cancelled_rows_are_collected_apart_from_finished_ones(self) -> None:
+        rows = [_row("A", "B", 10, status=5, home_result="", away_result=""), _row("G", "H", 13)]
+
+        page = parse_results_page(_archive_feed(rows))
+
+        assert [m.home_team for m in page.matches] == ["G"]
+        [cancelled] = page.cancelled
+        assert (cancelled.home_team, cancelled.away_team) == ("A", "B")
+        assert cancelled.start_time == datetime(2026, 10, 10, 15, 0, tzinfo=UTC)
+
     def test_unfinished_and_unscored_rows_are_skipped(self) -> None:
         rows = [
             _row("A", "B", 10, status=1, home_result="", away_result=""),
-            _row("C", "D", 11, status=5, home_result="", away_result=""),
             _row("E", "F", 12, home_result="", away_result=""),
             _row("G", "H", 13),
         ]
@@ -490,6 +499,7 @@ class TestResultsParsing:
         page = parse_results_page(_archive_feed(rows))
 
         assert [m.home_team for m in page.matches] == ["G"]
+        assert page.cancelled == []
         assert page.oldest_start == datetime(2026, 10, 10, 15, 0, tzinfo=UTC)
 
     def test_page_count_rounds_up(self) -> None:

@@ -2,10 +2,11 @@
 
 Reads finished matches over HTTP from the results page's archive feed (no
 browser; see docs/adr/0009-oddsportal-feed-client.md) and sets matching
-unsettled events FINAL with their scores. Sport-aware: the results page path
-comes from the shared ``LeagueSpec`` registry in ``fetch_oddsportal``.
+unsettled events FINAL with their scores, or CANCELLED for cancelled matches.
+Sport-aware: the results page path comes from the shared ``LeagueSpec``
+registry in ``fetch_oddsportal``.
 
-Idempotency: only events past kick-off that are SCHEDULED, LIVE, or FINAL
+Idempotency: only events past kick-off that are SCHEDULED, LIVE, POSTPONED, or FINAL
 without scores are pending, so re-runs after settling find nothing to process.
 """
 
@@ -24,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
 from odds_lambda.oddsportal_client import (
+    CancelledMatch,
     FetchedResults,
     FinishedMatch,
     OddsPortalClient,
@@ -47,6 +49,7 @@ class ResultsStats:
 
     matches_fetched: int = 0
     events_updated: int = 0
+    events_cancelled: int = 0
     events_unresolved: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -61,6 +64,7 @@ class PendingEvent:
 
     id: str
     commence_time: datetime
+    status: EventStatus
 
 
 async def get_pending_events(
@@ -71,7 +75,7 @@ async def get_pending_events(
         Event.sport_key == sport_key,
         Event.commence_time < datetime.now(UTC),
         or_(
-            Event.status.in_([EventStatus.SCHEDULED, EventStatus.LIVE]),
+            Event.status.in_([EventStatus.SCHEDULED, EventStatus.LIVE, EventStatus.POSTPONED]),
             and_(
                 Event.status == EventStatus.FINAL,
                 or_(Event.home_score.is_(None), Event.away_score.is_(None)),
@@ -80,17 +84,22 @@ async def get_pending_events(
     ]
     if since is not None:
         conditions.append(Event.commence_time >= since)
-    result = await session.execute(select(Event.id, Event.commence_time).where(and_(*conditions)))
-    return [PendingEvent(id=row.id, commence_time=row.commence_time) for row in result.all()]
+    result = await session.execute(
+        select(Event.id, Event.commence_time, Event.status).where(and_(*conditions))
+    )
+    return [
+        PendingEvent(id=row.id, commence_time=row.commence_time, status=row.status)
+        for row in result.all()
+    ]
 
 
 def _raise_if_feed_parsed_nothing(fetched: FetchedResults, pending: list[PendingEvent]) -> None:
-    """A feed with rows but no finished match, while old events wait, means the parser broke."""
+    """A feed with rows but no finished or cancelled match, while old events wait, means the parser broke."""
     stale_before = datetime.now(UTC) - STALE_AFTER
     stale = sum(1 for event in pending if event.commence_time < stale_before)
-    if stale and fetched.rows_seen and not fetched.matches:
+    if stale and fetched.rows_seen and not fetched.matches and not fetched.cancelled:
         raise OddsPortalError(
-            f"results feed returned {fetched.rows_seen} rows but no finished match, "
+            f"results feed returned {fetched.rows_seen} rows but no finished or cancelled match, "
             f"with {stale} pending events older than {STALE_AFTER}; page format may have changed"
         )
 
@@ -158,15 +167,23 @@ async def process_results(
         )
         for m in fetched.matches
     ]
+    cancelled = [
+        CancelledMatch(
+            home_team=normalize_team_name(m.home_team),
+            away_team=normalize_team_name(m.away_team),
+            start_time=m.start_time,
+        )
+        for m in fetched.cancelled
+    ]
     starts_by_teams: dict[tuple[str, str], list[datetime]] = {}
-    for match in matches:
+    for match in (*matches, *cancelled):
         starts_by_teams.setdefault((match.home_team, match.away_team), []).append(match.start_time)
     pending_by_id = {event.id: event for event in pending_events}
 
     async with async_session_maker() as session:
         writer = OddsWriter(session)
 
-        for match in sorted(matches, key=lambda m: m.start_time):
+        for match in sorted((*matches, *cancelled), key=lambda m: m.start_time):
             event_id = await find_match_id(
                 session, match.home_team, match.away_team, match.start_time, sport_key
             )
@@ -179,13 +196,22 @@ async def process_results(
             )
             if nearest != match.start_time:
                 continue
+            if isinstance(match, CancelledMatch) and not event.status.can_become(
+                EventStatus.CANCELLED
+            ):
+                continue
             try:
-                await writer.update_event_status(
-                    event_id=event.id,
-                    status=EventStatus.FINAL,
-                    home_score=match.home_score,
-                    away_score=match.away_score,
-                )
+                if isinstance(match, FinishedMatch):
+                    await writer.update_event_status(
+                        event_id=event.id,
+                        status=EventStatus.FINAL,
+                        home_score=match.home_score,
+                        away_score=match.away_score,
+                    )
+                else:
+                    await writer.update_event_status(
+                        event_id=event.id, status=EventStatus.CANCELLED
+                    )
                 await session.commit()
             except Exception as e:
                 msg = f"{match.home_team} vs {match.away_team}: {e}"
@@ -197,7 +223,10 @@ async def process_results(
                     logger.warning("session_rollback_failed", exc_info=True)
                 continue
 
-            stats.events_updated += 1
+            if isinstance(match, FinishedMatch):
+                stats.events_updated += 1
+            else:
+                stats.events_cancelled += 1
             del pending_by_id[event.id]
 
     stats.events_unresolved = len(pending_by_id)
@@ -205,6 +234,7 @@ async def process_results(
         "results_collection_complete",
         matches_fetched=stats.matches_fetched,
         events_updated=stats.events_updated,
+        events_cancelled=stats.events_cancelled,
         events_unresolved=stats.events_unresolved,
         errors=len(stats.errors),
     )
