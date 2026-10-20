@@ -3,7 +3,6 @@ System health monitoring with automated checks and alerting.
 
 This module implements proactive health monitoring to detect:
 - Stale data (no recent fetches)
-- Consecutive failures
 - Low API quota
 - Data quality degradation
 - Database connectivity issues
@@ -151,7 +150,6 @@ class HealthMetrics(BaseModel):
     fetch_success_rate_24h: float
     hours_since_last_fetch: float | None
     api_quota_remaining: int | None
-    consecutive_failures: int
     data_quality_errors_24h: int
     events_scheduled: int
     events_live: int
@@ -514,36 +512,6 @@ class HealthMonitor:
             "MLB data-collection checks are disarmed"
         )
 
-    async def check_consecutive_failures(self) -> tuple[bool, int]:
-        """
-        Check for consecutive fetch failures.
-
-        Returns:
-            (is_healthy, consecutive_failure_count)
-        """
-        from odds_lambda.storage.readers import OddsReader
-
-        reader = OddsReader(self.session)
-
-        # Get recent fetch logs
-        fetch_logs = await reader.get_fetch_logs(limit=10)
-
-        if not fetch_logs:
-            return True, 0
-
-        # Count consecutive failures from most recent
-        consecutive_failures = 0
-        for log in fetch_logs:
-            if log.success:
-                break
-            consecutive_failures += 1
-
-        threshold = self.settings.alerts.consecutive_failures_threshold
-
-        is_healthy = consecutive_failures < threshold
-
-        return is_healthy, consecutive_failures
-
     async def check_api_quota(self) -> tuple[bool, int | None, float | None]:
         """
         Check API quota levels.
@@ -669,9 +637,6 @@ class HealthMonitor:
         # Calculate hours since last data arrived (any source)
         hours_since_last_fetch = await self._get_hours_since_latest_snapshot()
 
-        # Get consecutive failures
-        _, consecutive_failures = await self.check_consecutive_failures()
-
         # Get data quality errors
         _, data_quality_errors = await self.check_data_quality()
 
@@ -679,7 +644,6 @@ class HealthMonitor:
             fetch_success_rate_24h=stats.get("fetch_success_rate_24h", 0.0),
             hours_since_last_fetch=hours_since_last_fetch,
             api_quota_remaining=stats.get("api_quota_remaining"),
-            consecutive_failures=consecutive_failures,
             data_quality_errors_24h=data_quality_errors,
             events_scheduled=stats.get("events_by_status", {}).get("scheduled", 0),
             events_live=stats.get("events_by_status", {}).get("live", 0),
@@ -782,12 +746,11 @@ class HealthMonitor:
         Checks:
         1. Stale data per source (no rows within the source's cadence while fixtures are scheduled),
            and EPL events with no live Betfair close
-        2. Consecutive failures
-        3. API quota levels
-        4. Data quality issues
-        5. Job heartbeats (missing completions)
-        6. Event identity: twins, repeated fixtures, stale scheduled events
-        7. Self-scheduling chains with no run booked or an overdue run
+        2. API quota levels
+        3. Data quality issues
+        4. Job heartbeats (missing completions)
+        5. Event identity: twins, repeated fixtures, stale scheduled events
+        6. Self-scheduling chains with no run booked or an overdue run
 
         Returns:
             HealthStatus with metrics and alerts sent
@@ -844,21 +807,7 @@ class HealthMonitor:
                 ):
                     alerts_sent.append(BETFAIR_CLOSE_ALERT_TYPE)
 
-            # Check 2: Consecutive failures
-            failures_healthy, failure_count = await self.check_consecutive_failures()
-            if not failures_healthy:
-                issue = f"{failure_count} consecutive fetch failures (threshold: {self.settings.alerts.consecutive_failures_threshold})"
-                issues_detected.append(issue)
-
-                if await self._send_alert(
-                    alert_type="consecutive_failures",
-                    severity="error",
-                    message=f"🚨 Multiple fetch failures: {issue}",
-                    context={"failure_count": failure_count},
-                ):
-                    alerts_sent.append("consecutive_failures")
-
-            # Check 3: API quota
+            # Check 2: API quota
             quota_healthy, quota_remaining, quota_fraction = await self.check_api_quota()
 
             if quota_remaining is not None and quota_fraction is not None:
@@ -898,7 +847,7 @@ class HealthMonitor:
                     ):
                         alerts_sent.append("quota_low")
 
-            # Check 4: Data quality
+            # Check 3: Data quality
             quality_healthy, error_count = await self.check_data_quality()
             if not quality_healthy:
                 issue = f"High data quality error rate: {error_count} errors in 24h"
@@ -912,14 +861,14 @@ class HealthMonitor:
                 ):
                     alerts_sent.append("data_quality_errors")
 
-            # Check 5: Job heartbeats
+            # Check 4: Job heartbeats
             heartbeat_issues = await self.check_job_heartbeats()
             issues_detected.extend(heartbeat_issues)
 
-            # Check 6: One event per match
+            # Check 5: One event per match
             issues_detected.extend(await self.check_event_identity())
 
-            # Check 7: Self-scheduling chains
+            # Check 6: Self-scheduling chains
             for chain in await self.check_schedule_chains(moment):
                 issue = chain.describe()
                 issues_detected.append(issue)
@@ -975,7 +924,6 @@ class HealthMonitor:
                     fetch_success_rate_24h=0.0,
                     hours_since_last_fetch=None,
                     api_quota_remaining=None,
-                    consecutive_failures=0,
                     data_quality_errors_24h=0,
                     events_scheduled=0,
                     events_live=0,

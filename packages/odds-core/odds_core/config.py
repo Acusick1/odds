@@ -197,12 +197,6 @@ class AlertConfig(BaseSettings):
         description="Trigger critical alert when API quota falls below this fraction (0-1)",
     )
 
-    # Failure tracking thresholds
-    consecutive_failures_threshold: int = Field(
-        default=3,
-        description="Number of consecutive failures before triggering alert",
-    )
-
     # Data staleness monitoring
     stale_data_hours: int = Field(
         default=2,

@@ -23,13 +23,13 @@ The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README
 
 | Topic | Authoritative source |
 |---|---|
-| Settings, defaults, per-job heartbeat hours, stale-data multipliers, the Betfair-close lookback, MLB season months (March to November) and the default job list | `odds_core.config` ([Configuration](configuration.md)); `.env.example` is the template, not a source of defaults |
+| Settings, defaults, per-job heartbeat hours, stale-data multipliers, the Betfair-close lookback, MLB season months (March to November) and the default job list | `odds_core.config` ([Configuration](configuration.md)); `.env.example` is a template, not a source of defaults |
 | CLI flags and defaults | each command's `--help` ([The odds CLI](odds-cli.md)) |
 | Job and schedule matrix | `odds_core.config.SchedulerConfig.bootstrap_jobs`, `odds_lambda.scheduling.jobs._JOB_CRON_MAP` and `odds_lambda.scheduling.jobs._JOB_SPORTS` for what runs in production on the mini-PC (the collectors, Polymarket EPL included), and `odds_lambda.scheduling.bootstrap.bootstrap_job` for what each scheduler start does to a stored schedule; `deployment/aws/terraform/eventbridge.tf` for the dormant AWS rules ([Where each job runs](../scheduling/job-deployment-matrix.md)); deployed AWS state only via `odds scheduler list-jobs --backend aws` |
 | Alerting and reporting | `odds_core.alerts`, gated by `odds_core.config.Settings.alerts_deliverable` and `SCHEDULER_DRY_RUN` ([Alerts](../operations/alerts.md), [Reporting surfaces](../operations/reporting-surfaces.md)) |
 | MCP toolset | every `@mcp.tool()` function defined in `odds_mcp.server` ([odds-mcp server](../agent/mcp-server.md)) |
 | Agent behaviour | the prompt files in `packages/odds-mcp/agents/` ([The betting agent](../agent/betting-agent.md)) |
-| Schema and storage | the model files, chiefly `odds_core.models` (events, odds rows with decimal prices, and snapshots; [Storage](../storage/index.md)) |
+| Schema and storage | the model files, mainly `odds_core.models` (events, odds rows with decimal prices, and snapshots; [Storage](../storage/index.md)) |
 | Training data, target and feature config | `odds_analytics.training.config.FeatureConfig` (whose `feature_groups` names, per target, and `target_type` are validated, with the fields a `retail_ev` target does not read, and `retail_ev_arm`, which only a `retail_ev` target may set away from `direct`) and `odds_analytics.feature_groups.prepare_training_data` (which builds the training arrays from the groups); evidence in `experiments/results/` ([CLV model findings](../evaluation/clv-model-findings.md)) |
 | Agent data sources | [Agent data sources](../agent/agent-data-sources.md) |
 | Issue and triage workflow | `docs/agents/` (below) |

@@ -44,7 +44,6 @@ async def main(ctx: JobContext) -> None:
             success_rate_24h=health_status.metrics.fetch_success_rate_24h,
             hours_since_last_fetch=health_status.metrics.hours_since_last_fetch,
             quota_remaining=health_status.metrics.api_quota_remaining,
-            consecutive_failures=health_status.metrics.consecutive_failures,
         )
 
         if not health_status.overall_healthy:
