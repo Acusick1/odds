@@ -403,22 +403,6 @@ class TestIdentityChecks:
 
         assert await EventMerger(session).find_repeated_fixtures("soccer_epl") == []
 
-    @pytest.mark.asyncio
-    async def test_flags_recent_scheduled_events_long_past_kickoff(
-        self, pglite_async_session
-    ) -> None:
-        session = pglite_async_session
-        session.add(make_epl_event(API_EVENT_ID, utc_now() - timedelta(days=3)))
-        session.add(make_epl_event(TWIN_EVENT_ID, utc_now() + timedelta(days=3)))
-        session.add(make_epl_event(FDUK_EVENT_ID, utc_now() - timedelta(days=30)))
-        await session.flush()
-
-        stale = await EventMerger(session).find_stale_scheduled(
-            timedelta(hours=24), timedelta(days=7), utc_now()
-        )
-
-        assert [e.id for e in stale] == [API_EVENT_ID]
-
 
 class TestMergeTwinsCommand:
     @pytest.mark.asyncio

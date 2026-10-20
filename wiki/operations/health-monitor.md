@@ -19,6 +19,8 @@ sources:
   - odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats
   - odds_lambda.health_monitor.HealthMonitor.check_api_quota
   - odds_lambda.health_monitor.HealthMonitor.check_event_identity
+  - odds_lambda.health_monitor.HealthMonitor.check_unsettled_events
+  - odds_lambda.storage.unsettled_events.find_unsettled_events
   - odds_lambda.health_monitor.HealthMonitor.check_schedule_chains
   - odds_lambda.health_monitor.DeadChain
   - odds_lambda.health_monitor.SCHEDULE_OVERDUE_GRACE
@@ -48,7 +50,7 @@ status: stable
 2. `odds_lambda.health_monitor.HealthMonitor.check_api_quota`: `api_quota_remaining` of the latest row that has one, divided by `settings.api.quota`; below 0.1 alert `quota_critical`, below 0.2 `quota_low`. This is the same fraction fetch-odds applies, but rate-limited ([odds-api-quota](../collection/odds-api-quota.md)).
 3. `odds_lambda.health_monitor.HealthMonitor.check_data_quality`: `error` plus `critical` `odds_core.models.DataQualityLog` rows in 24 h (each query capped at 1000) versus `data_quality_error_threshold` (10). The validator itself only emits `warning` and `error`, so `critical` never occurs ([odds-validator](../storage/odds-validator.md)).
 4. `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats`: compares the newest `heartbeat:<job>` row per key in `odds_core.config.AlertConfig.heartbeat_expectations` to its allowed hours. The default keys and allowed hours are in [Heartbeats](#heartbeats). A job with no history is not alerted (#384).
-5. `odds_lambda.health_monitor.HealthMonitor.check_event_identity`: per sport, matches stored as several events, EPL fixtures stored twice in a season, and events still `scheduled` a day after a kick-off in the last seven days, each its own warning (`duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `stale_scheduled_events:<sport>`). Nothing is merged; `odds events merge-twins --sport <sport> --apply` clears twins ([Event merge](../storage/event-merge.md#detection)).
+5. `odds_lambda.health_monitor.HealthMonitor.check_event_identity`: per sport, matches stored as several events, and EPL fixtures stored twice in a season, each its own warning (`duplicate_events:<sport>`, `repeated_fixtures:<sport>`). Nothing is merged; `odds events merge-twins --sport <sport> --apply` clears twins ([Event merge](../storage/event-merge.md#detection)).
 6. `odds_lambda.health_monitor.HealthMonitor.check_schedule_chains`: dead self-scheduling chains, each its own critical `dead_schedule_chain:<job>` ([Schedule chain check](#schedule-chain-check)).
 
 Then `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` runs on every health check, and it deletes `heartbeat:%` rows older than `heartbeat_retention_days` (7) and is the only retention sweep in the system.

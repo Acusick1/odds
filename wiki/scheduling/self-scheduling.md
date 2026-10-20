@@ -44,7 +44,7 @@ Five different failure behaviours exist across the jobs, and no code states whic
 |---|---|---|
 | `fetch-odds`, `fetch-scores`, `update-status` | pre and post | log and `odds_core.alerts.send_error`, continue |
 | `fetch-oddsportal`, `fetch-betfair-exchange` | pre and post | pre-schedule failure raises; post logs only |
-| `fetch-oddsportal-results` | fixed next-day time in `finally`, no pre-schedule | log and `odds_core.alerts.send_critical` |
+| `fetch-oddsportal-results` | fixed next-day time in `finally`, no pre-schedule | log and `odds_core.alerts.send_critical`; a run that settles nothing while events are overdue sends a `results_stalled` warning |
 | `check-health` | after the work only, raw backend call | log and `odds_core.alerts.send_error` |
 | `fetch-polymarket` | after the work only, raw backend call | log and `odds_core.alerts.send_error` |
 

@@ -216,6 +216,7 @@ class TestHealthMonitor:
                         with (
                             patch.object(monitor, "check_job_heartbeats", return_value=[]),
                             patch.object(monitor, "check_event_identity", return_value=[]),
+                            patch.object(monitor, "check_unsettled_events", return_value=[]),
                         ):
                             status = await monitor.check_system_health()
 
@@ -264,6 +265,7 @@ class TestHealthMonitor:
                         with (
                             patch.object(monitor, "check_job_heartbeats", return_value=[]),
                             patch.object(monitor, "check_event_identity", return_value=[]),
+                            patch.object(monitor, "check_unsettled_events", return_value=[]),
                         ):
                             # Mock alert sending
                             with patch.object(monitor, "_send_alert", return_value=True):
@@ -450,6 +452,7 @@ class TestCheckScheduleChains:
                 ("check_data_quality", (True, 0)),
                 ("check_job_heartbeats", []),
                 ("check_event_identity", []),
+                ("check_unsettled_events", []),
                 ("purge_old_heartbeats", 0),
                 (
                     "collect_metrics",

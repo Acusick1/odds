@@ -1129,6 +1129,7 @@ class TestResultsJob:
             fetch_oddsportal_results, "process_results", AsyncMock(return_value=stats)
         )
         monkeypatch.setattr(fetch_oddsportal_results, "self_schedule", AsyncMock())
+        monkeypatch.setattr(fetch_oddsportal_results, "record_run_outcome", AsyncMock())
 
         with pytest.raises(RuntimeError, match="failed to settle 1 event"):
             await fetch_oddsportal_results.main(JobContext(sport="soccer_epl"))
@@ -1144,7 +1145,11 @@ class TestResultsJob:
             AsyncMock(return_value=fetch_oddsportal_results.ResultsStats()),
         )
         monkeypatch.setattr(fetch_oddsportal_results, "self_schedule", AsyncMock())
+        record_outcome = AsyncMock()
+        monkeypatch.setattr(fetch_oddsportal_results, "record_run_outcome", record_outcome)
 
         await fetch_oddsportal_results.main(JobContext(sport="soccer_epl"))
 
+        record_outcome.assert_awaited_once()
+        assert record_outcome.await_args.args[0] == "soccer_epl"
         assert alerts.heartbeats == ["heartbeat:fetch-oddsportal-results-epl"]
