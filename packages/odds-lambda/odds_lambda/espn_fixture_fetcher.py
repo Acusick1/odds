@@ -10,6 +10,7 @@ The ESPN Site API is free and unauthenticated.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -64,8 +65,23 @@ _REQUEST_TIMEOUT_SECONDS = 15.0
 _SCOREBOARD_LIMIT = 300
 
 
+PRIMARY_LEAGUE_SLUG = "eng.1"
+
+
 class EspnUpcomingFetchError(RuntimeError):
-    """Every competition's upcoming-fixture request to ESPN failed."""
+    """The Premier League's upcoming-fixture request to ESPN failed, or every competition's did."""
+
+
+class EspnSeasonFetchError(RuntimeError):
+    """Every team's schedule requests to ESPN failed for the season."""
+
+
+@dataclass(frozen=True, slots=True)
+class UpcomingFixtures:
+    """Upcoming records plus the competitions whose request failed."""
+
+    records: list[EspnFixtureRecord]
+    failed_leagues: list[str]
 
 
 def current_season(now: datetime | None = None) -> int:
@@ -344,7 +360,9 @@ class EspnFixtureFetcher:
 
         return records
 
-    async def fetch_upcoming(self, days_ahead: int = 30) -> list[EspnFixtureRecord]:
+    async def fetch_upcoming(
+        self, days_ahead: int = 30, *, now: datetime | None = None
+    ) -> UpcomingFixtures:
         """Fetch near-future fixtures across all configured competitions.
 
         The ``teams/{id}/schedule`` endpoint only returns completed matches,
@@ -353,10 +371,12 @@ class EspnFixtureFetcher:
         filtered to ``start of today → today+days_ahead`` and deduplicated on
         ``(date, team, opponent)``.
 
-        A competition whose request fails is logged and skipped. Raises
-        ``EspnUpcomingFetchError`` when every competition failed.
+        A cup or European competition whose request fails is logged and listed
+        in ``failed_leagues``. Raises ``EspnUpcomingFetchError`` when the
+        Premier League request failed or every competition failed. ``now``
+        defaults to the current UTC time.
         """
-        now = datetime.now(UTC)
+        now = now or datetime.now(UTC)
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = now + timedelta(days=days_ahead)
         all_records: list[EspnFixtureRecord] = []
@@ -389,13 +409,13 @@ class EspnFixtureFetcher:
                 new_fixtures=new_count,
             )
 
-        if len(failed_leagues) == len(LEAGUE_SLUGS):
+        if PRIMARY_LEAGUE_SLUG in failed_leagues or len(failed_leagues) == len(LEAGUE_SLUGS):
             raise EspnUpcomingFetchError(
-                f"ESPN scoreboard request failed for every competition: {', '.join(failed_leagues)}"
+                f"ESPN scoreboard request failed for: {', '.join(failed_leagues)}"
             )
 
         all_records.sort(key=lambda r: r.date)
-        return all_records
+        return UpcomingFixtures(records=all_records, failed_leagues=failed_leagues)
 
     async def fetch_season(self, season: int) -> list[EspnFixtureRecord]:
         """Fetch all fixtures for all EPL teams in a season across all competitions.
@@ -409,11 +429,13 @@ class EspnFixtureFetcher:
 
         all_records: list[EspnFixtureRecord] = []
         seen: set[tuple[str, str, str]] = set()
+        failed_teams = 0
 
         for idx, team in enumerate(teams):
             team_id = team["id"]
             team_name = normalize_team_name(team["name"])
             team_records = 0
+            failed_requests = 0
 
             for league_slug in LEAGUE_SLUGS:
                 if self.request_delay_seconds > 0:
@@ -421,6 +443,7 @@ class EspnFixtureFetcher:
                 try:
                     fixtures = await self.fetch_team_schedule(league_slug, team_id, season)
                 except httpx.HTTPError as e:
+                    failed_requests += 1
                     logger.warning(
                         "espn_schedule_fetch_failed",
                         team=team_name,
@@ -437,6 +460,8 @@ class EspnFixtureFetcher:
                     all_records.append(record)
                     team_records += 1
 
+            if failed_requests == len(LEAGUE_SLUGS):
+                failed_teams += 1
             logger.info(
                 "espn_team_schedule_loaded",
                 season=season,
@@ -444,6 +469,11 @@ class EspnFixtureFetcher:
                 new_fixtures=team_records,
                 index=idx + 1,
                 total=len(teams),
+            )
+
+        if teams and failed_teams == len(teams):
+            raise EspnSeasonFetchError(
+                f"ESPN schedule requests failed for all {len(teams)} teams in season {season}"
             )
 
         all_records.sort(key=lambda r: r.date)

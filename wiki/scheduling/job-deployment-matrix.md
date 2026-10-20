@@ -45,7 +45,7 @@ The betting agent is not scheduled: it is run by hand on the mini-PC with `odds 
 
 Per-job pages: [fetch-odds](../collection/fetch-odds-job.md), [fetch-scores and update-status](../collection/results-jobs.md), [status lifecycle](../collection/event-status-lifecycle.md), [OddsPortal](../collection/fetch-oddsportal-job.md), [Betfair](../collection/betfair-exchange.md), [digest](../operations/daily-digest.md), [health](../operations/health-monitor.md), [agent](../agent/agent-run-job.md), [ESPN fixtures](../collection/epl-context-data.md), [MLB probables](../collection/mlb-probable-pitchers.md), [Polymarket](../collection/polymarket.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md).
 
-Known defects on the production host: OddsPortal scrapes return 0 matches (#484), one hung OddsPortal run ends the local chains (#485), and the ESPN fixtures request returns HTTP 400 (#486).
+Known defects on the production host: OddsPortal scrapes return 0 matches (#484) and one hung OddsPortal run ends the local chains (#485).
 
 ## Dormant AWS rules
 

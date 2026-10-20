@@ -23,7 +23,7 @@ The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README
 
 | Topic | Authoritative source |
 |---|---|
-| Settings, defaults, heartbeat hours, stale-data multipliers, the Betfair-close lookback, MLB season months (March to November) and the default job list | `odds_core.config` ([Configuration](configuration.md)); `.env.example` is the template, not a source of defaults |
+| Settings, defaults, per-job heartbeat hours, stale-data multipliers, the Betfair-close lookback, MLB season months (March to November) and the default job list | `odds_core.config` ([Configuration](configuration.md)); `.env.example` is the template, not a source of defaults |
 | CLI flags and defaults | each command's `--help` ([The odds CLI](odds-cli.md)) |
 | Job and schedule matrix | `odds_core.config.SchedulerConfig.bootstrap_jobs`, `odds_lambda.scheduling.jobs._JOB_CRON_MAP` and `odds_lambda.scheduling.jobs._JOB_SPORTS` for what runs in production on the mini-PC (the collectors, Polymarket EPL included), and `odds_lambda.scheduling.bootstrap.bootstrap_job` for what each scheduler start does to a stored schedule; `deployment/aws/terraform/eventbridge.tf` for the dormant AWS rules ([Where each job runs](../scheduling/job-deployment-matrix.md)); deployed AWS state only via `odds scheduler list-jobs --backend aws` |
 | Alerting and reporting | `odds_core.alerts` ([Alerts](../operations/alerts.md), [Reporting surfaces](../operations/reporting-surfaces.md)) |

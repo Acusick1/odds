@@ -51,7 +51,7 @@ class TestEspnLiveApi:
         """
         with _skip_on_espn_failure():
             async with EspnFixtureFetcher() as fetcher:
-                records = await fetcher.fetch_upcoming(days_ahead=30)
+                records = (await fetcher.fetch_upcoming(days_ahead=30)).records
 
         if not records:
             pytest.skip(
@@ -97,7 +97,7 @@ class TestEspnLiveApi:
         """
         with _skip_on_espn_failure():
             async with EspnFixtureFetcher() as fetcher:
-                upcoming = await fetcher.fetch_upcoming(days_ahead=30)
+                upcoming = (await fetcher.fetch_upcoming(days_ahead=30)).records
                 season = await fetcher.fetch_season(current_season())
 
         all_records = [*upcoming, *season]
