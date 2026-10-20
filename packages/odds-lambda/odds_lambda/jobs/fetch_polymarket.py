@@ -14,6 +14,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from odds_core.alerts import job_alert_context, send_error
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.polymarket_models import PolymarketFetchLog
@@ -106,72 +107,69 @@ async def main(ctx: JobContext) -> None:
 
     result = PolymarketIngestionResult()
 
-    try:
-        async with PolymarketClient() as client, async_session_maker() as session:
-            reader = PolymarketReader(session)
-            writer = PolymarketWriter(session)
-            service = build_ingestion_service(client, reader, writer)
+    async with job_alert_context("fetch-polymarket"):
+        try:
+            async with PolymarketClient() as client, async_session_maker() as session:
+                reader = PolymarketReader(session)
+                writer = PolymarketWriter(session)
+                service = build_ingestion_service(client, reader, writer)
 
-            # Discover active NBA events from Gamma API
-            logger.info("discovering_active_polymarket_events")
-            events_data = await client.get_events("basketball_nba", active=True, closed=False)
+                # Discover active NBA events from Gamma API
+                logger.info("discovering_active_polymarket_events")
+                events_data = await client.get_events("basketball_nba", active=True, closed=False)
 
-            if not events_data:
-                logger.info(
-                    "fetch_polymarket_skipped",
-                    reason="no_active_polymarket_events_from_api",
-                )
-                await _handle_no_api_events(
-                    reader,
-                    price_poll_interval=app_settings.polymarket.price_poll_interval,
-                    dry_run=app_settings.scheduler.dry_run,
-                )
-                return
+                if not events_data:
+                    logger.info(
+                        "fetch_polymarket_skipped",
+                        reason="no_active_polymarket_events_from_api",
+                    )
+                    await _handle_no_api_events(
+                        reader,
+                        price_poll_interval=app_settings.polymarket.price_poll_interval,
+                        dry_run=app_settings.scheduler.dry_run,
+                    )
+                    return
 
-            logger.info("active_polymarket_events_discovered", count=len(events_data))
+                logger.info("active_polymarket_events_discovered", count=len(events_data))
 
-            # Phase 1: Upsert events + markets
-            discovery_result = await service.discover_and_upsert_events(events_data)
-            result.events_processed = discovery_result.events_processed
-            result.markets_discovered = discovery_result.markets_discovered
-            result.errors = discovery_result.errors
+                # Phase 1: Upsert events + markets
+                discovery_result = await service.discover_and_upsert_events(events_data)
+                result.events_processed = discovery_result.events_processed
+                result.markets_discovered = discovery_result.markets_discovered
+                result.errors = discovery_result.errors
 
-            # Phase 2: Collect price/orderbook snapshots
-            snapshot_result = await service.collect_snapshots()
-            result.price_snapshots_stored = snapshot_result.price_snapshots_stored
-            result.orderbook_snapshots_stored = snapshot_result.orderbook_snapshots_stored
-            result.errors += snapshot_result.errors
-            result.fetch_tier = snapshot_result.fetch_tier
+                # Phase 2: Collect price/orderbook snapshots
+                snapshot_result = await service.collect_snapshots()
+                result.price_snapshots_stored = snapshot_result.price_snapshots_stored
+                result.orderbook_snapshots_stored = snapshot_result.orderbook_snapshots_stored
+                result.errors += snapshot_result.errors
+                result.fetch_tier = snapshot_result.fetch_tier
 
-            if result.fetch_tier is None:
-                # No active events after upsert — schedule daily check
-                next_execution = datetime.now(UTC) + timedelta(hours=24)
-                await _schedule(
-                    "fetch-polymarket", next_execution, dry_run=app_settings.scheduler.dry_run
-                )
-                return
+                if result.fetch_tier is None:
+                    # No active events after upsert — schedule daily check
+                    next_execution = datetime.now(UTC) + timedelta(hours=24)
+                    await _schedule(
+                        "fetch-polymarket", next_execution, dry_run=app_settings.scheduler.dry_run
+                    )
+                    return
 
-        logger.info(
-            "fetch_polymarket_completed",
-            events_processed=result.events_processed,
-            markets_discovered=result.markets_discovered,
-            price_snapshots_stored=result.price_snapshots_stored,
-            orderbook_snapshots_stored=result.orderbook_snapshots_stored,
-            errors=result.errors,
-        )
+            logger.info(
+                "fetch_polymarket_completed",
+                events_processed=result.events_processed,
+                markets_discovered=result.markets_discovered,
+                price_snapshots_stored=result.price_snapshots_stored,
+                orderbook_snapshots_stored=result.orderbook_snapshots_stored,
+                errors=result.errors,
+            )
 
-        await _log_fetch(result, success=True)
+            await _log_fetch(result, success=True)
 
-    except Exception as e:
-        logger.error("fetch_polymarket_failed", error=str(e), exc_info=True)
+        except Exception as e:
+            logger.error("fetch_polymarket_failed", error=str(e), exc_info=True)
 
-        await _log_fetch(result, success=False, error_message=str(e))
+            await _log_fetch(result, success=False, error_message=str(e))
 
-        from odds_core.alerts import send_critical
-
-        await send_critical(f"🚨 Fetch Polymarket job failed: {type(e).__name__}: {str(e)}")
-
-        raise
+            raise
 
     # Self-schedule next execution
     if result.fetch_tier:
@@ -191,8 +189,6 @@ async def main(ctx: JobContext) -> None:
             )
         except Exception as e:
             logger.error("fetch_polymarket_scheduling_failed", error=str(e), exc_info=True)
-
-            from odds_core.alerts import send_error
 
             await send_error(f"Fetch Polymarket scheduling failed: {type(e).__name__}: {str(e)}")
 

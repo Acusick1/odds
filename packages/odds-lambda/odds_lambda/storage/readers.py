@@ -464,23 +464,6 @@ class OddsReader:
         snapshots_result = await self.session.execute(snapshots_count_query)
         total_snapshots = snapshots_result.scalar_one()
 
-        # Recent fetch success rate (last 24h)
-        day_ago = datetime.now(UTC) - timedelta(hours=24)
-
-        # Count all fetches
-        total_fetches_query = select(func.count(FetchLog.id)).where(FetchLog.fetch_time >= day_ago)
-        total_result = await self.session.execute(total_fetches_query)
-        total_fetches = total_result.scalar_one()
-
-        # Count successful fetches
-        success_fetches_query = select(func.count(FetchLog.id)).where(
-            and_(FetchLog.fetch_time >= day_ago, FetchLog.success.is_(True))
-        )
-        success_result = await self.session.execute(success_fetches_query)
-        successful_fetches = success_result.scalar_one()
-
-        success_rate = (successful_fetches / total_fetches * 100) if total_fetches > 0 else 0.0
-
         # Most recent API quota
         latest_quota_query = (
             select(FetchLog.api_quota_remaining)
@@ -496,7 +479,6 @@ class OddsReader:
             "total_events": sum(events_by_status.values()),
             "total_odds_records": total_odds,
             "total_snapshots": total_snapshots,
-            "fetch_success_rate_24h": round(success_rate, 2),
             "api_quota_remaining": latest_quota,
         }
 

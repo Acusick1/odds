@@ -12,6 +12,7 @@ import asyncio
 from datetime import timedelta
 
 import structlog
+from odds_core.alerts import job_alert_context, send_critical, send_error, send_warning
 from odds_core.config import Settings, get_settings
 
 from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
@@ -118,8 +119,6 @@ async def main(ctx: JobContext) -> None:
             )
         except Exception as e:
             logger.error("fetch_odds_scheduling_failed", error=str(e), exc_info=True)
-            from odds_core.alerts import send_error
-
             await send_error(f"Fetch odds scheduling failed: {type(e).__name__}: {str(e)}")
 
     # Smart execution gating, scoped to this job's sport(s) — fixes the prior
@@ -136,105 +135,87 @@ async def main(ctx: JobContext) -> None:
     # Pre-schedule before any work so the chain survives crashes.
     await _schedule(decision, label="pre-schedule")
 
-    if not decision.should_execute:
+    async with job_alert_context(schedule_job_name):
+        if not decision.should_execute:
+            logger.info(
+                "fetch_odds_skipped",
+                reason=decision.reason,
+                next_check=decision.next_execution.isoformat() if decision.next_execution else None,
+            )
+            return
+
         logger.info(
-            "fetch_odds_skipped",
+            "fetch_odds_executing",
             reason=decision.reason,
-            next_check=decision.next_execution.isoformat() if decision.next_execution else None,
+            tier=decision.tier.value if decision.tier else None,
         )
-        return
 
-    # Execute fetch logic
-    logger.info(
-        "fetch_odds_executing",
-        reason=decision.reason,
-        tier=decision.tier.value if decision.tier else None,
-    )
+        try:
+            async with TheOddsAPIClient() as client:
+                ingestion_service = build_ingestion_service(client, app_settings)
+                results = await ingestion_service.ingest_sports(sports)
 
-    try:
-        async with TheOddsAPIClient() as client:
-            ingestion_service = build_ingestion_service(client, app_settings)
-            results = await ingestion_service.ingest_sports(sports)
+            for sport_result in results.sport_results:
+                for failure in sport_result.failures:
+                    logger.warning(
+                        "event_processing_failed",
+                        sport=sport_result.sport_key,
+                        event_id=failure.event_id,
+                        error=failure.error,
+                    )
 
-        for sport_result in results.sport_results:
-            for failure in sport_result.failures:
-                logger.warning(
-                    "event_processing_failed",
+                logger.info(
+                    "sport_fetch_completed",
                     sport=sport_result.sport_key,
-                    event_id=failure.event_id,
-                    error=failure.error,
+                    processed_events=sport_result.processed_events,
+                    total_events=sport_result.total_events,
+                    quota_remaining=sport_result.quota_remaining,
                 )
 
-            logger.info(
-                "sport_fetch_completed",
-                sport=sport_result.sport_key,
-                processed_events=sport_result.processed_events,
-                total_events=sport_result.total_events,
-                quota_remaining=sport_result.quota_remaining,
+                if sport_result.quota_remaining is not None:
+                    quota_fraction = sport_result.quota_remaining / app_settings.api.quota
+                    percentage_remaining = round(quota_fraction * 100, 1)
+
+                    if quota_fraction < app_settings.alerts.quota_critical_threshold:
+                        logger.error(
+                            "api_quota_critical",
+                            sport=sport_result.sport_key,
+                            remaining=sport_result.quota_remaining,
+                            quota=app_settings.api.quota,
+                            percentage=percentage_remaining,
+                        )
+                        await send_critical(
+                            f"🚨 API quota critical: {sport_result.quota_remaining} requests "
+                            f"remaining ({percentage_remaining}% of {app_settings.api.quota})"
+                        )
+
+                    elif quota_fraction < app_settings.alerts.quota_warning_threshold:
+                        logger.warning(
+                            "api_quota_low",
+                            sport=sport_result.sport_key,
+                            remaining=sport_result.quota_remaining,
+                            quota=app_settings.api.quota,
+                            percentage=percentage_remaining,
+                        )
+                        await send_warning(
+                            f"⚠️ API quota low: {sport_result.quota_remaining} requests "
+                            f"remaining ({percentage_remaining}% of {app_settings.api.quota})"
+                        )
+
+            await require_rows_for_fixtures(
+                SOURCE, {r.sport_key: r.processed_events for r in results.sport_results}
             )
 
-            # Check quota thresholds and send tiered alerts
-            if sport_result.quota_remaining is not None:
-                quota_fraction = sport_result.quota_remaining / app_settings.api.quota
-                percentage_remaining = round(quota_fraction * 100, 1)
+            logger.info(
+                "fetch_odds_completed",
+                total_processed=results.total_processed,
+                total_events=results.total_events,
+                total_failures=results.total_failures,
+            )
 
-                # Critical threshold (default 10%)
-                if quota_fraction < app_settings.alerts.quota_critical_threshold:
-                    logger.error(
-                        "api_quota_critical",
-                        sport=sport_result.sport_key,
-                        remaining=sport_result.quota_remaining,
-                        quota=app_settings.api.quota,
-                        percentage=percentage_remaining,
-                    )
-
-                    # Send critical alert
-                    from odds_core.alerts import send_critical
-
-                    await send_critical(
-                        f"🚨 API quota critical: {sport_result.quota_remaining} requests remaining "
-                        f"({percentage_remaining}% of {app_settings.api.quota})"
-                    )
-
-                # Warning threshold (default 20%)
-                elif quota_fraction < app_settings.alerts.quota_warning_threshold:
-                    logger.warning(
-                        "api_quota_low",
-                        sport=sport_result.sport_key,
-                        remaining=sport_result.quota_remaining,
-                        quota=app_settings.api.quota,
-                        percentage=percentage_remaining,
-                    )
-
-                    # Send warning alert
-                    from odds_core.alerts import send_warning
-
-                    await send_warning(
-                        f"⚠️ API quota low: {sport_result.quota_remaining} requests remaining "
-                        f"({percentage_remaining}% of {app_settings.api.quota})"
-                    )
-
-        await require_rows_for_fixtures(
-            SOURCE, {r.sport_key: r.processed_events for r in results.sport_results}
-        )
-
-        logger.info(
-            "fetch_odds_completed",
-            total_processed=results.total_processed,
-            total_events=results.total_events,
-            total_failures=results.total_failures,
-        )
-
-    except Exception as e:
-        logger.error("fetch_odds_failed", error=str(e), exc_info=True)
-
-        # Send critical alert
-        from odds_core.alerts import send_critical
-
-        await send_critical(f"🚨 Fetch odds job failed: {type(e).__name__}: {str(e)}")
-
-        # Pre-schedule already ran, so the chain survives. Re-raise for visibility.
-        raise
+        except Exception as e:
+            logger.error("fetch_odds_failed", error=str(e), exc_info=True)
+            raise
 
     # Re-query and reschedule — ingestion may have created new events that move
     # the proximity tier.

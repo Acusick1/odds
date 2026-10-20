@@ -12,6 +12,7 @@ import asyncio
 from datetime import timedelta
 
 import structlog
+from odds_core.alerts import job_alert_context, send_error
 from odds_core.api_models import parse_scores_from_api_dict
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
@@ -85,8 +86,6 @@ async def main(ctx: JobContext) -> None:
             )
         except Exception as e:
             logger.error("fetch_scores_scheduling_failed", error=str(e), exc_info=True)
-            from odds_core.alerts import send_error
-
             await send_error(f"Fetch scores scheduling failed: {type(e).__name__}: {str(e)}")
 
     # Smart execution gating, scoped to this job's sport(s).
@@ -95,30 +94,24 @@ async def main(ctx: JobContext) -> None:
     # Pre-schedule before any work so the chain survives crashes.
     await _schedule(decision, label="pre-schedule")
 
-    if not decision.should_execute:
-        logger.info(
-            "fetch_scores_skipped",
-            reason=decision.reason,
-            next_check=decision.next_execution.isoformat() if decision.next_execution else None,
-        )
-        return
+    async with job_alert_context(schedule_job_name):
+        if not decision.should_execute:
+            logger.info(
+                "fetch_scores_skipped",
+                reason=decision.reason,
+                next_check=decision.next_execution.isoformat() if decision.next_execution else None,
+            )
+            return
 
-    # Execute fetch logic
-    logger.info("fetch_scores_executing", reason=decision.reason)
+        logger.info("fetch_scores_executing", reason=decision.reason)
 
-    try:
-        await _fetch_and_update_scores(sports)
-        logger.info("fetch_scores_completed")
+        try:
+            await _fetch_and_update_scores(sports)
+            logger.info("fetch_scores_completed")
 
-    except Exception as e:
-        logger.error("fetch_scores_failed", error=str(e), exc_info=True)
-
-        # Send critical alert
-        from odds_core.alerts import send_critical
-
-        await send_critical(f"🚨 Fetch scores job failed: {type(e).__name__}: {str(e)}")
-
-        raise
+        except Exception as e:
+            logger.error("fetch_scores_failed", error=str(e), exc_info=True)
+            raise
 
     # Re-evaluate and reschedule after fetching scores.
     post_decision = await _scores_decision(sports)

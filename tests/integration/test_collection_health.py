@@ -1037,7 +1037,7 @@ class TestFetchOddsJob:
         sync = MagicMock()
         sync.sync_sports = AsyncMock(return_value=[])
         monkeypatch.setattr(fetch_odds, "build_event_sync_service", lambda c: sync)
-        monkeypatch.setattr("odds_core.alerts.send_critical", AsyncMock())
+        monkeypatch.setattr("odds_core.alerts.send_job_failure", AsyncMock())
 
     @staticmethod
     def _ingest(monkeypatch: pytest.MonkeyPatch, processed: int) -> None:
@@ -1059,7 +1059,7 @@ class TestFetchOddsJob:
         monkeypatch.setattr(fetch_odds, "build_ingestion_service", lambda c, s: service)
 
     async def test_zero_rows_with_fixtures_fails_and_alerts(
-        self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any]
+        self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
     ) -> None:
         await seed(datetime.now(UTC) + timedelta(hours=10))
         self._ingest(monkeypatch, 0)
@@ -1069,12 +1069,18 @@ class TestFetchOddsJob:
 
         import odds_core.alerts
 
-        odds_core.alerts.send_critical.assert_awaited_once()  # type: ignore[attr-defined]
+        odds_core.alerts.send_job_failure.assert_awaited_once()  # type: ignore[attr-defined]
+        assert odds_core.alerts.send_job_failure.await_args.args[0] == "fetch-odds-epl"  # type: ignore[attr-defined]
+        assert alerts.heartbeats == []
 
-    async def test_zero_rows_without_fixtures_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_zero_rows_without_fixtures_passes(
+        self, monkeypatch: pytest.MonkeyPatch, alerts: _AlertRecorder
+    ) -> None:
         self._ingest(monkeypatch, 0)
 
         await fetch_odds.main(JobContext(sport="soccer_epl"))
+
+        assert alerts.heartbeats == ["heartbeat:fetch-odds-epl"]
 
 
 class TestResultsJob:

@@ -31,7 +31,7 @@ On clean exit a job inside `job_alert_context(name)` inserts `heartbeat:<name>`.
 
 Which jobs write a heartbeat (the EPL Polymarket job included), and their default expectations, are in [health-monitor](health-monitor.md#heartbeats).
 
-fetch-odds, fetch-scores and the NBA Polymarket jobs send hand-rolled criticals on failure instead of a heartbeat, so only the per-source stale-data check catches a stalled chain ([fetch-odds-job](../collection/fetch-odds-job.md), [results-jobs](../collection/results-jobs.md), [polymarket](../collection/polymarket.md)).
+The NBA Polymarket job (`fetch-polymarket`) is inside `odds_core.alerts.job_alert_context` but is not in the default bootstrap list, so it has no heartbeat expectation ([polymarket](../collection/polymarket.md)).
 
 ## Empty collection
 

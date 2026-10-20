@@ -79,13 +79,6 @@ async def _show_status(verbose: bool):
                     f"({quota_percent:.1f}%)[/{quota_color}]",
                 )
 
-            # Fetch success rate
-            success_rate = stats.get("fetch_success_rate_24h", 0)
-            rate_color = (
-                "green" if success_rate > 95 else ("yellow" if success_rate > 80 else "red")
-            )
-            table.add_row("Success Rate (24h)", f"[{rate_color}]{success_rate}%[/{rate_color}]")
-
             console.print(table)
 
             # Verbose mode

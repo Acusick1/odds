@@ -217,6 +217,36 @@ class TestFetchPolymarketMain:
         assert "API down" in log_arg.error_message
         job.log_session.commit.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_failure_sends_rate_limited_job_failure_alert(self, job: JobMocks) -> None:
+        job.client.get_events.side_effect = Exception("API down")
+
+        with (
+            patch("odds_core.alerts.send_job_failure", new_callable=AsyncMock) as failure,
+            patch("odds_core.alerts.send_critical", new_callable=AsyncMock) as critical,
+            pytest.raises(Exception, match="API down"),
+        ):
+            await fetch_polymarket.main(JobContext())
+
+        failure.assert_awaited_once()
+        assert failure.call_args.args[0] == "fetch-polymarket"
+        critical.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_success_records_heartbeat(self, job: JobMocks) -> None:
+        job.client.get_events.return_value = [{"id": "ev-1"}]
+        job.service.discover_and_upsert_events.return_value = PolymarketIngestionResult(
+            events_processed=1
+        )
+        job.service.collect_snapshots.return_value = PolymarketIngestionResult(
+            price_snapshots_stored=1, fetch_tier=FetchTier.PREGAME
+        )
+
+        with patch("odds_core.alerts.record_to_alert_history", new_callable=AsyncMock) as record:
+            await fetch_polymarket.main(JobContext())
+
+        assert record.call_args.kwargs["alert_type"] == "heartbeat:fetch-polymarket"
+
     # -- scheduling --
 
     @pytest.mark.asyncio

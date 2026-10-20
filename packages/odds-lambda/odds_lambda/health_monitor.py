@@ -147,7 +147,6 @@ def collection_sources() -> tuple[CollectionSource, ...]:
 class HealthMetrics(BaseModel):
     """Health check metrics."""
 
-    fetch_success_rate_24h: float
     hours_since_last_fetch: float | None
     api_quota_remaining: int | None
     data_quality_errors_24h: int
@@ -642,7 +641,6 @@ class HealthMonitor:
         _, data_quality_errors = await self.check_data_quality()
 
         return HealthMetrics(
-            fetch_success_rate_24h=stats.get("fetch_success_rate_24h", 0.0),
             hours_since_last_fetch=hours_since_last_fetch,
             api_quota_remaining=stats.get("api_quota_remaining"),
             data_quality_errors_24h=data_quality_errors,
@@ -914,7 +912,6 @@ class HealthMonitor:
                 timestamp=datetime.now(UTC),
                 overall_healthy=False,
                 metrics=HealthMetrics(
-                    fetch_success_rate_24h=0.0,
                     hours_since_last_fetch=None,
                     api_quota_remaining=None,
                     data_quality_errors_24h=0,

@@ -22,7 +22,7 @@ status: stable
 | Poll-driven | check-health, the daily digest | Discord summary | reads `fetch_logs`, `odds_snapshots`, `data_quality_logs`, `predictions`, `alert_history` |
 | On-demand | `odds status`, `odds scheduler`, MCP tools | terminal tables or JSON | reads everything |
 
-Delivery, rate limiting and heartbeats are on [alerts](alerts.md) and [alerting-and-heartbeats](alerting-and-heartbeats.md); the check-health job is [health-monitor](health-monitor.md); `fetch_logs` is described with [the ingestion service](../collection/odds-ingestion-service.md#fetch-logs); scoring output is on [prediction-scoring](../modelling/prediction-scoring.md). Predictions exist only where scoring runs (a local scheduler), one row per snapshot, with `model_version` an S3 ETag.
+Delivery, rate limiting and heartbeats are on [alerts](alerts.md) and [alerting-and-heartbeats](alerting-and-heartbeats.md); the check-health job is [health-monitor](health-monitor.md); `fetch_logs` (Odds API and Betfair rows, no source column) is described with [the ingestion service](../collection/odds-ingestion-service.md#fetch-logs); scoring output is on [prediction-scoring](../modelling/prediction-scoring.md). Predictions exist only where scoring runs (a local scheduler), one row per snapshot, with `model_version` an S3 ETag.
 
 ## What each surface cannot show
 
