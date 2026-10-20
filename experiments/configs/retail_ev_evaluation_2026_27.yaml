@@ -1,0 +1,61 @@
+# The pre-registered one-look evaluation of ADR-0016: 2026-27 EPL events kicking off
+# from the freeze to the end of the season, 10-event expanding refits with the 7-day
+# gap, the frozen 2024-25 residual seed-42 trial, 10,000 event-clustered resamples
+# with seed 0. Run once, from the tag retail-ev-eval-2026-27, after the season.
+training_start: 2024-08-01T00:00:00Z
+window:
+  start: 2026-11-02T00:00:00Z
+  end: 2027-06-30T23:59:59Z
+refit_every_events: 10
+feature_groups: []
+feature_names:
+  - hours_to_kickoff
+  - retail_implied_prob
+  - book_fair_prob
+  - book_overround
+  - consensus_prob
+  - retail_consensus_diff
+  - num_bookmakers
+  - sharp_prob
+  - retail_sharp_diff
+  - exchange_overround
+  - exchange_age_hours
+  - baseline_ev
+  - is_weekend
+  - day_of_week
+  - outcome_home
+  - outcome_draw
+  - outcome_away
+  - book_10bet
+  - book_7bet
+  - book_888sport
+  - book_allbritishcasino
+  - book_bet365
+  - book_betano
+  - book_betfair_sportsbook
+  - book_betfred
+  - book_betmgm
+  - book_betuk
+  - book_betvictor
+  - book_betway
+  - book_boylesports
+  - book_bwin
+  - book_coral
+  - book_ladbrokes
+  - book_midnite
+  - book_paddypower
+  - book_skybet
+  - book_spreadex
+  - book_unibet_uk
+  - book_williamhill
+arm: residual
+model:
+  n_jobs: 1
+trial:
+  path: ../results/retail_ev_as_of_t_groups/summary.json
+  variant: price_only
+  run: residual_s42
+seed: 42
+bootstrap:
+  resamples: 10000
+  seed: 0
