@@ -235,20 +235,51 @@ async def record_to_alert_history(
         await session.commit()
 
 
-async def send_job_failure(job_name: str, error: Exception) -> None:
-    """Send the rate-limited CRITICAL ``job_failure:<job_name>`` alert and record it."""
-    alert_type = f"job_failure:{job_name}"
-    if alert_manager.enabled and await check_rate_limit(alert_type):
+async def _latest_sent_at(alert_type: str) -> datetime | None:
+    from sqlalchemy import func, select
+
+    from odds_core.database import async_session_maker
+    from odds_core.models import AlertHistory
+
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(func.max(AlertHistory.sent_at)).where(AlertHistory.alert_type == alert_type)
+        )
+        return result.scalar_one_or_none()
+
+
+async def job_failure_alert_due(job_name: str, now: datetime) -> bool:
+    """Whether a failure of ``job_name`` at ``now`` should alert.
+
+    An outage runs from a job's first failure to its next heartbeat. It alerts on
+    its first failure and again every ``AlertConfig.stale_reminder_minutes`` while
+    it lasts.
+    """
+    last_alert = await _latest_sent_at(f"job_failure:{job_name}")
+    if last_alert is None:
+        return True
+    last_heartbeat = await _latest_sent_at(f"heartbeat:{job_name}")
+    if last_heartbeat is not None and last_heartbeat > last_alert:
+        return True
+    reminder = timedelta(minutes=get_settings().alerts.stale_reminder_minutes)
+    return now - last_alert >= reminder
+
+
+async def send_job_failure(job_name: str, error: Exception, *, now: datetime | None = None) -> None:
+    """Send the CRITICAL ``job_failure:<job_name>`` alert once per outage and record it."""
+    if not alert_manager.enabled:
+        return
+    if await job_failure_alert_due(job_name, now or datetime.now(UTC)):
         msg = f"🚨 Job {job_name} failed: {type(error).__name__}: {error}"
         await alert_manager.alert(msg, "critical")
-        await record_to_alert_history(alert_type, "critical", msg)
+        await record_to_alert_history(f"job_failure:{job_name}", "critical", msg)
 
 
 @asynccontextmanager
 async def job_alert_context(job_name: str) -> AsyncIterator[None]:
     """Wrap a job body to standardise failure alerts and heartbeat recording.
 
-    On exception: send a rate-limited CRITICAL alert, then re-raise.
+    On exception: send a CRITICAL alert once per outage, then re-raise.
     On clean exit: write a heartbeat row to AlertHistory.
 
     Usage::

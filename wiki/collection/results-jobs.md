@@ -52,7 +52,7 @@ Three jobs and one command move events to LIVE, FINAL and CANCELLED ([event-stat
 3. `odds_lambda.jobs.fetch_scores._fetch_and_update_scores`: for each sport call `TheOddsAPIClient.get_scores(sport, days_from=3)`, and for every `completed` entry with parseable scores call `update_event_status(FINAL, home_score, away_score)`, committing per sport.
 4. Re-decide and post-schedule.
 
-Per-event failures are logged and skipped. A whole-job failure re-raises through `odds_core.alerts.job_alert_context`, which sends the rate-limited `job_failure:fetch-scores-<suffix>` critical. Each `/scores` call costs 2 units because the client sends `daysFrom` (#441; [odds-api-client](odds-api-client.md#cost-per-call)). Every run after the pre-schedule, gated ones included, writes `heartbeat:fetch-scores-<suffix>`.
+Per-event failures are logged and skipped. A whole-job failure re-raises through `odds_core.alerts.job_alert_context`, which sends the `job_failure:fetch-scores-<suffix>` critical once per outage. Each `/scores` call costs 2 units because the client sends `daysFrom` (#441; [odds-api-client](odds-api-client.md#cost-per-call)). Every run after the pre-schedule, gated ones included, writes `heartbeat:fetch-scores-<suffix>`.
 
 `odds fetch scores` repeats the same loop inline with `--sport` (default `basketball_nba`) and `--days` (default 3); it does not call the job and does not gate or reschedule. The update loop is duplicated in `odds_cli.commands.fetch._fetch_scores` and `odds_lambda.jobs.fetch_scores._fetch_and_update_scores`, so a change to result parsing needs both (#463). The job loops sports and alerts; the CLI takes one sport.
 

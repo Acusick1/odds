@@ -19,7 +19,7 @@ Three mechanisms watch the system, and each sees a different failure.
 
 | Mode | Mechanism | Sees |
 |---|---|---|
-| Event-driven | `odds_core.alerts.job_alert_context` sends `job_failure:<job>` through `odds_core.alerts.send_job_failure` and `odds_core.alerts.send_job_warning` sends soft-failure warnings ([alerts](alerts.md)) | a job that raised or wrote nothing while fixtures were scheduled |
+| Event-driven | `odds_core.alerts.job_alert_context` sends `job_failure:<job>` once per outage through `odds_core.alerts.send_job_failure` and `odds_core.alerts.send_job_warning` sends soft-failure warnings ([alerts](alerts.md)) | a job that raised or wrote nothing while fixtures were scheduled |
 | Heartbeat | `heartbeat:<job>` rows written on clean exit, compared to the per-job allowed hours (overnight pause or daily cadence, plus slack) in `odds_core.config.AlertConfig.heartbeat_expectations` | a job that stopped running |
 | Poll-driven | the checks of `odds_lambda.health_monitor.HealthMonitor` (stale sources, quota, data quality, heartbeats, event identity, unsettled events, schedule chains), run hourly by `check-health` ([health-monitor](health-monitor.md)) | a source that stopped writing snapshots, an MLB schedule job that stopped completing (a missing heartbeat), EPL events whose live Betfair close was not collected (reported after kick-off), low quota, data-quality errors, duplicate events, events left pending long after kick-off, results runs that settle nothing, self-scheduling jobs with no run booked or an overdue one |
 

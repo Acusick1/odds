@@ -213,7 +213,7 @@ class AlertConfig(BaseSettings):
     )
     stale_reminder_minutes: int = Field(
         default=360,
-        description="Minutes between repeat alerts while a source stays stale",
+        description="Minutes between repeat alerts while a source stays stale or a job keeps failing",
     )
 
     betfair_close_lookback_hours: int = Field(

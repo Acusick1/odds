@@ -58,7 +58,7 @@ No code checks for a job enabled on both hosts, so a re-enabled rule double-fetc
 
 ## Heartbeats
 
-Which jobs write a heartbeat is a property of `odds_core.alerts.job_alert_context`, not of the registry. `fetch-odds`, `fetch-scores` and both Polymarket jobs write none. `update-status` writes one only on runs that execute (`odds_lambda.jobs.update_status.main`); skipped runs write none. Producing a heartbeat is separate from the health check expecting one. The jobs the health check expects a heartbeat from, and how often, are in [Health monitor](../operations/health-monitor.md#heartbeats). All heartbeats land in the production database, which `check-health` reads; nothing outside the mini-PC notices if the host itself stops (#489). Every local run is bounded by `odds_lambda.scheduling.runner.JOB_TIMEOUT` ([Local scheduler](local-scheduler.md#scheduling-primitives)).
+Which jobs write a heartbeat is a property of `odds_core.alerts.job_alert_context`, not of the registry. `backfill-polymarket` writes none, and `fetch-polymarket` is wrapped but not bootstrapped. `update-status` writes one only on runs that execute (`odds_lambda.jobs.update_status.main`); skipped runs write none. Producing a heartbeat is separate from the health check expecting one. The jobs the health check expects a heartbeat from, and how often, are in [Health monitor](../operations/health-monitor.md#heartbeats). All heartbeats land in the production database, which `check-health` reads; nothing outside the mini-PC notices if the host itself stops (#489). Every local run is bounded by `odds_lambda.scheduling.runner.JOB_TIMEOUT` ([Local scheduler](local-scheduler.md#scheduling-primitives)).
 
 ## Deployed state
 
