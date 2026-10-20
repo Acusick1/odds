@@ -5,7 +5,9 @@ Flow:
    competitions from the ESPN Site API (free, unauthenticated).
 2. Upsert into ``espn_fixtures`` via ``EspnFixtureWriter`` (idempotent on
    ``(date, team, competition)``).
-3. Alerts on failure via ``job_alert_context``.
+3. Alerts on failure via ``job_alert_context``; the run fails when every
+   upcoming request failed, or ESPN lists no upcoming fixture while EPL events
+   are scheduled.
 
 Scheduler cadence is a fixed daily cron (06:00 UTC, pre-matchday) managed in
 Terraform — the ESPN endpoint is free and unauthenticated so no proximity-based
@@ -15,12 +17,14 @@ gating is needed.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.epl_data_models import EspnFixtureRecord
 
+from odds_lambda.collection_calendar import EmptyCollectionError, fixture_calendar
 from odds_lambda.espn_fixture_fetcher import EspnFixtureFetcher, current_season
 from odds_lambda.scheduling.jobs import JobContext
 from odds_lambda.storage.espn_fixture_writer import EspnFixtureWriter
@@ -64,9 +68,24 @@ async def main(ctx: JobContext) -> None:
         )
 
 
-# How many days ahead the scoreboard fetch reaches. 30 days covers the agent's
+# How many days ahead the upcoming fetch reaches. 30 days covers the agent's
 # rotation-risk window (next ~5 PL rounds plus any midweek cup fixtures).
 _UPCOMING_DAYS_AHEAD = 30
+
+
+async def _raise_if_upcoming_unexpectedly_empty() -> None:
+    """Raise ``EmptyCollectionError`` if EPL events are scheduled in the window ESPN returned empty."""
+    horizon = timedelta(days=_UPCOMING_DAYS_AHEAD)
+    async with async_session_maker() as session:
+        calendar = await fixture_calendar(
+            session, SPORT_KEY, now=datetime.now(UTC), horizon=horizon
+        )
+    if calendar.kickoffs_in_horizon:
+        raise EmptyCollectionError(
+            f"ESPN returned no upcoming fixtures with {calendar.kickoffs_in_horizon} "
+            f"{SPORT_KEY} event(s) scheduled within {horizon} "
+            f"(next kickoff {calendar.next_kickoff})"
+        )
 
 
 async def _fetch_and_upsert(season: int) -> tuple[int, int, int]:
@@ -77,6 +96,9 @@ async def _fetch_and_upsert(season: int) -> tuple[int, int, int]:
     async with EspnFixtureFetcher() as fetcher:
         past_records = await fetcher.fetch_season(season)
         upcoming_records = await fetcher.fetch_upcoming(days_ahead=_UPCOMING_DAYS_AHEAD)
+
+    if not upcoming_records:
+        await _raise_if_upcoming_unexpectedly_empty()
 
     past_count = len(past_records)
     upcoming_count = len(upcoming_records)

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
 import pytest
 from odds_lambda.espn_fixture_fetcher import (
+    LEAGUE_SLUGS,
     EspnFixtureFetcher,
+    EspnUpcomingFetchError,
+    _months_between,
     current_season,
     season_label,
 )
@@ -306,26 +309,61 @@ def _scoreboard_payload(
     }
 
 
+class TestMonthsBetween:
+    def test_single_month(self) -> None:
+        start = datetime(2026, 10, 20, tzinfo=UTC)
+        assert _months_between(start, start + timedelta(days=5)) == [(2026, 10)]
+
+    def test_crosses_month_boundary(self) -> None:
+        start = datetime(2026, 10, 20, tzinfo=UTC)
+        assert _months_between(start, start + timedelta(days=30)) == [(2026, 10), (2026, 11)]
+
+    def test_crosses_year_boundary(self) -> None:
+        start = datetime(2026, 12, 20, tzinfo=UTC)
+        assert _months_between(start, start + timedelta(days=30)) == [(2026, 12), (2027, 1)]
+
+
 class TestFetchUpcoming:
-    """Unit tests for fetch_upcoming using the scoreboard endpoint."""
+    """Unit tests for fetch_upcoming using the month-keyed scoreboard endpoint."""
+
+    @pytest.fixture
+    def requested_urls(self) -> list[str]:
+        return []
+
+    @pytest.fixture
+    def failing_leagues(self) -> set[str]:
+        return set()
 
     @pytest.fixture
     def transport_responses(self) -> dict[str, dict[str, Any]]:
         return {}
 
     @pytest.fixture
-    def mock_client(self, transport_responses: dict[str, dict[str, Any]]) -> httpx.AsyncClient:
+    def mock_client(
+        self,
+        transport_responses: dict[str, dict[str, Any]],
+        requested_urls: list[str],
+        failing_leagues: set[str],
+    ) -> httpx.AsyncClient:
         def handler(request: httpx.Request) -> httpx.Response:
             url = str(request.url)
-            # Match by league slug prefix before the query string.
+            requested_urls.append(url)
+            if any(f"/{league}/" in url for league in failing_leagues):
+                return httpx.Response(400, json={"error": "bad dates"})
             for prefix, payload in transport_responses.items():
                 if url.startswith(prefix):
                     return httpx.Response(200, json=payload)
-            # Cup/European slugs without a registered response → empty events.
             return httpx.Response(200, json={"events": []})
 
-        transport = httpx.MockTransport(handler)
-        return httpx.AsyncClient(transport=transport)
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    @pytest.fixture(autouse=True)
+    def no_retry_sleep(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("odds_lambda.espn_fixture_fetcher._RETRY_BACKOFF_SECONDS", 0.0)
+
+    @staticmethod
+    def _kickoff(days: int) -> str:
+        return (datetime.now(UTC) + timedelta(days=days)).strftime("%Y-%m-%dT%H:%MZ")
 
     @pytest.mark.asyncio
     async def test_scoreboard_event_produces_two_records(
@@ -333,7 +371,8 @@ class TestFetchUpcoming:
         mock_client: httpx.AsyncClient,
         transport_responses: dict[str, dict[str, Any]],
     ) -> None:
-        """One scoreboard event → two anchored records (home + away)."""
+        """One scoreboard event becomes two anchored records (home + away)."""
+        kickoff = self._kickoff(2)
         transport_responses[
             "http://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard"
         ] = _scoreboard_payload(
@@ -341,7 +380,7 @@ class TestFetchUpcoming:
             home_name="Arsenal",
             away_id="2",
             away_name="Wolverhampton Wanderers",
-            date="2025-09-27T14:00:00Z",
+            date=kickoff,
             state="pre",
             status="Scheduled",
         )
@@ -349,7 +388,6 @@ class TestFetchUpcoming:
         async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
             records = await fetcher.fetch_upcoming(days_ahead=7)
 
-        # Two rows produced: one anchored on each team.
         assert len(records) == 2
 
         home_row = next(r for r in records if r.team == "Arsenal")
@@ -361,12 +399,47 @@ class TestFetchUpcoming:
         assert home_row.status == "Scheduled"
         assert home_row.score_team == ""
         assert home_row.competition == "Premier League"
-        assert home_row.date == datetime(2025, 9, 27, 14, 0, tzinfo=UTC)
+        assert home_row.date == datetime.fromisoformat(kickoff.replace("Z", "+00:00"))
 
         assert away_row.opponent == "Arsenal"
         assert away_row.home_away == "away"
         assert away_row.state == "pre"
         assert away_row.score_team == ""
+
+    @pytest.mark.asyncio
+    async def test_requests_months_not_ranges(
+        self,
+        mock_client: httpx.AsyncClient,
+        requested_urls: list[str],
+    ) -> None:
+        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+            await fetcher.fetch_upcoming(days_ahead=30)
+
+        dates = {url.split("dates=")[1].split("&")[0] for url in requested_urls}
+        assert dates
+        assert all(len(d) == 6 and d.isdigit() for d in dates)
+        assert all("limit=" in url for url in requested_urls)
+
+    @pytest.mark.asyncio
+    async def test_events_outside_window_are_dropped(
+        self,
+        mock_client: httpx.AsyncClient,
+        transport_responses: dict[str, dict[str, Any]],
+    ) -> None:
+        transport_responses[
+            "http://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard"
+        ] = _scoreboard_payload(
+            home_id="1",
+            home_name="Arsenal",
+            away_id="2",
+            away_name="Chelsea",
+            date=self._kickoff(20),
+        )
+
+        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+            records = await fetcher.fetch_upcoming(days_ahead=7)
+
+        assert records == []
 
     @pytest.mark.asyncio
     async def test_empty_scoreboards_return_no_records(
@@ -378,3 +451,38 @@ class TestFetchUpcoming:
             records = await fetcher.fetch_upcoming(days_ahead=7)
 
         assert records == []
+
+    @pytest.mark.asyncio
+    async def test_single_league_failure_is_skipped(
+        self,
+        mock_client: httpx.AsyncClient,
+        transport_responses: dict[str, dict[str, Any]],
+        failing_leagues: set[str],
+    ) -> None:
+        failing_leagues.add("eng.fa")
+        transport_responses[
+            "http://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard"
+        ] = _scoreboard_payload(
+            home_id="1",
+            home_name="Arsenal",
+            away_id="2",
+            away_name="Chelsea",
+            date=self._kickoff(2),
+        )
+
+        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+            records = await fetcher.fetch_upcoming(days_ahead=7)
+
+        assert len(records) == 2
+
+    @pytest.mark.asyncio
+    async def test_all_leagues_failing_raises(
+        self,
+        mock_client: httpx.AsyncClient,
+        failing_leagues: set[str],
+    ) -> None:
+        failing_leagues.update(LEAGUE_SLUGS)
+
+        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+            with pytest.raises(EspnUpcomingFetchError, match="every competition"):
+                await fetcher.fetch_upcoming(days_ahead=7)
