@@ -8,9 +8,9 @@ import pytest
 from odds_lambda.betfair.adapter import (
     _is_draw,
     _normalize_runner_name,
-    _strip_pitcher_annotation,
     betfair_book_to_bookmaker_entry,
     resolve_teams,
+    strip_pitcher_annotation,
 )
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
 from odds_lambda.betfair.constants import SPORT_CONFIG
@@ -62,17 +62,22 @@ def _book(
 
 class TestStripPitcherAnnotation:
     def test_tbd_suffix_removed(self) -> None:
-        assert _strip_pitcher_annotation("Colorado Rockies (TBD)") == "Colorado Rockies"
+        assert strip_pitcher_annotation("Colorado Rockies (TBD)") == "Colorado Rockies"
 
     def test_pitcher_name_suffix_removed(self) -> None:
-        assert _strip_pitcher_annotation("New York Yankees (Cole)") == "New York Yankees"
+        assert strip_pitcher_annotation("New York Yankees (Cole)") == "New York Yankees"
+
+    def test_truncated_suffix_without_closing_paren_removed(self) -> None:
+        assert strip_pitcher_annotation("Tampa Bay Rays (D Rasm") == "Tampa Bay Rays"
+        assert strip_pitcher_annotation("Chicago White Sox (TBD") == "Chicago White Sox"
+        assert strip_pitcher_annotation("Los Angeles Dodgers (") == "Los Angeles Dodgers"
 
     def test_no_paren_unchanged(self) -> None:
-        assert _strip_pitcher_annotation("Boston Red Sox") == "Boston Red Sox"
+        assert strip_pitcher_annotation("Boston Red Sox") == "Boston Red Sox"
 
     def test_paren_in_middle_preserved(self) -> None:
         # Defensive: only trailing parens are stripped
-        assert _strip_pitcher_annotation("Some (mid) Team") == "Some (mid) Team"
+        assert strip_pitcher_annotation("Some (mid) Team") == "Some (mid) Team"
 
 
 class TestNormalizeRunnerName:
@@ -148,6 +153,16 @@ class TestResolveTeamsBaseball:
         )
         # Betfair: Away @ Home → home first in returned tuple
         assert resolve_teams(book, cfg) == ("Baltimore Orioles", "Boston Red Sox")
+
+    def test_mlb_with_truncated_pitcher_annotations(self) -> None:
+        cfg = SPORT_CONFIG["baseball_mlb"]
+        book = _book(
+            market_id="1.6",
+            event_id="x",
+            event_name="Cleveland Guardians (S @ Tampa Bay Rays (N Marti",
+            runners=[],
+        )
+        assert resolve_teams(book, cfg) == ("Tampa Bay Rays", "Cleveland Guardians")
 
     def test_mlb_with_pitchers(self) -> None:
         cfg = SPORT_CONFIG["baseball_mlb"]

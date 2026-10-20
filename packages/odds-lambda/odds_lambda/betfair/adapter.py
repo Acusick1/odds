@@ -49,17 +49,19 @@ DRAW_RUNNER_NAMES: frozenset[str] = frozenset({"the draw", "draw"})
 # names (e.g. "(TBD)", "(Cole)" for starting pitchers). This is a Betfair-API
 # quirk — kept here rather than in odds_core.team because trailing parens can
 # legitimately disambiguate teams in other contexts (e.g. "(W)" for women's).
-_PAREN_ANNOTATION_RE = re.compile(r"\s*\([^)]*\)\s*$")
+# Betfair cuts each half of a baseball event name at 22 characters, so the
+# closing paren may be missing ("Tampa Bay Rays (D Rasm").
+_PAREN_ANNOTATION_RE = re.compile(r"\s*\([^)]*\)?\s*$")
 
 
-def _strip_pitcher_annotation(name: str) -> str:
-    """Remove trailing parenthetical (e.g. '(TBD)' or '(Cole)') from MLB names."""
+def strip_pitcher_annotation(name: str) -> str:
+    """Remove a trailing, possibly truncated, parenthetical (e.g. '(TBD)' or '(S Cecc') from a name."""
     return _PAREN_ANNOTATION_RE.sub("", name).strip()
 
 
 def _normalize_runner_name(name: str) -> str:
     """Strip Betfair's pitcher annotation, then delegate to canonical normalization."""
-    return normalize_team_name(_strip_pitcher_annotation(name))
+    return normalize_team_name(strip_pitcher_annotation(name))
 
 
 def _is_draw(runner_name: str) -> bool:

@@ -14,6 +14,7 @@ from odds_core.prediction_models import Prediction
 from odds_lambda.event_sync import EventSyncService
 from odds_lambda.oddsportal_common import find_existing_event
 from odds_lambda.storage.event_merge import EventMerger
+from odds_lambda.storage.event_name_repair import repair_annotated_names
 from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
 
@@ -519,3 +520,145 @@ class TestMergeRebasesSnapshotTiming:
         with pytest.raises(typer.BadParameter):
             await events_cli._merge(API_EVENT_ID, API_EVENT_ID, apply=True)
         assert await session.get(Event, API_EVENT_ID) is not None
+
+
+def _mlb_event(event_id: str, home: str, away: str, **fields) -> Event:
+    fields.setdefault("status", EventStatus.SCHEDULED)
+    return Event(
+        id=event_id,
+        sport_key="baseball_mlb",
+        sport_title="MLB",
+        commence_time=fields.pop("commence_time", TWIN_KICKOFF),
+        home_team=home,
+        away_team=away,
+        **fields,
+    )
+
+
+class TestRepairAnnotatedNames:
+    @pytest.mark.asyncio
+    async def test_merges_into_the_clean_event_whose_id_sorts_later(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        session.add_all(
+            [
+                _mlb_event("op_live_CLE(S_TAMMAR", "Cleveland Guardians (S", "Tampa Bay Rays (N"),
+                _mlb_event(
+                    "op_live_CLEGUA_TAMRAY",
+                    "Cleveland Guardians",
+                    "Tampa Bay Rays",
+                    commence_time=TWIN_KICKOFF + timedelta(minutes=8),
+                    status=EventStatus.FINAL,
+                    home_score=3,
+                    away_score=1,
+                ),
+            ]
+        )
+        await session.commit()
+
+        report = await repair_annotated_names(session, "baseball_mlb")
+        await session.commit()
+
+        assert report.renamed_ids == ("op_live_CLE(S_TAMMAR",)
+        assert report.merged_count == 1
+        assert await _stored_event_ids(session) == {"op_live_CLEGUA_TAMRAY"}
+        kept = await session.get(Event, "op_live_CLEGUA_TAMRAY")
+        assert kept.commence_time == TWIN_KICKOFF + timedelta(minutes=8)
+        assert kept.status is EventStatus.FINAL
+
+    @pytest.mark.asyncio
+    async def test_event_without_a_clean_twin_is_renamed_in_place(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        session.add(_mlb_event("op_live_A", "Chicago White Sox (TBD", "Cleveland Guardians"))
+        await session.commit()
+
+        report = await repair_annotated_names(session, "baseball_mlb")
+
+        assert report.merged_count == 0
+        assert report.renamed_in_place_ids == ("op_live_A",)
+        assert report.renamed_in_place_statuses == {EventStatus.SCHEDULED: 1}
+        assert (await session.get(Event, "op_live_A")).home_team == "Chicago White Sox"
+
+    @pytest.mark.asyncio
+    async def test_renamed_event_takes_the_canonical_team_name(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        session.add_all(
+            [
+                _mlb_event("op_live_ST.(A_X", "St. Louis Cardinals (A", "Milwaukee Brewers"),
+                _mlb_event("op_live_ST.CAR_X", "St.Louis Cardinals", "Milwaukee Brewers"),
+            ]
+        )
+        await session.commit()
+
+        report = await repair_annotated_names(session, "baseball_mlb")
+
+        assert report.merged_count == 1
+        assert await _stored_event_ids(session) == {"op_live_ST.CAR_X"}
+
+    @pytest.mark.asyncio
+    async def test_annotated_twins_of_each_other_collapse_to_one(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        session.add_all(
+            [
+                _mlb_event("op_live_A", "New York Yankees (M Fri", "Tampa Bay Rays (N Marti"),
+                _mlb_event(
+                    "op_live_B",
+                    "New York Yankees (M",
+                    "Tampa Bay Rays",
+                    commence_time=TWIN_KICKOFF + timedelta(minutes=8),
+                ),
+            ]
+        )
+        await session.commit()
+
+        report = await repair_annotated_names(session, "baseball_mlb")
+
+        assert report.merged_count == 1
+        assert await _stored_event_ids(session) == {"op_live_A"}
+
+    @pytest.mark.asyncio
+    async def test_second_run_changes_nothing_and_other_sports_are_untouched(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        session.add_all(
+            [
+                _mlb_event("op_live_A", "Chicago White Sox (TBD", "Cleveland Guardians"),
+                make_epl_event("op_live_E", home_team="Arsenal (W)"),
+            ]
+        )
+        await session.commit()
+        await repair_annotated_names(session, "baseball_mlb")
+
+        again = await repair_annotated_names(session, "baseball_mlb")
+
+        assert again.renamed_ids == ()
+        assert again.merges == ()
+        assert (await session.get(Event, "op_live_E")).home_team == "Arsenal (W)"
+
+    @pytest.mark.asyncio
+    async def test_command_dry_run_writes_nothing_and_apply_merges(
+        self, pglite_async_session, monkeypatch, capsys
+    ) -> None:
+        session = pglite_async_session
+        session.add_all(
+            [
+                _mlb_event("op_live_A", "Chicago White Sox (TBD", "Cleveland Guardians"),
+                _mlb_event("op_live_B", "Chicago White Sox", "Cleveland Guardians"),
+            ]
+        )
+        await session.commit()
+        monkeypatch.setattr(events_cli, "async_session_maker", _session_maker(session))
+
+        await events_cli._repair_names("baseball_mlb", apply=False)
+        assert await _stored_event_ids(session) == {"op_live_A", "op_live_B"}
+        assert (await session.get(Event, "op_live_A")).home_team == "Chicago White Sox (TBD"
+        assert "merged into a real event: 1" in capsys.readouterr().out
+
+        await events_cli._repair_names("baseball_mlb", apply=True)
+        assert await _stored_event_ids(session) == {"op_live_B"}

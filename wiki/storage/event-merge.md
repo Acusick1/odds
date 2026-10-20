@@ -1,13 +1,15 @@
 ---
 type: reference
 title: Event merge
-description: How events for one match are merged into one canonical event, which event is kept, who merges, how twins and rescheduled duplicates are detected, and the odds events merge-twins command.
+description: How events for one match are merged into one canonical event, which event is kept, who merges, how twins and rescheduled duplicates are detected, and the odds events merge-twins and repair-names commands.
 sources:
   - odds_lambda.storage.event_merge.EventMerger
   - odds_lambda.storage.event_merge.EVENT_MATCH_WINDOW
   - odds_lambda.storage.event_merge.find_match_id
   - odds_lambda.storage.event_merge.find_historical_match_id
   - odds_lambda.storage.event_merge.source_pair
+  - odds_lambda.storage.event_name_repair.repair_annotated_names
+  - odds_lambda.betfair.adapter.strip_pitcher_annotation
   - odds_core.event_source.EventSource
   - odds_core.event_source.canonical_event_id
   - odds_lambda.health_monitor.HealthMonitor.check_event_identity
@@ -33,6 +35,7 @@ Merging happens in three places only:
 | Caller | Entry point |
 |---|---|
 | Odds API event sync ([fetch-odds](../collection/fetch-odds-job.md)) | `odds_lambda.storage.event_merge.EventMerger.adopt_twins`: every non-Odds-API event with the same sport and teams within ±2 h of each synced event |
+| `odds events repair-names --apply` | `odds_lambda.storage.event_name_repair.repair_annotated_names`: strips pitcher annotations from stored team names, then merges each resulting twin group into its best-sourced event that was never annotated |
 | `odds events merge-twins --apply` | `odds_lambda.storage.event_merge.EventMerger.merge_group` for every twin group |
 
 The production copier does not merge. It replaces an event's rows by event id, so merging a local twin into that event first would delete the twin's own rows (football-data.co.uk, Polymarket, Betfair history) with the replaced ones, and a scraper event could absorb an Odds API event. It leaves local twins in place and reports how many matches have them.
@@ -50,7 +53,7 @@ No database constraint forbids twins. `odds_lambda.health_monitor.HealthMonitor.
 
 ## Command
 
-`odds events merge-twins [--sport SPORT] [--apply]` (`odds_cli.commands.events`) prints a table of twin groups by source set (`odds_lambda.storage.event_merge.source_pair`) and their count. Without `--apply` it writes nothing. With it, the groups are merged in one transaction and the remaining count is printed. It never merges repeated fixtures; `odds events merge KEEP_ID DROP_ID [--apply]` merges one named pair (same sport and teams required, the two ids must differ, dry run without `--apply`), for a rescheduled match that `repeated_fixtures` flags. Keep the event with the real kick-off and result.
+`odds events merge-twins [--sport SPORT] [--apply]` (`odds_cli.commands.events`) prints a table of twin groups by source set (`odds_lambda.storage.event_merge.source_pair`) and their count. Without `--apply` it writes nothing. With it, the groups are merged in one transaction and the remaining count is printed. `odds events repair-names [--sport SPORT] [--apply]` (default `baseball_mlb`) repairs events created before Betfair names were stripped correctly: annotated events with a clean twin are merged into it, the rest are renamed in place so the results job can settle them; without `--apply` the plan is rolled back, and a second run changes nothing. It never merges repeated fixtures; `odds events merge KEEP_ID DROP_ID [--apply]` merges one named pair (same sport and teams required, the two ids must differ, dry run without `--apply`), for a rescheduled match that `repeated_fixtures` flags. Keep the event with the real kick-off and result.
 
 ## Related
 
