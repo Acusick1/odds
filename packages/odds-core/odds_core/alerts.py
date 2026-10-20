@@ -99,7 +99,7 @@ class AlertManager:
             config: Settings instance (defaults to global settings)
         """
         self.config = config or get_settings()
-        self.enabled = self.config.alerts.alert_enabled
+        self.enabled = self.config.alerts_deliverable
         self.channels: list[AlertBase] = []
 
         # Initialize configured channels

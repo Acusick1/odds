@@ -97,9 +97,9 @@ echo "==> alembic upgrade head"
 uv run alembic upgrade head
 migration_committed=1
 
-# Smoke runs with SCHEDULER_DRY_RUN=true so self-scheduling is a no-op: jobs do
-# their real work (gated by their cadence) but write nothing to the live
-# schedule store. The running scheduler keeps serving old code until smoke passes.
+# Smoke runs with SCHEDULER_DRY_RUN=true so self-scheduling and alerting are
+# no-ops: jobs do their real work (gated by their cadence) but write nothing to
+# the live schedule store and post nothing to Discord. The running scheduler keeps serving old code until smoke passes.
 echo "==> scheduler smoke (SCHEDULER_DRY_RUN=true)"
 SCHEDULER_DRY_RUN=true uv run odds scheduler smoke
 

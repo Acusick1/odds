@@ -23,7 +23,7 @@ status: stable
 ## Delivery
 
 - `odds_core.alerts.AlertBase` is the channel interface (`odds_core.alerts.AlertBase.send`, `odds_core.alerts.AlertBase.send_embed`). `odds_core.alerts.DiscordAlert` posts to a webhook; severity colours are info blue, warning yellow, error red, critical dark red. Discord is the only channel. A non-204 response or exception is logged (`discord_alert_failed` / `_error`) and swallowed, so a rotated webhook silently disables alerting (#457, #384).
-- `odds_core.alerts.AlertManager` builds channels from `settings.alerts` at construction (Discord only, when `discord_webhook_url` is set). `odds_core.alerts.AlertManager.alert` and `odds_core.alerts.AlertManager.send_embed` no-op with a debug log if `alert_enabled` is false and warn if there are no channels.
+- `odds_core.alerts.AlertManager` builds channels from `settings.alerts` at construction (Discord only, when `discord_webhook_url` is set). `odds_core.alerts.AlertManager.alert` and `odds_core.alerts.AlertManager.send_embed` no-op with a debug log if `odds_core.config.Settings.alerts_deliverable` is false (`alert_enabled` off, or `SCHEDULER_DRY_RUN` on, so the deploy smoke posts nothing) and warn if there are no channels.
 - `odds_core.alerts.alert_manager` is a module-level singleton created at import, so it snapshots `ALERT_ENABLED` and the webhook then; flipping `ALERT_ENABLED` later needs a new instance, and tests patch `odds_core.alerts.alert_manager` (#457).
 
 Helpers:

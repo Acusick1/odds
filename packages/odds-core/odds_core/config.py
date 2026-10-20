@@ -424,6 +424,10 @@ class Settings(BaseSettings):
     polymarket: PolymarketConfig = Field(default_factory=PolymarketConfig)
     betfair: BetfairConfig = Field(default_factory=BetfairConfig)
 
+    @property
+    def alerts_deliverable(self) -> bool:
+        return self.alerts.alert_enabled and not self.scheduler.dry_run
+
 
 @lru_cache
 def get_settings() -> Settings:

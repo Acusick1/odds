@@ -14,20 +14,17 @@ from odds_lambda.scheduling.backends.base import JobStatus, ScheduledJob
 @pytest.fixture
 def mock_settings():
     """Create mock settings for testing."""
-    settings = MagicMock(spec=Settings)
-    settings.alerts = AlertConfig(
-        alert_enabled=True,
-        alert_rate_limit_minutes=30,
-        quota_warning_threshold=0.2,
-        quota_critical_threshold=0.1,
-        consecutive_failures_threshold=3,
-        stale_data_hours=2,
+    return Settings(
+        alerts=AlertConfig(
+            alert_enabled=True,
+            alert_rate_limit_minutes=30,
+            quota_warning_threshold=0.2,
+            quota_critical_threshold=0.1,
+            consecutive_failures_threshold=3,
+            stale_data_hours=2,
+        ),
+        api=APIConfig(key="test-key", quota=500),
     )
-    settings.api = APIConfig(
-        key="test-key",
-        quota=500,
-    )
-    return settings
 
 
 @pytest.fixture
@@ -109,6 +106,22 @@ class TestHealthMonitor:
         assert result is False
         # Should not check rate limiting or send
         mock_session.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_alert_suppressed_in_scheduler_dry_run(self, mock_session, mock_settings):
+        """A dry-run process neither posts nor records the alert (no rate-limit row)."""
+        mock_settings.scheduler.dry_run = True
+        monitor = HealthMonitor(mock_session, mock_settings)
+
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock) as send:
+            result = await monitor._send_alert(
+                alert_type="test_alert", severity="critical", message="Test"
+            )
+
+        assert result is False
+        send.assert_not_called()
+        mock_session.execute.assert_not_called()
+        mock_session.add.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_check_consecutive_failures_healthy(self, mock_session, mock_settings):
