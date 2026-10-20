@@ -97,7 +97,7 @@ class LocalSchedulerBackend(SchedulerBackend):
         super().__init__(dry_run=dry_run, retry_config=retry_config)
         self._scheduler: AsyncScheduler | None = None
         self._configured_tasks: set[str] = set()
-        logger.info("local_scheduler_initialized", dry_run=self.dry_run)
+        logger.debug("local_scheduler_initialized", dry_run=self.dry_run)
 
     def validate_configuration(self) -> ValidationResult:
         from odds_lambda.scheduling.health_check import ValidationBuilder
@@ -258,7 +258,7 @@ class LocalSchedulerBackend(SchedulerBackend):
                 raise SchedulingFailedError(
                     f"{job_name} is a cron job; a one-off run would replace its cron schedule"
                 )
-            get_job_function(base_name)
+            get_job_function(base_name)  # fail at booking, not when the run fires
             ctx_payload: dict[str, object] = {}
             if resolved_sport:
                 ctx_payload["sport"] = resolved_sport
@@ -318,7 +318,7 @@ class LocalSchedulerBackend(SchedulerBackend):
             )
 
             base_name, resolved_sport = resolve_job_name(job_name)
-            get_job_function(base_name)
+            get_job_function(base_name)  # fail at booking, not when the run fires
             ctx_payload: dict[str, object] = {}
             if resolved_sport:
                 ctx_payload["sport"] = resolved_sport

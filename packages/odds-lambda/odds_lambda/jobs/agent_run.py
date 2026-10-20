@@ -212,6 +212,10 @@ async def _run_claude_agent(sport: SportKey) -> int:
             proc.kill()
             await proc.wait()
             return -1
+        except BaseException:
+            if proc.returncode is None:
+                proc.kill()
+            raise
 
     exit_code = proc.returncode or 0
     logger.info(

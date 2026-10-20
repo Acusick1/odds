@@ -92,6 +92,32 @@ class TestBootstrapSelfSchedulingJob:
         assert recorded_bootstraps == [JobContext(sport="soccer_epl")]
 
     @pytest.mark.asyncio
+    async def test_pending_run_stored_for_the_job_function_moves_to_the_runner(
+        self, recorded_bootstraps: list[JobContext]
+    ) -> None:
+        """Schedules written before the runner existed ran the job function as their own task."""
+        pending = datetime.now(UTC) + timedelta(minutes=14)
+        ctx = JobContext(sport="soccer_epl")
+        async with LocalSchedulerBackend() as backend:
+            assert backend._scheduler is not None
+            await backend._scheduler.add_schedule(
+                _recording_job,
+                trigger=DateTrigger(run_time=pending),
+                id="fetch-betfair-exchange-epl",
+                args=[ctx],
+            )
+
+            result = await bootstrap_job(backend, "fetch-betfair-exchange", "soccer_epl")
+
+            assert result.action == BootstrapAction.PENDING_KEPT
+            schedule = await backend._scheduler.get_schedule("fetch-betfair-exchange-epl")
+            assert schedule.task_id == "fetch-betfair-exchange-epl"
+            assert schedule.args == ("fetch-betfair-exchange-epl", ctx)
+            assert schedule.next_fire_time == pending
+            task = await backend._scheduler.data_store.get_task("fetch-betfair-exchange-epl")
+            assert task.func == "odds_lambda.scheduling.runner:run_scheduled_job"
+
+    @pytest.mark.asyncio
     async def test_leftover_cron_is_replaced_by_bootstrap(
         self, recorded_bootstraps: list[JobContext]
     ) -> None:

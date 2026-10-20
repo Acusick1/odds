@@ -260,11 +260,7 @@ async def job_alert_context(job_name: str) -> AsyncIterator[None]:
     try:
         yield
     except Exception as e:
-        alert_type = f"job_failure:{job_name}"
-        if alert_manager.enabled and await check_rate_limit(alert_type):
-            msg = f"🚨 Job {job_name} failed: {type(e).__name__}: {e}"
-            await alert_manager.alert(msg, "critical")
-            await record_to_alert_history(alert_type, "critical", msg)
+        await send_job_failure(job_name, e)
         raise
     else:
         # Record heartbeat on success

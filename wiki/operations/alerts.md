@@ -47,6 +47,7 @@ On AWS, the Lambda handler also sends its own critical on any exception ([lambda
 | `alert_type` (the rate-limit key) | Source | Severity |
 |---|---|---|
 | `job_failure:<job>` | `odds_core.alerts.job_alert_context`; `odds_lambda.scheduling.runner.run_chain_job` for a run that exceeds its timeout | critical |
+| `job_chain_rebooked:<job>` (a failed local run re-booked 15 minutes on) | `odds_lambda.scheduling.runner.run_chain_job` through `odds_core.alerts.send_job_warning` | warning |
 | `heartbeat:<job>` | `odds_core.alerts.job_alert_context` on success | info, never sent to Discord |
 | `job_empty:<job>` | `odds_core.alerts.send_job_warning` in the Polymarket odds job | warning |
 | `mlb_calendar_stale` (March to November, same repeat window) | `odds_lambda.health_monitor.HealthMonitor.check_mlb_calendar` | critical |

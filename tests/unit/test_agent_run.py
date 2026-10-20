@@ -474,3 +474,40 @@ class TestBuildAgentSubprocessEnv:
             # os.environ is untouched.
             assert os.environ["EXISTING_KEY"] == "original"
             assert "NEW_KEY" not in os.environ
+
+
+class TestRunClaudeAgentCancellation:
+    @pytest.mark.asyncio
+    async def test_cancellation_kills_the_subprocess(self, tmp_path) -> None:
+        import asyncio
+        from unittest.mock import MagicMock
+
+        from odds_lambda.jobs.agent_run import _run_claude_agent
+
+        class HangingStdout:
+            def __aiter__(self) -> HangingStdout:
+                return self
+
+            async def __anext__(self) -> bytes:
+                await asyncio.sleep(3600)
+                raise StopAsyncIteration
+
+        proc = MagicMock()
+        proc.stdout = HangingStdout()
+        proc.returncode = None
+        settings = MagicMock(project_root=tmp_path)
+
+        with (
+            patch("odds_lambda.jobs.agent_run.get_settings", return_value=settings),
+            patch(
+                "odds_lambda.jobs.agent_run.asyncio.create_subprocess_exec",
+                new=AsyncMock(return_value=proc),
+            ),
+        ):
+            task = asyncio.create_task(_run_claude_agent("soccer_epl"))
+            await asyncio.sleep(0.1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        proc.kill.assert_called_once()

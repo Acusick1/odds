@@ -34,7 +34,7 @@ It runs `sports` as `[ctx.sport]` or `data_collection.sports`:
 
 ## Failure behaviour
 
-- The job is not wrapped in `odds_core.alerts.job_alert_context`, so it writes no heartbeat and `heartbeat_expectations` has no `fetch-odds` entry (#438; [alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
+- The job is not wrapped in `odds_core.alerts.job_alert_context`, so it writes no heartbeat and `heartbeat_expectations` has no `fetch-odds` entry (#438; [alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)). On the local scheduler a run past `odds_lambda.scheduling.runner.JOB_TIMEOUT` is cancelled and alerted, and a failed run that booked nothing is re-booked ([Local scheduler](../scheduling/local-scheduler.md#scheduling-primitives)).
 - On failure it sends an unrate-limited `odds_core.alerts.send_critical` and re-raises; on AWS the Lambda handler sends a second critical (#442; [lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
 - Invoked without a `sport` (for example `odds scheduler run-once fetch-odds`), the job runs all configured sports, MLB included, and reschedules under the bare `fetch-odds` name, which matches no bootstrapped schedule or EventBridge rule (#470).
 
