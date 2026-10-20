@@ -766,8 +766,8 @@ class TestCheckMissingBetfairCloses:
             patch("odds_core.alerts.alert_manager.alert", side_effect=alert),
             patch.object(settings.alerts, "alert_enabled", True),
         ):
-            first = await monitor.check_system_health()
-            second = await monitor.check_system_health()
+            first = await monitor.check_system_health(NOW)
+            second = await monitor.check_system_health(NOW)
 
         close_alerts = [
             message for message in sent if "Betfair" in message and "snapshot" in message
@@ -796,11 +796,11 @@ class TestCheckMissingBetfairCloses:
         monitor.settings.alerts.alert_enabled = True
 
         with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock):
-            limited = await monitor.check_system_health()
+            limited = await monitor.check_system_health(NOW)
             await pglite_async_session.delete(recent)
             await pglite_async_session.commit()
-            retried = await monitor.check_system_health()
-            repeated = await monitor.check_system_health()
+            retried = await monitor.check_system_health(NOW)
+            repeated = await monitor.check_system_health(NOW)
 
         listing = [i for i in limited.issues_detected if event_id in i]
         assert len(listing) == 1

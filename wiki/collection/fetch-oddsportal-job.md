@@ -42,7 +42,7 @@ These apply only if the dormant scraper Lambda runs again.
 
 ## Heartbeats
 
-Heartbeats are keyed `heartbeat:fetch-oddsportal-<sport>`; both sports have entries (11 h EPL, 12 h MLB, covering the overnight window); `fetch-mlb-probables` (30 h) and `fetch-betfair-exchange` (10 h EPL, 11 h MLB) share the map in `odds_core.config.AlertConfig.heartbeat_expectations` ([alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
+Heartbeats are keyed `heartbeat:fetch-oddsportal-<sport>`; both sports have entries (11 h EPL, 12 h MLB, covering the overnight window); `fetch-mlb-probables` (30 h) and `fetch-betfair-exchange` (10 h EPL, 11 h MLB) and `fetch-polymarket-odds` (11 h EPL) share the map in `odds_core.config.AlertConfig.heartbeat_expectations` ([alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
 
 ## Related
 

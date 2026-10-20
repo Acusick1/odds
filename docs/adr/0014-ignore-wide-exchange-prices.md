@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Ignore wide Betfair Exchange books in the retail-EV target

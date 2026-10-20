@@ -60,6 +60,7 @@ class TestSettings:
                 # "daily-digest",
                 "fetch-espn-fixtures",
                 "fetch-betfair-exchange",
+                "fetch-polymarket-odds",
                 "fetch-mlb-probables",
             ]
             assert settings.data_quality.enable_validation is True

@@ -775,7 +775,7 @@ class HealthMonitor:
             logger.info("heartbeats_purged", deleted=deleted)
         return deleted
 
-    async def check_system_health(self) -> HealthStatus:
+    async def check_system_health(self, now: datetime | None = None) -> HealthStatus:
         """
         Perform comprehensive system health check.
 
@@ -793,6 +793,7 @@ class HealthMonitor:
             HealthStatus with metrics and alerts sent
         """
         logger.info("health_check_started")
+        moment = now or datetime.now(UTC)
 
         issues_detected = []
         alerts_sent = []
@@ -803,7 +804,7 @@ class HealthMonitor:
 
             # Check 1: Stale data, per source
             alerts_config = self.settings.alerts
-            for stale in await self.check_stale_sources():
+            for stale in await self.check_stale_sources(moment):
                 issue = stale.describe()
                 issues_detected.append(issue)
 
@@ -815,7 +816,7 @@ class HealthMonitor:
                 ):
                     alerts_sent.append(stale.alert_type)
 
-            mlb_issue = await self.check_mlb_calendar()
+            mlb_issue = await self.check_mlb_calendar(moment)
             if mlb_issue:
                 issues_detected.append(mlb_issue)
                 if await self._send_alert(
@@ -826,7 +827,7 @@ class HealthMonitor:
                 ):
                     alerts_sent.append("mlb_calendar_stale")
 
-            missing_closes = await self.check_missing_betfair_closes()
+            missing_closes = await self.check_missing_betfair_closes(moment)
             if missing_closes:
                 listing = "; ".join(close.describe() for close in missing_closes)
                 issue = (
@@ -919,7 +920,7 @@ class HealthMonitor:
             issues_detected.extend(await self.check_event_identity())
 
             # Check 7: Self-scheduling chains
-            for chain in await self.check_schedule_chains():
+            for chain in await self.check_schedule_chains(moment):
                 issue = chain.describe()
                 issues_detected.append(issue)
                 if await self._send_alert(

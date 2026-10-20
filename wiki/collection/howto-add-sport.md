@@ -37,7 +37,7 @@ The Odds API bookmakers and markets are config (`bookmakers`, a per-sport map, a
    - A job with an allowlist skips every sport not on it, so a new sport gets none of those jobs by default; per-sport jobs without an allowlist run for every sport in `data_collection.sports` ([local-scheduler](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
 9. Skip `sport_configs` in `deployment/aws/terraform/eventbridge.tf` while AWS is dormant.
    - Rules are created per `sport_configs` entry, and production runs on the mini-PC ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#dormant-aws-rules)).
-10. Add heartbeat expectations (allowed hours between runs, longer for jobs with an overnight pause) to `odds_core.config.AlertConfig.heartbeat_expectations` for each job that uses `odds_core.alerts.job_alert_context`, keyed by compound name (a daily job needs about 30 h, as `fetch-mlb-probables` has; `fetch-betfair-exchange` has an entry per sport).
+10. Add heartbeat expectations (allowed hours between runs, longer for jobs with an overnight pause) to `odds_core.config.AlertConfig.heartbeat_expectations` for each job that uses `odds_core.alerts.job_alert_context`, keyed by compound name (a daily job needs about 30 h, as `fetch-mlb-probables` has; `fetch-betfair-exchange` and `fetch-polymarket-odds` have an entry per sport).
    - Keys are compound names (`fetch-oddsportal-<suffix>`), and a key with no history is never alerted ([alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
 11. Pass `--sport` and the sport's market key (`1x2` or `h2h`) in every manual command and check the first fetch.
     - Several CLI defaults are NBA ([odds-cli](../foundations/odds-cli.md#sport-defaults)).

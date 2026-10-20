@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Read OddsPortal results over HTTP and stop storing its closing snapshots

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0013
 ---
 
 # Deprioritise Polymarket as a trading venue

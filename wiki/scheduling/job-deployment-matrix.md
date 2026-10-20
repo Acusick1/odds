@@ -33,7 +33,7 @@ Three lists in code decide what the production scheduler runs:
 | `update-status`, `check-health` | yes | global | self-scheduling; health every 60 min |
 | `fetch-oddsportal`, `fetch-oddsportal-results` | yes | every configured sport | proximity (30 min to 2 h) / daily 08:00 UTC |
 | `fetch-betfair-exchange` | yes | every Betfair-supported sport | self-scheduling, 15 min to 2 h, plus a run 5 min before each kickoff ([Betfair job](../collection/betfair-exchange.md#flow)) |
-| `fetch-polymarket-odds` | no, pending ADR-0013 | every sport with three-way Polymarket match markets (EPL) | self-scheduling, 5 min to 2 h ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#the-fetch-polymarket-odds-job)) |
+| `fetch-polymarket-odds` | yes ([ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md)) | every sport with three-way Polymarket match markets (EPL) | self-scheduling, 5 min to 2 h ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#the-fetch-polymarket-odds-job)) |
 | `fetch-espn-fixtures` | yes | EPL | cron `0 6 * * *` |
 | `fetch-mlb-probables` | yes | MLB | cron `0 6 * * *` |
 | `daily-digest` | no | EPL | cron `0 8 * * *`; posts to Discord |

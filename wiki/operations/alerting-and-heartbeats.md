@@ -21,7 +21,7 @@ Three mechanisms watch the system, and each sees a different failure.
 |---|---|---|
 | Event-driven | `odds_core.alerts.job_alert_context` sends `job_failure:<job>` and `odds_core.alerts.send_job_warning` sends soft-failure warnings ([alerts](alerts.md)) | a job that raised or wrote nothing while fixtures were scheduled |
 | Heartbeat | `heartbeat:<job>` rows written on clean exit, compared to the per-job allowed hours in `odds_core.config.AlertConfig.heartbeat_expectations` | a job that stopped running |
-| Poll-driven | `odds_lambda.health_monitor.HealthMonitor` ([health-monitor](health-monitor.md)) | a source that stopped writing snapshots, an MLB schedule that stopped being fetched, EPL events whose live Betfair close was not collected (reported after kick-off), fetch failures, low quota, data-quality errors, duplicate events, recent events still scheduled after kick-off, self-scheduling jobs with no run booked or an overdue one |
+| Poll-driven | the checks of `odds_lambda.health_monitor.HealthMonitor`, run hourly by `check-health` ([health-monitor](health-monitor.md)) | a source that stopped writing snapshots, an MLB schedule that stopped being fetched, EPL events whose live Betfair close was not collected (reported after kick-off), fetch failures, low quota, data-quality errors, duplicate events, recent events still scheduled after kick-off, self-scheduling jobs with no run booked or an overdue one |
 
 Event-driven alerts fire only if the job runs far enough to raise. A job that never starts, or whose chain of self-scheduled runs ended, raises nothing, which is what heartbeats and the poll cover; the poll's [schedule chain check](health-monitor.md#schedule-chain-check) sees an ended chain directly. The poll covers data symptoms (no new snapshots from a source within its cadence) that do not depend on a single job writing a row. (Inferred: the split exists because self-scheduling ends a chain silently when a run dies; see [self-scheduling](../scheduling/self-scheduling.md#failure-policy-by-job).)
 
@@ -29,7 +29,7 @@ Event-driven alerts fire only if the job runs far enough to raise. A job that ne
 
 On clean exit a job inside `job_alert_context(name)` inserts `heartbeat:<name>`. The check-health job compares the newest row per expectation key to its allowed hours and purges old heartbeat rows; the defaults and mechanics are on [health-monitor](health-monitor.md#heartbeats). Nothing checks that a job's `odds_core.alerts.job_alert_context` name matches a `heartbeat_expectations` key, and a key with no history is not alerted, so a rename leaves a stale key and the check passes silently (#384).
 
-Which jobs write a heartbeat, and their default expectations, are in [health-monitor](health-monitor.md#heartbeats).
+Which jobs write a heartbeat (the EPL Polymarket job included), and their default expectations, are in [health-monitor](health-monitor.md#heartbeats).
 
 fetch-odds, fetch-scores and the NBA Polymarket jobs send hand-rolled criticals on failure instead of a heartbeat, so only the per-source stale-data check catches a stalled chain ([fetch-odds-job](../collection/fetch-odds-job.md), [results-jobs](../collection/results-jobs.md), [polymarket](../collection/polymarket.md)).
 
