@@ -128,7 +128,7 @@ A job inside `odds_core.alerts.job_alert_context` inserts `heartbeat:<name>` on 
 
 ## Alert path
 
-`odds_lambda.health_monitor.HealthMonitor._send_alert` checks `odds_core.config.Settings.alerts_deliverable` (false when alerts are off or `SCHEDULER_DRY_RUN` is on, so a deploy smoke neither posts nor writes a rate-limit row), then `odds_lambda.health_monitor.HealthMonitor._should_send_alert` (a count over `alert_history` using `odds_core.config.AlertConfig.alert_rate_limit_minutes`), calls `odds_core.alerts.AlertManager.alert`, then `odds_lambda.health_monitor.HealthMonitor._record_alert` with the injected `AsyncSession`. This duplicates `odds_core.alerts.check_rate_limit` and `odds_core.alerts.record_to_alert_history` because the monitor carries its own session and settings ([alerts](alerts.md#alert-history)).
+`odds_lambda.health_monitor.HealthMonitor._send_alert` checks `odds_core.config.Settings.alerts_deliverable` (false when alerts are off or `SCHEDULER_DRY_RUN` is on, so a deploy smoke neither posts nor writes a rate-limit row), then `odds_lambda.health_monitor.HealthMonitor._should_send_alert` (a count over `alert_history` using `odds_core.config.AlertConfig.alert_rate_limit_minutes`), calls `odds_core.alerts.AlertManager.alert`, then `odds_lambda.health_monitor.HealthMonitor._record_alert` with the injected `AsyncSession`. This duplicates `odds_core.alerts.check_rate_limit` and `odds_core.alerts.record_to_alert_history` (which, like `odds_lambda.health_monitor.HealthMonitor._send_alert`, writes nothing under `SCHEDULER_DRY_RUN`) because the monitor carries its own session and settings ([alerts](alerts.md#alert-history)).
 
 ## odds status
 

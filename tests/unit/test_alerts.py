@@ -7,6 +7,7 @@ from odds_core.alerts import (
     AlertManager,
     DiscordAlert,
     job_alert_context,
+    record_to_alert_history,
     send_critical,
     send_error,
     send_warning,
@@ -190,6 +191,37 @@ class TestConvenienceFunctions:
         with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
             await send_critical("Test critical")
             mock_alert.assert_called_once_with("Test critical", "critical")
+
+
+class TestRecordToAlertHistory:
+    """record_to_alert_history is the single writer behind heartbeats and job alerts."""
+
+    @pytest.mark.asyncio
+    async def test_dry_run_writes_nothing(self) -> None:
+        settings = Settings(scheduler=SchedulerConfig(dry_run=True))
+        with (
+            patch("odds_core.alerts.get_settings", return_value=settings),
+            patch("odds_core.database.async_session_maker") as maker,
+        ):
+            await record_to_alert_history("heartbeat:test-job", "info", "ok")
+
+        maker.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_writes_row_outside_dry_run(self) -> None:
+        session = AsyncMock()
+        session.add = MagicMock()
+        maker = MagicMock()
+        maker.return_value.__aenter__.return_value = session
+        settings = Settings(scheduler=SchedulerConfig(dry_run=False))
+        with (
+            patch("odds_core.alerts.get_settings", return_value=settings),
+            patch("odds_core.database.async_session_maker", maker),
+        ):
+            await record_to_alert_history("heartbeat:test-job", "info", "ok")
+
+        session.add.assert_called_once()
+        session.commit.assert_awaited_once()
 
 
 class TestJobAlertContext:
