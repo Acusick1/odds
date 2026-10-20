@@ -18,9 +18,9 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.database import async_session_maker
-from odds_core.models import Event, EventStatus
+from odds_core.models import AlertHistory, Event, EventStatus
 from odds_core.team import normalize_team_name
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
@@ -51,6 +51,7 @@ class ResultsStats:
     events_updated: int = 0
     events_cancelled: int = 0
     events_unresolved: int = 0
+    unresolved_kickoffs: list[datetime] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
 
@@ -230,6 +231,7 @@ async def process_results(
             del pending_by_id[event.id]
 
     stats.events_unresolved = len(pending_by_id)
+    stats.unresolved_kickoffs = [event.commence_time for event in pending_by_id.values()]
     logger.info(
         "results_collection_complete",
         matches_fetched=stats.matches_fetched,
@@ -240,6 +242,56 @@ async def process_results(
     )
 
     return stats
+
+
+def _settled_alert_type(sport_key: str) -> str:
+    return f"results_settled:{sport_key}"
+
+
+async def _last_settled_at(sport_key: str) -> datetime | None:
+    async with async_session_maker() as session:
+        return (
+            await session.execute(
+                select(func.max(AlertHistory.sent_at)).where(
+                    AlertHistory.alert_type == _settled_alert_type(sport_key)
+                )
+            )
+        ).scalar_one()
+
+
+async def record_run_outcome(sport_key: str, stats: ResultsStats, now: datetime) -> None:
+    """Record that the run settled events, or warn when it settled none and events are overdue.
+
+    A run is stalled when it settled nothing while events that kicked off after
+    the job's last settling run are still pending more than ``STALE_AFTER`` on.
+    Unmatched events from before that run do not count, so one unresolvable
+    match does not alert while the job keeps settling others. Without a
+    settling run on record the job has no baseline and stays quiet.
+    """
+    from odds_core.alerts import record_to_alert_history, send_job_warning
+
+    if stats.events_updated:
+        await record_to_alert_history(
+            _settled_alert_type(sport_key),
+            "info",
+            f"Settled {stats.events_updated} {sport_key} events",
+        )
+        return
+    last_settled = await _last_settled_at(sport_key)
+    if last_settled is None:
+        return
+    overdue = [
+        kickoff
+        for kickoff in stats.unresolved_kickoffs
+        if kickoff < now - STALE_AFTER and kickoff > last_settled
+    ]
+    if overdue:
+        await send_job_warning(
+            f"results_stalled:{sport_key}",
+            f"⚠️ OddsPortal results settled nothing: {len(overdue)} {sport_key} events "
+            f"kicked off since {min(overdue):%Y-%m-%d %H:%M} UTC are still pending "
+            f"(last settling run: {last_settled:%Y-%m-%d %H:%M} UTC)",
+        )
 
 
 async def main(ctx: JobContext) -> None:
@@ -259,6 +311,7 @@ async def main(ctx: JobContext) -> None:
         async with job_alert_context(schedule_job_name):
             logger.info("fetch_oddsportal_results_started", sport=sport)
             stats = await process_results(sport=sport)
+            await record_run_outcome(sport or DEFAULT_SPORT_KEY, stats, datetime.now(UTC))
             if stats.errors:
                 raise RuntimeError(
                     f"{schedule_job_name} failed to settle {len(stats.errors)} event(s); "

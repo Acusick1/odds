@@ -10,8 +10,10 @@ import pytest
 from odds_core.models import Event, EventStatus
 from odds_lambda.jobs.fetch_oddsportal_results import (
     DEFAULT_SPORT_KEY,
+    ResultsStats,
     get_pending_events,
     process_results,
+    record_run_outcome,
 )
 from odds_lambda.oddsportal_client import (
     CancelledMatch,
@@ -455,3 +457,68 @@ class TestMainSelfSchedules:
         assert len(scheduled_calls) == 1, "self-schedule must run even when process_results raises"
         assert scheduled_calls[0]["job_name"] == "fetch-oddsportal-results-epl"
         assert scheduled_calls[0]["payload"] == {"sport": "soccer_epl"}
+
+
+class TestRecordRunOutcome:
+    NOW = datetime(2026, 10, 20, 8, 0, tzinfo=UTC)
+
+    @staticmethod
+    async def _run(
+        stats: ResultsStats, last_settled: datetime | None
+    ) -> tuple[AsyncMock, AsyncMock]:
+        record = AsyncMock()
+        warn = AsyncMock(return_value=True)
+        with (
+            patch("odds_core.alerts.record_to_alert_history", record),
+            patch("odds_core.alerts.send_job_warning", warn),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal_results._last_settled_at",
+                AsyncMock(return_value=last_settled),
+            ),
+        ):
+            await record_run_outcome("soccer_epl", stats, TestRecordRunOutcome.NOW)
+        return record, warn
+
+    @pytest.mark.asyncio
+    async def test_a_settling_run_records_the_marker_and_does_not_warn(self) -> None:
+        stats = ResultsStats(events_updated=2, unresolved_kickoffs=[self.NOW - timedelta(days=3)])
+
+        record, warn = await self._run(stats, None)
+
+        assert record.await_args.args[0] == "results_settled:soccer_epl"
+        warn.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_warns_when_nothing_settles_and_events_kicked_off_after_the_last_settle(
+        self,
+    ) -> None:
+        stats = ResultsStats(unresolved_kickoffs=[self.NOW - timedelta(days=2)])
+
+        record, warn = await self._run(stats, self.NOW - timedelta(days=5))
+
+        record.assert_not_awaited()
+        assert warn.await_args.args[0] == "results_stalled:soccer_epl"
+
+    @pytest.mark.asyncio
+    async def test_quiet_when_no_settling_run_is_on_record(self) -> None:
+        stats = ResultsStats(unresolved_kickoffs=[self.NOW - timedelta(days=2)])
+
+        _, warn = await self._run(stats, None)
+
+        warn.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_quiet_for_unmatched_events_older_than_the_last_settle(self) -> None:
+        stats = ResultsStats(unresolved_kickoffs=[self.NOW - timedelta(days=10)])
+
+        _, warn = await self._run(stats, self.NOW - timedelta(days=1))
+
+        warn.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_quiet_for_events_under_a_day_old(self) -> None:
+        stats = ResultsStats(unresolved_kickoffs=[self.NOW - timedelta(hours=5)])
+
+        _, warn = await self._run(stats, self.NOW - timedelta(days=5))
+
+        warn.assert_not_awaited()

@@ -47,12 +47,14 @@ from odds_lambda.scheduling.jobs import (
     resolve_target_sports,
 )
 from odds_lambda.storage.event_merge import EventMerger
+from odds_lambda.storage.unsettled_events import find_unsettled_events
 
 logger = structlog.get_logger()
 
 LEAGUE_SPORTS: tuple[str, ...] = ("soccer_epl",)
-STALE_SCHEDULED_AGE = timedelta(hours=24)
-STALE_SCHEDULED_WINDOW = timedelta(days=7)
+UNSETTLED_AGE = timedelta(hours=24)
+UNSETTLED_IDS_SHOWN = 10
+UNSETTLED_ALERT_MINUTES = 24 * 60
 BETFAIR_CLOSE_SPORT = "soccer_epl"
 BETFAIR_CLOSE_JOB = "fetch-betfair-exchange"
 BETFAIR_HISTORY_WINDOW = timedelta(hours=72)
@@ -572,7 +574,7 @@ class HealthMonitor:
 
     async def check_event_identity(self) -> list[str]:
         """
-        Check that each match is one event and that no old event is still scheduled.
+        Check that each match is one event.
 
         Each issue names its sport and is alerted separately; none merges anything.
         Run ``odds events merge-twins --sport <sport> --apply`` for twins.
@@ -606,19 +608,39 @@ class HealthMonitor:
                     context={"sport_key": sport, "repeated_fixtures": repeated},
                 )
 
-        stale = Counter(
-            event.sport_key
-            for event in await merger.find_stale_scheduled(
-                STALE_SCHEDULED_AGE, STALE_SCHEDULED_WINDOW, datetime.now(UTC)
+        return issues
+
+    async def check_unsettled_events(self, now: datetime) -> list[str]:
+        """
+        Check that no league event stays pending long after kick-off.
+
+        Alerts per league sport, at most once a day, naming the events of the
+        current season still SCHEDULED or LIVE more than ``UNSETTLED_AGE``
+        after kick-off.
+
+        Returns:
+            Issue descriptions, empty when healthy.
+        """
+        issues: list[str] = []
+        for sport in LEAGUE_SPORTS:
+            events = await find_unsettled_events(self.session, sport, UNSETTLED_AGE, now)
+            if not events:
+                continue
+            ids = [event.id for event in events]
+            shown = ", ".join(ids[:UNSETTLED_IDS_SHOWN])
+            more = (
+                f" and {len(ids) - UNSETTLED_IDS_SHOWN} more"
+                if len(ids) > UNSETTLED_IDS_SHOWN
+                else ""
             )
-        )
-        for sport, count in sorted(stale.items()):
-            issues.append(f"{count} {sport} events still scheduled long after kick-off")
+            issue = f"{len(ids)} {sport} events unsettled over 24 h after kick-off: {shown}{more}"
+            issues.append(issue)
             await self._send_alert(
-                alert_type=f"stale_scheduled_events:{sport}",
+                alert_type=f"unsettled_events:{sport}",
                 severity="warning",
-                message=f"⚠️ {count} {sport} events still scheduled long after kick-off",
-                context={"sport_key": sport, "stale_scheduled": count},
+                message=f"⚠️ {issue}",
+                context={"sport_key": sport, "event_ids": ids},
+                rate_limit_minutes=UNSETTLED_ALERT_MINUTES,
             )
         return issues
 
@@ -867,6 +889,9 @@ class HealthMonitor:
 
             # Check 5: One event per match
             issues_detected.extend(await self.check_event_identity())
+
+            # Check 5b: League events settle after kick-off
+            issues_detected.extend(await self.check_unsettled_events(moment))
 
             # Check 6: Self-scheduling chains
             for chain in await self.check_schedule_chains(moment):

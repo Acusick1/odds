@@ -47,7 +47,6 @@ No database constraint forbids twins. `odds_lambda.health_monitor.HealthMonitor.
 
 - **Twins** (`duplicate_events:<sport>`): `odds_lambda.storage.event_merge.EventMerger.find_twin_groups` clusters events with the same sport and teams whose commence times are within ±2 h of the cluster's first event.
 - **Repeated fixtures** (`repeated_fixtures:<sport>`): `odds_lambda.storage.event_merge.EventMerger.find_repeated_fixtures` finds a home and away pair stored more than once in a season (August to July) further apart than ±2 h, for `odds_lambda.health_monitor.LEAGUE_SPORTS`. This is a rescheduled match under a second id.
-- **Stale scheduled events** (`stale_scheduled_events:<sport>`): `odds_lambda.storage.event_merge.EventMerger.find_stale_scheduled` finds events still `scheduled` more than `odds_lambda.health_monitor.STALE_SCHEDULED_AGE` after kick-off whose kick-off was within `odds_lambda.health_monitor.STALE_SCHEDULED_WINDOW`, which a stuck twin or a missed result leaves behind. Older ones are not alerted, so a backlog does not alert forever.
 
 ## Command
 

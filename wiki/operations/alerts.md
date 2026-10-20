@@ -55,7 +55,9 @@ On AWS, the Lambda handler also sends its own critical on any exception ([lambda
 | `missing_betfair_close` (sent after kick-off as a coverage record; one alert per run listing events not already alerted in the lookback) | `odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes` | critical |
 | `quota_low`, `quota_critical` | `odds_lambda.health_monitor.HealthMonitor.check_api_quota` | warning, critical |
 | `data_quality_errors` | `odds_lambda.health_monitor.HealthMonitor.check_data_quality` | warning |
-| `duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `stale_scheduled_events:<sport>` (kick-off within the last 7 days) | `odds_lambda.health_monitor.HealthMonitor.check_event_identity` | warning |
+| `duplicate_events:<sport>`, `repeated_fixtures:<sport>` | `odds_lambda.health_monitor.HealthMonitor.check_event_identity` | warning |
+| `unsettled_events:<sport>` (league sports; current-season events pending over 24 h after kick-off; repeats once a day, not the common window) | `odds_lambda.health_monitor.HealthMonitor.check_unsettled_events` | warning |
+| `results_stalled:<sport>` (an OddsPortal results run settled nothing while events that kicked off after its last settling run are pending over 24 h) | `odds_lambda.jobs.fetch_oddsportal_results.record_run_outcome` | warning |
 | `missing_heartbeat:<job>` | `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats` | warning |
 | `dead_schedule_chain:<job>` (a bootstrapped self-scheduling job with no run booked or one overdue) | `odds_lambda.health_monitor.HealthMonitor.check_schedule_chains` | critical |
 | `health_check_failure` (the monitor itself raised) | `odds_lambda.health_monitor.HealthMonitor.check_system_health` | critical |

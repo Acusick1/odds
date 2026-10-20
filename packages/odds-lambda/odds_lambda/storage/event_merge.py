@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 import structlog
 from odds_core.event_source import EventSource, canonical_event_id
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, OddsSnapshot
 from odds_core.time import ensure_utc
 from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -167,20 +167,6 @@ class EventMerger:
                 if len(season_events) > 1 and span > EVENT_MATCH_WINDOW:
                     groups.append(season_events)
         return groups
-
-    async def find_stale_scheduled(
-        self, older_than: timedelta, within: timedelta, now: datetime
-    ) -> list[Event]:
-        result = await self.session.execute(
-            select(Event)
-            .where(
-                Event.status == EventStatus.SCHEDULED,
-                Event.commence_time < now - older_than,
-                Event.commence_time >= now - within,
-            )
-            .order_by(Event.commence_time, Event.id)
-        )
-        return list(result.scalars().all())
 
     async def merge_all_twins(
         self, sport_key: str | None = None, window: timedelta = EVENT_MATCH_WINDOW
