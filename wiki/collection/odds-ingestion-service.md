@@ -48,7 +48,7 @@ status: stable
 
 **Readers.**
 - `odds status show` takes the latest row; `odds status quota` the latest 10 ([odds status](../operations/health-monitor.md#odds-status)).
-- `odds_lambda.storage.readers.OddsReader.get_database_stats`: 24 h success rate and the newest non-null `api_quota_remaining`.
+- `odds_lambda.storage.readers.OddsReader.get_database_stats`: the newest non-null `api_quota_remaining`.
 - `odds_lambda.health_monitor.HealthMonitor.check_api_quota` reads the quota ([health-monitor](../operations/health-monitor.md)).
 
 ## Manual event discovery

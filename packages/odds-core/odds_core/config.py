@@ -213,7 +213,7 @@ class AlertConfig(BaseSettings):
     )
     stale_reminder_minutes: int = Field(
         default=360,
-        description="Minutes between repeat alerts while a source stays stale",
+        description="Minutes between repeat alerts while a source stays stale or a job keeps failing",
     )
 
     betfair_close_lookback_hours: int = Field(
@@ -239,6 +239,11 @@ class AlertConfig(BaseSettings):
         default={
             # Overnight windows (EPL 22-06 UTC, MLB 05-14 UTC) pause these jobs, so the
             # allowed gap is the window plus the polling interval.
+            # The longest gaps between runs: the 48 h opening tier for fetch-odds (the 24 h
+            # no-game check-in is shorter) and the 12 h idle interval for fetch-scores,
+            # each plus 1 h slack. Neither job pauses overnight.
+            "fetch-odds-epl": 49,
+            "fetch-scores-epl": 13,
             "fetch-oddsportal-epl": 11,
             "fetch-oddsportal-results-epl": 26,
             "fetch-oddsportal-mlb": 12,

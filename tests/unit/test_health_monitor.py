@@ -165,7 +165,6 @@ class TestHealthMonitor:
         with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
             mock_reader = AsyncMock()
             mock_reader.get_database_stats.return_value = {
-                "fetch_success_rate_24h": 95.5,
                 "api_quota_remaining": 15000,
                 "events_by_status": {
                     "scheduled": 10,
@@ -181,7 +180,6 @@ class TestHealthMonitor:
                     metrics = await monitor.collect_metrics()
 
             assert isinstance(metrics, HealthMetrics)
-            assert metrics.fetch_success_rate_24h == 95.5
             assert metrics.api_quota_remaining == 15000
             assert metrics.hours_since_last_fetch is not None
             assert metrics.data_quality_errors_24h == 2
@@ -197,7 +195,6 @@ class TestHealthMonitor:
         # Mock all checks to return healthy
         with patch.object(monitor, "collect_metrics") as mock_collect:
             mock_collect.return_value = HealthMetrics(
-                fetch_success_rate_24h=95.0,
                 hours_since_last_fetch=0.5,
                 api_quota_remaining=15000,
                 data_quality_errors_24h=2,
@@ -232,7 +229,6 @@ class TestHealthMonitor:
         # Mock metrics
         with patch.object(monitor, "collect_metrics") as mock_collect:
             mock_collect.return_value = HealthMetrics(
-                fetch_success_rate_24h=50.0,
                 hours_since_last_fetch=3.0,
                 api_quota_remaining=1000,
                 data_quality_errors_24h=15,
@@ -327,9 +323,9 @@ class TestHealthMonitor:
         """Should flag jobs with old heartbeats."""
         monitor = HealthMonitor(mock_session, mock_settings)
 
-        # Mock query: heartbeat from 30 hours ago (exceeds every expectation)
+        # Mock query: heartbeat from 60 hours ago (exceeds every expectation)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(hours=30)
+        mock_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(hours=60)
         mock_session.execute.return_value = mock_result
 
         with patch.object(monitor, "_send_alert", return_value=True):
@@ -454,7 +450,6 @@ class TestCheckScheduleChains:
                 (
                     "collect_metrics",
                     HealthMetrics(
-                        fetch_success_rate_24h=100.0,
                         hours_since_last_fetch=0.1,
                         api_quota_remaining=None,
                         data_quality_errors_24h=0,

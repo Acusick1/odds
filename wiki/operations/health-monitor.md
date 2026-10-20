@@ -71,7 +71,7 @@ A covered job is dead when it has no stored schedule, or when its next run is mo
 
 - `odds_lambda.collection_calendar.fixture_calendar` finds a fixture of the sport inside the source's horizon, so international breaks, off-seasons and the days before the first fixture raise nothing. EPL fixtures are SCHEDULED events; MLB fixtures are the games of the latest `odds_core.mlb_data_models.MlbProbablePitchers` fetch (every row of a fetch shares one `fetched_at`, and the scheduled job is the only writer) when that fetch is under 36 h old, with a priced game type, a known start time and a status other than Postponed, Cancelled or If Necessary. So the MLB calendar does not depend on the monitored collectors creating events. A fetch that finds no games writes no rows, so an MLB off-season, like any other, raises nothing; a probables job that stops completing shows as a missing `fetch-mlb-probables` heartbeat (30 h) and not as a calendar alert.
 - The source has written a snapshot for the sport before, the same no-history rule as heartbeats, so a job that was never enabled raises nothing (#384).
-- The job's own failure alert is not a recent, unanswered one: `job_failure:<job>` newer than its heartbeat and newer than the larger of the threshold and the reminder window. While that holds, the job's critical covers the outage and no stale alert is added; an older failure with no heartbeat since does not suppress.
+- The job's own failure alert is not a recent, unanswered one: `job_failure:<job>` newer than its heartbeat (`odds_core.alerts.job_outage_alerted_at`) and at most two reminder intervals old, since a job writes that row only once per reminder interval during an outage. While that holds, the job's critical covers the outage and no stale alert is added; an older failure with no heartbeat since does not suppress.
 - `odds_lambda.collection_calendar.active_hours_between` the later of the last snapshot and the moment the next kickoff entered the horizon, and now, excluding the sport's overnight window when the job honours it (`odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS`), exceeds the largest of `stale_data_hours` (2), `stale_cadence_multiplier` (3) times the job's cadence interval at the tier of the next kickoff, and `stale_last_interval_multiplier` (1.5) times the interval at the tier the next kickoff had when the last snapshot was written. The last term allows for the wait the job chose then, which can be longer than the one that applies now.
 
 A stale source alerts once and then repeats every `stale_reminder_minutes` (360) while it stays stale ([alerts](alerts.md)). The window is a rate limit, not a state: a source that recovers and goes stale again within 6 h of its last stale alert is muted until the window ends. The last-snapshot lookup takes the newest matching row through the `snapshot_time` index (`ORDER BY snapshot_time DESC LIMIT 1`), so a source with no recent rows scans back further.
@@ -121,7 +121,10 @@ A job inside `odds_core.alerts.job_alert_context` inserts `heartbeat:<name>` on 
 | score-predictions | yes | none |
 | fetch-mlb-probables | yes | 30 h |
 | fetch-espn-fixtures | yes | 26 h (daily cron plus slack) |
-| fetch-odds, fetch-scores, fetch-polymarket, backfill-polymarket, agent-run | no: not wrapped in `odds_core.alerts.job_alert_context` (#438) | none |
+| fetch-odds (EPL) | yes | 49 h (48 h opening-tier interval plus 1 h; no overnight pause) |
+| fetch-scores (EPL) | yes | 13 h (12 h idle interval plus 1 h; no overnight pause) |
+| fetch-polymarket | yes | none (not bootstrapped) |
+| backfill-polymarket, agent-run | no: not wrapped in `odds_core.alerts.job_alert_context` (#438) | none |
 
 ## Failure handling
 
@@ -136,11 +139,11 @@ A job inside `odds_core.alerts.job_alert_context` inserts `heartbeat:<name>` on 
 
 `odds_cli.commands.status` is the on-demand view of the same tables. It prints Rich tables only; there is no machine-readable output.
 
-- `odds status show [--verbose]`: latest fetch (minutes ago, tick or cross), event counts by status, odds and snapshot totals, quota and 24 h success rate from `odds_lambda.storage.readers.OddsReader.get_database_stats`; `--verbose` adds data-quality rows from the last 24 h (limit 10).
+- `odds status show [--verbose]`: latest fetch (minutes ago, tick or cross), event counts by status, odds and snapshot totals, quota from `odds_lambda.storage.readers.OddsReader.get_database_stats`; `--verbose` adds data-quality rows from the last 24 h (limit 10).
 - `odds status quota`: latest quota plus the last 10 `odds_core.models.FetchLog` rows (`odds_cli.commands.status._show_quota`). It reads the newest 10 rows of any source through `odds_lambda.storage.readers.OddsReader.get_fetch_logs` and shows nothing when the newest row has a null quota, as Betfair rows do (#441).
 - `odds scheduler health` (not part of `odds status`): prints a green or red overall status, the backend name, the passed and failed checks and any details from `odds_lambda.scheduling.backends.base.SchedulerBackend.health_check`, and exits 1 when unhealthy or on error.
 - `odds status events --days N --team T` (default 7 days): recent events with status and scores. It has no sport filter.
-- `status show` takes the latest fetch row from all sources and computes the 24 h success rate over all of them, so Betfair rows can distort both. Its quota is the newest non-null `api_quota_remaining`, unlike `status quota` ([odds-api-quota](../collection/odds-api-quota.md#where-the-views-disagree), [fetch logs](../collection/odds-ingestion-service.md#fetch-logs)).
+- `status show` takes the latest fetch row from all sources, so Betfair rows can distort it. It has no success rate: `fetch_logs` has no source column and a failed Odds API call writes no row, so a rate over it could not show an Odds API outage. Its quota is the newest non-null `api_quota_remaining`, unlike `status quota` ([odds-api-quota](../collection/odds-api-quota.md#where-the-views-disagree), [fetch logs](../collection/odds-ingestion-service.md#fetch-logs)).
 
 ## Related
 

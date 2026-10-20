@@ -129,7 +129,6 @@ class TestHealthCheckIntegration:
 
         assert health_status.overall_healthy is True
         assert len(health_status.issues_detected) == 0
-        assert health_status.metrics.fetch_success_rate_24h == 100.0
         assert health_status.metrics.api_quota_remaining == 15000
 
     @pytest.mark.asyncio

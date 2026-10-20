@@ -20,7 +20,7 @@ Five read-only tools defined in `odds_mcp.server`, part of the [odds-mcp server]
 
 ## `get_upcoming_fixtures(league="soccer_epl", days_ahead=7)`
 
-`SCHEDULED` events with `commence_time` between now and now plus `days_ahead` (clamped to 1-30), ordered by kickoff, then event ID, via `odds_lambda.storage.readers.OddsReader.get_events_by_date_range`. Each item: `id`, `sport_key`, `sport_title`, `home_team`, `away_team`, `commence_time`, status, scores and `completed_at`. Live events are excluded, so a fixture disappears once the update-status job marks it `LIVE`; that job runs on AWS, so the status depends on it running ([status lifecycle](../collection/event-status-lifecycle.md)).
+`SCHEDULED` events with `commence_time` between now and now plus `days_ahead` (clamped to 1-30), ordered by kickoff, then event ID, via `odds_lambda.storage.readers.OddsReader.get_events_by_date_range`. Each item: `id`, `sport_key`, `sport_title`, `home_team`, `away_team`, `commence_time`, status, scores and `completed_at`. Live events are excluded, so a fixture disappears once the update-status job marks it `LIVE`; that job must be running for the status to change ([status lifecycle](../collection/event-status-lifecycle.md)).
 
 ## `get_current_odds(event_id, market, include_raw_data=False, lookback_hours=2.0)`
 

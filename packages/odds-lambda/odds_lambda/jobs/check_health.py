@@ -41,7 +41,6 @@ async def main(ctx: JobContext) -> None:
             overall_healthy=health_status.overall_healthy,
             issues_detected=len(health_status.issues_detected),
             alerts_sent=len(health_status.alerts_sent),
-            success_rate_24h=health_status.metrics.fetch_success_rate_24h,
             hours_since_last_fetch=health_status.metrics.hours_since_last_fetch,
             quota_remaining=health_status.metrics.api_quota_remaining,
         )

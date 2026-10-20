@@ -1,5 +1,6 @@
 """Unit tests for alert infrastructure."""
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,9 +11,10 @@ from odds_core.alerts import (
     record_to_alert_history,
     send_critical,
     send_error,
+    send_job_failure,
     send_warning,
 )
-from odds_core.config import AlertConfig, SchedulerConfig, Settings
+from odds_core.config import AlertConfig, SchedulerConfig, Settings, get_settings
 
 
 class TestAlertManager:
@@ -240,12 +242,12 @@ class TestJobAlertContext:
 
     @pytest.mark.asyncio
     @patch("odds_core.alerts.record_to_alert_history", new_callable=AsyncMock)
-    @patch("odds_core.alerts.check_rate_limit", new_callable=AsyncMock, return_value=True)
+    @patch("odds_core.alerts.latest_sent_at", new_callable=AsyncMock, return_value=None)
     @patch("odds_core.alerts.alert_manager")
     async def test_sends_alert_on_failure(
         self,
         mock_manager: MagicMock,
-        mock_rate_limit: AsyncMock,
+        mock_latest: AsyncMock,
         mock_record: AsyncMock,
     ) -> None:
         """Should send CRITICAL alert and re-raise on exception."""
@@ -268,27 +270,6 @@ class TestJobAlertContext:
 
     @pytest.mark.asyncio
     @patch("odds_core.alerts.record_to_alert_history", new_callable=AsyncMock)
-    @patch("odds_core.alerts.check_rate_limit", new_callable=AsyncMock, return_value=False)
-    @patch("odds_core.alerts.alert_manager")
-    async def test_rate_limits_failure_alerts(
-        self,
-        mock_manager: MagicMock,
-        mock_rate_limit: AsyncMock,
-        mock_record: AsyncMock,
-    ) -> None:
-        """Should suppress alert when rate-limited, still re-raise."""
-        mock_manager.enabled = True
-        mock_manager.alert = AsyncMock()
-
-        with pytest.raises(ValueError):
-            async with job_alert_context("test-job"):
-                raise ValueError("boom")
-
-        mock_manager.alert.assert_not_called()
-        mock_record.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("odds_core.alerts.record_to_alert_history", new_callable=AsyncMock)
     @patch("odds_core.alerts.alert_manager")
     async def test_skips_alert_when_disabled(
         self,
@@ -304,3 +285,101 @@ class TestJobAlertContext:
                 raise ValueError("boom")
 
         mock_manager.alert.assert_not_called()
+
+
+NOW = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
+
+
+class TestSendJobFailure:
+    """A job alerts once per outage and again each reminder interval."""
+
+    @staticmethod
+    def _history(
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        failure: datetime | None = None,
+        heartbeat: datetime | None = None,
+    ) -> None:
+        times = {"job_failure:test-job": failure, "heartbeat:test-job": heartbeat}
+
+        async def latest(alert_type: str, session: object = None) -> datetime | None:
+            return times[alert_type]
+
+        monkeypatch.setattr("odds_core.alerts.latest_sent_at", latest)
+
+    @pytest.fixture(autouse=True)
+    def manager(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        manager = MagicMock(enabled=True, alert=AsyncMock())
+        monkeypatch.setattr("odds_core.alerts.alert_manager", manager)
+        monkeypatch.setattr("odds_core.alerts.record_to_alert_history", AsyncMock())
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_first_failure_alerts_and_is_recorded(
+        self, monkeypatch: pytest.MonkeyPatch, manager: MagicMock
+    ) -> None:
+        self._history(monkeypatch)
+
+        await send_job_failure("test-job", ValueError("boom"), now=NOW)
+
+        manager.alert.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_repeated_failures_in_one_outage_alert_once(
+        self, monkeypatch: pytest.MonkeyPatch, manager: MagicMock
+    ) -> None:
+        self._history(monkeypatch, failure=NOW - timedelta(minutes=30))
+
+        await send_job_failure("test-job", ValueError("boom"), now=NOW)
+
+        manager.alert.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failure_after_an_older_heartbeat_is_still_the_same_outage(
+        self, monkeypatch: pytest.MonkeyPatch, manager: MagicMock
+    ) -> None:
+        self._history(
+            monkeypatch,
+            failure=NOW - timedelta(hours=1),
+            heartbeat=NOW - timedelta(hours=2),
+        )
+
+        await send_job_failure("test-job", ValueError("boom"), now=NOW)
+
+        manager.alert.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reminds_after_the_reminder_interval(
+        self, monkeypatch: pytest.MonkeyPatch, manager: MagicMock
+    ) -> None:
+        reminder = timedelta(minutes=get_settings().alerts.stale_reminder_minutes)
+        self._history(monkeypatch, failure=NOW - reminder)
+
+        await send_job_failure("test-job", ValueError("boom"), now=NOW)
+
+        manager.alert.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_failure_after_a_success_alerts_again(
+        self, monkeypatch: pytest.MonkeyPatch, manager: MagicMock
+    ) -> None:
+        self._history(
+            monkeypatch,
+            failure=NOW - timedelta(hours=2),
+            heartbeat=NOW - timedelta(hours=1),
+        )
+
+        await send_job_failure("test-job", ValueError("boom"), now=NOW)
+
+        manager.alert.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_dry_run_alerts_and_records_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, manager: MagicMock
+    ) -> None:
+        manager.enabled = False
+        self._history(monkeypatch)
+
+        await send_job_failure("test-job", ValueError("boom"), now=NOW)
+
+        manager.alert.assert_not_called()

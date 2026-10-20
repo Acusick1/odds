@@ -17,7 +17,7 @@ from odds_lambda.scheduling.jobs import JobContext
 _BUILD_PATCH = "odds_lambda.scheduling.backends.local.build_scheduler"
 _JOB_FUNCTION_PATCH = "odds_lambda.scheduling.jobs.get_job_function"
 _FAILURE_ALERT_PATCH = "odds_lambda.scheduling.runner.send_job_failure"
-_WARNING_PATCH = "odds_lambda.scheduling.runner.send_job_warning"
+_WARNING_PATCH = "odds_lambda.scheduling.runner.send_outage_warning"
 
 EPL_JOB = "fetch-oddsportal-epl"
 JobFunc = Callable[[JobContext], Awaitable[None]]
@@ -204,7 +204,7 @@ class TestFailedRun:
         assert rebooked is not None
         expected = datetime.now(UTC) + runner.CHAIN_RETRY_DELAY
         assert abs(rebooked - expected) < timedelta(seconds=10)
-        assert warning.await_args.args[0] == f"job_chain_rebooked:{EPL_JOB}"
+        assert warning.await_args.args[1] == f"job_chain_rebooked:{EPL_JOB}"
 
     @pytest.mark.asyncio
     async def test_failing_rebook_warning_is_swallowed(self, warning: AsyncMock) -> None:

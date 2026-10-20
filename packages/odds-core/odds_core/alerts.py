@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import aiohttp
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_core.config import Settings, get_settings
 
@@ -235,20 +236,79 @@ async def record_to_alert_history(
         await session.commit()
 
 
-async def send_job_failure(job_name: str, error: Exception) -> None:
-    """Send the rate-limited CRITICAL ``job_failure:<job_name>`` alert and record it."""
+async def latest_sent_at(alert_type: str, session: AsyncSession | None = None) -> datetime | None:
+    """Newest ``AlertHistory.sent_at`` of ``alert_type``, on ``session`` or a fresh one."""
+    from sqlalchemy import func, select
+
+    from odds_core.database import async_session_maker
+    from odds_core.models import AlertHistory
+
+    query = select(func.max(AlertHistory.sent_at)).where(AlertHistory.alert_type == alert_type)
+    if session is not None:
+        return (await session.execute(query)).scalar_one_or_none()
+    async with async_session_maker() as own_session:
+        return (await own_session.execute(query)).scalar_one_or_none()
+
+
+async def job_outage_alerted_at(
+    job_name: str, alert_type: str | None = None, session: AsyncSession | None = None
+) -> datetime | None:
+    """When the open outage of ``job_name`` last raised ``alert_type``, else None.
+
+    An outage runs from a job's first failure to its next ``heartbeat:<job_name>``;
+    an alert older than the job's latest heartbeat belongs to a closed outage.
+    ``alert_type`` defaults to ``job_failure:<job_name>``.
+    """
+    alerted = await latest_sent_at(alert_type or f"job_failure:{job_name}", session)
+    if alerted is None:
+        return None
+    heartbeat = await latest_sent_at(f"heartbeat:{job_name}", session)
+    if heartbeat is not None and heartbeat > alerted:
+        return None
+    return alerted
+
+
+async def outage_alert_due(job_name: str, alert_type: str, now: datetime) -> bool:
+    """Whether ``alert_type`` should be raised for ``job_name`` at ``now``.
+
+    It is due on the first occurrence in an outage and again every
+    ``AlertConfig.stale_reminder_minutes`` while the outage lasts.
+    """
+    alerted = await job_outage_alerted_at(job_name, alert_type)
+    if alerted is None:
+        return True
+    return now - alerted >= timedelta(minutes=get_settings().alerts.stale_reminder_minutes)
+
+
+async def send_job_failure(job_name: str, error: Exception, *, now: datetime | None = None) -> None:
+    """Send the CRITICAL ``job_failure:<job_name>`` alert once per outage and record it."""
     alert_type = f"job_failure:{job_name}"
-    if alert_manager.enabled and await check_rate_limit(alert_type):
+    if not alert_manager.enabled:
+        return
+    if await outage_alert_due(job_name, alert_type, now or datetime.now(UTC)):
         msg = f"🚨 Job {job_name} failed: {type(error).__name__}: {error}"
         await alert_manager.alert(msg, "critical")
         await record_to_alert_history(alert_type, "critical", msg)
+
+
+async def send_outage_warning(
+    job_name: str, alert_type: str, message: str, *, now: datetime | None = None
+) -> bool:
+    """Send a WARNING once per outage of ``job_name`` and record it; True if sent."""
+    if not alert_manager.enabled:
+        return False
+    if not await outage_alert_due(job_name, alert_type, now or datetime.now(UTC)):
+        return False
+    await alert_manager.alert(message, "warning")
+    await record_to_alert_history(alert_type, "warning", message)
+    return True
 
 
 @asynccontextmanager
 async def job_alert_context(job_name: str) -> AsyncIterator[None]:
     """Wrap a job body to standardise failure alerts and heartbeat recording.
 
-    On exception: send a rate-limited CRITICAL alert, then re-raise.
+    On exception: send a CRITICAL alert once per outage, then re-raise.
     On clean exit: write a heartbeat row to AlertHistory.
 
     Usage::

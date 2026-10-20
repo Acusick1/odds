@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 import structlog
+from odds_core.alerts import job_outage_alerted_at
 from odds_core.betfair_close import LIVE_CLOSE_WINDOW, complete_exchange_prices, is_in_play
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
@@ -147,7 +148,6 @@ def collection_sources() -> tuple[CollectionSource, ...]:
 class HealthMetrics(BaseModel):
     """Health check metrics."""
 
-    fetch_success_rate_24h: float
     hours_since_last_fetch: float | None
     api_quota_remaining: int | None
     data_quality_errors_24h: int
@@ -295,23 +295,16 @@ class HealthMonitor:
             return None
         return (datetime.now(UTC) - latest_snapshot_time).total_seconds() / 3600
 
-    async def _job_is_failing(self, job_name: str, now: datetime, recent: timedelta) -> bool:
-        """Whether the job's latest failure alert is within ``recent`` and newer than its heartbeat."""
-        latest: dict[str, datetime | None] = {}
-        for kind in ("job_failure", "heartbeat"):
-            latest[kind] = (
-                await self.session.execute(
-                    select(func.max(AlertHistory.sent_at)).where(
-                        AlertHistory.alert_type == f"{kind}:{job_name}"
-                    )
-                )
-            ).scalar_one_or_none()
-        failure, heartbeat = latest["job_failure"], latest["heartbeat"]
-        return (
-            failure is not None
-            and failure > now - recent
-            and (heartbeat is None or failure > heartbeat)
-        )
+    async def _job_is_failing(self, job_name: str, now: datetime) -> bool:
+        """Whether ``job_name`` is in an outage whose latest failure alert is recent.
+
+        The outage is the one ``odds_core.alerts.job_outage_alerted_at`` defines. Its
+        failure rows are written once per reminder interval, so a row up to two
+        intervals old still means the job is failing.
+        """
+        alerted = await job_outage_alerted_at(job_name, session=self.session)
+        reminder = timedelta(minutes=self.settings.alerts.stale_reminder_minutes)
+        return alerted is not None and alerted > now - 2 * reminder
 
     async def check_stale_sources(self, now: datetime | None = None) -> list[StaleSource]:
         """Find sources that stopped writing while fixtures they should price are scheduled.
@@ -363,9 +356,8 @@ class HealthMonitor:
                 active = active_hours_between(reference, moment, source.overnight_window(sport_key))
                 if active <= threshold:
                     continue
-                recent = timedelta(hours=max(threshold, alerts.stale_reminder_minutes / 60))
                 if await self._job_is_failing(
-                    make_compound_job_name(source.job_name, sport_key), moment, recent
+                    make_compound_job_name(source.job_name, sport_key), moment
                 ):
                     logger.info("stale_source_job_failing", source=source.key, sport=sport_key)
                     continue
@@ -642,7 +634,6 @@ class HealthMonitor:
         _, data_quality_errors = await self.check_data_quality()
 
         return HealthMetrics(
-            fetch_success_rate_24h=stats.get("fetch_success_rate_24h", 0.0),
             hours_since_last_fetch=hours_since_last_fetch,
             api_quota_remaining=stats.get("api_quota_remaining"),
             data_quality_errors_24h=data_quality_errors,
@@ -914,7 +905,6 @@ class HealthMonitor:
                 timestamp=datetime.now(UTC),
                 overall_healthy=False,
                 metrics=HealthMetrics(
-                    fetch_success_rate_24h=0.0,
                     hours_since_last_fetch=None,
                     api_quota_remaining=None,
                     data_quality_errors_24h=0,

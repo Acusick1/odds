@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from odds_core.alerts import send_job_failure, send_job_warning
+from odds_core.alerts import send_job_failure, send_outage_warning
 from odds_core.config import get_settings
 
 from odds_lambda.scheduling import jobs
@@ -87,7 +87,8 @@ async def _keep_chain_alive(backend: LocalSchedulerBackend, job_name: str, now: 
     if await _bounded(book(), "job_chain_rebook_failed"):
         logger.warning("job_chain_rebooked", job=job_name, next_time=retry_at.isoformat())
         await _bounded(
-            send_job_warning(
+            send_outage_warning(
+                job_name,
                 f"job_chain_rebooked:{job_name}",
                 f"⚠️ {job_name} failed and was re-booked for {retry_at:%H:%M} UTC",
             ),
