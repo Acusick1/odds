@@ -199,12 +199,14 @@ async def test_scheduler_end_to_end(
                 assert len(jobs) == 1
                 assert jobs[0].job_name == "fetch-odds"
 
-            # Wait for the job to execute (2s + buffer)
-            print("Waiting for job to execute via scheduler...")
-            await asyncio.sleep(4)
+                # Wait for the job to execute (2s + buffer)
+                print("Waiting for job to execute via scheduler...")
+                await asyncio.sleep(4)
 
-            assert _e2e_execution_happened["fetch_odds"], "Job should have executed via scheduler"
-            print("Scheduler: Job executed via APScheduler")
+                assert _e2e_execution_happened["fetch_odds"], (
+                    "Job should have executed via scheduler"
+                )
+                print("Scheduler: Job executed via APScheduler")
 
     # Verify data persisted
     await test_session.rollback()

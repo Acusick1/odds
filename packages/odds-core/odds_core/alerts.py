@@ -235,6 +235,15 @@ async def record_to_alert_history(
         await session.commit()
 
 
+async def send_job_failure(job_name: str, error: Exception) -> None:
+    """Send the rate-limited CRITICAL ``job_failure:<job_name>`` alert and record it."""
+    alert_type = f"job_failure:{job_name}"
+    if alert_manager.enabled and await check_rate_limit(alert_type):
+        msg = f"🚨 Job {job_name} failed: {type(error).__name__}: {error}"
+        await alert_manager.alert(msg, "critical")
+        await record_to_alert_history(alert_type, "critical", msg)
+
+
 @asynccontextmanager
 async def job_alert_context(job_name: str) -> AsyncIterator[None]:
     """Wrap a job body to standardise failure alerts and heartbeat recording.

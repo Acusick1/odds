@@ -7,6 +7,8 @@ sources:
   - odds_lambda.scheduling.backends.local.utc_cron_trigger
   - odds_lambda.scheduling.bootstrap.bootstrap_job
   - odds_lambda.scheduling.backends.local.LocalSchedulerBackend.get_one_off_run
+  - odds_lambda.scheduling.runner.run_scheduled_job
+  - odds_lambda.scheduling.runner.run_chain_job
   - odds_cli.commands.scheduler.start_local
   - odds_cli.commands.scheduler.info
   - odds_cli.commands.scheduler.smoke
@@ -34,6 +36,8 @@ status: stable
 
 - `odds_lambda.scheduling.backends.local.LocalSchedulerBackend.schedule_next_execution` writes a one-shot `DateTrigger` schedule with `id=job_name` and `ConflictPolicy.replace`. It raises `odds_lambda.scheduling.exceptions.SchedulingFailedError` for a job in `odds_lambda.scheduling.jobs._JOB_CRON_MAP`, because the one-off run would replace that job's cron.
 - `odds_lambda.scheduling.backends.local.LocalSchedulerBackend.schedule_cron` writes a `CronTrigger` with the same id and policy, built by `odds_lambda.scheduling.backends.local.utc_cron_trigger`: UTC fields, matched from the current UTC time. APScheduler's default start time is the naive local time, which on the mini-PC in BST put a `*/30` cron's first fire an hour late (#562).
+- Every schedule runs `odds_lambda.scheduling.runner.run_scheduled_job` as a task of its own, named after the schedule id, so APScheduler's one running job per task limits a chain to one run at a time and a hung run cannot hold up another sport's chain of the same job. Misfire grace time stays unset, so a run that fires late, such as after the scheduler was down, still runs.
+- `odds_lambda.scheduling.runner.run_chain_job` bounds each run (including the inline bootstrap run) at `odds_lambda.scheduling.runner.JOB_TIMEOUT` (20 min). A run that times out is cancelled, logged as `job_timed_out` and alerted as `job_failure:<job>`. A run of a self-scheduling job that raises or times out and left no run booked books one `odds_lambda.scheduling.runner.CHAIN_RETRY_DELAY` (15 min) later (`job_chain_rebooked`), then re-raises. A run that returns without booking is left alone, as with a disabled Betfair job. A cron job keeps its cron.
 - Both reuse a live scheduler (the backend's own, or `current_async_scheduler` while a job runs); otherwise `build_scheduler(role=SchedulerRole.scheduler)` opens a short-lived one that only writes to the store.
 - `odds_lambda.scheduling.backends.local.LocalSchedulerBackend.cancel_scheduled_execution` needs a started scheduler.
 
@@ -53,8 +57,8 @@ In `odds_cli.commands.scheduler`:
 `odds_lambda.scheduling.bootstrap.bootstrap_job` installs one job, per target sport for a per-sport job:
 
 - A job in `odds_lambda.scheduling.jobs._JOB_CRON_MAP` has its cron re-applied on every start, so an edit to the expression takes effect.
-- A self-scheduling job that has a pending one-off run (`odds_lambda.scheduling.backends.local.LocalSchedulerBackend.get_one_off_run`) keeps it. A restart, such as a deploy, therefore never moves the run the job booked for itself.
-- A self-scheduling job without one has any other stored schedule removed (such as a cron stored for it under an older `_JOB_CRON_MAP`), then runs its bootstrap function inline. For the data jobs that is a full run that books the next one.
+- A self-scheduling job that has a pending one-off run (`odds_lambda.scheduling.backends.local.LocalSchedulerBackend.get_one_off_run`) keeps it, re-booked at the same time so it runs through `odds_lambda.scheduling.runner.run_scheduled_job`. A restart, such as a deploy, therefore never moves the run the job booked for itself.
+- A self-scheduling job without one has any other stored schedule removed (such as a cron stored for it under an older `_JOB_CRON_MAP`), then runs its bootstrap function inline under the run timeout. For the data jobs that is a full run that books the next one.
 
 `odds_lambda.scheduling.jobs._JOB_CRON_MAP` holds the fixed cron expressions: `daily-digest` `0 8 * * *`, `fetch-espn-fixtures` `0 6 * * *`, `fetch-mlb-probables` `0 6 * * *`. A cron and a self-schedule share one schedule id, so a self-scheduling job never has a cron entry.
 
