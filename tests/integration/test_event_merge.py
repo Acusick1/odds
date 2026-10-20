@@ -662,3 +662,117 @@ class TestRepairAnnotatedNames:
 
         await events_cli._repair_names("baseball_mlb", apply=True)
         assert await _stored_event_ids(session) == {"op_live_B"}
+
+
+class TestRepairGhostsFromRunnerNames:
+    @pytest.mark.asyncio
+    async def test_cut_off_name_merges_into_clean_event_and_moves_every_row(
+        self, pglite_async_session
+    ) -> None:
+        from odds_core.match_brief_models import BriefDecision, MatchBrief
+
+        session = pglite_async_session
+        ghost = _mlb_event("op_live_ST.CAR_ARIDIA", "St. Louis Cardin", "Arizona Diamondbacks")
+        session.add_all(
+            [
+                ghost,
+                _mlb_event("op_live_ARIDIA_ST.CAR", "St.Louis Cardinals", "Arizona Diamondbacks"),
+            ]
+        )
+        await session.flush()
+        snapshot = OddsSnapshot(
+            event_id=ghost.id,
+            snapshot_time=TWIN_KICKOFF - timedelta(hours=1),
+            raw_data={
+                "source": "betfair_api",
+                "bookmakers": [
+                    {
+                        "betfair_meta": {
+                            "runners": [
+                                {"runner_name": "Arizona Diamondbacks"},
+                                {"runner_name": "St. Louis Cardinals"},
+                            ]
+                        }
+                    }
+                ],
+            },
+            bookmaker_count=1,
+        )
+        session.add(snapshot)
+        await session.flush()
+        session.add_all(
+            [
+                Odds(
+                    event_id=ghost.id,
+                    bookmaker_key="betfair_exchange",
+                    bookmaker_title="Betfair Exchange",
+                    market_key="h2h",
+                    outcome_name="St.Louis Cardinals",
+                    price_decimal=2.0,
+                    odds_timestamp=snapshot.snapshot_time,
+                    last_update=snapshot.snapshot_time,
+                ),
+                MatchBrief(
+                    event_id=ghost.id, decision=BriefDecision.WATCHING, summary="s", brief_text="b"
+                ),
+            ]
+        )
+        await session.commit()
+
+        report = await repair_annotated_names(session, "baseball_mlb")
+        await session.commit()
+
+        assert report.merged_count == 1
+        assert await _stored_event_ids(session) == {"op_live_ARIDIA_ST.CAR"}
+        for model in (OddsSnapshot, Odds, MatchBrief):
+            assert await _event_ids(session, model) == {"op_live_ARIDIA_ST.CAR"}
+        assert report.describe_merges() == [
+            "op_live_ARIDIA_ST.CAR [scheduled] <- op_live_ST.CAR_ARIDIA [scheduled]"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_doubleheader_games_are_renamed_but_never_merged(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        session.add_all(
+            [
+                _mlb_event("op_live_PIT1", "Pittsburgh Pirates - Game 1", "Milwaukee Brewers"),
+                _mlb_event(
+                    "op_live_PIT2",
+                    "Pittsburgh Pirates - Game 2",
+                    "Milwaukee Brewers",
+                    commence_time=TWIN_KICKOFF + timedelta(hours=4),
+                ),
+            ]
+        )
+        await session.commit()
+
+        report = await repair_annotated_names(session, "baseball_mlb")
+
+        assert report.merges == ()
+        assert await _stored_event_ids(session) == {"op_live_PIT1", "op_live_PIT2"}
+        assert (await session.get(Event, "op_live_PIT2")).home_team == "Pittsburgh Pirates"
+
+    @pytest.mark.asyncio
+    async def test_clean_doubleheader_is_not_conflated_by_a_repair(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        session.add_all(
+            [
+                _mlb_event("op_live_G1", "Pittsburgh Pirates", "Milwaukee Brewers"),
+                _mlb_event(
+                    "op_live_G2",
+                    "Pittsburgh Pirates",
+                    "Milwaukee Brewers",
+                    commence_time=TWIN_KICKOFF + timedelta(hours=3),
+                ),
+                _mlb_event("op_live_X", "Pittsburgh Pirates (A", "Milwaukee Brewers"),
+            ]
+        )
+        await session.commit()
+
+        await repair_annotated_names(session, "baseball_mlb")
+
+        assert await _stored_event_ids(session) == {"op_live_G1", "op_live_G2"}

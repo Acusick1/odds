@@ -97,11 +97,13 @@ async def _repair_names(sport: str, apply: bool) -> None:
         report = await repair_annotated_names(session, sport)
         statuses = {s.value: n for s, n in report.renamed_in_place_statuses.items()}
         console.print(
-            f"Events with an annotated team name: {len(report.renamed_ids)}; "
+            f"Events with a non-canonical team name: {len(report.renamed_ids)}; "
             f"merged into a real event: {report.merged_count}; "
             f"renamed in place: {len(report.renamed_in_place_ids)} "
             f"({statuses or 'none'})"
         )
+        for line in report.describe_merges():
+            console.print(f"  {line}")
         if not apply:
             await session.rollback()
             console.print("Dry run: nothing written. Re-run with --apply.")
@@ -114,10 +116,11 @@ def repair_names(
     sport: str = typer.Option("baseball_mlb", "--sport", "-s", help="Sport key"),
     apply: bool = typer.Option(False, "--apply", help="Write; without it the plan is rolled back"),
 ) -> None:
-    """Strip pitcher annotations (e.g. "Tampa Bay Rays (D Rasm") from event team names.
+    """Give events the canonical team names (no pitcher annotation, truncation or game suffix).
 
-    Events that then duplicate a real event are merged into it; the rest are renamed
-    in place so the results job can settle them. Safe to re-run.
+    Betfair-created events take the full runner names from their snapshots. Events that
+    then duplicate a real event are merged into it; the rest are renamed in place so the
+    results job can settle them. Doubleheader games stay separate. Safe to re-run.
 
     Example:
         odds events repair-names --sport baseball_mlb --apply

@@ -9,6 +9,7 @@ from odds_lambda.betfair.adapter import (
     _is_draw,
     _normalize_runner_name,
     betfair_book_to_bookmaker_entry,
+    canonical_teams,
     resolve_teams,
     strip_pitcher_annotation,
 )
@@ -274,3 +275,47 @@ class TestBookToBookmakerEntry:
         )
         entry = betfair_book_to_bookmaker_entry(book, cfg, home_team="A", away_team="B")
         assert entry is None
+
+
+class TestCanonicalTeams:
+    RUNNERS = ["Los Angeles Angels", "Kansas City Royals"]
+
+    def test_truncated_half_takes_the_full_runner_name(self) -> None:
+        assert canonical_teams("Kansas City Royal", "Los Angeles Angels (P", self.RUNNERS) == (
+            "Kansas City Royals",
+            "Los Angeles Angels",
+        )
+
+    def test_game_suffix_is_dropped_whatever_the_form(self) -> None:
+        runners = ["Pittsburgh Pirates", "Milwaukee Brewers"]
+        assert canonical_teams("Pittsburgh Pirates - Game 1", "Milwaukee Brewers", runners) == (
+            "Pittsburgh Pirates",
+            "Milwaukee Brewers",
+        )
+        assert canonical_teams("Pittsburgh Pirates Game 2", "Milwaukee Brewers", []) == (
+            "Pittsburgh Pirates",
+            "Milwaukee Brewers",
+        )
+
+    def test_runner_names_get_canonical_aliases(self) -> None:
+        assert canonical_teams(
+            "St. Louis Cardin",
+            "Arizona Diamondbacks",
+            [
+                "Arizona Diamondbacks",
+                "St. Louis Cardinals",
+            ],
+        ) == ("St.Louis Cardinals", "Arizona Diamondbacks")
+
+    def test_ambiguous_half_falls_back_to_the_stripped_name(self) -> None:
+        runners = ["Chicago Cubs", "Chicago White Sox"]
+        assert canonical_teams("Chicago (TBD", "Chicago White Sox", runners) == (
+            "Chicago",
+            "Chicago White Sox",
+        )
+
+    def test_draw_runner_is_never_a_team(self) -> None:
+        assert canonical_teams("Arsenal", "Chelsea", ["Arsenal", "The Draw", "Chelsea"]) == (
+            "Arsenal",
+            "Chelsea",
+        )

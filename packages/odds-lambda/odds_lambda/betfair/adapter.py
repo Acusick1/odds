@@ -30,6 +30,7 @@ The pipeline's canonical bookmaker entry is::
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
@@ -45,13 +46,16 @@ logger = structlog.get_logger()
 
 DRAW_RUNNER_NAMES: frozenset[str] = frozenset({"the draw", "draw"})
 
-# Strip parenthetical annotations Betfair appends to baseball runner/event
-# names (e.g. "(TBD)", "(Cole)" for starting pitchers). This is a Betfair-API
-# quirk — kept here rather than in odds_core.team because trailing parens can
-# legitimately disambiguate teams in other contexts (e.g. "(W)" for women's).
-# Betfair cuts each half of a baseball event name at 22 characters, so the
-# closing paren may be missing ("Tampa Bay Rays (D Rasm").
+# Betfair appends the probable pitchers to baseball event names ("(TBD)",
+# "(Cole)") and a game number to doubleheaders ("Game 1", "- Game 2"), and cuts
+# the name at a fixed length, so a half can end mid-word ("Kansas City Royal")
+# or with an unclosed bracket ("Tampa Bay Rays (D Rasm"). Runner names are
+# always the full team names, so they decide the teams; these strippers only
+# serve a half no runner matches. They live here rather than in
+# odds_core.team because trailing parens can legitimately disambiguate teams in
+# other contexts (e.g. "(W)" for women's).
 _PAREN_ANNOTATION_RE = re.compile(r"\s*\([^)]*\)?\s*$")
+_GAME_SUFFIX_RE = re.compile(r"\s*(?:-\s*)?Game\s*\d*\s*$")
 
 
 def strip_pitcher_annotation(name: str) -> str:
@@ -59,9 +63,43 @@ def strip_pitcher_annotation(name: str) -> str:
     return _PAREN_ANNOTATION_RE.sub("", name).strip()
 
 
+def clean_team_name(name: str) -> str:
+    """Remove trailing pitcher annotations and doubleheader game suffixes."""
+    previous = None
+    while previous != name:
+        previous = name
+        name = _GAME_SUFFIX_RE.sub("", strip_pitcher_annotation(name)).strip()
+    return name
+
+
 def _normalize_runner_name(name: str) -> str:
     """Strip Betfair's pitcher annotation, then delegate to canonical normalization."""
     return normalize_team_name(strip_pitcher_annotation(name))
+
+
+def _match_runner(half: str, team_runner_names: Sequence[str]) -> str | None:
+    """The one runner a possibly annotated or truncated event-name half names."""
+    lowered = half.strip().lower()
+    cleaned = clean_team_name(half).lower()
+    matches = [
+        name
+        for name in team_runner_names
+        if lowered.startswith(name.lower()) or (cleaned and name.lower().startswith(cleaned))
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def canonical_teams(home_half: str, away_half: str, runner_names: Sequence[str]) -> tuple[str, str]:
+    """Canonical (home, away) for event-name halves, preferring the full runner names."""
+    team_runner_names = [n for n in runner_names if n and not _is_draw(n)]
+    home_runner = _match_runner(home_half, team_runner_names)
+    away_runner = _match_runner(away_half, team_runner_names)
+    if home_runner is not None and home_runner == away_runner:
+        home_runner = away_runner = None
+    return (
+        normalize_team_name(home_runner or clean_team_name(home_half)),
+        normalize_team_name(away_runner or clean_team_name(away_half)),
+    )
 
 
 def _is_draw(runner_name: str) -> bool:
@@ -72,7 +110,10 @@ def resolve_teams(
     book: BetfairBook,
     sport_cfg: SportBetfairConfig,
 ) -> tuple[str, str] | None:
-    """Resolve (home_team, away_team) from the Betfair event name.
+    """Resolve (home_team, away_team) from the Betfair event name and runners.
+
+    The event name only decides which team is home; the teams themselves come
+    from the full runner names when each half matches exactly one of them.
 
     Soccer event names: ``"<Home> v <Away>"``.
     Baseball event names: ``"<Away> @ <Home>"`` (with optional pitcher
@@ -96,7 +137,7 @@ def resolve_teams(
         home_raw, away_raw = parts
     else:
         away_raw, home_raw = parts
-    return _normalize_runner_name(home_raw), _normalize_runner_name(away_raw)
+    return canonical_teams(home_raw, away_raw, [r.runner_name for r in book.runners])
 
 
 def _runner_to_outcome(
