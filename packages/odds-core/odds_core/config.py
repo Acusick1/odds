@@ -257,6 +257,8 @@ class AlertConfig(BaseSettings):
             "fetch-oddsportal-mlb": 12,
             "fetch-oddsportal-results-mlb": 26,
             "fetch-mlb-probables": 30,
+            # Daily 06:00 UTC cron, plus slack.
+            "fetch-espn-fixtures": 26,
             "fetch-betfair-exchange-epl": 10,
             "fetch-betfair-exchange-mlb": 11,
             "fetch-polymarket-odds-epl": 11,

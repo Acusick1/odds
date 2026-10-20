@@ -10,6 +10,7 @@ The ESPN Site API is free and unauthenticated.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -59,6 +60,29 @@ _MAX_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = 1.0
 _REQUEST_TIMEOUT_SECONDS = 15.0
 
+# ESPN's scoreboard default page is 100 events; a month of any one competition
+# is below this limit, which is set explicitly so a busy month is never truncated.
+_SCOREBOARD_LIMIT = 300
+
+
+PRIMARY_LEAGUE_SLUG = "eng.1"
+
+
+class EspnUpcomingFetchError(RuntimeError):
+    """The Premier League's upcoming-fixture request to ESPN failed."""
+
+
+class EspnSeasonFetchError(RuntimeError):
+    """The Premier League schedule request failed for every team in the season."""
+
+
+@dataclass(frozen=True, slots=True)
+class UpcomingFixtures:
+    """Upcoming records plus the competitions whose request failed."""
+
+    records: list[EspnFixtureRecord]
+    failed_leagues: list[str]
+
 
 def current_season(now: datetime | None = None) -> int:
     """Return the EPL season start year for the given instant.
@@ -72,6 +96,16 @@ def current_season(now: datetime | None = None) -> int:
     if now.month >= _SEASON_FLIP_MONTH:
         return now.year
     return now.year - 1
+
+
+def _months_between(start: datetime, end: datetime) -> list[tuple[int, int]]:
+    """Return the ``(year, month)`` pairs from ``start``'s month through ``end``'s."""
+    months: list[tuple[int, int]] = []
+    year, month = start.year, start.month
+    while (year, month) <= (end.year, end.month):
+        months.append((year, month))
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return months
 
 
 def season_label(season: int) -> str:
@@ -227,36 +261,29 @@ class EspnFixtureFetcher:
 
         return records
 
-    async def fetch_scoreboard(
+    async def fetch_month_scoreboard(
         self,
         league_slug: str,
-        start: datetime,
-        end: datetime,
+        year: int,
+        month: int,
     ) -> list[EspnFixtureRecord]:
-        """Fetch a date-range scoreboard for one competition.
+        """Fetch one calendar month's scoreboard for one competition.
 
         The scoreboard endpoint returns one event per match (rather than one
         per team per match, like ``teams/{id}/schedule``). For each event we
-        emit two records — one anchored on each team — to match the schema
+        emit two records, one anchored on each team, to match the schema
         used by ``fetch_team_schedule``.
 
-        Returns an empty list if ESPN does not publish a scoreboard for
-        ``league_slug`` (rather than raising) so cup/European slugs without
-        upcoming fixtures don't fail the whole fetch.
+        ESPN rejects ``dates=`` ranges with HTTP 400; it accepts a single day
+        (``YYYYMMDD``), a month (``YYYYMM``) or a year. Raises
+        ``httpx.HTTPError`` when the request fails.
         """
         competition = LEAGUE_SLUGS[league_slug]
-        start_str = start.strftime("%Y%m%d")
-        end_str = end.strftime("%Y%m%d")
-        url = f"{BASE_URL}/{league_slug}/scoreboard?dates={start_str}-{end_str}"
-        try:
-            data = await self._fetch_json(url)
-        except httpx.HTTPError as e:
-            logger.warning(
-                "espn_scoreboard_fetch_failed",
-                league=league_slug,
-                error=str(e),
-            )
-            return []
+        url = (
+            f"{BASE_URL}/{league_slug}/scoreboard"
+            f"?dates={year:04d}{month:02d}&limit={_SCOREBOARD_LIMIT}"
+        )
+        data = await self._fetch_json(url)
 
         events = data.get("events", [])
         records: list[EspnFixtureRecord] = []
@@ -333,39 +360,62 @@ class EspnFixtureFetcher:
 
         return records
 
-    async def fetch_upcoming(self, days_ahead: int = 30) -> list[EspnFixtureRecord]:
+    async def fetch_upcoming(
+        self, days_ahead: int = 30, *, now: datetime | None = None
+    ) -> UpcomingFixtures:
         """Fetch near-future fixtures across all configured competitions.
 
         The ``teams/{id}/schedule`` endpoint only returns completed matches,
-        so upcoming fixtures must come from the scoreboard endpoint. Iterates
-        ``LEAGUE_SLUGS`` with a ``today → today+days_ahead`` date range and
-        deduplicates on ``(date, team, opponent)``.
+        so upcoming fixtures come from the scoreboard endpoint. One request
+        per competition per calendar month covers the window; records are
+        filtered to ``start of today → today+days_ahead`` and deduplicated on
+        ``(date, team, opponent)``.
+
+        A cup or European competition whose request fails is logged and listed
+        in ``failed_leagues``. Raises ``EspnUpcomingFetchError`` when the
+        Premier League request failed or every competition failed. ``now``
+        defaults to the current UTC time.
         """
-        now = datetime.now(UTC)
+        now = now or datetime.now(UTC)
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = now + timedelta(days=days_ahead)
         all_records: list[EspnFixtureRecord] = []
         seen: set[tuple[str, str, str]] = set()
+        failed_leagues: list[str] = []
 
         for league_slug in LEAGUE_SLUGS:
-            if self.request_delay_seconds > 0:
-                await asyncio.sleep(self.request_delay_seconds)
-            fixtures = await self.fetch_scoreboard(league_slug, now, end)
             new_count = 0
-            for record in fixtures:
-                key = (record.date.isoformat(), record.team, record.opponent)
-                if key in seen:
-                    continue
-                seen.add(key)
-                all_records.append(record)
-                new_count += 1
+            try:
+                for year, month in _months_between(start, end):
+                    if self.request_delay_seconds > 0:
+                        await asyncio.sleep(self.request_delay_seconds)
+                    fixtures = await self.fetch_month_scoreboard(league_slug, year, month)
+                    for record in fixtures:
+                        if not start <= record.date <= end:
+                            continue
+                        key = (record.date.isoformat(), record.team, record.opponent)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        all_records.append(record)
+                        new_count += 1
+            except httpx.HTTPError as e:
+                failed_leagues.append(league_slug)
+                logger.warning("espn_scoreboard_fetch_failed", league=league_slug, error=str(e))
+                continue
             logger.info(
                 "espn_scoreboard_loaded",
                 league=league_slug,
                 new_fixtures=new_count,
             )
 
+        if PRIMARY_LEAGUE_SLUG in failed_leagues:
+            raise EspnUpcomingFetchError(
+                f"ESPN scoreboard request failed for: {', '.join(failed_leagues)}"
+            )
+
         all_records.sort(key=lambda r: r.date)
-        return all_records
+        return UpcomingFixtures(records=all_records, failed_leagues=failed_leagues)
 
     async def fetch_season(self, season: int) -> list[EspnFixtureRecord]:
         """Fetch all fixtures for all EPL teams in a season across all competitions.
@@ -379,6 +429,7 @@ class EspnFixtureFetcher:
 
         all_records: list[EspnFixtureRecord] = []
         seen: set[tuple[str, str, str]] = set()
+        primary_failures = 0
 
         for idx, team in enumerate(teams):
             team_id = team["id"]
@@ -391,6 +442,8 @@ class EspnFixtureFetcher:
                 try:
                     fixtures = await self.fetch_team_schedule(league_slug, team_id, season)
                 except httpx.HTTPError as e:
+                    if league_slug == PRIMARY_LEAGUE_SLUG:
+                        primary_failures += 1
                     logger.warning(
                         "espn_schedule_fetch_failed",
                         team=team_name,
@@ -414,6 +467,11 @@ class EspnFixtureFetcher:
                 new_fixtures=team_records,
                 index=idx + 1,
                 total=len(teams),
+            )
+
+        if teams and primary_failures == len(teams):
+            raise EspnSeasonFetchError(
+                f"ESPN Premier League schedule request failed for all {len(teams)} teams in season {season}"
             )
 
         all_records.sort(key=lambda r: r.date)

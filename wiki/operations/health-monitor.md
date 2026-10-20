@@ -118,7 +118,7 @@ A job inside `odds_core.alerts.job_alert_context` inserts `heartbeat:<name>` on 
 | fetch-polymarket-odds (per sport) | yes | 11 h EPL (overnight window plus polling interval, plus 1 h slack) |
 | score-predictions | yes | none |
 | fetch-mlb-probables | yes | 30 h |
-| fetch-espn-fixtures | yes | none |
+| fetch-espn-fixtures | yes | 26 h (daily cron plus slack) |
 | fetch-odds, fetch-scores, fetch-polymarket, backfill-polymarket, agent-run | no: not wrapped in `odds_core.alerts.job_alert_context` (#438) | none |
 
 ## Failure handling
