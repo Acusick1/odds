@@ -165,8 +165,15 @@ class OddsIngestionService:
             fetch_log = FetchLog(
                 sport_key=sport_key,
                 events_count=len(response.events),
-                bookmakers_count=len(bookmakers),
+                bookmakers_count=len(
+                    {
+                        b["key"]
+                        for event_data in response.raw_events_data
+                        for b in event_data.get("bookmakers", [])
+                    }
+                ),
                 success=len(failures) == 0,
+                error_message="; ".join(f"{f.event_id}: {f.error}" for f in failures) or None,
                 api_quota_remaining=response.quota_remaining,
                 response_time_ms=response.response_time_ms,
             )

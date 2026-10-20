@@ -38,7 +38,7 @@ status: stable
 
 ## Commit contract
 
-- `odds_lambda.storage.writers.OddsWriter` never calls `flush()` or `commit()`. It only adds, deletes or executes statements, and `odds_lambda.storage.event_merge.EventMerger` likewise leaves committing to its caller for its foreign-key and snapshot-timing `UPDATE`s; the caller commits, as `odds_lambda.ingestion.OddsIngestionService.ingest_sport` does once per event.
+- `odds_lambda.storage.writers.OddsWriter` never calls `flush()` or `commit()`. It only adds, deletes or executes statements, and `odds_lambda.storage.event_merge.EventMerger` likewise leaves committing to its caller for its foreign-key and snapshot-timing `UPDATE`s; the caller commits, as `odds_lambda.ingestion.OddsIngestionService.ingest_sport` does, once per event.
 - Every per-source writer except `odds_lambda.storage.writers.OddsWriter` and the Polymarket snapshot/log methods flushes after its bulk upsert (for example `odds_lambda.storage.injury_writer.InjuryWriter.upsert_injury_reports`) but still does not commit.
 - Each unit of work gets its own session, never one shared across tasks ([Databases and environments](../foundations/databases-and-environments.md)).
 

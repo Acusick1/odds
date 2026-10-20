@@ -3,7 +3,6 @@ System health monitoring with automated checks and alerting.
 
 This module implements proactive health monitoring to detect:
 - Stale data (no recent fetches)
-- Consecutive failures
 - Low API quota
 - Data quality degradation
 - Database connectivity issues
@@ -747,12 +746,11 @@ class HealthMonitor:
         Checks:
         1. Stale data per source (no rows within the source's cadence while fixtures are scheduled),
            and EPL events with no live Betfair close
-        2. Consecutive failures
-        3. API quota levels
-        4. Data quality issues
-        5. Job heartbeats (missing completions)
-        6. Event identity: twins, repeated fixtures, stale scheduled events
-        7. Self-scheduling chains with no run booked or an overdue run
+        2. API quota levels
+        3. Data quality issues
+        4. Job heartbeats (missing completions)
+        5. Event identity: twins, repeated fixtures, stale scheduled events
+        6. Self-scheduling chains with no run booked or an overdue run
 
         Returns:
             HealthStatus with metrics and alerts sent

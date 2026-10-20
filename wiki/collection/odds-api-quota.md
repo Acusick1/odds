@@ -26,7 +26,7 @@ Quota is a per-key monthly balance that only [the client](odds-api-client.md#cos
 
 | Place | What it reads | Rate limited | Recorded in `alert_history` |
 |---|---|---|---|
-| `odds_core.models.FetchLog.api_quota_remaining` | written once per sport by `odds_lambda.ingestion.OddsIngestionService.ingest_sport` ([fetch logs](odds-ingestion-service.md#fetch-logs)) | n/a | n/a |
+| `odds_core.models.FetchLog.api_quota_remaining` | written once per sport and run by `odds_lambda.ingestion.OddsIngestionService.ingest_sport` ([fetch logs](odds-ingestion-service.md#fetch-logs)) | n/a | n/a |
 | fetch-odds quota alerts | `quota_remaining / odds_core.config.APIConfig.quota` after each fetch | no | no |
 | `odds_lambda.health_monitor.HealthMonitor.check_api_quota` | newest `fetch_logs` row with a non-null quota, same fraction | yes | yes |
 | `odds status quota` (`odds_cli.commands.status._show_quota`) | newest 10 `fetch_logs` rows, any source | n/a | n/a |

@@ -51,7 +51,7 @@ status: stable
 5. `odds_lambda.health_monitor.HealthMonitor.check_event_identity`: per sport, matches stored as several events, EPL fixtures stored twice in a season, and events still `scheduled` a day after a kick-off in the last seven days, each its own warning (`duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `stale_scheduled_events:<sport>`). Nothing is merged; `odds events merge-twins --sport <sport> --apply` clears twins ([Event merge](../storage/event-merge.md#detection)).
 6. `odds_lambda.health_monitor.HealthMonitor.check_schedule_chains`: dead self-scheduling chains, each its own critical `dead_schedule_chain:<job>` ([Schedule chain check](#schedule-chain-check)).
 
-Then `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` runs on every health check: it deletes `heartbeat:%` rows older than `heartbeat_retention_days` (7) and is the only retention sweep in the system.
+Then `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` runs on every health check, and it deletes `heartbeat:%` rows older than `heartbeat_retention_days` (7) and is the only retention sweep in the system.
 
 ## Schedule chain check
 

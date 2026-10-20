@@ -131,6 +131,8 @@ class TestOddsIngestionService:
         ).scalar_one()
         assert fetch_log.events_count == 1
         assert fetch_log.success is True
+        assert fetch_log.error_message is None
+        assert fetch_log.bookmakers_count == 1
         assert fetch_log.api_quota_remaining == 12345
 
     @pytest.mark.asyncio
@@ -200,6 +202,8 @@ class TestOddsIngestionService:
         ).scalar_one()
         assert fetch_log.events_count == 1
         assert fetch_log.success is False
+        assert fetch_log.error_message == "ingest_event_failure: snapshot_failure"
+        assert fetch_log.bookmakers_count == 0
 
         failed_event_id, exc = callbacks_record["failed"][0]
         assert failed_event_id == "ingest_event_failure"

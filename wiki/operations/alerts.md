@@ -40,7 +40,7 @@ On AWS, the Lambda handler also sends its own critical on any exception ([lambda
 
 ## Alert history
 
-`odds_core.models.AlertHistory` (`alert_history`) holds `alert_type`, `severity`, `message`, `sent_at`, nullable JSON `context`, with composite index `ix_alert_type_sent_at` that serves both rate-limit and heartbeat lookups. It is a dedup ledger and a heartbeat log in one table. Writers: `odds_core.alerts.record_to_alert_history` and `odds_lambda.health_monitor.HealthMonitor._record_alert`. Readers: `odds_core.alerts.check_rate_limit`, `odds_lambda.health_monitor.HealthMonitor._should_send_alert`, `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats`, `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats`.
+`odds_core.models.AlertHistory` (`alert_history`) holds `alert_type`, `severity`, `message`, `sent_at`, nullable JSON `context`, with composite index `ix_alert_type_sent_at` that serves both rate-limit and heartbeat lookups. It is one table serving as dedup ledger and heartbeat log. Writers: `odds_core.alerts.record_to_alert_history` and `odds_lambda.health_monitor.HealthMonitor._record_alert`. Readers: `odds_core.alerts.check_rate_limit`, `odds_lambda.health_monitor.HealthMonitor._should_send_alert`, `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats`, `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats`.
 
 | `alert_type` (the rate-limit key) | Source | Severity |
 |---|---|---|
@@ -55,7 +55,7 @@ On AWS, the Lambda handler also sends its own critical on any exception ([lambda
 | `duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `stale_scheduled_events:<sport>` (kick-off within the last 7 days) | `odds_lambda.health_monitor.HealthMonitor.check_event_identity` | warning |
 | `missing_heartbeat:<job>` | `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats` | warning |
 | `dead_schedule_chain:<job>` (a bootstrapped self-scheduling job with no run booked or one overdue) | `odds_lambda.health_monitor.HealthMonitor.check_schedule_chains` | critical |
-| `health_check_failure` | `odds_lambda.health_monitor.HealthMonitor.check_system_health` | critical |
+| `health_check_failure` (the monitor itself raised) | `odds_lambda.health_monitor.HealthMonitor.check_system_health` | critical |
 
 The default window is 30 minutes (`odds_core.alerts.check_rate_limit`'s argument for jobs, `odds_core.config.AlertConfig.alert_rate_limit_minutes` for the monitor). The key is `alert_type` alone, so a warning suppresses a critical of the same type for the window; the quota pair works only because the types differ (#384).
 
