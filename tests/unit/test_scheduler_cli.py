@@ -126,6 +126,23 @@ class TestSmokeCommand:
         assert result.exit_code == 0
         assert "agent-run" in recorder.ran_bases
 
+    def test_default_run_skips_jobs_that_spend_api_quota(self) -> None:
+        settings = _settings(["fetch-oddsportal", "fetch-odds", "fetch-scores"], ["soccer_epl"])
+        recorder = _JobRecorder()
+        result = _invoke_smoke([], settings, recorder)
+
+        assert result.exit_code == 0
+        assert recorder.ran_bases == {"fetch-oddsportal"}
+        assert "--include-paid-api" in result.output
+
+    def test_include_paid_api_runs_quota_spending_jobs(self) -> None:
+        settings = _settings(["fetch-oddsportal", "fetch-odds", "fetch-scores"], ["soccer_epl"])
+        recorder = _JobRecorder()
+        result = _invoke_smoke(["--include-paid-api"], settings, recorder)
+
+        assert result.exit_code == 0
+        assert recorder.ran_bases == {"fetch-oddsportal", "fetch-odds", "fetch-scores"}
+
     def test_daily_digest_runs_by_default(self) -> None:
         settings = _settings(["fetch-oddsportal", "daily-digest"], ["soccer_epl"])
         recorder = _JobRecorder()
@@ -191,8 +208,8 @@ class TestSmokeCommand:
         assert recorder.ran == []
 
     def test_failing_job_yields_nonzero_exit(self) -> None:
-        settings = _settings(["fetch-oddsportal", "fetch-scores"], ["soccer_epl"])
-        recorder = _JobRecorder(fail_bases={"fetch-scores"})
+        settings = _settings(["fetch-oddsportal", "fetch-espn-fixtures"], ["soccer_epl"])
+        recorder = _JobRecorder(fail_bases={"fetch-espn-fixtures"})
         result = _invoke_smoke([], settings, recorder)
 
         assert result.exit_code == 1
@@ -207,9 +224,9 @@ class TestSmokeCommand:
         assert result.exit_code == 2
 
     def test_clean_run_exits_zero(self) -> None:
-        settings = _settings(["fetch-oddsportal", "fetch-scores"], ["soccer_epl"])
+        settings = _settings(["fetch-oddsportal", "fetch-espn-fixtures"], ["soccer_epl"])
         recorder = _JobRecorder()
         result = _invoke_smoke([], settings, recorder)
 
         assert result.exit_code == 0
-        assert recorder.ran_bases == {"fetch-oddsportal", "fetch-scores"}
+        assert recorder.ran_bases == {"fetch-oddsportal", "fetch-espn-fixtures"}

@@ -32,9 +32,9 @@ status: stable
 
 | Endpoint | Client method | Units |
 |---|---|---|
-| `/odds` | `odds_lambda.data_fetcher.TheOddsAPIClient.get_odds` | 1 per region per market, regardless of game count (default 1 region x 3 markets = 3) `(inferred)` |
+| `/odds` | `odds_lambda.data_fetcher.TheOddsAPIClient.get_odds` | 1 per region per market, regardless of game count (default 1 region x 3 markets = 3; every 10 bookmakers count as one region) ([vendor](https://the-odds-api.com/liveapi/guides/v4/#usage-quota-costs)) |
 | `/events` | `odds_lambda.data_fetcher.TheOddsAPIClient.get_events` | free (`odds_lambda.data_fetcher.TheOddsAPIClient.get_events` docstring) |
-| `/scores` | `odds_lambda.data_fetcher.TheOddsAPIClient.get_scores` | 1 without `daysFrom`, 2 with `(inferred)` |
+| `/scores` | `odds_lambda.data_fetcher.TheOddsAPIClient.get_scores` | 1 without `daysFrom`, 2 with ([vendor](https://the-odds-api.com/liveapi/guides/v4/#usage-quota-costs)) |
 | `/historical/odds` | `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds` | 10 per region per market (`odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_events` docstring) |
 | `/historical/events` | `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_events` | 1 (`odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_events` docstring) |
 

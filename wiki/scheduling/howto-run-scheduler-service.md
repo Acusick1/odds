@@ -53,7 +53,7 @@ Run `./deploy.sh` from the repo root on the mini-PC; it is the only path to prod
 4. **Verify.** After 15 s it exits non-zero, printing the unit status, unless the unit is active, its `ActiveEnterTimestamp` (read as a unix timestamp) is no earlier than the start of the deploy, and its `NRestarts` has not grown (no crash loop). Then it prints `odds scheduler list-jobs`.
 
 - `set -e` aborts before the restart if migration or smoke fails. The old code keeps serving unless a migration was pending, in which case the scheduler was stopped first and stays down until a rerun or `sudo systemctl start odds-scheduler`.
-- Dry-run makes self-scheduling a no-op, so the live schedule store is untouched. It does not stop the jobs' own work: smoke runs each job's real `main()`, so a due `fetch-odds` or `fetch-scores` spends Odds API quota ([CLI](local-scheduler.md#cli)).
+- Dry-run makes self-scheduling a no-op, so the live schedule store is untouched. It does not stop the jobs' own work: smoke runs each job's real `main()`. It skips `fetch-odds` and `fetch-scores` unless passed `--include-paid-api`, so a deploy spends no Odds API quota ([CLI](local-scheduler.md#cli)).
 - `--ff-only` fails on a diverged checkout, so discard or commit local edits on the host first.
 - A pending migration always runs with the scheduler stopped, so the old scheduler never reads a schema it does not know. The hand-run agent's MCP server is not managed by the script and reads the database directly: do not deploy during an agent session ([Create and apply a database migration](../foundations/howto-database-migration.md)).
 

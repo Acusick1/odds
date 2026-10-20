@@ -29,10 +29,11 @@ from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 
 logger = structlog.get_logger()
 
-# Proximity-based polling cadence (hours) for the cheap /odds API. Matches the
-# canonical FetchTier intervals odds fetch has always used.
+# Proximity-based polling cadence (hours). Each /odds call costs 3 units against
+# the 500/month free tier, so the closing tier polls every 2 h and the pregame
+# tier every 3 h; the Betfair and OddsPortal jobs carry the close.
 CADENCE = CadenceConfig(
-    closing=0.5,
+    closing=2.0,
     pregame=3.0,
     sharp=12.0,
     early=24.0,
