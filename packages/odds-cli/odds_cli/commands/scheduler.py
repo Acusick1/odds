@@ -330,7 +330,7 @@ def smoke(
     pass ``--no-side-effects`` to drop it.
 
     Run with ``SCHEDULER_DRY_RUN=true`` (as ``deploy.sh`` does) so self-scheduling
-    is a no-op and the live schedule store is untouched.
+    and Discord alerting are no-ops and the live schedule store is untouched.
 
     Coverage caveat: smoke always exercises each job's import / config / decision /
     schema path, but the full fetch+ingest body only runs when the job's cadence

@@ -7,11 +7,12 @@ from odds_core.alerts import (
     AlertManager,
     DiscordAlert,
     job_alert_context,
+    record_to_alert_history,
     send_critical,
     send_error,
     send_warning,
 )
-from odds_core.config import AlertConfig, Settings
+from odds_core.config import AlertConfig, SchedulerConfig, Settings
 
 
 class TestAlertManager:
@@ -20,9 +21,10 @@ class TestAlertManager:
     def test_alert_manager_reads_nested_config_fields(self):
         """AlertManager should correctly read alerts.* nested config fields."""
         # Create mock settings with nested alert config
-        settings = MagicMock(spec=Settings)
-        settings.alerts = AlertConfig(
-            alert_enabled=True, discord_webhook_url="https://discord.com/api/webhooks/test"
+        settings = Settings(
+            alerts=AlertConfig(
+                alert_enabled=True, discord_webhook_url="https://discord.com/api/webhooks/test"
+            )
         )
 
         manager = AlertManager(config=settings)
@@ -33,9 +35,10 @@ class TestAlertManager:
 
     def test_alert_manager_disabled_when_flag_false(self):
         """AlertManager should be disabled when alert_enabled=False."""
-        settings = MagicMock(spec=Settings)
-        settings.alerts = AlertConfig(
-            alert_enabled=False, discord_webhook_url="https://discord.com/api/webhooks/test"
+        settings = Settings(
+            alerts=AlertConfig(
+                alert_enabled=False, discord_webhook_url="https://discord.com/api/webhooks/test"
+            )
         )
 
         manager = AlertManager(config=settings)
@@ -46,8 +49,7 @@ class TestAlertManager:
 
     def test_alert_manager_no_channels_without_webhook(self):
         """AlertManager should have no channels if no webhook configured."""
-        settings = MagicMock(spec=Settings)
-        settings.alerts = AlertConfig(alert_enabled=True, discord_webhook_url=None)
+        settings = Settings(alerts=AlertConfig(alert_enabled=True, discord_webhook_url=None))
 
         manager = AlertManager(config=settings)
 
@@ -57,9 +59,10 @@ class TestAlertManager:
     @pytest.mark.asyncio
     async def test_alert_respects_enabled_flag(self):
         """Alerts should not send when enabled=False."""
-        settings = MagicMock(spec=Settings)
-        settings.alerts = AlertConfig(
-            alert_enabled=False, discord_webhook_url="https://discord.com/api/webhooks/test"
+        settings = Settings(
+            alerts=AlertConfig(
+                alert_enabled=False, discord_webhook_url="https://discord.com/api/webhooks/test"
+            )
         )
 
         manager = AlertManager(config=settings)
@@ -74,9 +77,10 @@ class TestAlertManager:
     @pytest.mark.asyncio
     async def test_alert_sends_when_enabled(self):
         """Alerts should send when enabled=True."""
-        settings = MagicMock(spec=Settings)
-        settings.alerts = AlertConfig(
-            alert_enabled=True, discord_webhook_url="https://discord.com/api/webhooks/test"
+        settings = Settings(
+            alerts=AlertConfig(
+                alert_enabled=True, discord_webhook_url="https://discord.com/api/webhooks/test"
+            )
         )
 
         manager = AlertManager(config=settings)
@@ -87,6 +91,23 @@ class TestAlertManager:
 
             # Should call send because enabled=True
             mock_send.assert_called_once_with("Test message", "warning")
+
+    @pytest.mark.asyncio
+    async def test_alert_suppressed_in_scheduler_dry_run(self):
+        """A dry-run process (deploy smoke) must not post to the live channel."""
+        settings = Settings(
+            alerts=AlertConfig(
+                alert_enabled=True, discord_webhook_url="https://discord.com/api/webhooks/test"
+            ),
+            scheduler=SchedulerConfig(dry_run=True),
+        )
+
+        manager = AlertManager(config=settings)
+
+        assert manager.enabled is False
+        with patch.object(manager.channels[0], "send", new_callable=AsyncMock) as mock_send:
+            await manager.alert("Test message", "critical")
+            mock_send.assert_not_called()
 
 
 class TestDiscordAlert:
@@ -170,6 +191,37 @@ class TestConvenienceFunctions:
         with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
             await send_critical("Test critical")
             mock_alert.assert_called_once_with("Test critical", "critical")
+
+
+class TestRecordToAlertHistory:
+    """record_to_alert_history is the single writer behind heartbeats and job alerts."""
+
+    @pytest.mark.asyncio
+    async def test_dry_run_writes_nothing(self) -> None:
+        settings = Settings(scheduler=SchedulerConfig(dry_run=True))
+        with (
+            patch("odds_core.alerts.get_settings", return_value=settings),
+            patch("odds_core.database.async_session_maker") as maker,
+        ):
+            await record_to_alert_history("heartbeat:test-job", "info", "ok")
+
+        maker.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_writes_row_outside_dry_run(self) -> None:
+        session = AsyncMock()
+        session.add = MagicMock()
+        maker = MagicMock()
+        maker.return_value.__aenter__.return_value = session
+        settings = Settings(scheduler=SchedulerConfig(dry_run=False))
+        with (
+            patch("odds_core.alerts.get_settings", return_value=settings),
+            patch("odds_core.database.async_session_maker", maker),
+        ):
+            await record_to_alert_history("heartbeat:test-job", "info", "ok")
+
+        session.add.assert_called_once()
+        session.commit.assert_awaited_once()
 
 
 class TestJobAlertContext:

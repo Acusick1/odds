@@ -265,7 +265,7 @@ class HealthMonitor:
         Returns:
             True if alert was sent
         """
-        if not self.settings.alerts.alert_enabled:
+        if not self.settings.alerts_deliverable:
             logger.debug("alert_skipped_disabled", alert_type=alert_type)
             return False
 

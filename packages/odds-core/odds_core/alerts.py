@@ -99,7 +99,7 @@ class AlertManager:
             config: Settings instance (defaults to global settings)
         """
         self.config = config or get_settings()
-        self.enabled = self.config.alerts.alert_enabled
+        self.enabled = self.config.alerts_deliverable
         self.channels: list[AlertBase] = []
 
         # Initialize configured channels
@@ -213,7 +213,13 @@ async def record_to_alert_history(
     severity: str,
     message: str,
 ) -> None:
-    """Insert a row into AlertHistory (used for rate limiting and heartbeats)."""
+    """Insert a row into AlertHistory (used for rate limiting and heartbeats).
+
+    A no-op under ``SCHEDULER_DRY_RUN`` so validation runs leave the ledger untouched.
+    """
+    if get_settings().scheduler.dry_run:
+        return
+
     from odds_core.database import async_session_maker
     from odds_core.models import AlertHistory
 
