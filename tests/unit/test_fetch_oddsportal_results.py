@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,7 +13,12 @@ from odds_lambda.jobs.fetch_oddsportal_results import (
     get_pending_events,
     process_results,
 )
-from odds_lambda.oddsportal_client import FetchedResults, FinishedMatch, OddsPortalError
+from odds_lambda.oddsportal_client import (
+    CancelledMatch,
+    FetchedResults,
+    FinishedMatch,
+    OddsPortalError,
+)
 from sqlalchemy import select
 
 KICKOFF = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(days=3)
@@ -108,8 +114,17 @@ def _session_maker(session) -> MagicMock:
     return maker
 
 
-def _fetched(*matches: FinishedMatch, rows_seen: int | None = None) -> FetchedResults:
-    return FetchedResults(list(matches), rows_seen or len(matches), complete=True)
+def _fetched(
+    *matches: FinishedMatch,
+    rows_seen: int | None = None,
+    cancelled: Sequence[CancelledMatch] = (),
+) -> FetchedResults:
+    return FetchedResults(
+        list(matches),
+        rows_seen or len(matches) + len(cancelled),
+        complete=True,
+        cancelled=list(cancelled),
+    )
 
 
 async def _stored(session, event_id: str) -> Event:
@@ -155,6 +170,58 @@ class TestProcessResults:
         assert (scoreless.home_score, scoreless.away_score) == (0, 0)
         unresolved = await _stored(test_session, "no_result")
         assert (unresolved.status, unresolved.home_score) == (EventStatus.SCHEDULED, None)
+
+    @pytest.mark.asyncio
+    async def test_postponed_event_that_is_played_reaches_final(self, test_session) -> None:
+        test_session.add(_make_event(event_id="late", status=EventStatus.POSTPONED))
+        await test_session.commit()
+
+        with patch(
+            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+            _session_maker(test_session),
+        ):
+            stats = await process_results(fetched=_fetched(_make_match()))
+
+        assert stats.events_updated == 1
+        stored = await _stored(test_session, "late")
+        assert (stored.status, stored.home_score) == (EventStatus.FINAL, 2)
+
+    @pytest.mark.asyncio
+    async def test_cancelled_match_cancels_the_pending_event(self, test_session) -> None:
+        test_session.add(_make_event(event_id="called_off"))
+        test_session.add(_make_event(event_id="other", home_team="Fulham", away_team="Burnley"))
+        await test_session.commit()
+
+        cancelled = CancelledMatch(home_team="Arsenal", away_team="Chelsea", start_time=KICKOFF)
+        with patch(
+            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+            _session_maker(test_session),
+        ):
+            stats = await process_results(fetched=_fetched(cancelled=[cancelled]))
+
+        assert (stats.events_cancelled, stats.events_updated, stats.events_unresolved) == (1, 0, 1)
+        stored = await _stored(test_session, "called_off")
+        assert (stored.status, stored.home_score, stored.completed_at) == (
+            EventStatus.CANCELLED,
+            None,
+            None,
+        )
+        assert (await _stored(test_session, "other")).status == EventStatus.SCHEDULED
+
+    @pytest.mark.asyncio
+    async def test_cancelled_match_leaves_a_scoreless_final_event_final(self, test_session) -> None:
+        test_session.add(_make_event(event_id="played", status=EventStatus.FINAL))
+        await test_session.commit()
+
+        cancelled = CancelledMatch(home_team="Arsenal", away_team="Chelsea", start_time=KICKOFF)
+        with patch(
+            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+            _session_maker(test_session),
+        ):
+            stats = await process_results(fetched=_fetched(cancelled=[cancelled]))
+
+        assert (stats.events_cancelled, stats.errors) == (0, [])
+        assert (await _stored(test_session, "played")).status == EventStatus.FINAL
 
     @pytest.mark.asyncio
     async def test_fetches_results_back_to_the_oldest_pending_kickoff(self, test_session) -> None:
@@ -305,7 +372,7 @@ class TestProcessResults:
                 "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
                 _session_maker(test_session),
             ),
-            pytest.raises(OddsPortalError, match="no finished match"),
+            pytest.raises(OddsPortalError, match="no finished or cancelled match"),
         ):
             await process_results(fetched=_fetched(rows_seen=50))
 

@@ -16,7 +16,7 @@ import json
 import math
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import TracebackType
 from typing import Any
@@ -67,6 +67,7 @@ _ARCHIVE_URL_RE = re.compile(
     r'"url":"' + re.escape(BASE_URL) + r'/(ajax-sport-country-tournament-archive_/[^"]+)"'
 )
 _STATUS_FINISHED = 3
+_STATUS_CANCELED = 5
 
 
 class OddsPortalError(Exception):
@@ -97,8 +98,16 @@ class FinishedMatch:
 
 
 @dataclass(frozen=True)
+class CancelledMatch:
+    home_team: str
+    away_team: str
+    start_time: datetime
+
+
+@dataclass(frozen=True)
 class ResultsPage:
     matches: list[FinishedMatch]
+    cancelled: list[CancelledMatch]
     rows_seen: int
     oldest_start: datetime | None
     page_count: int
@@ -109,6 +118,7 @@ class FetchedResults:
     matches: list[FinishedMatch]
     rows_seen: int
     complete: bool
+    cancelled: list[CancelledMatch] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -274,7 +284,7 @@ def parse_archive_path(html: str) -> str:
 
 
 def parse_results_page(feed: Any) -> ResultsPage:
-    """Finished matches of one archive feed page, with the page's oldest kick-off."""
+    """Finished and cancelled matches of one archive feed page, with the page's oldest kick-off."""
     data = feed.get("d") if isinstance(feed, dict) else None
     if not isinstance(data, dict):
         raise OddsPortalError("unexpected archive feed shape")
@@ -286,7 +296,17 @@ def parse_results_page(feed: Any) -> ResultsPage:
         raise OddsPortalError(f"unexpected archive feed shape: {e!r}") from e
 
     matches: list[FinishedMatch] = []
+    cancelled: list[CancelledMatch] = []
     for row, start in zip(rows, starts, strict=True):
+        if row.get("status-id") == _STATUS_CANCELED:
+            cancelled.append(
+                CancelledMatch(
+                    home_team=str(row["home-name"]),
+                    away_team=str(row["away-name"]),
+                    start_time=start,
+                )
+            )
+            continue
         home, away = str(row.get("homeResult", "")), str(row.get("awayResult", ""))
         if row.get("status-id") != _STATUS_FINISHED or not (home.isdigit() and away.isdigit()):
             continue
@@ -301,6 +321,7 @@ def parse_results_page(feed: Any) -> ResultsPage:
         )
     return ResultsPage(
         matches=matches,
+        cancelled=cancelled,
         rows_seen=len(rows),
         oldest_start=min(starts, default=None),
         page_count=page_count,
@@ -483,7 +504,7 @@ class OddsPortalClient:
         return parse_listing(html)
 
     async def fetch_results(self, path: str, since: datetime) -> FetchedResults:
-        """Finished matches on a results page, newest first, back to the page holding ``since``.
+        """Finished and cancelled matches on a results page, newest first, back to the page holding ``since``.
 
         A page that fails after the first keeps the earlier pages and marks the result
         incomplete; a failure on the first page raises.
@@ -493,6 +514,7 @@ class OddsPortalClient:
         )
         archive = parse_archive_path(html)
         matches: list[FinishedMatch] = []
+        cancelled: list[CancelledMatch] = []
         rows_seen = 0
         page = 1
         while True:
@@ -503,15 +525,16 @@ class OddsPortalClient:
                 if page == 1:
                     raise
                 logger.error("oddsportal_results_page_failed", page=page, error=str(e))
-                return FetchedResults(matches, rows_seen, complete=False)
+                return FetchedResults(matches, rows_seen, complete=False, cancelled=cancelled)
             matches.extend(results.matches)
+            cancelled.extend(results.cancelled)
             rows_seen += results.rows_seen
             if (
                 results.oldest_start is None
                 or results.oldest_start < since
                 or page >= results.page_count
             ):
-                return FetchedResults(matches, rows_seen, complete=True)
+                return FetchedResults(matches, rows_seen, complete=True, cancelled=cancelled)
             page += 1
             await _sleep(self._request_delay)
 

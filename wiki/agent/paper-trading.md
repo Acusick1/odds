@@ -7,6 +7,8 @@ sources:
   - odds_core.paper_trade_models.TradeResult
   - odds_lambda.paper_trading.place_trade
   - odds_lambda.paper_trading.settle_trades
+  - odds_lambda.paper_trading.SETTLEABLE_MARKETS
+  - odds_lambda.paper_trading.VOIDING_STATUSES
   - odds_lambda.paper_trading.get_portfolio_summary
   - odds_core.odds_math.determine_h2h_winner
   - odds_core.odds_math.calculate_profit_from_odds
@@ -32,7 +34,7 @@ Columns: `event_id` (FK), `market`, `selection` (`home`/`draw`/`away`), `bookmak
 
 ## Service functions
 
-- `odds_lambda.paper_trading.place_trade` validates stake greater than 0, stake not above `bankroll`, and selection in home/draw/away, then flushes (callers commit). It does not restrict `market`, and the stake caps and the requirement to state an edge are prompt-level ([agent prompts](agent-prompts.md#what-code-enforces)).
+- `odds_lambda.paper_trading.place_trade` validates stake greater than 0, stake not above `bankroll`, market in `odds_lambda.paper_trading.SETTLEABLE_MARKETS` (`h2h`, `1x2`) and selection in home/draw/away (`draw` on an `h2h` market only for an event of a three-way sport, `odds_core.utils.is_three_way_sport`), then flushes (callers commit). The stake caps and the requirement to state an edge are prompt-level ([agent prompts](agent-prompts.md#what-code-enforces)).
 - `get_portfolio_summary(initial_bankroll=1000.0)`: `current_bankroll = initial + total_pnl - open_exposure`; `roi` is `total_pnl / total_staked * 100`. The `bankroll` that `odds_mcp.server.paper_bet` uses for sizing defaults to the portfolio's current bankroll, unless the agent passes its own.
 
 ## Entry points
@@ -46,7 +48,7 @@ Columns: `event_id` (FK), `market`, `selection` (`home`/`draw`/`away`), `bookmak
 
 ## Settlement
 
-`odds_lambda.paper_trading.settle_trades` settles unsettled trades whose event is `FINAL` with both scores, using `odds_core.odds_math.determine_h2h_winner`; it is idempotent. P&L comes from `odds_core.odds_math.calculate_profit_from_odds`. Every trade is graded as a head-to-head result from the final score, so a non-`h2h` bet would be graded wrongly (#440). Draws are only meaningful for 3-way markets: a `home`/`away` bet on a drawn football match loses, and no trade is ever settled as `push` or `void` by this code (#440). `FINAL` and the scores are set by the fetch-scores job (AWS) or the OddsPortal results job, so stalled results jobs leave bets unsettled ([results jobs](../collection/results-jobs.md)).
+`odds_lambda.paper_trading.settle_trades` is idempotent and handles two cases. A trade on a `FINAL` event with both scores is graded with `odds_core.odds_math.determine_h2h_winner` for the markets in `odds_lambda.paper_trading.SETTLEABLE_MARKETS`, so a `home`/`away` bet on a drawn match loses and a `draw` bet on a 1x2 market wins; a trade on any other market is logged (`paper_trade_unsupported_market`) and left open. A trade on a `CANCELLED` event (`odds_lambda.paper_trading.VOIDING_STATUSES`) settles as `void` with zero P&L and `bankroll_after` equal to `bankroll_before`. A trade on a `POSTPONED` event stays open, because a re-dated event returns to SCHEDULED and settles when played; nothing settles as `push`. P&L comes from `odds_core.odds_math.calculate_profit_from_odds`. `FINAL` and the scores come from the fetch-scores job (AWS) or the OddsPortal results job, `CANCELLED` from the OddsPortal results job, so stalled jobs leave bets unsettled ([event status lifecycle](../collection/event-status-lifecycle.md), [results jobs](../collection/results-jobs.md)).
 
 ## Related
 

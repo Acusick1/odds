@@ -5,11 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+import structlog
+from odds_core.market_prices import THREE_WAY_MARKET, TWO_WAY_MARKET
 from odds_core.models import Event, EventStatus
 from odds_core.odds_math import calculate_profit_from_odds, determine_h2h_winner
 from odds_core.paper_trade_models import PaperTrade, TradeResult
+from odds_core.utils import is_three_way_sport
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = structlog.get_logger()
+
+SETTLEABLE_MARKETS = frozenset({TWO_WAY_MARKET, THREE_WAY_MARKET})
+VOIDING_STATUSES = (EventStatus.CANCELLED,)
 
 
 @dataclass(frozen=True)
@@ -46,8 +54,18 @@ async def place_trade(
         raise ValueError("Stake must be positive")
     if stake > bankroll:
         raise ValueError(f"Stake {stake} exceeds available bankroll {bankroll}")
+    if market not in SETTLEABLE_MARKETS:
+        raise ValueError(
+            f"Unsupported market '{market}', must be one of {sorted(SETTLEABLE_MARKETS)}"
+        )
     if selection not in ("home", "draw", "away"):
         raise ValueError(f"Invalid selection '{selection}', must be home/draw/away")
+    if selection == "draw" and market == TWO_WAY_MARKET:
+        event = await session.get(Event, event_id)
+        if event is None:
+            raise ValueError(f"Event '{event_id}' not found")
+        if not is_three_way_sport(event.sport_key):
+            raise ValueError(f"Invalid selection 'draw': {event.sport_key} has no draw")
 
     trade = PaperTrade(
         event_id=event_id,
@@ -66,15 +84,18 @@ async def place_trade(
 
 
 async def settle_trades(session: AsyncSession) -> list[PaperTrade]:
-    """Settle all unsettled trades whose events have final scores. Idempotent."""
-    # Fetch unsettled trades joined with their events
+    """Settle unsettled trades on FINAL events and void those on cancelled ones.
+
+    A FINAL event settles only with both scores. Idempotent.
+    """
+    played = (Event.status == EventStatus.FINAL) & (
+        Event.home_score.is_not(None) & Event.away_score.is_not(None)  # type: ignore[union-attr]
+    )
     stmt = (
         select(PaperTrade, Event)
         .join(Event, PaperTrade.event_id == Event.id)
         .where(PaperTrade.settled_at.is_(None))  # type: ignore[union-attr]
-        .where(Event.status == EventStatus.FINAL)
-        .where(Event.home_score.is_not(None))  # type: ignore[union-attr]
-        .where(Event.away_score.is_not(None))  # type: ignore[union-attr]
+        .where(played | Event.status.in_(VOIDING_STATUSES))  # type: ignore[attr-defined]
     )
     rows = (await session.execute(stmt)).all()
 
@@ -82,11 +103,17 @@ async def settle_trades(session: AsyncSession) -> list[PaperTrade]:
     now = datetime.now(UTC)
 
     for trade, event in rows:
-        assert event.home_score is not None
-        assert event.away_score is not None
+        if event.status in VOIDING_STATUSES:
+            result = TradeResult.VOID
+        elif trade.market in SETTLEABLE_MARKETS:
+            assert event.home_score is not None
+            assert event.away_score is not None
+            winner = determine_h2h_winner(event.home_score, event.away_score)
+            result = TradeResult.WIN if trade.selection == winner else TradeResult.LOSS
+        else:
+            logger.error("paper_trade_unsupported_market", trade_id=trade.id, market=trade.market)
+            continue
 
-        winner = determine_h2h_winner(event.home_score, event.away_score)
-        result = TradeResult.WIN if trade.selection == winner else TradeResult.LOSS
         pnl = (
             calculate_profit_from_odds(trade.stake, trade.odds, won=(result == TradeResult.WIN))
             if result in (TradeResult.WIN, TradeResult.LOSS)

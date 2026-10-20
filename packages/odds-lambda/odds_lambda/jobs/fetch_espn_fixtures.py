@@ -5,7 +5,8 @@ Flow:
    competitions from the ESPN Site API (free, unauthenticated).
 2. Upsert into ``espn_fixtures`` via ``EspnFixtureWriter`` (idempotent on
    ``(date, team, competition)``).
-3. Alerts on failure via ``job_alert_context``; the run fails when the Premier
+3. Marks events of postponed Premier League matches POSTPONED.
+4. Alerts on failure via ``job_alert_context``; the run fails when the Premier
    League upcoming request failed (or every one did), the Premier League
    schedule request failed for every team, or ESPN lists no upcoming Premier League fixture while EPL
    events are scheduled. Rows fetched before a failure are upserted first.
@@ -25,6 +26,7 @@ from odds_core.alerts import send_job_warning
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.epl_data_models import EspnFixtureRecord
+from odds_core.models import Event, EventStatus
 
 from odds_lambda.collection_calendar import EmptyCollectionError, fixture_calendar
 from odds_lambda.espn_fixture_fetcher import (
@@ -36,7 +38,10 @@ from odds_lambda.espn_fixture_fetcher import (
     current_season,
 )
 from odds_lambda.scheduling.jobs import JobContext
+from odds_lambda.storage.espn_fixture_reader import EspnFixtureReader
 from odds_lambda.storage.espn_fixture_writer import EspnFixtureWriter
+from odds_lambda.storage.event_merge import EVENT_MATCH_WINDOW, find_match_id
+from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
@@ -75,6 +80,8 @@ async def main(ctx: JobContext) -> None:
             upcoming_count=upcoming_count,
             total_upserted=total,
         )
+        postponed = await _mark_postponed_events()
+        logger.info("fetch_espn_fixtures_postponed_marked", events=postponed)
 
 
 # How many days ahead the upcoming fetch reaches. 30 days covers the agent's
@@ -95,6 +102,36 @@ async def _raise_if_upcoming_unexpectedly_empty() -> None:
             f"{calendar.kickoffs_in_horizon} {SPORT_KEY} event(s) scheduled within {horizon} "
             f"(next kickoff {calendar.next_kickoff})"
         )
+
+
+async def _mark_postponed_events() -> int:
+    """Set the event of each ESPN-postponed Premier League match POSTPONED; returns how many."""
+    marked = 0
+    async with async_session_maker() as session:
+        postponed = await EspnFixtureReader(session).get_postponed_home_fixtures(
+            LEAGUE_SLUGS[PRIMARY_LEAGUE_SLUG]
+        )
+        writer = OddsWriter(session)
+        reader = EspnFixtureReader(session)
+        for fixture in postponed:
+            if await reader.has_unpostponed_fixture(
+                LEAGUE_SLUGS[PRIMARY_LEAGUE_SLUG],
+                fixture.team,
+                fixture.opponent,
+                fixture.date,
+                EVENT_MATCH_WINDOW,
+            ):
+                continue
+            event_id = await find_match_id(
+                session, fixture.team, fixture.opponent, fixture.date, SPORT_KEY
+            )
+            event = await session.get(Event, event_id) if event_id is not None else None
+            if event is None or event.status not in (EventStatus.SCHEDULED, EventStatus.LIVE):
+                continue
+            await writer.update_event_status(event.id, EventStatus.POSTPONED)
+            marked += 1
+        await session.commit()
+    return marked
 
 
 async def _upsert(records: list[EspnFixtureRecord]) -> int:

@@ -44,7 +44,7 @@ status: stable
 
 ## Verb conventions
 
-- `upsert_*`: Postgres `ON CONFLICT DO UPDATE`, usually with a dynamically built `set_` excluding the key columns. Each per-source writer has its own copy of this loop.
+- `upsert_*`: Postgres `ON CONFLICT DO UPDATE`, usually with a dynamically built `set_` excluding the key columns (`odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` also leaves status, scores and `completed_at` out). Each per-source writer has its own copy of this loop.
 - `insert_*` / `bulk_insert_*`: `ON CONFLICT DO NOTHING` (`odds_lambda.storage.mlb_pitcher_writer.MlbPitcherWriter.insert_snapshots`, `odds_lambda.storage.writers.OddsWriter.bulk_insert_odds`).
 - `store_*`: plain `session.add()`.
 - The rule is not enforced anywhere; check the method body before relying on conflict behaviour.

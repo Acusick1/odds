@@ -10,7 +10,7 @@ from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds,
 from odds_core.odds_math import outcome_price_decimal
 from odds_core.team import normalize_team_name, team_abbrev
 from odds_core.time import ensure_utc, parse_api_datetime
-from sqlalchemy import select
+from sqlalchemy import and_, case, literal, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -305,7 +305,8 @@ class OddsWriter:
             Updated Event or None if not found
 
         Raises:
-            ValueError: If ``status`` is FINAL and either score is missing
+            ValueError: If ``status`` is FINAL and either score is missing, or the stored
+                status cannot become ``status`` (``EventStatus.can_become``)
         """
         if status == EventStatus.FINAL and (home_score is None or away_score is None):
             raise ValueError(f"event {event_id} cannot be FINAL without both scores")
@@ -316,6 +317,11 @@ class OddsWriter:
         if not event:
             logger.warning("event_not_found", event_id=event_id)
             return None
+
+        if not event.status.can_become(status):
+            raise ValueError(
+                f"event {event_id} cannot move from {event.status.value} to {status.value}"
+            )
 
         event.status = status
         event.updated_at = datetime.now(UTC)
@@ -433,12 +439,15 @@ class OddsWriter:
         logger.info("bulk_odds_inserted", count=count)
         return count
 
-    async def bulk_upsert_events(self, events: list[Event]) -> dict[str, int]:
+    async def bulk_upsert_events(
+        self, events: list[Event], now: datetime | None = None
+    ) -> dict[str, int]:
         """
         Bulk upsert event records for efficient backfill operations.
 
         Args:
             events: List of Event instances to insert or update
+            now: Clock for the LIVE exception below (defaults to the current time)
 
         Returns:
             Dictionary with keys 'inserted' and 'updated' containing approximate counts
@@ -446,6 +455,10 @@ class OddsWriter:
         Note:
             Uses PostgreSQL INSERT ... ON CONFLICT DO UPDATE pattern.
             Preserves created_at timestamps on updates, updates updated_at field.
+            Status, scores and completed_at are never overwritten, because the incoming
+            events are discovery records (scheduled, no scores). The exceptions
+            are a POSTPONED event whose kick-off moved and a LIVE event whose incoming
+            kick-off is after ``now``, which return to SCHEDULED.
 
         Example:
             events = [
@@ -481,13 +494,28 @@ class OddsWriter:
         # Build upsert statement
         stmt = insert(Event).values(event_dicts)
 
-        # Build dynamic update set excluding primary key and created_at
-        # This automatically includes new fields and fails loudly on schema changes
+        events_table = Event.__table__
+        result_columns = {"status", "home_score", "away_score", "completed_at"}
         set_ = {
             col.name: stmt.excluded[col.name]
-            for col in Event.__table__.columns
-            if not col.primary_key and col.name != "created_at"
+            for col in events_table.columns
+            if not col.primary_key and col.name != "created_at" and col.name not in result_columns
         }
+        now = now or datetime.now(UTC)
+        rescheduled = or_(
+            and_(
+                events_table.c.status == EventStatus.POSTPONED,
+                events_table.c.commence_time != stmt.excluded.commence_time,
+            ),
+            and_(
+                events_table.c.status == EventStatus.LIVE,
+                stmt.excluded.commence_time > now,
+            ),
+        )
+        set_["status"] = case(
+            (rescheduled, literal(EventStatus.SCHEDULED, events_table.c.status.type)),
+            else_=events_table.c.status,
+        )
         # Override updated_at to current time (SQLAlchemy doesn't auto-apply Python defaults)
         set_["updated_at"] = datetime.now(UTC)
 

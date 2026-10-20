@@ -8,6 +8,8 @@ from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
 
+ESPN_STATUS_POSTPONED = "Postponed"
+
 # ---------------------------------------------------------------------------
 # Typed ingest records (fetcher → writer boundary)
 # ---------------------------------------------------------------------------
