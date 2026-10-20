@@ -20,7 +20,7 @@ from odds_core.snapshot_sources import SnapshotSource
 from odds_core.sports import SportKey
 from sqlalchemy import select
 
-from odds_lambda.collection_calendar import CollectionSource
+from odds_lambda.collection_calendar import CollectionSource, decide_collection_run
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.polymarket_fetcher import PolymarketClient
 from odds_lambda.polymarket_odds import (
@@ -36,11 +36,9 @@ from odds_lambda.polymarket_odds import (
 )
 from odds_lambda.polymarket_sports import MATCH_ODDS_SPORTS, POLYMARKET_SPORTS
 from odds_lambda.scheduling.decision import (
-    DORMANCY_HORIZON_DAYS,
     OVERNIGHT_WINDOWS,
     CadenceConfig,
     ScheduleDecision,
-    decide_forward_resilient,
 )
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
@@ -230,8 +228,8 @@ async def main(ctx: JobContext) -> None:
     overnight = OVERNIGHT_WINDOWS.get(target_sports[0]) if len(target_sports) == 1 else None
 
     async def _reschedule(label: str) -> ScheduleDecision:
-        decision = await decide_forward_resilient(
-            target_sports, CADENCE, overnight=overnight, lookahead_days=DORMANCY_HORIZON_DAYS
+        decision = await decide_collection_run(
+            target_sports, CADENCE, overnight=overnight, stored_only=True
         )
         assert decision.next_execution is not None  # noqa: S101
         try:

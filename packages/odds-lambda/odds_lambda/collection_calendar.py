@@ -175,15 +175,20 @@ async def decide_collection_run(
     *,
     overnight: OvernightWindow | None,
     now: datetime | None = None,
+    stored_only: bool = False,
 ) -> ScheduleDecision:
-    """Next run of a collector, dormant while no fixture is within ``DORMANCY_HORIZON_DAYS``."""
+    """Next run of a collector, dormant while no fixture is within ``DORMANCY_HORIZON_DAYS``.
+
+    ``stored_only`` looks at stored events alone, for a job that only pairs
+    with events other jobs create.
+    """
     return await decide_forward_resilient(
         sport_keys,
         cadence,
         overnight=overnight,
         lookahead_days=DORMANCY_HORIZON_DAYS,
         now=now,
-        next_kickoff_lookup=next_fixture_kickoff,
+        next_kickoff_lookup=None if stored_only else next_fixture_kickoff,
     )
 
 
