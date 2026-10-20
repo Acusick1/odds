@@ -36,7 +36,7 @@ Helpers:
 
 On AWS, the Lambda handler also sends its own critical on any exception ([lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
 
-`odds_core.config.AlertConfig` (no env prefix; its docstring says "infrastructure for future use", yet it drives deployed alerting): `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED` (default false), quota thresholds 0.2 and 0.1, `CONSECUTIVE_FAILURES_THRESHOLD` 3, `STALE_DATA_HOURS` 2, `ALERT_RATE_LIMIT_MINUTES` 30, `DATA_QUALITY_ERROR_THRESHOLD` 10, `heartbeat_expectations` (hours per compound job name such as `fetch-polymarket-odds-epl` or `fetch-espn-fixtures`, 2 to 30 by default), `heartbeat_retention_days` 7 ([configuration](../foundations/configuration.md)).
+`odds_core.config.AlertConfig` (no env prefix; its docstring says "infrastructure for future use", yet it drives deployed alerting): `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED` (default false), quota thresholds 0.2 and 0.1, `STALE_DATA_HOURS` 2, `ALERT_RATE_LIMIT_MINUTES` 30, `DATA_QUALITY_ERROR_THRESHOLD` 10, `heartbeat_expectations` (hours per compound job name such as `fetch-polymarket-odds-epl` or `fetch-espn-fixtures`, 2 to 30 by default), `heartbeat_retention_days` 7 ([configuration](../foundations/configuration.md)).
 
 ## Alert history
 
@@ -50,7 +50,6 @@ On AWS, the Lambda handler also sends its own critical on any exception ([lambda
 | `mlb_calendar_stale` (March to November, same repeat window) | `odds_lambda.health_monitor.HealthMonitor.check_mlb_calendar` | critical |
 | `stale_data:<source>:<sport>` (repeats every `stale_reminder_minutes`, not the common window) | `odds_lambda.health_monitor.HealthMonitor.check_stale_sources` | critical |
 | `missing_betfair_close` (sent after kick-off as a coverage record; one alert per run listing events not already alerted in the lookback) | `odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes` | critical |
-| `consecutive_failures` | `odds_lambda.health_monitor.HealthMonitor.check_consecutive_failures` | error |
 | `quota_low`, `quota_critical` | `odds_lambda.health_monitor.HealthMonitor.check_api_quota` | warning, critical |
 | `data_quality_errors` | `odds_lambda.health_monitor.HealthMonitor.check_data_quality` | warning |
 | `duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `stale_scheduled_events:<sport>` (kick-off within the last 7 days) | `odds_lambda.health_monitor.HealthMonitor.check_event_identity` | warning |

@@ -131,7 +131,6 @@ class TestHealthCheckIntegration:
         assert len(health_status.issues_detected) == 0
         assert health_status.metrics.fetch_success_rate_24h == 100.0
         assert health_status.metrics.api_quota_remaining == 15000
-        assert health_status.metrics.consecutive_failures == 0
 
     @pytest.mark.asyncio
     async def test_health_check_detects_stale_data(self, test_session):
@@ -153,41 +152,6 @@ class TestHealthCheckIntegration:
         assert health_status.overall_healthy is False
         assert len(health_status.issues_detected) > 0
         assert any("oddsportal has written no" in issue for issue in health_status.issues_detected)
-
-    @pytest.mark.asyncio
-    async def test_health_check_detects_consecutive_failures(self, test_session):
-        """Test health check detects consecutive failures."""
-        # Create 4 consecutive failures (threshold is 3)
-        for i in range(4):
-            fetch_log = FetchLog(
-                fetch_time=datetime.now(UTC) - timedelta(minutes=i * 30),
-                sport_key="basketball_nba",
-                events_count=0,
-                bookmakers_count=0,
-                success=False,
-                error_message="API error",
-                api_quota_remaining=15000,
-            )
-            test_session.add(fetch_log)
-
-        await test_session.commit()
-
-        # Mock alert system
-        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock):
-            with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
-                mock_settings = get_settings()
-                mock_settings.alerts.alert_enabled = False
-                mock_get_settings.return_value = mock_settings
-
-                from odds_lambda.health_monitor import HealthMonitor
-
-                monitor = HealthMonitor(test_session, mock_settings)
-                health_status = await monitor.check_system_health()
-
-        assert health_status.overall_healthy is False
-        assert len(health_status.issues_detected) > 0
-        assert any("consecutive" in issue.lower() for issue in health_status.issues_detected)
-        assert health_status.metrics.consecutive_failures == 4
 
     @pytest.mark.asyncio
     async def test_health_check_detects_low_quota(self, test_session):

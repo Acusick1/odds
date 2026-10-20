@@ -32,7 +32,7 @@ Quota is a per-key monthly balance that only [the client](odds-api-client.md#cos
 | `odds status quota` (`odds_cli.commands.status._show_quota`) | newest 10 `fetch_logs` rows, any source | n/a | n/a |
 
 - `fetch-odds` sends a warning below `odds_core.config.AlertConfig.quota_warning_threshold` and a critical below `odds_core.config.AlertConfig.quota_critical_threshold`. It uses `odds_core.alerts.send_warning`/`odds_core.alerts.send_critical` without an `alert_type`, so the alert repeats on every run below threshold (as often as the closing tier fetches) and is never recorded ([fetch-odds-job](fetch-odds-job.md)).
-- The health monitor applies the same fractions as `quota_low` and `quota_critical` and rate-limits them through `alert_history` ([health-monitor](../operations/health-monitor.md)).
+- The health monitor applies the same fractions as `quota_low` and `quota_critical`, rate-limited through `alert_history` ([health-monitor](../operations/health-monitor.md)).
 - Both thresholds divide the active key's balance by `odds_core.config.APIConfig.quota`, so with a larger paid key they are meaningless until it is set (#441).
 
 ## Scheduled spend

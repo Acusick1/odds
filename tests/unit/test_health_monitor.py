@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_core.config import AlertConfig, APIConfig, SchedulerConfig, Settings
-from odds_core.models import AlertHistory, FetchLog
+from odds_core.models import AlertHistory
 from odds_lambda.health_monitor import HealthMetrics, HealthMonitor, HealthStatus, StaleSource
 from odds_lambda.scheduling.backends.base import JobStatus, ScheduledJob
 
@@ -20,7 +20,6 @@ def mock_settings():
             alert_rate_limit_minutes=30,
             quota_warning_threshold=0.2,
             quota_critical_threshold=0.1,
-            consecutive_failures_threshold=3,
             stale_data_hours=2,
         ),
         api=APIConfig(key="test-key", quota=500),
@@ -123,62 +122,6 @@ class TestHealthMonitor:
         mock_session.execute.assert_not_called()
         mock_session.add.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_check_consecutive_failures_healthy(self, mock_session, mock_settings):
-        """Should return healthy when no consecutive failures."""
-        monitor = HealthMonitor(mock_session, mock_settings)
-
-        # Mock fetch logs with success
-        fetch_logs = [
-            FetchLog(
-                fetch_time=datetime.now(UTC) - timedelta(minutes=i * 30),
-                sport_key="basketball_nba",
-                events_count=5,
-                bookmakers_count=8,
-                success=True,
-            )
-            for i in range(5)
-        ]
-
-        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
-            mock_reader = AsyncMock()
-            mock_reader.get_fetch_logs.return_value = fetch_logs
-            mock_reader_class.return_value = mock_reader
-
-            is_healthy, failure_count = await monitor.check_consecutive_failures()
-
-            assert is_healthy is True
-            assert failure_count == 0
-
-    @pytest.mark.asyncio
-    async def test_check_consecutive_failures_unhealthy(self, mock_session, mock_settings):
-        """Should return unhealthy when consecutive failures exceed threshold."""
-        monitor = HealthMonitor(mock_session, mock_settings)
-
-        # Mock fetch logs with 3 consecutive failures (threshold = 3)
-        fetch_logs = [
-            FetchLog(
-                fetch_time=datetime.now(UTC) - timedelta(minutes=i * 30),
-                sport_key="basketball_nba",
-                events_count=0,
-                bookmakers_count=0,
-                success=False,
-                error_message="API error",
-            )
-            for i in range(3)
-        ]
-
-        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
-            mock_reader = AsyncMock()
-            mock_reader.get_fetch_logs.return_value = fetch_logs
-            mock_reader_class.return_value = mock_reader
-
-            is_healthy, failure_count = await monitor.check_consecutive_failures()
-
-            assert is_healthy is False
-            assert failure_count == 3
-
-    @pytest.mark.asyncio
     async def test_check_api_quota_healthy(self, mock_session, mock_settings):
         """Should return healthy when quota is above warning threshold."""
         monitor = HealthMonitor(mock_session, mock_settings)
@@ -234,15 +177,13 @@ class TestHealthMonitor:
 
             # Mock shared snapshot query and check methods
             with patch.object(monitor, "_get_hours_since_latest_snapshot", return_value=0.5):
-                with patch.object(monitor, "check_consecutive_failures", return_value=(True, 0)):
-                    with patch.object(monitor, "check_data_quality", return_value=(True, 2)):
-                        metrics = await monitor.collect_metrics()
+                with patch.object(monitor, "check_data_quality", return_value=(True, 2)):
+                    metrics = await monitor.collect_metrics()
 
             assert isinstance(metrics, HealthMetrics)
             assert metrics.fetch_success_rate_24h == 95.5
             assert metrics.api_quota_remaining == 15000
             assert metrics.hours_since_last_fetch is not None
-            assert metrics.consecutive_failures == 0
             assert metrics.data_quality_errors_24h == 2
             assert metrics.events_scheduled == 10
             assert metrics.events_live == 2
@@ -259,7 +200,6 @@ class TestHealthMonitor:
                 fetch_success_rate_24h=95.0,
                 hours_since_last_fetch=0.5,
                 api_quota_remaining=15000,
-                consecutive_failures=0,
                 data_quality_errors_24h=2,
                 events_scheduled=5,
                 events_live=0,
@@ -271,14 +211,13 @@ class TestHealthMonitor:
                 patch.object(monitor, "check_mlb_calendar", return_value=None),
                 patch.object(monitor, "check_missing_betfair_closes", return_value=[]),
             ):
-                with patch.object(monitor, "check_consecutive_failures", return_value=(True, 0)):
-                    with patch.object(monitor, "check_api_quota", return_value=(True, 15000, 0.75)):
-                        with patch.object(monitor, "check_data_quality", return_value=(True, 2)):
-                            with (
-                                patch.object(monitor, "check_job_heartbeats", return_value=[]),
-                                patch.object(monitor, "check_event_identity", return_value=[]),
-                            ):
-                                status = await monitor.check_system_health()
+                with patch.object(monitor, "check_api_quota", return_value=(True, 15000, 0.75)):
+                    with patch.object(monitor, "check_data_quality", return_value=(True, 2)):
+                        with (
+                            patch.object(monitor, "check_job_heartbeats", return_value=[]),
+                            patch.object(monitor, "check_event_identity", return_value=[]),
+                        ):
+                            status = await monitor.check_system_health()
 
             assert isinstance(status, HealthStatus)
             assert status.overall_healthy is True
@@ -296,7 +235,6 @@ class TestHealthMonitor:
                 fetch_success_rate_24h=50.0,
                 hours_since_last_fetch=3.0,
                 api_quota_remaining=1000,
-                consecutive_failures=4,
                 data_quality_errors_24h=15,
                 events_scheduled=0,
                 events_live=0,
@@ -321,16 +259,15 @@ class TestHealthMonitor:
                     ],
                 ),
             ):
-                with patch.object(monitor, "check_consecutive_failures", return_value=(False, 4)):
-                    with patch.object(monitor, "check_api_quota", return_value=(False, 1000, 0.05)):
-                        with patch.object(monitor, "check_data_quality", return_value=(False, 15)):
-                            with (
-                                patch.object(monitor, "check_job_heartbeats", return_value=[]),
-                                patch.object(monitor, "check_event_identity", return_value=[]),
-                            ):
-                                # Mock alert sending
-                                with patch.object(monitor, "_send_alert", return_value=True):
-                                    status = await monitor.check_system_health()
+                with patch.object(monitor, "check_api_quota", return_value=(False, 1000, 0.05)):
+                    with patch.object(monitor, "check_data_quality", return_value=(False, 15)):
+                        with (
+                            patch.object(monitor, "check_job_heartbeats", return_value=[]),
+                            patch.object(monitor, "check_event_identity", return_value=[]),
+                        ):
+                            # Mock alert sending
+                            with patch.object(monitor, "_send_alert", return_value=True):
+                                status = await monitor.check_system_health()
 
             assert status.overall_healthy is False
             assert len(status.issues_detected) > 0
@@ -509,7 +446,6 @@ class TestCheckScheduleChains:
                 ("check_stale_sources", []),
                 ("check_mlb_calendar", None),
                 ("check_missing_betfair_closes", []),
-                ("check_consecutive_failures", (True, 0)),
                 ("check_api_quota", (True, None, None)),
                 ("check_data_quality", (True, 0)),
                 ("check_job_heartbeats", []),
@@ -521,7 +457,6 @@ class TestCheckScheduleChains:
                         fetch_success_rate_24h=100.0,
                         hours_since_last_fetch=0.1,
                         api_quota_remaining=None,
-                        consecutive_failures=0,
                         data_quality_errors_24h=0,
                         events_scheduled=1,
                         events_live=0,
