@@ -8,9 +8,9 @@ In the retail-EV target, a decision row whose retail price comes from an FDUK op
 
 ## Context
 
-ADR-0012's baseline is the devigged exchange price from the latest live Betfair job or FDUK opening snapshot at or before t. That assumes t is when the retail price was taken. For an FDUK opening snapshot it is not: the stamp is FDUK's latest documented collection time, an upper bound, and the price can be a day or more older ([historical ingest scripts](../../wiki/collection/historical-ingest-scripts.md#snapshot-shape)). Any other source's price at or before the stamp can then postdate the retail price.
+ADR-0012's baseline is the devigged exchange price from the latest live Betfair job or FDUK opening snapshot at or before t. That assumes t is when the retail price was taken. For an FDUK opening snapshot it is not: the stamp is FDUK's latest documented collection time and an upper bound: the price was taken at or before it, by an amount FDUK does not record ([historical ingest scripts](../../wiki/collection/historical-ingest-scripts.md#snapshot-shape)). Any other source's price at or before the stamp can then postdate the retail price.
 
-The as-of-t feature experiment (#545, PR #548) showed the leak in practice. Polymarket prices looked up at the FDUK stamp predicted those rows' residual. Shifting every Polymarket lookup back 1 hour removed 55 to 80% of the gain, and after 3 hours no gain had a CI that excluded zero ([as-of-t groups](../../wiki/evaluation/exp-epl-retail-ev-as-of-t-groups.md)).
+The as-of-t feature experiment (#545, PR #548) showed the leak in practice. Polymarket prices looked up at the FDUK stamp predicted those rows' residual. Shifting every Polymarket lookup back 1 hour removed 54 to 79% of the gain, and after that shift no gain had a CI that excluded zero ([as-of-t groups](../../wiki/evaluation/exp-epl-retail-ev-as-of-t-groups.md)).
 
 ## Decision
 

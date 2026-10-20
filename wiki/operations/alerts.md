@@ -47,16 +47,16 @@ On AWS, the Lambda handler also sends its own critical on any exception ([lambda
 | `job_failure:<job>` | `odds_core.alerts.job_alert_context` | critical |
 | `heartbeat:<job>` | `odds_core.alerts.job_alert_context` on success | info, never sent to Discord |
 | `job_empty:<job>` | `odds_core.alerts.send_job_warning` in the Polymarket odds job | warning |
-| `mlb_calendar_stale` (March to November, same repeat window) | `odds_lambda.health_monitor.HealthMonitor` | critical |
-| `stale_data:<source>:<sport>` (repeats every `stale_reminder_minutes`, not the common window) | `odds_lambda.health_monitor.HealthMonitor` | critical |
-| `missing_betfair_close` (sent after kick-off as a coverage record; one alert per run listing events not already alerted in the lookback) | `odds_lambda.health_monitor.HealthMonitor` | critical |
-| `consecutive_failures` | `odds_lambda.health_monitor.HealthMonitor` | error |
-| `quota_low`, `quota_critical` | `odds_lambda.health_monitor.HealthMonitor` | warning, critical |
-| `data_quality_errors` | `odds_lambda.health_monitor.HealthMonitor` | warning |
-| `duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `stale_scheduled_events:<sport>` (kick-off within the last 7 days) | `odds_lambda.health_monitor.HealthMonitor` | warning |
-| `missing_heartbeat:<job>` | `odds_lambda.health_monitor.HealthMonitor` | warning |
-| `dead_schedule_chain:<job>` (a bootstrapped self-scheduling job with no run booked or one overdue) | `odds_lambda.health_monitor.HealthMonitor` | critical |
-| `health_check_failure` | `odds_lambda.health_monitor.HealthMonitor` | critical |
+| `mlb_calendar_stale` (March to November, same repeat window) | `odds_lambda.health_monitor.HealthMonitor.check_mlb_calendar` | critical |
+| `stale_data:<source>:<sport>` (repeats every `stale_reminder_minutes`, not the common window) | `odds_lambda.health_monitor.HealthMonitor.check_stale_sources` | critical |
+| `missing_betfair_close` (sent after kick-off as a coverage record; one alert per run listing events not already alerted in the lookback) | `odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes` | critical |
+| `consecutive_failures` | `odds_lambda.health_monitor.HealthMonitor.check_consecutive_failures` | error |
+| `quota_low`, `quota_critical` | `odds_lambda.health_monitor.HealthMonitor.check_api_quota` | warning, critical |
+| `data_quality_errors` | `odds_lambda.health_monitor.HealthMonitor.check_data_quality` | warning |
+| `duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `stale_scheduled_events:<sport>` (kick-off within the last 7 days) | `odds_lambda.health_monitor.HealthMonitor.check_event_identity` | warning |
+| `missing_heartbeat:<job>` | `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats` | warning |
+| `dead_schedule_chain:<job>` (a bootstrapped self-scheduling job with no run booked or one overdue) | `odds_lambda.health_monitor.HealthMonitor.check_schedule_chains` | critical |
+| `health_check_failure` | `odds_lambda.health_monitor.HealthMonitor.check_system_health` | critical |
 
 The default window is 30 minutes (`odds_core.alerts.check_rate_limit`'s argument for jobs, `odds_core.config.AlertConfig.alert_rate_limit_minutes` for the monitor). The key is `alert_type` alone, so a warning suppresses a critical of the same type for the window; the quota pair works only because the types differ (#384).
 

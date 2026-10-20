@@ -115,7 +115,7 @@ A job inside `odds_core.alerts.job_alert_context` inserts `heartbeat:<name>` on 
 | check-health | yes | 2 h |
 | update-status | yes | none |
 | fetch-betfair-exchange (per sport) | yes | 10 h EPL, 11 h MLB (overnight window plus the 2 h interval) |
-| fetch-polymarket-odds (per sport) | yes | 11 h EPL (overnight window plus polling interval) |
+| fetch-polymarket-odds (per sport) | yes | 11 h EPL (overnight window plus polling interval, plus 1 h slack) |
 | score-predictions | yes | none |
 | fetch-mlb-probables | yes | 30 h |
 | fetch-espn-fixtures | yes | none |

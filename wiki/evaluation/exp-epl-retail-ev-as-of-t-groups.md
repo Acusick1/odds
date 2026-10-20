@@ -121,7 +121,7 @@ The independent review of #548 tested this with a robustness probe on the earlie
 | 6 h | 10.2 [−14.6, 36.5] | −0.4 [−50.1, 50.8] | 11.2 [−19.9, 42.5] | 6.5 [−37.4, 52.7] |
 | 12 h | 6.2 [−19.5, 31.3] | −4.6 [−55.1, 44.0] | 5.5 [−24.9, 34.8] | 8.7 [−41.3, 56.5] |
 
-A 1-hour shift removes 55 to 80% of the gain, and after a 3-hour shift no gain has a CI that excludes zero. A real Polymarket signal would not depend on the price being the one stamped exactly at the FDUK collection time.
+A 1-hour shift removes 54 to 79% of the gain, and after it no gain has a CI that excludes zero. A real Polymarket signal would not depend on the price being the one stamped exactly at the FDUK collection time.
 
 ## Related
 
