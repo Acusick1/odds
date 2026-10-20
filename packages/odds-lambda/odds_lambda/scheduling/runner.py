@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.alerts import send_job_failure, send_job_warning
+from odds_core.config import get_settings
 
 from odds_lambda.scheduling import jobs
 from odds_lambda.scheduling.backends.local import LocalSchedulerBackend
@@ -98,4 +99,9 @@ async def run_scheduled_job(job_name: str, ctx: JobContext) -> None:
     """Task function behind every local schedule; resolves the job at run time."""
     base_name, _ = resolve_job_name(job_name)
     job = jobs.get_job_function(base_name)
-    await run_chain_job(LocalSchedulerBackend(), job_name, lambda: job(ctx), timeout=JOB_TIMEOUT)
+    await run_chain_job(
+        LocalSchedulerBackend(dry_run=get_settings().scheduler.dry_run),
+        job_name,
+        lambda: job(ctx),
+        timeout=JOB_TIMEOUT,
+    )
