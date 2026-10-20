@@ -242,7 +242,7 @@ class TestJobAlertContext:
 
     @pytest.mark.asyncio
     @patch("odds_core.alerts.record_to_alert_history", new_callable=AsyncMock)
-    @patch("odds_core.alerts._latest_sent_at", new_callable=AsyncMock, return_value=None)
+    @patch("odds_core.alerts.latest_sent_at", new_callable=AsyncMock, return_value=None)
     @patch("odds_core.alerts.alert_manager")
     async def test_sends_alert_on_failure(
         self,
@@ -302,10 +302,10 @@ class TestSendJobFailure:
     ) -> None:
         times = {"job_failure:test-job": failure, "heartbeat:test-job": heartbeat}
 
-        async def latest(alert_type: str) -> datetime | None:
+        async def latest(alert_type: str, session: object = None) -> datetime | None:
             return times[alert_type]
 
-        monkeypatch.setattr("odds_core.alerts._latest_sent_at", latest)
+        monkeypatch.setattr("odds_core.alerts.latest_sent_at", latest)
 
     @pytest.fixture(autouse=True)
     def manager(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:

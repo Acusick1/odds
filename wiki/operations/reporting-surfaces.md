@@ -18,7 +18,7 @@ status: stable
 
 | Mode | Producers | Output | Backing tables |
 |---|---|---|---|
-| Event-driven | jobs via `odds_core.alerts.job_alert_context` (`odds_core.alerts.send_job_failure`), `odds_core.alerts.send_job_warning`, quota alerts | Discord | `alert_history` (outage and rate-limit state, heartbeats) |
+| Event-driven | jobs via `odds_core.alerts.job_alert_context` (`odds_core.alerts.send_job_failure`, once per outage), `odds_core.alerts.send_job_warning`, quota alerts | Discord | `alert_history` (outage and rate-limit state, heartbeats) |
 | Poll-driven | check-health, the daily digest | Discord summary | reads `fetch_logs`, `odds_snapshots`, `data_quality_logs`, `predictions`, `alert_history` |
 | On-demand | `odds status`, `odds scheduler`, MCP tools | terminal tables or JSON | reads everything |
 

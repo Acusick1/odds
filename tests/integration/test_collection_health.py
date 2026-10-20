@@ -344,6 +344,22 @@ class TestCheckStaleSources:
 
         assert await self._monitor(pglite_async_session).check_stale_sources(NOW) == []
 
+    async def test_a_failure_before_the_overnight_pause_still_suppresses_after_it(
+        self, pglite_async_session: Any, seed: Callable[..., Any]
+    ) -> None:
+        await seed(NOW + timedelta(hours=3), snapshots=((OP, NOW - timedelta(hours=11)),))
+        pglite_async_session.add(
+            AlertHistory(
+                alert_type="job_failure:fetch-oddsportal-epl",
+                severity="critical",
+                message="failed",
+                sent_at=NOW - timedelta(hours=10),
+            )
+        )
+        await pglite_async_session.commit()
+
+        assert await self._monitor(pglite_async_session).check_stale_sources(NOW) == []
+
     async def test_an_old_failure_without_a_heartbeat_no_longer_suppresses(
         self, pglite_async_session: Any, seed: Callable[..., Any]
     ) -> None:

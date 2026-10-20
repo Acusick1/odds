@@ -218,7 +218,7 @@ class TestFetchPolymarketMain:
         job.log_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_failure_sends_rate_limited_job_failure_alert(self, job: JobMocks) -> None:
+    async def test_failure_sends_the_job_failure_alert(self, job: JobMocks) -> None:
         job.client.get_events.side_effect = Exception("API down")
 
         with (

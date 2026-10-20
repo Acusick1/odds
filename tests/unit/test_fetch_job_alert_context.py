@@ -104,7 +104,7 @@ class TestHeartbeatExpectations:
 
 class TestFetchOdds:
     @pytest.mark.asyncio
-    async def test_failure_sends_the_rate_limited_alert_only(
+    async def test_failure_sends_the_job_failure_alert_only(
         self, odds_job: SimpleNamespace, alerts: SimpleNamespace
     ) -> None:
         odds_job.ingestion.ingest_sports.side_effect = RuntimeError("401 from the API")
@@ -176,7 +176,7 @@ class TestFetchScores:
             yield SimpleNamespace(decide=decide, work=work)
 
     @pytest.mark.asyncio
-    async def test_failure_sends_the_rate_limited_alert_only(
+    async def test_failure_sends_the_job_failure_alert_only(
         self, scores_job: SimpleNamespace, alerts: SimpleNamespace
     ) -> None:
         scores_job.work.side_effect = RuntimeError("API down")
