@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from types import TracebackType
 from typing import TYPE_CHECKING
@@ -17,8 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 if TYPE_CHECKING:
     from odds_lambda.scheduling.jobs import JobContext
-
-    JobFunc = Callable[[JobContext], Awaitable[None]]
 
 from odds_lambda.scheduling.backends.base import (
     BackendHealth,
@@ -99,7 +97,7 @@ class LocalSchedulerBackend(SchedulerBackend):
         super().__init__(dry_run=dry_run, retry_config=retry_config)
         self._scheduler: AsyncScheduler | None = None
         self._configured_tasks: set[str] = set()
-        logger.info("local_scheduler_initialized", dry_run=self.dry_run)
+        logger.debug("local_scheduler_initialized", dry_run=self.dry_run)
 
     def validate_configuration(self) -> ValidationResult:
         from odds_lambda.scheduling.health_check import ValidationBuilder
@@ -260,7 +258,7 @@ class LocalSchedulerBackend(SchedulerBackend):
                 raise SchedulingFailedError(
                     f"{job_name} is a cron job; a one-off run would replace its cron schedule"
                 )
-            job_func = get_job_function(base_name)
+            get_job_function(base_name)  # fail at booking, not when the run fires
             ctx_payload: dict[str, object] = {}
             if resolved_sport:
                 ctx_payload["sport"] = resolved_sport
@@ -268,7 +266,7 @@ class LocalSchedulerBackend(SchedulerBackend):
                 ctx_payload.update(payload)
             ctx = JobContext.from_payload(ctx_payload)
 
-            await self._add_schedule(job_func, job_name, next_time, ctx)
+            await self._add_schedule(job_name, next_time, ctx)
 
             logger.info(
                 "local_job_scheduled",
@@ -320,7 +318,7 @@ class LocalSchedulerBackend(SchedulerBackend):
             )
 
             base_name, resolved_sport = resolve_job_name(job_name)
-            job_func = get_job_function(base_name)
+            get_job_function(base_name)  # fail at booking, not when the run fires
             ctx_payload: dict[str, object] = {}
             if resolved_sport:
                 ctx_payload["sport"] = resolved_sport
@@ -328,7 +326,7 @@ class LocalSchedulerBackend(SchedulerBackend):
                 ctx_payload.update(payload)
             ctx = JobContext.from_payload(ctx_payload)
 
-            await self._add_cron_schedule(job_func, job_name, cron_expr, ctx)
+            await self._add_cron_schedule(job_name, cron_expr, ctx)
 
             logger.info(
                 "local_cron_scheduled",
@@ -350,7 +348,6 @@ class LocalSchedulerBackend(SchedulerBackend):
 
     async def _add_cron_schedule(
         self,
-        job_func: JobFunc,
         job_name: str,
         cron_expr: str,
         ctx: JobContext,
@@ -360,39 +357,45 @@ class LocalSchedulerBackend(SchedulerBackend):
 
         scheduler = self._scheduler or current_async_scheduler.get(None)
         if scheduler is not None:
-            await self._write_cron_schedule(scheduler, job_func, job_name, cron_expr, ctx)
+            await self._write_cron_schedule(scheduler, job_name, cron_expr, ctx)
             return
 
         async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
-            await self._write_cron_schedule(scheduler, job_func, job_name, cron_expr, ctx)
+            await self._write_cron_schedule(scheduler, job_name, cron_expr, ctx)
+
+    async def _configure_chain_task(self, scheduler: AsyncScheduler, job_name: str) -> None:
+        """Give each schedule id its own task, so a hung run blocks only its own chain.
+
+        APScheduler allows one running job per task by default, and a task is
+        otherwise keyed by function, which every sport of a job shares.
+        """
+        from odds_lambda.scheduling.runner import run_scheduled_job
+
+        if job_name not in self._configured_tasks:
+            await scheduler.configure_task(job_name, func=run_scheduled_job, max_running_jobs=1)
+            self._configured_tasks.add(job_name)
 
     async def _write_cron_schedule(
         self,
         scheduler: AsyncScheduler,
-        job_func: JobFunc,
         job_name: str,
         cron_expr: str,
         ctx: JobContext,
     ) -> None:
-        task_key = f"{job_func.__module__}.{job_func.__qualname__}"
-        if task_key not in self._configured_tasks:
-            await scheduler.configure_task(job_func)
-            self._configured_tasks.add(task_key)
-
+        await self._configure_chain_task(scheduler, job_name)
         await scheduler.add_schedule(
-            job_func,
+            job_name,
             trigger=utc_cron_trigger(cron_expr, now=datetime.now(UTC)),
             id=job_name,
-            args=[ctx],
+            args=[job_name, ctx],
             conflict_policy=ConflictPolicy.replace,
         )
 
     async def _add_schedule(
         self,
-        job_func: object,
         job_name: str,
         next_time: datetime,
-        ctx: object,
+        ctx: JobContext,
     ) -> None:
         """Write a schedule to the data store.
 
@@ -406,30 +409,25 @@ class LocalSchedulerBackend(SchedulerBackend):
 
         scheduler = self._scheduler or current_async_scheduler.get(None)
         if scheduler is not None:
-            await self._write_schedule(scheduler, job_func, job_name, next_time, ctx)
+            await self._write_schedule(scheduler, job_name, next_time, ctx)
             return
 
         async with build_scheduler(role=SchedulerRole.scheduler) as scheduler:
-            await self._write_schedule(scheduler, job_func, job_name, next_time, ctx)
+            await self._write_schedule(scheduler, job_name, next_time, ctx)
 
     async def _write_schedule(
         self,
         scheduler: AsyncScheduler,
-        job_func: object,
         job_name: str,
         next_time: datetime,
-        ctx: object,
+        ctx: JobContext,
     ) -> None:
-        task_key = f"{job_func.__module__}.{job_func.__qualname__}"  # type: ignore[union-attr]
-        if task_key not in self._configured_tasks:
-            await scheduler.configure_task(job_func)
-            self._configured_tasks.add(task_key)
-
+        await self._configure_chain_task(scheduler, job_name)
         await scheduler.add_schedule(
-            job_func,
+            job_name,
             trigger=DateTrigger(run_time=next_time),
             id=job_name,
-            args=[ctx],
+            args=[job_name, ctx],
             conflict_policy=ConflictPolicy.replace,
         )
 

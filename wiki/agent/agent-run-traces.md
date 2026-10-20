@@ -23,7 +23,7 @@ Each run of the [agent runtime](agent-run-job.md#runtime) writes its full `strea
 - Every line goes to `<project_root>/logs/agent_runs/{sport}_{YYYYMMDDTHHMMSSZ}_{pid}.jsonl`. `logs/` is gitignored.
 - The asyncio stream line limit is `odds_lambda.jobs.agent_run.AGENT_STREAM_LINE_LIMIT` (8 MiB); the asyncio default is 64 KiB.
 - `odds_lambda.jobs.agent_run._prune_agent_run_logs` runs before writing and deletes all but the newest `odds_lambda.jobs.agent_run.AGENT_RUN_LOG_KEEP` (50) files matching `{sport}_*.jsonl`, so up to 51 files exist per sport after a run.
-- The subprocess is killed after `odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS`; the partial trace stays.
+- The subprocess is killed after `odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS`, or when the run is cancelled; the partial trace stays.
 
 ## Structlog events
 

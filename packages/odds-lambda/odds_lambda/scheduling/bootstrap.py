@@ -15,6 +15,7 @@ from odds_lambda.scheduling.jobs import (
     get_job_cron,
     make_compound_job_name,
 )
+from odds_lambda.scheduling.runner import run_chain_job
 
 
 class BootstrapAction(StrEnum):
@@ -40,9 +41,10 @@ async def bootstrap_job(
 
     A cron job has its cron re-applied, so an edit to ``_JOB_CRON_MAP`` takes
     effect. A self-scheduling job keeps a pending one-off run, which it
-    computed itself. Without one, any other stored schedule (such as a cron
-    left from before the job self-scheduled) is removed and the job's
-    bootstrap function runs.
+    computed itself, re-booked at the same time so it runs through the current
+    runner. Without one, any other stored schedule (such as a cron left from
+    before the job self-scheduled) is removed and the job's bootstrap function
+    runs under the run timeout.
     """
     job_name = make_compound_job_name(base_name, sport)
     cron_expr = get_job_cron(base_name)
@@ -56,10 +58,12 @@ async def bootstrap_job(
             )
         one_off_run = await backend.get_one_off_run(job_name)
         if one_off_run is not None:
+            await backend.schedule_next_execution(job_name, one_off_run)
             return BootstrapResult(job_name, BootstrapAction.PENDING_KEPT, one_off_run)
         if existing is not None:
             await backend.cancel_scheduled_execution(job_name)
-        await get_bootstrap_function(base_name)(JobContext(sport=sport))
+        bootstrap = get_bootstrap_function(base_name)
+        await run_chain_job(backend, job_name, lambda: bootstrap(JobContext(sport=sport)))
         return BootstrapResult(job_name, BootstrapAction.BOOTSTRAPPED, existing_run)
     except Exception as e:
         return BootstrapResult(
