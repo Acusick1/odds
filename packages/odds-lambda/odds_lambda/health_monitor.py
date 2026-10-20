@@ -30,11 +30,9 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.collection_calendar import (
-    MLB_SCHEDULE_MAX_AGE,
     CollectionSource,
     active_hours_between,
     fixture_calendar,
-    latest_mlb_schedule_fetch,
     latest_snapshot_time,
 )
 from odds_lambda.scheduling.backends.base import ScheduledJob
@@ -495,25 +493,6 @@ class HealthMonitor:
             event_id for context in contexts for event_id in (context or {}).get("event_ids", [])
         }
 
-    async def check_mlb_calendar(self, now: datetime | None = None) -> str | None:
-        """Issue when the MLB schedule has not been fetched during the regular season.
-
-        Without a fresh schedule the MLB stale-data and empty-run checks see no
-        fixtures and stay quiet, so a missing schedule is itself an alert.
-        """
-        moment = now or datetime.now(UTC)
-        alerts = self.settings.alerts
-        if not alerts.mlb_season_first_month <= moment.month <= alerts.mlb_season_last_month:
-            return None
-        latest = await latest_mlb_schedule_fetch(self.session)
-        if latest is not None and latest >= moment - MLB_SCHEDULE_MAX_AGE:
-            return None
-        last = latest.isoformat() if latest else "never"
-        return (
-            f"MLB schedule not fetched within {MLB_SCHEDULE_MAX_AGE} (last: {last}); "
-            "MLB data-collection checks are disarmed"
-        )
-
     async def check_api_quota(self) -> tuple[bool, int | None, float | None]:
         """
         Check API quota levels.
@@ -800,17 +779,6 @@ class HealthMonitor:
                     rate_limit_minutes=alerts_config.stale_reminder_minutes,
                 ):
                     alerts_sent.append(stale.alert_type)
-
-            mlb_issue = await self.check_mlb_calendar(moment)
-            if mlb_issue:
-                issues_detected.append(mlb_issue)
-                if await self._send_alert(
-                    alert_type="mlb_calendar_stale",
-                    severity="critical",
-                    message=f"🚨 {mlb_issue}",
-                    rate_limit_minutes=alerts_config.stale_reminder_minutes,
-                ):
-                    alerts_sent.append("mlb_calendar_stale")
 
             missing_closes = await self.check_missing_betfair_closes(moment)
             if missing_closes:

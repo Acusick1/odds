@@ -895,51 +895,6 @@ class TestMlbCalendar:
 
         assert await self._count(pglite_async_session) == 1
 
-    async def test_a_missing_schedule_in_season_is_an_issue(
-        self, pglite_async_session: Any
-    ) -> None:
-        in_season = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
-        monitor = HealthMonitor(pglite_async_session, get_settings())
-
-        issue = await monitor.check_mlb_calendar(in_season)
-
-        assert issue is not None and "never" in issue
-
-    async def test_a_fresh_schedule_in_season_is_healthy(self, pglite_async_session: Any) -> None:
-        in_season = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
-        pglite_async_session.add(
-            self._game(1, in_season + timedelta(hours=5), in_season - timedelta(hours=5))
-        )
-        await pglite_async_session.commit()
-        monitor = HealthMonitor(pglite_async_session, get_settings())
-
-        assert await monitor.check_mlb_calendar(in_season) is None
-
-    async def test_an_old_schedule_in_season_is_an_issue(self, pglite_async_session: Any) -> None:
-        in_season = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
-        pglite_async_session.add(
-            self._game(1, in_season + timedelta(hours=5), in_season - timedelta(hours=50))
-        )
-        await pglite_async_session.commit()
-        monitor = HealthMonitor(pglite_async_session, get_settings())
-
-        assert await monitor.check_mlb_calendar(in_season) is not None
-
-    @pytest.mark.parametrize("month", [3, 11])
-    async def test_the_season_runs_from_march_to_november(
-        self, pglite_async_session: Any, month: int
-    ) -> None:
-        moment = datetime(2026, month, 15, 12, 0, tzinfo=UTC)
-        monitor = HealthMonitor(pglite_async_session, get_settings())
-
-        assert await monitor.check_mlb_calendar(moment) is not None
-
-    async def test_no_schedule_out_of_season_is_fine(self, pglite_async_session: Any) -> None:
-        winter = datetime(2026, 12, 10, 12, 0, tzinfo=UTC)
-        monitor = HealthMonitor(pglite_async_session, get_settings())
-
-        assert await monitor.check_mlb_calendar(winter) is None
-
 
 class _AlertRecorder:
     def __init__(self) -> None:
@@ -961,11 +916,13 @@ def alerts(monkeypatch: pytest.MonkeyPatch) -> Iterator[_AlertRecorder]:
     yield recorder
 
 
-def _schedule_stubs(monkeypatch: pytest.MonkeyPatch, module: Any) -> None:
+def _schedule_stubs(
+    monkeypatch: pytest.MonkeyPatch, module: Any, decider: str = "decide_forward_resilient"
+) -> None:
     decision = ScheduleDecision(
         should_execute=True, reason="test", next_execution=NOW + timedelta(hours=1), tier=None
     )
-    monkeypatch.setattr(module, "decide_forward_resilient", AsyncMock(return_value=decision))
+    monkeypatch.setattr(module, decider, AsyncMock(return_value=decision))
     monkeypatch.setattr(module, "self_schedule", AsyncMock())
 
 
@@ -973,7 +930,7 @@ def _schedule_stubs(monkeypatch: pytest.MonkeyPatch, module: Any) -> None:
 class TestOddsPortalJob:
     @pytest.fixture(autouse=True)
     def stubs(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        _schedule_stubs(monkeypatch, fetch_oddsportal)
+        _schedule_stubs(monkeypatch, fetch_oddsportal, "decide_collection_run")
         monkeypatch.setattr("odds_lambda.model_loader.model_supports_sport", lambda sport: False)
 
     @staticmethod
@@ -1030,7 +987,7 @@ class TestOddsPortalJob:
 class TestBetfairJob:
     @pytest.fixture(autouse=True)
     def stubs(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        _schedule_stubs(monkeypatch, fetch_betfair_exchange)
+        _schedule_stubs(monkeypatch, fetch_betfair_exchange, "decide_collection_run")
         settings = MagicMock()
         settings.betfair.enabled = True
         settings.betfair.sports = None

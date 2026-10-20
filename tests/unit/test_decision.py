@@ -69,7 +69,43 @@ class TestDecideForward:
             next_kickoff=NOW + timedelta(days=10),
         )
         assert decision.should_execute is False
+        assert decision.next_execution == NOW + timedelta(days=3)
+
+    @pytest.mark.asyncio
+    async def test_check_in_beats_a_distant_wake(self) -> None:
+        decision = await decide_forward(
+            "soccer_epl",
+            CADENCE,
+            now=NOW,
+            lookahead_days=7,
+            next_kickoff=NOW + timedelta(days=90),
+        )
+        assert decision.should_execute is False
         assert _hours_after(NOW, decision.next_execution) == CADENCE.no_game
+
+    @pytest.mark.asyncio
+    async def test_a_check_in_ignores_the_overnight_window(self) -> None:
+        night = datetime(2026, 6, 2, 20, 0, tzinfo=UTC)
+        decision = await decide_forward(
+            "soccer_epl",
+            CADENCE,
+            now=night,
+            overnight=(22, 6),
+            lookahead_days=7,
+            next_kickoff=night + timedelta(days=90),
+        )
+        assert decision.next_execution == night + timedelta(hours=CADENCE.no_game)
+
+    @pytest.mark.asyncio
+    async def test_a_game_exactly_at_the_lookahead_runs(self) -> None:
+        decision = await decide_forward(
+            "soccer_epl",
+            CADENCE,
+            now=NOW,
+            lookahead_days=7,
+            next_kickoff=NOW + timedelta(days=7),
+        )
+        assert decision.should_execute is True
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -215,6 +251,23 @@ class TestDecideForwardResilient:
         assert decision.should_execute is True
         assert decision.tier is None
         assert _hours_after(NOW, decision.next_execution) == CADENCE.db_fallback
+
+    @pytest.mark.asyncio
+    async def test_an_injected_fixture_source_replaces_the_stored_events(self, monkeypatch) -> None:
+        async def stored(sport_key: str, *, now: datetime) -> None:
+            return None
+
+        async def published(sport_key: str, *, now: datetime) -> datetime:
+            return NOW + timedelta(hours=2)
+
+        monkeypatch.setattr("odds_lambda.scheduling.decision.get_next_kickoff", stored)
+
+        decision = await decide_forward_resilient(
+            ["soccer_epl"], CADENCE, now=NOW, next_kickoff_lookup=published
+        )
+
+        assert decision.should_execute is True
+        assert decision.tier == FetchTier.CLOSING
 
 
 class TestCloseLead:

@@ -58,7 +58,7 @@ class TestBetfairCadence:
         assert CADENCE.interval_for(FetchTier.OPENING) == 2.0
 
     def test_no_game_band(self) -> None:
-        assert CADENCE.no_game == 2.0
+        assert CADENCE.no_game == 6.0
 
 
 class TestShouldSkipBook:

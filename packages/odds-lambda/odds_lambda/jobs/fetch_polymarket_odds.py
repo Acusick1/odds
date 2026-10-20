@@ -36,6 +36,7 @@ from odds_lambda.polymarket_odds import (
 )
 from odds_lambda.polymarket_sports import MATCH_ODDS_SPORTS, POLYMARKET_SPORTS
 from odds_lambda.scheduling.decision import (
+    DORMANCY_HORIZON_DAYS,
     OVERNIGHT_WINDOWS,
     CadenceConfig,
     ScheduleDecision,
@@ -47,7 +48,7 @@ from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-_NO_GAME_HOURS = 2.0
+_NO_GAME_HOURS = 6.0
 LISTING_CHECK_HORIZON = timedelta(days=5)
 
 
@@ -229,7 +230,9 @@ async def main(ctx: JobContext) -> None:
     overnight = OVERNIGHT_WINDOWS.get(target_sports[0]) if len(target_sports) == 1 else None
 
     async def _reschedule(label: str) -> ScheduleDecision:
-        decision = await decide_forward_resilient(target_sports, CADENCE, overnight=overnight)
+        decision = await decide_forward_resilient(
+            target_sports, CADENCE, overnight=overnight, lookahead_days=DORMANCY_HORIZON_DAYS
+        )
         assert decision.next_execution is not None  # noqa: S101
         try:
             await self_schedule(
@@ -245,7 +248,12 @@ async def main(ctx: JobContext) -> None:
                 raise
         return decision
 
-    await _reschedule("pre-schedule")
+    decision = await _reschedule("pre-schedule")
+
+    if not decision.should_execute:
+        async with job_alert_context(compound_job_name):
+            logger.info("polymarket_odds_dormant", sports=target_sports, reason=decision.reason)
+        return
 
     snapshot_time = datetime.now(UTC)
     all_stats: list[IngestionStats] = []

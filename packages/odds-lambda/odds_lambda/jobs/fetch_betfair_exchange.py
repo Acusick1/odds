@@ -33,13 +33,12 @@ from odds_lambda.betfair import (
     resolve_teams,
 )
 from odds_lambda.betfair.cert_loader import resolve_cert_paths
-from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
-from odds_lambda.scheduling.decision import (
-    OVERNIGHT_WINDOWS,
-    CadenceConfig,
-    ScheduleDecision,
-    decide_forward_resilient,
+from odds_lambda.collection_calendar import (
+    CollectionSource,
+    decide_collection_run,
+    require_rows_for_fixtures,
 )
+from odds_lambda.scheduling.decision import OVERNIGHT_WINDOWS, CadenceConfig, ScheduleDecision
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
 from odds_lambda.storage.writers import OddsWriter
@@ -47,8 +46,8 @@ from odds_lambda.storage.writers import OddsWriter
 logger = structlog.get_logger()
 
 # Proximity-based polling cadence (hours): cheap delayed API — poll more
-# aggressively than browser-driven fetch-oddsportal. 12h+ to kickoff (and
-# no-game) all poll at 2h, matching the previous "far" band. ``close_lead``
+# aggressively than browser-driven fetch-oddsportal. 12h+ to kickoff all poll
+# at 2h, matching the previous "far" band. ``close_lead``
 # adds a run 5 minutes before every kickoff: the latest decision time and
 # inside the live close window of ADR-0012.
 CADENCE = CadenceConfig(
@@ -57,7 +56,7 @@ CADENCE = CadenceConfig(
     sharp=2.0,
     early=2.0,
     opening=2.0,
-    no_game=2.0,
+    no_game=6.0,
     db_fallback=1.0,
     close_lead=timedelta(minutes=5),
 )
@@ -246,10 +245,8 @@ async def main(ctx: JobContext) -> None:
     # so no suppression is applied there.
     overnight = OVERNIGHT_WINDOWS.get(target_sports[0]) if len(target_sports) == 1 else None
 
-    # Always-run fetcher (no execution gate): we only use the decision's
-    # proximity-derived next_execution, not should_execute.
     async def _reschedule(label: str) -> ScheduleDecision:
-        decision = await decide_forward_resilient(target_sports, CADENCE, overnight=overnight)
+        decision = await decide_collection_run(target_sports, CADENCE, overnight=overnight)
         assert decision.next_execution is not None  # noqa: S101
         try:
             await self_schedule(
@@ -267,7 +264,12 @@ async def main(ctx: JobContext) -> None:
 
     # Pre-schedule before doing the work, so a crash mid-fetch doesn't break
     # the chain.
-    await _reschedule("pre-schedule")
+    decision = await _reschedule("pre-schedule")
+
+    if not decision.should_execute:
+        async with job_alert_context(compound_job_name):
+            logger.info("betfair_job_dormant", sports=target_sports, reason=decision.reason)
+        return
 
     snapshot_time = datetime.now(UTC)
     all_stats: list[IngestionStats] = []

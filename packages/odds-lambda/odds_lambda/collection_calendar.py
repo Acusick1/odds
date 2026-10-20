@@ -5,15 +5,26 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from odds_core.database import async_session_maker
+from odds_core.epl_data_models import ESPN_STATUS_POSTPONED, EspnFixture
 from odds_core.mlb_data_models import UNPLAYED_GAME_STATUSES, MlbProbablePitchers
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.snapshot_sources import SnapshotSource
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.scheduling.decision import OVERNIGHT_WINDOWS, CadenceConfig, OvernightWindow
+from odds_lambda.espn_fixture_fetcher import LEAGUE_SLUGS, PRIMARY_LEAGUE_SLUG
+from odds_lambda.scheduling.decision import (
+    DORMANCY_HORIZON_DAYS,
+    OVERNIGHT_WINDOWS,
+    CadenceConfig,
+    OvernightWindow,
+    ScheduleDecision,
+    decide_forward_resilient,
+)
+from odds_lambda.scheduling.helpers import get_next_kickoff
 
 MLB_SPORT_KEY = "baseball_mlb"
+EPL_SPORT_KEY = "soccer_epl"
 MLB_PRICED_GAME_TYPES = ("R", "F", "D", "L", "W")
 MLB_SCHEDULE_MAX_AGE = timedelta(hours=36)
 ERRORS_SHOWN = 3
@@ -82,10 +93,6 @@ async def fixture_calendar(
     return FixtureCalendar(next_kickoff=next_kickoff, kickoffs_in_horizon=in_horizon)
 
 
-async def latest_mlb_schedule_fetch(session: AsyncSession) -> datetime | None:
-    return (await session.execute(select(func.max(MlbProbablePitchers.fetched_at)))).scalar_one()
-
-
 async def _mlb_schedule_calendar(
     session: AsyncSession, *, now: datetime, horizon: timedelta
 ) -> FixtureCalendar:
@@ -94,7 +101,7 @@ async def _mlb_schedule_calendar(
     Every row of a fetch shares one ``fetched_at``, so the latest fetch is the
     current schedule; a fetch older than ``MLB_SCHEDULE_MAX_AGE`` is no calendar.
     """
-    latest = await latest_mlb_schedule_fetch(session)
+    latest = (await session.execute(select(func.max(MlbProbablePitchers.fetched_at)))).scalar_one()
     if latest is None or latest < now - MLB_SCHEDULE_MAX_AGE:
         return FixtureCalendar(next_kickoff=None, kickoffs_in_horizon=0)
     scheduled = (
@@ -118,6 +125,66 @@ async def _mlb_schedule_calendar(
         )
     ).scalar_one()
     return FixtureCalendar(next_kickoff=next_kickoff, kickoffs_in_horizon=in_horizon)
+
+
+async def _espn_next_fixture(session: AsyncSession, *, now: datetime) -> datetime | None:
+    return (
+        await session.execute(
+            select(func.min(EspnFixture.date)).where(
+                EspnFixture.competition == LEAGUE_SLUGS[PRIMARY_LEAGUE_SLUG],
+                EspnFixture.status != ESPN_STATUS_POSTPONED,
+                EspnFixture.date > now,
+            )
+        )
+    ).scalar_one()
+
+
+async def published_schedule_kickoff(
+    session: AsyncSession, sport_key: str, *, now: datetime
+) -> datetime | None:
+    """Next kickoff in the sport's published schedule, which no collection job writes.
+
+    EPL reads the ESPN fixtures of the daily ``fetch-espn-fixtures`` cron and
+    MLB the Stats API schedule of the daily ``fetch-mlb-probables`` cron. A
+    sport without a published schedule here has none.
+    """
+    if sport_key == MLB_SPORT_KEY:
+        calendar = await _mlb_schedule_calendar(session, now=now, horizon=timedelta(0))
+        return calendar.next_kickoff
+    if sport_key == EPL_SPORT_KEY:
+        return await _espn_next_fixture(session, now=now)
+    return None
+
+
+async def next_fixture_kickoff(sport_key: str, *, now: datetime) -> datetime | None:
+    """Earliest upcoming kickoff in the stored events or the published schedule.
+
+    A collector that goes dormant stops creating events, so the stored events
+    alone could never end the dormancy. The published schedule wakes it, and the
+    stored events keep a sport awake when the schedule source is down.
+    """
+    stored = await get_next_kickoff(sport_key, now=now)
+    async with async_session_maker() as session:
+        published = await published_schedule_kickoff(session, sport_key, now=now)
+    return min((k for k in (stored, published) if k is not None), default=None)
+
+
+async def decide_collection_run(
+    sport_keys: list[str],
+    cadence: CadenceConfig,
+    *,
+    overnight: OvernightWindow | None,
+    now: datetime | None = None,
+) -> ScheduleDecision:
+    """Next run of a collector, dormant while no fixture is within ``DORMANCY_HORIZON_DAYS``."""
+    return await decide_forward_resilient(
+        sport_keys,
+        cadence,
+        overnight=overnight,
+        lookahead_days=DORMANCY_HORIZON_DAYS,
+        now=now,
+        next_kickoff_lookup=next_fixture_kickoff,
+    )
 
 
 async def latest_snapshot_time(

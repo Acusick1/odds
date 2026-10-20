@@ -208,7 +208,6 @@ class TestHealthMonitor:
 
             with (
                 patch.object(monitor, "check_stale_sources", return_value=[]),
-                patch.object(monitor, "check_mlb_calendar", return_value=None),
                 patch.object(monitor, "check_missing_betfair_closes", return_value=[]),
             ):
                 with patch.object(monitor, "check_api_quota", return_value=(True, 15000, 0.75)):
@@ -244,7 +243,6 @@ class TestHealthMonitor:
 
             # Mock checks to return unhealthy
             with (
-                patch.object(monitor, "check_mlb_calendar", return_value=None),
                 patch.object(monitor, "check_missing_betfair_closes", return_value=[]),
                 patch.object(
                     monitor,
@@ -446,7 +444,6 @@ class TestCheckScheduleChains:
             patch.object(monitor, name, return_value=value)
             for name, value in (
                 ("check_stale_sources", []),
-                ("check_mlb_calendar", None),
                 ("check_missing_betfair_closes", []),
                 ("check_api_quota", (True, None, None)),
                 ("check_data_quality", (True, 0)),
