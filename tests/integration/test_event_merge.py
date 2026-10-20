@@ -14,7 +14,7 @@ from odds_core.prediction_models import Prediction
 from odds_lambda.event_sync import EventSyncService
 from odds_lambda.oddsportal_common import find_existing_event
 from odds_lambda.storage.event_merge import EventMerger
-from odds_lambda.storage.event_name_repair import repair_annotated_names
+from odds_lambda.storage.event_name_repair import repair_team_names
 from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
 
@@ -557,7 +557,7 @@ class TestRepairAnnotatedNames:
         )
         await session.commit()
 
-        report = await repair_annotated_names(session, "baseball_mlb")
+        report = await repair_team_names(session, "baseball_mlb")
         await session.commit()
 
         assert report.renamed_ids == ("op_live_CLE(S_TAMMAR",)
@@ -575,7 +575,7 @@ class TestRepairAnnotatedNames:
         session.add(_mlb_event("op_live_A", "Chicago White Sox (TBD", "Cleveland Guardians"))
         await session.commit()
 
-        report = await repair_annotated_names(session, "baseball_mlb")
+        report = await repair_team_names(session, "baseball_mlb")
 
         assert report.merged_count == 0
         assert report.renamed_in_place_ids == ("op_live_A",)
@@ -593,7 +593,7 @@ class TestRepairAnnotatedNames:
         )
         await session.commit()
 
-        report = await repair_annotated_names(session, "baseball_mlb")
+        report = await repair_team_names(session, "baseball_mlb")
 
         assert report.merged_count == 1
         assert await _stored_event_ids(session) == {"op_live_ST.CAR_X"}
@@ -616,7 +616,7 @@ class TestRepairAnnotatedNames:
         )
         await session.commit()
 
-        report = await repair_annotated_names(session, "baseball_mlb")
+        report = await repair_team_names(session, "baseball_mlb")
 
         assert report.merged_count == 1
         assert await _stored_event_ids(session) == {"op_live_A"}
@@ -633,9 +633,9 @@ class TestRepairAnnotatedNames:
             ]
         )
         await session.commit()
-        await repair_annotated_names(session, "baseball_mlb")
+        await repair_team_names(session, "baseball_mlb")
 
-        again = await repair_annotated_names(session, "baseball_mlb")
+        again = await repair_team_names(session, "baseball_mlb")
 
         assert again.renamed_ids == ()
         assert again.merges == ()
@@ -719,7 +719,7 @@ class TestRepairGhostsFromRunnerNames:
         )
         await session.commit()
 
-        report = await repair_annotated_names(session, "baseball_mlb")
+        report = await repair_team_names(session, "baseball_mlb")
         await session.commit()
 
         assert report.merged_count == 1
@@ -748,7 +748,7 @@ class TestRepairGhostsFromRunnerNames:
         )
         await session.commit()
 
-        report = await repair_annotated_names(session, "baseball_mlb")
+        report = await repair_team_names(session, "baseball_mlb")
 
         assert report.merges == ()
         assert await _stored_event_ids(session) == {"op_live_PIT1", "op_live_PIT2"}
@@ -773,6 +773,6 @@ class TestRepairGhostsFromRunnerNames:
         )
         await session.commit()
 
-        await repair_annotated_names(session, "baseball_mlb")
+        await repair_team_names(session, "baseball_mlb")
 
         assert await _stored_event_ids(session) == {"op_live_G1", "op_live_G2"}

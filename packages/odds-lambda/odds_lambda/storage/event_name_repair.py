@@ -93,7 +93,7 @@ async def find_misnamed_events(
     return misnamed
 
 
-async def repair_annotated_names(session: AsyncSession, sport_key: str) -> NameRepairReport:
+async def repair_team_names(session: AsyncSession, sport_key: str) -> NameRepairReport:
     """Give Betfair-created events their canonical team names and merge the twins that creates.
 
     A merged group keeps its best-sourced event that was never renamed, so the

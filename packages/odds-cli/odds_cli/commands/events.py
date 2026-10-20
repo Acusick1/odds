@@ -7,7 +7,7 @@ import typer
 from odds_core.database import async_session_maker
 from odds_core.models import Event
 from odds_lambda.storage.event_merge import EventMerger, source_pair
-from odds_lambda.storage.event_name_repair import repair_annotated_names
+from odds_lambda.storage.event_name_repair import repair_team_names
 from rich.console import Console
 from rich.table import Table
 
@@ -94,7 +94,7 @@ def merge(
 
 async def _repair_names(sport: str, apply: bool) -> None:
     async with async_session_maker() as session:
-        report = await repair_annotated_names(session, sport)
+        report = await repair_team_names(session, sport)
         statuses = {s.value: n for s, n in report.renamed_in_place_statuses.items()}
         console.print(
             f"Events with a non-canonical team name: {len(report.renamed_ids)}; "
