@@ -36,7 +36,7 @@ Region `eu-west-1`. Scheduler function `odds-scheduler`, log group `/aws/lambda/
 ## Workflow
 
 1. **Context.** `date -u` and `grep "^DATABASE_URL=" .env`. Daily validation checks the previous day and names its file after the day it checked, so the file dated D covers D ([CI/CD workflows](../operations/ci-cd-workflows.md)).
-2. **Last and next run.** The last run should fall within the job's cadence for the nearest game's [tier](../storage/fetch-tier.md) ([cadence](decision-engine.md#cadence)). A collector with no fixture within 28 days only checks in, so a gap in snapshots with no fixture that close is expected ([dormancy](decision-engine.md#dormancy)).
+2. **Last and next run.** The last run should fall within the job's cadence for the nearest game's [tier](../storage/fetch-tier.md) ([cadence](decision-engine.md#cadence)). A collector with no fixture within 28 days only checks in, so a gap in snapshots with no fixture that close is expected ([dormancy](decision-engine.md#dormancy)). `fetch-odds` (`odds_lambda.jobs.fetch_odds.CADENCE`) runs every 2 h within 3 h of a kickoff and every 3 h from 3 to 12 h.
    ```bash
    aws events list-rules --name-prefix odds- | jq -r '.Rules[] | "\(.Name) | \(.State) | \(.ScheduleExpression)"'
 

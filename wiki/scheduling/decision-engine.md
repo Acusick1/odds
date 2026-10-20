@@ -68,7 +68,7 @@ Hours per tier:
 
 | Job | closing | pregame | sharp | early | opening | no game |
 |---|---|---|---|---|---|---|
-| `fetch-odds` | 0.5 | 3 | 12 | 24 | 48 | 24 |
+| `fetch-odds` | 2 | 3 | 12 | 24 | 48 | 24 |
 | `fetch-oddsportal` | 0.5 | 1 | 2 | 2 | 2 | 6 |
 | `fetch-betfair-exchange` | 0.25 | 0.5 | 2 | 2 | 2 | 6 |
 | `fetch-polymarket-odds` | 0.083 | 0.25 | 0.25 | 0.5 | 1 | 6 |

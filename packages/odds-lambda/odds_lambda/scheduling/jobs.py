@@ -97,6 +97,10 @@ _SPORT_SUFFIX_MAP: dict[str, SportKey] = {
 # skips these by default and only runs them under an explicit opt-in.
 _SMOKE_UNSAFE_JOBS: frozenset[str] = frozenset({"agent-run"})
 
+# Jobs whose runs spend Odds API quota units. The smoke command skips these by
+# default because every deploy would otherwise burn units off-schedule.
+_PAID_API_JOBS: frozenset[str] = frozenset({"fetch-odds", "fetch-scores"})
+
 # Jobs that post to outward channels (e.g. Discord) on every run. The smoke
 # command drops these under ``--no-side-effects`` so a validation run can stay
 # silent on shared channels.
@@ -257,6 +261,15 @@ def get_job_function(job_name: str) -> Callable[[JobContext], Awaitable[None]]:
 def is_per_sport_job(job_name: str) -> bool:
     """Check whether a job accepts a sport parameter."""
     return job_name in _PER_SPORT_JOBS
+
+
+def spends_api_quota(job_name: str) -> bool:
+    """Whether a run of the job can spend Odds API quota units.
+
+    Accepts a compound (sport-suffixed) or base job name.
+    """
+    base_name, _ = resolve_job_name(job_name)
+    return base_name in _PAID_API_JOBS
 
 
 def is_smoke_unsafe(job_name: str) -> bool:

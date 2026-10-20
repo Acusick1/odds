@@ -99,7 +99,9 @@ migration_committed=1
 
 # Smoke runs with SCHEDULER_DRY_RUN=true so self-scheduling and alerting are
 # no-ops: jobs do their real work (gated by their cadence) but write nothing to
-# the live schedule store and post nothing to Discord. The running scheduler keeps serving old code until smoke passes.
+# the live schedule store and post nothing to Discord. The running scheduler
+# keeps serving old code until smoke passes. Jobs that spend Odds API quota
+# (fetch-odds, fetch-scores) are skipped by default so a deploy costs no units.
 echo "==> scheduler smoke (SCHEDULER_DRY_RUN=true)"
 SCHEDULER_DRY_RUN=true uv run odds scheduler smoke
 

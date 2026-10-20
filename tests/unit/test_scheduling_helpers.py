@@ -147,6 +147,13 @@ class TestSmokeTags:
         # Compound (sport-suffixed) names resolve to the same base.
         assert is_smoke_unsafe("agent-run-epl")
 
+    def test_odds_api_jobs_spend_quota(self) -> None:
+        from odds_lambda.scheduling.jobs import spends_api_quota
+
+        assert spends_api_quota("fetch-odds")
+        assert spends_api_quota("fetch-scores-epl")
+        assert not spends_api_quota("fetch-oddsportal")
+
     def test_daily_digest_is_outward_posting(self) -> None:
         from odds_lambda.scheduling.jobs import is_outward_posting
 

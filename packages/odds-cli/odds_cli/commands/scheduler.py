@@ -299,6 +299,12 @@ def smoke(
         help="Also run smoke-unsafe jobs (agent-run). Off by default so a deploy "
         "check never places paper bets.",
     ),
+    include_paid_api: bool = typer.Option(
+        False,
+        "--include-paid-api",
+        help="Also run jobs that spend Odds API quota (fetch-odds, fetch-scores). "
+        "Off by default so a deploy check spends no units.",
+    ),
     no_side_effects: bool = typer.Option(
         False,
         "--no-side-effects",
@@ -326,8 +332,10 @@ def smoke(
     Exits non-zero (exit code = number of failed jobs) if any job fails.
 
     ``agent-run`` is skipped by default (never place paper bets during a deploy
-    check); pass ``--include-agent`` to run it. ``daily-digest`` posts to Discord;
-    pass ``--no-side-effects`` to drop it.
+    check); pass ``--include-agent`` to run it. ``fetch-odds`` and ``fetch-scores``
+    are skipped by default because they spend Odds API quota; pass
+    ``--include-paid-api`` to run them. ``daily-digest`` posts to Discord; pass
+    ``--no-side-effects`` to drop it.
 
     Run with ``SCHEDULER_DRY_RUN=true`` (as ``deploy.sh`` does) so self-scheduling
     and Discord alerting are no-ops and the live schedule store is untouched.
@@ -352,6 +360,7 @@ def smoke(
         is_outward_posting,
         is_smoke_unsafe,
         resolve_job_name,
+        spends_api_quota,
     )
 
     bootstrap_jobs = app_settings.scheduler.bootstrap_jobs
@@ -413,6 +422,8 @@ def smoke(
             skipped.append((name, "excluded (--exclude)"))
         elif is_smoke_unsafe(name) and not include_agent:
             skipped.append((name, "smoke-unsafe (pass --include-agent)"))
+        elif spends_api_quota(name) and not include_paid_api:
+            skipped.append((name, "spends Odds API quota (pass --include-paid-api)"))
         elif is_outward_posting(name) and no_side_effects:
             skipped.append((name, "outward-posting (--no-side-effects)"))
         else:
