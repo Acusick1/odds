@@ -66,6 +66,7 @@ _EVENT_KEYS = ("encodeEventId", "home-name", "away-name", "date-start-timestamp"
 _ARCHIVE_URL_RE = re.compile(
     r'"url":"' + re.escape(BASE_URL) + r'/(ajax-sport-country-tournament-archive_/[^"]+)"'
 )
+_PROXY_ERROR_RE = re.compile(r"\AURL:\S+ Status: (\d{3})\s*\Z")
 _STATUS_FINISHED = 3
 _STATUS_CANCELED = 5
 
@@ -75,7 +76,7 @@ class OddsPortalError(Exception):
 
 
 class _TransientError(Exception):
-    """Retryable HTTP status (429 or 5xx)."""
+    """Retryable HTTP status (429 or 5xx), possibly wrapped in a proxy error body."""
 
 
 @dataclass(frozen=True)
@@ -480,6 +481,12 @@ class OddsPortalClient:
                         raise _TransientError(f"HTTP {status}")
                     if status != 200:
                         raise OddsPortalError(f"HTTP {status} for {url}")
+                    wrapped = _PROXY_ERROR_RE.match(text)
+                    if wrapped is not None:
+                        upstream = int(wrapped.group(1))
+                        if upstream == 429 or upstream >= 500:
+                            raise _TransientError(f"upstream status {upstream}")
+                        raise OddsPortalError(f"upstream status {upstream} for {url}")
                     return text
         except OddsPortalError:
             raise

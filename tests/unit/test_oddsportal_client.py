@@ -264,6 +264,9 @@ class FakeClient(OddsPortalClient):
         return response
 
 
+PROXY_503 = "URL:/ajax-sport-country-tournament-archive_/1/SY30SsKF/X0X1/1/0/page/1/ Status: 503"
+
+
 @pytest.fixture
 def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     recorded: list[float] = []
@@ -347,6 +350,33 @@ class TestClientRequests:
     async def test_unsupported_market_raises(self) -> None:
         with pytest.raises(OddsPortalError, match="unsupported market"):
             await FakeClient([]).fetch_market(EVENT, "spreads", CONTEXT)
+
+    async def test_proxy_wrapped_503_is_retried(
+        self, encrypt_payload: Encrypt, sleeps: list[float]
+    ) -> None:
+        feed = _feed({"odds": {"16": [2.0, 3.0, 4.0]}, "act": {"16": True}})
+        client = FakeClient([(200, PROXY_503), (200, encrypt_payload(feed))])
+
+        result = await client.fetch_market(EVENT, "1x2", CONTEXT)
+
+        assert [b.name for b in result] == ["bet365"]
+        assert len(client.requests) == 2
+
+    async def test_proxy_wrapped_503_exhausts_retries(self, sleeps: list[float]) -> None:
+        client = FakeClient([(200, PROXY_503)] * 3)
+
+        with pytest.raises(OddsPortalError, match=r"after 3 attempts.*match-event.*status 503"):
+            await client.fetch_market(EVENT, "1x2", CONTEXT)
+
+        assert len(client.requests) == 3
+
+    async def test_proxy_wrapped_404_fails_immediately(self, sleeps: list[float]) -> None:
+        client = FakeClient([(200, "URL:/ajax-x_/1/a/ Status: 404")])
+
+        with pytest.raises(OddsPortalError, match="upstream status 404 for .*match-event"):
+            await client.fetch_market(EVENT, "1x2", CONTEXT)
+
+        assert len(client.requests) == 1
 
     async def test_503_is_retried(self, sleeps: list[float]) -> None:
         client = FakeClient([(503, ""), (503, ""), (200, EMPTY_LISTING)])
