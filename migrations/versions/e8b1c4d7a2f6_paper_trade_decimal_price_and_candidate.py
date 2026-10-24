@@ -1,7 +1,7 @@
 """paper trades: decimal price and candidate fields
 
 Revision ID: e8b1c4d7a2f6
-Revises: d4f1a8c6e2b9
+Revises: a5c8d2e91f37
 Create Date: 2026-10-24 14:00:00.000000
 
 Replaces ``paper_trades.odds`` (integer American odds, which cannot hold a UK
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "e8b1c4d7a2f6"
-down_revision = "d4f1a8c6e2b9"
+down_revision = "a5c8d2e91f37"
 branch_labels = None
 depends_on = None
 
