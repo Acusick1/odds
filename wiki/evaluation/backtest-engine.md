@@ -14,7 +14,6 @@ sources:
   - odds_analytics.utils.calculate_sortino_ratio
   - odds_analytics.utils.calculate_max_drawdown
   - odds_analytics.utils.calculate_profit_factor
-  - odds_lambda.storage.readers.OddsReader
   - odds_core.paper_trade_models.PaperTrade
   - odds_cli.commands.backtest.run_backtest
   - odds_cli.commands.backtest.STRATEGIES
@@ -22,6 +21,8 @@ sources:
   - odds_cli.commands.backtest.compare_results
   - odds_cli.commands.backtest.export_csv
   - odds_analytics.backtesting.services.BacktestEngine._calculate_metrics
+mentions:
+  - odds_lambda.storage.readers.OddsReader
 status: stable
 ---
 

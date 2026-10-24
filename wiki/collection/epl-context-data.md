@@ -17,6 +17,8 @@ sources:
   - scripts/ingest_espn_lineups.py
   - scripts/ingest_fbref_player_stats.py
   - deployment/aws/terraform/eventbridge.tf
+mentions:
+  - odds_core.alerts.job_alert_context
 status: stable
 ---
 

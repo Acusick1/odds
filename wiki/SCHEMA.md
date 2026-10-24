@@ -53,12 +53,15 @@ title: Fetch-tier classification
 description: How hours-to-kickoff maps to a fetch tier and which code paths assign tiers.
 sources:
   - odds_lambda.tier_utils.calculate_tier
+mentions:
+  - odds_lambda.storage.readers.OddsReader
 status: stable
 ---
 ```
 
 - `description` is one sentence saying which questions the page answers. Agents see it in the area index.
 - `sources` lists the code the page as a whole describes.
+- `mentions` (optional) lists dotted functions, classes or attributes that the page only names, such as "the job runs inside `odds_core.alerts.job_alert_context`". See [Citations](#citations) and [Staleness](#staleness).
 - `status` is `draft`, `stable` or `deprecated`. A deprecated page carries `superseded_by: <slug>` and a single line pointing to its replacement. Delete it once nothing links to it.
 
 ## Warnings and known defects
@@ -73,6 +76,7 @@ status: stable
 - **Everything else:** cite by repo-relative path. That covers scripts, experiments, Terraform, workflows, `pyproject.toml`, and agent prompts under `packages/odds-mcp/agents/`.
 - **Bare identifiers:** an identifier in backticks that names a definition in the packages must be written as its dotted path. Short forms hide the claim from the staleness check.
 - **Coverage:** every non-obvious factual claim carries an inline citation or is covered by `sources`. Cite values, defaults and flags rather than restating them bare.
+- **Mentions:** a page that only names a symbol, or restates no more than its signature and docstring, lists it under `mentions` and cites it in the body as usual. Any claim about what the symbol does beyond that makes the page describe it, so leave it out of `mentions`.
 - **Explanation evidence:** explanation cites its evidence, which can be an ADR, a PR (`#123`), a commit (`abc1234`), or a results file under `experiments/results/`. Reasoning with no evidence is labelled `(inferred)`.
 - **Deployed AWS state:** it cannot be verified from the repo. Pages that mention it say so and give the command that checks it.
 - **`docs/`:** pages do not cite it, apart from `docs/adr/` and `docs/agents/`.
@@ -86,12 +90,14 @@ Use relative markdown links: `[Text](slug.md)` or `[Text](../area/slug.md#headin
 A page is stale when code it cites has changed since the page was last changed. Git supplies both sides:
 
 - **Dotted citations:** stale if any commit after the page's last commit touches the symbol's line range, or adds or removes the symbol. A citation of a re-export also tracks each import statement that binds it, so retargeting the alias counts.
+- **Mentions:** every citation of a symbol listed in `mentions` tracks only its interface instead of its whole range: a function's decorators, signature and docstring, or a class's decorators, header line and docstring plus the same parts of its `__init__`. A class without `__init__`, such as a dataclass or pydantic model, tracks its annotated fields instead. Edits inside the body, or to any other method, leave the page fresh. A mention whose symbol disappears is an error, like any citation.
+- **Squash merges:** PRs are squash-merged, so a page edit counts only if it survives the squash. A page whose content is unchanged since the branch's merge base with `origin/main` dates from its last commit at or before that base, so a page edited and then reverted on a branch is judged as never edited (`--squash-onto`). A page with a net change dates from its last commit as usual, so code changed later on the same branch still makes it stale. On `main` there is no branch to judge. A missing `origin/main` fails the lint in CI and prints a warning elsewhere.
 - **Merges:** a merge commit counts only for what it changes relative to every parent, such as a conflict resolution. Changes it brings in from a branch count through that branch's own commits.
 - **Path citations:** stale if any later commit changes the file.
 - **Uncommitted changes:** these count too, unless the page itself is edited.
 - **Renamed or deleted cited files:** these are errors, not staleness.
 
-The lint prints each stale page with the changed citations and the page lines that cite them.
+The lint prints each stale page with the changed citations, whether each is a mention or describes the symbol, and the page lines that cite them. A stale mention means the symbol's interface changed: check that the page still names it correctly.
 
 ## Coverage
 

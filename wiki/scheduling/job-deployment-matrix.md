@@ -4,13 +4,14 @@ title: Where each job runs
 description: The production host and its job set, the per-job sport and schedule table, the dormant AWS rules, heartbeat writers, and how to check deployed AWS state.
 sources:
   - odds_core.config.SchedulerConfig.bootstrap_jobs
-  - odds_core.alerts.job_alert_context
   - odds_lambda.scheduling.jobs._JOB_CRON_MAP
   - odds_lambda.scheduling.jobs._JOB_SPORTS
   - odds_lambda.scheduling.jobs.resolve_target_sports
   - deployment/aws/terraform/eventbridge.tf
   - deployment/aws/terraform/variables.tf
   - scripts/verify-schedules.sh
+mentions:
+  - odds_core.alerts.job_alert_context
 status: stable
 ---
 

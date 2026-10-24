@@ -21,6 +21,8 @@ sources:
   - odds_mcp.server.get_current_odds
   - tests/unit/test_mcp_server.py
   - .mcp.json
+mentions:
+  - odds_lambda.storage.readers.OddsReader
 status: stable
 ---
 

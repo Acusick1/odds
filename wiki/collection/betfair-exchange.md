@@ -14,6 +14,8 @@ sources:
   - odds_core.config.BetfairConfig
   - deployment/aws/terraform/lambda.tf
   - deployment/aws/terraform/eventbridge.tf
+mentions:
+  - odds_core.alerts.job_alert_context
 status: stable
 ---
 

@@ -9,7 +9,6 @@ sources:
   - odds_mcp.server.get_predictions
   - odds_mcp.server.find_retail_edges
   - odds_analytics.utils.per_book_market_holds
-  - odds_lambda.storage.readers.OddsReader
   - odds_core.prediction_models.Prediction
 status: stable
 ---

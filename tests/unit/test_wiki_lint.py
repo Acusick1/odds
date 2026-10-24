@@ -696,7 +696,7 @@ class TestStaleness:
         assert found[0] == Finding(
             "a",
             Kind.STALE,
-            f"pkg.mod.calculate changed in {sha}",
+            f"pkg.mod.calculate (describes) changed in {sha}",
             (line_of(committed, "  - pkg.mod.calculate"),),
         )
         assert {f.slug for f in found} == {"a", "b"}
@@ -716,7 +716,7 @@ class TestStaleness:
         edit_mod(committed, "return 20", "return 200")
         commit(committed, "packages")
         _, found = stale(committed)
-        assert found[0].message == f"pkg.mod.calculate changed in {hit}"
+        assert found[0].message == f"pkg.mod.calculate (describes) changed in {hit}"
 
     def test_line_shift_above_symbol_is_not_stale(self, committed: Path) -> None:
         edit_mod(committed, "LIMIT = 3\n", "LIMIT = 3\nOTHER = 4\nMORE = 5\n")
@@ -734,7 +734,7 @@ class TestStaleness:
             Finding(
                 "a",
                 Kind.STALE,
-                f"pkg.mod.Box.run changed in {sha}",
+                f"pkg.mod.Box.run (describes) changed in {sha}",
                 (line_of(committed, "Runs `pkg.mod.Box.run`"),),
             )
         ]
@@ -745,7 +745,9 @@ class TestStaleness:
         edit_mod(committed, "async def run(self) -> None: ...", "async def run(self) -> int: ...")
         sha = commit(committed, "packages")
         _, found = stale(committed)
-        assert [f.message for f in found if f.slug == "a"] == [f"pkg.Crate.run changed in {sha}"]
+        assert [f.message for f in found if f.slug == "a"] == [
+            f"pkg.Crate.run (describes) changed in {sha}"
+        ]
 
     def test_retargeting_a_reexport_is_stale(self, committed: Path) -> None:
         init = f"{PKG}/__init__.py"
@@ -759,7 +761,7 @@ class TestStaleness:
         errors, found = stale(committed)
         assert errors == []
         assert [(f.message, f.lines) for f in found if f.slug == "a"] == [
-            (f"pkg.chosen changed in {sha}", (line_of(committed, "`pkg.chosen`"),))
+            (f"pkg.chosen (describes) changed in {sha}", (line_of(committed, "`pkg.chosen`"),))
         ]
 
     def test_unrelated_edit_to_the_reexporting_module_is_not_stale(self, committed: Path) -> None:
@@ -791,7 +793,7 @@ class TestStaleness:
         sha = commit(committed, "packages")
         _, found = stale(committed)
         assert [f.message for f in found if f.slug == "a"] == [
-            f"pkg.mod.Box.limit changed in {sha}"
+            f"pkg.mod.Box.limit (describes) changed in {sha}"
         ]
 
     def test_symbols_in_conditional_blocks_and_init_track_their_ranges(
@@ -815,8 +817,8 @@ class TestStaleness:
         sha = commit(committed, "packages")
         _, found = stale(committed)
         assert sorted(messages(found, "a")) == [
-            f"pkg.cond.K.a changed in {sha}",
-            f"pkg.cond.g changed in {sha}",
+            f"pkg.cond.K.a (describes) changed in {sha}",
+            f"pkg.cond.g (describes) changed in {sha}",
         ]
 
     def test_added_or_removed_symbol_is_stale(self, committed: Path) -> None:
@@ -826,7 +828,7 @@ class TestStaleness:
         edit_mod(committed, "LIMIT = 3\n", "LIMIT = 3\n\n\ndef other() -> int:\n    return 2\n")
         sha = commit(committed, "packages")
         _, found = stale(committed)
-        assert f"pkg.mod.other changed in {sha}" in messages(found, "a")
+        assert f"pkg.mod.other (describes) changed in {sha}" in messages(found, "a")
 
     def test_whole_file_citation_is_stale_on_any_change(self, committed: Path) -> None:
         put_a(committed, "Config in `pyproject.toml`.")
@@ -839,7 +841,7 @@ class TestStaleness:
             Finding(
                 "a",
                 Kind.STALE,
-                f"pyproject.toml changed in {sha}",
+                f"pyproject.toml (describes) changed in {sha}",
                 (line_of(committed, "Config in"),),
             )
         ]
@@ -847,7 +849,7 @@ class TestStaleness:
     def test_working_tree_change_is_stale_until_page_is_edited(self, committed: Path) -> None:
         edit_mod(committed, "return 1", "return 10")
         _, found = stale(committed)
-        assert found[0].message == "pkg.mod.calculate changed in working tree"
+        assert found[0].message == "pkg.mod.calculate (describes) changed in working tree"
         put_a(committed, "Runs `pkg.mod.Box.run`. Rechecked.")
         _, found = stale(committed)
         assert {f.slug for f in found} == {"b"}
@@ -861,14 +863,14 @@ class TestStaleness:
         commit(committed, "wiki", message="cite toml")
         (committed / "pyproject.toml").write_text("[project]\nname = 'x'\n")
         _, found = stale(committed)
-        assert "pyproject.toml changed in working tree" in messages(found, "a")
+        assert "pyproject.toml (describes) changed in working tree" in messages(found, "a")
 
     def test_commit_and_working_tree_changes_are_both_listed(self, committed: Path) -> None:
         edit_mod(committed, "return 1", "return 10")
         sha = commit(committed, "packages")
         edit_mod(committed, "return 10", "return 11")
         _, found = stale(committed)
-        assert found[0].message == f"pkg.mod.calculate changed in {sha}, working tree"
+        assert found[0].message == f"pkg.mod.calculate (describes) changed in {sha}, working tree"
 
     def test_unparseable_file_version_compares_whole_file(self, committed: Path) -> None:
         edit_mod(committed, "return 2", "return (")
@@ -876,7 +878,7 @@ class TestStaleness:
         edit_mod(committed, "return (", "return 2")
         fixed = commit(committed, "packages")
         _, found = stale(committed)
-        assert f"pkg.mod.calculate changed in {fixed}, {broke}" in messages(found, "a")
+        assert f"pkg.mod.calculate (describes) changed in {fixed}, {broke}" in messages(found, "a")
 
     def test_stale_does_not_fail_unless_requested(self, committed: Path) -> None:
         edit_mod(committed, "return 1", "return 10")
@@ -893,7 +895,9 @@ class TestStaleness:
         line = line_of(committed, "  - pkg.mod.calculate")
         out = capsys.readouterr().out
         assert out.startswith("Stale pages:\na:\n")
-        assert f"  stale: pkg.mod.calculate changed in {sha} (page lines {line})\n" in out
+        assert (
+            f"  stale: pkg.mod.calculate (describes) changed in {sha} (page lines {line})\n" in out
+        )
 
     def test_history_is_queried_once_per_path_and_commit(
         self, committed: Path, monkeypatch: pytest.MonkeyPatch
@@ -934,7 +938,7 @@ class TestMergeCommits:
         merge = commit(committed, "packages", message="evil merge")
         assert len(git(committed, "rev-list", "--parents", "-n", "1", "HEAD").split()) == 3
         _, found = stale(committed)
-        assert found[0].message == f"pkg.mod.calculate changed in {merge}"
+        assert found[0].message == f"pkg.mod.calculate (describes) changed in {merge}"
 
     def test_clean_merge_of_unrelated_files_is_not_stale(self, committed: Path) -> None:
         trunk = git(committed, "branch", "--show-current")
@@ -962,7 +966,7 @@ class TestMergeCommits:
             committed, "rev-parse", "side^{tree}"
         )
         _, found = stale(committed)
-        assert found[0].message == f"pkg.mod.calculate changed in {trunk_commit}"
+        assert found[0].message == f"pkg.mod.calculate (describes) changed in {trunk_commit}"
 
     def test_page_edited_on_a_merged_side_branch_is_not_stale(self, committed: Path) -> None:
         trunk = git(committed, "branch", "--show-current")
@@ -991,6 +995,283 @@ class TestMergeCommits:
         git(committed, "merge", "-q", "--no-ff", "feature", "-m", "merge")
         _, found = stale(committed)
         assert {f.slug for f in found} == {"b"}
+
+
+SVC = f"{PKG}/svc.py"
+SVC_TEXT = (
+    "import contextlib\nimport dataclasses\n\n\n"
+    "@contextlib.contextmanager\n"
+    "def guarded(name: str):\n"
+    '    """Guard a job."""\n'
+    "    yield name\n\n\n"
+    "class Reader:\n"
+    '    """Reads."""\n\n'
+    "    def __init__(self, session: str) -> None:\n"
+    '        """Keep the session."""\n'
+    "        self.session = session\n\n"
+    "    def fetch(self) -> int:\n"
+    "        return 1\n\n\n"
+    "@dataclasses.dataclass\n"
+    "class Settings:\n"
+    '    """Config."""\n\n'
+    "    name: str\n"
+    "    retries: int = 0\n\n"
+    "    def label(self) -> str:\n"
+    "        return self.name\n"
+)
+
+
+def edit_svc(repo: Path, old: str, new: str) -> None:
+    svc = repo / SVC
+    assert old in svc.read_text()
+    svc.write_text(svc.read_text().replace(old, new))
+
+
+class TestMentions:
+    @pytest.fixture
+    def mentioned(self, committed: Path) -> Path:
+        """Page a mentions both svc symbols; page b describes `guarded`."""
+        write_file(committed, SVC, SVC_TEXT)
+        commit(committed, "packages")
+        write_page(
+            committed,
+            "alpha",
+            "a",
+            page(
+                "Runs inside `pkg.svc.guarded` with a `pkg.svc.Reader`." + LINK_B,
+                mentions="[pkg.svc.guarded, pkg.svc.Reader]",
+                title="A",
+            ),
+        )
+        write_page(committed, "beta", "b", page("[A](../alpha/a.md) `pkg.svc.guarded`", title="B"))
+        commit(committed, "wiki", message="cite svc")
+        return committed
+
+    def test_mentions_resolve_without_errors(self, mentioned: Path) -> None:
+        assert stale(mentioned) == ([], [])
+
+    def test_body_edit_leaves_a_mention_fresh_but_not_a_description(self, mentioned: Path) -> None:
+        edit_svc(mentioned, "yield name", "yield name.upper()")
+        sha = commit(mentioned, "packages")
+        _, found = stale(mentioned)
+        assert messages(found, "a") == []
+        assert messages(found, "b") == [f"pkg.svc.guarded (describes) changed in {sha}"]
+
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            ("def guarded(name: str):", "def guarded(name: str, retries: int = 0):"),
+            ('"""Guard a job."""', '"""Guard a job and alert on failure."""'),
+            ("@contextlib.contextmanager", "@contextlib.asynccontextmanager"),
+        ],
+        ids=["signature", "docstring", "decorator"],
+    )
+    def test_interface_edit_makes_a_mention_stale(
+        self, mentioned: Path, old: str, new: str
+    ) -> None:
+        edit_svc(mentioned, old, new)
+        sha = commit(mentioned, "packages")
+        _, found = stale(mentioned)
+        line = line_of(mentioned, "Runs inside")
+        frontmatter = line_of(mentioned, "mentions:")
+        assert [(f.message, f.lines) for f in found if f.slug == "a"] == [
+            (f"pkg.svc.guarded (mention) changed in {sha}", (frontmatter, line))
+        ]
+
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            ("return 1", "return 2"),
+            ("self.session = session", "self.session = session.strip()"),
+        ],
+        ids=["method", "init-body"],
+    )
+    def test_class_mention_ignores_method_bodies(self, mentioned: Path, old: str, new: str) -> None:
+        edit_svc(mentioned, old, new)
+        commit(mentioned, "packages")
+        assert stale(mentioned) == ([], [])
+
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            ('"""Reads."""', '"""Reads odds."""'),
+            ("class Reader:", "class Reader(object):"),
+            ("def __init__(self, session: str)", "def __init__(self, session: bytes)"),
+            ('"""Keep the session."""', '"""Keep the open session."""'),
+        ],
+        ids=["docstring", "bases", "init-signature", "init-docstring"],
+    )
+    def test_class_mention_tracks_class_and_init_interface(
+        self, mentioned: Path, old: str, new: str
+    ) -> None:
+        edit_svc(mentioned, old, new)
+        sha = commit(mentioned, "packages")
+        _, found = stale(mentioned)
+        assert messages(found, "a") == [f"pkg.svc.Reader (mention) changed in {sha}"]
+
+    def test_function_without_docstring_tracks_its_multiline_signature(
+        self, mentioned: Path
+    ) -> None:
+        edit_svc(
+            mentioned, "    def fetch(self) -> int:", "    def fetch(\n        self,\n    ) -> int:"
+        )
+        commit(mentioned, "packages")
+        put_a(
+            mentioned,
+            "`pkg.svc.Reader.fetch`",
+            sources="  - pkg.mod.calculate\nmentions: [pkg.svc.Reader.fetch]",
+        )
+        commit(mentioned, "wiki", message="mention fetch")
+        edit_svc(mentioned, "return 1", "return 2")
+        commit(mentioned, "packages")
+        assert stale(mentioned) == ([], [])
+        edit_svc(mentioned, "    ) -> int:", "    ) -> float:")
+        sha = commit(mentioned, "packages")
+        _, found = stale(mentioned)
+        assert messages(found, "a") == [f"pkg.svc.Reader.fetch (mention) changed in {sha}"]
+
+    def test_class_without_init_tracks_its_fields(self, mentioned: Path) -> None:
+        put_a(
+            mentioned,
+            "`pkg.svc.Settings`",
+            sources="  - pkg.mod.calculate\nmentions: [pkg.svc.Settings]",
+        )
+        commit(mentioned, "wiki", message="mention settings")
+        edit_svc(mentioned, "return self.name", "return self.name.upper()")
+        commit(mentioned, "packages")
+        assert stale(mentioned) == ([], [])
+        edit_svc(mentioned, "retries: int = 0", "retries: int = 3")
+        sha = commit(mentioned, "packages")
+        _, found = stale(mentioned)
+        assert messages(found, "a") == [f"pkg.svc.Settings (mention) changed in {sha}"]
+
+    def test_removed_mention_is_an_error(self, mentioned: Path) -> None:
+        write_file(mentioned, SVC, "import contextlib\n")
+        commit(mentioned, "packages")
+        errors, _ = stale(mentioned)
+        assert Kind.SYMBOL_UNDEFINED in kinds(errors, "a")
+
+    @pytest.mark.parametrize(
+        ("mentions", "sources", "problem"),
+        [
+            ("[pkg.mod.calculate]", "  - pkg.mod.calculate", "is also in sources"),
+            ("[pyproject.toml]", "  - pkg.mod.calculate", "is not a dotted symbol"),
+            ("[pkg.mod]", "  - pkg.mod.calculate", "names a module"),
+        ],
+    )
+    def test_invalid_mentions(self, repo: Path, mentions: str, sources: str, problem: str) -> None:
+        write_page(
+            repo,
+            "alpha",
+            "a",
+            page("[B](../beta/b.md)", sources=sources, mentions=mentions, title="A"),
+        )
+        findings = run(repo)
+        assert kinds(findings, "a") == [Kind.INVALID_MENTION]
+        assert problem in messages(findings, "a")[0]
+        assert line_of(repo, "mentions:") in findings[0].lines
+
+    def test_stale_output_names_the_citation_kind(
+        self, mentioned: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        edit_svc(mentioned, '"""Reads."""', '"""Reads odds."""')
+        sha = commit(mentioned, "packages")
+        wiki_lint.lint(mentioned / "wiki", mentioned, write=False)
+        assert f"  stale: pkg.svc.Reader (mention) changed in {sha}" in capsys.readouterr().out
+
+
+class TestSquash:
+    @pytest.fixture
+    def trunk(self, committed: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        name = git(committed, "branch", "--show-current")
+        git(committed, "checkout", "-q", "-b", "feature")
+        return name
+
+    def squashed(self, repo: Path, onto: str) -> wiki_lint.WikiLinter:
+        linter = wiki_lint.WikiLinter(repo / "wiki", repo, squash_onto=onto)
+        linter.run()
+        return linter
+
+    def test_page_edit_reverted_on_the_branch_is_stale_once_squashed(
+        self, committed: Path, trunk: str
+    ) -> None:
+        original = (committed / "wiki/alpha/a.md").read_text()
+        write_file(committed, "wiki/alpha/a.md", original + "\nUpdated.\n")
+        commit(committed, "wiki", message="edit page")
+        edit_mod(committed, "return 1", "return 10")
+        sha = commit(committed, "packages", message="code")
+        write_file(committed, "wiki/alpha/a.md", original)
+        commit(committed, "wiki", message="revert page")
+        assert "a" not in {f.slug for f in lint_repo(committed).stale}
+        assert messages(self.squashed(committed, trunk).stale, "a") == [
+            f"pkg.mod.calculate (describes) changed in {sha}"
+        ]
+
+    def test_branch_that_edits_the_page_after_the_code_is_fresh(
+        self, committed: Path, trunk: str
+    ) -> None:
+        edit_mod(committed, "return 1", "return 10")
+        commit(committed, "packages", message="code")
+        put_a(committed, "Runs `pkg.mod.Box.run`. Updated.")
+        commit(committed, "wiki", message="page")
+        assert {f.slug for f in self.squashed(committed, trunk).stale} == {"b"}
+
+    def test_code_change_after_the_page_edit_on_the_branch_is_stale(
+        self, committed: Path, trunk: str
+    ) -> None:
+        put_a(committed, "Runs `pkg.mod.Box.run`. Updated.")
+        commit(committed, "wiki", message="page")
+        edit_mod(committed, "return 1", "return 10")
+        sha = commit(committed, "packages", message="code")
+        assert messages(self.squashed(committed, trunk).stale, "a") == [
+            f"pkg.mod.calculate (describes) changed in {sha}"
+        ]
+
+    def test_trunk_commits_before_the_branch_are_reported(
+        self, committed: Path, trunk: str
+    ) -> None:
+        git(committed, "checkout", "-q", trunk)
+        edit_mod(committed, "return 1", "return 10")
+        sha = commit(committed, "packages", message="trunk code")
+        git(committed, "checkout", "-q", "-b", "later")
+        write_file(committed, "notes.txt", "x\n")
+        commit(committed, "notes.txt", message="unrelated")
+        assert messages(self.squashed(committed, trunk).stale, "a") == [
+            f"pkg.mod.calculate (describes) changed in {sha}"
+        ]
+
+    def test_on_trunk_there_is_no_merge_base_to_judge(self, committed: Path, trunk: str) -> None:
+        git(committed, "checkout", "-q", trunk)
+        edit_mod(committed, "return 1", "return 10")
+        sha = commit(committed, "packages")
+        linter = self.squashed(committed, trunk)
+        assert linter.history.merge_base() is None
+        assert messages(linter.stale, "a") == [f"pkg.mod.calculate (describes) changed in {sha}"]
+
+    def test_working_tree_changes_still_count(self, committed: Path, trunk: str) -> None:
+        write_file(committed, "notes.txt", "x\n")
+        commit(committed, "notes.txt")
+        edit_mod(committed, "return 1", "return 10")
+        assert messages(self.squashed(committed, trunk).stale, "a") == [
+            "pkg.mod.calculate (describes) changed in working tree"
+        ]
+
+    def test_unknown_ref_warns_and_judges_commit_by_commit_locally(
+        self, committed: Path, trunk: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        edit_mod(committed, "return 1", "return 10")
+        sha = commit(committed, "packages")
+        linter = self.squashed(committed, "origin/nope")
+        assert messages(linter.stale, "a") == [f"pkg.mod.calculate (describes) changed in {sha}"]
+        assert "no merge base with origin/nope" in capsys.readouterr().err
+
+    def test_unknown_ref_fails_in_ci(
+        self, committed: Path, trunk: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        with pytest.raises(SystemExit, match="no merge base with origin/nope"):
+            self.squashed(committed, "origin/nope")
 
 
 class TestMissingFiles:
@@ -1194,6 +1475,17 @@ class TestLocate:
             f"pkg.mod.calculate  {MOD}:4-5",
             f"pkg.mod.Box.run  {MOD}:16-16",
             "scripts/tool.py",
+        ]
+
+    def test_slug_lists_mentions_after_sources(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        put_a(repo, "`pkg.mod.Box.run`", sources="  - pkg.mod.calculate\nmentions: [pkg.mod.other]")
+        _, out, _ = self.locate(repo, capsys, "a")
+        assert out == [
+            f"pkg.mod.calculate  {MOD}:4-5",
+            f"pkg.mod.other  {MOD}:8-9",
+            f"pkg.mod.Box.run  {MOD}:16-16",
         ]
 
     def test_unknown_slug_fails(self, repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
