@@ -81,7 +81,7 @@ No grid time after the earlier of the event's `commence_time` and Polymarket's s
 - It prints the counts: finished events, paired, skipped, written, snapshots, dropped points by reason, and unpaired events and matches. `--dry-run` fetches and resamples but writes nothing.
 
 > [!WARNING]
-> The command writes to whatever `DATABASE_URL` points at. Production is loaded only from the mini-PC ([databases](../foundations/databases-and-environments.md#environments)).
+> The command writes to whatever `DATABASE_URL` points at. Production is loaded only from the production host ([databases](../foundations/databases-and-environments.md#environments)).
 
 ## The fetch-polymarket-odds job
 

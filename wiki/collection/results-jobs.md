@@ -30,7 +30,7 @@ status: stable
 
 # Results and status jobs
 
-Three jobs and one command move events to LIVE, FINAL and CANCELLED ([event-status-lifecycle](event-status-lifecycle.md)). All three jobs are in the default local `bootstrap_jobs` and run on the mini-PC ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)); their AWS rules are dormant.
+Three jobs and one command move events to LIVE, FINAL and CANCELLED ([event-status-lifecycle](event-status-lifecycle.md)). All three jobs are in the default local `bootstrap_jobs` and run on the production host ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)); their AWS rules are dormant.
 
 ## update-status
 

@@ -124,6 +124,38 @@ class TestWikiLint:
         write_page(repo, "alpha", "a", page("See [[b]] and [B](../beta/b.md).", title="A"))
         assert kinds(run(repo), "a") == [Kind.WIKILINK]
 
+    @pytest.mark.parametrize(
+        ("body", "meta", "term", "line"),
+        [
+            ("Runs on the mini-PC.", {}, "mini-PC", 12),
+            ("Runs on the mini PC.", {}, "mini PC", 12),
+            ("Body.", {"description": "On nucboxg10pro."}, "nucbox", 4),
+            ("Host host.tail1234.ts.net.", {}, ".ts.net", 12),
+            ("Under /home/someone/odds.", {}, "/home/s", 12),
+        ],
+    )
+    def test_machine_specific_term(
+        self, repo: Path, body: str, meta: dict[str, str], term: str, line: int
+    ) -> None:
+        write_page(repo, "alpha", "a", page(body, title="A", **meta))
+        message = f"pages describe the production role, not the machine: {term}"
+        assert [f for f in run(repo) if f.slug == "a"] == [
+            Finding("a", Kind.MACHINE_SPECIFIC, message, (line,))
+        ]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "```\nssh mini-PC\n```",
+            "([ADR](../../docs/adr/0008-mini-pc-is-production.md))",
+            "[adr]: ../../docs/adr/0008-mini-pc-is-production.md",
+            "Install to `~/.local/bin`.",
+        ],
+    )
+    def test_machine_free_text_passes(self, repo: Path, body: str) -> None:
+        write_page(repo, "alpha", "a", page(body, title="A"))
+        assert Kind.MACHINE_SPECIFIC not in kinds(run(repo), "a")
+
     def test_broken_links_and_anchors_are_left_to_lychee(self, repo: Path) -> None:
         write_page(
             repo,

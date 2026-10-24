@@ -16,7 +16,7 @@ status: stable
 
 # Where each job runs
 
-Every scheduled job runs on one host: the mini-PC, a WSL2 guest on a Windows machine (Tailscale host `nucboxg10pro`), under the [local scheduler](local-scheduler.md) managed by `odds-scheduler.service` ([Run the scheduler as a systemd service](howto-run-scheduler-service.md)). Its Postgres is the production database ([Databases and environments](../foundations/databases-and-environments.md#environments)). The AWS Lambdas and their EventBridge rules are dormant. The decision and its trade-offs are in [ADR-0008](../../docs/adr/0008-mini-pc-is-production.md). The registry itself is in [Job registry](job-registry.md).
+Every scheduled job runs on one host: the production host, under the [local scheduler](local-scheduler.md) managed by `odds-scheduler.service` ([Run the scheduler as a systemd service](howto-run-scheduler-service.md)). Its Postgres is the production database ([Databases and environments](../foundations/databases-and-environments.md#environments)). The AWS Lambdas and their EventBridge rules are dormant. The decision and its trade-offs are in [ADR-0008](../../docs/adr/0008-mini-pc-is-production.md). The registry itself is in [Job registry](job-registry.md).
 
 ## Where each job runs
 
@@ -41,7 +41,7 @@ Three lists in code decide what the production scheduler runs:
 | `score-predictions` | inline in `fetch-oddsportal` | per sport with a model | n/a ([Prediction scoring](../modelling/prediction-scoring.md)) |
 | `fetch-polymarket`, `backfill-polymarket` | no | global | self-scheduling / AWS `rate(3 days)` |
 
-The betting agent is not scheduled: it is run by hand on the mini-PC with `odds agent run` as the restricted `odds_agent` role ([Agent runtime](../agent/agent-run-job.md)). A collection job goes dormant for a sport with no fixture in the next 28 days, and wakes by itself ([dormancy](decision-engine.md#dormancy)).
+The betting agent is not scheduled: it is run by hand on the production host with `odds agent run` as the restricted `odds_agent` role ([Agent runtime](../agent/agent-run-job.md)). A collection job goes dormant for a sport with no fixture in the next 28 days, and wakes by itself ([dormancy](decision-engine.md#dormancy)).
 
 Per-job pages: [fetch-odds](../collection/fetch-odds-job.md), [fetch-scores and update-status](../collection/results-jobs.md), [status lifecycle](../collection/event-status-lifecycle.md), [OddsPortal](../collection/fetch-oddsportal-job.md), [Betfair](../collection/betfair-exchange.md), [digest](../operations/daily-digest.md), [health](../operations/health-monitor.md), [agent](../agent/agent-run-job.md), [ESPN fixtures](../collection/epl-context-data.md), [MLB probables](../collection/mlb-probable-pitchers.md), [Polymarket](../collection/polymarket.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md).
 
@@ -54,17 +54,17 @@ Terraform still declares the AWS jobs: in `deployment/aws/terraform/eventbridge.
 > [!WARNING]
 > The Deploy to Production workflow (`deploy-prod.yml`) is disabled in GitHub; keep it disabled while AWS is dormant (`gh workflow list --all` shows the state). Its post-deploy invocations make every job reschedule itself, which re-enables every rule, so both hosts would collect and the Lambdas would write to the Neon archive ([CI/CD workflows](../operations/ci-cd-workflows.md#prod-deploy)).
 
-No code checks for a job enabled on both hosts, so a re-enabled rule double-fetches alongside the mini-PC.
+No code checks for a job enabled on both hosts, so a re-enabled rule double-fetches alongside the production host.
 
 ## Heartbeats
 
-Which jobs write a heartbeat is a property of `odds_core.alerts.job_alert_context`, not of the registry. `backfill-polymarket` writes none, and `fetch-polymarket` is wrapped but not bootstrapped. `update-status` writes one only on runs that execute (`odds_lambda.jobs.update_status.main`); skipped runs write none. Producing a heartbeat is separate from the health check expecting one. The jobs the health check expects a heartbeat from, and how often, are in [Health monitor](../operations/health-monitor.md#heartbeats). All heartbeats land in the production database, which `check-health` reads; nothing outside the mini-PC notices if the host itself stops (#489). Every local run is bounded by `odds_lambda.scheduling.runner.JOB_TIMEOUT` ([Local scheduler](local-scheduler.md#scheduling-primitives)).
+Which jobs write a heartbeat is a property of `odds_core.alerts.job_alert_context`, not of the registry. `backfill-polymarket` writes none, and `fetch-polymarket` is wrapped but not bootstrapped. `update-status` writes one only on runs that execute (`odds_lambda.jobs.update_status.main`); skipped runs write none. Producing a heartbeat is separate from the health check expecting one. The jobs the health check expects a heartbeat from, and how often, are in [Health monitor](../operations/health-monitor.md#heartbeats). All heartbeats land in the production database, which `check-health` reads; nothing outside the production host notices if the host itself stops (#489). Every local run is bounded by `odds_lambda.scheduling.runner.JOB_TIMEOUT` ([Local scheduler](local-scheduler.md#scheduling-primitives)).
 
 ## Deployed state
 
 Deployed AWS state cannot be verified from the repo. Only `terraform.tfvars.example` is committed, so the live account may have been applied with different gates. Terraform pre-creates the self-scheduling rules `DISABLED` and ignores `schedule_expression` and `state` on them ([Scheduler backends](scheduler-backends.md#rules-and-terraform)), so a plan shows neither real cadences nor whether a rule was re-enabled.
 
-Query the account with `odds scheduler list-jobs --backend aws` (needs `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX` and credentials). Every rule should be listed as cancelled (disabled). Compare it with `odds scheduler list-jobs` on the mini-PC to find a job running in both places.
+Query the account with `odds scheduler list-jobs --backend aws` (needs `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX` and credentials). Every rule should be listed as cancelled (disabled). Compare it with `odds scheduler list-jobs` on the production host to find a job running in both places.
 
 - `scripts/verify-schedules.sh` fails disabled, placeholder-rate and past-year rules, so it fails every rule while AWS is dormant. #383 tracks the orphans from when the rules ran.
 - A Lambda payload without `sport` runs every configured sport and reschedules under the bare name, which matches no rule ([Lambda handler](scheduler-backends.md#lambda-handler)).

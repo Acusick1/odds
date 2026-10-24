@@ -29,6 +29,6 @@ Repo-wide material that every other area assumes: what the system is and which s
 
 - [Add a setting](howto-add-setting.md) — Steps to add a configuration setting so it loads from .env and reaches the production host.
 - [Copy production data locally](howto-copy-production-data.md) — Steps to copy one sport and date range from production into the local database, with the command's options and copy behaviour.
-- [Create and apply a database migration](howto-database-migration.md) — How to change a model, autogenerate and review an Alembic migration, and promote it local, then CI dev, then production on the mini-PC without breaking the running release.
+- [Create and apply a database migration](howto-database-migration.md) — How to change a model, autogenerate and review an Alembic migration, and promote it local, then CI dev, then production without breaking the running release.
 - [Set up and run locally](howto-develop-locally.md) — Install, write a working .env, start Postgres, migrate, make a first fetch, enable the pre-commit hooks and issue claiming, and run the offline tests.
 <!-- pages:end -->

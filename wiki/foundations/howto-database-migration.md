@@ -1,7 +1,7 @@
 ---
 type: howto
 title: Create and apply a database migration
-description: How to change a model, autogenerate and review an Alembic migration, and promote it local, then CI dev, then production on the mini-PC without breaking the running release.
+description: How to change a model, autogenerate and review an Alembic migration, and promote it local, then CI dev, then production without breaking the running release.
 sources:
   - migrations/env.py
   - tests/migration/conftest.py
@@ -28,7 +28,7 @@ Every change to a model under `packages/odds-core/odds_core/` needs an Alembic m
 6. **Update affected queries** in the storage layer ([Storage layer](../storage/storage-layer.md)) and run the tests ([Run the tests](howto-develop-locally.md#run-the-tests)).
 7. **Run migration tests locally.** `uv run pytest tests/migration/ -v`. These connect to `DATABASE_URL` and include write tests, so only do this against local ([Test suite](test-suite.md#migration-tests)).
 8. **Merge to main.** CI runs tests, then `.github/workflows/deploy-dev.yml` applies `alembic upgrade head` to the dev database and runs all of `tests/migration`. See [CI/CD workflows](../operations/ci-cd-workflows.md). The Terraform apply in the same workflow ([AWS infrastructure](../operations/aws-infrastructure.md)) runs before the migration.
-9. **Production.** Run [./deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) on the mini-PC once the change is on main. When the database is not at head it stops the scheduler first, migrates, smoke-tests and restarts it, so no migration runs under the old code; a failure after the stop leaves the scheduler down and says so. The hand-run agent's MCP server is not managed by the script: do not deploy during an agent session. After a migration that rewrites a large table, run `VACUUM ANALYZE` on it. Do not run migrations outside deploy.sh, or `tests/migration` at all, against production. `.github/workflows/deploy-prod.yml` migrates the Neon archive, not production, and must not be run, including through a published release ([Where each job runs](../scheduling/job-deployment-matrix.md#dormant-aws-rules)).
+9. **Production.** Run [./deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) on the production host once the change is on main. When the database is not at head it stops the scheduler first, migrates, smoke-tests and restarts it, so no migration runs under the old code; a failure after the stop leaves the scheduler down and says so. The hand-run agent's MCP server is not managed by the script: do not deploy during an agent session. After a migration that rewrites a large table, run `VACUUM ANALYZE` on it. Do not run migrations outside deploy.sh, or `tests/migration` at all, against production. `.github/workflows/deploy-prod.yml` migrates the Neon archive, not production, and must not be run, including through a published release ([Where each job runs](../scheduling/job-deployment-matrix.md#dormant-aws-rules)).
 
 ## Related
 

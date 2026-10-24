@@ -1,7 +1,7 @@
 ---
 type: howto
 title: Run the scheduler as a systemd service
-description: Install the scheduler's systemd unit on the production mini-PC, start it at Windows boot under WSL, and redeploy production with deploy.sh.
+description: Install the scheduler's systemd unit on the production host, optionally keep WSL running from Windows boot, and redeploy production with deploy.sh.
 sources:
   - odds-scheduler.service
   - deploy.sh
@@ -10,7 +10,7 @@ status: stable
 
 # Run the scheduler as a systemd service
 
-Run the [local scheduler](local-scheduler.md) on the mini-PC under systemd and redeploy it with a script that proves changed jobs run before restarting. This host is production: its scheduler runs every scheduled job and its Postgres is the production database ([Where each job runs](job-deployment-matrix.md), [ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)).
+Run the [local scheduler](local-scheduler.md) on the production host under systemd and redeploy it with a script that proves changed jobs run before restarting. The scheduler runs every scheduled job and its Postgres is the production database ([Where each job runs](job-deployment-matrix.md), [ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)).
 
 The AWS rules must stay disabled, or both hosts collect. `odds scheduler list-jobs --backend aws` shows their state ([Deployed state](job-deployment-matrix.md#deployed-state)).
 
@@ -25,16 +25,16 @@ The AWS rules must stay disabled, or both hosts collect. `odds scheduler list-jo
    sudo systemctl enable --now odds-scheduler
    ```
    - `Restart=always` with `RestartSec=5` restarts it after a crash or reboot.
-3. **Let the deploying user restart the service without a password.** `deploy.sh` restarts the unit (and stops it before a pending migration) through `sudo` and, with no terminal, refuses to start unless both rules exist. Create it with `sudo visudo -f /etc/sudoers.d/odds-scheduler` (replace `andrew` with the unit's `User`):
+3. **Let the deploying user restart the service without a password.** `deploy.sh` restarts the unit (and stops it before a pending migration) through `sudo` and, with no terminal, refuses to start unless both rules exist. Create it with `sudo visudo -f /etc/sudoers.d/odds-scheduler` (replace `<deploy-user>` with the unit's `User`):
    ```
-   andrew ALL=(root) NOPASSWD: /usr/bin/systemctl start odds-scheduler, /usr/bin/systemctl stop odds-scheduler, /usr/bin/systemctl restart odds-scheduler, /usr/bin/systemctl enable --now odds-scheduler, /usr/bin/systemctl daemon-reload
+   <deploy-user> ALL=(root) NOPASSWD: /usr/bin/systemctl start odds-scheduler, /usr/bin/systemctl stop odds-scheduler, /usr/bin/systemctl restart odds-scheduler, /usr/bin/systemctl enable --now odds-scheduler, /usr/bin/systemctl daemon-reload
    ```
    - The paths must match `command -v systemctl`; `sudo -n -l` lists the rule.
 4. **Check.** `systemctl status odds-scheduler`, `journalctl -u odds-scheduler -f`.
 
-## Start it at Windows boot (WSL hosts)
+## Start it at Windows boot (WSL hosts only)
 
-On a Windows host the unit runs inside WSL, which starts only when something calls `wsl.exe` and stops once no `wsl.exe` client remains.
+If the production host runs Linux under WSL on Windows, the unit runs inside WSL, which starts only when something calls `wsl.exe` and stops once no `wsl.exe` client remains.
 
 1. **Enable systemd in WSL.** `/etc/wsl.conf` needs `[boot]` `systemd=true`; run `wsl --shutdown` from Windows after changing it.
 2. **Add a Windows Task Scheduler task.**
@@ -45,7 +45,7 @@ On a Windows host the unit runs inside WSL, which starts only when something cal
 
 ## Redeploy
 
-Run `./deploy.sh` from the repo root on the mini-PC; it is the only path to production. It works from a terminal or from a non-interactive `ssh <host> 'cd ~/odds && ./deploy.sh'`.
+Run `./deploy.sh` from the repo root on the production host; it is the only path to production. It works from a terminal or from a non-interactive `ssh <production-host> 'cd <repo> && ./deploy.sh'`.
 
 1. **Preflight.** It puts `$HOME/.local/bin` (the uv installer's directory) on `PATH` and checks that `git`, `uv`, `sudo` and `systemctl` resolve. Without a terminal it also requires the NOPASSWD rules for `systemctl restart odds-scheduler` and `systemctl stop odds-scheduler` ([Install the unit](#install-the-unit)). A failed check exits before anything changes. From a terminal without the rule, sudo prompts for a password at the restart, after the smoke run; until it is answered the checkout and environment are ahead of the running scheduler, which keeps serving the old code.
 2. **Update and validate.** `git pull --ff-only`, `uv sync`. If `uv run alembic current` is not at head, it stops the scheduler (`sudo systemctl stop odds-scheduler`) before `uv run alembic upgrade head`; any later failure prints that the scheduler is down with the commands that restore the old code (`git checkout` the previous commit, `uv sync`, start the service; `alembic downgrade` first only if the migration committed). If `alembic current` itself fails, it exits without stopping the scheduler. Then `SCHEDULER_DRY_RUN=true uv run odds scheduler smoke`; dry run suppresses schedule writes, Discord alerts, alert rate-limit rows and heartbeats, so the new code's `check-health` cannot report a job the running scheduler has not booked yet as a dead chain, and smoke leaves `alert_history` untouched.

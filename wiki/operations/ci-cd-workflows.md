@@ -20,7 +20,7 @@ status: stable
 
 # CI/CD workflows
 
-Workflows live in `.github/workflows/`. Secrets come from the `development` and `production` GitHub environments. No workflow deploys to production, which is the mini-PC and is deployed by [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The `production` environment names the dormant AWS stack and its Neon database (secret values are not verifiable from the repo; check Settings, Environments). CI unit and integration tests run on py-pglite with `-m "not live_api"` ([test-suite](../foundations/test-suite.md), [howto-develop-locally](../foundations/howto-develop-locally.md)).
+Workflows live in `.github/workflows/`. Secrets come from the `development` and `production` GitHub environments. No workflow deploys to production, which is a single host deployed by [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The `production` environment names the dormant AWS stack and its Neon database (secret values are not verifiable from the repo; check Settings, Environments). CI unit and integration tests run on py-pglite with `-m "not live_api"` ([test-suite](../foundations/test-suite.md), [howto-develop-locally](../foundations/howto-develop-locally.md)).
 
 | Workflow | Trigger | What it does |
 |---|---|---|
@@ -33,7 +33,7 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 | `live-api.yml` | Monday 06:00 UTC | `pytest -m live_api` against third-party APIs |
 | `schedule-health-check.yml` | 10:00 UTC cron, `production` environment; disabled | `scripts/verify-schedules.sh --rule-prefix odds` |
 
-`daily-validation` checks the previous day, so a file dated 20251103 covers 3 November. It reads the `production` environment's `DATABASE_URL` secret, so it validates the Neon archive rather than the mini-PC database unless that secret is changed. `schedule-health-check` fails every disabled rule ([Schedule verification](#schedule-verification)), so it would fail while AWS is dormant. Both workflows, and `deploy-prod.yml`, are disabled in GitHub; that state is not in the repo, so check it with `gh workflow list --all` and restore one with `gh workflow enable`. Its discovery check is NBA-only, so EPL and MLB days are checked against NBA discovery ([coverage-checks](../storage/coverage-checks.md)).
+`daily-validation` checks the previous day, so a file dated 20251103 covers 3 November. It reads the `production` environment's `DATABASE_URL` secret, so it validates the Neon archive rather than the production database unless that secret is changed. `schedule-health-check` fails every disabled rule ([Schedule verification](#schedule-verification)), so it would fail while AWS is dormant. Both workflows, and `deploy-prod.yml`, are disabled in GitHub; that state is not in the repo, so check it with `gh workflow list --all` and restore one with `gh workflow enable`. Its discovery check is NBA-only, so EPL and MLB days are checked against NBA discovery ([coverage-checks](../storage/coverage-checks.md)).
 
 ## Dev deploy
 
@@ -42,7 +42,7 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 ## Prod deploy
 
 > [!WARNING]
-> `deploy-prod.yml` is disabled in GitHub. Do not re-enable it, dispatch it or publish a release while AWS is dormant. Its job invocations re-enable every dormant EventBridge rule, so the Lambdas collect alongside the mini-PC and write to the Neon archive ([Where each job runs](../scheduling/job-deployment-matrix.md#dormant-aws-rules)).
+> `deploy-prod.yml` is disabled in GitHub. Do not re-enable it, dispatch it or publish a release while AWS is dormant. Its job invocations re-enable every dormant EventBridge rule, so the Lambdas collect alongside the production host and write to the Neon archive ([Where each job runs](../scheduling/job-deployment-matrix.md#dormant-aws-rules)).
 
 `deploy-prod.yml` sets `project_name=odds-scheduler`, `rule_prefix=odds`, applies, migrates, runs only read-only schema and CLI tests under `tests/migration`, then invokes every scheduler job and, as `continue-on-error`, every scraper job from the Terraform outputs. Those invocations make each job reschedule itself, which is what activates the `DISABLED` placeholder rules ([self-scheduling](../scheduling/self-scheduling.md), [scheduler-backends](../scheduling/scheduler-backends.md)). It then runs `verify-schedules.sh` and `verify_database.py`. Manual deploy steps live on [howto-deploy-aws](howto-deploy-aws.md).
 

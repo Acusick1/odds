@@ -29,7 +29,7 @@ Pre-commit (`.pre-commit-config.yaml`) runs on every commit; the `Lint` workflow
 |---|---|---|
 | ruff `--fix`, ruff-format | all Python | Rules `E W F I B C4 UP DTZ003 DTZ005`, line length 100, target py312, `E501` ignored (root `pyproject.toml`). `UP` enforces `str | None` and `list[T]` |
 | vale | [README.md](../../README.md), [AGENTS.md](../../AGENTS.md), `wiki/` and the Markdown under docs (hook `files` in `.pre-commit-config.yaml`; rules in `.vale.ini`) | `Temporal.Narration` (error on change narration) and `Temporal.TimeRelative` (warning on moment-in-time words) in `.vale/styles/Temporal/` |
-| wiki-lint | whole repo, every commit (`always_run`; `--no-write --fail-stale`) | Frontmatter, links, citations, unqualified symbols, index blocks, coverage and staleness of cited symbols, re-export imports and files (`scripts/wiki_lint.py`; rules in [SCHEMA](../SCHEMA.md)) |
+| wiki-lint | whole repo, every commit (`always_run`; `--no-write --fail-stale`) | Frontmatter, links, machine-specific terms outside fenced blocks and link targets, citations, unqualified symbols, index blocks, coverage and staleness of cited symbols, re-export imports and files (`scripts/wiki_lint.py`; rules in [SCHEMA](../SCHEMA.md)) |
 | lychee (Docker) | all `.md` | Links and `#heading` anchors, offline |
 
 The `claim-issue` hook (`.githooks/claim-issue.sh`) is a plain `post-checkout` git hook outside pre-commit, installed as in [Set up and run locally](howto-develop-locally.md#set-up).
