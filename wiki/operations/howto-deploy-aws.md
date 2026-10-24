@@ -17,7 +17,7 @@ status: stable
 
 # Deploy to AWS by hand
 
-The AWS stack is dormant and production runs on the production host ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). `ci-cd.yml` still deploys and destroys an ephemeral dev stack on every relevant push to main ([ci-cd-workflows](ci-cd-workflows.md)). Use these manual steps for a dev stack, a debugging session, or to reverse the move. What the infrastructure contains is on [aws-infrastructure](aws-infrastructure.md).
+The AWS stack is dormant and production runs on a single local host ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). `ci-cd.yml` still deploys and destroys an ephemeral dev stack on every relevant push to main ([ci-cd-workflows](ci-cd-workflows.md)). Use these manual steps for a dev stack, a debugging session, or to reverse the move. What the infrastructure contains is on [aws-infrastructure](aws-infrastructure.md).
 
 > [!WARNING]
 > Step 4 against the production stack re-enables its rules, so the Lambdas collect alongside the production host and write to the Neon archive. Do it only to move production back to AWS, after stopping the production host's jobs. Never run migrations or `odds fetch` against the production database from a development machine ([databases-and-environments](../foundations/databases-and-environments.md#environments)).

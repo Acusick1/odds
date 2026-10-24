@@ -18,7 +18,7 @@ status: stable
 
 # AWS infrastructure
 
-Everything lives under `deployment/aws/`; region `eu-west-1`. The stack is dormant: its EventBridge rules are disabled and production runs on the production host, while the Lambdas, ECR images, Terraform state and the S3 model bucket stay in place ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md), [Where each job runs](../scheduling/job-deployment-matrix.md#dormant-aws-rules)). Local scoring on the production host still loads the model from that bucket ([model-store](../modelling/model-store.md)). Deployed state is not in the repo, and Terraform does not show the live schedule (see [Terraform](#terraform)); the live view is `odds scheduler list-jobs --backend aws` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). The manual deploy steps are on [howto-deploy-aws](howto-deploy-aws.md).
+Everything lives under `deployment/aws/`; region `eu-west-1`. The stack is dormant: its EventBridge rules are disabled and production runs on a single local host, while the Lambdas, ECR images, Terraform state and the S3 model bucket stay in place ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md), [Where each job runs](../scheduling/job-deployment-matrix.md#dormant-aws-rules)). Local scoring on the production host still loads the model from that bucket ([model-store](../modelling/model-store.md)). Deployed state is not in the repo, and Terraform does not show the live schedule (see [Terraform](#terraform)); the live view is `odds scheduler list-jobs --backend aws` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). The manual deploy steps are on [howto-deploy-aws](howto-deploy-aws.md).
 
 ## Functions
 

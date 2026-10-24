@@ -42,7 +42,7 @@ All code gets sessions from one module-level factory: `odds_core.database.async_
 | Production | `odds` in the production host's Docker Compose `postgres:15`, host port 5433 | written by the production host's scheduler and by the agent as `odds_agent` ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)) |
 | Neon archive | remote managed Postgres, the Neon main branch | frozen; the database the AWS Lambdas wrote to. Its EPL and MLB data was merged into production on 2026-10-17 (#483). |
 
-Production is the local database of one host: on the production host, `DATABASE_URL` names its own Compose Postgres. A development machine never points `DATABASE_URL` at it ([AGENTS.md](../../AGENTS.md#constraints)).
+Production is the Compose Postgres of a single local host, which its own processes reach through a local `DATABASE_URL`. A development machine never points `DATABASE_URL` at it ([AGENTS.md](../../AGENTS.md#constraints)).
 
 `.env.example` defines `LOCAL_DATABASE_URL`, `DEV_DATABASE_URL`, `PROD_DATABASE_URL` and sets `DATABASE_URL=${DEV_DATABASE_URL}`, so a fresh copy of it points at the shared dev database (#429). On existing machines `PROD_DATABASE_URL` names the Neon archive, not the production database. Lambda gets `DATABASE_URL` from Terraform, which takes the dev or production Neon connection string per environment (`deployment/aws/terraform/terraform.tfvars.example`; the provider is not verifiable from the repo beyond that template).
 

@@ -10,7 +10,7 @@ Every code change keeps the wiki current. `uv run python scripts/wiki_lint.py` (
 
 ## Constraints
 
-- **The production host is currently the mini-PC**, reached with `ssh minipc` over Tailscale (an alias in the maintainer's SSH config). No other file names the machine.
+- **The production host is currently the mini-PC**: Tailscale host `nucboxg10pro`, repo checkout at `~/odds`.
 - **Never point `DATABASE_URL` at production** from a development machine. Production is the Postgres on the production host, and only `deploy.sh` on that host migrates it. That rules out migrations, fetches, test runs and `odds copy from-prod` without an explicit production URL. See [databases](wiki/foundations/databases-and-environments.md#environments).
 - **AWS is dormant, and its deployed state is not in the repo.** Every scheduled job runs on the production host; the EventBridge rules and the Deploy to Production workflow are disabled; re-enabling the workflow and running it re-enables every rule. `odds scheduler list-jobs --backend aws` is the only record of the AWS state. See [jobs and deployment](wiki/scheduling/job-deployment-matrix.md#dormant-aws-rules) and [ADR-0008](docs/adr/0008-mini-pc-is-production.md).
 - **The Odds API costs quota units.** Check `odds status quota` before bulk or historical fetches. See [quota](wiki/collection/odds-api-quota.md).

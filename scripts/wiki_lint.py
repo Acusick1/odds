@@ -72,8 +72,8 @@ DOTTED_RE = re.compile(r"^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(?:\(\))?$")
 BARE_RE = re.compile(r"^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)(?:\(\))?$")
 CONSTANT_RE = re.compile(r"^[A-Z][A-Z0-9_]+$")
 HAS_EXT_RE = re.compile(r"\.[A-Za-z]\w*$")
-LINK_TARGET_RE = re.compile(r"\]\([^)\s]+")
-MACHINE_TERM_RE = re.compile(r"mini-?pc|nucbox|/home/|~/", re.IGNORECASE)
+LINK_TARGET_RE = re.compile(r"\]\([^)\s]+|^\[[^\]]+\]:[ \t]*\S+|<[^>\s]+>", re.MULTILINE)
+MACHINE_TERM_RE = re.compile(r"mini[- ]?pc|nucbox|\.ts\.net|/home/\w", re.IGNORECASE)
 HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 
 FunctionOrClass = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
@@ -1142,7 +1142,7 @@ class WikiLinter:
         page.citations.setdefault(citation, set()).update(lines)
 
     def _check_machine_terms(self, slug: str, text: str) -> None:
-        text = LINK_TARGET_RE.sub("](", text)
+        text = LINK_TARGET_RE.sub("", mask_fences(text))
         for number, line in enumerate(text.splitlines(), start=1):
             for match in MACHINE_TERM_RE.finditer(line):
                 self._add(

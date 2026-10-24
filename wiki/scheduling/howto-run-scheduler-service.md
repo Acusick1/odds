@@ -10,7 +10,7 @@ status: stable
 
 # Run the scheduler as a systemd service
 
-Run the [local scheduler](local-scheduler.md) on the production host under systemd and redeploy it with a script that proves changed jobs run before restarting. This host is production: its scheduler runs every scheduled job and its Postgres is the production database ([Where each job runs](job-deployment-matrix.md), [ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)).
+Run the [local scheduler](local-scheduler.md) on the production host under systemd and redeploy it with a script that proves changed jobs run before restarting. The scheduler runs every scheduled job and its Postgres is the production database ([Where each job runs](job-deployment-matrix.md), [ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)).
 
 The AWS rules must stay disabled, or both hosts collect. `odds scheduler list-jobs --backend aws` shows their state ([Deployed state](job-deployment-matrix.md#deployed-state)).
 
