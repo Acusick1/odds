@@ -35,7 +35,7 @@ Quota is a per-key monthly balance that only [the client](odds-api-client.md#cos
 - Quota views skip rows with a null quota, such as Betfair rows ([betfair-exchange](betfair-exchange.md)): `odds_lambda.storage.readers.OddsReader.get_fetch_logs` with `with_quota=True` and `odds_lambda.storage.readers.OddsReader.get_database_stats` both filter in the query. `fetch_logs` has no source column, so Odds API rows are inferred from the nullable quota (#441).
 - `fetch-odds` sends no quota alert; a failed run or a failed booking alerts as in [fetch-odds-job](fetch-odds-job.md).
 - The health monitor applies the thresholds as `quota_low` and `quota_critical`, sent once per condition and reminded every `stale_reminder_minutes` through `alert_history` ([health-monitor](../operations/health-monitor.md)).
-- Both thresholds divide the active key's balance by `odds_core.config.APIConfig.quota`, so with a larger paid key they are meaningless until it is set (#441).
+- Both thresholds divide the active key's balance (the key chosen by [rotation](odds-api-client.md#retry-and-rotation)) by `odds_core.config.APIConfig.quota`, so with a larger paid key they are meaningless until it is set (#441).
 
 ## Scheduled spend
 
