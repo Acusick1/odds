@@ -51,7 +51,11 @@ Most of the workflow's tooling does not exist (#608). What does:
 - The close, computed from stored snapshots when a report runs, so a trade stores none. MLB has no close defined, so its trades are reported without EV.
 - `odds candidates report`, which gives the checkpoint verdict ([Candidate registry](../evaluation/candidate-registry.md#odds-candidates-report)).
 
-Missing: nothing runs a mechanical candidate; only the agent can place paper trades (#609).
+Missing:
+
+- The interface a mechanical rule implements (#620).
+- The runner that places a mechanical candidate's paper trades; only the agent can place them today (#609).
+- A replay backtest of a rule on stored data (#621).
 
 ## Related
 
