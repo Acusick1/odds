@@ -14,7 +14,7 @@ from odds_core.polymarket_models import (
     PolymarketPriceSnapshot,
 )
 from odds_core.time import ensure_utc, parse_api_datetime
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -197,7 +197,7 @@ class PolymarketWriter:
         prices: dict,
         commence_time: datetime,
         snapshot_time: datetime | None = None,
-    ) -> PolymarketPriceSnapshot:
+    ) -> bool:
         """
         Store a price snapshot for a Polymarket market.
 
@@ -208,7 +208,8 @@ class PolymarketWriter:
             snapshot_time: Time of snapshot (defaults to now)
 
         Returns:
-            Created PolymarketPriceSnapshot instance
+            True if a row was inserted, False if the market already had a snapshot at
+            ``snapshot_time``
         """
         snapshot_time = ensure_utc(snapshot_time or datetime.now(UTC))
         commence_time = ensure_utc(commence_time)
@@ -217,42 +218,32 @@ class PolymarketWriter:
         fetch_tier = calculate_tier_from_timestamps(snapshot_time, commence_time)
         hours_until = calculate_hours_until_commence(snapshot_time, commence_time)
 
-        # Calculate derived metrics if both bid and ask available
-        best_bid = prices.get("best_bid")
-        best_ask = prices.get("best_ask")
-        spread = None
-        midpoint = None
-
-        if best_bid is not None and best_ask is not None:
-            spread = best_ask - best_bid
-            midpoint = (best_bid + best_ask) / 2
-
-        snapshot = PolymarketPriceSnapshot(
-            polymarket_market_id=market.id,
-            snapshot_time=snapshot_time,
-            outcome_0_price=prices["outcome_0_price"],
-            outcome_1_price=prices["outcome_1_price"],
-            best_bid=best_bid,
-            best_ask=best_ask,
-            spread=spread,
-            midpoint=midpoint,
-            volume=prices.get("volume"),
-            liquidity=prices.get("liquidity"),
-            fetch_tier=fetch_tier.value,
-            hours_until_commence=hours_until,
+        stmt = (
+            insert(PolymarketPriceSnapshot)
+            .values(
+                polymarket_market_id=market.id,
+                snapshot_time=snapshot_time,
+                outcome_0_price=prices["outcome_0_price"],
+                outcome_1_price=prices["outcome_1_price"],
+                volume=prices.get("volume"),
+                liquidity=prices.get("liquidity"),
+                fetch_tier=fetch_tier.value,
+                hours_until_commence=hours_until,
+            )
+            .on_conflict_do_nothing(index_elements=["polymarket_market_id", "snapshot_time"])
+            .returning(PolymarketPriceSnapshot.id)
         )
-
-        self.session.add(snapshot)
+        stored = (await self.session.execute(stmt)).scalar_one_or_none() is not None
 
         logger.info(
-            "polymarket_price_snapshot_stored",
+            "polymarket_price_snapshot_stored" if stored else "polymarket_price_snapshot_exists",
             market_id=market.id,
             snapshot_time=snapshot_time,
             fetch_tier=fetch_tier.value,
             hours_until=round(hours_until, 2),
         )
 
-        return snapshot
+        return stored
 
     async def store_orderbook_snapshot(
         self,
@@ -363,10 +354,6 @@ class PolymarketWriter:
                 "snapshot_time": snapshot_time,
                 "outcome_0_price": outcome_0_price,
                 "outcome_1_price": outcome_1_price,
-                "best_bid": None,
-                "best_ask": None,
-                "spread": None,
-                "midpoint": None,
                 "volume": None,
                 "liquidity": None,
                 "fetch_tier": fetch_tier.value,
@@ -374,35 +361,15 @@ class PolymarketWriter:
             }
             snapshot_dicts.append(snapshot_dict)
 
-        # Pre-filter to check which snapshots already exist
-        # Note: For very large datasets (thousands of points), WHERE IN (...) could be expensive.
-        # We use this approach to provide accurate inserted/skipped counts for logging.
-        # Alternative: Add unique constraint on (market_id, snapshot_time) and use ON CONFLICT DO NOTHING,
-        # which would be more efficient but lose granular count reporting.
+        inserted_count = 0
         if snapshot_dicts:
-            existing_query = select(PolymarketPriceSnapshot.snapshot_time).where(
-                and_(
-                    PolymarketPriceSnapshot.polymarket_market_id == market.id,
-                    PolymarketPriceSnapshot.snapshot_time.in_(
-                        [d["snapshot_time"] for d in snapshot_dicts]
-                    ),
-                )
+            stmt = (
+                insert(PolymarketPriceSnapshot)
+                .values(snapshot_dicts)
+                .on_conflict_do_nothing(index_elements=["polymarket_market_id", "snapshot_time"])
+                .returning(PolymarketPriceSnapshot.id)
             )
-            result = await self.session.execute(existing_query)
-            existing_times = {row[0] for row in result.fetchall()}
-
-            # Filter out existing snapshots
-            new_snapshot_dicts = [
-                d for d in snapshot_dicts if d["snapshot_time"] not in existing_times
-            ]
-        else:
-            new_snapshot_dicts = []
-
-        # Bulk insert only new snapshots
-        inserted_count = len(new_snapshot_dicts)
-        if new_snapshot_dicts:
-            stmt = insert(PolymarketPriceSnapshot).values(new_snapshot_dicts)
-            await self.session.execute(stmt)
+            inserted_count = len((await self.session.execute(stmt)).all())
 
         skipped_count = len(history) - inserted_count
 

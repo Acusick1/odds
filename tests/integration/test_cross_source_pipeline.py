@@ -182,7 +182,7 @@ def make_pm_price_snapshots(
     base_prob = home_prob - 0.04
     decision_time = commence_time - timedelta(hours=7.5)
     for i in range(4):
-        t = decision_time - timedelta(minutes=90 - i * 30)
+        t = decision_time - timedelta(minutes=105 - i * 30)
         prob = round(base_prob + i * 0.01, 4)
         snapshots.append(
             PolymarketPriceSnapshot(
@@ -190,10 +190,6 @@ def make_pm_price_snapshots(
                 snapshot_time=t,
                 outcome_0_price=prob,
                 outcome_1_price=round(1.0 - prob, 4),
-                best_bid=round(prob - 0.01, 4),
-                best_ask=round(prob + 0.01, 4),
-                spread=0.02,
-                midpoint=prob,
                 volume=1000.0,
                 liquidity=5000.0,
                 fetch_tier="pregame",
@@ -206,10 +202,6 @@ def make_pm_price_snapshots(
             snapshot_time=decision_time,
             outcome_0_price=home_prob,
             outcome_1_price=round(1.0 - home_prob, 4),
-            best_bid=round(home_prob - 0.01, 4),
-            best_ask=round(home_prob + 0.01, 4),
-            spread=0.02,
-            midpoint=home_prob,
             volume=2000.0,
             liquidity=8000.0,
             fetch_tier="pregame",

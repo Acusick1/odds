@@ -119,7 +119,6 @@ def parse_ticker(ticker: str) -> tuple[str, str, date] | None:
 async def match_polymarket_event(
     session: AsyncSession,
     ticker: str,
-    pm_start_date: datetime | None = None,
 ) -> str | None:
     """Find the matching internal Event record for a Polymarket event.
 
@@ -129,7 +128,6 @@ async def match_polymarket_event(
     Args:
         session: Async database session
         ticker: Polymarket ticker (e.g. "nba-dal-mil-2026-01-25")
-        pm_start_date: Unused, kept for backward compatibility
 
     Returns event_id if a confident single match is found, None otherwise.
     Never produces false positives — returns None when uncertain.

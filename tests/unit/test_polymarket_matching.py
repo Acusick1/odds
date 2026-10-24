@@ -147,60 +147,51 @@ class TestMatchPolymarketEvent:
 
     @pytest.mark.asyncio
     async def test_exact_match(self):
-        pm_start = datetime(2026, 1, 25, 2, 0, 0, tzinfo=UTC)
         commence = datetime(2026, 1, 25, 2, 0, 0, tzinfo=UTC)
 
         event = self._make_event("evt_abc123", "Dallas Mavericks", "Milwaukee Bucks", commence)
         session = self._make_session([event])
 
-        result = await match_polymarket_event(session, "nba-dal-mil-2026-01-25", pm_start)
+        result = await match_polymarket_event(session, "nba-dal-mil-2026-01-25")
         assert result == "evt_abc123"
 
     @pytest.mark.asyncio
     async def test_no_matching_events_returns_none(self):
-        pm_start = datetime(2026, 1, 25, 2, 0, 0, tzinfo=UTC)
         session = self._make_session([])
 
-        result = await match_polymarket_event(session, "nba-dal-mil-2026-01-25", pm_start)
+        result = await match_polymarket_event(session, "nba-dal-mil-2026-01-25")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_ambiguous_match_returns_none(self):
         """Two candidates → no match to avoid false positives."""
-        pm_start = datetime(2026, 1, 25, 2, 0, 0, tzinfo=UTC)
         commence = datetime(2026, 1, 25, 2, 0, 0, tzinfo=UTC)
 
         event1 = self._make_event("evt_1", "Dallas Mavericks", "Milwaukee Bucks", commence)
         event2 = self._make_event("evt_2", "Dallas Mavericks", "Milwaukee Bucks", commence)
         session = self._make_session([event1, event2])
 
-        result = await match_polymarket_event(session, "nba-dal-mil-2026-01-25", pm_start)
+        result = await match_polymarket_event(session, "nba-dal-mil-2026-01-25")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_invalid_ticker_returns_none(self):
         session = self._make_session([])
-        result = await match_polymarket_event(
-            session, "not-a-ticker", datetime(2026, 1, 25, tzinfo=UTC)
-        )
+        result = await match_polymarket_event(session, "not-a-ticker")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_unknown_abbreviation_returns_none(self):
         """Ticker with unknown team abbreviation → None."""
         session = self._make_session([])
-        result = await match_polymarket_event(
-            session, "nba-zzz-mil-2026-01-25", datetime(2026, 1, 25, tzinfo=UTC)
-        )
+        result = await match_polymarket_event(session, "nba-zzz-mil-2026-01-25")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_execute_called_once(self):
         """match_polymarket_event issues exactly one DB query for a valid ticker."""
         session = self._make_session([])
-        await match_polymarket_event(
-            session, "nba-dal-mil-2026-01-25", datetime(2026, 1, 25, 2, 0, tzinfo=UTC)
-        )
+        await match_polymarket_event(session, "nba-dal-mil-2026-01-25")
         session.execute.assert_called_once()
 
 
@@ -224,10 +215,7 @@ class TestMatchPolymarketEventDB:
         pglite_async_session.add(event)
         await pglite_async_session.commit()
 
-        pm_start = game_time  # exact match
-        result = await match_polymarket_event(
-            pglite_async_session, "nba-dal-mil-2026-01-25", pm_start
-        )
+        result = await match_polymarket_event(pglite_async_session, "nba-dal-mil-2026-01-25")
         assert result == "test_evt_inside"
 
     @pytest.mark.asyncio
@@ -270,7 +258,5 @@ class TestMatchPolymarketEventDB:
         pglite_async_session.add(event)
         await pglite_async_session.commit()
 
-        result = await match_polymarket_event(
-            pglite_async_session, "nba-dal-mil-2026-01-25", game_time
-        )
+        result = await match_polymarket_event(pglite_async_session, "nba-dal-mil-2026-01-25")
         assert result is None

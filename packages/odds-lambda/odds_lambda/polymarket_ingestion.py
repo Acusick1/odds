@@ -170,7 +170,7 @@ class PolymarketIngestionService:
                             price_1 = prices[token_ids[1]]
 
                             if price_0 is not None and price_1 is not None:
-                                await self._writer.store_price_snapshot(
+                                stored = await self._writer.store_price_snapshot(
                                     market=market,
                                     prices={
                                         "outcome_0_price": price_0,
@@ -179,7 +179,8 @@ class PolymarketIngestionService:
                                     commence_time=event.start_date,
                                     snapshot_time=now,
                                 )
-                                result.price_snapshots_stored += 1
+                                if stored:
+                                    result.price_snapshots_stored += 1
                             else:
                                 logger.warning(
                                     "price_snapshot_skipped_none_price",

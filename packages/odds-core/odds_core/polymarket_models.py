@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import JSON, Column, DateTime, Index
+from sqlalchemy import JSON, Column, DateTime, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
@@ -126,12 +126,6 @@ class PolymarketPriceSnapshot(SQLModel, table=True):
     outcome_0_price: float = Field(description="Outcome 0 implied probability")
     outcome_1_price: float = Field(description="Outcome 1 implied probability")
 
-    # Order book summary
-    best_bid: float | None = Field(default=None, description="Best bid price")
-    best_ask: float | None = Field(default=None, description="Best ask price")
-    spread: float | None = Field(default=None, description="Bid-ask spread")
-    midpoint: float | None = Field(default=None, description="Bid-ask midpoint")
-
     # Volume and liquidity
     volume: float | None = Field(default=None, description="Market volume")
     liquidity: float | None = Field(default=None, description="Market liquidity")
@@ -143,7 +137,7 @@ class PolymarketPriceSnapshot(SQLModel, table=True):
     )
 
     __table_args__ = (
-        Index("ix_pm_price_market_time", "polymarket_market_id", "snapshot_time"),
+        UniqueConstraint("polymarket_market_id", "snapshot_time", name="uq_pm_price_market_time"),
         Index("ix_pm_price_market_tier", "polymarket_market_id", "fetch_tier"),
     )
 

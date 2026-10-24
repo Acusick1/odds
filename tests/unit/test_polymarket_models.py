@@ -171,7 +171,7 @@ class TestPolymarketPriceSnapshot:
         assert snapshot.outcome_1_price == 0.38
 
     def test_optional_fields_default_none(self):
-        """Test optional book summary and tier fields default to None."""
+        """Test optional volume and tier fields default to None."""
         snapshot = PolymarketPriceSnapshot(
             polymarket_market_id=1,
             snapshot_time=datetime.now(UTC),
@@ -179,10 +179,6 @@ class TestPolymarketPriceSnapshot:
             outcome_1_price=0.45,
         )
 
-        assert snapshot.best_bid is None
-        assert snapshot.best_ask is None
-        assert snapshot.spread is None
-        assert snapshot.midpoint is None
         assert snapshot.volume is None
         assert snapshot.liquidity is None
         assert snapshot.fetch_tier is None
