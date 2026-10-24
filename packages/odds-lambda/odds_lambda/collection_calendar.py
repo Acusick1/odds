@@ -77,6 +77,13 @@ async def fixture_calendar(
     """
     if sport_key == MLB_SPORT_KEY:
         return await _mlb_schedule_calendar(session, now=now, horizon=horizon)
+    return await event_calendar(session, sport_key, now=now, horizon=horizon)
+
+
+async def event_calendar(
+    session: AsyncSession, sport_key: str, *, now: datetime, horizon: timedelta
+) -> FixtureCalendar:
+    """Upcoming SCHEDULED ``events`` of a sport, whichever collector created them."""
     scheduled = (
         Event.sport_key == sport_key,
         Event.status == EventStatus.SCHEDULED,

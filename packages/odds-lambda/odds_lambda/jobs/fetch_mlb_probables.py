@@ -17,12 +17,13 @@ populate rate (D+0 fully populated, D+1..D+3 partial, D+4 onwards empty).
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import structlog
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 
+from odds_lambda.collection_calendar import EmptyCollectionError, event_calendar
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher, dates_for_window
 from odds_lambda.scheduling.jobs import JobContext
 from odds_lambda.storage.mlb_pitcher_writer import MlbPitcherWriter
@@ -35,6 +36,7 @@ SPORT_KEY = "baseball_mlb"
 # Core UTC window: today + next 3 days. ``dates_for_window`` pads ±1
 # calendar day to absorb the ET-anchored MLBAM ``date=`` parameter.
 _LOOKAHEAD_HOURS = 24 * 3
+_LOOKAHEAD = timedelta(hours=_LOOKAHEAD_HOURS)
 
 
 async def main(ctx: JobContext) -> None:
@@ -76,6 +78,7 @@ async def _fetch_and_store(now: datetime, target_dates: list[date]) -> int:
 
     if not records:
         logger.warning("fetch_mlb_probables_empty", date_count=len(target_dates))
+        await _raise_if_schedule_unexpectedly_empty(now)
         return 0
 
     async with async_session_maker() as session:
@@ -84,6 +87,21 @@ async def _fetch_and_store(now: datetime, target_dates: list[date]) -> int:
         await session.commit()
 
     return count
+
+
+async def _raise_if_schedule_unexpectedly_empty(now: datetime) -> None:
+    """Raise ``EmptyCollectionError`` if MLB events are scheduled in the window the API returned empty.
+
+    An empty fetch leaves the MLB stale checks without a calendar.
+    """
+    async with async_session_maker() as session:
+        calendar = await event_calendar(session, SPORT_KEY, now=now, horizon=_LOOKAHEAD)
+    if calendar.kickoffs_in_horizon:
+        raise EmptyCollectionError(
+            f"MLB Stats API returned no games with "
+            f"{calendar.kickoffs_in_horizon} {SPORT_KEY} event(s) scheduled within {_LOOKAHEAD} "
+            f"(next kickoff {calendar.next_kickoff})"
+        )
 
 
 if __name__ == "__main__":

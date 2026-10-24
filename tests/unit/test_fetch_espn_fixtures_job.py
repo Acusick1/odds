@@ -54,7 +54,7 @@ def _fetcher(
 @pytest.fixture
 def calendar() -> Iterator[AsyncMock]:
     with (
-        patch.object(fetch_espn_fixtures, "fixture_calendar", new_callable=AsyncMock) as mock,
+        patch.object(fetch_espn_fixtures, "event_calendar", new_callable=AsyncMock) as mock,
         patch.object(fetch_espn_fixtures, "async_session_maker", MagicMock()),
     ):
         yield mock
