@@ -209,7 +209,7 @@ class TestTradeToDict:
         trade.market = "h2h"
         trade.selection = "home"
         trade.bookmaker = "bet365"
-        trade.odds = -110
+        trade.price_decimal = 1.91
         trade.stake = 10.0
         trade.reasoning = "good value"
         trade.confidence = 0.8
@@ -219,10 +219,16 @@ class TestTradeToDict:
         trade.settled_at = None
         trade.result = None
         trade.pnl = None
+        trade.candidate_name = "cand"
+        trade.candidate_version = 2
+        trade.git_sha = "abc123"
 
         result = _trade_to_dict(trade)
         assert result["id"] == 1
-        assert result["odds"] == -110
+        assert result["price_decimal"] == 1.91
+        assert result["candidate_name"] == "cand"
+        assert result["candidate_version"] == 2
+        assert result["git_sha"] == "abc123"
         assert result["result"] is None
         assert result["settled_at"] is None
 
@@ -235,7 +241,7 @@ class TestTradeToDict:
         trade.market = "h2h"
         trade.selection = "home"
         trade.bookmaker = "bet365"
-        trade.odds = -110
+        trade.price_decimal = 1.91
         trade.stake = 10.0
         trade.reasoning = None
         trade.confidence = None
@@ -245,6 +251,9 @@ class TestTradeToDict:
         trade.settled_at = datetime(2026, 4, 12, 17, 0, tzinfo=UTC)
         trade.result = TradeResult.WIN
         trade.pnl = 9.09
+        trade.candidate_name = None
+        trade.candidate_version = None
+        trade.git_sha = None
 
         result = _trade_to_dict(trade)
         assert result["result"] == "win"
@@ -602,7 +611,7 @@ class TestPaperBetValidation:
                 event_id="evt-1",
                 market="h2h",
                 selection="home",
-                odds=-110,
+                price_decimal=1.91,
                 stake=10.0,
             )
             assert "error" in result
@@ -626,11 +635,84 @@ class TestPaperBetValidation:
                 event_id="nonexistent",
                 market="h2h",
                 selection="home",
-                odds=-110,
+                price_decimal=1.91,
                 stake=10.0,
             )
             assert "error" in result
             assert "nonexistent" in result["error"]
+
+
+class TestPaperBetCandidate:
+    @staticmethod
+    def _session_with_scheduled_event() -> AsyncMock:
+        event = MagicMock(spec=Event)
+        event.status = EventStatus.SCHEDULED
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = event
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=result)
+        return session
+
+    @pytest.mark.asyncio
+    async def test_candidate_and_price_reach_place_trade(self) -> None:
+        from odds_mcp.server import paper_bet
+
+        session = self._session_with_scheduled_event()
+        placed = MagicMock(spec=PaperTrade)
+        placed.id = 1
+        placed.placed_at = datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
+        placed.settled_at = None
+        placed.result = None
+
+        with (
+            patch("odds_mcp.server.async_session_maker") as maker,
+            patch("odds_mcp.server.place_trade", AsyncMock(return_value=placed)) as place,
+        ):
+            maker.return_value.__aenter__ = AsyncMock(return_value=session)
+            maker.return_value.__aexit__ = AsyncMock()
+            result = await paper_bet(
+                event_id="evt-1",
+                market="1x2",
+                selection="home",
+                price_decimal=2.2,
+                stake=10.0,
+                bankroll=1000.0,
+                candidate_name="cand",
+                candidate_version=2,
+            )
+
+        assert result["status"] == "placed"
+        kwargs = place.await_args.kwargs
+        assert kwargs["price_decimal"] == 2.2
+        assert kwargs["candidate_name"] == "cand"
+        assert kwargs["candidate_version"] == 2
+
+    @pytest.mark.asyncio
+    async def test_registry_rejection_comes_back_as_error(self) -> None:
+        from odds_mcp.server import paper_bet
+
+        session = self._session_with_scheduled_event()
+        with (
+            patch("odds_mcp.server.async_session_maker") as maker,
+            patch(
+                "odds_mcp.server.place_trade",
+                AsyncMock(side_effect=ValueError("Candidate 'x' is not in the registry")),
+            ),
+        ):
+            maker.return_value.__aenter__ = AsyncMock(return_value=session)
+            maker.return_value.__aexit__ = AsyncMock()
+            result = await paper_bet(
+                event_id="evt-1",
+                market="1x2",
+                selection="home",
+                price_decimal=2.2,
+                stake=10.0,
+                bankroll=1000.0,
+                candidate_name="x",
+                candidate_version=1,
+            )
+
+        assert "not in the registry" in result["error"]
 
 
 class TestFindRetailEdges:

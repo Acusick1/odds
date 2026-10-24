@@ -47,7 +47,7 @@ async def _list_trades(settled: bool, limit: int) -> None:
             table.add_column("Event")
             table.add_column("Selection")
             table.add_column("Bookmaker")
-            table.add_column("Odds", justify="right")
+            table.add_column("Price", justify="right")
             table.add_column("Stake", justify="right")
             if settled:
                 table.add_column("Result")
@@ -59,7 +59,7 @@ async def _list_trades(settled: bool, limit: int) -> None:
                     trade.event_id[:12] + "...",
                     trade.selection,
                     trade.bookmaker,
-                    str(trade.odds),
+                    f"{trade.price_decimal:.2f}",
                     f"{trade.stake:.2f}",
                 ]
                 if settled:

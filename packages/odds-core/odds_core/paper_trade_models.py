@@ -6,10 +6,11 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, DateTime, Index, text
+from sqlalchemy import CheckConstraint, Column, DateTime, Float, Index, text
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
+from odds_core.odds_math import decimal_to_american
 
 if TYPE_CHECKING:
     from odds_analytics.backtesting.models import BetRecord
@@ -38,8 +39,16 @@ class PaperTrade(SQLModel, table=True):
     market: str = Field(description="Market type: h2h")
     selection: str = Field(description="Selection: home, draw, or away")
     bookmaker: str = Field(index=True, description="Bookmaker key")
-    odds: int = Field(description="American odds at time of placement")
+    price_decimal: float = Field(
+        sa_column=Column(Float, nullable=False),
+        description="Decimal price taken at placement (e.g. 1.91, 2.5)",
+    )
     stake: float = Field(description="Stake amount")
+
+    # Candidate that placed the bet; both set or neither, and null before the registry existed
+    candidate_name: str | None = Field(default=None, index=True)
+    candidate_version: int | None = Field(default=None)
+    git_sha: str | None = Field(default=None, description="Commit the bet was placed from")
 
     # Agent reasoning
     reasoning: str | None = Field(default=None, description="Why this bet was placed")
@@ -72,6 +81,11 @@ class PaperTrade(SQLModel, table=True):
             "ix_paper_trades_unsettled", "settled_at", postgresql_where=text("settled_at IS NULL")
         ),
         Index("ix_paper_trades_event_selection", "event_id", "selection"),
+        CheckConstraint("price_decimal > 1.0", name="ck_paper_trades_price_decimal_gt_one"),
+        CheckConstraint(
+            "(candidate_name IS NULL) = (candidate_version IS NULL)",
+            name="ck_paper_trades_candidate_pair",
+        ),
     )
 
     def to_bet_record(self, event: Event) -> BetRecord:
@@ -88,7 +102,7 @@ class PaperTrade(SQLModel, table=True):
             market=self.market,
             outcome=self.selection,
             bookmaker=self.bookmaker,
-            odds=self.odds,
+            odds=decimal_to_american(self.price_decimal),
             line=None,
             decision_time=self.placed_at,
             stake=self.stake,

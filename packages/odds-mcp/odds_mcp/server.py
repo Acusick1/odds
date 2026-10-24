@@ -153,7 +153,7 @@ def _trade_to_dict(trade: PaperTrade) -> dict[str, Any]:
         "market": trade.market,
         "selection": trade.selection,
         "bookmaker": trade.bookmaker,
-        "odds": trade.odds,
+        "price_decimal": trade.price_decimal,
         "stake": trade.stake,
         "reasoning": trade.reasoning,
         "confidence": trade.confidence,
@@ -163,6 +163,9 @@ def _trade_to_dict(trade: PaperTrade) -> dict[str, Any]:
         "settled_at": trade.settled_at.isoformat() if trade.settled_at else None,
         "result": trade.result.value if trade.result else None,
         "pnl": trade.pnl,
+        "candidate_name": trade.candidate_name,
+        "candidate_version": trade.candidate_version,
+        "git_sha": trade.git_sha,
     }
 
 
@@ -574,12 +577,14 @@ async def paper_bet(
     event_id: str,
     market: str,
     selection: str,
-    odds: int,
+    price_decimal: float,
     stake: float,
     reasoning: str = "",
     bookmaker: str = "best_available",
     confidence: float | None = None,
     bankroll: float | None = None,
+    candidate_name: str | None = None,
+    candidate_version: int | None = None,
 ) -> dict[str, Any]:
     """Place a paper (simulated) bet on an event.
 
@@ -587,12 +592,14 @@ async def paper_bet(
         event_id: Event identifier.
         market: Market type (e.g. "h2h").
         selection: "home", "draw", or "away".
-        odds: American odds at time of placement (e.g. -110, +150).
+        price_decimal: Decimal price at time of placement (e.g. 1.91, 2.50).
         stake: Stake amount.
         reasoning: Why this bet is being placed.
         bookmaker: Bookmaker key (default "best_available").
         confidence: Agent confidence score (0.0 to 1.0, optional).
         bankroll: Current bankroll. If omitted, computed from portfolio state.
+        candidate_name: Registered candidate placing the bet (with candidate_version).
+        candidate_version: The candidate's current version.
 
     Returns:
         Dict with the placed trade details.
@@ -617,11 +624,13 @@ async def paper_bet(
                 market=market,
                 selection=selection,
                 bookmaker=bookmaker,
-                odds=odds,
+                price_decimal=price_decimal,
                 stake=stake,
                 bankroll=bankroll,
                 reasoning=reasoning or None,
                 confidence=confidence,
+                candidate_name=candidate_name,
+                candidate_version=candidate_version,
             )
             await session.commit()
         except ValueError as e:
@@ -644,7 +653,7 @@ async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
         initial_bankroll: Starting bankroll for ROI calculation.
 
     Returns:
-        Dict with portfolio metrics and list of open trades.
+        Dict with portfolio metrics, list of open trades.
     """
     async with async_session_maker() as session:
         portfolio = await get_portfolio_summary(session, initial_bankroll=initial_bankroll)

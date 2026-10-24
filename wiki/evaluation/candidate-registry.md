@@ -23,7 +23,7 @@ The registry is the `candidates/` directory: one `<name>.yaml` file per candidat
 | `kind: mechanical`, `rule` and params | `odds_core.candidates.MechanicalCandidate` | `rule` names a rule function. The parameters are a free JSON mapping here, and the rule validates them (#609) |
 | `kind: agent` | `odds_core.candidates.AgentCandidate` | No further fields; the agent's prompts and model are its definition ([agent run](../agent/agent-run-job.md)) |
 
-`odds_core.candidates.load_candidates` raises a `ValueError` naming the file when a file fails validation or its `name` differs from its file stem, and when a sport has more than one agent candidate whose status is active or promoted. Agents for one sport share `packages/odds-mcp/agents/common.md` and the sport's `base.md`, so two live agents for one sport could not differ. A killed agent does not count, so its replacement can be added.
+`odds_core.candidates.load_candidates` raises a `ValueError` naming the file when a file fails validation or its `name` differs from its file stem, and when a sport has more than one agent candidate whose status is active or promoted. Agents for one sport share `packages/odds-mcp/agents/common.md` and the sport's `base.md`, so two live agents for one sport would run the same prompts. A killed agent does not count, so its replacement can be added.
 
 A change of status goes through a pull request. The version is a strict positive integer (`"3"` is rejected), bumped whenever the rule, parameters or model change ([versioning](../foundations/goal-and-strategy.md#candidates)).
 

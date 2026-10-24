@@ -280,7 +280,7 @@ class TestRepointMigrationUpgrade:
             market="h2h",
             selection="home",
             bookmaker="bet365",
-            odds=-110,
+            price_decimal=1.91,
             stake=10.0,
             bankroll_before=1000.0,
         )
@@ -340,7 +340,7 @@ class TestRepointMigrationUpgrade:
             market="h2h",
             selection="home",
             bookmaker="bet365",
-            odds=-120,
+            price_decimal=1.83,
             stake=15.0,
             bankroll_before=1000.0,
         )

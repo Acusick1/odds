@@ -117,3 +117,8 @@ def calculate_profit_from_odds(stake: float, american_odds: int, won: bool) -> f
         return -stake
     decimal_odds = american_to_decimal(american_odds)
     return stake * decimal_odds - stake
+
+
+def calculate_profit_from_decimal(stake: float, price_decimal: float, won: bool) -> float:
+    """Profit (positive) or loss (negative) for a bet at a decimal price."""
+    return stake * (price_decimal - 1) if won else -stake

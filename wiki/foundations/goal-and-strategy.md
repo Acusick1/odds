@@ -44,10 +44,14 @@ The suspended bet365 CLV model is not a candidate. Its predictions are an input 
 
 ## What exists today
 
-Most of the workflow's tooling does not exist (#608). The [candidate registry](../evaluation/candidate-registry.md) does, with no candidate in it. Missing:
+Most of the workflow's tooling does not exist (#608). What does:
 
-- `odds_core.paper_trade_models.PaperTrade` has no field for the candidate or its version, and stores no close (#604). MLB has no close defined.
-- Nothing runs a mechanical candidate; only the agent can place paper trades, through `odds_mcp.server.paper_bet` (#609).
+- The [candidate registry](../evaluation/candidate-registry.md), with no candidate in it.
+- The candidate, its version and the git commit on each paper trade (`odds_core.paper_trade_models.PaperTrade`), with the candidate checked against the registry when the bet is placed through `odds_mcp.server.paper_bet` ([paper trading](../agent/paper-trading.md#candidate-fields)).
+- The close, computed from stored snapshots when a report runs, so a trade stores none. MLB has no close defined, so its trades are reported without EV.
+- `odds candidates report`, which gives the checkpoint verdict.
+
+Missing: nothing runs a mechanical candidate; only the agent can place paper trades (#609).
 
 ## Related
 

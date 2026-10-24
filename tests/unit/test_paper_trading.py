@@ -1,8 +1,10 @@
 """Tests for paper trade model and settlement logic."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
+import yaml
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_lambda.paper_trading import (
@@ -11,6 +13,119 @@ from odds_lambda.paper_trading import (
     place_trade,
     settle_trades,
 )
+
+
+def _write_candidate(directory: Path, **fields: object) -> None:
+    data = {
+        "name": "cand",
+        "description": "d",
+        "kind": "agent",
+        "sport": "soccer_epl",
+        "version": 2,
+        "issue": 1,
+        "start_date": (datetime.now(UTC) - timedelta(days=1)).date().isoformat(),
+        "status": "active",
+        **fields,
+    }
+    (directory / f"{data['name']}.yaml").write_text(yaml.safe_dump(data))
+
+
+class TestPlaceTradeCandidate:
+    @pytest.fixture
+    async def event(self, test_session) -> Event:
+        event = Event(
+            id="evt-c",
+            sport_key="soccer_epl",
+            sport_title="EPL",
+            commence_time=datetime(2026, 4, 15, 15, 0, tzinfo=UTC),
+            home_team="Arsenal",
+            away_team="Chelsea",
+        )
+        test_session.add(event)
+        await test_session.flush()
+        return event
+
+    @pytest.fixture
+    def registry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        monkeypatch.setattr("odds_lambda.paper_trading.candidates_dir", lambda: tmp_path)
+        return tmp_path
+
+    @staticmethod
+    async def _place(session, **candidate: object) -> PaperTrade:
+        return await place_trade(
+            session,
+            event_id="evt-c",
+            market="1x2",
+            selection="home",
+            bookmaker="bet365",
+            price_decimal=2.2,
+            stake=10.0,
+            bankroll=1000.0,
+            **candidate,  # type: ignore[arg-type]
+        )
+
+    @pytest.mark.asyncio
+    async def test_valid_candidate_is_recorded(self, test_session, event, registry) -> None:
+        _write_candidate(registry)
+        trade = await self._place(test_session, candidate_name="cand", candidate_version=2)
+        assert (trade.candidate_name, trade.candidate_version) == ("cand", 2)
+
+    @pytest.mark.asyncio
+    async def test_no_candidate_is_allowed(self, test_session, event, registry) -> None:
+        trade = await self._place(test_session)
+        assert trade.candidate_name is None and trade.candidate_version is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("fields", "call", "message"),
+        [
+            ({}, {"candidate_name": "other", "candidate_version": 2}, "not in the registry"),
+            (
+                {"status": "killed"},
+                {"candidate_name": "cand", "candidate_version": 2},
+                "not active",
+            ),
+            (
+                {"status": "promoted"},
+                {"candidate_name": "cand", "candidate_version": 2},
+                "not active",
+            ),
+            (
+                {"start_date": (datetime.now(UTC) + timedelta(days=2)).date().isoformat()},
+                {"candidate_name": "cand", "candidate_version": 2},
+                "starts on",
+            ),
+            ({}, {"candidate_name": "cand", "candidate_version": 1}, "version 2, not 1"),
+            ({}, {"candidate_name": "cand"}, "together"),
+            ({}, {"candidate_version": 2}, "together"),
+        ],
+    )
+    async def test_invalid_candidate_is_rejected(
+        self, test_session, event, registry, fields, call, message
+    ) -> None:
+        _write_candidate(registry, **fields)
+        with pytest.raises(ValueError, match=message):
+            await self._place(test_session, **call)
+
+    @pytest.mark.asyncio
+    async def test_git_sha_is_recorded(self, test_session, event, registry, monkeypatch) -> None:
+        monkeypatch.setattr("odds_lambda.paper_trading.current_git_sha", lambda: "abc123")
+        trade = await self._place(test_session)
+        assert trade.git_sha == "abc123"
+
+    @pytest.mark.asyncio
+    async def test_price_must_exceed_one(self, test_session, event, registry) -> None:
+        with pytest.raises(ValueError, match="exceed 1.0"):
+            await place_trade(
+                test_session,
+                event_id="evt-c",
+                market="1x2",
+                selection="home",
+                bookmaker="bet365",
+                price_decimal=1.0,
+                stake=10.0,
+                bankroll=1000.0,
+            )
 
 
 class TestPlaceTrade:
@@ -33,7 +148,7 @@ class TestPlaceTrade:
             market="h2h",
             selection="home",
             bookmaker="bet365",
-            odds=-150,
+            price_decimal=1.6,
             stake=50.0,
             bankroll=1000.0,
             reasoning="Value on home side",
@@ -43,7 +158,7 @@ class TestPlaceTrade:
         assert trade.id is not None
         assert trade.event_id == "evt-001"
         assert trade.selection == "home"
-        assert trade.odds == -150
+        assert trade.price_decimal == 1.6
         assert trade.stake == 50.0
         assert trade.bankroll_before == 1000.0
         assert trade.settled_at is None
@@ -57,7 +172,7 @@ class TestPlaceTrade:
                 market="h2h",
                 selection="home",
                 bookmaker="bet365",
-                odds=-150,
+                price_decimal=1.6,
                 stake=2000.0,
                 bankroll=1000.0,
             )
@@ -71,7 +186,7 @@ class TestPlaceTrade:
                 market="h2h",
                 selection="over",
                 bookmaker="bet365",
-                odds=-150,
+                price_decimal=1.6,
                 stake=50.0,
                 bankroll=1000.0,
             )
@@ -85,7 +200,7 @@ class TestPlaceTrade:
                 market="h2h",
                 selection="home",
                 bookmaker="bet365",
-                odds=-150,
+                price_decimal=1.6,
                 stake=0,
                 bankroll=1000.0,
             )
@@ -117,7 +232,7 @@ class TestPlaceTradeMarkets:
             market="h2h",
             selection="draw",
             bookmaker="bet365",
-            odds=300,
+            price_decimal=4.0,
             stake=50.0,
             bankroll=1000.0,
         )
@@ -136,7 +251,7 @@ class TestPlaceTradeMarkets:
                 market="totals",
                 selection="home",
                 bookmaker="bet365",
-                odds=-110,
+                price_decimal=1.9,
                 stake=50.0,
                 bankroll=1000.0,
             )
@@ -162,7 +277,7 @@ def _trade(event_id: str, market: str, selection: str) -> PaperTrade:
         market=market,
         selection=selection,
         bookmaker="bet365",
-        odds=200,
+        price_decimal=3.0,
         stake=100.0,
         bankroll_before=1000.0,
     )
@@ -245,7 +360,7 @@ class TestSettleTrades:
             market="h2h",
             selection="home",
             bookmaker="bet365",
-            odds=150,
+            price_decimal=2.5,
             stake=100.0,
             bankroll_before=1000.0,
         )
@@ -280,7 +395,7 @@ class TestSettleTrades:
             market="h2h",
             selection="home",
             bookmaker="bet365",
-            odds=150,
+            price_decimal=2.5,
             stake=100.0,
             bankroll_before=1000.0,
         )
@@ -313,7 +428,7 @@ class TestSettleTrades:
             market="h2h",
             selection="home",
             bookmaker="bet365",
-            odds=-150,
+            price_decimal=1.6,
             stake=100.0,
             bankroll_before=1000.0,
         )
@@ -346,7 +461,7 @@ class TestSettleTrades:
             market="h2h",
             selection="draw",
             bookmaker="bet365",
-            odds=250,
+            price_decimal=3.5,
             stake=50.0,
             bankroll_before=1000.0,
         )
@@ -377,7 +492,7 @@ class TestSettleTrades:
             market="h2h",
             selection="home",
             bookmaker="bet365",
-            odds=-110,
+            price_decimal=1.9,
             stake=50.0,
             bankroll_before=1000.0,
         )
@@ -414,7 +529,7 @@ class TestPortfolioQueries:
             market="h2h",
             selection="away",
             bookmaker="betway",
-            odds=200,
+            price_decimal=3.0,
             stake=25.0,
             bankroll_before=975.0,
         )
@@ -444,7 +559,7 @@ class TestToBetRecord:
             market="h2h",
             selection="home",
             bookmaker="bet365",
-            odds=-150,
+            price_decimal=1 + 2 / 3,
             stake=100.0,
             bankroll_before=1000.0,
             bankroll_after=1066.67,
