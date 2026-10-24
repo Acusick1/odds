@@ -27,7 +27,7 @@ status: stable
 
 | Module | Class | Notes |
 |---|---|---|
-| `odds_lambda.storage.writers` / `odds_lambda.storage.readers` | [`odds_lambda.storage.writers.OddsWriter`](odds-writer.md) / [`odds_lambda.storage.readers.OddsReader`](odds-reader.md) | Events (status and scores, live-twin merges), snapshots, odds (stored as decimal prices), fetch logs, including their API quota, and data-quality logs |
+| `odds_lambda.storage.writers` / `odds_lambda.storage.readers` | [`odds_lambda.storage.writers.OddsWriter`](odds-writer.md) / [`odds_lambda.storage.readers.OddsReader`](odds-reader.md) | Events (status and scores, live-twin merges, MLB `gamePk`s), snapshots, odds (stored as decimal prices), fetch logs, including their API quota, and data-quality logs |
 | `odds_lambda.storage.validators` | `odds_lambda.storage.validators.OddsValidator` | [Odds validation](odds-validator.md) (zero-margin books skip the vig floor; prices are checked as decimals) |
 | `odds_lambda.storage.tier_validator` | `odds_lambda.storage.tier_validator.TierCoverageValidator` | [Coverage and completeness checks](coverage-checks.md) |
 | `odds_lambda.storage.polymarket_writer` / `odds_lambda.storage.polymarket_reader` | `odds_lambda.storage.polymarket_writer.PolymarketWriter` | [Polymarket](../collection/polymarket.md) (price snapshot inserts skip an existing market and time) |
@@ -38,7 +38,7 @@ status: stable
 
 ## Commit contract
 
-- `odds_lambda.storage.writers.OddsWriter` never calls `flush()` or `commit()`. It only adds, deletes or executes statements, and `odds_lambda.storage.event_merge.EventMerger` also leaves committing to its caller for its foreign-key and snapshot-timing `UPDATE`s and its deletes; the caller commits, as `odds_lambda.ingestion.OddsIngestionService.ingest_sport` does, once per event.
+- `odds_lambda.storage.writers.OddsWriter` never calls `commit()`. It only adds, deletes or executes statements, except that `odds_lambda.storage.writers.OddsWriter.find_or_create_event` writes an MLB event's `gamePk` inside a savepoint, which flushes ([OddsWriter](odds-writer.md#find_or_create_event)). `odds_lambda.storage.event_merge.EventMerger` also leaves committing to its caller for its foreign-key and snapshot-timing `UPDATE`s and its deletes, flushing only to delete a duplicate before the kept event takes its `gamePk`; the caller commits, as `odds_lambda.ingestion.OddsIngestionService.ingest_sport` does, once per event.
 - Every per-source writer except `odds_lambda.storage.writers.OddsWriter` and the Polymarket snapshot/log methods flushes after its bulk upsert (for example `odds_lambda.storage.injury_writer.InjuryWriter.upsert_injury_reports`) but still does not commit.
 - Each unit of work gets its own session, never one shared across tasks ([Databases and environments](../foundations/databases-and-environments.md)).
 

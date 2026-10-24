@@ -21,6 +21,14 @@ HISTORICAL_MATCH_WINDOW = timedelta(hours=24)
 SEASON_START_MONTH = 8
 
 
+class ConflictingGamePks(ValueError):
+    """Events holding different MLB ``gamePk``s are different games and are never merged."""
+
+
+def _game_pks(events: Sequence[Event]) -> set[int]:
+    return {e.mlb_game_pk for e in events if e.mlb_game_pk is not None}
+
+
 @dataclass(frozen=True)
 class MergeReport:
     kept_id: str
@@ -67,10 +75,21 @@ async def find_match_id(
     sport_key: str,
 ) -> str | None:
     """The canonical event within ``EVENT_MATCH_WINDOW``. Read-only."""
-    events = await _candidates(
+    events = await find_match_candidates(session, home_team, away_team, commence_time, sport_key)
+    return canonical_event_id([e.id for e in events]) if events else None
+
+
+async def find_match_candidates(
+    session: AsyncSession,
+    home_team: str,
+    away_team: str,
+    commence_time: datetime,
+    sport_key: str,
+) -> list[Event]:
+    """Every event of the same sport and teams within ``EVENT_MATCH_WINDOW``. Read-only."""
+    return await _candidates(
         session, home_team, away_team, commence_time, EVENT_MATCH_WINDOW, sport_key
     )
-    return canonical_event_id([e.id for e in events]) if events else None
 
 
 async def find_historical_match_id(
@@ -106,14 +125,32 @@ async def find_historical_match_id(
     return None
 
 
+async def retime_snapshots(session: AsyncSession, event_id: str, commence_time: datetime) -> int:
+    """Recompute ``hours_until_commence`` and ``fetch_tier`` of an event's snapshots against
+    ``commence_time``. Flushes; returns the number of snapshots re-timed."""
+    snapshots = (
+        (await session.execute(select(OddsSnapshot).where(OddsSnapshot.event_id == event_id)))
+        .scalars()
+        .all()
+    )
+    commence = ensure_utc(commence_time)
+    for snapshot in snapshots:
+        snapshot_time = ensure_utc(snapshot.snapshot_time)
+        snapshot.hours_until_commence = calculate_hours_until_commence(snapshot_time, commence)
+        snapshot.fetch_tier = calculate_tier_from_timestamps(snapshot_time, commence).value
+    await session.flush()
+    return len(snapshots)
+
+
 class EventMerger:
     """The one way to collapse several events for one match into a single event.
 
     Every ``event_id`` foreign key moves to the kept event, results the kept
     event lacks are carried over, and the duplicates are deleted. The kept
     event keeps its own commence time: it is the best source, and the Odds API
-    id is kept because score and status jobs match on it. Runs in the caller's
-    transaction.
+    id is kept because score and status jobs match on it. The kept event takes
+    a duplicate's ``mlb_game_pk`` when it has none; events holding different
+    ``gamePk``s raise ``ConflictingGamePks``. Runs in the caller's transaction.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -133,18 +170,30 @@ class EventMerger:
     async def find_twin_groups(
         self, sport_key: str | None = None, window: timedelta = EVENT_MATCH_WINDOW
     ) -> list[list[Event]]:
-        groups: list[list[Event]] = []
+        """Same-match events within ``window`` of the first, leaving out clusters that hold
+        different ``gamePk``s: those are separate games (a doubleheader) and are logged."""
+        clusters: list[list[Event]] = []
         for events in (await self._events_by_match(sport_key)).values():
             cluster = [events[0]]
             for event in events[1:]:
                 if event.commence_time - cluster[0].commence_time <= window:
                     cluster.append(event)
                     continue
-                if len(cluster) > 1:
-                    groups.append(cluster)
+                clusters.append(cluster)
                 cluster = [event]
-            if len(cluster) > 1:
-                groups.append(cluster)
+            clusters.append(cluster)
+        groups: list[list[Event]] = []
+        for cluster in clusters:
+            if len(cluster) < 2:
+                continue
+            if len(_game_pks(cluster)) > 1:
+                logger.warning(
+                    "twin_group_conflicting_game_pks",
+                    event_ids=[e.id for e in cluster],
+                    game_pks=sorted(_game_pks(cluster)),
+                )
+                continue
+            groups.append(cluster)
         return groups
 
     async def find_repeated_fixtures(self, sport_key: str) -> list[list[Event]]:
@@ -182,6 +231,12 @@ class EventMerger:
         return await self.merge(by_id[keep_id], duplicates)
 
     async def merge(self, keep: Event, duplicates: Sequence[Event]) -> MergeReport:
+        game_pks = _game_pks([keep, *duplicates])
+        if len(game_pks) > 1:
+            raise ConflictingGamePks(
+                f"refusing to merge {[d.id for d in duplicates]} into {keep.id}: "
+                f"they hold different MLB gamePks {sorted(game_pks)}"
+            )
         rows_moved: dict[str, int] = {}
         for duplicate in duplicates:
             await self._rebase_snapshot_timing(duplicate, keep)
@@ -191,6 +246,10 @@ class EventMerger:
                 rows_moved[table] = rows_moved.get(table, 0) + count
             self._carry_result(keep, duplicate)
             await self.session.delete(duplicate)
+        if keep.mlb_game_pk is None and game_pks:
+            # The duplicate's row must be gone before the kept event takes its unique gamePk.
+            await self.session.flush()
+            keep.mlb_game_pk = game_pks.pop()
         report = MergeReport(keep.id, tuple(d.id for d in duplicates), rows_moved)
         logger.info(
             "events_merged",
@@ -204,21 +263,7 @@ class EventMerger:
         """Recompute moved snapshots' hours and tier against the kept event's kick-off."""
         if ensure_utc(duplicate.commence_time) == ensure_utc(keep.commence_time):
             return
-        snapshots = (
-            (
-                await self.session.execute(
-                    select(OddsSnapshot).where(OddsSnapshot.event_id == duplicate.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        commence = ensure_utc(keep.commence_time)
-        for snapshot in snapshots:
-            snapshot_time = ensure_utc(snapshot.snapshot_time)
-            snapshot.hours_until_commence = calculate_hours_until_commence(snapshot_time, commence)
-            snapshot.fetch_tier = calculate_tier_from_timestamps(snapshot_time, commence).value
-        await self.session.flush()
+        await retime_snapshots(self.session, duplicate.id, keep.commence_time)
 
     @staticmethod
     def _carry_result(keep: Event, duplicate: Event) -> None:

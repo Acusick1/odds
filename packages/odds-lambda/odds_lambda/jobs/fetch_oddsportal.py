@@ -32,6 +32,14 @@ from odds_lambda.collection_calendar import (
     decide_collection_run,
     require_rows_for_fixtures,
 )
+from odds_lambda.live_events import (
+    DroppedGame,
+    LiveEventFinder,
+    SkipReason,
+    alert_dropped_games,
+    count_dropped,
+)
+from odds_lambda.mlb_game_resolver import GameRow
 from odds_lambda.oddsportal_adapter import MatchOdds, convert_market
 from odds_lambda.oddsportal_client import OddsPortalClient, OddsPortalError
 from odds_lambda.scheduling.decision import CadenceConfig, ScheduleDecision
@@ -120,8 +128,17 @@ class IngestionStats:
     matches_converted: int = 0
     events_matched: int = 0
     events_created: int = 0
+    dropped_games: list[DroppedGame] = field(default_factory=list)
     snapshots_stored: int = 0
     errors: list[str] = field(default_factory=list)
+
+    @property
+    def games_unresolved(self) -> int:
+        return count_dropped(self.dropped_games, SkipReason.UNRESOLVED)
+
+    @property
+    def games_skipped_schedule_unavailable(self) -> int:
+        return count_dropped(self.dropped_games, SkipReason.SCHEDULE_UNAVAILABLE)
 
     @property
     def all_listed_started(self) -> bool:
@@ -137,6 +154,10 @@ class LeagueScrape:
     upcoming_listed: int = 0
     latest_listed_start: datetime | None = None
     errors: list[str] = field(default_factory=list)
+
+
+def _game_row(match: MatchOdds) -> GameRow:
+    return GameRow(match.home_team, match.away_team, match.match_date)
 
 
 async def scrape_league(spec: LeagueSpec) -> LeagueScrape:
@@ -224,18 +245,23 @@ async def ingest_league(
     scraped_date = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M")
     api_request_id = f"{LIVE_REQUEST_ID_PREFIX}{scraped_date}"
 
+    finder = await LiveEventFinder.for_run(
+        spec.sport_key, spec.sport_title, (_game_row(m) for m in all_converted)
+    )
+    if finder.schedule_unavailable:
+        stats.errors.append("MLB schedule unavailable: no new events created")
+    dropped: dict[GameRow, DroppedGame] = {}
+
     async with async_session_maker() as session:
         writer = OddsWriter(session)
 
         for match in all_converted:
             try:
-                event_id, created = await writer.find_or_create_event(
-                    home_team=match.home_team,
-                    away_team=match.away_team,
-                    match_date=match.match_date,
-                    sport_key=spec.sport_key,
-                    sport_title=spec.sport_title,
-                )
+                found = await finder.find_or_create(writer, _game_row(match))
+                if isinstance(found, DroppedGame):
+                    dropped[found.game] = found
+                    continue
+                event_id, created = found
 
                 if created:
                     stats.events_created += 1
@@ -258,12 +284,15 @@ async def ingest_league(
 
         await session.commit()
 
+    stats.dropped_games = list(dropped.values())
     logger.info(
         "league_ingestion_complete",
         league=spec.league,
         matches_scraped=stats.matches_scraped,
         events_matched=stats.events_matched,
         events_created=stats.events_created,
+        games_unresolved=stats.games_unresolved,
+        games_skipped_schedule_unavailable=stats.games_skipped_schedule_unavailable,
         snapshots_stored=stats.snapshots_stored,
         errors=len(stats.errors),
     )
@@ -339,6 +368,7 @@ async def main(ctx: JobContext) -> None:
             ) from e
 
         total_scraped = stats.matches_scraped
+        await alert_dropped_games(compound_job_name, stats.dropped_games)
 
         logger.info(
             "fetch_oddsportal_completed",

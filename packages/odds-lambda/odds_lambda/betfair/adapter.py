@@ -56,11 +56,18 @@ DRAW_RUNNER_NAMES: frozenset[str] = frozenset({"the draw", "draw"})
 # other contexts (e.g. "(W)" for women's).
 _PAREN_ANNOTATION_RE = re.compile(r"\s*\([^)]*\)?\s*$")
 _GAME_SUFFIX_RE = re.compile(r"\s*(?:-\s*)?Game\s*\d*\s*$")
+_GAME_NUMBER_RE = re.compile(r"\bGame\s*(\d+)\b")
 
 
 def strip_pitcher_annotation(name: str) -> str:
     """Remove a trailing, possibly truncated, parenthetical (e.g. '(TBD)' or '(S Cecc') from a name."""
     return _PAREN_ANNOTATION_RE.sub("", name).strip()
+
+
+def doubleheader_game_number(event_name: str) -> int | None:
+    """The N of a doubleheader's "Game N" label in a Betfair event name, if it carries one."""
+    match = _GAME_NUMBER_RE.search(event_name)
+    return int(match.group(1)) if match else None
 
 
 def clean_team_name(name: str) -> str:

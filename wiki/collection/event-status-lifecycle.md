@@ -40,7 +40,7 @@ A result is the strongest evidence, so every status but FINAL can reach FINAL, a
 
 | Transition | Setter | Rule |
 |---|---|---|
-| (new) → SCHEDULED | event sync (`odds_lambda.storage.writers.OddsWriter.bulk_upsert_events`), `odds_lambda.storage.writers.OddsWriter.find_or_create_event` (only when no event matches), `odds discover games` | default status |
+| (new) → SCHEDULED | event sync (`odds_lambda.storage.writers.OddsWriter.bulk_upsert_events`), `odds_lambda.storage.writers.OddsWriter.find_or_create_event` (only when no event matches, by `gamePk` or teams for MLB), `odds discover games` | default status |
 | SCHEDULED → LIVE | `odds_lambda.jobs.update_status._update_event_statuses` | events already past `commence_time` within `odds_lambda.jobs.update_status.STATUS_WINDOW`; `reader.get_events_by_date_range(status=SCHEDULED)` |
 | → FINAL | `odds_lambda.jobs.fetch_scores._fetch_and_update_scores` | Odds API `/scores` ([results-jobs](results-jobs.md#fetch-scores)), only when `completed` and both scores parse |
 | → FINAL | `odds_lambda.jobs.fetch_oddsportal_results.process_results` | OddsPortal finished matches for events already past kickoff that are SCHEDULED, LIVE, POSTPONED, or FINAL without scores (`odds_lambda.jobs.fetch_oddsportal_results.get_pending_events`); a run that settles nothing alerts ([results-jobs](results-jobs.md)) |

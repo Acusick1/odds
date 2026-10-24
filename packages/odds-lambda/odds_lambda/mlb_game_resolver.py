@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from enum import StrEnum
 
 import httpx
 import structlog
+from odds_core.sports import SportKey
 from odds_core.team import normalize_team_name
 from odds_core.time import to_eastern
 
@@ -16,6 +17,7 @@ from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState, MlbStatsF
 
 logger = structlog.get_logger()
 
+MLB_SPORT_KEY: SportKey = "baseball_mlb"
 MAX_SINGLE_GAME_GAP = timedelta(hours=6)
 START_MATCH_WINDOW = timedelta(minutes=15)
 STARTED_SIBLING_MARGIN = timedelta(minutes=3)
@@ -53,8 +55,14 @@ class UnresolvedReason(StrEnum):
 
 @dataclass(frozen=True)
 class ResolvedGame:
+    """The row's game. ``start`` is its scheduled start from a slot that is neither postponed nor
+    TBD (``None`` when the fetched schedule has none); ``sibling_starts`` are the listed starts of
+    the other games of that pair on that date, TBD placeholders included."""
+
     game_pk: int
     rule: ResolutionRule
+    start: datetime | None = None
+    sibling_starts: tuple[datetime, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -123,10 +131,27 @@ def resolve_game_pks(
         if row.game_number is None:
             unnumbered_by_group.setdefault(key, []).append(row)
 
-    return [
-        _resolve_row(row, slots_by_group.get(key, []), unnumbered_by_group.get(key, []))
-        for row, key in zip(rows, row_keys, strict=True)
-    ]
+    played_starts = {
+        slot.game_pk: slot.start_time
+        for slot in schedule
+        if not slot.resumed
+        and not slot.start_time_tbd
+        and slot.state not in (MlbGameState.POSTPONED, MlbGameState.CANCELLED)
+    }
+    resolutions: list[GameResolution] = []
+    for row, key in zip(rows, row_keys, strict=True):
+        slots = slots_by_group.get(key, [])
+        resolution = _resolve_row(row, slots, unnumbered_by_group.get(key, []))
+        if isinstance(resolution, ResolvedGame):
+            resolution = replace(
+                resolution,
+                start=played_starts.get(resolution.game_pk),
+                sibling_starts=tuple(
+                    g.start_time for g in _day_games(slots) if g.game_pk != resolution.game_pk
+                ),
+            )
+        resolutions.append(resolution)
+    return resolutions
 
 
 def _resolve_row(
