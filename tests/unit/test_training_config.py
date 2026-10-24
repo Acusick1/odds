@@ -1999,7 +1999,7 @@ class TestSearchSpaceKeys:
 
 
 class TestStrategyTypeValues:
-    @pytest.mark.parametrize("name", ["xgboost", "lstm_line_movement"])
+    @pytest.mark.parametrize("name", ["xgboost"])
     def test_unimplemented_alias_is_rejected(self, name, make_ml_config):
         with pytest.raises(ValidationError):
             make_ml_config(strategy_type=name)

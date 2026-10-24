@@ -72,12 +72,10 @@ def apply_variance_filter(
 ) -> tuple[np.ndarray, list[str], np.ndarray]:
     """Drop features whose variance is below threshold using sklearn VarianceThreshold.
 
-    Handles both 2D (samples, features) and 3D (samples, timesteps, features) arrays.
-    For 3D arrays, variance is computed over the flattened (samples × timesteps) axis.
     Skips filtering when fewer than 2 samples are present.
 
     Args:
-        X: Feature array, shape (samples, features) or (samples, timesteps, features).
+        X: Feature array, shape (samples, features).
         feature_names: Names corresponding to the last axis of X.
         threshold: Variance threshold; features strictly below this are dropped.
 
@@ -88,9 +86,8 @@ def apply_variance_filter(
     if len(X) < 2:
         return X, feature_names, np.ones(n_features, dtype=bool)
 
-    X_2d = X.reshape(-1, X.shape[-1]) if X.ndim == 3 else X
     selector = VarianceThreshold(threshold=threshold)
-    selector.fit(X_2d)
+    selector.fit(X)
     keep = selector.get_support()
 
     dropped = [name for name, k in zip(feature_names, keep, strict=False) if not k]

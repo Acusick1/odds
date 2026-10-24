@@ -12,6 +12,8 @@ The wiki is the documentation. Before changing a subsystem, read [wiki/index.md]
 
 Every code change keeps the wiki current. `uv run python scripts/wiki_lint.py` (also a pre-commit hook and CI check) lists stale pages, with the changed symbols and the page lines that cite them. Edit those pages to match the new code. A new scheduled job, CLI command or MCP tool needs a page that cites it.
 
+A PR that replaces code deletes what it replaces, with its tests and wiki pages; git history is the record.
+
 ## Constraints
 
 - **The production host is currently the mini-PC**: Tailscale host `nucboxg10pro`, repo checkout at `~/odds`.
@@ -22,7 +24,6 @@ Every code change keeps the wiki current. `uv run python scripts/wiki_lint.py` (
 - **Historical analysis uses only data at or before decision time.** `get_odds_at_time` searches both sides of the target time. See [look-ahead](wiki/modelling/look-ahead-bias.md).
 - **The retail-EV model's target, EV against the Betfair Exchange close, is `target_type: retail_ev`.** See [target](wiki/modelling/clv-target.md).
 - **Use one `async with async_session_maker() as session` per task.** Lambda gets `NullPool` automatically. See [databases](wiki/foundations/databases-and-environments.md).
-- **A PR that replaces code deletes what it replaces, with its tests and wiki pages; git history is the record.**
 
 ## Tests
 
