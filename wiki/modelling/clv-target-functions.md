@@ -5,6 +5,9 @@ description: The retail-EV row builder, its features, weights and keep-bar metri
 sources:
   - odds_analytics.retail_ev
   - odds_analytics.retail_ev_metrics
+  - odds_core.betfair_close.event_close
+  - odds_core.betfair_close.ExchangePrice
+  - odds_core.betfair_close.MAX_EXCHANGE_OVERROUND
   - odds_analytics.as_of_team_features
   - odds_core.snapshot_sources
   - odds_core.bookmakers.UK_RETAIL_BOOKMAKERS
@@ -31,9 +34,9 @@ status: stable
 
 **Rows.** For each snapshot of a kind in `odds_analytics.retail_ev.RETAIL_KINDS` (Odds API, OddsPortal, OddsPortal live, FDUK opening) whose time t lies between `odds_analytics.retail_ev.DECISION_WINDOW` and `odds_analytics.retail_ev.DECISION_CUTOFF` before kick-off, every outcome priced by a book in `odds_core.bookmakers.UK_RETAIL_BOOKMAKERS` is a row. Book keys pass through `odds_core.bookmakers.canonical_bookmaker_key` first, which maps aliases such as `betfred_uk` to one key and the Odds API's `betmgm` (US BetMGM) to `betmgm_us`, outside the UK roster. FDUK closing snapshots, at kick-off, never give rows. Prices from books outside the roster in a decision-window snapshot are counted per key in `odds_analytics.retail_ev.DropCounts.prices_outside_roster`. Outcomes are matched by name to the event's home and away teams and `Draw` (`odds_core.market_prices.market_outcomes`: three for `1x2`, two for `h2h`). For reporting, each `odds_analytics.retail_ev.RetailEvRow` labels its horizon bucket from hours to kick-off (lower edges `odds_analytics.retail_ev.HORIZON_BUCKET_EDGES_HOURS`, labels `odds_analytics.retail_ev.HORIZON_BUCKET_LABELS`; a row outside the 7-day decision window raises `ValueError`) and its season, which starts in `odds_analytics.retail_ev.SEASON_START_MONTH`.
 
-**Close.** The last `betfair_exchange` price from a live Betfair snapshot (`odds_core.snapshot_sources.SnapshotKind.BETFAIR_LIVE`) with a price for every outcome (`odds_core.betfair_close.complete_exchange_prices`), not in-play (`betfair_meta.inplay`) and within `odds_core.betfair_close.LIVE_CLOSE_WINDOW` before kick-off; otherwise the FDUK closing snapshot's `betfair_exchange` price. With neither, the event gives no rows and counts in `odds_analytics.retail_ev.DropCounts.events_without_close`.
+**Close.** `odds_core.betfair_close.event_close` returns an `odds_core.betfair_close.ExchangePrice` (time, snapshot kind, devigged probabilities, overround) or None, and `odds_analytics.retail_ev.build_event_rows` takes the close from it. It is the last `betfair_exchange` price from a live Betfair snapshot (`odds_core.snapshot_sources.SnapshotKind.BETFAIR_LIVE`) with a price for every outcome (`odds_core.betfair_close.complete_exchange_prices`), not in-play (`betfair_meta.inplay`) and within `odds_core.betfair_close.LIVE_CLOSE_WINDOW` before kick-off; otherwise the FDUK closing snapshot's `betfair_exchange` price. With neither, the event gives no rows and counts in `odds_analytics.retail_ev.DropCounts.events_without_close`.
 
-An exchange price, at the close or at t, counts only when its back overround is at most `odds_analytics.retail_ev.MAX_EXCHANGE_OVERROUND`; wider ones are skipped and counted in `odds_analytics.retail_ev.DropCounts.wide_exchange_snapshots`.
+An exchange price, at the close or at t, counts only when its back overround is at most `odds_core.betfair_close.MAX_EXCHANGE_OVERROUND`; wider ones are skipped and counted in `odds_analytics.retail_ev.DropCounts.wide_exchange_snapshots` (counted by the at-t pass of `odds_analytics.retail_ev.build_event_rows`, which also decides the close's snapshots through `odds_core.betfair_close.event_close`).
 
 **Exchange price at t.** The latest complete `betfair_exchange` price at or before t from live Betfair or FDUK opening snapshots (`odds_analytics.retail_ev.EXCHANGE_AT_T_KINDS`). Rows without one, or with one older than `odds_analytics.retail_ev.MAX_EXCHANGE_AGE`, are dropped and counted in `odds_analytics.retail_ev.DropCounts`. An FDUK opening row takes only the price in its own snapshot and is dropped without one (`odds_analytics.retail_ev.DropCounts.rows_without_own_exchange`), because its t is only an upper bound ([CLV target](clv-target.md#the-retail-ev-target)). Exchange prices inside OddsPortal or Odds API snapshots are not used.
 

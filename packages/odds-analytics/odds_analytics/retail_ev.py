@@ -16,7 +16,15 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 
 import numpy as np
 import structlog
-from odds_core.betfair_close import LIVE_CLOSE_WINDOW, complete_exchange_prices, is_in_play
+from odds_core.betfair_close import (
+    MAX_EXCHANGE_OVERROUND,
+    ExchangePrice,
+    devig,
+    event_close,
+    exchange_price,
+    is_in_play,
+    overround,
+)
 from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
 from odds_core.market_prices import (
     Outcome,
@@ -25,7 +33,6 @@ from odds_core.market_prices import (
     outcome_names,
 )
 from odds_core.models import Event, OddsSnapshot
-from odds_core.odds_math import devig_probabilities
 from odds_core.snapshot_sources import SnapshotKind, snapshot_kind
 
 from odds_analytics.epl_schedule_features import EplScheduleFeatures
@@ -44,8 +51,6 @@ logger = structlog.get_logger()
 DECISION_WINDOW = timedelta(days=7)
 DECISION_CUTOFF = timedelta(minutes=5)
 MAX_EXCHANGE_AGE = timedelta(hours=2)
-# A wider back book is a thin market whose best backs are not a price (ADR-0014).
-MAX_EXCHANGE_OVERROUND = 0.05
 POLYMARKET_BOOKMAKER = "polymarket"
 # Twice the coarsest step of the Polymarket history grid, and the exchange's age cap.
 MAX_POLYMARKET_AGE = timedelta(hours=2)
@@ -75,16 +80,6 @@ UPPER_BOUND_TIME_KINDS: frozenset[SnapshotKind] = frozenset({SnapshotKind.FDUK_O
 EXCHANGE_AT_T_KINDS: frozenset[SnapshotKind] = frozenset(
     {SnapshotKind.BETFAIR_LIVE, SnapshotKind.FDUK_OPENING}
 )
-
-
-@dataclass(frozen=True)
-class ExchangePrice:
-    """Devigged Betfair Exchange back prices from one snapshot."""
-
-    time: datetime
-    kind: SnapshotKind
-    fair: dict[Outcome, float]
-    overround: float
 
 
 @dataclass(frozen=True)
@@ -225,33 +220,6 @@ def event_weights(event_ids: np.ndarray) -> np.ndarray:
     return 1.0 / counts[inverse]
 
 
-def _devig(prices: dict[Outcome, float], outcomes: tuple[Outcome, ...]) -> dict[Outcome, float]:
-    fair = devig_probabilities(*(1 / prices[o] for o in outcomes))
-    return dict(zip(outcomes, fair, strict=True))
-
-
-def _overround(prices: dict[Outcome, float], outcomes: tuple[Outcome, ...]) -> float:
-    return sum(1 / prices[o] for o in outcomes) - 1
-
-
-def _exchange_price(
-    snapshot: OddsSnapshot,
-    kind: SnapshotKind,
-    market: str,
-    names: dict[str, Outcome],
-    outcomes: tuple[Outcome, ...],
-) -> ExchangePrice | None:
-    prices = complete_exchange_prices(snapshot.raw_data, kind, market, names)
-    if prices is None:
-        return None
-    return ExchangePrice(
-        time=snapshot.snapshot_time,
-        kind=kind,
-        fair=_devig(prices, outcomes),
-        overround=_overround(prices, outcomes),
-    )
-
-
 def _polymarket_price(
     snapshot: OddsSnapshot, market: str, names: dict[str, Outcome], outcomes: tuple[Outcome, ...]
 ) -> PolymarketPrice | None:
@@ -274,9 +242,7 @@ def _polymarket_price(
         bid, ask = bids.get(outcome.value), asks.get(outcome.value)
         if bid is not None and ask is not None:
             spread[outcome] = ask - bid
-    return PolymarketPrice(
-        time=snapshot.snapshot_time, fair=_devig(prices, outcomes), spread=spread
-    )
+    return PolymarketPrice(time=snapshot.snapshot_time, fair=devig(prices, outcomes), spread=spread)
 
 
 def _latest_at_or_before(times: list[datetime], at: datetime, max_age: timedelta) -> int | None:
@@ -336,10 +302,8 @@ def build_event_rows(
 ) -> tuple[list[RetailEvRow], DropCounts]:
     """Build every decision row for one event from its snapshots, in time order.
 
-    The close is the last live Betfair snapshot that is not in-play within
-    ``LIVE_CLOSE_WINDOW`` before kick-off, else the FDUK closing price (stamped at
-    kick-off). The exchange price at t comes only from live Betfair or FDUK opening
-    snapshots at or before t, so nothing after t enters a row's inputs. Exchange
+    The close is ``odds_core.betfair_close.event_close``. The exchange price at t comes
+    only from live Betfair or FDUK opening snapshots at or before t, so nothing after t enters a row's inputs. Exchange
     prices whose back overround exceeds ``max_exchange_overround`` are not prices.
     The Polymarket price and the dynamics also come only from snapshots at or before t.
     """
@@ -351,8 +315,6 @@ def build_event_rows(
     kinds = [snapshot_kind(s.raw_data) for s in ordered]
 
     exchange_at_t: list[ExchangePrice] = []
-    live_closes: list[ExchangePrice] = []
-    fduk_close: ExchangePrice | None = None
     polymarket: list[PolymarketPrice] = []
     for snapshot, kind in zip(ordered, kinds, strict=True):
         if kind is SnapshotKind.POLYMARKET:
@@ -364,24 +326,16 @@ def build_event_rows(
             continue
         if kind is SnapshotKind.BETFAIR_LIVE and is_in_play(snapshot.raw_data):
             continue
-        price = _exchange_price(snapshot, kind, market, names, outcomes)
+        price = exchange_price(snapshot, kind, market, names, outcomes)
         if price is None:
             continue
         if price.overround > max_exchange_overround:
             drops.wide_exchange_snapshots += 1
             continue
-        if kind is SnapshotKind.FDUK_CLOSING:
-            fduk_close = price
-            continue
-        if price.time < kickoff:
+        if kind is not SnapshotKind.FDUK_CLOSING and price.time < kickoff:
             exchange_at_t.append(price)
-        if (
-            kind is SnapshotKind.BETFAIR_LIVE
-            and kickoff - LIVE_CLOSE_WINDOW <= price.time <= kickoff
-        ):
-            live_closes.append(price)
 
-    close = live_closes[-1] if live_closes else fduk_close
+    close = event_close(event, ordered, market, max_exchange_overround)
     if close is None:
         drops.events_without_close = 1
         return [], drops
@@ -460,8 +414,8 @@ def build_event_rows(
 
         for book, prices in quote.books.items():
             complete = set(prices) == set(outcomes)
-            book_fair = _devig(prices, outcomes) if complete else None
-            book_overround = _overround(prices, outcomes) if complete else None
+            book_fair = devig(prices, outcomes) if complete else None
+            book_overround = overround(prices, outcomes) if complete else None
             for outcome, price in prices.items():
                 implied_for_outcome = quote.implied[outcome]
                 rows.append(
