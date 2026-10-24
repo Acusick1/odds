@@ -24,4 +24,7 @@ jobs:
           enable-cache: false
 
       - name: Run all hooks on all files
+        env:
+          # The workflow runs on push, where GITHUB_BASE_REF is unset.
+          CANDIDATE_BASE_REF: origin/main
         run: uvx pre-commit run --all-files --show-diff-on-failure

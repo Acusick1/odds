@@ -48,6 +48,7 @@ status: stable
 | `polymarket` | [Polymarket pipeline and tables](../collection/polymarket.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#backfill-command) |
 | `injuries`, `nba-stats`, `pbpstats` | [NBA feeds](../collection/nba-injuries-and-stats.md) |
 | `paper` | [Paper trading](../agent/paper-trading.md) |
+| `candidates` | [Candidate registry](../evaluation/candidate-registry.md#odds-candidates-list) |
 | `agent` | [Agent runtime and the agent-run job](../agent/agent-run-job.md) |
 
 ## Sport defaults

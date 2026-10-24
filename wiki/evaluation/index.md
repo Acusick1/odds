@@ -12,6 +12,7 @@ Backtests replay a strategy over stored events; experiments record what the CLV 
 
 - [Backtest engine](backtest-engine.md) — BacktestEngine event loop, sizing, settlement, metrics as computed, BacktestResult and its JSON and CSV forms.
 - [Backtest strategies](backtest-strategies.md) — The registered strategies, their constructor defaults and the STRATEGIES registry.
+- [Candidate registry](candidate-registry.md) — The candidate file format, the odds candidates list command, and the version check that stops a candidate changing without a new version.
 - [Experiment scripts and artifacts](experiment-scripts.md) — Layout of experiments/, config and script conventions, the FINDINGS.md sections, the verification artifact files, and the inventory of scripts.
 - [Retail-EV evaluation](retail-ev-evaluation.md) — The one-look evaluation of a frozen retail-EV model on a window of events, with its spec, the window-end guard, the refit blocks, the keep-bar statistics and verdict, the coverage report, the descriptive slices and the output files.
 

@@ -70,7 +70,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in
 
 ## odds-core
 
-`packages/odds-core/odds_core/` declares only sqlmodel, sqlalchemy, asyncpg, pydantic, pydantic-settings, structlog and aiohttp (`packages/odds-core/pyproject.toml`).
+`packages/odds-core/odds_core/` declares only sqlmodel, sqlalchemy, asyncpg, pydantic, pydantic-settings, structlog, aiohttp and pyyaml (`packages/odds-core/pyproject.toml`).
 
 | Module | Holds |
 |---|---|

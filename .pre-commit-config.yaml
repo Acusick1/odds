@@ -23,6 +23,13 @@ repos:
         additional_dependencies: [pyyaml==6.0.3, pydantic==2.12.4, griffe==2.3.2]
         pass_filenames: false
         always_run: true
+      - id: candidate-versions
+        name: candidate-versions
+        entry: python scripts/check_candidate_versions.py
+        language: python
+        additional_dependencies: [pyyaml==6.0.3]
+        pass_filenames: false
+        always_run: true
   - repo: https://github.com/lycheeverse/lychee
     rev: lychee-v0.24.2
     hooks:
