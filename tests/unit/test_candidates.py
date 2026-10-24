@@ -84,6 +84,17 @@ class TestLoadCandidates:
         with pytest.raises(ValueError, match="soccer_epl"):
             load_candidates(tmp_path)
 
+    def test_killed_agent_does_not_block_replacement(self, tmp_path: Path) -> None:
+        write(tmp_path, {**AGENT, "status": "killed"})
+        write(tmp_path, {**AGENT, "name": "epl-agent-2", "status": "active"})
+        assert len(load_candidates(tmp_path)) == 2
+
+    @pytest.mark.parametrize("version", ["3", 0, 1.5, True])
+    def test_version_must_be_positive_integer(self, tmp_path: Path, version: object) -> None:
+        write(tmp_path, {**MECHANICAL, "version": version})
+        with pytest.raises(ValueError):
+            load_candidates(tmp_path)
+
     def test_agents_for_different_sports_allowed(self, tmp_path: Path) -> None:
         write(tmp_path, AGENT)
         write(tmp_path, {**AGENT, "name": "mlb-agent", "sport": "baseball_mlb"})
@@ -94,23 +105,30 @@ class TestLoadCandidates:
 
 
 class TestListCommand:
-    def test_empty_registry(self, tmp_path: Path) -> None:
-        result = CliRunner(env={"COLUMNS": "200"}).invoke(
-            app, ["candidates", "list", "--dir", str(tmp_path)]
-        )
+    @pytest.fixture
+    def registry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        monkeypatch.setattr("odds_cli.commands.candidates.candidates_dir", lambda: tmp_path)
+        return tmp_path
+
+    def test_empty_registry(self, registry: Path) -> None:
+        result = CliRunner(env={"COLUMNS": "200"}).invoke(app, ["candidates", "list"])
         assert result.exit_code == 0
         assert "No candidates registered" in result.stdout
 
-    def test_lists_and_filters_by_status(self, tmp_path: Path) -> None:
-        write(tmp_path, MECHANICAL)
-        write(tmp_path, AGENT)
+    def test_lists_and_filters_by_status(self, registry: Path) -> None:
+        write(registry, MECHANICAL)
+        write(registry, AGENT)
         runner = CliRunner(env={"COLUMNS": "200"})
 
-        everything = runner.invoke(app, ["candidates", "list", "--dir", str(tmp_path)])
-        promoted = runner.invoke(
-            app, ["candidates", "list", "--dir", str(tmp_path), "--status", "promoted"]
-        )
+        everything = runner.invoke(app, ["candidates", "list"])
+        promoted = runner.invoke(app, ["candidates", "list", "--status", "promoted"])
 
         assert "back-longest" in everything.stdout and "epl-agent" in everything.stdout
         assert "#610" in everything.stdout
         assert "epl-agent" in promoted.stdout and "back-longest" not in promoted.stdout
+
+    def test_invalid_file_exits_1(self, registry: Path) -> None:
+        write(registry, {**MECHANICAL, "surprise": 1})
+        result = CliRunner(env={"COLUMNS": "200"}).invoke(app, ["candidates", "list"])
+        assert result.exit_code == 1
+        assert "back-longest.yaml" in result.stdout

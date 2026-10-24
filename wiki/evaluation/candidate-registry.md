@@ -23,22 +23,23 @@ The registry is the `candidates/` directory: one `<name>.yaml` file per candidat
 | `kind: mechanical`, `rule` and params | `odds_core.candidates.MechanicalCandidate` | `rule` names a rule function. The parameters are a free JSON mapping here, and the rule validates them (#609) |
 | `kind: agent` | `odds_core.candidates.AgentCandidate` | No further fields; the agent's prompts and model are its definition ([agent run](../agent/agent-run-job.md)) |
 
-`odds_core.candidates.load_candidates` raises a `ValueError` naming the file when a file fails validation or its `name` differs from its file stem, and when a sport has more than one agent candidate.
+`odds_core.candidates.load_candidates` raises a `ValueError` naming the file when a file fails validation or its `name` differs from its file stem, and when a sport has more than one agent candidate whose status is active or promoted. Agents for one sport share `packages/odds-mcp/agents/common.md` and the sport's `base.md`, so two live agents for one sport could not differ. A killed agent does not count, so its replacement can be added.
 
-A change of status goes through a pull request. The version is a positive integer, bumped whenever the rule, parameters or model change ([versioning](../foundations/goal-and-strategy.md#candidates)).
+A change of status goes through a pull request. The version is a strict positive integer (`"3"` is rejected), bumped whenever the rule, parameters or model change ([versioning](../foundations/goal-and-strategy.md#candidates)).
 
 ## `odds candidates list`
 
-`odds_cli.commands.candidates.list_candidates` prints each candidate's name, kind, sport, version, status, start date and issue, optionally filtered by status. It reads the files in `odds_core.candidates.candidates_dir` and does not touch the database.
+`odds_cli.commands.candidates.list_candidates` prints each candidate's name, kind, sport, version, status, start date and issue, optionally filtered by status. It reads the files in `odds_core.candidates.candidates_dir` and does not touch the database. An invalid registry prints the loader's error in red and exits 1.
 
 ## Version check
 
-`scripts/check_candidate_versions.py` compares the working tree's `candidates/*.yaml` with the same files at a base commit. It runs as the `candidate-versions` pre-commit hook ([code conventions](../foundations/code-conventions.md#mechanical-gates)), locally and in the `Lint` workflow. The base is `--base`, else the merge-base with `CANDIDATE_BASE_REF` or `origin/$GITHUB_BASE_REF`, else `HEAD`. The workflow sets `CANDIDATE_BASE_REF` to `origin/main`.
+`scripts/check_candidate_versions.py` compares the working tree's `candidates/*.yaml` with the same files at a base commit. It runs as the `candidate-versions` pre-commit hook ([code conventions](../foundations/code-conventions.md#mechanical-gates)), locally and in the `Lint` workflow. The base is `--base`, else the merge-base of `HEAD` with `origin/main`, else with `main`, else `HEAD`.
 
 It fails when:
 
-- a file that exists at the base is deleted. A candidate is killed by setting its status to killed;
+- a file that exists at the base is deleted. A candidate is killed by setting its status to killed. A rename reads as a deletion, so it fails: a renamed candidate is a new candidate;
+- a file is not valid YAML (the error names the file);
 - a file's `version` decreased;
 - any key other than the status and `description` changed and the version did not increase (`UNVERSIONED_KEYS` in the script).
 
-A new file always passes. The check does not look at agent prompt files, so an agent candidate's version bump for a prompt or model change is not enforced.
+A new file always passes. The check compares YAML only. Changes to a mechanical rule's code (#609) and to an agent's prompts or model are not enforced by it.

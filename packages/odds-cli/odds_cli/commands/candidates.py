@@ -1,6 +1,5 @@
 """CLI commands for the betting candidate registry."""
 
-from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -17,12 +16,13 @@ def list_candidates(
     status: Annotated[
         CandidateStatus | None, typer.Option("--status", help="Filter by status")
     ] = None,
-    directory: Annotated[
-        Path | None, typer.Option("--dir", help="Registry directory", hidden=True)
-    ] = None,
 ) -> None:
     """List registered candidates."""
-    candidates = load_candidates(directory or candidates_dir())
+    try:
+        candidates = load_candidates(candidates_dir())
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]", soft_wrap=True)
+        raise typer.Exit(1) from exc
     if status is not None:
         candidates = [c for c in candidates if c.status == status]
 

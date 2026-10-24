@@ -27,7 +27,7 @@ class _CandidateBase(BaseModel):
     name: str = Field(pattern=NAME_PATTERN)
     description: str
     sport: SportKey
-    version: PositiveInt
+    version: Annotated[int, Field(strict=True, gt=0)]
     issue: PositiveInt
     start_date: date
     status: CandidateStatus
@@ -66,9 +66,13 @@ def load_candidates(directory: Path) -> list[Candidate]:
             raise ValueError(f"{path}: name {candidate.name!r} must match the file name")
         candidates.append(candidate)
 
-    agents_per_sport = Counter(c.sport for c in candidates if c.kind == "agent")
-    for sport, count in agents_per_sport.items():
+    live_agents_per_sport = Counter(
+        c.sport for c in candidates if c.kind == "agent" and c.status != CandidateStatus.KILLED
+    )
+    for sport, count in live_agents_per_sport.items():
         if count > 1:
-            raise ValueError(f"{directory}: {count} agent candidates for {sport}, at most one")
+            raise ValueError(
+                f"{directory}: {count} active or promoted agent candidates for {sport}, at most one"
+            )
 
     return sorted(candidates, key=lambda c: c.name)

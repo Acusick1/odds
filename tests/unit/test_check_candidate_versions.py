@@ -25,7 +25,7 @@ def git(repo: Path, *args: str) -> None:
 class TestCheckCandidateVersions:
     @pytest.fixture
     def repo(self, tmp_path: Path) -> Path:
-        git(tmp_path, "init", "-q")
+        git(tmp_path, "init", "-q", "-b", "main")
         git(tmp_path, "config", "user.email", "t@example.com")
         git(tmp_path, "config", "user.name", "t")
         (tmp_path / "candidates").mkdir()
@@ -34,9 +34,9 @@ class TestCheckCandidateVersions:
         git(tmp_path, "commit", "-q", "-m", "base")
         return tmp_path
 
-    def run(self, repo: Path) -> subprocess.CompletedProcess[str]:
+    def run(self, repo: Path, base: str | None = "HEAD") -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, str(SCRIPT), "--base", "HEAD"],
+            [sys.executable, str(SCRIPT), *(["--base", base] if base else [])],
             cwd=repo,
             capture_output=True,
             text=True,
@@ -82,3 +82,30 @@ class TestCheckCandidateVersions:
     def test_new_file_passes(self, repo: Path) -> None:
         (repo / "candidates" / "fresh.yaml").write_text(BASE_YAML.replace("back-longest", "fresh"))
         assert self.run(repo).returncode == 0
+
+    def test_default_base_is_merge_base_with_main(self, repo: Path) -> None:
+        git(repo, "checkout", "-q", "-b", "feature")
+        self.edit(repo, "0.02", "0.05")
+        self.edit(repo, "version: 2", "version: 3")
+        git(repo, "commit", "-qam", "bump")
+        self.edit(repo, "0.05", "0.07")
+        git(repo, "commit", "-qam", "tweak")
+
+        assert self.run(repo, base=None).returncode == 0
+        assert self.run(repo, base="HEAD~1").returncode == 1
+
+    def test_rename_fails(self, repo: Path) -> None:
+        git(repo, "mv", "candidates/back-longest.yaml", "candidates/renamed.yaml")
+        result = self.run(repo)
+        assert result.returncode == 1 and "back-longest.yaml: deleted" in result.stderr
+
+    def test_malformed_yaml_fails(self, repo: Path) -> None:
+        (repo / "candidates" / "back-longest.yaml").write_text("name: [unclosed\n")
+        result = self.run(repo)
+        assert result.returncode == 1
+        assert "back-longest.yaml: invalid YAML" in result.stderr
+
+    def test_non_integer_version_fails(self, repo: Path) -> None:
+        self.edit(repo, "version: 2", 'version: "3"')
+        result = self.run(repo)
+        assert result.returncode == 1 and "non-integer" in result.stderr

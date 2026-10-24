@@ -1,12 +1,11 @@
 """Fail when a candidate file changes without a version bump, or is deleted.
 
-Compares candidates/*.yaml in the working tree with the base: --base, else
-$CANDIDATE_BASE_REF, else the merge-base with origin/$GITHUB_BASE_REF, else HEAD.
+Compares candidates/*.yaml in the working tree with the base: --base, else the
+merge-base of HEAD with origin/main, else with main, else HEAD.
 Only stdlib and yaml are imported: the pre-commit hook env has no project install.
 """
 
 import argparse
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -23,13 +22,21 @@ def _git(*args: str) -> str:
     return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
 
 
+def _ref_exists(ref: str) -> bool:
+    return (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], capture_output=True
+        ).returncode
+        == 0
+    )
+
+
 def _resolve_base(arg: str | None) -> str:
     if arg:
         return arg
-    if ref := os.environ.get("CANDIDATE_BASE_REF"):
-        return _git("merge-base", "HEAD", ref).strip()
-    if base_branch := os.environ.get("GITHUB_BASE_REF"):
-        return _git("merge-base", "HEAD", f"origin/{base_branch}").strip()
+    for ref in ("origin/main", "main"):
+        if _ref_exists(ref):
+            return _git("merge-base", "HEAD", ref).strip()
     return "HEAD"
 
 
@@ -51,8 +58,13 @@ def check(base: str) -> list[str]:
                 f"{rel}: deleted. Kill a candidate by setting status: killed, don't delete it"
             )
             continue
-        old = _load(_git("show", f"{base}:{rel}"))
-        new = _load(path.read_text())
+        try:
+            old = _load(_git("show", f"{base}:{rel}"))
+            new = _load(path.read_text())
+        except yaml.YAMLError as exc:
+            reason = getattr(exc, "problem", None) or str(exc).splitlines()[0]
+            errors.append(f"{rel}: invalid YAML ({reason})")
+            continue
         old_version, new_version = old.get("version"), new.get("version")
         if isinstance(old_version, int) and isinstance(new_version, int):
             if new_version < old_version:
