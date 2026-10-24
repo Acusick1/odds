@@ -742,7 +742,9 @@ class TestGetPortfolioCandidates:
             patch("odds_mcp.server.load_candidates", return_value=[entry]),
             patch(
                 "odds_mcp.server.candidate_report",
-                AsyncMock(return_value=summarize_candidates([], [entry])),
+                AsyncMock(
+                    return_value=summarize_candidates([], [entry], datetime(2026, 5, 1, tzinfo=UTC))
+                ),
             ),
         ):
             maker.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
@@ -757,6 +759,7 @@ class TestGetPortfolioCandidates:
                 "settled_bets": 0,
                 "bets_with_close": 0,
                 "bets_without_close": 0,
+                "pending_bets": 0,
                 "total_stake": 0,
                 "pnl": 0,
                 "roi": 0.0,
@@ -764,6 +767,32 @@ class TestGetPortfolioCandidates:
                 "verdict": "not_yet",
             }
         ]
+
+
+class TestGetPortfolioInvalidRegistry:
+    @pytest.mark.asyncio
+    async def test_registry_error_leaves_the_rest_of_the_portfolio(self) -> None:
+        from odds_lambda.paper_trading import PortfolioSummary
+        from odds_mcp.server import get_portfolio
+
+        portfolio = PortfolioSummary(1000.0, 3, 1, 2, 5.0, 10.0, 50.0, 1, 0, 0)
+
+        with (
+            patch("odds_mcp.server.async_session_maker") as maker,
+            patch("odds_mcp.server.get_portfolio_summary", AsyncMock(return_value=portfolio)),
+            patch("odds_mcp.server.get_open_trades", AsyncMock(return_value=[])),
+            patch(
+                "odds_mcp.server.load_candidates",
+                side_effect=ValueError("candidates/x.yaml: bad"),
+            ),
+        ):
+            maker.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
+            maker.return_value.__aexit__ = AsyncMock()
+            result = await get_portfolio()
+
+        assert result["candidates"] == {"error": "candidates/x.yaml: bad"}
+        assert result["total_trades"] == 3
+        assert result["total_pnl"] == 5.0
 
 
 class TestFindRetailEdges:

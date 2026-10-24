@@ -94,6 +94,7 @@ def _report_table(summaries: list[CandidateSummary]) -> Table:
     table.add_column("Settled", justify="right")
     table.add_column("With close", justify="right")
     table.add_column("No close", justify="right")
+    table.add_column("Pending", justify="right")
     table.add_column("Staked", justify="right")
     table.add_column("P&L", justify="right")
     table.add_column("ROI", justify="right")
@@ -112,6 +113,7 @@ def _report_table(summaries: list[CandidateSummary]) -> Table:
             str(s.settled_bets),
             str(s.bets_with_close),
             str(s.bets_without_close),
+            str(s.pending_bets),
             f"{s.total_stake:.2f}",
             f"{s.pnl:+.2f}",
             f"{s.roi:+.1%}",

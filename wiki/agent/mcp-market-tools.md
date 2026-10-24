@@ -15,7 +15,7 @@ status: stable
 
 # MCP odds, prediction and retail-edge tools
 
-Five read-only market-data tools in `odds_mcp.server`, part of the [odds-mcp server](mcp-server.md). Unknown event ids return `{"error": "Event '<id>' not found"}`. The first four read stored data; `odds_mcp.server.find_retail_edges` is the [betting agent](betting-agent.md)'s flagship screener, about 290 lines.
+Five read-only market-data tools, defined in `odds_mcp.server`, part of the [odds-mcp server](mcp-server.md). Unknown event ids return `{"error": "Event '<id>' not found"}`. The first four read stored data; `odds_mcp.server.find_retail_edges` is the [betting agent](betting-agent.md)'s flagship screener, about 290 lines.
 
 ## `get_upcoming_fixtures(league="soccer_epl", days_ahead=7)`
 

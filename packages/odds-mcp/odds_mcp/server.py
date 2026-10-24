@@ -656,6 +656,7 @@ def _candidate_summary_to_dict(summary: CandidateSummary) -> dict[str, Any]:
         "settled_bets": summary.settled_bets,
         "bets_with_close": summary.bets_with_close,
         "bets_without_close": summary.bets_without_close,
+        "pending_bets": summary.pending_bets,
         "total_stake": summary.total_stake,
         "pnl": summary.pnl,
         "roi": summary.roi,
@@ -684,7 +685,14 @@ async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
     async with async_session_maker() as session:
         portfolio = await get_portfolio_summary(session, initial_bankroll=initial_bankroll)
         open_trades = await get_open_trades(session)
-        candidates = await candidate_report(session, load_candidates(candidates_dir()))
+        candidates: list[dict[str, Any]] | dict[str, str]
+        try:
+            candidates = [
+                _candidate_summary_to_dict(c)
+                for c in await candidate_report(session, load_candidates(candidates_dir()))
+            ]
+        except ValueError as exc:
+            candidates = {"error": str(exc)}
 
     return {
         "current_bankroll": portfolio.current_bankroll,
@@ -700,7 +708,7 @@ async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
             "pushes": portfolio.push_count,
         },
         "open_trade_details": [_trade_to_dict(t) for t in open_trades],
-        "candidates": [_candidate_summary_to_dict(c) for c in candidates],
+        "candidates": candidates,
     }
 
 

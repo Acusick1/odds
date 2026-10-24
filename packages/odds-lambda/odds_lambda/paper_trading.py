@@ -38,8 +38,8 @@ class PortfolioSummary:
     push_count: int
 
 
-def _check_candidate(name: str, version: int) -> None:
-    """Raise ValueError unless the registry's candidate may place bets today at this version."""
+def _check_candidate(name: str, version: int, event: Event, market: str) -> None:
+    """Raise ValueError unless the registry's candidate may place this bet today at this version."""
     candidate = next((c for c in load_candidates(candidates_dir()) if c.name == name), None)
     if candidate is None:
         raise ValueError(f"Candidate '{name}' is not in the registry")
@@ -50,6 +50,12 @@ def _check_candidate(name: str, version: int) -> None:
         raise ValueError(f"Candidate '{name}' starts on {candidate.start_date}, after {today}")
     if candidate.version != version:
         raise ValueError(f"Candidate '{name}' is at version {candidate.version}, not {version}")
+    if event.sport_key != candidate.sport:
+        raise ValueError(
+            f"Candidate '{name}' is for {candidate.sport}, not {event.sport_key} ({event.id})"
+        )
+    if market == TWO_WAY_MARKET and is_three_way_sport(event.sport_key):
+        raise ValueError(f"{event.sport_key} trades use '{THREE_WAY_MARKET}', not '{market}'")
 
 
 async def place_trade(
@@ -90,7 +96,10 @@ async def place_trade(
     if (candidate_name is None) != (candidate_version is None):
         raise ValueError("candidate_name and candidate_version are set together or not at all")
     if candidate_name is not None and candidate_version is not None:
-        _check_candidate(candidate_name, candidate_version)
+        candidate_event = await session.get(Event, event_id)
+        if candidate_event is None:
+            raise ValueError(f"Event '{event_id}' not found")
+        _check_candidate(candidate_name, candidate_version, candidate_event, market)
 
     trade = PaperTrade(
         event_id=event_id,

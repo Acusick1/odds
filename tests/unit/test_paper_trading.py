@@ -108,6 +108,41 @@ class TestPlaceTradeCandidate:
             await self._place(test_session, **call)
 
     @pytest.mark.asyncio
+    async def test_h2h_is_rejected_on_a_three_way_sport(
+        self, test_session, event, registry
+    ) -> None:
+        _write_candidate(registry)
+        with pytest.raises(ValueError, match="use '1x2'"):
+            await place_trade(
+                test_session,
+                event_id="evt-c",
+                market="h2h",
+                selection="home",
+                bookmaker="bet365",
+                price_decimal=2.2,
+                stake=10.0,
+                bankroll=1000.0,
+                candidate_name="cand",
+                candidate_version=2,
+            )
+
+    @pytest.mark.asyncio
+    async def test_candidate_sport_must_match_the_event(
+        self, test_session, event, registry
+    ) -> None:
+        _write_candidate(registry, sport="baseball_mlb")
+        with pytest.raises(ValueError, match="is for baseball_mlb, not soccer_epl"):
+            await self._place(test_session, candidate_name="cand", candidate_version=2)
+
+    @pytest.mark.asyncio
+    async def test_candidate_trade_on_a_missing_event_is_rejected(
+        self, test_session, registry
+    ) -> None:
+        _write_candidate(registry)
+        with pytest.raises(ValueError, match="not found"):
+            await self._place(test_session, candidate_name="cand", candidate_version=2)
+
+    @pytest.mark.asyncio
     async def test_git_sha_is_recorded(self, test_session, event, registry, monkeypatch) -> None:
         monkeypatch.setattr("odds_lambda.paper_trading.current_git_sha", lambda: "abc123")
         trade = await self._place(test_session)

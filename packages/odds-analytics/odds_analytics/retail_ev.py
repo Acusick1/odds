@@ -303,8 +303,9 @@ def build_event_rows(
     """Build every decision row for one event from its snapshots, in time order.
 
     The close is ``odds_core.betfair_close.event_close``. The exchange price at t comes
-    only from live Betfair or FDUK opening snapshots at or before t, so nothing after t enters a row's inputs. Exchange
-    prices whose back overround exceeds ``max_exchange_overround`` are not prices.
+    only from live Betfair or FDUK opening snapshots at or before t, so nothing after t
+    enters a row's inputs. Exchange prices whose back overround exceeds
+    ``max_exchange_overround`` are not prices.
     The Polymarket price and the dynamics also come only from snapshots at or before t.
     """
     drops = DropCounts()
