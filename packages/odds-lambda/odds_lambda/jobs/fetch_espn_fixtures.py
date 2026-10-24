@@ -28,7 +28,7 @@ from odds_core.database import async_session_maker
 from odds_core.epl_data_models import EspnFixtureRecord
 from odds_core.models import Event, EventStatus
 
-from odds_lambda.collection_calendar import EmptyCollectionError, fixture_calendar
+from odds_lambda.collection_calendar import EmptyCollectionError, event_calendar
 from odds_lambda.espn_fixture_fetcher import (
     LEAGUE_SLUGS,
     PRIMARY_LEAGUE_SLUG,
@@ -93,9 +93,7 @@ async def _raise_if_upcoming_unexpectedly_empty() -> None:
     """Raise ``EmptyCollectionError`` if EPL events are scheduled in the window ESPN returned empty."""
     horizon = timedelta(days=_UPCOMING_DAYS_AHEAD)
     async with async_session_maker() as session:
-        calendar = await fixture_calendar(
-            session, SPORT_KEY, now=datetime.now(UTC), horizon=horizon
-        )
+        calendar = await event_calendar(session, SPORT_KEY, now=datetime.now(UTC), horizon=horizon)
     if calendar.kickoffs_in_horizon:
         raise EmptyCollectionError(
             f"ESPN returned no upcoming Premier League fixtures with "
