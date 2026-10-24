@@ -13,6 +13,7 @@ from odds_core.config import get_settings
 from odds_core.sports import SportKey
 
 NAME_PATTERN = r"^[a-z0-9]+(-[a-z0-9]+)*$"
+SHA256_PATTERN = r"^[0-9a-f]{64}$"
 
 
 class CandidateStatus(StrEnum):
@@ -36,6 +37,7 @@ class _CandidateBase(BaseModel):
 class MechanicalCandidate(_CandidateBase):
     kind: Literal["mechanical"]
     rule: str
+    rule_sha256: str = Field(pattern=SHA256_PATTERN)
     params: dict[str, JsonValue] = {}
 
 

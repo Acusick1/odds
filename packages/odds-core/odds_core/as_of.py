@@ -17,6 +17,8 @@ RETAIL_KINDS: frozenset[SnapshotKind] = frozenset(
         SnapshotKind.FDUK_OPENING,
     }
 )
+# Stamped at FDUK's latest documented collection time, an upper bound on when the price was taken.
+UPPER_BOUND_TIME_KINDS: frozenset[SnapshotKind] = frozenset({SnapshotKind.FDUK_OPENING})
 EXCHANGE_AT_T_KINDS: frozenset[SnapshotKind] = frozenset(
     {SnapshotKind.BETFAIR_LIVE, SnapshotKind.FDUK_OPENING}
 )

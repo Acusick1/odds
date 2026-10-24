@@ -8,23 +8,20 @@ from odds_lambda.candidate_rules.market_state import (
     load_market_state,
 )
 from odds_lambda.candidate_rules.rules import (
-    RULE_SOURCE_HASHES,
     RULES,
     BetIntent,
     ExchangeGapParams,
     RuleParams,
     RuleSpec,
-    changed_pinned_rules,
     decision_time,
     exchange_gap,
-    rule_source_hash,
+    rule_sha256,
     validate_candidate_rules,
 )
 
 __all__ = [
     "MAX_RETAIL_AGE",
     "RULES",
-    "RULE_SOURCE_HASHES",
     "BetIntent",
     "ExchangeGapParams",
     "MarketState",
@@ -32,10 +29,9 @@ __all__ = [
     "RuleParams",
     "RuleSpec",
     "build_market_state",
-    "changed_pinned_rules",
     "decision_time",
     "exchange_gap",
     "load_market_state",
-    "rule_source_hash",
+    "rule_sha256",
     "validate_candidate_rules",
 ]

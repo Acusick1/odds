@@ -20,6 +20,7 @@ from odds_core.as_of import (
     EXCHANGE_AT_T_KINDS,
     MAX_EXCHANGE_AGE,
     RETAIL_KINDS,
+    UPPER_BOUND_TIME_KINDS,
     latest_at_or_before,
 )
 from odds_core.betfair_close import (
@@ -71,9 +72,6 @@ BASELINE_FEATURE = "baseline_ev"
 HORIZON_BUCKET_EDGES_HOURS: tuple[float, ...] = (0.0, 1.0, 6.0, 24.0, 72.0)
 HORIZON_BUCKET_LABELS: tuple[str, ...] = ("0-1h", "1-6h", "6-24h", "1-3d", "3-7d")
 SEASON_START_MONTH = 7
-
-# Stamped at FDUK's latest documented collection time, an upper bound on when the price was taken.
-UPPER_BOUND_TIME_KINDS: frozenset[SnapshotKind] = frozenset({SnapshotKind.FDUK_OPENING})
 
 
 @dataclass(frozen=True)

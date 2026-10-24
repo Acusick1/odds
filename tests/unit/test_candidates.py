@@ -11,6 +11,7 @@ from odds_core.candidates import (
     candidates_dir,
     load_candidates,
 )
+from odds_lambda.candidate_rules import rule_sha256
 from typer.testing import CliRunner
 
 MECHANICAL: dict[str, object] = {
@@ -23,6 +24,7 @@ MECHANICAL: dict[str, object] = {
     "start_date": "2026-11-01",
     "status": "active",
     "rule": "exchange_gap",
+    "rule_sha256": rule_sha256("exchange_gap"),
     "params": {"threshold": 0.02, "minutes_before_kickoff": 60},
 }
 
@@ -138,3 +140,22 @@ class TestListCommand:
         result = CliRunner(env={"COLUMNS": "200"}).invoke(app, ["candidates", "list"])
         assert result.exit_code == 1
         assert "back-longest" in result.stdout and "no_such_rule" in result.stdout
+
+    def test_changed_rule_hash_exits_1(self, registry: Path) -> None:
+        write(registry, {**MECHANICAL, "rule_sha256": "0" * 64})
+        result = CliRunner(env={"COLUMNS": "200"}).invoke(app, ["candidates", "list"])
+        assert result.exit_code == 1
+        assert "code of rule 'exchange_gap' changed" in result.stdout
+
+    def test_rule_hash_prints_the_current_hash(self) -> None:
+        result = CliRunner(env={"COLUMNS": "200"}).invoke(
+            app, ["candidates", "rule-hash", "exchange_gap"]
+        )
+        assert result.exit_code == 0
+        assert result.stdout.strip() == rule_sha256("exchange_gap")
+
+    def test_rule_hash_unknown_rule_exits_1(self) -> None:
+        result = CliRunner(env={"COLUMNS": "200"}).invoke(
+            app, ["candidates", "rule-hash", "no_such_rule"]
+        )
+        assert result.exit_code == 1

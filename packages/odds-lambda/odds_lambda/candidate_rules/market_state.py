@@ -6,7 +6,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from odds_core.as_of import EXCHANGE_AT_T_KINDS, MAX_EXCHANGE_AGE, RETAIL_KINDS
+from odds_core.as_of import (
+    EXCHANGE_AT_T_KINDS,
+    MAX_EXCHANGE_AGE,
+    RETAIL_KINDS,
+    UPPER_BOUND_TIME_KINDS,
+)
 from odds_core.betfair_close import (
     MAX_EXCHANGE_OVERROUND,
     ExchangePrice,
@@ -22,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.betfair.constants import SPORT_CONFIG
 
+# The slowest OddsPortal cadence (2 h at 24 h out, ``odds_lambda.jobs.fetch_oddsportal.CADENCE``).
 MAX_RETAIL_AGE = timedelta(hours=2)
 # The loader's lookback: no quote or exchange price older than this can enter a state.
 SNAPSHOT_LOOKBACK = max(MAX_RETAIL_AGE, MAX_EXCHANGE_AGE)
@@ -29,7 +35,7 @@ SNAPSHOT_LOOKBACK = max(MAX_RETAIL_AGE, MAX_EXCHANGE_AGE)
 
 @dataclass(frozen=True)
 class RetailQuote:
-    """One UK retail book's decimal prices from its latest snapshot at or before t."""
+    """One UK retail book's decimal prices from one snapshot at or before t."""
 
     time: datetime
     prices: dict[Outcome, float]
@@ -63,11 +69,17 @@ def build_market_state(
 ) -> MarketState:
     """The event's state at ``decision_time``; snapshots stamped after it are ignored.
 
-    Each UK retail book keeps the prices of its latest retail snapshot, dropped when
-    older than ``MAX_RETAIL_AGE``. The exchange price is the latest complete,
-    not in-play, live Betfair or FDUK opening price within ``MAX_EXCHANGE_AGE`` whose
-    back overround is at most ``max_exchange_overround``: the choice
-    ``odds_analytics.retail_ev.build_event_rows`` makes for its baseline.
+    Retail: for each retail snapshot kind, only its latest snapshot at or before t, if
+    within ``MAX_RETAIL_AGE``, counts, so a book absent from it is absent from the state.
+    A book quoted by two kinds takes the more recent snapshot's price. The exchange price
+    is the latest complete, not in-play live Betfair price within ``MAX_EXCHANGE_AGE``
+    whose back overround is at most ``max_exchange_overround``.
+
+    FDUK opening snapshots (``UPPER_BOUND_TIME_KINDS``) are excluded: their stamp is an
+    upper bound on the price's time, which a live run at t never sees. This differs from
+    ``odds_analytics.retail_ev.build_event_rows``, which takes the exchange baseline of
+    an FDUK opening row from that row's own snapshot and takes retail prices per book
+    rather than per whole snapshot.
     """
     market = sport_market(event.sport_key)
     outcomes = market_outcomes(market)
@@ -77,14 +89,14 @@ def build_market_state(
         key=lambda s: (s.snapshot_time, s.id or 0),
     )
 
-    retail: dict[str, RetailQuote] = {}
+    latest_retail: dict[SnapshotKind, OddsSnapshot] = {}
     exchange: ExchangePrice | None = None
     for snapshot in known:
         kind = snapshot_kind(snapshot.raw_data)
+        if kind in UPPER_BOUND_TIME_KINDS:
+            continue
         if kind in RETAIL_KINDS:
-            for book, prices in book_prices(snapshot.raw_data, kind, market, names).items():
-                if book in UK_RETAIL_BOOKMAKERS:
-                    retail[book] = RetailQuote(snapshot.snapshot_time, prices)
+            latest_retail[kind] = snapshot
         if kind not in EXCHANGE_AT_T_KINDS:
             continue
         if kind is SnapshotKind.BETFAIR_LIVE and is_in_play(snapshot.raw_data):
@@ -92,6 +104,17 @@ def build_market_state(
         price = exchange_price(snapshot, kind, market, names, outcomes)
         if price is not None and price.overround <= max_exchange_overround:
             exchange = price
+
+    retail: dict[str, RetailQuote] = {}
+    fresh = [
+        (kind, snapshot)
+        for kind, snapshot in latest_retail.items()
+        if decision_time - snapshot.snapshot_time <= MAX_RETAIL_AGE
+    ]
+    for kind, snapshot in sorted(fresh, key=lambda ks: (ks[1].snapshot_time, ks[1].id or 0)):
+        for book, prices in book_prices(snapshot.raw_data, kind, market, names).items():
+            if book in UK_RETAIL_BOOKMAKERS:
+                retail[book] = RetailQuote(snapshot.snapshot_time, prices)
 
     if exchange is not None and decision_time - exchange.time > MAX_EXCHANGE_AGE:
         exchange = None
@@ -101,24 +124,30 @@ def build_market_state(
         market=market,
         kickoff=event.commence_time,
         decision_time=decision_time,
-        retail={
-            book: quote
-            for book, quote in retail.items()
-            if decision_time - quote.time <= MAX_RETAIL_AGE
-        },
+        retail=retail,
         exchange=exchange,
     )
 
 
 async def load_market_state(
-    session: AsyncSession, event: Event, decision_time: datetime
+    session: AsyncSession,
+    event: Event,
+    decision_time: datetime,
+    known_at: datetime | None = None,
 ) -> MarketState:
-    """Build the state from one query for the snapshots in the lookback before ``decision_time``."""
-    result = await session.execute(
-        select(OddsSnapshot).where(
-            OddsSnapshot.event_id == event.id,
-            OddsSnapshot.snapshot_time <= decision_time,
-            OddsSnapshot.snapshot_time >= decision_time - SNAPSHOT_LOOKBACK,
-        )
-    )
+    """Build the state from one query for the snapshots in the lookback before ``decision_time``.
+
+    With ``known_at``, only snapshots stored (``created_at``) by then count: the data the
+    system had when it acted. The live runner passes its run time and the parity check
+    passes the trade's placed time. A historical backtest passes ``None``, because
+    backfilled rows were created long after their snapshot time.
+    """
+    conditions = [
+        OddsSnapshot.event_id == event.id,
+        OddsSnapshot.snapshot_time <= decision_time,
+        OddsSnapshot.snapshot_time >= decision_time - SNAPSHOT_LOOKBACK,
+    ]
+    if known_at is not None:
+        conditions.append(OddsSnapshot.created_at <= known_at)
+    result = await session.execute(select(OddsSnapshot).where(*conditions))
     return build_market_state(event, list(result.scalars().all()), decision_time)

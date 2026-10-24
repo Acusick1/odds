@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -13,16 +14,14 @@ from odds_core.models import OddsSnapshot
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotKind
 from odds_lambda.candidate_rules import (
     MAX_RETAIL_AGE,
-    RULE_SOURCE_HASHES,
-    RULES,
     BetIntent,
     ExchangeGapParams,
     MarketState,
     RetailQuote,
     build_market_state,
-    changed_pinned_rules,
     decision_time,
     exchange_gap,
+    rule_sha256,
     validate_candidate_rules,
 )
 from pydantic import ValidationError
@@ -83,10 +82,28 @@ class TestBuildMarketState:
             T - timedelta(minutes=10), {HOME: 2.1, DRAW: 3.1, AWAY: 4.1}
         )
 
-    def test_book_missing_from_latest_snapshot_keeps_earlier_quote(self) -> None:
+    def test_book_missing_from_latest_snapshot_is_absent(self) -> None:
         old = _snap(30, three_way_bookmaker("bet365", (2.0, 3.0, 4.0)))
         new = _snap(10, three_way_bookmaker("betway", (2.2, 3.2, 4.2)))
-        assert set(_state([old, new]).retail) == {"bet365", "betway"}
+        assert set(_state([old, new]).retail) == {"betway"}
+
+    def test_two_kinds_quoting_a_book_take_the_more_recent_snapshot(self) -> None:
+        older = _snap(
+            30,
+            three_way_bookmaker("bet365", (2.0, 3.0, 4.0)),
+            three_way_bookmaker("betway", (2.2, 3.2, 4.2)),
+            source=None,
+        )
+        newer = _snap(10, three_way_bookmaker("bet365", (2.1, 3.1, 4.1)))
+        state = _state([older, newer])
+        assert state.retail["bet365"].time == newer.snapshot_time
+        assert state.retail["bet365"].prices[HOME] == 2.1
+        assert state.retail["betway"].time == older.snapshot_time
+
+    def test_stale_latest_snapshot_of_a_kind_does_not_fall_back(self) -> None:
+        minutes = MAX_RETAIL_AGE.total_seconds() / 60
+        stale = _snap(minutes + 1, three_way_bookmaker("bet365", (2.0, 3.0, 4.0)))
+        assert _state([stale]).retail == {}
 
     def test_stale_retail_quote_is_dropped(self) -> None:
         minutes = MAX_RETAIL_AGE.total_seconds() / 60
@@ -126,7 +143,7 @@ class TestBuildMarketState:
         old = _snap(121, _betfair((2.0, 4.0, 4.0)), source="betfair_api")
         assert _state([old]).exchange is None
 
-    def test_fduk_opening_is_usable_as_exchange_and_retail(self) -> None:
+    def test_fduk_opening_is_excluded_as_exchange_and_retail(self) -> None:
         snapshot = make_tagged_snapshot(
             EVENT.id,
             T - timedelta(minutes=20),
@@ -135,8 +152,7 @@ class TestBuildMarketState:
             FdukTimeBasis.COLLECTION_DEADLINE,
         )
         state = _state([snapshot])
-        assert state.exchange is not None and state.exchange.kind is SnapshotKind.FDUK_OPENING
-        assert "bet365" in state.retail
+        assert state.exchange is None and state.retail == {}
 
     def test_fduk_closing_is_not_known_at_t(self) -> None:
         snapshot = make_tagged_snapshot(
@@ -249,6 +265,7 @@ def _candidate(**overrides: Any) -> MechanicalCandidate:
         "start_date": "2026-11-01",
         "status": "active",
         "rule": "exchange_gap",
+        "rule_sha256": rule_sha256("exchange_gap"),
         "params": {"threshold": 0.02, "minutes_before_kickoff": 60},
         **overrides,
     }
@@ -267,23 +284,52 @@ class TestValidateCandidateRules:
         with pytest.raises(ValueError, match="'gap'.*invalid params"):
             validate_candidate_rules([_candidate(params={"threshold": -1})])
 
+    def test_sport_without_a_market_fails(self) -> None:
+        with pytest.raises(ValueError, match="'gap'.*No candidate market defined"):
+            validate_candidate_rules([_candidate(sport="basketball_nba")])
+
     def test_registered_candidates_are_valid(self) -> None:
         validate_candidate_rules(load_candidates(candidates_dir()))
 
 
-class TestRulePinning:
-    def test_every_rule_is_pinned(self) -> None:
-        assert set(RULES) == set(RULE_SOURCE_HASHES)
+class TestRuleSha256:
+    def test_is_a_stable_sha256(self) -> None:
+        assert rule_sha256("exchange_gap") == rule_sha256("exchange_gap")
+        assert len(rule_sha256("exchange_gap")) == 64
 
-    def test_referenced_rules_are_unchanged(self) -> None:
-        referenced = [
-            c.rule for c in load_candidates(candidates_dir()) if isinstance(c, MechanicalCandidate)
-        ]
-        assert changed_pinned_rules(referenced) == [], (
-            "a rule a candidate references changed; a changed rule needs a new rule name"
-        )
+    @pytest.mark.parametrize(
+        "target",
+        [
+            "odds_lambda.candidate_rules.rules.exchange_gap",
+            "odds_lambda.candidate_rules.rules.ExchangeGapParams",
+            "odds_lambda.candidate_rules.market_state",
+            "odds_core.as_of",
+        ],
+    )
+    def test_covers_the_rule_its_params_the_state_and_the_as_of_module(
+        self, monkeypatch: pytest.MonkeyPatch, target: str
+    ) -> None:
+        real = inspect.getsource
 
-    def test_a_source_change_is_detected(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        assert changed_pinned_rules(["exchange_gap"]) == []
-        monkeypatch.setitem(RULE_SOURCE_HASHES, "exchange_gap", "0" * 64)
-        assert changed_pinned_rules(["exchange_gap"]) == ["exchange_gap"]
+        def name_of(obj: Any) -> str:
+            return (
+                getattr(obj, "__name__", "")
+                if inspect.ismodule(obj)
+                else (f"{obj.__module__}.{obj.__qualname__}")
+            )
+
+        def fake(obj: Any) -> str:
+            return real(obj) + ("# changed" if name_of(obj) == target else "")
+
+        before = rule_sha256("exchange_gap")
+        monkeypatch.setattr(inspect, "getsource", fake)
+        assert rule_sha256("exchange_gap") != before
+
+    def test_a_stale_hash_fails_validation_with_the_new_one(self) -> None:
+        with pytest.raises(ValueError, match="'gap'.*code of rule 'exchange_gap' changed") as exc:
+            validate_candidate_rules([_candidate(rule_sha256="0" * 64)])
+        assert rule_sha256("exchange_gap") in str(exc.value)
+
+    def test_hash_must_be_64_hex_chars(self) -> None:
+        with pytest.raises(ValidationError):
+            _candidate(rule_sha256="abc")

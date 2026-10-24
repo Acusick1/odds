@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+from odds_core import as_of
 from odds_core.candidates import Candidate, MechanicalCandidate
 from odds_core.market_prices import Outcome, market_outcomes
 from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt, ValidationError
 
-from odds_lambda.candidate_rules.market_state import MarketState
+from odds_lambda.candidate_rules import market_state
+from odds_lambda.candidate_rules.market_state import MarketState, sport_market
 
 
 @dataclass(frozen=True)
@@ -70,23 +72,27 @@ RULES: dict[str, RuleSpec] = {
     "exchange_gap": RuleSpec(exchange_gap, ExchangeGapParams),
 }
 
-# A rule a registered candidate references never changes; a changed rule is a new name.
-RULE_SOURCE_HASHES: dict[str, str] = {
-    "exchange_gap": "2c7f28457bfe9680dab68fca819fa97fd4bfbf157d671f7c6effc80198451ca7",
-}
 
+def rule_sha256(rule_name: str) -> str:
+    """Hash of the code a rule's bets depend on, in a fixed order.
 
-def rule_source_hash(name: str) -> str:
-    return hashlib.sha256(inspect.getsource(RULES[name].function).encode()).hexdigest()
-
-
-def changed_pinned_rules(names: Iterable[str]) -> list[str]:
-    """The rules among ``names`` whose source no longer matches its pinned hash."""
-    return sorted(n for n in set(names) if rule_source_hash(n) != RULE_SOURCE_HASHES[n])
+    The rule function, its params model, the market state module and the as-of module.
+    """
+    spec = RULES[rule_name]
+    digest = hashlib.sha256()
+    for source in (
+        inspect.getsource(spec.function),
+        inspect.getsource(spec.params_model),
+        inspect.getsource(market_state),
+        inspect.getsource(as_of),
+    ):
+        digest.update(source.encode())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def validate_candidate_rules(candidates: Sequence[Candidate]) -> None:
-    """Raise ``ValueError`` naming a mechanical candidate whose rule or params are invalid."""
+    """Raise ``ValueError`` naming a mechanical candidate that is invalid or whose rule code changed."""
     for candidate in candidates:
         if not isinstance(candidate, MechanicalCandidate):
             continue
@@ -95,6 +101,17 @@ def validate_candidate_rules(candidates: Sequence[Candidate]) -> None:
             raise ValueError(
                 f"candidate {candidate.name!r}: unknown rule {candidate.rule!r}, "
                 f"known rules {sorted(RULES)}"
+            )
+        try:
+            sport_market(candidate.sport)
+        except ValueError as exc:
+            raise ValueError(f"candidate {candidate.name!r}: {exc}") from exc
+        if candidate.rule_sha256 != (current := rule_sha256(candidate.rule)):
+            raise ValueError(
+                f"candidate {candidate.name!r}: the code of rule {candidate.rule!r} changed "
+                f"(recorded rule_sha256 {candidate.rule_sha256}, current {current}); "
+                f"a new candidate version must record the new hash "
+                f"(`odds candidates rule-hash {candidate.rule}` prints it)"
             )
         try:
             spec.params_model.model_validate(candidate.params)
