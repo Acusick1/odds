@@ -55,7 +55,7 @@ async with async_session_maker() as session:
     result = await BacktestEngine(BasicEVStrategy(), config, OddsReader(session)).run()
 ```
 
-Imports: `odds_analytics.backtesting` (`odds_analytics.backtesting.config.BacktestConfig`, `odds_analytics.backtesting.services.BacktestEngine`, `odds_analytics.backtesting.config.BetSizingConfig`), `odds_analytics.strategies`, `odds_core.database.async_session_maker`, `odds_lambda.storage.readers.OddsReader` (the reader the engine takes, not a raw session).
+Imports: `odds_analytics.backtesting` (`odds_analytics.backtesting.config.BacktestConfig`, `odds_analytics.backtesting.services.BacktestEngine`, `odds_analytics.backtesting.config.BetSizingConfig`), `odds_analytics.strategies`, `odds_core.database.async_session_maker`, `odds_lambda.storage.readers.OddsReader` (the reader the engine takes instead of a raw session).
 
 ## Reading results
 
