@@ -1,5 +1,6 @@
 """Unit tests for alert infrastructure."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -285,6 +286,38 @@ class TestJobAlertContext:
                 raise ValueError("boom")
 
         mock_manager.alert.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("odds_core.alerts.send_job_failure", new_callable=AsyncMock)
+    async def test_alert_failure_does_not_mask_job_exception(self, mock_send: AsyncMock) -> None:
+        """A failing alert send must not replace the job's own exception."""
+        mock_send.side_effect = ConnectionError("alert path down")
+        original = ValueError("boom")
+
+        with pytest.raises(ValueError) as exc_info:
+            async with job_alert_context("test-job"):
+                raise original
+
+        assert exc_info.value is original
+        mock_send.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_hanging_alert_send_does_not_mask_job_exception(self) -> None:
+        """A hung alert send is cut off by the timeout and the job's exception survives."""
+
+        async def hang(*_: object) -> None:
+            await asyncio.sleep(60)
+
+        original = ValueError("boom")
+        with (
+            patch("odds_core.alerts.send_job_failure", side_effect=hang),
+            patch("odds_core.alerts.ALERT_SEND_TIMEOUT_SECONDS", 0.01),
+            pytest.raises(ValueError) as exc_info,
+        ):
+            async with job_alert_context("test-job"):
+                raise original
+
+        assert exc_info.value is original
 
 
 NOW = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)

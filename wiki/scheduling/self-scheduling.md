@@ -29,7 +29,7 @@ The cadence of a data job follows how close the next kickoff is, which only the 
 1. Decide: `odds_lambda.scheduling.decision.decide_forward_resilient` or `odds_lambda.scheduling.decision.decide_backward_resilient`. The collectors that create their own events decide through `odds_lambda.collection_calendar.decide_collection_run` (one definition of dormancy) and, with no fixture within the dormancy horizon, only book a check-in and write their heartbeat ([dormancy](decision-engine.md#dormancy)).
 2. Pre-schedule the next run before any work, so a crash or Lambda timeout leaves the chain intact.
 3. If the gate says skip, return.
-4. Do the work (usually inside `odds_core.alerts.job_alert_context`, which alerts once per outage; see [Alerts](../operations/alerts.md)). On the local scheduler `odds_lambda.scheduling.runner.run_chain_job` bounds the run and re-books the chain when it fails with nothing booked ([Local scheduler](local-scheduler.md#scheduling-primitives)).
+4. Do the work (usually inside `odds_core.alerts.job_alert_context`, which alerts once per outage; see [Alerts](../operations/alerts.md#delivery)). On the local scheduler `odds_lambda.scheduling.runner.run_chain_job` bounds the run and re-books the chain when it fails with nothing booked ([Local scheduler](local-scheduler.md#scheduling-primitives)).
 5. Re-decide and reschedule, because ingestion may have created events that move the tier.
 
 A local scheduler restart keeps each job's pending run; only a job without one runs its bootstrap function to start the chain ([bootstrap](local-scheduler.md#bootstrap-jobs-and-cron-table)).
