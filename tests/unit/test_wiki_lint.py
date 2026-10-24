@@ -124,6 +124,30 @@ class TestWikiLint:
         write_page(repo, "alpha", "a", page("See [[b]] and [B](../beta/b.md).", title="A"))
         assert kinds(run(repo), "a") == [Kind.WIKILINK]
 
+    def test_machine_specific_term(self, repo: Path) -> None:
+        text = page("Runs on the Mini-PC.", title="A", description="On nucboxg10pro.")
+        write_page(repo, "alpha", "a", text)
+        lines = text.splitlines()
+        expected = [
+            Finding("a", Kind.MACHINE_SPECIFIC, message, (lines.index(line) + 1,))
+            for line, message in [
+                (
+                    "description: On nucboxg10pro.",
+                    "pages describe the production role, not the machine: nucbox",
+                ),
+                (
+                    "Runs on the Mini-PC.",
+                    "pages describe the production role, not the machine: Mini-PC",
+                ),
+            ]
+        ]
+        assert [f for f in run(repo) if f.slug == "a"] == expected
+
+    def test_machine_free_page_and_adr_link_target_pass(self, repo: Path) -> None:
+        body = "Runs on the production host ([ADR](../../docs/adr/0008-mini-pc-is-production.md))."
+        write_page(repo, "alpha", "a", page(body, title="A"))
+        assert Kind.MACHINE_SPECIFIC not in kinds(run(repo), "a")
+
     def test_broken_links_and_anchors_are_left_to_lychee(self, repo: Path) -> None:
         write_page(
             repo,

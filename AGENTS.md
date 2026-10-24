@@ -1,6 +1,6 @@
 # Betting Odds Pipeline & Agent
 
-Single-user, sport-agnostic betting odds pipeline with per-sport LLM betting agents (EPL and MLB data collection active; the agents are run by hand on the production mini-PC; NBA code is deprioritized). The edge being tested is the agent's synthesis of odds, exchange prices, team news and context; an XGBoost CLV model is a supplementary signal.
+Single-user, sport-agnostic betting odds pipeline with per-sport LLM betting agents (EPL and MLB data collection active; the agents are run by hand on the production host; NBA code is deprioritized). The edge being tested is the agent's synthesis of odds, exchange prices, team news and context; an XGBoost CLV model is a supplementary signal.
 
 ## Documentation
 
@@ -10,8 +10,9 @@ Every code change keeps the wiki current. `uv run python scripts/wiki_lint.py` (
 
 ## Constraints
 
-- **Never point `DATABASE_URL` at production** from a development machine. Production is the mini-PC's Postgres, and only `deploy.sh` on that host migrates it. That rules out migrations, fetches, test runs and `odds copy from-prod` without an explicit production URL. See [databases](wiki/foundations/databases-and-environments.md#environments).
-- **AWS is dormant, and its deployed state is not in the repo.** Every scheduled job runs on the mini-PC; the EventBridge rules and the Deploy to Production workflow are disabled; re-enabling the workflow and running it re-enables every rule. `odds scheduler list-jobs --backend aws` is the only record of the AWS state. See [jobs and deployment](wiki/scheduling/job-deployment-matrix.md#dormant-aws-rules) and [ADR-0008](docs/adr/0008-mini-pc-is-production.md).
+- **The production host is currently the mini-PC**, reached with `ssh minipc` over Tailscale (an alias in the maintainer's SSH config). No other file names the machine.
+- **Never point `DATABASE_URL` at production** from a development machine. Production is the Postgres on the production host, and only `deploy.sh` on that host migrates it. That rules out migrations, fetches, test runs and `odds copy from-prod` without an explicit production URL. See [databases](wiki/foundations/databases-and-environments.md#environments).
+- **AWS is dormant, and its deployed state is not in the repo.** Every scheduled job runs on the production host; the EventBridge rules and the Deploy to Production workflow are disabled; re-enabling the workflow and running it re-enables every rule. `odds scheduler list-jobs --backend aws` is the only record of the AWS state. See [jobs and deployment](wiki/scheduling/job-deployment-matrix.md#dormant-aws-rules) and [ADR-0008](docs/adr/0008-mini-pc-is-production.md).
 - **The Odds API costs quota units.** Check `odds status quota` before bulk or historical fetches. See [quota](wiki/collection/odds-api-quota.md).
 - **Pass `--sport` and the sport's market key.** Several CLI defaults are NBA. EPL odds use `1x2` and MLB uses `h2h`. See [sources and keys](wiki/collection/sport-and-market-keys.md).
 - **Historical analysis uses only data at or before decision time.** `get_odds_at_time` searches both sides of the target time. See [look-ahead](wiki/modelling/look-ahead-bias.md).

@@ -19,7 +19,7 @@ status: stable
 
 # The fetch-oddsportal job
 
-`odds_lambda.jobs.fetch_oddsportal.main(ctx)` reads pre-match odds over HTTP ([oddsportal-scraper](oddsportal-scraper.md)), converts them to the canonical shape and stores snapshots through `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot`. It is in the default local `bootstrap_jobs` and runs on the mini-PC ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Its scraper Lambda rules (gated by `enable_oddsportal_scraper`) are dormant; a re-enabled rule would scrape alongside the mini-PC, and no code checks for a job enabled in both places. Deployed state: `odds scheduler list-jobs --backend aws`. On the mini-PC, one hung run ends the local chains (#485).
+`odds_lambda.jobs.fetch_oddsportal.main(ctx)` reads pre-match odds over HTTP ([oddsportal-scraper](oddsportal-scraper.md)), converts them to the canonical shape and stores snapshots through `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot`. It is in the default local `bootstrap_jobs` and runs on the production host ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Its scraper Lambda rules (gated by `enable_oddsportal_scraper`) are dormant; a re-enabled rule would scrape alongside the production host, and no code checks for a job enabled in both places. Deployed state: `odds scheduler list-jobs --backend aws`. On the production host, one hung run ends the local chains (#485).
 
 ## Leagues
 

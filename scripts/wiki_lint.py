@@ -72,6 +72,8 @@ DOTTED_RE = re.compile(r"^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(?:\(\))?$")
 BARE_RE = re.compile(r"^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)(?:\(\))?$")
 CONSTANT_RE = re.compile(r"^[A-Z][A-Z0-9_]+$")
 HAS_EXT_RE = re.compile(r"\.[A-Za-z]\w*$")
+LINK_TARGET_RE = re.compile(r"\]\([^)\s]+")
+MACHINE_TERM_RE = re.compile(r"mini-?pc|nucbox|/home/|~/", re.IGNORECASE)
 HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 
 FunctionOrClass = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
@@ -135,6 +137,7 @@ class Kind(Enum):
     DOCS_CITATION = "docs citation"
     DOCS_LINK = "docs link"
     WIKILINK = "wikilink"
+    MACHINE_SPECIFIC = "machine-specific term"
     PATH_MISSING = "path missing"
     PATH_DELETED = "path deleted"
     PATH_RENAMED = "path renamed"
@@ -726,6 +729,7 @@ class WikiLinter:
             for target in self._check_links(slug, page.path, page.body):
                 if target in by_path and by_path[target] != slug:
                     self.inbound[by_path[target]].add(slug)
+            self._check_machine_terms(slug, page.text)
             self._check_citations(page)
         for page in self.pages.values():
             self._check_staleness(page)
@@ -1136,6 +1140,17 @@ class WikiLinter:
         if backlink:
             self.cites[citation.path].add(page.slug)
         page.citations.setdefault(citation, set()).update(lines)
+
+    def _check_machine_terms(self, slug: str, text: str) -> None:
+        text = LINK_TARGET_RE.sub("](", text)
+        for number, line in enumerate(text.splitlines(), start=1):
+            for match in MACHINE_TERM_RE.finditer(line):
+                self._add(
+                    slug,
+                    Kind.MACHINE_SPECIFIC,
+                    f"pages describe the production role, not the machine: {match.group(0)}",
+                    (number,),
+                )
 
     def _check_links(self, slug: str, path: Path, text: str) -> list[Path]:
         """Report wikilinks and docs/ links; return the existing files linked to.

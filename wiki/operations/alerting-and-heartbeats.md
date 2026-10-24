@@ -39,7 +39,7 @@ A collection job that has run cleanly can still have collected nothing. `odds_la
 
 ## Blind spots
 
-- All three mechanisms run on the mini-PC, the only production host. If the host or its WSL guest stops, nothing runs to raise an alert; #489 tracks an external dead-man's switch ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)).
+- All three mechanisms run on the production host, and nothing else runs scheduled jobs. If the host or the scheduler stops, nothing runs to raise an alert; #489 tracks an external dead-man's switch ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)).
 - Delivery depends on the environment that runs the job: on the dormant AWS stack, the scraper function's Terraform sets neither `ALERT_ENABLED` nor `DISCORD_WEBHOOK_URL`, so its alerts are off (#443; [aws-infrastructure](aws-infrastructure.md)).
 - `fetch_logs` records no failed API call, and no check reads it for outages: a fetch-odds failure reaches Discord only through the job's own critical and the stale-data check ([fetch logs](../collection/odds-ingestion-service.md#fetch-logs)).
 - Discord is the only channel and a failed post is still recorded, so a failed delivery suppresses retries for the window ([alerts](alerts.md#delivery)).

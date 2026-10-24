@@ -112,7 +112,7 @@ Every scheduled job module (`odds_lambda.jobs.*`), every CLI command module (`od
 
 - frontmatter, area index membership, orphan pages, and the generated index blocks;
 - that citations resolve (dotted paths via griffe, file paths on disk) and that no bare identifiers remain;
-- that no pages cite `docs/`;
+- that no pages cite `docs/` or name the production machine or home paths (only AGENTS.md names the machine);
 - coverage and staleness.
 
 lychee checks links and anchors, and vale checks prose.

@@ -5,7 +5,7 @@ description: The job registry and where each job runs, self-scheduling and its d
 
 # Scheduling
 
-Every data job is registered once, decides its own next run, and books that run through a backend: an APScheduler entry on a local host, or an EventBridge rule on AWS. Production runs every job on the mini-PC's local scheduler, and the AWS rules are dormant. This area covers the registry, the decision logic, both backends, and the how-tos for adding, running and debugging jobs.
+Every data job is registered once, decides its own next run, and books that run through a backend: an APScheduler entry on a local host, or an EventBridge rule on AWS. Production runs every job on the production host's local scheduler, and the AWS rules are dormant. This area covers the registry, the decision logic, both backends, and the how-tos for adding, running and debugging jobs.
 
 <!-- pages:start -->
 ### Reference
@@ -24,5 +24,5 @@ Every data job is registered once, decides its own next run, and books that run 
 
 - [Add a scheduler job](howto-add-scheduler-job.md) — Steps to add a job (entry point, registry, per-sport, sport allowlist or cron registration, self-scheduling, alert wrapper and heartbeat, production bootstrap and matrix update) and the traps in each.
 - [Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md) — A read-only workflow for stale data or missing tiers on AWS covering rules, CloudWatch logs, database versus fixtures, tier coverage and a safe manual invoke.
-- [Run the scheduler as a systemd service](howto-run-scheduler-service.md) — Install the scheduler's systemd unit on the production mini-PC, start it at Windows boot under WSL, and redeploy production with deploy.sh.
+- [Run the scheduler as a systemd service](howto-run-scheduler-service.md) — Install the scheduler's systemd unit on the production host, optionally keep WSL running from Windows boot, and redeploy production with deploy.sh.
 <!-- pages:end -->

@@ -5,7 +5,7 @@ description: AWS infrastructure and deployment, CI/CD workflows, Discord alerts,
 
 # Operations
 
-How the system is deployed, verified and watched: production on the mini-PC is deployed with `deploy.sh` ([Run the scheduler as a systemd service](../scheduling/howto-run-scheduler-service.md)); this area covers the dormant Lambdas and their Terraform, the GitHub Actions that test, deploy and check them, the alert and heartbeat machinery that tells an operator something stalled, and the reports the system produces. Deployed AWS state is not in the repo; pages say so and give the command that checks it.
+How the system is deployed, verified and watched: production is deployed with `deploy.sh` ([Run the scheduler as a systemd service](../scheduling/howto-run-scheduler-service.md)); this area covers the dormant Lambdas and their Terraform, the GitHub Actions that test, deploy and check them, the alert and heartbeat machinery that tells an operator something stalled, and the reports the system produces. Deployed AWS state is not in the repo; pages say so and give the command that checks it.
 
 <!-- pages:start -->
 ### Reference
