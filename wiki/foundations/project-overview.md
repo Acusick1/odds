@@ -28,7 +28,7 @@ EPL and MLB data collection is active. The agents are in interactive evaluation,
 
 ## Goal
 
-Profit. Agents, models and mechanical rules are candidates, run in parallel and judged on live paper trades by EV against the Betfair Exchange close ([Goal and strategy](goal-and-strategy.md)). The deployed model is `epl-clv-home` `v308058c` with a CV R² of about 0.058. It is a supplementary signal the agent treats as a sanity check. See [The betting agent](../agent/betting-agent.md) and [What the CLV model can and cannot do](../evaluation/clv-model-findings.md).
+Profit. Any approach can be a candidate (today the betting agents; models and mechanical rules qualify too), run in parallel and judged on live paper trades by EV against the Betfair Exchange close ([Goal and strategy](goal-and-strategy.md)). See [The betting agent](../agent/betting-agent.md) and [What the CLV model can and cannot do](../evaluation/clv-model-findings.md).
 
 ## What runs where
 

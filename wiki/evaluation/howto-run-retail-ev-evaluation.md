@@ -17,7 +17,7 @@ The spec fields, the window-end guard, the statistics and the output files are o
 > [!WARNING]
 > Never point `DATABASE_URL` at production. The evaluation reads a local copy ([databases](../foundations/databases-and-environments.md#environments)).
 
-1. **Load the data locally.** For a fresh-season look, copy production once the window has ended and its last FDUK file is loaded ([copy production data](../foundations/howto-copy-production-data.md)). A dry run uses the development data already in the local database.
+1. **Load the data locally.** For a window that has ended, copy production once the window has ended and its last FDUK file is loaded ([copy production data](../foundations/howto-copy-production-data.md)). A dry run uses the development data already in the local database.
 2. **Write the spec.** For the 2026-27 window the spec is already committed: `experiments/configs/retail_ev_evaluation_2026_27.yaml`; skip to step 3. Otherwise copy `experiments/configs/retail_ev_evaluation_dry_run.yaml` and set the window, training start, refit cadence, feature groups, arm, hyperparameter trial, seed and bootstrap (`odds_analytics.retail_ev_evaluation.EvaluationSpec`).
    - Set `odds_analytics.retail_ev_evaluation.EvaluationSpec.feature_names` to the columns the frozen model expects; the run refuses any other list.
    - A window end after the run time is refused, so the run cannot be an interim look.

@@ -40,7 +40,7 @@ The wiki lint (`scripts/wiki_lint.py`) runs as the `wiki-lint` pre-commit hook a
 
 Vale rejects change-narrating words in `README.md`, `AGENTS.md`, `docs/adr/`, `docs/agents/` and `wiki/`; `.vale.ini` turns both rules off for `docs/adr/*.md` because ADRs are point-in-time records. Every page describes the current state.
 
-`docs/agents/domain.md` tells agents to read `wiki/index.md` and the ADRs under `docs/adr/` before exploring and to flag any contradiction of an ADR.
+`docs/agents/domain.md` tells agents to read `wiki/index.md` and the ADRs under `docs/adr/` before exploring and to flag any contradiction of an accepted ADR.
 
 ## Issue tracker
 

@@ -72,6 +72,6 @@ Every structured lineup API investigated is paywalled, blocks current-season dat
 
 ## Related
 
-- [ADR-0005: information edge](../../docs/adr/0005-information-edge.md)
+- [Goal and strategy](../foundations/goal-and-strategy.md)
 - [The betting agent](betting-agent.md)
 - [About the system and its pivots](../foundations/project-overview.md)

@@ -27,15 +27,15 @@ The suspended bet365 CLV model is not a candidate. Its predictions are an input 
 
 - **Development data generates ideas and never promotes.** The EPL 2024–26 range has been used for evaluation several times ([EPL CLV re-baseline](../evaluation/exp-epl-clv-rebaseline.md)). Choosing the best of many ideas on data already seen finds edges that are not there `(inferred)`.
 - **A candidate is judged on a live forward test.** It paper-trades from a start date at a fixed version. Any number of candidates run in parallel, and none waits on another.
-- **The score is EV at the price taken against the Betfair Exchange close:** `p_close × decimal_odds − 1`, with the close as defined for the [retail-EV target](../modelling/clv-target.md#the-retail-ev-target). Betfair Exchange is the close because its EPL coverage is continuous, where Pinnacle's ends in January 2026 ([ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md), "Considered options").
-- **EV beats realised P&L as the score because of variance** `(inferred)`. At 1X2 prices P&L per unit bet has a standard deviation of about 1.3, so a 3% edge takes thousands of bets to show. EV against the close has a standard deviation of roughly 0.05 to 0.10 and shows the same edge in hundreds.
-- **P&L is reported beside EV.** Positive EV with P&L below it by more than variance explains means the close is the wrong benchmark for that market.
+- **The score is EV at the price taken against the Betfair Exchange close:** `p_close × decimal_odds − 1`, with the close as defined for the [retail-EV target](../modelling/clv-target.md#the-retail-ev-target). Betfair Exchange is the close because its closing prices exist from 2024-25 on, where FDUK Pinnacle closing prices end 2026-01-08 ([ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md), "Considered options"). That close is defined for EPL only.
+- **EV beats realised P&L as the score because of variance** `(inferred)`. A bet's P&L is a win or a loss of the whole stake, while its EV against the close varies only with how far the price moves before kick-off, so EV shows an edge in far fewer bets.
+- **P&L is reported beside EV.** Positive EV with P&L below it by more than variance explains means the close is the wrong benchmark for that market `(inferred)`.
 - **Promote or kill.** A candidate is promoted when the event-clustered bootstrap 95% CI on its mean EV is above zero, and killed when the CI is at or below zero.
 - **Real money needs stake capacity too.** UK retail books restrict accounts that win, so a promoted candidate is also judged on how much it can stake `(inferred)`.
 
 ## What scoring exists today
 
-Paper trades record neither the candidate that placed them nor the close: `odds_core.paper_trade_models.PaperTrade` holds the price, stake, result and P&L only. So no candidate is scored yet (#604). Whether the Betfair Exchange close is deep enough to be MLB's benchmark has not been checked (#604).
+`odds_core.paper_trade_models.PaperTrade` has no field for the candidate or its version, and stores no close, so no candidate is scored yet (#604). MLB has no close defined (#604).
 
 ## Related
 
