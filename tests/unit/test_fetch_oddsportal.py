@@ -98,6 +98,7 @@ class TestScrapeLeague:
         scrape = await scrape_league(EPL)
 
         assert scrape.events_listed == 2
+        assert scrape.upcoming_listed == 2
         assert [m.market for m in scrape.matches] == ["1x2", "over_under_2_5"] * 2
         assert scrape.errors == []
 
@@ -107,6 +108,7 @@ class TestScrapeLeague:
         scrape = await scrape_league(EPL)
 
         assert scrape.events_listed == 1
+        assert scrape.upcoming_listed == 0
         assert scrape.matches == []
         assert client.context_fetches == 0
 
@@ -169,6 +171,11 @@ class TestIngestLeague:
         assert stats.matches_converted == 2
         assert stats.errors == ["x"]
         assert stats.snapshots_stored == 2
+
+    async def test_stats_carry_listing_counts(self) -> None:
+        stats = await ingest_league(EPL, scraped=LeagueScrape(events_listed=3, upcoming_listed=1))
+
+        assert (stats.events_listed, stats.upcoming_listed) == (3, 1)
 
     async def test_empty_scrape_returns_zero_stats(self) -> None:
         stats = await ingest_league(EPL, scraped=LeagueScrape(events_listed=0))

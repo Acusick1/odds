@@ -117,6 +117,8 @@ class IngestionStats:
     """Tracks results of a single league ingestion run."""
 
     league: str = ""
+    events_listed: int = 0
+    upcoming_listed: int = 0
     matches_scraped: int = 0
     matches_converted: int = 0
     events_matched: int = 0
@@ -131,6 +133,7 @@ class LeagueScrape:
 
     matches: list[MatchOdds] = field(default_factory=list)
     events_listed: int = 0
+    upcoming_listed: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -146,6 +149,7 @@ async def scrape_league(spec: LeagueSpec) -> LeagueScrape:
         scrape.events_listed = len(events)
         now = datetime.now(UTC)
         upcoming = [e for e in events if e.start_time > now]
+        scrape.upcoming_listed = len(upcoming)
         if not upcoming:
             return scrape
 
@@ -192,6 +196,8 @@ async def ingest_league(
         logger.info("scraping_league", league=spec.league, sport=spec.sport)
         scraped = await scrape_league(spec)
 
+    stats.events_listed = scraped.events_listed
+    stats.upcoming_listed = scraped.upcoming_listed
     all_converted = scraped.matches
     stats.errors.extend(scraped.errors)
     stats.matches_converted = len(all_converted)
@@ -355,15 +361,21 @@ async def main(ctx: JobContext) -> None:
 
         if failures:
             raise RuntimeError(f"{compound_job_name} failed: {'; '.join(failures)}")
+        checked = []
+        for spec, stats in zip(specs, all_stats, strict=True):
+            if stats.events_listed > 0 and stats.upcoming_listed == 0:
+                logger.info(
+                    "oddsportal_empty_run_check_skipped",
+                    sport=spec.sport_key,
+                    reason="every listed event has already started",
+                    events_listed=stats.events_listed,
+                )
+                continue
+            checked.append((spec, stats))
         await require_rows_for_fixtures(
             SOURCE,
-            {
-                spec.sport_key: stats.snapshots_stored
-                for spec, stats in zip(specs, all_stats, strict=True)
-            },
-            errors_by_sport={
-                spec.sport_key: stats.errors for spec, stats in zip(specs, all_stats, strict=True)
-            },
+            {spec.sport_key: stats.snapshots_stored for spec, stats in checked},
+            errors_by_sport={spec.sport_key: stats.errors for spec, stats in checked},
         )
 
     # Outside job_alert_context so scoring failures don't fire scrape alerts.
