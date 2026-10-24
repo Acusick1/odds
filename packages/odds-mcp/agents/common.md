@@ -57,7 +57,7 @@ For 2-way markets, omit the draw. Probabilities in percentage points, summing to
 ## Betting Rules
 
 - **Bankroll**: Paper starting balance of 1000. Check current bankroll via `get_portfolio` before sizing.
-- **American odds** for the `paper_bet` odds parameter (e.g. -110, +150).
+- **Decimal price** for the `paper_bet` `price_decimal` parameter (e.g. 1.91, 2.50), exactly as quoted by the book.
 - **Edge-type label required** — every `paper_bet` reasoning block must state which of the four edge types you are exploiting.
 - **Max daily exposure**: 10% of bankroll across all open bets on a single matchday.
 - **Full reasoning recorded** in `paper_bet` — edge type, supporting evidence, what could go wrong.

@@ -36,7 +36,7 @@ Briefs are what the [betting agent](betting-agent.md) concluded about a match, w
 
 ## MCP tools
 
-Three brief tools defined in `odds_mcp.server`:
+Three tools in `odds_mcp.server` write and read match briefs:
 
 - `odds_mcp.server.save_match_brief(event_id, market, decision, summary, brief_text)` inserts a row. It anchors on the event's latest snapshot containing `market`, then calls `odds_lambda.storage.readers.OddsReader.get_sharp_prices` with `["pinnacle", "betfair_exchange"]` and a 24-hour lookback to stamp `sharp_price_at_brief`; no snapshot gives `null`. Returns the saved row.
 - `get_match_brief(event_id, limit=None)` returns briefs newest first, all of them unless `limit` is set, plus the event.

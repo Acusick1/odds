@@ -263,7 +263,7 @@ async def live_twin_with_rows(pglite_async_session):
                 market="h2h",
                 selection="home",
                 bookmaker="bet365",
-                odds=150,
+                price_decimal=2.5,
                 stake=10.0,
                 bankroll_before=100.0,
             ),

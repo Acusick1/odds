@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import structlog
+from odds_core.candidates import CandidateStatus, candidates_dir, load_candidates
+from odds_core.git_info import current_git_sha
 from odds_core.market_prices import THREE_WAY_MARKET, TWO_WAY_MARKET
 from odds_core.models import Event, EventStatus
-from odds_core.odds_math import calculate_profit_from_odds, determine_h2h_winner
+from odds_core.odds_math import calculate_profit_from_decimal, determine_h2h_winner
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_core.utils import is_three_way_sport
 from sqlalchemy import func, select
@@ -36,6 +38,26 @@ class PortfolioSummary:
     push_count: int
 
 
+def _check_candidate(name: str, version: int, event: Event, market: str) -> None:
+    """Raise ValueError unless the registry's candidate may place this bet today at this version."""
+    candidate = next((c for c in load_candidates(candidates_dir()) if c.name == name), None)
+    if candidate is None:
+        raise ValueError(f"Candidate '{name}' is not in the registry")
+    if candidate.status != CandidateStatus.ACTIVE:
+        raise ValueError(f"Candidate '{name}' is {candidate.status}, not active")
+    today = datetime.now(UTC).date()
+    if candidate.start_date > today:
+        raise ValueError(f"Candidate '{name}' starts on {candidate.start_date}, after {today}")
+    if candidate.version != version:
+        raise ValueError(f"Candidate '{name}' is at version {candidate.version}, not {version}")
+    if event.sport_key != candidate.sport:
+        raise ValueError(
+            f"Candidate '{name}' is for {candidate.sport}, not {event.sport_key} ({event.id})"
+        )
+    if market == TWO_WAY_MARKET and is_three_way_sport(event.sport_key):
+        raise ValueError(f"{event.sport_key} trades use '{THREE_WAY_MARKET}', not '{market}'")
+
+
 async def place_trade(
     session: AsyncSession,
     *,
@@ -43,13 +65,17 @@ async def place_trade(
     market: str,
     selection: str,
     bookmaker: str,
-    odds: int,
+    price_decimal: float,
     stake: float,
     bankroll: float,
     reasoning: str | None = None,
     confidence: float | None = None,
+    candidate_name: str | None = None,
+    candidate_version: int | None = None,
 ) -> PaperTrade:
-    """Place a new paper trade. Validates stake against bankroll."""
+    """Place a new paper trade. Validates stake against bankroll and the candidate."""
+    if price_decimal <= 1.0:
+        raise ValueError(f"Decimal price must exceed 1.0, got {price_decimal}")
     if stake <= 0:
         raise ValueError("Stake must be positive")
     if stake > bankroll:
@@ -67,16 +93,27 @@ async def place_trade(
         if not is_three_way_sport(event.sport_key):
             raise ValueError(f"Invalid selection 'draw': {event.sport_key} has no draw")
 
+    if (candidate_name is None) != (candidate_version is None):
+        raise ValueError("candidate_name and candidate_version are set together or not at all")
+    if candidate_name is not None and candidate_version is not None:
+        candidate_event = await session.get(Event, event_id)
+        if candidate_event is None:
+            raise ValueError(f"Event '{event_id}' not found")
+        _check_candidate(candidate_name, candidate_version, candidate_event, market)
+
     trade = PaperTrade(
         event_id=event_id,
         market=market,
         selection=selection,
         bookmaker=bookmaker,
-        odds=odds,
+        price_decimal=price_decimal,
         stake=stake,
         bankroll_before=bankroll,
         reasoning=reasoning,
         confidence=confidence,
+        candidate_name=candidate_name,
+        candidate_version=candidate_version,
+        git_sha=current_git_sha(),
     )
     session.add(trade)
     await session.flush()
@@ -115,7 +152,9 @@ async def settle_trades(session: AsyncSession) -> list[PaperTrade]:
             continue
 
         pnl = (
-            calculate_profit_from_odds(trade.stake, trade.odds, won=(result == TradeResult.WIN))
+            calculate_profit_from_decimal(
+                trade.stake, trade.price_decimal, won=(result == TradeResult.WIN)
+            )
             if result in (TradeResult.WIN, TradeResult.LOSS)
             else 0.0
         )

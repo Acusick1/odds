@@ -13,9 +13,11 @@ from typing import Any, Literal
 
 import structlog
 from fastmcp import FastMCP
+from odds_analytics.candidate_report import CandidateSummary, candidate_report
 from odds_analytics.utils import per_book_market_holds
 from odds_core.agent_wakeup_models import AgentWakeup
 from odds_core.bookmakers import NON_BETTABLE_BOOKMAKERS
+from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.database import async_session_maker
 from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
@@ -153,7 +155,7 @@ def _trade_to_dict(trade: PaperTrade) -> dict[str, Any]:
         "market": trade.market,
         "selection": trade.selection,
         "bookmaker": trade.bookmaker,
-        "odds": trade.odds,
+        "price_decimal": trade.price_decimal,
         "stake": trade.stake,
         "reasoning": trade.reasoning,
         "confidence": trade.confidence,
@@ -163,6 +165,9 @@ def _trade_to_dict(trade: PaperTrade) -> dict[str, Any]:
         "settled_at": trade.settled_at.isoformat() if trade.settled_at else None,
         "result": trade.result.value if trade.result else None,
         "pnl": trade.pnl,
+        "candidate_name": trade.candidate_name,
+        "candidate_version": trade.candidate_version,
+        "git_sha": trade.git_sha,
     }
 
 
@@ -574,12 +579,14 @@ async def paper_bet(
     event_id: str,
     market: str,
     selection: str,
-    odds: int,
+    price_decimal: float,
     stake: float,
     reasoning: str = "",
     bookmaker: str = "best_available",
     confidence: float | None = None,
     bankroll: float | None = None,
+    candidate_name: str | None = None,
+    candidate_version: int | None = None,
 ) -> dict[str, Any]:
     """Place a paper (simulated) bet on an event.
 
@@ -587,12 +594,14 @@ async def paper_bet(
         event_id: Event identifier.
         market: Market type (e.g. "h2h").
         selection: "home", "draw", or "away".
-        odds: American odds at time of placement (e.g. -110, +150).
+        price_decimal: Decimal price at time of placement (e.g. 1.91, 2.50).
         stake: Stake amount.
         reasoning: Why this bet is being placed.
         bookmaker: Bookmaker key (default "best_available").
         confidence: Agent confidence score (0.0 to 1.0, optional).
         bankroll: Current bankroll. If omitted, computed from portfolio state.
+        candidate_name: Registered candidate placing the bet (with candidate_version).
+        candidate_version: The candidate's current version.
 
     Returns:
         Dict with the placed trade details.
@@ -617,11 +626,13 @@ async def paper_bet(
                 market=market,
                 selection=selection,
                 bookmaker=bookmaker,
-                odds=odds,
+                price_decimal=price_decimal,
                 stake=stake,
                 bankroll=bankroll,
                 reasoning=reasoning or None,
                 confidence=confidence,
+                candidate_name=candidate_name,
+                candidate_version=candidate_version,
             )
             await session.commit()
         except ValueError as e:
@@ -636,6 +647,31 @@ async def paper_bet(
     }
 
 
+def _candidate_summary_to_dict(summary: CandidateSummary) -> dict[str, Any]:
+    checkpoint = summary.checkpoint
+    return {
+        "name": summary.name,
+        "version": summary.version,
+        "status": summary.status.value if summary.status else None,
+        "settled_bets": summary.settled_bets,
+        "bets_with_close": summary.bets_with_close,
+        "bets_without_close": summary.bets_without_close,
+        "pending_bets": summary.pending_bets,
+        "total_stake": summary.total_stake,
+        "pnl": summary.pnl,
+        "roi": summary.roi,
+        "checkpoint": None
+        if checkpoint is None
+        else {
+            "n": checkpoint.n,
+            "mean_ev": checkpoint.mean_ev,
+            "ci95": list(checkpoint.ci95),
+            "ci99": list(checkpoint.ci99),
+        },
+        "verdict": summary.verdict.value,
+    }
+
+
 @mcp.tool()
 async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
     """Get paper trading portfolio summary: open bets, P&L, bankroll.
@@ -644,11 +680,19 @@ async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
         initial_bankroll: Starting bankroll for ROI calculation.
 
     Returns:
-        Dict with portfolio metrics and list of open trades.
+        Dict with portfolio metrics, list of open trades and per-candidate results.
     """
     async with async_session_maker() as session:
         portfolio = await get_portfolio_summary(session, initial_bankroll=initial_bankroll)
         open_trades = await get_open_trades(session)
+        candidates: list[dict[str, Any]] | dict[str, str]
+        try:
+            candidates = [
+                _candidate_summary_to_dict(c)
+                for c in await candidate_report(session, load_candidates(candidates_dir()))
+            ]
+        except ValueError as exc:
+            candidates = {"error": str(exc)}
 
     return {
         "current_bankroll": portfolio.current_bankroll,
@@ -664,6 +708,7 @@ async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
             "pushes": portfolio.push_count,
         },
         "open_trade_details": [_trade_to_dict(t) for t in open_trades],
+        "candidates": candidates,
     }
 
 

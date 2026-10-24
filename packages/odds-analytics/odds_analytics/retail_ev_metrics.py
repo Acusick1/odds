@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -35,10 +36,36 @@ def _resample_counts(n_events: int, n_boot: int, seed: int) -> np.ndarray:
     return rng.multinomial(n_events, np.full(n_events, 1.0 / n_events), size=n_boot)
 
 
-def _percentile_ci(samples: np.ndarray) -> tuple[float, float]:
-    tail = (1 - CI_LEVEL) / 2 * 100
+def _percentile_ci(samples: np.ndarray, level: float = CI_LEVEL) -> tuple[float, float]:
+    tail = (1 - level) / 2 * 100
     low, high = np.percentile(samples, [tail, 100 - tail])
     return float(low), float(high)
+
+
+@dataclass(frozen=True)
+class RatioEstimate:
+    point: float
+    intervals: dict[float, tuple[float, float]]
+
+
+def event_clustered_ratio(
+    event_ids: np.ndarray,
+    numerators: np.ndarray,
+    denominators: np.ndarray,
+    levels: Sequence[float] = (CI_LEVEL,),
+    n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
+    seed: int = 0,
+) -> RatioEstimate:
+    """Sum of numerators over sum of denominators, with a percentile CI per level.
+
+    Events are resampled whole, so rows of one event stay together.
+    """
+    num, den = _event_sums(event_ids, numerators, denominators)
+    counts = _resample_counts(len(num), n_boot, seed)
+    samples = (counts @ num) / (counts @ den)
+    return RatioEstimate(
+        float(num.sum() / den.sum()), {level: _percentile_ci(samples, level) for level in levels}
+    )
 
 
 def mse_gain(
