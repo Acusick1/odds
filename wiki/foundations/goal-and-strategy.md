@@ -18,7 +18,7 @@ The goal is profit from betting at UK retail books on EPL and MLB. No approach i
 
 A candidate is any rule that decides bets: a mechanical rule on prices, a model, or an LLM agent.
 
-- **Registry.** A registered candidate is one YAML file in `candidates/`, holding its definition and its status: active, promoted or killed. Status changes by pull request, and no database table copies it.
+- **Registry.** A registered candidate is one YAML file in `candidates/` ([Candidate registry](../evaluation/candidate-registry.md)), holding its definition and its status: active, promoted or killed. Status changes by pull request, and no database table copies it.
 - **Version.** Each candidate has a whole-number version, bumped whenever its rule, parameters or model changes. For an agent, a change to `packages/odds-mcp/agents/common.md`, its sport's `base.md` or the model passed by `odds_lambda.jobs.agent_run._run_claude_agent` is a new version. A change to `packages/odds-mcp/agents/<sport>/observations.md` is not: that file is the agent's own running playbook, and it is gitignored, so a version and git SHA do not pin it `(inferred)`.
 - **Tracking.** An idea starts as a GitHub issue labelled `candidate`. Once registered, its file's status is its stage.
 
@@ -43,9 +43,8 @@ The suspended bet365 CLV model is not a candidate. Its predictions are an input 
 
 ## What exists today
 
-None of the workflow's tooling exists (#608):
+Most of the workflow's tooling does not exist (#608). The [candidate registry](../evaluation/candidate-registry.md) does, with no candidate in it. Missing:
 
-- There is no candidate registry (#610).
 - `odds_core.paper_trade_models.PaperTrade` has no field for the candidate or its version, and stores no close (#604). MLB has no close defined.
 - Nothing runs a mechanical candidate; only the agent can place paper trades, through `odds_mcp.server.paper_bet` (#609).
 
