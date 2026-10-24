@@ -174,6 +174,44 @@ class TestProcessResults:
         assert (unresolved.status, unresolved.home_score) == (EventStatus.SCHEDULED, None)
 
     @pytest.mark.asyncio
+    async def test_series_listed_newest_first_settles_each_game_with_its_own_score(
+        self, test_session
+    ) -> None:
+        days = [KICKOFF + timedelta(days=i) for i in range(3)]
+        for i, day in enumerate(days):
+            test_session.add(
+                _make_event(
+                    event_id=f"game_{i}",
+                    home_team="Boston Red Sox",
+                    away_team="New York Yankees",
+                    commence_time=day,
+                    sport_key="baseball_mlb",
+                )
+            )
+        await test_session.commit()
+
+        newest_first = [
+            _make_match(
+                home_team="Boston Red Sox",
+                away_team="New York Yankees",
+                start_time=day,
+                home_score=i + 1,
+                away_score=0,
+            )
+            for i, day in reversed(list(enumerate(days)))
+        ]
+        with patch(
+            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+            _session_maker(test_session),
+        ):
+            stats = await process_results(sport="baseball_mlb", fetched=_fetched(*newest_first))
+
+        assert (stats.events_updated, stats.events_unresolved) == (3, 0)
+        for i in range(3):
+            stored = await _stored(test_session, f"game_{i}")
+            assert (stored.home_score, stored.away_score) == (i + 1, 0)
+
+    @pytest.mark.asyncio
     async def test_postponed_event_that_is_played_reaches_final(self, test_session) -> None:
         test_session.add(_make_event(event_id="late", status=EventStatus.POSTPONED))
         await test_session.commit()
