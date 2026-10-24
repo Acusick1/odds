@@ -27,7 +27,7 @@ status: stable
 
 | Module | Class | Notes |
 |---|---|---|
-| `odds_lambda.storage.writers` / `odds_lambda.storage.readers` | [`odds_lambda.storage.writers.OddsWriter`](odds-writer.md) / [`odds_lambda.storage.readers.OddsReader`](odds-reader.md) | Events (status and scores, live-twin merges), snapshots, odds (stored as decimal prices), fetch logs and data-quality logs |
+| `odds_lambda.storage.writers` / `odds_lambda.storage.readers` | [`odds_lambda.storage.writers.OddsWriter`](odds-writer.md) / [`odds_lambda.storage.readers.OddsReader`](odds-reader.md) | Events (status and scores, live-twin merges), snapshots, odds (stored as decimal prices), fetch logs, including their API quota, and data-quality logs |
 | `odds_lambda.storage.validators` | `odds_lambda.storage.validators.OddsValidator` | [Odds validation](odds-validator.md) (zero-margin books skip the vig floor; prices are checked as decimals) |
 | `odds_lambda.storage.tier_validator` | `odds_lambda.storage.tier_validator.TierCoverageValidator` | [Coverage and completeness checks](coverage-checks.md) |
 | `odds_lambda.storage.polymarket_writer` / `odds_lambda.storage.polymarket_reader` | `odds_lambda.storage.polymarket_writer.PolymarketWriter` | [Polymarket](../collection/polymarket.md) |

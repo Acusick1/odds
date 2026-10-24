@@ -53,7 +53,7 @@ Computation:
 
 1. Anchor on the event's latest snapshot containing `market`; both windows end at that snapshot's time.
 2. Sharp prices: `odds_lambda.storage.readers.OddsReader.get_sharp_prices`, newest first, per outcome, taking the first sharp book in priority order that has a price.
-3. Retail prices: `odds_lambda.storage.readers.OddsReader.get_latest_book_prices`, the newest price per `(book, outcome, point)`. Any book not in the sharp list is retail.
+3. Retail prices: `odds_lambda.storage.readers.OddsReader.get_latest_book_prices`, the newest price per `(book, outcome, point)`. Any book outside the sharp list is retail.
 4. Per `(outcome, point)` bucket: `divergence = retail_implied_prob - sharp_implied_prob` per book, with implied probabilities taken as `1 / price_decimal`; `median_divergence` and `dispersion_stddev` (population standard deviation, needs 2+ books); `z_score = (divergence - median) / stddev`, set only when the bucket has 3+ books and a nonzero stddev; `best_retail` (lowest implied probability) and `worst_retail`.
 5. `market_hold` per book, only for `h2h` and `1x2`, from `odds_analytics.utils.per_book_market_holds` over decimal prices, which drops books missing any required outcome.
 

@@ -140,10 +140,10 @@ A job inside [`odds_core.alerts.job_alert_context`](alerts.md#delivery) inserts 
 `odds_cli.commands.status` is the on-demand view of the same tables. It prints Rich tables only; there is no machine-readable output.
 
 - `odds status show [--verbose]`: latest fetch (minutes ago, tick or cross), event counts by status, odds and snapshot totals, quota from `odds_lambda.storage.readers.OddsReader.get_database_stats`; `--verbose` adds data-quality rows from the last 24 h (limit 10).
-- `odds status quota`: latest quota plus the last 10 `odds_core.models.FetchLog` rows (`odds_cli.commands.status._show_quota`). It reads the newest 10 rows of any source through `odds_lambda.storage.readers.OddsReader.get_fetch_logs` and shows nothing when the newest row has a null quota, as Betfair rows do (#441).
+- `odds status quota`: latest quota plus the last 10 `odds_core.models.FetchLog` rows that have a quota (`odds_cli.commands.status._show_quota`). Rows with a null quota are skipped ([odds-api-quota](../collection/odds-api-quota.md#where-quota-is-recorded-alerted-and-checked)); when none has a quota it prints `No fetch log records an API quota`.
 - `odds scheduler health` (not part of `odds status`): prints a green or red overall status, the backend name, the passed and failed checks and any details from `odds_lambda.scheduling.backends.base.SchedulerBackend.health_check`, and exits 1 when unhealthy or on error.
 - `odds status events --days N --team T` (default 7 days): recent events with status and scores. It has no sport filter.
-- `status show` takes the latest fetch row from all sources, so Betfair rows can distort it. It has no success rate: `fetch_logs` has no source column and a failed Odds API call writes no row, so a rate over it could not show an Odds API outage. Its quota is the newest non-null `api_quota_remaining`, unlike `status quota` ([odds-api-quota](../collection/odds-api-quota.md#where-the-views-disagree), [fetch logs](../collection/odds-ingestion-service.md#fetch-logs)).
+- `status show` takes the latest fetch row from all sources, so Betfair rows can distort it. It has no success rate: `fetch_logs` has no source column and a failed Odds API call writes no row, so a rate over it could not show an Odds API outage. Its quota is read as in `status quota` ([odds-api-quota](../collection/odds-api-quota.md#where-quota-is-recorded-alerted-and-checked), [fetch logs](../collection/odds-ingestion-service.md#fetch-logs)).
 
 ## Related
 

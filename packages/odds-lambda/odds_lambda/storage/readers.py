@@ -382,6 +382,7 @@ class OddsReader:
         sport_key: str | None = None,
         start_time: datetime | None = None,
         limit: int = 100,
+        with_quota: bool = False,
     ) -> list[FetchLog]:
         """
         Get fetch operation logs.
@@ -390,6 +391,7 @@ class OddsReader:
             sport_key: Filter by sport (optional)
             start_time: Only logs after this time (optional)
             limit: Maximum number of records
+            with_quota: Only rows with a non-null api_quota_remaining
 
         Returns:
             List of FetchLog records
@@ -401,6 +403,9 @@ class OddsReader:
 
         if start_time:
             query = query.where(FetchLog.fetch_time >= start_time)
+
+        if with_quota:
+            query = query.where(FetchLog.api_quota_remaining.is_not(None))
 
         query = query.order_by(FetchLog.fetch_time.desc()).limit(limit)
 

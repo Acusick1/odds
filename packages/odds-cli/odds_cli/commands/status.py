@@ -148,56 +148,54 @@ async def _show_quota():
         async with async_session_maker() as session:
             reader = OddsReader(session)
 
-            # Get recent fetch logs to see quota usage
-            fetch_logs = await reader.get_fetch_logs(limit=10)
+            fetch_logs = await reader.get_fetch_logs(limit=10, with_quota=True)
+            readings = [
+                (log.fetch_time, log.api_quota_remaining)
+                for log in fetch_logs
+                if log.api_quota_remaining is not None
+            ]
 
-            if not fetch_logs:
-                console.print("[yellow]No fetch logs available[/yellow]\n")
+            if not readings:
+                console.print("[yellow]No fetch log records an API quota[/yellow]\n")
                 return
 
-            # Current quota
-            latest = fetch_logs[0]
-            if latest.api_quota_remaining is not None:
-                quota_used = app_settings.api.quota - latest.api_quota_remaining
-                quota_percent = (latest.api_quota_remaining / app_settings.api.quota) * 100
+            quota_remaining = readings[0][1]
+            quota_used = app_settings.api.quota - quota_remaining
+            quota_percent = (quota_remaining / app_settings.api.quota) * 100
 
-                table = Table(show_header=False, box=None)
-                table.add_column("Metric", style="cyan")
-                table.add_column("Value")
+            table = Table(show_header=False, box=None)
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value")
 
-                quota_color = (
-                    "green" if quota_percent > 50 else ("yellow" if quota_percent > 20 else "red")
-                )
+            quota_color = (
+                "green" if quota_percent > 50 else ("yellow" if quota_percent > 20 else "red")
+            )
 
-                table.add_row("Total Quota", f"{app_settings.api.quota:,}")
-                table.add_row("Used", f"{quota_used:,}")
-                table.add_row(
-                    "Remaining",
-                    f"[{quota_color}]{latest.api_quota_remaining:,} ({quota_percent:.1f}%)[/{quota_color}]",
-                )
+            table.add_row("Total Quota", f"{app_settings.api.quota:,}")
+            table.add_row("Used", f"{quota_used:,}")
+            table.add_row(
+                "Remaining",
+                f"[{quota_color}]{quota_remaining:,} ({quota_percent:.1f}%)[/{quota_color}]",
+            )
 
-                console.print(table)
+            console.print(table)
 
-                # Quota usage trend
-                console.print("\n[bold]Recent Usage:[/bold]")
-                trend_table = Table()
-                trend_table.add_column("Time")
-                trend_table.add_column("Remaining", justify="right")
-                trend_table.add_column("Used", justify="right")
+            console.print("\n[bold]Recent Usage:[/bold]")
+            trend_table = Table()
+            trend_table.add_column("Time")
+            trend_table.add_column("Remaining", justify="right")
+            trend_table.add_column("Used", justify="right")
 
-                for log in fetch_logs:
-                    if log.api_quota_remaining is not None:
-                        time_ago = datetime.now(UTC) - log.fetch_time
-                        minutes_ago = int(time_ago.total_seconds() / 60)
-                        used = app_settings.api.quota - log.api_quota_remaining
+            for i, (fetch_time, remaining) in enumerate(readings):
+                minutes_ago = int((datetime.now(UTC) - fetch_time).total_seconds() / 60)
+                if i + 1 < len(readings):
+                    spent = readings[i + 1][1] - remaining
+                    used = f"{spent}" if spent >= 0 else "reset"
+                else:
+                    used = ""
+                trend_table.add_row(f"{minutes_ago}m ago", f"{remaining:,}", used)
 
-                        trend_table.add_row(
-                            f"{minutes_ago}m ago",
-                            f"{log.api_quota_remaining:,}",
-                            f"+{used - quota_used}" if used != quota_used else "0",
-                        )
-
-                console.print(trend_table)
+            console.print(trend_table)
 
             console.print()
 
