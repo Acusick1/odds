@@ -60,7 +60,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in
 | Settings and logging | Pydantic Settings, structlog | `packages/odds-core/pyproject.toml` |
 | Local scheduler | APScheduler 4 (pinned alpha), tenacity retries | `packages/odds-lambda/pyproject.toml` |
 | Migrations | Alembic | `packages/odds-lambda/pyproject.toml` |
-| NBA stats and browser scraping | nba_api, Playwright | `packages/odds-lambda/pyproject.toml` |
+| NBA stats and game-log browser scraping | nba_api, Playwright | `packages/odds-lambda/pyproject.toml` |
 | CLI | Typer, Rich | `packages/odds-cli/pyproject.toml` |
 | MCP server | FastMCP | `packages/odds-mcp/pyproject.toml` |
 | Modelling | XGBoost | `packages/odds-analytics/pyproject.toml` |

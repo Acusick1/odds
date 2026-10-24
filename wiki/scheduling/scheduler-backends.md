@@ -23,7 +23,6 @@ sources:
   - deployment/aws/terraform/eventbridge.tf
   - deployment/aws/terraform/lambda.tf
   - deployment/aws/Dockerfile.lambda
-  - deployment/aws/Dockerfile.scraper
 status: stable
 ---
 
@@ -70,15 +69,15 @@ The Lambda role in `deployment/aws/terraform/lambda.tf` grants `PutRule`, `PutTa
 
 ### Rules and Terraform
 
-`deployment/aws/terraform/eventbridge.tf` pre-creates each self-scheduling rule `DISABLED` with a `rate(1 day)` placeholder and `lifecycle { ignore_changes = [schedule_expression, state] }`, so `terraform plan` never shows live cadences. A rule is named `{rule_prefix}-{job}[-{sport suffix}]`, which is why jobs use [compound names](job-registry.md#compound-job-names). The post-deploy Lambda invocations in the deploy workflows activate the placeholders (prod invocations of the scraper are `continue-on-error`), so a run of `deploy-prod.yml` re-enables every dormant rule ([CI/CD workflows](../operations/ci-cd-workflows.md)). Live state is not in the repo: run `odds scheduler list-jobs --backend aws` ([Deployed state](job-deployment-matrix.md#deployed-state)).
+`deployment/aws/terraform/eventbridge.tf` pre-creates each self-scheduling rule `DISABLED` with a `rate(1 day)` placeholder and `lifecycle { ignore_changes = [schedule_expression, state] }`, so `terraform plan` never shows live cadences. A rule is named `{rule_prefix}-{job}[-{sport suffix}]`, which is why jobs use [compound names](job-registry.md#compound-job-names). The post-deploy Lambda invocations in the deploy workflows activate the placeholders, so a run of `deploy-prod.yml` re-enables every dormant rule ([CI/CD workflows](../operations/ci-cd-workflows.md)). Live state is not in the repo: run `odds scheduler list-jobs --backend aws` ([Deployed state](job-deployment-matrix.md#deployed-state)).
 
 ### Env-var contract
 
-Constructor arguments win, then unprefixed env vars: `AWS_REGION`, `LAMBDA_ARN`, `RULE_PREFIX`. Terraform sets `LAMBDA_ARN` and `RULE_PREFIX` on each function (`deployment/aws/terraform/lambda.tf`); the scraper's `LAMBDA_ARN` is its own ARN, so scraper jobs reschedule onto the scraper. `odds_lambda.scheduling.backends.get_scheduler_backend` first passes `settings.aws.*` (`odds_core.config.AWSConfig`, prefix `AWS_`: `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX`), which is what a local `list-jobs --backend aws` uses ([Configuration](../foundations/configuration.md#variables-read-outside-settings)). Missing region, ARN or prefix raises `odds_lambda.scheduling.exceptions.ConfigurationError` in the constructor. `odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend.health_check` results are cached for 5 minutes.
+Constructor arguments win, then unprefixed env vars: `AWS_REGION`, `LAMBDA_ARN`, `RULE_PREFIX`. Terraform sets `LAMBDA_ARN` and `RULE_PREFIX` on the function (`deployment/aws/terraform/lambda.tf`). `odds_lambda.scheduling.backends.get_scheduler_backend` first passes `settings.aws.*` (`odds_core.config.AWSConfig`, prefix `AWS_`: `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX`), which is what a local `list-jobs --backend aws` uses ([Configuration](../foundations/configuration.md#variables-read-outside-settings)). Missing region, ARN or prefix raises `odds_lambda.scheduling.exceptions.ConfigurationError` in the constructor. `odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend.health_check` results are cached for 5 minutes.
 
 ## Lambda handler
 
-`odds_lambda.lambda_handler.lambda_handler` is the CMD of both Lambda images (`deployment/aws/Dockerfile.lambda`, `deployment/aws/Dockerfile.scraper`); the scheduler and scraper functions differ only in image contents and rules ([AWS infrastructure](../operations/aws-infrastructure.md)). The Lambda env var holding the function's own ARN is `LAMBDA_ARN`, the variable the backend reads ([Env-var contract](#env-var-contract)). Alert environment variables per function are on [AWS infrastructure](../operations/aws-infrastructure.md).
+`odds_lambda.lambda_handler.lambda_handler` is the CMD of the Lambda image (`deployment/aws/Dockerfile.lambda`, [AWS infrastructure](../operations/aws-infrastructure.md)). The Lambda env var holding the function's own ARN is `LAMBDA_ARN`, the variable the backend reads ([Env-var contract](#env-var-contract)). Alert environment variables are on [AWS infrastructure](../operations/aws-infrastructure.md).
 
 EventBridge delivers the target `Input` written by the AWS backend or by Terraform:
 

@@ -30,7 +30,6 @@ odds-lambda = { workspace = true }
 odds-analytics = { workspace = true }
 odds-cli = { workspace = true }
 odds-mcp = { workspace = true }
-oddsharvester = { git = "https://github.com/Acusick1/OddsHarvester.git", tag = "odds-fork-2026.05.29" }
 
 [dependency-groups]
 dev = [
@@ -55,8 +54,6 @@ dev = [
     "psycopg[binary]>=3.2.12",
     "pytest-env>=1.2.0",
     "statsmodels>=0.14.6",
-    # OddsPortal scraper
-    "oddsharvester",
     "pyyaml>=6.0.3",
     "griffe>=2.3.2",
 ]

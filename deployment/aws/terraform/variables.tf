@@ -65,18 +65,6 @@ variable "image_tag" {
   default     = "dev-latest"
 }
 
-variable "enable_oddsportal_scraper" {
-  description = "Deploy OddsPortal scraper Lambda (separate container with Playwright/Chromium)"
-  type        = bool
-  default     = false
-}
-
-variable "scraper_image_tag" {
-  description = "Docker image tag for the scraper Lambda (e.g., dev-a1b2c3d or dev-latest)"
-  type        = string
-  default     = "dev-latest"
-}
-
 variable "model_bucket_name" {
   description = "S3 bucket name for trained model artifacts"
   type        = string

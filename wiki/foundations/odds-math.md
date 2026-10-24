@@ -16,7 +16,7 @@ status: stable
 
 # Odds arithmetic helpers
 
-`odds_core.odds_math` is the intended single home for pure odds arithmetic. It has no third-party imports so the scraper Lambda (which bundles odds-lambda but not odds-analytics) can use it.
+`odds_core.odds_math` is the intended single home for pure odds arithmetic. It has no third-party imports so `odds-lambda` code that cannot import `odds-analytics` can use it.
 
 ## Functions
 

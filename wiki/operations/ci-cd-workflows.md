@@ -37,14 +37,14 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 
 ## Dev deploy
 
-`deploy-dev.yml` builds both images (tag `dev-<sha>`), runs `terraform apply` with `terraform.tfvars.example` plus overrides (scraper and Betfair on), runs `alembic upgrade head` and all of `pytest tests/migration`, invokes `check-health` and `fetch-betfair-exchange-epl` (a smoke test) through `scripts/ci/test_lambda.py`, runs `scripts/ci/verify_database.py` and `verify-schedules.sh --jobs check-health`, then always `terraform destroy`s ([howto-database-migration](../foundations/howto-database-migration.md)).
+`deploy-dev.yml` builds the Lambda image (tag `dev-<sha>`), runs `terraform apply` with `terraform.tfvars.example` plus overrides (Betfair on), runs `alembic upgrade head` and all of `pytest tests/migration`, invokes `check-health` and `fetch-betfair-exchange-epl` (a smoke test) through `scripts/ci/test_lambda.py`, runs `scripts/ci/verify_database.py` and `verify-schedules.sh --jobs check-health`, then always `terraform destroy`s ([howto-database-migration](../foundations/howto-database-migration.md)).
 
 ## Prod deploy
 
 > [!WARNING]
 > `deploy-prod.yml` is disabled in GitHub. Do not re-enable it, dispatch it or publish a release while AWS is dormant. Its job invocations re-enable every dormant EventBridge rule, so the Lambdas collect alongside the production host and write to the Neon archive ([Where each job runs](../scheduling/job-deployment-matrix.md#dormant-aws-rules)).
 
-`deploy-prod.yml` sets `project_name=odds-scheduler`, `rule_prefix=odds`, applies, migrates, runs only read-only schema and CLI tests under `tests/migration`, then invokes every scheduler job and, as `continue-on-error`, every scraper job from the Terraform outputs. Those invocations make each job reschedule itself, which is what activates the `DISABLED` placeholder rules ([self-scheduling](../scheduling/self-scheduling.md), [scheduler-backends](../scheduling/scheduler-backends.md)). It then runs `verify-schedules.sh` and `verify_database.py`. Manual deploy steps live on [howto-deploy-aws](howto-deploy-aws.md).
+`deploy-prod.yml` sets `project_name=odds-scheduler`, `rule_prefix=odds`, applies, migrates, runs only read-only schema and CLI tests under `tests/migration`, then invokes every scheduler job from the Terraform outputs. Those invocations make each job reschedule itself, which is what activates the `DISABLED` placeholder rules ([self-scheduling](../scheduling/self-scheduling.md), [scheduler-backends](../scheduling/scheduler-backends.md)). It then runs `verify-schedules.sh` and `verify_database.py`. Manual deploy steps live on [howto-deploy-aws](howto-deploy-aws.md).
 
 ## Schedule verification
 
@@ -53,7 +53,6 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 ## Known gaps
 
 - `test.yml` and `live-api.yml` set up Python 3.11 (`python-version` in `.github/workflows/test.yml` and `.github/workflows/live-api.yml`), while every package requires `>=3.12` (`pyproject.toml`); `deploy-*` use 3.12 (`.github/workflows/deploy-dev.yml`, `.github/workflows/deploy-prod.yml`; #460).
-- The prod scraper test step is `continue-on-error`, so a broken scraper does not fail a deploy.
 - The dev deploy exercises only `check-health` and Betfair; `fetch-odds` is not invoked there.
 - The workflows trigger on main (not `master`), and the scheduler log group is `/aws/lambda/odds-scheduler`.
 

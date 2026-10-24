@@ -291,10 +291,9 @@ class TestRefreshScrapeUnknownLeague:
         assert result["market"] == "home_away"
         assert result["job_id"] == str(job_id)
 
-        # Verify the LeagueSpec passed to the scheduler has the MLB sport identifiers
+        # Verify the LeagueSpec passed to the scheduler has the MLB identifiers
         call_kwargs = mock_scheduler.add_job.call_args.kwargs
         spec = call_kwargs["args"][0]
-        assert spec.sport == "baseball"
         assert spec.sport_key == "baseball_mlb"
         assert spec.markets == ["home_away"]
 

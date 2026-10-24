@@ -54,9 +54,9 @@ class JobContext:
 
 
 # Maps job name to (module_path, function_name).
-# Modules are imported lazily when the job is first requested, so a Lambda
-# that only runs scraper jobs never imports score_predictions (which needs
-# odds_analytics / xgboost).
+# Modules are imported lazily when the job is first requested, so the
+# registry never imports score_predictions (which needs odds_analytics /
+# xgboost) unless that job runs.
 _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
     "fetch-odds": ("odds_lambda.jobs.fetch_odds", "main"),
     "fetch-scores": ("odds_lambda.jobs.fetch_scores", "main"),

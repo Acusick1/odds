@@ -43,7 +43,7 @@ CLI: `odds polymarket discover` lists active NBA events currently on Polymarket 
 
 ## Gates and deployment
 
-`odds_core.config.PolymarketConfig.enabled` defaults to true, while Terraform `enable_polymarket` defaults to false ([configuration](../foundations/configuration.md)). On AWS, `enable_polymarket` gates the rules (`deployment/aws/terraform/eventbridge.tf`); the backfill rule is `{rule_prefix}-backfill-polymarket-bootstrap`, `rate(3 days)`. Deployed state is unverifiable from the repo: `odds scheduler list-jobs --backend aws` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
+`odds_core.config.PolymarketConfig.enabled` defaults to true, while Terraform `enable_polymarket` defaults to false ([configuration](../foundations/configuration.md)). On AWS, `enable_polymarket` gates the fetch and backfill rules (`deployment/aws/terraform/eventbridge.tf`); the backfill rule is `{rule_prefix}-backfill-polymarket-bootstrap`, `rate(3 days)`. Deployed state is unverifiable from the repo: `odds scheduler list-jobs --backend aws` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
 
 ## Tables
 
