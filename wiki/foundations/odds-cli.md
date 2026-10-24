@@ -30,6 +30,8 @@ status: stable
 
 ## Command groups
 
+`packages/odds-cli/pyproject.toml` declares Typer, Rich, boto3, PyYAML, structlog, sqlalchemy, apscheduler and numpy, each because `odds_cli` imports it directly; `optuna` comes only through analytics' `training` extra.
+
 | Group | Page |
 |---|---|
 | `odds fetch` | [Odds API ingestion service](../collection/odds-ingestion-service.md), [Results and status jobs](../collection/results-jobs.md) |

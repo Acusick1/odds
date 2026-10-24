@@ -12,6 +12,10 @@ dependencies = [
     "rich>=13.7.0",
     "boto3>=1.42.62",
     "pyyaml>=6.0.3",
+    "structlog>=25.5.0",
+    "sqlalchemy>=2.0.44",
+    "apscheduler>=4.0.0a6",
+    "numpy>=2.3.4",
 ]
 
 [tool.uv.sources]
@@ -39,3 +43,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["odds_cli"]
+
+[tool.deptry.per_rule_ignores]
+DEP003 = ["optuna"]

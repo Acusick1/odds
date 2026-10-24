@@ -9,6 +9,11 @@ dependencies = [
     "odds-lambda",
     "odds-analytics",
     "fastmcp>=2.0.0",
+    "httpx>=0.28.1",
+    "structlog>=25.5.0",
+    "sqlalchemy>=2.0.44",
+    "pydantic>=2.12.4",
+    "apscheduler>=4.0.0a6",
 ]
 
 [tool.uv.sources]

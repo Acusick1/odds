@@ -29,6 +29,12 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Check declared dependencies
+        run: |
+          for pkg in packages/*/; do
+            (cd "$pkg" && uv run --project ../.. --with deptry deptry .)
+          done
+
       - name: Run unit tests
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

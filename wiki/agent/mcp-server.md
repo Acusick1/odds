@@ -32,6 +32,8 @@ status: stable
 
 ## Launch
 
+`packages/odds-mcp/pyproject.toml` declares fastmcp, httpx, apscheduler, structlog, sqlalchemy and pydantic besides the workspace packages, each because `odds_mcp` imports it directly.
+
 `.mcp.json` registers a stdio server named `odds` that runs `uv run fastmcp run odds_mcp.server`. Running the file directly (`python server.py`) first awaits `odds_mcp.server._assert_unique_tool_names`, then `mcp.run()`. The `fastmcp run` path never calls `odds_core.logging_setup.configure_logging` (nothing in `odds_mcp.server` does) and skips `odds_mcp.server._assert_unique_tool_names`, which is only invoked under `if __name__ == "__main__"` ([code conventions](../foundations/code-conventions.md)). Unprefixed mounts let a child tool silently shadow a parent tool with the same name; under `fastmcp run` the uniqueness assertion does not run, and `tests/unit/test_mcp_server.py` checks uniqueness.
 
 ## Tool catalogue (17)

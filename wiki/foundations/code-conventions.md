@@ -36,6 +36,10 @@ The `claim-issue` hook (`.githooks/claim-issue.sh`) is a plain `post-checkout` g
 
 Ruff selects only `DTZ003` and `DTZ005` for timezone checks ([Timezones](timezones.md)).
 
+### Dependency checks
+
+`deptry` runs in `.github/workflows/test.yml` once per package (`cd "$pkg" && uv run --project ../.. --with deptry deptry .`, for each `packages/*/`) and fails on a module that a package imports without declaring in its own `pyproject.toml`. Deliberate exceptions sit in that package's `[tool.deptry.per_rule_ignores]` ([Workspace packages](workspace-packages.md#dependency-exceptions)).
+
 ## Conventions without tooling
 
 - **Type hints** on every signature. No type checker (mypy, ty, pyright) is configured in pre-commit or CI, so hints are not verified.
