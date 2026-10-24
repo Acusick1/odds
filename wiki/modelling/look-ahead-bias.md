@@ -12,7 +12,6 @@ sources:
   - odds_analytics.training.config.SamplingConfig
   - odds_analytics.injury_features.extract_injury_features
   - odds_analytics.lstm_line_movement.LSTMLineMovementStrategy
-  - odds_lambda.storage.readers.OddsReader
   - odds_lambda.storage.polymarket_reader.PolymarketReader
   - experiments/configs/xgboost_epl_production_tabular_match_stats.yaml
 status: stable

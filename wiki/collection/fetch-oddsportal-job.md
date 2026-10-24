@@ -12,6 +12,8 @@ sources:
   - odds_lambda.jobs.fetch_oddsportal.scrape_league
   - odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS
   - odds_core.config.AlertConfig.heartbeat_expectations
+mentions:
+  - odds_core.alerts.job_alert_context
 status: stable
 ---
 

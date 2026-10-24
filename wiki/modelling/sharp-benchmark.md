@@ -11,7 +11,6 @@ sources:
   - odds_analytics.feature_extraction.DEFAULT_SHARP_BOOKMAKERS
   - odds_analytics.feature_groups.TierSampler
   - odds_analytics.training.config.FeatureConfig
-  - odds_lambda.storage.readers.OddsReader
   - odds_mcp.server.find_retail_edges
   - packages/odds-mcp/agents/common.md
   - odds_core.models.Odds

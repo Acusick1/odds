@@ -27,6 +27,8 @@ sources:
   - packages/odds-mcp/pyproject.toml
   - pyproject.toml
   - docker-compose.yml
+mentions:
+  - odds_core.alerts.job_alert_context
 status: stable
 ---
 

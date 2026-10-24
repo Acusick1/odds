@@ -32,6 +32,8 @@ sources:
   - odds_lambda.polymarket_odds.preferred_event
   - odds_lambda.polymarket_odds.MAX_QUOTE_SPREAD
   - odds_lambda.jobs.fetch_polymarket_odds.EmptyListingError
+mentions:
+  - odds_core.alerts.job_alert_context
 status: stable
 ---
 

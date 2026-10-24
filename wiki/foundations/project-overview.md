@@ -10,7 +10,6 @@ sources:
   - odds_cli.commands.backfill
   - odds_analytics.backfill_executor.BackfillExecutor
   - odds_lambda.storage.tier_validator.TierCoverageValidator
-  - odds_lambda.storage.readers.OddsReader
   - odds_analytics.strategies.BasicEVStrategy
   - odds_lambda.polymarket_fetcher.PolymarketClient
 status: stable

@@ -12,6 +12,8 @@ sources:
   - odds_analytics.backtesting.config.BacktestConfig
   - odds_analytics.backtesting.config.BetSizingConfig
   - odds_analytics.backtesting.services.BacktestEngine
+mentions:
+  - odds_lambda.storage.readers.OddsReader
 status: stable
 ---
 

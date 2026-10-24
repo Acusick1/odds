@@ -19,10 +19,11 @@ sources:
   - odds_lambda.scheduling.jobs.JobContext.from_payload
   - odds_core.config.AWSConfig
   - odds_core.alerts.send_critical
-  - odds_core.alerts.job_alert_context
   - deployment/aws/terraform/eventbridge.tf
   - deployment/aws/terraform/lambda.tf
   - deployment/aws/Dockerfile.lambda
+mentions:
+  - odds_core.alerts.job_alert_context
 status: stable
 ---
 

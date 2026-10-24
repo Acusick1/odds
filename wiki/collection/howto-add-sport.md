@@ -13,6 +13,8 @@ sources:
   - odds_lambda.betfair.constants.SPORT_CONFIG
   - odds_core.team
   - deployment/aws/terraform/eventbridge.tf
+mentions:
+  - odds_core.alerts.job_alert_context
 status: stable
 ---
 

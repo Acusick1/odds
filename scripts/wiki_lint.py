@@ -8,6 +8,7 @@ import builtins
 import json
 import keyword
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -60,6 +61,7 @@ GENERIC_VARIABLE_NAMES = frozenset(
 )
 SKIP_DIRS = {"__pycache__", ".venv", "node_modules", ".git"}
 COVERAGE_KEY = "coverage"
+DEFAULT_SQUASH_ONTO = "origin/main"
 
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.DOTALL)
 FENCE_RE = re.compile(r"^(```|~~~).*?^\1[ \t]*$", re.DOTALL | re.MULTILINE)
@@ -111,6 +113,7 @@ class PageMeta(BaseModel):
     title: str = Field(min_length=1)
     description: str = Field(min_length=1)
     sources: list[str]
+    mentions: list[str] = Field(default_factory=list)
     status: PageStatus
     superseded_by: str | None = None
 
@@ -134,6 +137,7 @@ class Kind(Enum):
     SUPERSEDED_NOT_DEPRECATED = "superseded_by on non-deprecated page"
     DUPLICATE_SLUG = "duplicate slug"
     SOURCE_NOT_CITATION = "source is not a citation"
+    INVALID_MENTION = "invalid mention"
     DOCS_CITATION = "docs citation"
     DOCS_LINK = "docs link"
     WIKILINK = "wikilink"
@@ -315,6 +319,14 @@ class Span:
 
 
 @dataclass(frozen=True)
+class Spans:
+    parts: tuple[Span, ...]
+
+    def overlaps(self, start: int, count: int) -> bool:
+        return any(part.overlaps(start, count) for part in self.parts)
+
+
+@dataclass(frozen=True)
 class WholeFile:
     """Extent of a symbol in a file that does not parse: any change counts."""
 
@@ -322,13 +334,53 @@ class WholeFile:
         return count > 0
 
 
-Extent = Span | WholeFile
+Extent = Span | Spans | WholeFile
 
 
 def _span(node: ast.stmt) -> Span:
     decorators = node.decorator_list if isinstance(node, FunctionOrClass) else []
     start = min([node.lineno, *(d.lineno for d in decorators)])
     return Span(start, node.end_lineno or node.lineno)
+
+
+def _is_docstring(node: ast.stmt) -> bool:
+    return (
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    )
+
+
+def _header(node: FunctionOrClass) -> Span:
+    """Decorators, signature and docstring: everything above the first body statement."""
+    first = node.body[0]
+    end = first.end_lineno or first.lineno if _is_docstring(first) else first.lineno - 1
+    return Span(_span(node).start, max(node.lineno, end))
+
+
+def _interface(node: ast.stmt) -> Extent:
+    """What a mention tracks: a function's header, or a class's header and its constructor's.
+
+    A class without `__init__` (a dataclass or pydantic model) is constructed from its fields.
+    """
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        return _header(node)
+    if isinstance(node, ast.ClassDef):
+        init = next(
+            (
+                n
+                for n in node.body
+                if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef) and n.name == "__init__"
+            ),
+            None,
+        )
+        constructor = (
+            [_header(init)]
+            if init
+            else [_span(n) for n in node.body if isinstance(n, ast.AnnAssign)]
+        )
+        return Spans((_header(node), *constructor))
+    return _span(node)
 
 
 @dataclass(frozen=True)
@@ -344,12 +396,14 @@ class Source:
         except SyntaxError:
             return cls(None)
 
-    def extent(self, symbol: str) -> Extent | None:
+    def extent(self, symbol: str, mention: bool = False) -> Extent | None:
         """None when the symbol is not defined."""
         if self.tree is None:
             return WholeFile()
         node = resolve_symbol(self.tree, symbol)
-        return None if node is None else _span(node)
+        if node is None:
+            return None
+        return _interface(node) if mention else _span(node)
 
 
 @dataclass
@@ -359,11 +413,11 @@ class FileChange:
     old_hunks: list[tuple[int, int]]
     new_hunks: list[tuple[int, int]]
 
-    def touches(self, symbol: str | None) -> bool:
+    def touches(self, symbol: str | None, mention: bool = False) -> bool:
         if symbol is None:
             return bool(self.old_hunks)
-        old = self.old.extent(symbol) if self.old else None
-        new = self.new.extent(symbol) if self.new else None
+        old = self.old.extent(symbol, mention) if self.old else None
+        new = self.new.extent(symbol, mention) if self.new else None
         if old is None and new is None:
             return False
         if old is None or new is None:
@@ -386,10 +440,18 @@ class Changes:
 
 
 class GitHistory:
-    """Git-backed page and citation history; every query is cached per commit."""
+    """Git-backed page and citation history; every query is cached per commit.
 
-    def __init__(self, root: Path) -> None:
+    With `squash_onto`, a page whose net content is unchanged since HEAD's merge base with
+    that ref dates from its last commit at or before the base: a squash merge drops its edits.
+    """
+
+    def __init__(self, root: Path, squash_onto: str | None = None) -> None:
         self.root = root
+        self.squash_onto = squash_onto
+        self._merge_base: str | None = None
+        self._merge_base_known = False
+        self._squash_diff: frozenset[str] | None = None
         self._last_commits: dict[str, str | None] = {}
         self._tracked: dict[str, frozenset[str]] = {}
         self._renames: dict[str, dict[str, str]] = {}
@@ -405,9 +467,39 @@ class GitHistory:
     def is_modified(self, rel: str) -> bool:
         return bool(self._git("status", "--porcelain", "--", rel).stdout.strip())
 
+    def merge_base(self) -> str | None:
+        """HEAD's merge base with `squash_onto`; None when not squashing or HEAD is on it."""
+        if not self._merge_base_known:
+            self._merge_base_known = True
+            if self.squash_onto is not None:
+                self._merge_base = self._find_merge_base(self.squash_onto)
+        return self._merge_base
+
+    def _changed_since_base(self) -> frozenset[str]:
+        """Paths whose content differs between the merge base and HEAD: the squash's diff."""
+        if self._squash_diff is None:
+            base = self.merge_base()
+            diff = self._git("diff", "--name-only", base, "HEAD").stdout if base else ""
+            self._squash_diff = frozenset(diff.splitlines())
+        return self._squash_diff
+
+    def _find_merge_base(self, ref: str) -> str | None:
+        result = self._git("merge-base", "HEAD", ref)
+        if result.returncode != 0:
+            message = f"wiki-lint: no merge base with {ref}"
+            # CI must not pass by silently judging the unsquashed history.
+            if os.environ.get("GITHUB_ACTIONS"):
+                raise SystemExit(f"{message}; fetch it (actions/checkout fetch-depth: 0)")
+            print(f"{message}; judging page edits commit by commit", file=sys.stderr)
+            return None
+        base = result.stdout.strip()
+        return None if base == self._git("rev-parse", "HEAD").stdout.strip() else base
+
     def last_commit(self, rel: str) -> str | None:
         if rel not in self._last_commits:
-            result = self._git("log", "-1", "--format=%H", "--", rel)
+            base = self.merge_base()
+            rev = base if base is not None and rel not in self._changed_since_base() else "HEAD"
+            result = self._git("log", "-1", "--format=%H", rev, "--", rel)
             self._last_commits[rel] = result.stdout.strip() or None
         return self._last_commits[rel]
 
@@ -430,13 +522,19 @@ class GitHistory:
             self._renames[rev] = renames
         return self._renames[rev].get(path)
 
-    def changes_since(self, base: str | None, path: str, symbol: str | None) -> Changes:
-        """Commits after `base` (and uncommitted edits) that touch the symbol, or the whole file."""
+    def changes_since(
+        self, base: str | None, path: str, symbol: str | None, mention: bool = False
+    ) -> Changes:
+        """Commits after `base` (and uncommitted edits) that touch the symbol, or the whole file.
+
+        A mention is touched only through the symbol's interface (see `_interface`).
+        """
         commits = [] if base is None else self._commits_after(base, path)
         touching = tuple(
-            commit[:7] for commit in commits if self._commit_touches(path, symbol, commit)
+            commit[:7] for commit in commits if self._commit_touches(path, symbol, mention, commit)
         )
-        return Changes(touching, self._head_exists() and self._touches(path, symbol, "HEAD", None))
+        working_tree = self._head_exists() and self._touches(path, symbol, mention, "HEAD", None)
+        return Changes(touching, working_tree)
 
     def _head_exists(self) -> bool:
         if self._has_head is None:
@@ -455,20 +553,22 @@ class GitHistory:
         result = self._git("show", f"{rev}:{path}")
         return Source.parse(result.stdout) if result.returncode == 0 else None
 
-    def _commit_touches(self, path: str, symbol: str | None, commit: str) -> bool:
+    def _commit_touches(self, path: str, symbol: str | None, mention: bool, commit: str) -> bool:
         """A merge counts only for what it introduced itself: a change against every parent.
 
         Changes it brought in are counted via their own commits, when those follow the base.
         """
         parents = self._git("rev-list", "--parents", "-n", "1", commit).stdout.split()[1:]
         return all(
-            self._touches(path, symbol, f"{commit}^{n}", commit)
+            self._touches(path, symbol, mention, f"{commit}^{n}", commit)
             for n in range(1, max(len(parents), 1) + 1)
         )
 
-    def _touches(self, path: str, symbol: str | None, old_rev: str, new_rev: str | None) -> bool:
+    def _touches(
+        self, path: str, symbol: str | None, mention: bool, old_rev: str, new_rev: str | None
+    ) -> bool:
         change = self._file_change(path, old_rev, new_rev)
-        return change is not None and change.touches(symbol)
+        return change is not None and change.touches(symbol, mention)
 
     def _file_change(self, path: str, old_rev: str, new_rev: str | None) -> FileChange | None:
         """new_rev None compares against the working tree."""
@@ -676,6 +776,7 @@ class WikiLinter:
         mcp_dir: str = DEFAULT_MCP_DIR,
         symbol_root: str = DEFAULT_SYMBOL_ROOT,
         package_roots: Sequence[str] | None = None,
+        squash_onto: str | None = None,
     ) -> None:
         self.wiki_dir = wiki_dir.resolve()
         self.root = root.resolve()
@@ -683,7 +784,7 @@ class WikiLinter:
         self.module_dirs = module_dirs
         self.mcp_dir = mcp_dir
         self.symbol_root = symbol_root
-        self.history = GitHistory(self.root)
+        self.history = GitHistory(self.root, squash_onto)
         self.findings: list[Finding] = []
         self.pages: dict[str, Page] = {}
         self.inbound: dict[str, set[str]] = {}
@@ -826,6 +927,22 @@ class WikiLinter:
             )
         for source in meta.sources:
             self._check_source(page, source)
+        for mention in meta.mentions:
+            self._check_mention(page, mention, meta.sources)
+
+    def _check_mention(self, page: Page, mention: str, sources: list[str]) -> None:
+        lines = self._frontmatter_lines(page, mention)
+        resolved = self.packages.resolve(mention) if self._is_dotted(mention) else None
+        if mention in sources:
+            problem = "is also in sources, which the page describes"
+        elif not self._is_dotted(mention):
+            problem = "is not a dotted symbol"
+        elif resolved is not None and resolved.final.symbol is None:
+            problem = "names a module; a mention names a function, class or attribute"
+        else:
+            self._check_source(page, mention)
+            return
+        self._add(page.slug, Kind.INVALID_MENTION, f"mention {mention} {problem}", lines)
 
     def _fix_area_index(self, area: str) -> None:
         path = self.wiki_dir / area / "index.md"
@@ -877,15 +994,18 @@ class WikiLinter:
         if self.history.is_modified(page.rel):
             return
         base = self.history.last_commit(page.rel)
+        mentions = {m.removesuffix("()") for m in page.meta.mentions} if page.meta else set()
         for citation, lines in sorted(page.citations.items(), key=lambda kv: kv[0].label):
             if not (self.root / citation.path).is_file():
                 continue
-            changes = self.history.changes_since(base, citation.path, citation.symbol)
+            mention = citation.label in mentions
+            changes = self.history.changes_since(base, citation.path, citation.symbol, mention)
             if changes:
+                kind = "mention" if mention else "describes"
                 self._add(
                     page.slug,
                     Kind.STALE,
-                    f"{citation.label} changed in {changes.describe()}",
+                    f"{citation.label} ({kind}) changed in {changes.describe()}",
                     lines,
                 )
 
@@ -941,9 +1061,11 @@ class WikiLinter:
     def _check_source(self, page: Page, source: str) -> None:
         if source.startswith(("http://", "https://")):
             return
+        self._check_citation(page, source, self._frontmatter_lines(page, source), is_source=True)
+
+    def _frontmatter_lines(self, page: Page, entry: str) -> set[int]:
         frontmatter = page.text.splitlines()[: page.body_offset]
-        lines = {i for i, line in enumerate(frontmatter, 1) if source in line}
-        self._check_citation(page, source, lines, is_source=True)
+        return {i for i, line in enumerate(frontmatter, 1) if entry in line}
 
     def _check_citations(self, page: Page) -> None:
         masked = mask_fences(page.body)
@@ -1096,7 +1218,7 @@ class WikiLinter:
         if page is None:
             return None
         if page.meta:
-            for source in page.meta.sources:
+            for source in [*page.meta.sources, *page.meta.mentions]:
                 self._check_source(page, source)
         self._check_citations(page)
         out: list[str] = []
@@ -1224,8 +1346,11 @@ def lint(
     fix: bool = False,
     fail_stale: bool = False,
     package_roots: Sequence[str] | None = None,
+    squash_onto: str | None = None,
 ) -> int:
-    linter = WikiLinter(wiki_dir, root, fix=fix, package_roots=package_roots)
+    linter = WikiLinter(
+        wiki_dir, root, fix=fix, package_roots=package_roots, squash_onto=squash_onto
+    )
     linter.run()
     for line in render(linter.findings):
         print(line)
@@ -1256,6 +1381,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fix", action="store_true", help="regenerate area index page lists")
     parser.add_argument("--fail-stale", action="store_true", help="exit 1 when pages are stale")
     parser.add_argument(
+        "--squash-onto",
+        default=DEFAULT_SQUASH_ONTO,
+        metavar="REF",
+        help="date a page with no net change since its merge base with REF from before that "
+        "base, as a squash merge leaves it (default: %(default)s; '' disables)",
+    )
+    parser.add_argument(
         "--locate",
         nargs="+",
         metavar="ARG",
@@ -1265,7 +1397,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.locate:
         return locate(args.locate, args.wiki_dir)
-    return lint(args.wiki_dir, write=not args.no_write, fix=args.fix, fail_stale=args.fail_stale)
+    return lint(
+        args.wiki_dir,
+        write=not args.no_write,
+        fix=args.fix,
+        fail_stale=args.fail_stale,
+        squash_onto=args.squash_onto or None,
+    )
 
 
 if __name__ == "__main__":

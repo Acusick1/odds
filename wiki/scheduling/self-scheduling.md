@@ -14,6 +14,8 @@ sources:
   - odds_lambda.jobs.fetch_oddsportal_results.main
   - odds_lambda.jobs.fetch_polymarket._schedule
   - odds_lambda.health_monitor.check_system_health
+mentions:
+  - odds_core.alerts.job_alert_context
 status: stable
 ---
 
