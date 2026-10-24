@@ -38,7 +38,7 @@ The frontmatter has a `title` and a `description`, followed by a short hand-writ
 | `explanation` | Discuss a subject: concepts, how parts fit together, why things are the way they are, experiment findings | Context, design reasoning, trade-offs, results | Step-by-step instructions, exhaustive facts. Link to reference instead. |
 | `howto` | Get a competent user through one task | Ordered steps, each with a short reason | Background. Link to explanation instead. |
 
-Decisions are not pages. A choice with alternatives and consequences is an ADR in `docs/adr/` (Nygard: context, decision, status, consequences). Explanation pages link to it.
+Decisions are not pages. A hard-to-reverse engineering choice with alternatives and consequences is an ADR in `docs/adr/` (Nygard: context, decision, status, consequences). Explanation pages link to it. Strategy (what to try and how candidates are judged) is not an ADR: it lives on [Goal and strategy](foundations/goal-and-strategy.md) and is rewritten whenever it changes.
 
 There are no tutorials. This is a single-developer project, and the how-tos cover onboarding.
 

@@ -21,7 +21,7 @@ status: stable
 
 The [price-only](exp-epl-retail-ev-price-only.md) (#540) and [as-of-t groups](exp-epl-retail-ev-as-of-t-groups.md) (#545) runs tune on 2024-25 and freeze the settings. That season has only FDUK opening rows, so no tuning trial sees a Polymarket price, an exchange move or a live-collected row. The tuned residual models sit in a heavy-regularisation corner: about 100 trees, a learning rate near 0.01 and `min_child_weight` near its upper bound of 2,000. This run (#549) re-tunes inside 2025-26, on folds that carry those columns, without tuning on any row it scores.
 
-**This is development data, and the results are exploratory.** ADR-0012 judges a model only on a pre-registered fresh season. The rows have been examined by #540 and #545, and the design below was chosen with their layout in view. The run reads events kicking off up to 2026-07-31 and leaves 2026-27 untouched.
+**This is development data, and the results are exploratory.** Only a live forward test promotes a model ([goal and strategy](../foundations/goal-and-strategy.md)). The rows have been examined by #540 and #545, and the design below was chosen with their layout in view. The run reads events kicking off up to 2026-07-31 and leaves 2026-27 untouched.
 
 **Findings.**
 

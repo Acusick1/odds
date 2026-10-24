@@ -10,7 +10,7 @@ status: stable
 
 # Retail-EV evaluation
 
-`odds_analytics.retail_ev_evaluation` scores a frozen model for the [retail-EV target](../modelling/clv-target.md#the-retail-ev-target) once, on every event of a window, and returns ADR-0012's keep or retire verdict ([ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md)). `odds evaluate retail-ev` (`odds_cli.commands.evaluate.evaluate_retail_ev`) runs it; the steps are on [Run the retail-EV evaluation](howto-run-retail-ev-evaluation.md). The registered look is [ADR-0016](../../docs/adr/0016-pre-register-retail-ev-evaluation.md)'s, with the spec `experiments/configs/retail_ev_evaluation_2026_27.yaml` at the tag `retail-ev-eval-2026-27`.
+`odds_analytics.retail_ev_evaluation` scores a frozen model for the [retail-EV target](../modelling/clv-target.md#the-retail-ev-target) once, on every event of a window, and returns ADR-0012's keep or retire verdict ([ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md)). `odds evaluate retail-ev` (`odds_cli.commands.evaluate.evaluate_retail_ev`) runs it; the steps are on [Run the retail-EV evaluation](howto-run-retail-ev-evaluation.md). It is an offline check of one model on a past window; a model is promoted only by a live forward test ([goal and strategy](../foundations/goal-and-strategy.md)). A 2026-27 spec is committed as `experiments/configs/retail_ev_evaluation_2026_27.yaml`, at the tag `retail-ev-eval-2026-27`.
 
 ## Spec
 

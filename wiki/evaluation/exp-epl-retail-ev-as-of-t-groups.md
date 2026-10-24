@@ -23,7 +23,7 @@ status: stable
 
 This run repeats the protocol of [Price-only models on the retail-EV target](exp-epl-retail-ev-price-only.md) (#540) with the as-of-t feature groups of #545 ([retail-EV features](../modelling/clv-target-functions.md#retail-ev-features)). Each group is added alone, and then all four together. Each variant's models are compared with the price-only model of the same arm and seed, on the same rows.
 
-**This is development data, and the results are exploratory.** No keep-bar claim is made: ADR-0012 judges a model only on a pre-registered fresh season. The run reads events kicking off up to 2026-07-31 and leaves 2026-27 untouched.
+**This is development data, and the results are exploratory.** No keep-bar claim is made. Only a live forward test promotes a model ([goal and strategy](../foundations/goal-and-strategy.md)). The run reads events kicking off up to 2026-07-31 and leaves 2026-27 untouched.
 
 **Findings.**
 

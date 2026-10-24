@@ -1,6 +1,6 @@
 # Wiki
 
-This repo is a single-user, sport-agnostic betting data pipeline (odds collection, storage, scheduling, alerting, paper trading) with per-sport LLM betting agents for EPL and MLB. The hypothesised edge is the agent's information synthesis; an XGBoost CLV model is a supplementary signal.
+This repo is a single-user, sport-agnostic betting data pipeline (odds collection, storage, scheduling, alerting, paper trading) with per-sport LLM betting agents for EPL and MLB. The goal is profit; any approach (today the betting agents) is a candidate judged on live paper trades ([goal and strategy](foundations/goal-and-strategy.md)).
 
 Read this page, then one area index, then the page, then the cited code. Code is authoritative. Page rules: [SCHEMA.md](SCHEMA.md).
 

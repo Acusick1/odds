@@ -4,6 +4,8 @@ status: accepted
 
 # Predict a retail bet's EV against the Betfair Exchange close
 
+The keep bar below no longer decides whether a model is kept; [Goal and strategy](../../wiki/foundations/goal-and-strategy.md) does.
+
 The next EPL CLV model predicts the expected value of a bet at a UK retail price, measured against the Betfair Exchange closing price. It replaces the bet365 close-minus-snapshot delta of [ADR-0002](0002-bet365-clv-target.md) and [ADR-0011](0011-bet365-clv-target-on-like-for-like-evidence.md).
 
 ## Context

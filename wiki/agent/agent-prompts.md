@@ -43,7 +43,7 @@ The agent does not bet on qualitative team assessment. Every bet needs one of fo
 3. a structural bias (bookmaker liability management, accumulator distortion, public money on popular teams);
 4. fundamental value.
 
-The strategic goal frames structural biases as valid edge types alongside information gaps ([ADR-0005](../../docs/adr/0005-information-edge.md)).
+The prompt's Thesis frames structural biases as valid edge types alongside information gaps (`packages/odds-mcp/agents/common.md`).
 
 ## Conviction tiers
 

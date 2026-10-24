@@ -42,7 +42,7 @@ status: stable
 
 This page records the first model run on the retail-EV target of [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md) (#540, under the map #506): a UK retail bet's EV against the devigged Betfair Exchange close, one row per event, outcome, book and retail snapshot ([CLV and the training target](../modelling/clv-target.md#the-retail-ev-target)). XGBoost sees only the price features at t. It is compared with the parameter-free martingale baseline, which takes the exchange price at t as the close.
 
-**This is development data, and the results are exploratory.** ADR-0012 judges a model only on a pre-registered fresh season, so nothing here is a keep-bar result or a claim of skill. The run reads 2024-25 and 2025-26 only. 2026-27 is left untouched, because it is the fresh season of [ADR-0016](../../docs/adr/0016-pre-register-retail-ev-evaluation.md).
+**This is development data, and the results are exploratory.** Nothing here is a keep-bar result or a claim of skill. Only a live forward test promotes a model ([goal and strategy](../foundations/goal-and-strategy.md)). The run reads 2024-25 and 2025-26 only. 2026-27 was held out for the [ADR-0016](../../docs/adr/0016-pre-register-retail-ev-evaluation.md) look.
 
 **Findings.**
 

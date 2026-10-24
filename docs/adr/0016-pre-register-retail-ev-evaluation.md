@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: deprecated
 ---
 
 # Pre-register the fresh-season evaluation of the retail-EV model
+
+Deprecated: strategy lives in [Goal and strategy](../../wiki/foundations/goal-and-strategy.md).
 
 The [ADR-0012](0012-retail-ev-against-betfair-exchange-close.md) retail-EV model is judged once, on the 2026-27 EPL events that kick off on or after a freeze date, by ADR-0012's two keep-bar conditions. This ADR names the season, the freeze date, what is frozen, the single look, the collection rules and the statistics that decide.
 

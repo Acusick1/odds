@@ -1,6 +1,10 @@
 # Betting Odds Pipeline & Agent
 
-Single-user, sport-agnostic betting odds pipeline with per-sport LLM betting agents (EPL and MLB data collection active; the agents are run by hand on the production host; NBA code is deprioritized). The edge being tested is the agent's synthesis of odds, exchange prices, team news and context; an XGBoost CLV model is a supplementary signal.
+Single-user, sport-agnostic betting odds pipeline with per-sport LLM betting agents (EPL and MLB data collection active; the agents are run by hand on the production host; NBA code is deprioritized).
+
+## Goal
+
+The goal is profit. Any approach that might get there is fair game, and candidates run in parallel (today the betting agents; models and mechanical rules qualify too). Development data generates ideas and never promotes one. A candidate is promoted or killed at fixed checkpoints of a live paper-trading forward test, scored by EV at the price taken against the Betfair Exchange close. No candidate can be scored yet (#604). See [goal and strategy](wiki/foundations/goal-and-strategy.md).
 
 ## Documentation
 
@@ -16,7 +20,7 @@ Every code change keeps the wiki current. `uv run python scripts/wiki_lint.py` (
 - **The Odds API costs quota units.** Check `odds status quota` before bulk or historical fetches. See [quota](wiki/collection/odds-api-quota.md).
 - **Pass `--sport` and the sport's market key.** Several CLI defaults are NBA. EPL odds use `1x2` and MLB uses `h2h`. See [sources and keys](wiki/collection/sport-and-market-keys.md).
 - **Historical analysis uses only data at or before decision time.** `get_odds_at_time` searches both sides of the target time. See [look-ahead](wiki/modelling/look-ahead-bias.md).
-- **The suspended EPL model's CLV target is devigged bet365** (`target_type: devigged_bookmaker`, `target_bookmaker: bet365`). The next model's target, ADR-0012's retail EV against the Betfair Exchange close, is `target_type: retail_ev`. See [CLV target](wiki/modelling/clv-target.md).
+- **The suspended EPL model's CLV target is devigged bet365** (`target_type: devigged_bookmaker`, `target_bookmaker: bet365`). The retail-EV model's target, EV against the Betfair Exchange close, is `target_type: retail_ev`. See [CLV target](wiki/modelling/clv-target.md).
 - **Use one `async with async_session_maker() as session` per task.** Lambda gets `NullPool` automatically. See [databases](wiki/foundations/databases-and-environments.md).
 
 ## Tests

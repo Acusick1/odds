@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: deprecated
 ---
 
 # Treat the agent's information synthesis as the primary edge
+
+Deprecated: strategy lives in [Goal and strategy](../../wiki/foundations/goal-and-strategy.md).
 
 ## Context
 
