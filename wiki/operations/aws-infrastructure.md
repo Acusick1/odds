@@ -20,7 +20,7 @@ Everything lives under `deployment/aws/`; region `eu-west-1`. The stack is dorma
 
 ## Function
 
-The scheduler function is named `var.project_name` (prod `odds-scheduler`, default `odds-scheduler-dev`). Its image is `Dockerfile.lambda`: `odds-core`, `odds-lambda`, `odds-analytics`, `odds-cli` wheels plus xgboost. Memory is `lambda_memory_size` (512 MB) and timeout `lambda_timeout` (300 s) (`deployment/aws/terraform/variables.tf`). No Lambda runs `fetch-oddsportal` or `fetch-oddsportal-results`; they run on the local scheduler.
+The scheduler function is named `var.project_name` (prod `odds-scheduler`, default `odds-scheduler-dev`). Its image is `Dockerfile.lambda`: `odds-core`, `odds-lambda`, `odds-analytics`, `odds-cli` wheels and their declared dependencies, XGBoost included. Memory is `lambda_memory_size` (512 MB) and timeout `lambda_timeout` (300 s) (`deployment/aws/terraform/variables.tf`). No Lambda runs `fetch-oddsportal` or `fetch-oddsportal-results`; they run on the local scheduler.
 
 The handler and registry are described on [scheduler-backends](../scheduling/scheduler-backends.md#lambda-handler). The log group `/aws/lambda/<function>` keeps 14 days. The IAM role grants: S3 model read, EventBridge rule writes (restricted to `{rule_prefix}-*`; it lacks `events:ListRules`, so listing and health checks work only from a shell with broader credentials; #443), SSM read/write of `/{project_name}/active-api-key-index` (the [API key rotation](../collection/odds-api-client.md#retry-and-rotation) index, set through `SSM_API_KEY_INDEX`), and, if `betfair_enabled`, SSM read of the Betfair cert/key parameters ([Betfair client](../collection/betfair-exchange.md)).
 

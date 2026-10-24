@@ -61,8 +61,8 @@ Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in
 | ORM and driver | SQLModel, asyncpg, on PostgreSQL 15 (`docker-compose.yml`) | `packages/odds-core/pyproject.toml` |
 | Settings and logging | Pydantic Settings, structlog | `packages/odds-core/pyproject.toml` |
 | Local scheduler | APScheduler 4 (pinned alpha), tenacity retries | `packages/odds-lambda/pyproject.toml` |
-| Migrations | Alembic | `packages/odds-lambda/pyproject.toml` |
-| NBA stats and game-log browser scraping | nba_api, Playwright | `packages/odds-lambda/pyproject.toml` |
+| Migrations | Alembic | `pyproject.toml` |
+| NBA game-log browser scraping | Playwright | `packages/odds-lambda/pyproject.toml` |
 | CLI | Typer, Rich | `packages/odds-cli/pyproject.toml` |
 | MCP server | FastMCP | `packages/odds-mcp/pyproject.toml` |
 | Modelling | XGBoost | `packages/odds-analytics/pyproject.toml` |
@@ -70,7 +70,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in
 
 ## odds-core
 
-`packages/odds-core/odds_core/` declares only sqlmodel, asyncpg, pydantic-settings, python-dotenv, structlog and aiohttp (`packages/odds-core/pyproject.toml`).
+`packages/odds-core/odds_core/` declares only sqlmodel, sqlalchemy, asyncpg, pydantic, pydantic-settings, structlog and aiohttp (`packages/odds-core/pyproject.toml`).
 
 | Module | Holds |
 |---|---|
@@ -133,7 +133,7 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 
 - `packages/odds-lambda/pyproject.toml` does not declare `odds-analytics`, but `odds_lambda.model_loader` imports `odds_analytics.training.config` (where the feature group names, including `retail_ev`'s own, target fields and the `retail_ev` CV protocol are validated) and `odds_lambda.jobs.score_predictions` imports `odds_analytics.feature_groups` (the training-array module) at module level (#454); the job also reads the model pickle's `margin_feature` key, which `odds_analytics.xgboost_line_movement` writes. Analytics declares a dependency on odds-lambda, so the cycle is undeclared on this side. The scraper-side consequence is on [Prediction scoring](../modelling/prediction-scoring.md).
 - `odds_core.paper_trade_models.PaperTrade` imports `odds_analytics.backtesting.models` (type-checking plus a lazy import inside `odds_core.paper_trade_models.PaperTrade.to_bet_record`), so odds-core depends on odds-analytics in practice (#459).
-- `python-dotenv` is declared in core but nothing imports it; `.env` is read only by pydantic-settings (#459).
+- Every package declares each third-party library its code imports, even when a workspace dependency already brings it in; `deptry` checks this per package in CI ([Code conventions](code-conventions.md#dependency-checks)). The ignores that remain in each package's `[tool.deptry.per_rule_ignores]` are `odds_analytics` (odds-core and odds-lambda, the two undeclared imports above), `botocore` (odds-lambda; installed with boto3), `optuna` (odds-cli; behind analytics' `training` extra), `asyncpg` (odds-core; the driver named in `DATABASE_URL`) and `optuna-integration` (odds-analytics; loaded by Optuna as a plugin).
 
 ## Related
 

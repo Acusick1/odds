@@ -78,7 +78,7 @@ Constructor arguments win, then unprefixed env vars: `AWS_REGION`, `LAMBDA_ARN`,
 
 ## Lambda handler
 
-`odds_lambda.lambda_handler.lambda_handler` is the CMD of the Lambda image (`deployment/aws/Dockerfile.lambda`, [AWS infrastructure](../operations/aws-infrastructure.md)). The Lambda env var holding the function's own ARN is `LAMBDA_ARN`, the variable the backend reads ([Env-var contract](#env-var-contract)). Alert environment variables are on [AWS infrastructure](../operations/aws-infrastructure.md).
+`odds_lambda.lambda_handler.lambda_handler` is the CMD of the Lambda image, which installs only the wheels' declared dependencies (`deployment/aws/Dockerfile.lambda`, [AWS infrastructure](../operations/aws-infrastructure.md)). The Lambda env var holding the function's own ARN is `LAMBDA_ARN`, the variable the backend reads ([Env-var contract](#env-var-contract)). Alert environment variables are on [AWS infrastructure](../operations/aws-infrastructure.md).
 
 EventBridge delivers the target `Input` written by the AWS backend or by Terraform:
 

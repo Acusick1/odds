@@ -8,9 +8,10 @@ dependencies = [
     "sqlmodel>=0.0.14",
     "asyncpg>=0.29.0",
     "pydantic-settings>=2.1.0",
-    "python-dotenv>=1.0.0",
     "structlog>=23.3.0",
     "aiohttp>=3.9.0",
+    "sqlalchemy>=2.0.44",
+    "pydantic>=2.12.4",
 ]
 
 [build-system]
@@ -19,3 +20,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["odds_core"]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["asyncpg"]
+DEP003 = ["odds_analytics"]

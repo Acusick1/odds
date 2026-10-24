@@ -11,6 +11,11 @@ dependencies = [
     "joblib>=1.3.0",
     "rich>=13.0.0",
     "pyyaml>=6.0",
+    "structlog>=25.5.0",
+    "sqlalchemy>=2.0.44",
+    "pydantic>=2.12.4",
+    "scipy>=1.16.3",
+    "xgboost>=3.1.1",
 ]
 
 [project.optional-dependencies]
@@ -29,7 +34,6 @@ odds-lambda = { workspace = true }
 
 [dependency-groups]
 ml = [
-    "xgboost>=2.0.0",
     "matplotlib>=3.10.7",
     "plotly>=6.3.1",
     "seaborn>=0.13.2",
@@ -41,3 +45,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["odds_analytics"]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["optuna-integration"]

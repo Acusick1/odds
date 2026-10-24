@@ -32,7 +32,7 @@ Rule: use `datetime.now(UTC)` (`from datetime import UTC`), store UTC in the dat
 
 ## Lint coverage
 
-Ruff selects only `DTZ003` (`utcnow()`) and `DTZ005` (`now()` without tz) (root `pyproject.toml` `[tool.ruff.lint]`). `datetime(...)`, `strptime`, `date.today()` and `fromtimestamp` without a zone pass lint, which is how the sites below survive; review catches them.
+Ruff selects only `DTZ003` (`utcnow()`) and `DTZ005` (`now()` without tz) (`[tool.ruff.lint]` in the root `pyproject.toml`). `datetime(...)`, `strptime`, `date.today()` and `fromtimestamp` without a zone pass lint, which is how the sites below survive; review catches them.
 
 ## Helpers
 
