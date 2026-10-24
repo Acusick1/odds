@@ -50,6 +50,11 @@ class SessionMaker:
         return None
 
 
+@pytest.fixture(autouse=True)
+def deliverable_alerts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("odds_core.alerts.alert_manager.enabled", True)
+
+
 @pytest.fixture
 def seed(pglite_async_session: Any) -> Callable[..., Any]:
     counter = 0
@@ -454,12 +459,8 @@ class TestCheckStaleSources:
         monitor.settings.alerts.alert_enabled = True
         reminder = monitor.settings.alerts.stale_reminder_minutes
         with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock):
-            first = await monitor._send_alert(
-                "stale_data:x:y", "critical", "m", rate_limit_minutes=reminder
-            )
-            again = await monitor._send_alert(
-                "stale_data:x:y", "critical", "m", rate_limit_minutes=reminder
-            )
+            first = await monitor._send_alert("stale_data:x:y", "critical", "m")
+            again = await monitor._send_alert("stale_data:x:y", "critical", "m")
 
         assert (first, again) == (True, False)
         assert reminder == 360

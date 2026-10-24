@@ -22,7 +22,7 @@ Each external source has a fetcher, a job (or manual script) that runs it, and a
 - [Polymarket pipeline and tables](polymarket.md) — Client, classifier, ingestion, fetch and backfill jobs, manual linking, CLI, AWS gate, the five tables and order-book metrics.
 - [Results and status jobs](results-jobs.md) — update-status, fetch-scores, fetch-oddsportal-results and odds fetch scores: cadence, flow, heartbeats, failure handling.
 - [Sport, market and bookmaker keys](sport-and-market-keys.md) — SportKey, job-name suffixes, the market-key dialects per writer, bookmaker key maps, and DataCollectionConfig defaults.
-- [The fetch-odds job](fetch-odds-job.md) — Event sync, gate, pre/post-schedule, quota alerts and log events of odds_lambda.jobs.fetch_odds.
+- [The fetch-odds job](fetch-odds-job.md) — Event sync, gate, pre/post-schedule and log events of odds_lambda.jobs.fetch_odds.
 - [The fetch-oddsportal job](fetch-oddsportal-job.md) — LEAGUE_SPECS, flow, cadence, alerts, heartbeats and inline scoring of odds_lambda.jobs.fetch_oddsportal.
 - [The Odds API client and key rotation](odds-api-client.md) — TheOddsAPIClient methods, retry and key rotation with the SSM index, and unit cost per endpoint.
 
@@ -30,7 +30,7 @@ Each external source has a fetcher, a job (or manual script) that runs it, and a
 
 - [Data sources](data-sources.md) — Every odds feed and what each one supplies, bookmaker roles, the Pinnacle coverage gap, and where each feed runs.
 - [Event status lifecycle](event-status-lifecycle.md) — The five statuses, which job or command sets each, and what each status gates downstream.
-- [Odds API quota accounting](odds-api-quota.md) — How quota is spent, recorded in fetch_logs, alerted by fetch-odds and the health monitor, and checked with odds status quota, and where those disagree.
+- [Odds API quota accounting](odds-api-quota.md) — How quota is spent, recorded in fetch_logs, alerted by the health monitor, and checked with odds status quota, and where those disagree.
 - [Polymarket market character and data availability](polymarket-market-research.md) — Observed market depth by sport, series and tag ids from research, market richness, and how long the API keeps data.
 
 ### How-to guides

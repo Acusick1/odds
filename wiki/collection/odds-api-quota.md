@@ -1,7 +1,7 @@
 ---
 type: explanation
 title: Odds API quota accounting
-description: How quota is spent, recorded in fetch_logs, alerted by fetch-odds and the health monitor, and checked with odds status quota, and where those disagree.
+description: How quota is spent, recorded in fetch_logs, alerted by the health monitor, and checked with odds status quota, and where those disagree.
 sources:
   - odds_core.models.FetchLog
   - odds_core.config.APIConfig
@@ -22,20 +22,19 @@ status: stable
 
 # Odds API quota accounting
 
-Quota is a per-key monthly balance that only [the client](odds-api-client.md#cost-per-call) spends. A fetch-odds run that stores no snapshot while an EPL fixture is within 48 hours fails and alerts regardless of quota ([fetch-odds-job](fetch-odds-job.md#flow)). Four places read or act on it, and each reads it differently.
+Quota is a per-key monthly balance that only [the client](odds-api-client.md#cost-per-call) spends. A fetch-odds run that stores no snapshot while an EPL fixture is within 48 hours fails and alerts regardless of quota ([fetch-odds-job](fetch-odds-job.md#flow)). Three places read or act on it, and each reads it differently.
 
 ## Where quota is recorded, alerted and checked
 
-| Place | What it reads | Rate limited | Recorded in `alert_history` |
+| Place | What it reads | Reminded | Recorded in `alert_history` |
 |---|---|---|---|
 | `odds_core.models.FetchLog.api_quota_remaining` | written once per sport and run by `odds_lambda.ingestion.OddsIngestionService.ingest_sport` ([fetch logs](odds-ingestion-service.md#fetch-logs)) | n/a | n/a |
-| fetch-odds quota alerts | `quota_remaining / odds_core.config.APIConfig.quota` after each fetch | no | no |
 | `odds_lambda.health_monitor.HealthMonitor.check_api_quota` | newest `fetch_logs` row with a non-null quota, same fraction | yes | yes |
 | `odds status quota` (`odds_cli.commands.status._show_quota`) | newest 10 `fetch_logs` rows with a non-null quota; the per-fetch Used column is the next-older row's remaining minus this row's, `reset` when negative, blank for the oldest | n/a | n/a |
 
 - Quota views skip rows with a null quota, such as Betfair rows ([betfair-exchange](betfair-exchange.md)): `odds_lambda.storage.readers.OddsReader.get_fetch_logs` with `with_quota=True` and `odds_lambda.storage.readers.OddsReader.get_database_stats` both filter in the query. `fetch_logs` has no source column, so Odds API rows are inferred from the nullable quota (#441).
-- `fetch-odds` sends a warning below `odds_core.config.AlertConfig.quota_warning_threshold` and a critical below `odds_core.config.AlertConfig.quota_critical_threshold`. It uses `odds_core.alerts.send_warning`/`odds_core.alerts.send_critical` without an `alert_type`, so the alert repeats on every run below threshold (as often as the closing tier fetches) and is never recorded ([fetch-odds-job](fetch-odds-job.md)).
-- The health monitor applies the same fractions as `quota_low` and `quota_critical`, rate-limited through `alert_history` ([health-monitor](../operations/health-monitor.md)).
+- `fetch-odds` sends no quota alert.
+- The health monitor applies the thresholds as `quota_low` and `quota_critical`, sent once per condition and reminded every `stale_reminder_minutes` through `alert_history` ([health-monitor](../operations/health-monitor.md)).
 - Both thresholds divide the active key's balance by `odds_core.config.APIConfig.quota`, so with a larger paid key they are meaningless until it is set (#441).
 
 ## Scheduled spend

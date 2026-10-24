@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 import structlog
-from odds_core.alerts import job_outage_alerted_at
+from odds_core.alerts import job_outage_alerted_at, send_recorded_alert
 from odds_core.betfair_close import LIVE_CLOSE_WINDOW, complete_exchange_prices, is_in_play
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
@@ -27,7 +27,7 @@ from odds_core.market_prices import THREE_WAY_MARKET, outcome_names
 from odds_core.models import AlertHistory, Event, EventStatus, OddsSnapshot
 from odds_core.snapshot_sources import SnapshotKind, SnapshotSource
 from pydantic import BaseModel
-from sqlalchemy import and_, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.collection_calendar import (
@@ -188,103 +188,26 @@ class HealthMonitor:
         self.settings = settings
         self.schedules = schedules
 
-    async def _should_send_alert(
-        self, alert_type: str, rate_limit_minutes: int | None = None
-    ) -> bool:
-        """
-        Check if alert should be sent based on rate limiting.
-
-        Args:
-            alert_type: Alert type identifier
-
-        Returns:
-            True if alert should be sent (no recent alert of this type)
-        """
-        if rate_limit_minutes is None:
-            rate_limit_minutes = self.settings.alerts.alert_rate_limit_minutes
-        cutoff_time = datetime.now(UTC) - timedelta(minutes=rate_limit_minutes)
-
-        # Query for recent alerts of this type
-        query = select(func.count(AlertHistory.id)).where(
-            and_(
-                AlertHistory.alert_type == alert_type,
-                AlertHistory.sent_at >= cutoff_time,
-            )
-        )
-
-        result = await self.session.execute(query)
-        recent_count = result.scalar_one()
-
-        return recent_count == 0
-
-    async def _record_alert(
-        self, alert_type: str, severity: str, message: str, context: dict | None = None
-    ):
-        """
-        Record sent alert in database.
-
-        Args:
-            alert_type: Alert type identifier
-            severity: Alert severity level
-            message: Alert message
-            context: Additional context data
-        """
-        alert_record = AlertHistory(
-            alert_type=alert_type,
-            severity=severity,
-            message=message,
-            context=context,
-            sent_at=datetime.now(UTC),
-        )
-
-        self.session.add(alert_record)
-        await self.session.commit()
-
-        logger.info("alert_recorded", alert_type=alert_type, severity=severity)
-
     async def _send_alert(
         self,
         alert_type: str,
         severity: str,
         message: str,
         context: dict | None = None,
-        rate_limit_minutes: int | None = None,
-    ):
-        """
-        Send alert if rate limiting allows.
-
-        Args:
-            alert_type: Alert type identifier
-            severity: Alert severity level
-            message: Alert message
-            context: Additional context data
-            rate_limit_minutes: Overrides the configured window for this alert
-
-        Returns:
-            True if alert was sent
-        """
+        every: timedelta | None = None,
+    ) -> bool:
+        """Send via ``odds_core.alerts.send_recorded_alert``, default interval ``stale_reminder_minutes``."""
         if not self.settings.alerts_deliverable:
             logger.debug("alert_skipped_disabled", alert_type=alert_type)
             return False
-
-        if not await self._should_send_alert(alert_type, rate_limit_minutes):
-            logger.debug(
-                "alert_rate_limited",
-                alert_type=alert_type,
-                rate_limit_minutes=rate_limit_minutes
-                or self.settings.alerts.alert_rate_limit_minutes,
-            )
-            return False
-
-        # Send via alert system
-        from odds_core.alerts import alert_manager
-
-        await alert_manager.alert(message, severity)
-
-        # Record in database
-        await self._record_alert(alert_type, severity, message, context)
-
-        return True
+        return await send_recorded_alert(
+            alert_type,
+            severity,
+            message,
+            every=every or timedelta(minutes=self.settings.alerts.stale_reminder_minutes),
+            context=context,
+            session=self.session,
+        )
 
     async def _get_hours_since_latest_snapshot(self) -> float | None:
         """Query hours since the most recent OddsSnapshot, or None if empty."""
@@ -611,7 +534,7 @@ class HealthMonitor:
                 severity="warning",
                 message=f"⚠️ {issue}",
                 context={"sport_key": sport, "event_ids": ids},
-                rate_limit_minutes=UNSETTLED_ALERT_MINUTES,
+                every=timedelta(minutes=UNSETTLED_ALERT_MINUTES),
             )
         return issues
 
@@ -758,7 +681,6 @@ class HealthMonitor:
             metrics = await self.collect_metrics()
 
             # Check 1: Stale data, per source
-            alerts_config = self.settings.alerts
             for stale in await self.check_stale_sources(moment):
                 issue = stale.describe()
                 issues_detected.append(issue)
@@ -767,7 +689,6 @@ class HealthMonitor:
                     alert_type=stale.alert_type,
                     severity="critical",
                     message=f"🚨 Stale data: {issue}",
-                    rate_limit_minutes=alerts_config.stale_reminder_minutes,
                 ):
                     alerts_sent.append(stale.alert_type)
 
@@ -784,7 +705,7 @@ class HealthMonitor:
                     severity="critical",
                     message=f"🚨 {issue}",
                     context={"event_ids": [close.event_id for close in missing_closes]},
-                    rate_limit_minutes=alerts_config.alert_rate_limit_minutes,
+                    every=timedelta(0),
                 ):
                     alerts_sent.append(BETFAIR_CLOSE_ALERT_TYPE)
 
