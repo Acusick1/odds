@@ -191,6 +191,18 @@ class TestCollectSnapshots:
         assert prices_arg["outcome_1_price"] == 0.45
 
     @pytest.mark.asyncio
+    async def test_existing_snapshot_is_not_counted(self, mocks: ServiceMocks) -> None:
+        service = mocks.build_service()
+        mocks.reader.get_active_events.return_value = [_make_active_event(hours_until=6)]
+        mocks.reader.get_markets_by_type.return_value = [_make_market()]
+        mocks.client.get_prices_batch.return_value = {"token-0": 0.55, "token-1": 0.45}
+        mocks.writer.store_price_snapshot.return_value = False
+
+        result = await service.collect_snapshots(now=FROZEN_NOW)
+
+        assert result.price_snapshots_stored == 0
+
+    @pytest.mark.asyncio
     async def test_stores_orderbooks_in_closing_tier(self, mocks: ServiceMocks) -> None:
         settings = _make_settings(orderbook_tiers=["closing"])
         m = ServiceMocks(settings=settings)

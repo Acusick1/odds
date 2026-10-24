@@ -323,9 +323,7 @@ async def _link_async(dry_run: bool):
             results_table.add_column("Result")
 
             for pm_event in unlinked:
-                event_id = await match_polymarket_event(
-                    session, pm_event.ticker, pm_event.start_date
-                )
+                event_id = await match_polymarket_event(session, pm_event.ticker)
 
                 if event_id:
                     matched += 1

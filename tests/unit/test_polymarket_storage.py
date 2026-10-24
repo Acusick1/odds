@@ -235,19 +235,60 @@ class TestPolymarketWriter:
         prices = {
             "outcome_0_price": 0.55,
             "outcome_1_price": 0.45,
-            "best_bid": 0.54,
-            "best_ask": 0.56,
             "volume": 1000.0,
             "liquidity": 500.0,
         }
 
-        snapshot = await writer.store_price_snapshot(market, prices, commence_time, snapshot_time)
+        assert await writer.store_price_snapshot(market, prices, commence_time, snapshot_time)
         await pglite_async_session.flush()
 
+        snapshot = await PolymarketReader(pglite_async_session).get_price_at_time(
+            market.id, snapshot_time
+        )
+        assert snapshot is not None
         assert snapshot.fetch_tier == "closing"
         assert snapshot.hours_until_commence == 2.0
-        assert abs(snapshot.spread - 0.02) < 1e-10  # 0.56 - 0.54
-        assert snapshot.midpoint == 0.55  # (0.54 + 0.56) / 2
+
+    @pytest.mark.asyncio
+    async def test_store_price_snapshot_ignores_repeat_of_same_market_and_time(
+        self, pglite_async_session
+    ):
+        writer = PolymarketWriter(pglite_async_session)
+        event = await writer.upsert_event(
+            {
+                "id": "event_dup",
+                "ticker": "nba-dup",
+                "slug": "dup",
+                "title": "Dup Game",
+                "startDate": "2026-02-14T01:00:00Z",
+                "endDate": "2026-02-14T04:00:00Z",
+                "markets": [],
+            }
+        )
+        markets = await writer.upsert_markets(
+            event.id,
+            [
+                {
+                    "id": "market_dup",
+                    "conditionId": "cond_dup",
+                    "question": "Dup Game",
+                    "clobTokenIds": ["token_a", "token_b"],
+                    "outcomes": ["Team A", "Team B"],
+                }
+            ],
+            event.title,
+        )
+        market = markets[0]
+        commence_time = datetime(2026, 2, 14, 1, 0, 0, tzinfo=UTC)
+        snapshot_time = commence_time - timedelta(hours=2)
+        first = {"outcome_0_price": 0.55, "outcome_1_price": 0.45}
+        retry = {"outcome_0_price": 0.60, "outcome_1_price": 0.40}
+
+        assert await writer.store_price_snapshot(market, first, commence_time, snapshot_time)
+        assert not await writer.store_price_snapshot(market, retry, commence_time, snapshot_time)
+
+        rows = await PolymarketReader(pglite_async_session).get_prices_for_market(market.id)
+        assert [r.outcome_0_price for r in rows] == [0.55]
 
     @pytest.mark.asyncio
     async def test_store_orderbook_invalid_book(self, pglite_async_session):
@@ -564,8 +605,6 @@ class TestPolymarketReader:
         prices_before = {
             "outcome_0_price": 0.50,
             "outcome_1_price": 0.50,
-            "best_bid": 0.49,
-            "best_ask": 0.51,
         }
         await writer.store_price_snapshot(
             market, prices_before, commence_time, target_time - timedelta(minutes=2)
@@ -574,8 +613,6 @@ class TestPolymarketReader:
         prices_after = {
             "outcome_0_price": 0.60,
             "outcome_1_price": 0.40,
-            "best_bid": 0.59,
-            "best_ask": 0.61,
         }
         await writer.store_price_snapshot(
             market, prices_after, commence_time, target_time + timedelta(minutes=2)

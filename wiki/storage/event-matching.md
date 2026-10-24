@@ -32,7 +32,7 @@ There is no shared matcher for deciding which `events` row a piece of incoming d
 | `odds_lambda.storage.writers.OddsWriter.find_or_create_event` | live OddsPortal scrape and Betfair jobs | ±2 h | `odds_core.team.normalize_team_name` applied first; sport filter | the canonical candidate (`odds_core.event_source.canonical_event_id`) |
 | `odds_lambda.storage.injury_writer.InjuryWriter._match_event` | [NBA injury reports](../collection/nba-injuries-and-stats.md) | ET `game_date` 10:00 to next day 06:00, converted to UTC | team is home or away | `None` |
 | `odds_lambda.storage.game_log_writer.GameLogWriter._match_event` | [NBA game logs](../collection/nba-injuries-and-stats.md) | same ET window (a verbatim copy) | team is home or away | `None` |
-| `odds_lambda.polymarket_matching.match_polymarket_event` | `odds polymarket link` only | ticker date at 12:00 UTC ±24 h | exact, via `odds_lambda.polymarket_matching.NBA_ABBREV_MAP` | `None` |
+| `odds_lambda.polymarket_matching.match_polymarket_event` | `odds polymarket link` only | ticker date at 12:00 UTC ±24 h (the ticker alone is the input) | exact, via `odds_lambda.polymarket_matching.NBA_ABBREV_MAP` | `None` |
 | `odds_lambda.polymarket_odds.pair_events` | `odds polymarket backfill-odds` and the fetch-polymarket-odds job | kick-off within `odds_lambda.polymarket_odds.EVENT_MATCH_WINDOW` (3 h) | exact home and away after `odds_lambda.polymarket_odds.canonical_team` | skips the event; when several events match one Polymarket match only the Odds API one (`odds_core.event_ids.is_odds_api_event_id`) pairs (`odds_lambda.polymarket_odds.preferred_event`) and the others are logged as twins |
 
 ## Consequences of the differences

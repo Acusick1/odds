@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 from odds_analytics.feature_extraction import TabularFeatures
+from odds_analytics.feature_groups import _find_nearest_pm_orderbook
 from odds_analytics.polymarket_features import (
     CrossSourceFeatureExtractor,
     CrossSourceFeatures,
@@ -34,10 +35,6 @@ def sample_price_snapshot() -> PolymarketPriceSnapshot:
         snapshot_time=t,
         outcome_0_price=0.62,
         outcome_1_price=0.38,
-        best_bid=0.61,
-        best_ask=0.63,
-        spread=0.02,
-        midpoint=0.62,
         volume=5000.0,
         liquidity=12000.0,
         fetch_tier="pregame",
@@ -80,10 +77,6 @@ def recent_prices() -> list[PolymarketPriceSnapshot]:
             snapshot_time=base_time + timedelta(minutes=30 * i),
             outcome_0_price=p,
             outcome_1_price=round(1.0 - p, 4),
-            best_bid=round(p - 0.01, 4),
-            best_ask=round(p + 0.01, 4),
-            spread=0.02,
-            midpoint=p,
             volume=1000.0,
             liquidity=5000.0,
             fetch_tier="pregame",
@@ -256,9 +249,36 @@ class TestPolymarketFeatureExtractor:
             recent_prices=[],
             home_outcome_index=0,
         )
+        assert result.pm_volume == pytest.approx(5000.0)
+        assert result.pm_liquidity == pytest.approx(12000.0)
+
+    def test_extracts_bid_ask_from_orderbook(
+        self, sample_price_snapshot, sample_orderbook_snapshot
+    ):
+        extractor = PolymarketFeatureExtractor()
+        result = extractor.extract(
+            price_snapshot=sample_price_snapshot,
+            orderbook_snapshot=sample_orderbook_snapshot,
+            recent_prices=[],
+            home_outcome_index=0,
+        )
+        assert result.pm_best_bid == pytest.approx(0.61)
+        assert result.pm_best_ask == pytest.approx(0.63)
         assert result.pm_spread == pytest.approx(0.02)
         assert result.pm_midpoint == pytest.approx(0.62)
-        assert result.pm_volume == pytest.approx(5000.0)
+
+    def test_bid_ask_none_without_orderbook(self, sample_price_snapshot):
+        extractor = PolymarketFeatureExtractor()
+        result = extractor.extract(
+            price_snapshot=sample_price_snapshot,
+            orderbook_snapshot=None,
+            recent_prices=[],
+            home_outcome_index=0,
+        )
+        assert result.pm_best_bid is None
+        assert result.pm_best_ask is None
+        assert result.pm_spread is None
+        assert result.pm_midpoint is None
 
     def test_extracts_orderbook_fields(self, sample_price_snapshot, sample_orderbook_snapshot):
         extractor = PolymarketFeatureExtractor()
@@ -307,10 +327,6 @@ class TestPolymarketFeatureExtractor:
                     snapshot_time=datetime(2026, 1, 20, 10, 0, tzinfo=UTC),
                     outcome_0_price=0.60,
                     outcome_1_price=0.40,
-                    best_bid=0.59,
-                    best_ask=0.61,
-                    spread=0.02,
-                    midpoint=0.60,
                     volume=1000.0,
                     liquidity=5000.0,
                     fetch_tier="pregame",
@@ -370,3 +386,84 @@ class TestCrossSourceFeatureExtractor:
         result = extractor.extract(pm_features=pm, sb_features=sample_sb_tabular_features)
         # pm=0.62, sharp_prob=0.55 → pm_sharp_divergence=0.07
         assert result.pm_sharp_divergence == pytest.approx(0.07, abs=1e-6)
+
+
+class TestNearestOrderbookLookup:
+    """The order book behind pm_best_bid/pm_best_ask is never from after the decision time."""
+
+    @staticmethod
+    def _book(minute: int, bid: float) -> PolymarketOrderBookSnapshot:
+        return PolymarketOrderBookSnapshot(
+            polymarket_market_id=10,
+            snapshot_time=datetime(2026, 1, 20, 12, minute, tzinfo=UTC),
+            token_id="tok_0",
+            raw_book={"bids": [], "asks": []},
+            best_bid=bid,
+            best_ask=round(bid + 0.02, 4),
+        )
+
+    def test_ignores_book_after_target_time(self):
+        target = datetime(2026, 1, 20, 12, 10, tzinfo=UTC)
+        books = [self._book(8, 0.50), self._book(11, 0.70)]
+        found = _find_nearest_pm_orderbook(books, target, tolerance_minutes=5)
+        assert found is not None
+        assert found.best_bid == pytest.approx(0.50)
+
+    def test_none_when_only_later_books_exist(self):
+        target = datetime(2026, 1, 20, 12, 10, tzinfo=UTC)
+        assert _find_nearest_pm_orderbook([self._book(11, 0.70)], target, 5) is None
+
+
+class TestHomeOrientedBook:
+    def test_home_is_outcome_0_uses_book_as_stored(
+        self, sample_price_snapshot, sample_orderbook_snapshot
+    ):
+        result = PolymarketFeatureExtractor().extract(
+            sample_price_snapshot, sample_orderbook_snapshot, [], home_outcome_index=0
+        )
+        assert result.pm_best_bid == pytest.approx(0.61)
+        assert result.pm_best_ask == pytest.approx(0.63)
+        assert result.pm_midpoint == pytest.approx(0.62)
+        assert result.pm_spread == pytest.approx(0.02)
+        assert result.pm_bid_depth == pytest.approx(800.0)
+        assert result.pm_ask_depth == pytest.approx(600.0)
+        assert result.pm_imbalance == pytest.approx(0.14)
+        assert result.pm_weighted_mid == pytest.approx(0.618)
+
+    def test_home_is_outcome_1_reflects_book(
+        self, sample_price_snapshot, sample_orderbook_snapshot
+    ):
+        result = PolymarketFeatureExtractor().extract(
+            sample_price_snapshot, sample_orderbook_snapshot, [], home_outcome_index=1
+        )
+        assert result.pm_best_bid == pytest.approx(1 - 0.63)
+        assert result.pm_best_ask == pytest.approx(1 - 0.61)
+        assert result.pm_midpoint == pytest.approx(1 - 0.62)
+        assert result.pm_spread == pytest.approx(0.02)
+        assert result.pm_bid_depth == pytest.approx(600.0)
+        assert result.pm_ask_depth == pytest.approx(800.0)
+        assert result.pm_imbalance == pytest.approx(-0.14)
+        assert result.pm_weighted_mid == pytest.approx(1 - 0.618)
+
+    def test_midpoint_agrees_with_home_probability_side(
+        self, sample_price_snapshot, sample_orderbook_snapshot
+    ):
+        result = PolymarketFeatureExtractor().extract(
+            sample_price_snapshot, sample_orderbook_snapshot, [], home_outcome_index=1
+        )
+        assert result.pm_home_prob == pytest.approx(0.38)
+        assert result.pm_midpoint == pytest.approx(0.38)
+
+    def test_missing_book_fields_stay_none_when_reflected(self, sample_price_snapshot):
+        book = PolymarketOrderBookSnapshot(
+            polymarket_market_id=10,
+            snapshot_time=datetime(2026, 1, 20, 12, 0, tzinfo=UTC),
+            token_id="tok_0",
+            raw_book={"bids": [], "asks": []},
+        )
+        result = PolymarketFeatureExtractor().extract(
+            sample_price_snapshot, book, [], home_outcome_index=1
+        )
+        assert result.pm_best_bid is None
+        assert result.pm_imbalance is None
+        assert result.pm_weighted_mid is None

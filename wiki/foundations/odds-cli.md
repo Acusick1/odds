@@ -45,7 +45,7 @@ status: stable
 | `validate`, `quality` | [Coverage and completeness checks](../storage/coverage-checks.md) |
 | `copy` | [Copy production data locally](howto-copy-production-data.md) |
 | `scheduler` | [Local scheduler](../scheduling/local-scheduler.md) |
-| `polymarket` | [Polymarket pipeline and tables](../collection/polymarket.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#backfill-command) |
+| `polymarket` | [Polymarket pipeline and tables](../collection/polymarket.md) (`odds_cli.commands.polymarket.link` matches an event from its ticker), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#backfill-command) |
 | `injuries`, `nba-stats`, `pbpstats` | [NBA feeds](../collection/nba-injuries-and-stats.md) |
 | `paper` | [Paper trading](../agent/paper-trading.md) |
 | `candidates` | [Candidate registry](../evaluation/candidate-registry.md#odds-candidates-list) |

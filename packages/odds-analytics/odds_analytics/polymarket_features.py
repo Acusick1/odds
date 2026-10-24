@@ -49,7 +49,7 @@ class PolymarketTabularFeatures:
     pm_home_prob: float | None = None
     pm_away_prob: float | None = None
 
-    # Order book microstructure
+    # Order book microstructure, from the home side's view (PolymarketOrderBookSnapshot)
     pm_spread: float | None = None
     pm_midpoint: float | None = None
     pm_best_bid: float | None = None
@@ -168,7 +168,7 @@ class PolymarketFeatureExtractor:
 
         Args:
             price_snapshot: Price snapshot at decision time
-            orderbook_snapshot: Order book snapshot at decision time (may be None)
+            orderbook_snapshot: Latest order book snapshot at or before decision time (may be None)
             recent_prices: Price series over velocity window (may be empty)
             home_outcome_index: Which outcome (0 or 1) is the home team
 
@@ -189,20 +189,13 @@ class PolymarketFeatureExtractor:
         features = PolymarketTabularFeatures(
             pm_home_prob=pm_home_prob,
             pm_away_prob=pm_away_prob,
-            pm_spread=price_snapshot.spread,
-            pm_midpoint=price_snapshot.midpoint,
-            pm_best_bid=price_snapshot.best_bid,
-            pm_best_ask=price_snapshot.best_ask,
             pm_volume=price_snapshot.volume,
             pm_liquidity=price_snapshot.liquidity,
         )
 
-        # Order book depth (from separate snapshot if available)
+        # Order book (from separate snapshot if available)
         if orderbook_snapshot is not None:
-            features.pm_bid_depth = orderbook_snapshot.bid_depth_total
-            features.pm_ask_depth = orderbook_snapshot.ask_depth_total
-            features.pm_imbalance = orderbook_snapshot.imbalance
-            features.pm_weighted_mid = orderbook_snapshot.weighted_mid
+            self._apply_home_oriented_book(features, orderbook_snapshot, home_outcome_index)
 
         # Price velocity from recent series
         velocity, acceleration = self._compute_velocity(recent_prices, home_outcome_index)
@@ -210,6 +203,40 @@ class PolymarketFeatureExtractor:
         features.pm_price_acceleration = acceleration
 
         return features
+
+    @staticmethod
+    def _apply_home_oriented_book(
+        features: PolymarketTabularFeatures,
+        book: PolymarketOrderBookSnapshot,
+        home_outcome_index: int,
+    ) -> None:
+        """Set the book features from the home side's view.
+
+        The stored book is of outcome 0's token. When the home team is outcome 1, a bid
+        for outcome 0 is an ask for outcome 1 at the complementary price, so prices are
+        reflected through 1, bid and ask depth swap, and imbalance changes sign.
+        """
+
+        def reflect(price: float | None) -> float | None:
+            return None if price is None else 1.0 - price
+
+        features.pm_spread = book.spread
+        if home_outcome_index == 0:
+            features.pm_midpoint = book.midpoint
+            features.pm_best_bid = book.best_bid
+            features.pm_best_ask = book.best_ask
+            features.pm_bid_depth = book.bid_depth_total
+            features.pm_ask_depth = book.ask_depth_total
+            features.pm_imbalance = book.imbalance
+            features.pm_weighted_mid = book.weighted_mid
+        else:
+            features.pm_midpoint = reflect(book.midpoint)
+            features.pm_best_bid = reflect(book.best_ask)
+            features.pm_best_ask = reflect(book.best_bid)
+            features.pm_bid_depth = book.ask_depth_total
+            features.pm_ask_depth = book.bid_depth_total
+            features.pm_imbalance = None if book.imbalance is None else -book.imbalance
+            features.pm_weighted_mid = reflect(book.weighted_mid)
 
     def _compute_velocity(
         self,
