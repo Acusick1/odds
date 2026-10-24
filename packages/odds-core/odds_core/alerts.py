@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -14,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from odds_core.config import Settings, get_settings
 
 logger = structlog.get_logger()
+
+ALERT_SEND_TIMEOUT_SECONDS = 30
 
 
 class AlertBase(ABC):
@@ -320,7 +323,11 @@ async def job_alert_context(job_name: str) -> AsyncIterator[None]:
     try:
         yield
     except Exception as e:
-        await send_job_failure(job_name, e)
+        try:
+            async with asyncio.timeout(ALERT_SEND_TIMEOUT_SECONDS):
+                await send_job_failure(job_name, e)
+        except Exception:
+            logger.error("job_failure_alert_failed", job=job_name, exc_info=True)
         raise
     else:
         # Record heartbeat on success

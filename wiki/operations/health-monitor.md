@@ -107,7 +107,7 @@ The alert fires after kick-off, when the close cannot be collected. It is a cove
 
 ## Heartbeats
 
-A job inside `odds_core.alerts.job_alert_context` inserts `heartbeat:<name>` on clean exit ([alerts](alerts.md#alert-history)). A dormant `fetch-oddsportal`, `fetch-betfair-exchange` or `fetch-polymarket-odds` run enters the context without scraping, so its 6 h check-ins keep the heartbeat inside the expectations below. `odds_core.config.AlertConfig.heartbeat_expectations` holds the allowed hours per key; the table lists every job module under `odds_lambda.jobs` and whether it writes a heartbeat. How the mechanisms fit together is on [alerting-and-heartbeats](alerting-and-heartbeats.md).
+A job inside [`odds_core.alerts.job_alert_context`](alerts.md#delivery) inserts `heartbeat:<name>` on clean exit and none when the job raises ([alerts](alerts.md#alert-history)). A dormant `fetch-oddsportal`, `fetch-betfair-exchange` or `fetch-polymarket-odds` run enters the context without scraping, so its 6 h check-ins keep the heartbeat inside the expectations below. `odds_core.config.AlertConfig.heartbeat_expectations` holds the allowed hours per key; the table lists every job module under `odds_lambda.jobs` and whether it writes a heartbeat. How the mechanisms fit together is on [alerting-and-heartbeats](alerting-and-heartbeats.md).
 
 | Job | Writes a heartbeat | Default expectation |
 |---|---|---|
