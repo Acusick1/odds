@@ -1,6 +1,6 @@
 ---
 title: Operations
-description: AWS infrastructure and deployment, CI/CD workflows, Discord alerts, heartbeats and the health monitor, and reporting surfaces including the daily digest.
+description: AWS infrastructure and deployment, CI/CD workflows, Discord alerts, heartbeats and the health monitor, and reporting surfaces.
 ---
 
 # Operations
@@ -14,7 +14,6 @@ How the system is deployed, verified and watched: production is deployed with `d
 - [AWS infrastructure and deployment](aws-infrastructure.md) — The dormant AWS stack — the Lambda function and image, Terraform and bootstrap layout and variables, IAM, SSM, logs, secrets, constraints and costs.
 - [CI/CD workflows](ci-cd-workflows.md) — What each GitHub Actions workflow runs and when — tests, lint, ephemeral dev deploy, the AWS prod deploy that must not run, daily validation, live-API and schedule health checks — and what they do not exercise.
 - [Health monitor, check-health job and odds status](health-monitor.md) — HealthMonitor, the check-health job's six checks, heartbeat purge, its own alert path, and what odds status show, quota and events print and read.
-- [The daily-digest job](daily-digest.md) — Queries, embed layout, delivery, schedule and heartbeat of odds_lambda.jobs.daily_digest.
 
 ### Explanation
 

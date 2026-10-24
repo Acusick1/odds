@@ -1,7 +1,7 @@
 """
 Copy data from production database to local database.
 
-Replicates events, snapshots, and predictions for a given sport and date range.
+Replicates events, snapshots and odds for a given sport and date range.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from datetime import UTC, datetime
 
 import structlog
 from odds_core.models import Event, Odds, OddsSnapshot
-from odds_core.prediction_models import Prediction
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -39,7 +38,6 @@ class CopyStats:
     events_skipped: int = 0
     snapshots_copied: int = 0
     odds_copied: int = 0
-    predictions_copied: int = 0
     local_twin_matches: int = 0
     failed_event_ids: list[str] = field(default_factory=list)
 
@@ -49,7 +47,7 @@ class CopyStats:
 
 
 class ProductionDataCopier:
-    """Replaces local events' snapshots, odds and predictions with production's."""
+    """Replaces local events' snapshots and odds with production's."""
 
     def __init__(
         self,
@@ -165,17 +163,7 @@ class ProductionDataCopier:
                 .scalars()
                 .all()
             )
-            prod_predictions = list(
-                (
-                    await prod_session.execute(
-                        select(Prediction).where(Prediction.event_id == event.id)
-                    )
-                )
-                .scalars()
-                .all()
-            )
 
-            await local_session.execute(delete(Prediction).where(Prediction.event_id == event.id))
             await local_session.execute(delete(Odds).where(Odds.event_id == event.id))
             await local_session.execute(
                 delete(OddsSnapshot).where(OddsSnapshot.event_id == event.id)
@@ -188,44 +176,18 @@ class ProductionDataCopier:
             ]
             local_session.add_all(local_snapshots)
             await local_session.flush()
-            snapshot_ids = {
-                prod.id: local.id
-                for prod, local in zip(prod_snapshots, local_snapshots, strict=True)
-                if prod.id is not None and local.id is not None
-            }
 
             if prod_odds:
                 await local_session.execute(
                     insert(Odds), [row.model_dump(exclude={"id"}) for row in prod_odds]
                 )
 
-            prediction_rows = [
-                {
-                    **pred.model_dump(exclude={"id"}),
-                    "snapshot_id": self._local_snapshot_id(pred, snapshot_ids),
-                }
-                for pred in prod_predictions
-            ]
-            if prediction_rows:
-                await local_session.execute(insert(Prediction), prediction_rows)
-
             await local_session.commit()
 
         self.stats.events_copied += 1
         self.stats.snapshots_copied += len(local_snapshots)
         self.stats.odds_copied += len(prod_odds)
-        self.stats.predictions_copied += len(prediction_rows)
         logger.info("event_copied", event_id=event.id, snapshot_count=len(local_snapshots))
-
-    @staticmethod
-    def _local_snapshot_id(prediction: Prediction, snapshot_ids: dict[int, int]) -> int:
-        if prediction.snapshot_id not in snapshot_ids:
-            raise ValueError(
-                f"prediction {prediction.id} of event {prediction.event_id} references "
-                f"production snapshot {prediction.snapshot_id}, which belongs to another event; "
-                "the source database has not run the migration that forbids this (#531)"
-            )
-        return snapshot_ids[prediction.snapshot_id]
 
     def _print_summary(self) -> None:
         """Print summary statistics."""
@@ -236,7 +198,6 @@ class ProductionDataCopier:
         console.print(f"  Snapshots copied: [green]{self.stats.snapshots_copied}[/green]")
 
         console.print(f"  Odds rows copied: [green]{self.stats.odds_copied}[/green]")
-        console.print(f"  Predictions copied: [green]{self.stats.predictions_copied}[/green]")
         if self.stats.local_twin_matches:
             console.print(
                 f"  Local matches stored as several events: "
@@ -266,7 +227,7 @@ async def copy_from_prod(
     skip_existing: bool = True,
 ) -> CopyStats:
     """
-    Copy all events, snapshots, and predictions from production to local database.
+    Copy all events and snapshots from production to local database.
 
     Args:
         start_date: Start date (YYYY-MM-DD)

@@ -7,7 +7,6 @@ sources:
   - odds_analytics.feature_groups._static_feature_group_names
   - odds_analytics.feature_groups._extract_static_feature_parts
   - odds_analytics.feature_groups.collect_event_data
-  - odds_analytics.feature_groups.preload_feature_group_caches
   - odds_analytics.feature_groups.EventDataBundle
   - odds_analytics.training.config.FeatureConfig
   - odds_analytics.training.config.FeatureGroupName
@@ -18,17 +17,17 @@ status: stable
 
 # Add a feature group
 
-These steps add a group for the delta targets. Group names are dispatched by string in several places, so a new group touches each of them (see [Feature groups](feature-groups.md)). A `retail_ev` group is computed as of each row's decision time instead: it goes in `odds_analytics.training.config.RetailEvFeatureGroupName` and the group table behind `odds_analytics.retail_ev.RetailEvFeatures`, with no other source's price at t for a row whose decision time is only an upper bound, and into the look-ahead tests of `tests/unit/test_retail_ev.py`, which rebuild each row from truncated data ([retail-EV features](clv-target-functions.md#retail-ev-features)). A `residual` arm (`odds_analytics.training.config.FeatureConfig.retail_ev_arm`) takes the `odds_analytics.retail_ev.BASELINE_FEATURE` column as its base margin, and `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.train` raises if that column is not among the features.
+These steps add a static group for the `raw` target. Group names are dispatched by string in several places, so a new group touches each of them (see [Feature groups](feature-groups.md)). A `retail_ev` group is computed as of each row's decision time instead: it goes in `odds_analytics.training.config.RetailEvFeatureGroupName` and the group table behind `odds_analytics.retail_ev.RetailEvFeatures`, with no other source's price at t for a row whose decision time is only an upper bound, and into the look-ahead tests of `tests/unit/test_retail_ev.py`, which rebuild each row from truncated data ([retail-EV features](clv-target-functions.md#retail-ev-features)). A `residual` arm (`odds_analytics.training.config.FeatureConfig.retail_ev_arm`) takes the `odds_analytics.retail_ev.BASELINE_FEATURE` column as its base margin, and `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.train` raises if that column is not among the features.
 
-1. **Write the extractor.** Create a dataclass with array and feature-name methods (as `odds_analytics.standings_features.StandingsFeatures.to_array` and `odds_analytics.standings_features.StandingsFeatures.get_feature_names`), and an extractor that takes only data before the snapshot.
+1. **Write the extractor.** Create a dataclass with array and feature-name methods (as `odds_analytics.schedule_features.RestScheduleFeatures` does), and an extractor that takes only data before the snapshot.
    - The look-ahead rule per layer is on [Decision time and look-ahead bias](look-ahead-bias.md).
 2. **Register the name.** Add it to `odds_analytics.training.config.FeatureGroupName` (which `odds_analytics.feature_groups._STATIC_FEATURE_GROUPS` derives from), `odds_analytics.feature_groups._static_feature_group_names` (choose a prefix) and `odds_analytics.feature_groups._extract_static_feature_parts`.
    - The dispatch functions branch on the group name, so a name missed in one of them is dropped without an error.
-3. **Load its data.** Add the loading in `odds_analytics.feature_groups.collect_event_data` (which drops reference-only Polymarket snapshots) (or a cache in `odds_analytics.feature_groups.preload_feature_group_caches`) and the field in `odds_analytics.feature_groups.EventDataBundle`.
+3. **Load its data.** Add the loading in `odds_analytics.feature_groups.collect_event_data` (which drops reference-only Polymarket snapshots) and the field in `odds_analytics.feature_groups.EventDataBundle`.
 4. **Describe it in the config.** Mention it in the `feature_groups` description of `odds_analytics.training.config.FeatureConfig`.
    - The field is validated against `FeatureGroupName`, so a name missing from step 2 fails at config load, including as a `feature_groups` tuning choice ([training config](training-config.md)).
    - A config that uses the group also sets `target_type`, which has no default.
-   - A `retail_ev` config rejects every group: the groups are computed as of kick-off, and its rows need features as of each row's decision time ([CLV and the training target](clv-target.md#the-retail-ev-target)).
+   - A `retail_ev` config rejects every static group: they are computed as of kick-off, and its rows need features as of each row's decision time ([CLV and the training target](clv-target.md#the-retail-ev-target)).
 5. **Verify.** Run a training config that selects the group and check the verification artifacts for feature count and all-NaN columns ([run an experiment](../evaluation/experiment-scripts.md#verification-artifacts)).
    - Zeroed or all-NaN columns once hid an adapter bug.
 

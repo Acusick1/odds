@@ -4,68 +4,24 @@ Sequence Data Loader and Odds Utilities.
 Key Functions:
 - load_sequences_for_event(): Query odds snapshots and organize chronologically
 - calculate_regression_target(): Calculate line movement for regression
-- extract_devigged_h2h_probs(): Extract devigged bookmaker probabilities (h2h)
-- extract_devigged_totals_probs(): Extract devigged bookmaker probabilities (totals)
-- calculate_devigged_bookmaker_target(): Devigged h2h close vs snapshot delta
-- calculate_devigged_totals_target(): Devigged totals close vs snapshot delta
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
-from enum import Enum
-from typing import Literal, NamedTuple
 
 import numpy as np
 import structlog
 from odds_core.models import Odds
-from odds_core.odds_math import devig_probabilities, outcome_price_decimal
+from odds_core.odds_math import outcome_price_decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-
-# Outcome name used by the Odds API for draw results in 3-way markets
-DRAW_OUTCOME = "Draw"
-
-
-class DeviggedProbs(NamedTuple):
-    """Devigged probabilities for an h2h market.
-
-    Always contains home and away. For 3-way markets (soccer),
-    draw is populated; for 2-way markets (NBA), draw is None.
-    """
-
-    home: float
-    draw: float | None
-    away: float
-
-
-class DeviggedTotalsProbs(NamedTuple):
-    """Devigged probabilities for a totals (Over/Under) market."""
-
-    over: float
-    under: float
-
-
-class TargetType(str, Enum):
-    """Target type for LSTM training."""
-
-    CLASSIFICATION = "classification"
-    REGRESSION = "regression"
-
 
 logger = structlog.get_logger()
 
 __all__ = [
-    "DeviggedProbs",
-    "DeviggedTotalsProbs",
-    "DRAW_OUTCOME",
     "load_sequences_for_event",
-    "TargetType",
     "calculate_regression_target",
-    "extract_devigged_h2h_probs",
-    "extract_devigged_totals_probs",
-    "calculate_devigged_bookmaker_target",
-    "calculate_devigged_totals_target",
 ]
 
 
@@ -124,145 +80,6 @@ def calculate_regression_target(
     else:
         # Unknown market
         return None
-
-
-def extract_devigged_h2h_probs(
-    odds: list[Odds],
-    home_team: str,
-    away_team: str,
-    bookmaker_key: str = "pinnacle",
-    market_key: str = "h2h",
-) -> DeviggedProbs | None:
-    """Extract devigged moneyline probabilities from a specific bookmaker.
-
-    Supports both 2-way (h2h: home/away) and 3-way (1x2: home/draw/away) markets.
-    Filters odds to the given bookmaker and market, finds all outcomes,
-    converts to implied probabilities, and applies proportional devigging.
-
-    Returns:
-        DeviggedProbs with home, draw (None for 2-way), and away fields.
-        None if home or away outcome is missing for the bookmaker.
-    """
-    bm_h2h = [o for o in odds if o.bookmaker_key == bookmaker_key and o.market_key == market_key]
-    if not bm_h2h:
-        return None
-
-    home_odds: Odds | None = None
-    away_odds: Odds | None = None
-    draw_odds: Odds | None = None
-    for o in bm_h2h:
-        if o.outcome_name == home_team:
-            home_odds = o
-        elif o.outcome_name == away_team:
-            away_odds = o
-        elif o.outcome_name == DRAW_OUTCOME:
-            draw_odds = o
-
-    if home_odds is None or away_odds is None:
-        return None
-
-    home_raw = home_odds.implied_probability
-    away_raw = away_odds.implied_probability
-
-    if draw_odds is not None:
-        draw_raw = draw_odds.implied_probability
-        home, draw, away = devig_probabilities(home_raw, draw_raw, away_raw)
-        return DeviggedProbs(home=home, draw=draw, away=away)
-
-    home, away = devig_probabilities(home_raw, away_raw)
-    return DeviggedProbs(home=home, draw=None, away=away)
-
-
-def calculate_devigged_bookmaker_target(
-    snapshot_odds: list[Odds],
-    closing_odds: list[Odds],
-    home_team: str,
-    away_team: str,
-    bookmaker_key: str = "pinnacle",
-    market_key: str = "h2h",
-    *,
-    outcome: Literal["home", "away", "draw"],
-) -> float | None:
-    """Calculate target as devigged bookmaker close minus devigged bookmaker at snapshot.
-
-    Returns:
-        fair_close - fair_snapshot for the requested outcome, or None if bookmaker
-        data is missing on either side or the outcome is absent (draw in a 2-way market).
-    """
-    snapshot_probs = extract_devigged_h2h_probs(
-        snapshot_odds, home_team, away_team, bookmaker_key, market_key
-    )
-    closing_probs = extract_devigged_h2h_probs(
-        closing_odds, home_team, away_team, bookmaker_key, market_key
-    )
-
-    if snapshot_probs is None or closing_probs is None:
-        return None
-
-    if outcome == "draw":
-        if snapshot_probs.draw is None or closing_probs.draw is None:
-            return None
-        return closing_probs.draw - snapshot_probs.draw
-    if outcome == "away":
-        return closing_probs.away - snapshot_probs.away
-    return closing_probs.home - snapshot_probs.home
-
-
-def extract_devigged_totals_probs(
-    odds: list[Odds],
-    bookmaker_key: str = "pinnacle",
-) -> DeviggedTotalsProbs | None:
-    """Extract devigged Over/Under probabilities from a specific bookmaker.
-
-    Filters odds to the given bookmaker's totals market, finds Over and Under
-    outcomes, converts to implied probabilities, and applies proportional devigging.
-
-    Returns:
-        DeviggedTotalsProbs with over and under fields.
-        None if Over or Under outcome is missing for the bookmaker.
-    """
-    bm_totals = [o for o in odds if o.bookmaker_key == bookmaker_key and o.market_key == "totals"]
-    if not bm_totals:
-        return None
-
-    over_odds: Odds | None = None
-    under_odds: Odds | None = None
-    for o in bm_totals:
-        if o.outcome_name == "Over":
-            over_odds = o
-        elif o.outcome_name == "Under":
-            under_odds = o
-
-    if over_odds is None or under_odds is None:
-        return None
-
-    over_raw = over_odds.implied_probability
-    under_raw = under_odds.implied_probability
-    over, under = devig_probabilities(over_raw, under_raw)
-    return DeviggedTotalsProbs(over=over, under=under)
-
-
-def calculate_devigged_totals_target(
-    snapshot_odds: list[Odds],
-    closing_odds: list[Odds],
-    bookmaker_key: str = "pinnacle",
-    outcome: Literal["Over", "Under"] = "Over",
-) -> float | None:
-    """Calculate target as devigged totals close minus devigged totals at snapshot.
-
-    Returns:
-        fair_close - fair_snapshot for the requested outcome (Over or Under),
-        or None if bookmaker data missing on either side.
-    """
-    snapshot_probs = extract_devigged_totals_probs(snapshot_odds, bookmaker_key)
-    closing_probs = extract_devigged_totals_probs(closing_odds, bookmaker_key)
-
-    if snapshot_probs is None or closing_probs is None:
-        return None
-
-    if outcome == "Over":
-        return closing_probs.over - snapshot_probs.over
-    return closing_probs.under - snapshot_probs.under
 
 
 async def load_sequences_for_event(

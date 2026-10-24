@@ -173,4 +173,3 @@ Tuned settings per outer fold, summarised over the 10 folds (`corner.csv`, `fold
 - [Price-only models on the retail-EV target](exp-epl-retail-ev-price-only.md)
 - [As-of-t feature groups on the retail-EV target](exp-epl-retail-ev-as-of-t-groups.md)
 - [Cross-validation](../modelling/cross-validation.md), [Hyperparameter tuner](../modelling/hyperparameter-tuner.md)
-- [What the CLV model can and cannot do](clv-model-findings.md)

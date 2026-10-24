@@ -10,7 +10,6 @@ import pytest
 from odds_cli.commands import copy_from_prod as copy_cli
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.odds_math import american_to_decimal
-from odds_core.prediction_models import Prediction
 from odds_lambda import copy_from_production
 from odds_lambda.copy_from_production import CopyStats, ProductionDataCopier
 from sqlalchemy import select, text
@@ -127,16 +126,6 @@ async def _seed_prod_event(
                     last_update=kickoff - timedelta(hours=1),
                 )
             )
-        await session.flush()
-        session.add(
-            Prediction(
-                event_id=event_id,
-                snapshot_id=first_snapshot_id + 1,
-                model_name="clv",
-                model_version="v1",
-                predicted_clv=0.02,
-            )
-        )
         await session.commit()
 
 
@@ -148,9 +137,9 @@ def _copier(
     return ProductionDataCopier(prod, local, skip_existing=skip_existing)
 
 
-class TestCopyPredictions:
+class TestCopyEvents:
     @pytest.mark.asyncio
-    async def test_prediction_follows_its_snapshot_when_ids_differ(
+    async def test_copies_the_events_snapshots_and_odds(
         self,
         prod_session_maker: async_sessionmaker[AsyncSession],
         local_session_maker: async_sessionmaker[AsyncSession],
@@ -161,12 +150,7 @@ class TestCopyPredictions:
 
         assert stats.events_copied == 1
         assert stats.events_failed == 0
-        assert stats.predictions_copied == 1
-        async with local_session_maker() as session:
-            prediction = (await session.execute(select(Prediction))).scalar_one()
-            snapshot = await session.get(OddsSnapshot, prediction.snapshot_id)
-        assert snapshot is not None
-        assert snapshot.fetch_tier == "closing"
+        assert (stats.snapshots_copied, stats.odds_copied) == (3, 3)
 
     @pytest.mark.asyncio
     async def test_recopy_with_overwrite_replaces_without_duplicating(
@@ -183,10 +167,8 @@ class TestCopyPredictions:
 
         assert stats.events_failed == 0
         assert stats.snapshots_copied == 3
-        assert stats.predictions_copied == 1
         async with local_session_maker() as session:
             assert len((await session.execute(select(OddsSnapshot))).scalars().all()) == 3
-            assert len((await session.execute(select(Prediction))).scalars().all()) == 1
 
 
 class TestCopyPreservesColumns:
@@ -250,19 +232,6 @@ class TestCopyPreservesColumns:
 
 
 class TestCopyFailures:
-    def test_prediction_of_another_events_snapshot_names_the_event(self) -> None:
-        prediction = Prediction(
-            id=7,
-            event_id="evt_b",
-            snapshot_id=500,
-            model_name="m",
-            model_version="1",
-            predicted_clv=0.0,
-        )
-
-        with pytest.raises(ValueError, match="evt_b"):
-            ProductionDataCopier._local_snapshot_id(prediction, {600: 1})
-
     @pytest.mark.asyncio
     async def test_failed_event_is_rolled_back_and_reported_not_counted_as_copied(
         self,
@@ -314,7 +283,7 @@ class TestCopyFailures:
 
 class TestOverwriteReplacesLocalRows:
     @pytest.mark.asyncio
-    async def test_snapshots_sharing_time_and_tag_stay_distinct_and_keep_their_predictions(
+    async def test_snapshots_sharing_time_and_tag_stay_distinct(
         self,
         prod_session_maker: async_sessionmaker[AsyncSession],
         local_session_maker: async_sessionmaker[AsyncSession],
@@ -327,13 +296,9 @@ class TestOverwriteReplacesLocalRows:
 
         async with local_session_maker() as session:
             snapshots = (await session.execute(select(OddsSnapshot))).scalars().all()
-            prediction = (await session.execute(select(Prediction))).scalar_one()
         closing = [s for s in snapshots if s.fetch_tier == "closing"]
         assert len(snapshots) == 3
         assert len({(s.snapshot_time, s.api_request_id) for s in closing}) == 1
-        assert prediction.snapshot_id in {s.id for s in closing}
-        local_closing_with_prediction = [s for s in closing if s.id == prediction.snapshot_id]
-        assert len(local_closing_with_prediction) == 1
 
     @pytest.mark.asyncio
     async def test_odds_rows_equal_production_and_are_stable_across_reruns(

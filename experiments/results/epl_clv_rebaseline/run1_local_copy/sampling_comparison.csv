@@ -1,8 +1,0 @@
-season,production_row,day_before_row,events
-2024-25,23 to 25 h,True,380
-2025-26,23 to 25 h,True,281
-2025-26,no row,False,63
-2025-26,no row,True,7
-2025-26,over 25 h,False,18
-2025-26,under 23 h,False,2
-2025-26,under 23 h,True,16

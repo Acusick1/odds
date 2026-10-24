@@ -60,7 +60,7 @@ The wake-up interval is the `agent-run` row of the [cadence table](../scheduling
 
 ### `odds agent run`
 
-`odds agent run --sport S [--db NAME]` calls `odds_lambda.jobs.agent_run._run_claude_agent` directly: no pre-schedule, no wake-up consumption, no reschedule. `--db` swaps the database name in `DATABASE_URL` (default `odds`); a timeout exits 1. `odds_cli.commands.agent` imports the underscore-private `odds_lambda.jobs.agent_run._run_claude_agent` across packages ([Workspace packages](../foundations/workspace-packages.md)).
+`odds agent run --sport S [--db NAME]` calls `odds_lambda.jobs.agent_run._run_claude_agent` directly: no pre-schedule, no wake-up consumption, no reschedule. `--db` swaps the database name in `DATABASE_URL` (default `odds`, the database the local scheduler writes scraper output to); a timeout exits 1. `odds_cli.commands.agent` imports the underscore-private `odds_lambda.jobs.agent_run._run_claude_agent` across packages ([Workspace packages](../foundations/workspace-packages.md)).
 
 ## Database role
 

@@ -74,8 +74,7 @@ class TestRetailEvConfig:
     def test_other_targets_reject_the_residual_arm(self) -> None:
         with pytest.raises(ValidationError, match="retail_ev_arm"):
             FeatureConfig(
-                target_type="devigged_bookmaker",
-                target_bookmaker="bet365",
+                target_type="raw",
                 markets=["1x2"],
                 retail_ev_arm="residual",
             )
@@ -87,8 +86,7 @@ class TestRetailEvConfig:
     def test_other_targets_reject_as_of_t_groups(self) -> None:
         with pytest.raises(ValidationError, match="retail_ev feature groups"):
             FeatureConfig(
-                target_type="devigged_bookmaker",
-                target_bookmaker="bet365",
+                target_type="raw",
                 markets=["1x2"],
                 feature_groups=("tabular", "dynamics"),
             )
@@ -97,16 +95,10 @@ class TestRetailEvConfig:
         "overrides",
         [
             {"feature_groups": ("tabular",)},
-            {"feature_groups": ("dynamics", "standings")},
-            {"feature_groups": ("standings",)},
-            {"feature_groups": ("match_stats",)},
-            {"feature_groups": ("epl_schedule",)},
             {"outcome": "away"},
             {"sharp_bookmakers": ["betfair_exchange"]},
             {"retail_bookmakers": ["bet365"]},
-            {"closing_source_priority": ["football_data_uk"]},
             {"sampling": {"strategy": "tier"}},
-            {"target_bookmaker": "bet365"},
             {"markets": ["totals"], "outcome": "over"},
             {"adapter": "lstm"},
         ],

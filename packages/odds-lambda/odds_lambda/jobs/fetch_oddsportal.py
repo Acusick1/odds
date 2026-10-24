@@ -362,25 +362,6 @@ async def main(ctx: JobContext) -> None:
                 errors_by_sport={spec.sport_key: stats.errors},
             )
 
-    # Outside job_alert_context so scoring failures don't fire scrape alerts.
-    try:
-        from odds_lambda.model_loader import model_supports_sport
-
-        if model_supports_sport(sport):
-            from odds_lambda.jobs.score_predictions import score_events
-
-            score_stats = await score_events(sport=sport)
-            logger.info("fetch_oddsportal_scoring_complete", **score_stats)
-        else:
-            logger.info("fetch_oddsportal_scoring_skipped", sport=sport)
-    except Exception as e:
-        logger.error(
-            "fetch_oddsportal_scoring_failed",
-            sport=sport,
-            error=str(e),
-            exc_info=True,
-        )
-
     # On success, re-query next kickoff (scrape may have created new events)
     # and reschedule at the updated interval.
     if total_scraped > 0:

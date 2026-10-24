@@ -46,7 +46,6 @@ Concrete examples that fit each `common.md` edge category in an MLB context:
 
 - **Confirmed lineups** drop roughly 2–4 hours before first pitch; pitcher scratches possible down to game time.
 - **Weather** is primarily a totals edge, but at outdoor parks with short fences or strong wind, it can shift moneyline win probability (fly-ball pitcher + strong wind-out at Wrigley, for example).
-- **No CLV model** for MLB — analysis is purely information-driven.
 - **Pitcher W–L records are noisy.** Use ERA, FIP, xFIP, SIERA, and recent game logs instead.
 
 ## Deferred MCP Tools

@@ -30,7 +30,7 @@ Deployed Lambda and rule state cannot be verified from the repo; every command b
 
 ## Where things are
 
-Region `eu-west-1`. Scheduler function `odds-scheduler`, log group `/aws/lambda/odds-scheduler`. Rules `odds-{job}[-{sport}]`. Live schedule: `odds scheduler list-jobs --backend aws`. The Lambda role lacks `events:ListRules`, so listing works only from a local shell with broader credentials (#443).
+Region `eu-west-1`. Scheduler function `odds-scheduler`, log group `/aws/lambda/odds-scheduler`. Rules are named `odds-{job}[-{sport}]`. Live schedule: `odds scheduler list-jobs --backend aws`. The Lambda role lacks `events:ListRules`, so listing works only from a local shell with broader credentials (#443).
 
 ## Workflow
 

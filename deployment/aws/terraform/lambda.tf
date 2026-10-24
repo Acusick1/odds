@@ -20,26 +20,6 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Policy for S3 model bucket read access
-resource "aws_iam_role_policy" "s3_model_read" {
-  name = "${var.project_name}-s3-model-read"
-  role = aws_iam_role.lambda_exec.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:HeadObject"
-        ]
-        Resource = "arn:aws:s3:::${var.model_bucket_name}/*"
-      }
-    ]
-  })
-}
-
 # Policy for EventBridge access (self-scheduling)
 resource "aws_iam_role_policy" "eventbridge_access" {
   name = "${var.project_name}-eventbridge-access"
@@ -141,8 +121,6 @@ resource "aws_lambda_function" "odds_scheduler" {
       # Optional: Configure other settings
       LOG_LEVEL           = "INFO"
       ENABLE_VALIDATION   = "true"
-      MODEL_BUCKET        = var.model_bucket_name
-      MODEL_NAME          = var.model_name
       DISCORD_WEBHOOK_URL = var.discord_webhook_url
       ALERT_ENABLED       = var.discord_webhook_url != "" ? "true" : "false"
 

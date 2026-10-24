@@ -29,7 +29,7 @@ Collected by jobs or ingestion scripts into the database and available through [
 | Betfair Exchange | Best back/lay Match Odds, the sharp reference | Self-scheduling by kickoff proximity, plus a run 5 min before each kickoff, dormant with no fixture in 28 days (`odds_lambda.jobs.fetch_betfair_exchange.CADENCE`) | [Betfair](../collection/betfair-exchange.md) |
 | The Odds API | US bookmaker odds | Self-scheduling by fetch tier, EPL only (its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist); 500 units per month per free key, whether one `ODDS_API_KEY` or each of `ODDS_API_KEYS` (the only quota that is a code default, `odds_core.config.APIConfig`; a paid key changes it) | [Odds API quota](../collection/odds-api-quota.md) |
 | football-data.co.uk | Historical EPL opening and closing `1x2` odds from Pinnacle, Betfair Exchange and UK retail books (stored as the CSV decimal) | Manual script (`scripts/ingest_football_data_uk.py`; also fills missing results on existing events) | [historical loads](../collection/historical-ingest-scripts.md) |
-| ESPN fixtures | All-competition EPL schedule | Daily job (cron in `_JOB_CRON_MAP`) | [EPL context](../collection/epl-context-data.md) |
+| ESPN fixtures | All-competition EPL schedule | Daily job (cron in `odds_lambda.scheduling.jobs._JOB_CRON_MAP`) | [EPL context](../collection/epl-context-data.md) |
 | ESPN lineups | Starting XIs | Manual script | [EPL context](../collection/epl-context-data.md) |
 | MLB Stats API | Probable pitchers | Daily job | [MLB pitchers](../collection/mlb-probable-pitchers.md) |
 | Polymarket | EPL 1X2 midpoints as `polymarket` snapshots at 5 min to 1 h spacing; NBA volume, order book depth, imbalance, price velocity | EPL: bootstrapped job, self-scheduling by kickoff proximity (`odds_lambda.jobs.fetch_polymarket_odds.CADENCE`); NBA: built, deprioritized | [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md), [Polymarket](../collection/polymarket.md) |
@@ -58,7 +58,7 @@ Not collected on a schedule; the agent searches and browses these each wake-up w
 | Action Network, BetQL | US sportsbook data; the "public" they track does not move EPL lines |
 | Accumulator popularity | No source publishes most-backed acca legs with volume; tipster output is not crowd data |
 | Tipster consensus (Predictz, Forebet) | Model-driven, lags sharp money, no signal for anticipating line movement |
-| FPL API ownership and transfers | As XGBoost features (2026-03-20): R² -0.017 under sliding-380 and 0.022 under expanding:150 against baselines of 0.026 and 0.052; transfer spikes lag the news sources the agent searches directly. See [EPL ablation](../evaluation/exp-epl-feature-ablation-and-search-space.md) |
+| FPL API ownership and transfers | Tested as XGBoost features (#255): R² below the baseline without them; transfer spikes lag the news sources the agent searches directly |
 | API-Football | Free tier blocks current-season fixture lookup (2022-2024 only) and the lineups endpoint needs the gated fixture ids; Pro plan about $20 per month |
 | football-data.org | A different site from football-data.co.uk; lineups cost €29 per month and timing is undocumented |
 | ESPN API (for lineups) | Lineups appear around KO-60 but non-monotonically (present at KO-60, gone by KO-45 in a 2026-04-14 Champions League test; nothing at KO-59 in a 2026-04-13 EPL test); 403 from cloud and datacenter IPs |

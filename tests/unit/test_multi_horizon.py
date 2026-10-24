@@ -302,17 +302,6 @@ class TestFeatureConfigValidation:
         )
         assert config.target_type == "raw"
 
-    def test_devigged_bookmaker_target_type(self):
-        config = FeatureConfig(
-            target_bookmaker="pinnacle",
-            feature_groups=["tabular"],
-            markets=["h2h"],
-            outcome="home",
-            closing_tier="closing",
-            target_type="devigged_bookmaker",
-        )
-        assert config.target_type == "devigged_bookmaker"
-
     def test_adapter_default_is_xgboost(self):
         config = FeatureConfig(
             target_type="raw",
@@ -830,12 +819,11 @@ class TestPrepareTrainingData:
         all_snaps = decision_snaps + [closing_snap]
 
         config = FeatureConfig(
-            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_bookmaker",
+            target_type="raw",
             sampling=SamplingConfig(
                 strategy="time_range",
                 min_hours=3.0,
@@ -888,12 +876,11 @@ class TestPrepareTrainingData:
                 return [chosen]
 
         config = FeatureConfig(
-            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_bookmaker",
+            target_type="raw",
             sampling=SamplingConfig(
                 strategy="time_range", min_hours=3.0, max_hours=12.0, max_samples_per_event=5
             ),
@@ -915,7 +902,7 @@ class TestPrepareTrainingData:
 
     @pytest.mark.asyncio
     async def test_drops_event_without_bookmaker_closing(self, sample_events):
-        """Events without bookmaker closing data are skipped with devigged_bookmaker target."""
+        """Events whose closing snapshot has no sharp bookmaker are skipped."""
         event = sample_events[0]
         commence = event.commence_time
 
@@ -951,12 +938,11 @@ class TestPrepareTrainingData:
         )
 
         config = FeatureConfig(
-            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_bookmaker",
+            target_type="raw",
             sampling=SamplingConfig(
                 strategy="time_range",
                 min_hours=3.0,
@@ -1002,12 +988,11 @@ class TestPrepareTrainingData:
         all_snaps = [decision_snap, closing_snap]
 
         config = FeatureConfig(
-            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_bookmaker",
+            target_type="raw",
             sampling=SamplingConfig(
                 strategy="time_range",
                 min_hours=3.0,
@@ -1059,12 +1044,11 @@ class TestPrepareTrainingData:
         all_snaps = decision_snaps + [closing_snap]
 
         config = FeatureConfig(
-            target_bookmaker="pinnacle",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_bookmaker",
+            target_type="raw",
             sampling=SamplingConfig(
                 strategy="time_range",
                 min_hours=3.0,
@@ -1328,13 +1312,12 @@ class TestPrepareTrainingDataMaskCollection:
         )
 
         config = FeatureConfig(
-            target_bookmaker="pinnacle",
             adapter="xgboost",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_bookmaker",
+            target_type="raw",
             sampling=SamplingConfig(strategy="tier", decision_tier="pregame"),
         )
 
@@ -1387,13 +1370,12 @@ class TestPrepareTrainingDataMaskCollection:
         mock_output = AdapterOutput(features=mock_sequence, mask=mock_mask)
 
         config = FeatureConfig(
-            target_bookmaker="pinnacle",
             adapter="lstm",
             feature_groups=["tabular"],
             markets=["h2h"],
             outcome="home",
             closing_tier="closing",
-            target_type="devigged_bookmaker",
+            target_type="raw",
             lookback_hours=72,
             timesteps=timesteps,
             sampling=SamplingConfig(strategy="tier", decision_tier="pregame"),

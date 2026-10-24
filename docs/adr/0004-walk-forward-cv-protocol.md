@@ -4,7 +4,7 @@ status: superseded by ADR-0010
 
 # Evaluate with walk-forward CV: sliding 380 events, 50-event steps, no test split
 
-Walk-forward CV with a sliding 380-event window and 50-event steps is the primary evaluation, and there is no held-out test set. The grid behind it is on [CV protocol grid](../../wiki/evaluation/exp-cv-protocol-grid.md).
+Walk-forward CV with a sliding 380-event window and 50-event steps is the primary evaluation, and there is no held-out test set. The grid behind it is on [CV protocol grid](https://github.com/Acusick1/odds/blob/1ca09fe/wiki/evaluation/exp-cv-protocol-grid.md).
 
 ## Context
 

@@ -54,7 +54,7 @@ The prompt's Thesis frames structural biases as valid edge types alongside infor
 | 2 | 2% |
 | 3 | 3% |
 
-Higher conviction maps to a higher tier; the criteria per tier are in the prompt file. The prompt also caps exposure at 10% of bankroll across all open bets on one matchday and says never to exceed 3% on a single bet.
+The criteria per tier are in the prompt file. The prompt also caps exposure at 10% of bankroll across all open bets on one matchday and says never to exceed 3% on a single bet.
 
 ## What code enforces
 

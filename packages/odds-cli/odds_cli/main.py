@@ -16,7 +16,6 @@ from odds_cli.commands import (
     events,
     fetch,
     injuries,
-    model,
     nba_stats,
     paper,
     pbpstats,
@@ -53,7 +52,6 @@ app.add_typer(injuries.app, name="injuries", help="NBA injury report operations"
 app.add_typer(nba_stats.app, name="nba-stats", help="NBA game log operations")
 app.add_typer(pbpstats.app, name="pbpstats", help="PBPStats player season statistics")
 app.add_typer(scrape.app, name="scrape", help="Scrape odds from OddsPortal")
-app.add_typer(model.app, name="model", help="Model artifact management")
 app.add_typer(paper.app, name="paper", help="Paper trade management")
 app.add_typer(candidates.app, name="candidates", help="Betting candidates in the registry")
 app.add_typer(agent.app, name="agent", help="Run the sport agent subprocess directly")

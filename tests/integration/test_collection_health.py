@@ -948,7 +948,6 @@ class TestOddsPortalJob:
     @pytest.fixture(autouse=True)
     def stubs(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _schedule_stubs(monkeypatch, fetch_oddsportal, "decide_collection_run")
-        monkeypatch.setattr("odds_lambda.model_loader.model_supports_sport", lambda sport: False)
 
     @staticmethod
     def _ingest(

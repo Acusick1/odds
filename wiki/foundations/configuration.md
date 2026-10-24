@@ -35,17 +35,16 @@ Model and feature settings (`target_type`, `sharp_bookmakers`) are not here: the
 | `data_collection` | `odds_core.config.DataCollectionConfig` | `SPORTS`, `BOOKMAKERS`, `MARKETS`, `REGIONS` (bare) | [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md) |
 | `scheduler` | `odds_core.config.SchedulerConfig` | `SCHEDULER_BACKEND`, `_DRY_RUN`, `_LOOKAHEAD_DAYS`, `_BOOTSTRAP_JOBS` | [Local scheduler](../scheduling/local-scheduler.md) |
 | `aws` | `odds_core.config.AWSConfig` | `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX` | [Scheduler backends](../scheduling/scheduler-backends.md) |
-| `model` | `odds_core.config.ModelConfig` | `MODEL_NAME`, `MODEL_BUCKET` | [Model store](../modelling/model-store.md) |
 | `data_quality` | `odds_core.config.DataQualityConfig` | `ENABLE_VALIDATION`, `REJECT_INVALID_ODDS` (bare); `enable_validation` is read only in `odds_lambda.ingestion.OddsIngestionService.ingest_sport`, whose `validate` argument overrides it; `reject_invalid_odds` is read by nothing (#448) | [Odds validation](../storage/odds-validator.md) |
 | `alerts` | `odds_core.config.AlertConfig` | `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED`, thresholds (stale data uses `STALE_DATA_HOURS` as a floor, `STALE_CADENCE_MULTIPLIER` and `STALE_LAST_INTERVAL_MULTIPLIER` times each job's cadence, `STALE_REMINDER_MINUTES` between repeats, `BETFAIR_CLOSE_LOOKBACK_HOURS` for the missing-Betfair-close check, see [health monitor](../operations/health-monitor.md#stale-data-check) and [Betfair close check](../operations/health-monitor.md#betfair-close-check)), `HEARTBEAT_EXPECTATIONS` (bare, hours per compound job name such as `fetch-espn-fixtures`, 2 to 30 by default) | [Alerts](../operations/alerts.md) |
 | `logging` | `odds_core.config.LoggingConfig` | `LOG_LEVEL`, `LOG_FILE` | [Code conventions](code-conventions.md#logging) |
 | `polymarket`, `betfair` | `odds_core.config.PolymarketConfig`, `odds_core.config.BetfairConfig` | `POLYMARKET_*`, `BETFAIR_*` (neither has a sport list; a job's sport comes from its compound name) | [Polymarket](../collection/polymarket.md) (series and tag IDs are per sport in `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`, not settings), [Betfair Exchange](../collection/betfair-exchange.md) |
 
-Eight sections carry an env prefix and three are bare (`SPORTS`, `ALERT_ENABLED`, `HEARTBEAT_EXPECTATIONS` as raw JSON).
+Seven sections carry an env prefix and three are bare (`SPORTS`, `ALERT_ENABLED`, `HEARTBEAT_EXPECTATIONS` as raw JSON).
 
 ## List fields and the template
 
-List fields (`SPORTS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are parsed as JSON arrays, and `BOOKMAKERS` as a JSON object of sport key to bookmaker list that replaces the whole default map. `.env.example` writes the lists comma-separated, and it sets `SPORTS=basketball_nba`, so copying it unchanged makes `odds_core.config.get_settings()` raise `SettingsError` on `sports` (#444). The code default for `SCHEDULER_BOOTSTRAP_JOBS` is `odds_core.config.SchedulerConfig`'s: the production job set, with `agent-run` and `daily-digest` commented out ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
+List fields (`SPORTS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are parsed as JSON arrays, and `BOOKMAKERS` as a JSON object of sport key to bookmaker list that replaces the whole default map. `.env.example` writes the lists comma-separated, and it sets `SPORTS=basketball_nba`, so copying it unchanged makes `odds_core.config.get_settings()` raise `SettingsError` on `sports` (#444). The code default for `SCHEDULER_BOOTSTRAP_JOBS` is `odds_core.config.SchedulerConfig`'s: the production job set, with `agent-run` commented out ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
 
 ## Read at import
 

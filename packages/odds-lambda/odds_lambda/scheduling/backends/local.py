@@ -298,7 +298,7 @@ class LocalSchedulerBackend(SchedulerBackend):
 
         Unlike ``schedule_next_execution`` (one-shot ``DateTrigger``), this
         installs a ``CronTrigger`` that fires on the expression indefinitely.
-        Intended for fixed-schedule jobs (e.g. daily digest) whose fire time
+        Intended for fixed-schedule jobs (e.g. fetch-espn-fixtures) whose fire time
         does not depend on game proximity.
         """
         if self.dry_run:

@@ -154,17 +154,17 @@ class TestBootstrapCronJob:
         self, recorded_bootstraps: list[JobContext]
     ) -> None:
         async with LocalSchedulerBackend() as backend:
-            await backend.schedule_cron("daily-digest-epl", "0 9 * * *")
+            await backend.schedule_cron("fetch-espn-fixtures-epl", "0 9 * * *")
 
-            result = await bootstrap_job(backend, "daily-digest", "soccer_epl")
+            result = await bootstrap_job(backend, "fetch-espn-fixtures", "soccer_epl")
 
             assert result.action == BootstrapAction.CRON_APPLIED
-            assert result.cron_expr == "0 8 * * *"
+            assert result.cron_expr == "0 6 * * *"
             assert backend._scheduler is not None
-            schedule = await backend._scheduler.get_schedule("daily-digest-epl")
+            schedule = await backend._scheduler.get_schedule("fetch-espn-fixtures-epl")
             assert isinstance(schedule.trigger, CronTrigger)
             assert schedule.next_fire_time is not None
-            assert schedule.next_fire_time.astimezone(UTC).hour == 8
+            assert schedule.next_fire_time.astimezone(UTC).hour == 6
         assert recorded_bootstraps == []
 
     @pytest.mark.asyncio
@@ -174,7 +174,7 @@ class TestBootstrapCronJob:
         async with LocalSchedulerBackend() as backend:
             with pytest.raises(SchedulingFailedError, match="cron job"):
                 await backend.schedule_next_execution(
-                    "daily-digest-epl", datetime.now(UTC) + timedelta(hours=1)
+                    "fetch-espn-fixtures-epl", datetime.now(UTC) + timedelta(hours=1)
                 )
 
 
@@ -201,9 +201,9 @@ class TestUtcCronTrigger:
         self, recorded_bootstraps: list[JobContext]
     ) -> None:
         async with LocalSchedulerBackend() as backend:
-            await backend.schedule_cron("daily-digest-epl", "*/30 * * * *")
+            await backend.schedule_cron("fetch-espn-fixtures-epl", "*/30 * * * *")
 
             assert backend._scheduler is not None
-            schedule = await backend._scheduler.get_schedule("daily-digest-epl")
+            schedule = await backend._scheduler.get_schedule("fetch-espn-fixtures-epl")
             assert schedule.next_fire_time is not None
             assert schedule.next_fire_time - datetime.now(UTC) <= timedelta(minutes=30)

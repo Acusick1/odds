@@ -4,7 +4,7 @@ status: accepted
 
 # Evaluate EPL CLV with expanding walk-forward CV, tuned before 2024-08-01 and evaluated after
 
-The EPL CLV model is evaluated with expanding-window walk-forward CV in 50-event steps, and there is no held-out test set. Hyperparameters are tuned only on events before 2024-08-01 (the tuning range). Events on or after that date (the evaluation range) are scored only by folds that walk forward with those hyperparameters frozen. This supersedes [ADR-0004](0004-walk-forward-cv-protocol.md). The evidence is on [CV protocol on a common validation range](../../wiki/evaluation/exp-cv-protocol-common-range.md).
+The EPL CLV model is evaluated with expanding-window walk-forward CV in 50-event steps, and there is no held-out test set. Hyperparameters are tuned only on events before 2024-08-01 (the tuning range). Events on or after that date (the evaluation range) are scored only by folds that walk forward with those hyperparameters frozen. This supersedes [ADR-0004](0004-walk-forward-cv-protocol.md). The evidence is on [CV protocol on a common validation range](https://github.com/Acusick1/odds/blob/1ca09fe/wiki/evaluation/exp-cv-protocol-common-range.md).
 
 ## Context
 
@@ -46,4 +46,4 @@ The three cells were scored on the same 1,100 validation events, 2021-08-13 to 2
 - Issues #452, #494, #495, #496.
 - `experiments/scripts/cv_protocol_common_range.py`; `experiments/results/cv_protocol_common_range/` (`results.csv`, `event_counts.csv`, `snapshot_coverage.csv`, `folds.csv`, `summary.json`).
 - `experiments/configs/xgboost_epl_cv_protocol_base.yaml` and its cell configs.
-- Wiki: [CV protocol on a common validation range](../../wiki/evaluation/exp-cv-protocol-common-range.md), [Cross-validation](../../wiki/modelling/cross-validation.md).
+- Wiki: [CV protocol on a common validation range](https://github.com/Acusick1/odds/blob/1ca09fe/wiki/evaluation/exp-cv-protocol-common-range.md), [Cross-validation](../../wiki/modelling/cross-validation.md).

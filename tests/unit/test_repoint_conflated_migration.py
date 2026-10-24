@@ -9,6 +9,7 @@ remainder.
 from __future__ import annotations
 
 import importlib.util
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
@@ -24,7 +25,7 @@ from odds_core.match_brief_models import MatchBrief  # noqa: F401
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.odds_math import american_to_decimal
 from odds_core.paper_trade_models import PaperTrade  # noqa: F401
-from odds_core.prediction_models import Prediction  # noqa: F401
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -222,6 +223,15 @@ class TestRepointConflatedQueries:
 
 class TestRepointMigrationUpgrade:
     """End-to-end test of upgrade(): skip path logs + safe rows are moved."""
+
+    @pytest.fixture(autouse=True)
+    async def predictions_table(self, pglite_async_session: AsyncSession) -> AsyncIterator[None]:
+        """The migration still repoints ``predictions``, a table no model maps any more."""
+        await pglite_async_session.execute(
+            text("CREATE TABLE predictions (id serial PRIMARY KEY, event_id text, snapshot_id int)")
+        )
+        yield
+        await pglite_async_session.execute(text("DROP TABLE predictions"))
 
     async def test_upgrade_skips_duplicates_and_repoints_safe_rows(
         self,

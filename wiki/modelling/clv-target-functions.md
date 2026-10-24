@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Target functions
-description: The retail-EV row builder, its features, weights and keep-bar metrics, the devigged and raw delta functions, the `_compute_target` dispatch, closing-snapshot selection, and the target fields of FeatureConfig.
+description: The retail-EV row builder, its features, weights and keep-bar metrics, the raw delta function, the `_compute_target` dispatch, closing-snapshot selection, and the target fields of FeatureConfig.
 sources:
   - odds_analytics.retail_ev
   - odds_analytics.retail_ev_metrics
@@ -12,19 +12,15 @@ sources:
   - odds_core.snapshot_sources
   - odds_core.bookmakers.UK_RETAIL_BOOKMAKERS
   - odds_core.bookmakers.canonical_bookmaker_key
-  - odds_analytics.sequence_loader.calculate_devigged_bookmaker_target
-  - odds_analytics.sequence_loader.calculate_devigged_totals_target
   - odds_analytics.sequence_loader.calculate_regression_target
-  - odds_analytics.sequence_loader.extract_devigged_h2h_probs
   - odds_analytics.feature_groups._compute_target
-  - odds_analytics.feature_groups._select_closing_snapshot
   - odds_analytics.training.config.FeatureConfig
 status: stable
 ---
 
 # Target functions
 
-`odds_analytics.training.config.FeatureConfig.target_type` selects the target: `retail_ev` is built by `odds_analytics.retail_ev`; `devigged_bookmaker` and `raw` by functions in `odds_analytics.sequence_loader`, which holds the delta maths for every model although its name suggests only LSTM sequence loading. Its `odds_analytics.sequence_loader.TargetType` enum is referenced nowhere else in the repo (#473). Why each target is shaped as it is is on [CLV and the training target](clv-target.md).
+`odds_analytics.training.config.FeatureConfig.target_type` selects the target: `retail_ev` is built by `odds_analytics.retail_ev` and `raw` by `odds_analytics.sequence_loader.calculate_regression_target`, in a module whose name suggests only LSTM sequence loading. Why each target is shaped as it is is on [CLV and the training target](clv-target.md).
 
 ## Retail-EV rows
 
@@ -69,7 +65,7 @@ FDUK opening rows (`odds_analytics.retail_ev.UPPER_BOUND_TIME_KINDS`, `odds_anal
 
 The two team groups count a match only once its result is known: it kicked off before `odds_analytics.as_of_team_features.results_known_before`, t minus `odds_analytics.as_of_team_features.RESULT_LAG` (3 hours, which covers a match to full time `(inferred)`). Rest days and the 14- and 7-day congestion windows are still measured back from the event's kick-off, so a match between t and kick-off is missing from the features rather than leaking into them. ESPN fixture rows count only with a played status (`odds_analytics.as_of_team_features.FINISHED_FIXTURE_STATUSES`), because a rescheduled match leaves a `Scheduled` or `Postponed` row at its old date, and a team with no played fixture row before then has NaN congestion columns. `odds_analytics.as_of_team_features.load_team_history` loads the EPL results (`odds_analytics.standings_features.load_season_events_cache`) and, for the schedule group, the ESPN fixtures, once per build; the events must share one sport. Its `until` bound stops both at a kick-off or fixture date; the training pipeline loads every match, and the [retail-EV evaluation](../evaluation/retail-ev-evaluation.md#what-it-reads) stops at its window end.
 
-The event-level groups (`tabular`, standings, match stats, EPL schedule and the rest) are rejected under `retail_ev`, and the `retail_ev` groups under every other target: the event-level ones are computed as of kick-off, not as of t ([look-ahead](look-ahead-bias.md#no-future-data-layer-by-layer)). The variance filter drops constant columns, such as books absent from the data ([feature pipeline](feature-pipeline.md)).
+The event-level groups (`tabular`, `polymarket`, `injuries` and `rest`) are rejected under `retail_ev`, and the `retail_ev` groups under every other target: the event-level ones are computed as of kick-off, not as of t ([look-ahead](look-ahead-bias.md#no-future-data-layer-by-layer)). The variance filter drops constant columns, such as books absent from the data ([feature pipeline](feature-pipeline.md)).
 
 ## Keep-bar metrics
 
@@ -80,27 +76,16 @@ The event-level groups (`tabular`, standings, match stats, EPL schedule and the 
 - `odds_analytics.retail_ev_metrics.event_clustered_ratio`: a sum of numerators over a sum of denominators with percentile CIs at chosen levels from whole-event resamples; the [candidate report](../evaluation/candidate-registry.md#odds-candidates-report) uses it for its stake-weighted mean EV.
 - `odds_analytics.retail_ev_metrics.mse_gain_of_event_totals` and `odds_analytics.retail_ev_metrics.pick_ev_gain_of_event_totals` run the same bootstraps on per-event totals (weighted squared errors and loss-weight totals, or pick-EV differences), which the row-level functions compute and pass to them. The [keep-bar power simulation](../evaluation/exp-retail-ev-power.md) calls them directly.
 
-## Devigged delta
+## Raw delta and dispatch
 
-- `odds_analytics.sequence_loader.calculate_devigged_bookmaker_target` returns the closing minus snapshot devigged probability of the configured outcome (`home`, `away` or `draw`) for one bookmaker, or `None` if either side lacks that bookmaker or the outcome. It handles 2-way and 3-way markets; `draw` exists only in 3-way markets.
-- `odds_analytics.sequence_loader.extract_devigged_h2h_probs` converts prices with `odds_core.models.Odds.implied_probability` (1 over the stored decimal price) and normalises with `odds_core.odds_math.devig_probabilities`. Devigging is proportional only, and the 3-way (`Draw`) probability is devigged together with home and away ([odds arithmetic](../foundations/odds-math.md), [devigging](../foundations/devigging.md)).
-- `odds_analytics.sequence_loader.calculate_devigged_totals_target` does the same for Over/Under.
+`odds_analytics.feature_groups._compute_target` serves the `raw` target: it extracts the configured `outcome`'s odds from the decision and closing snapshots for the primary market and returns `odds_analytics.sequence_loader.calculate_regression_target`, the closing minus snapshot mean implied-probability delta for `h2h` and point delta for `spreads` and `totals`; any other market, `1x2` included, returns `None` and the row is dropped. The implied probabilities are `odds_core.models.Odds.implied_probability` (1 over the stored decimal price), not devigged ([odds arithmetic](../foundations/odds-math.md), [devigging](../foundations/devigging.md)).
 
-## Dispatch
+`odds_analytics.training.config.FeatureConfig` requires `target_type` (`raw` or `retail_ev`). `retail_ev_arm` (`odds_analytics.training.config.RetailEvArm`) is `direct` unless `target_type` is `retail_ev`; its `residual` value makes the model fit the target minus the baseline ([residual arm](training-config.md#retail-ev-arm)). `retail_ev` is valid only for `h2h` and `1x2` with the `xgboost` adapter, and ignores `outcome`. A config that breaks these rules fails validation.
 
-`odds_analytics.feature_groups._compute_target` serves the delta targets:
+## Closing snapshot of a raw target
 
-- `"devigged_bookmaker"` uses the functions above.
-- `"raw"` uses `odds_analytics.sequence_loader.calculate_regression_target`, the mean vig-inclusive implied-probability delta. Devigging therefore applies to a delta target only when the YAML sets `target_type: devigged_bookmaker`.
-
-`odds_analytics.training.config.FeatureConfig` requires `target_type`. `retail_ev_arm` (`odds_analytics.training.config.RetailEvArm`) is `direct` unless `target_type` is `retail_ev`; its `residual` value makes the model fit the target minus the baseline ([residual arm](training-config.md#retail-ev-arm)). `target_bookmaker` is required for `devigged_bookmaker` and must be omitted otherwise; `devigged_bookmaker` is valid only for `h2h`, `1x2` and `totals`, and `retail_ev` only for `h2h` and `1x2` with the `xgboost` adapter; `outcome` must be `over` or `under` exactly when the market is `totals`, and `retail_ev` ignores it. A config that breaks these rules fails validation.
-
-`odds_analytics.feature_groups._compute_target` passes `outcome` to every branch, so the target and the tabular features describe the same side.
-
-## Closing snapshot of a delta target
-
-`odds_analytics.feature_groups._select_closing_snapshot` takes the snapshots in `closing_tier`. Under `devigged_bookmaker` it prefers those with the target bookmaker's data for the primary market, then the first match in `closing_source_priority`; otherwise, and under `raw`, it takes the latest. `closing_source_priority` is matched against `odds_core.models.OddsSnapshot.api_request_id`, whose values are provenance tags such as `football_data_uk` and `oddsportal` ([provenance tags](../storage/odds-tables.md#provenance)). Because selection is by tier, the FDUK loader clamps opening snapshots out of the closing tier (`scripts/ingest_football_data_uk.py`). A devigged config reads its target bookmaker through a guard that raises if it is unset. `odds_analytics.feature_groups.prepare_training_data` drops events with no closing snapshot and, under `devigged_bookmaker`, events whose closing snapshot lacks the target bookmaker, whichever sampler picks the decision snapshots ([feature pipeline](feature-pipeline.md)). `retail_ev` selects no closing snapshot here.
+`odds_analytics.feature_groups.collect_event_data` takes the latest snapshot in `closing_tier` as the closing snapshot. Because selection is by tier, the FDUK loader clamps opening snapshots out of the closing tier (`scripts/ingest_football_data_uk.py`). `odds_analytics.feature_groups.prepare_training_data` drops events with no closing snapshot, and events whose closing snapshot has none of the `sharp_bookmakers`, whichever sampler picks the decision snapshots ([feature pipeline](feature-pipeline.md)). `retail_ev` selects no closing snapshot here.
 
 ## Config fields
 
-`odds_analytics.training.config.FeatureConfig` carries `target_type`, `retail_ev_arm`, `target_bookmaker`, `closing_tier` and `closing_source_priority`; all fields and defaults are on [Training config](training-config.md). The tabular group's `retail_sharp_diff` is the strongest predictor of the delta target ([sharp benchmark](sharp-benchmark.md)).
+`odds_analytics.training.config.FeatureConfig` carries `target_type`, `retail_ev_arm` and `closing_tier`; all fields and defaults are on [Training config](training-config.md). The tabular group's `retail_sharp_diff` is built from the same prices as the `raw` target ([sharp benchmark](sharp-benchmark.md)).

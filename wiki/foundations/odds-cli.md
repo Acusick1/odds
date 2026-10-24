@@ -30,7 +30,7 @@ status: stable
 
 ## Command groups
 
-`packages/odds-cli/pyproject.toml` declares Typer, Rich, boto3, PyYAML, structlog, sqlalchemy, apscheduler and numpy, each because `odds_cli` imports it directly; `optuna` comes only through analytics' `training` extra.
+`packages/odds-cli/pyproject.toml` declares Typer, Rich, PyYAML, structlog, sqlalchemy, apscheduler and numpy, each because `odds_cli` imports it directly; `optuna` comes only through analytics' `training` extra.
 
 | Group | Page |
 |---|---|
@@ -39,7 +39,6 @@ status: stable
 | `odds_cli.commands.discover`, `odds_cli.commands.backfill` | [Odds API historical backfill](../collection/odds-api-backfill.md) |
 | `backtest` | [Backtest engine](../evaluation/backtest-engine.md), [Backtest strategies](../evaluation/backtest-strategies.md) |
 | `odds train` | [Training pipeline](../modelling/training-pipeline.md) (`tune` stores a new timestamped study in a local SQLite file unless `--in-memory`; both subcommands pass the split's sample weights and kick-off times on, [sample weights](../modelling/training-pipeline.md#sample-weights)), [Hyperparameter tuner](../modelling/hyperparameter-tuner.md) |
-| `model` | [Model store](../modelling/model-store.md) |
 | `odds evaluate` | [Retail-EV evaluation](../evaluation/retail-ev-evaluation.md) (`--allow-incomplete <event ID>`, repeatable, and `--force` are recorded in the manifest) |
 | `odds status` | [odds status](../operations/health-monitor.md#odds-status), [Odds API quota](../collection/odds-api-quota.md) |
 | `validate`, `quality` | [Coverage and completeness checks](../storage/coverage-checks.md) |
@@ -79,7 +78,7 @@ The help text disagrees with the code in four places (#448, #466):
 
 - The root help, banner and callback docstring say "NBA" (`odds_cli.main.app`, `odds_cli.main.callback`).
 - `--strategy` on `odds backtest run` lists `lstm`, which is not a key of `odds_cli.commands.backtest.STRATEGIES`.
-- `odds scheduler run-once` help names a sport-suffixed per-sport job and `update-status` of the 15 in `odds_lambda.scheduling.jobs._JOB_MODULE_MAP` (`odds_cli.commands.scheduler.run_once`).
+- `odds scheduler run-once` help names a sport-suffixed per-sport job and `update-status` of the 13 in `odds_lambda.scheduling.jobs._JOB_MODULE_MAP` (`odds_cli.commands.scheduler.run_once`).
 - `odds scheduler info` has no help text, because its docstring follows a statement (`odds_cli.commands.scheduler.info`). It lists each sport's Odds API bookmakers.
 
 ## Related

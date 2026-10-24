@@ -154,15 +154,8 @@ class TestSmokeTags:
         assert spends_api_quota("fetch-scores-epl")
         assert not spends_api_quota("fetch-oddsportal")
 
-    def test_daily_digest_is_outward_posting(self) -> None:
-        from odds_lambda.scheduling.jobs import is_outward_posting
-
-        assert is_outward_posting("daily-digest")
-        assert is_outward_posting("daily-digest-epl")
-
-    def test_data_jobs_are_neither(self) -> None:
-        from odds_lambda.scheduling.jobs import is_outward_posting, is_smoke_unsafe
+    def test_data_jobs_are_smoke_safe(self) -> None:
+        from odds_lambda.scheduling.jobs import is_smoke_unsafe
 
         for job in ("fetch-oddsportal", "fetch-espn-fixtures", "fetch-betfair-exchange"):
             assert not is_smoke_unsafe(job)
-            assert not is_outward_posting(job)

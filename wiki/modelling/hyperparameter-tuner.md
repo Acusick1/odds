@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Hyperparameter tuner (Optuna)
-description: OptunaTuner, the objective, search-space schema, feature selection and CLI options, with the production search space cited by file.
+description: OptunaTuner, the objective, search-space schema, feature selection and CLI options, with the example search spaces cited by file.
 sources:
   - odds_analytics.training.tuner.OptunaTuner
   - odds_analytics.training.tuner.create_objective
@@ -11,7 +11,8 @@ sources:
   - odds_analytics.training.feature_selection.FeatureSelector
   - odds_analytics.training.feature_selection.get_feature_selector
   - odds_cli.commands.train.run_tuning
-  - experiments/configs/xgboost_epl_production_tabular_match_stats.yaml
+  - experiments/configs/xgboost_tuning_without_feature_selection.yaml
+  - experiments/configs/xgboost_feature_selection_tuning.yaml
 status: stable
 ---
 
@@ -24,11 +25,11 @@ status: stable
 - **Objective.** Each trial deep-copies the config, applies the sampled values, and (with `use_kfold`) stacks train and validation rows and runs `odds_analytics.training.cross_validation.run_cv` ([cross-validation](cross-validation.md)), passing the rows' sample weights and kick-off times, which `odds_analytics.training.tuner.create_objective` requires for `retail_ev` ([sample weights](training-pipeline.md#sample-weights)). `tuning.metric` is one of `val_mse` (default), `val_mae` or `val_r2` and maps to the mean CV value. The direction follows the metric (`val_r2` maximises, the others minimise) through `odds_analytics.training.config.TuningConfig.direction`; the config has no `direction` key. Tuning never reads test rows: a non-CV trial is scored on the validation rows and needs a validation split.
 - **Failed trials.** The objective catches nothing: an exception (or a metric missing from a non-CV trial's history) fails the trial, Optuna records it as `FAIL` and `odds_analytics.training.tuner.OptunaTuner.optimize` re-raises, aborting the study. `TrialPruned` is recorded as pruned.
 - **Feature selection.** With `top_k_features` in the search space and `feature_selection.enabled`, `odds_analytics.training.feature_selection.get_feature_selector` (`manual`, `filter`, `ensemble`, `hybrid`) ranks features once per study (when the study has no stored ranking) and later trials keep the top k. Not supported for LSTM.
-- **CLI.** `--n-trials`, `--timeout`, `--study-name` (default `<experiment>_<UTC timestamp>`; an existing name resumes), `--storage`, `--output` (default `<config>_best.yaml`), `--train-best`. `--storage` defaults to the SQLite file `optuna.db` in `experiments/`, relative to the working directory (gitignored), never `DATABASE_URL`: Optuna's schema check fails against a database that already holds another `alembic_version` row (reproduced on Optuna 4.6.0: `RuntimeError: ... is no longer compatible with the table schema`, in the storage-schema test in `tests/unit/test_tuner.py`). `--in-memory` opts out and conflicts with `--storage` (`odds_cli.commands.train.run_tuning`). `--train-best` is rejected when `top_k_features` is searched, because the selected subset is not saved with the config. The model from `--train-best` carries the full config `.yaml`, so it is scorable ([prediction scoring](prediction-scoring.md)).
+- **CLI.** `--n-trials`, `--timeout`, `--study-name` (default `<experiment>_<UTC timestamp>`; an existing name resumes), `--storage`, `--output` (default `<config>_best.yaml`), `--train-best`. `--storage` defaults to the SQLite file `optuna.db` in `experiments/`, relative to the working directory (gitignored), never `DATABASE_URL`: Optuna's schema check fails against a database that already holds another `alembic_version` row (reproduced on Optuna 4.6.0: `RuntimeError: ... is no longer compatible with the table schema`, in the storage-schema test in `tests/unit/test_tuner.py`). `--in-memory` opts out and conflicts with `--storage` (`odds_cli.commands.train.run_tuning`). `--train-best` is rejected when `top_k_features` is searched, because the selected subset is not saved with the config. `--train-best` saves the model with the full config `.yaml` beside it, as `odds train run` does ([training pipeline](training-pipeline.md#steps-of-odds-train-run)).
 
-## Production search space
+## Example search spaces
 
-The search space of the deployed model is in `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml` (PR #362), and the values are authoritative there. The deployed model `v308058c` was trained from that YAML as at commit `2bf3712`, which set early stopping on the validation fold ([caveat](../evaluation/clv-model-findings.md#caveats)). The search space tunes `n_estimators`, which is the only control on boosting length. Most older committed YAMLs carry a different search space, so copy it from the `experiments/configs/xgboost_epl_production_*` configs when starting a new sliding-window run. Why it replaced the original, and the results under each, are on [EPL feature ablation and principled search space](../evaluation/exp-epl-feature-ablation-and-search-space.md#principled-search-space-re-test).
+`experiments/configs/xgboost_tuning_without_feature_selection.yaml` and `experiments/configs/xgboost_feature_selection_tuning.yaml` are the committed XGBoost tuning examples, and the values are authoritative there; the second adds `top_k_features` with feature selection enabled. `odds_analytics.training.config.XGBoostConfig` has no early-stopping field, so a search space tunes `n_estimators` as the only control on boosting length. Neither file sets `target_type`, which `odds_analytics.training.config.FeatureConfig` requires, so a copy needs one added.
 
 ## Related
 

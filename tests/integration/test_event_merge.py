@@ -10,13 +10,12 @@ from odds_core.api_models import EventsResponse
 from odds_core.match_brief_models import MatchBrief
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot, utc_now
 from odds_core.paper_trade_models import PaperTrade
-from odds_core.prediction_models import Prediction
 from odds_lambda.event_sync import EventSyncService
 from odds_lambda.oddsportal_common import find_existing_event
 from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.event_name_repair import repair_team_names
 from odds_lambda.storage.writers import OddsWriter
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from tests.test_helpers import (
     API_EVENT_ID,
@@ -26,7 +25,7 @@ from tests.test_helpers import (
     make_epl_event,
 )
 
-CHILD_MODELS = (OddsSnapshot, Odds, Prediction, PaperTrade, MatchBrief)
+CHILD_MODELS = (OddsSnapshot, Odds, PaperTrade, MatchBrief)
 
 
 async def _event_ids(session, model) -> set[str]:
@@ -65,23 +64,6 @@ class TestAdoptTwins:
         for model in CHILD_MODELS:
             assert await _event_ids(session, model) == {API_EVENT_ID}, model
         assert await session.get(Event, TWIN_EVENT_ID) is None
-
-    @pytest.mark.asyncio
-    async def test_predictions_still_match_their_snapshots_after_the_merge(
-        self, live_twin_with_rows
-    ) -> None:
-        session = live_twin_with_rows
-        api_event = make_epl_event(API_EVENT_ID, TWIN_KICKOFF + timedelta(minutes=30))
-        session.add(api_event)
-        await session.flush()
-
-        await EventMerger(session).adopt_twins([api_event])
-        await session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
-
-        prediction = (await session.execute(select(Prediction))).scalar_one()
-        snapshot = await session.get(OddsSnapshot, prediction.snapshot_id)
-        assert snapshot is not None
-        assert prediction.event_id == snapshot.event_id == API_EVENT_ID
 
     @pytest.mark.asyncio
     async def test_reads_every_table_referencing_events_from_the_catalog(

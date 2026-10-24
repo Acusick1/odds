@@ -55,9 +55,6 @@ FeatureGroupName = Literal[
     "polymarket",
     "injuries",
     "rest",
-    "standings",
-    "match_stats",
-    "epl_schedule",
 ]
 
 # Groups computed as of each retail_ev row's decision time; the only groups retail_ev accepts.
@@ -587,7 +584,6 @@ class SamplingConfig(BaseModel):
 # =============================================================================
 
 
-_DEVIGGED_MARKETS = frozenset({"h2h", "1x2", "totals"})
 _RETAIL_EV_MARKETS = frozenset({"h2h", "1x2"})
 # FeatureConfig fields retail_ev does not read; a value other than the default is rejected.
 _RETAIL_EV_UNUSED_FIELDS: tuple[str, ...] = (
@@ -595,7 +591,6 @@ _RETAIL_EV_UNUSED_FIELDS: tuple[str, ...] = (
     "retail_bookmakers",
     "outcome",
     "closing_tier",
-    "closing_source_priority",
     "sampling",
     "lookback_hours",
     "timesteps",
@@ -684,9 +679,8 @@ class FeatureConfig(BaseModel):
     feature_groups: tuple[FeatureGroupName | RetailEvFeatureGroupName, ...] = Field(
         default=("tabular",),
         description="Feature groups to compose. May be empty only for the lstm adapter and "
-        "retail_ev. Available: tabular, polymarket, injuries, rest, standings, match_stats, "
-        "epl_schedule; retail_ev takes only polymarket_at_t, dynamics, schedule_as_of_t, "
-        "standings_as_of_t.",
+        "retail_ev. Available: tabular, polymarket, injuries, rest; retail_ev takes only "
+        "polymarket_at_t, dynamics, schedule_as_of_t, standings_as_of_t.",
     )
 
     # Standings feature configuration
@@ -695,14 +689,6 @@ class FeatureConfig(BaseModel):
         ge=1,
         le=38,
         description="Number of recent matches for form calculation in standings features.",
-    )
-
-    # Match stats feature configuration
-    match_stats_window: int = Field(
-        default=5,
-        ge=1,
-        le=38,
-        description="Rolling window size for match stats averages (shots, corners, etc.).",
     )
 
     # Trajectory feature configuration
@@ -736,9 +722,8 @@ class FeatureConfig(BaseModel):
     )
 
     # Target formulation
-    target_type: Literal["raw", "devigged_bookmaker", "retail_ev"] = Field(
+    target_type: Literal["raw", "retail_ev"] = Field(
         description="Target formulation. 'raw': avg implied prob delta at snapshot vs closing. "
-        "'devigged_bookmaker': bookmaker close vs bookmaker at snapshot, both devigged. "
         "'retail_ev': a UK retail bet's EV against the Betfair Exchange close (ADR-0012).",
     )
 
@@ -747,19 +732,6 @@ class FeatureConfig(BaseModel):
         description="retail_ev only. 'direct': the model predicts the EV. 'residual': the "
         "model predicts the EV minus the baseline, which XGBoost takes as each row's base "
         "margin, so a model that learns nothing predicts the baseline.",
-    )
-
-    target_bookmaker: str | None = Field(
-        default=None,
-        description="Bookmaker key for the devigged target and closing-snapshot selection. "
-        "Required when target_type='devigged_bookmaker'; must be omitted for 'raw'.",
-    )
-
-    closing_source_priority: list[str] | None = Field(
-        default=None,
-        description="Preferred source(s) for closing snapshot selection, ordered by priority. "
-        "Matched against snapshot.api_request_id (e.g. 'oddsportal', 'football_data_uk'). "
-        "When set, among candidates with the target bookmaker, prefer those from these sources.",
     )
 
     sport_key: str | None = Field(
@@ -804,20 +776,6 @@ class FeatureConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_target_for_market(self) -> FeatureConfig:
-        if self.target_type == "devigged_bookmaker":
-            if self.target_bookmaker is None:
-                raise ValueError(
-                    "target_bookmaker is required when target_type is devigged_bookmaker"
-                )
-            if self.primary_market not in _DEVIGGED_MARKETS:
-                raise ValueError(
-                    f"devigged_bookmaker has no target for market {self.primary_market!r}; "
-                    f"supported markets: {sorted(_DEVIGGED_MARKETS)}"
-                )
-        elif self.target_bookmaker is not None:
-            raise ValueError(
-                f"target_bookmaker must be omitted when target_type is {self.target_type}"
-            )
         if self.target_type == "retail_ev" and self.primary_market not in _RETAIL_EV_MARKETS:
             raise ValueError(
                 f"retail_ev has no target for market {self.primary_market!r}; "

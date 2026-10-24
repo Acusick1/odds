@@ -65,20 +65,8 @@ variable "image_tag" {
   default     = "dev-latest"
 }
 
-variable "model_bucket_name" {
-  description = "S3 bucket name for trained model artifacts"
-  type        = string
-  default     = "odds-models-685946576110"
-}
-
-variable "model_name" {
-  description = "Model name for CLV predictions (S3 key prefix)"
-  type        = string
-  default     = "epl-clv-home"
-}
-
 variable "discord_webhook_url" {
-  description = "Discord webhook URL for alerts and digests"
+  description = "Discord webhook URL for alerts"
   type        = string
   sensitive   = true
   default     = ""

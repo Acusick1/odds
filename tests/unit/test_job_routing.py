@@ -212,16 +212,14 @@ class TestJobCronRegistry:
         assert get_job_cron("fetch-odds") is None
 
     def test_get_job_cron_returns_expression_for_mapped_job(self) -> None:
-        assert get_job_cron("daily-digest") == "0 8 * * *"
+        assert get_job_cron("fetch-espn-fixtures") == "0 6 * * *"
 
     def test_get_job_cron_returns_none_for_unknown_job(self) -> None:
         assert get_job_cron("totally-made-up") is None
 
     def test_get_job_sports_returns_allowlist_when_restricted(self) -> None:
-        # daily-digest and fetch-espn-fixtures are EPL-only — the sport
-        # allowlist is load-bearing (prevents the MLB digest from crashing
-        # inside job_alert_context each morning).
-        assert get_job_sports("daily-digest") == ("soccer_epl",)
+        # fetch-espn-fixtures is EPL-only — the sport allowlist is load-bearing
+        # (ESPN has no fixtures for the other configured sports).
         assert get_job_sports("fetch-espn-fixtures") == ("soccer_epl",)
 
     @pytest.mark.parametrize("job", ["fetch-odds", "fetch-scores"])
@@ -255,8 +253,8 @@ class TestResolveTargetSports:
         ]
 
     def test_cron_job_with_allowlist_ignores_unlisted_sports(self) -> None:
-        # daily-digest is restricted to EPL even when MLB is configured.
-        assert resolve_target_sports("daily-digest", ["soccer_epl", "baseball_mlb"]) == [
+        # fetch-espn-fixtures is restricted to EPL even when MLB is configured.
+        assert resolve_target_sports("fetch-espn-fixtures", ["soccer_epl", "baseball_mlb"]) == [
             "soccer_epl"
         ]
 
@@ -276,13 +274,13 @@ class TestExpectedCompoundJobNames:
 
     def test_expands_per_sport_and_keeps_global_jobs(self) -> None:
         expected = expected_compound_job_names(
-            ["fetch-oddsportal", "daily-digest", "check-health"],
+            ["fetch-oddsportal", "fetch-espn-fixtures", "check-health"],
             ["soccer_epl", "baseball_mlb"],
         )
         assert expected == {
             "fetch-oddsportal-epl",
             "fetch-oddsportal-mlb",
-            "daily-digest-epl",  # sport allowlist drops MLB
+            "fetch-espn-fixtures-epl",  # sport allowlist drops MLB
             "check-health",  # global job kept as-is
         }
 

@@ -22,7 +22,6 @@ from odds_core.database import async_session_maker
 from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade
-from odds_core.prediction_models import Prediction
 from odds_core.snapshot_utils import extract_odds_from_snapshot
 from odds_core.sports import SportKey
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME
@@ -34,7 +33,7 @@ from odds_lambda.paper_trading import (
     settle_trades,
 )
 from odds_lambda.storage.readers import BookPriceEntry, OddsReader
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from odds_mcp.tools.epl import epl_mcp
@@ -47,7 +46,7 @@ MarketKey = Literal["h2h", "1x2", "totals", "spreads"]
 mcp = FastMCP(
     "odds-mcp",
     instructions=(
-        "Betting odds pipeline tools. Use these to inspect fixtures, odds, predictions, "
+        "Betting odds pipeline tools. Use these to inspect fixtures, odds, "
         "and manage paper trades across sports (EPL football, MLB baseball). "
         "All times are UTC."
     ),
@@ -513,65 +512,6 @@ async def get_scrape_status(
     if job_result is not None:
         response["result"] = job_result
     return response
-
-
-@mcp.tool()
-async def get_predictions(
-    event_id: str,
-    limit: int = 5,
-    since_hours: float | None = None,
-) -> dict[str, Any]:
-    """Get pre-scored CLV predictions for an event (most recent first).
-
-    Reads predictions stored by the scoring pipeline (not on-demand inference).
-    Returns up to `limit` predictions, newest first. Use `since_hours` to
-    restrict to recent predictions only.
-
-    Args:
-        event_id: Event identifier.
-        limit: Max predictions to return, newest first. Clamped to 1 minimum. Default 5.
-        since_hours: If set, only return predictions created in the last N hours.
-
-    Returns:
-        Dict with event info, total matching count, and the limited list.
-    """
-    async with async_session_maker() as session:
-        reader = OddsReader(session)
-        event = await reader.get_event_by_id(event_id)
-        if event is None:
-            return {"error": f"Event '{event_id}' not found"}
-
-        query = select(Prediction).where(Prediction.event_id == event_id)
-
-        if since_hours is not None:
-            cutoff = datetime.now(UTC) - timedelta(hours=since_hours)
-            query = query.where(Prediction.created_at >= cutoff)
-
-        # Count matching rows (respects since_hours filter)
-        count_query = query.with_only_columns(func.count(Prediction.id))
-        count_result = await session.execute(count_query)
-        total_matching = count_result.scalar() or 0
-
-        query = query.order_by(Prediction.created_at.desc()).limit(max(1, limit))
-        pred_result = await session.execute(query)
-        predictions = list(pred_result.scalars().all())
-
-    return {
-        "event": _event_to_dict(event),
-        "total_matching": total_matching,
-        "returned": len(predictions),
-        "predictions": [
-            {
-                "id": p.id,
-                "snapshot_id": p.snapshot_id,
-                "model_name": p.model_name,
-                "model_version": p.model_version,
-                "predicted_clv": p.predicted_clv,
-                "created_at": p.created_at.isoformat(),
-            }
-            for p in predictions
-        ],
-    }
 
 
 @mcp.tool()

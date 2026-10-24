@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Literal, Protocol, get_args
+from typing import TYPE_CHECKING, Protocol, get_args
 
 import numpy as np
 import pandas as pd
@@ -52,17 +52,12 @@ from odds_analytics.polymarket_features import (
     resolve_home_outcome_index,
 )
 from odds_analytics.sequence_loader import (
-    calculate_devigged_bookmaker_target,
-    calculate_devigged_totals_target,
     calculate_regression_target,
-    extract_devigged_h2h_probs,
-    extract_devigged_totals_probs,
     load_sequences_for_event,
 )
 from odds_analytics.training.config import FeatureGroupName
 
 if TYPE_CHECKING:
-    from odds_analytics.match_stats_features import MatchStatsCache
     from odds_analytics.training.config import FeatureConfig
 
 logger = structlog.get_logger()
@@ -81,8 +76,6 @@ __all__ = [
     "filter_completed_events",
     "resolve_outcome_name",
     "snapshot_has_bookmaker",
-    "FeatureGroupCaches",
-    "preload_feature_group_caches",
     "load_fixtures_df",
 ]
 
@@ -115,9 +108,6 @@ class EventDataBundle:
     injury_reports: list[InjuryReport] = field(default_factory=list)
     player_stats: dict[str, NbaPlayerSeasonStats] = field(default_factory=dict)
     game_logs: list[NbaTeamGameLog] = field(default_factory=list)
-    prior_season_events: list[Event] = field(default_factory=list)
-    prior_match_stats: dict[str, list[dict[str, int]]] = field(default_factory=dict)
-    fixtures_df: pd.DataFrame | None = None
     sequences: list[list[Odds]] = field(default_factory=list)
 
 
@@ -134,46 +124,16 @@ def snapshot_has_bookmaker(snapshot: OddsSnapshot, bookmaker_key: str, market: s
     return False
 
 
-def _devigged_bookmaker(config: FeatureConfig) -> str:
-    """The target bookmaker of a devigged config (``FeatureConfig`` guarantees it is set)."""
-    if config.target_bookmaker is None:
-        raise ValueError("target_bookmaker is required for a devigged_bookmaker target")
-    return config.target_bookmaker
-
-
-def _h2h_outcome(config: FeatureConfig) -> Literal["home", "away"]:
-    """The side of an h2h/1x2 config (``FeatureConfig`` guarantees over/under only for totals)."""
-    if config.outcome not in ("home", "away"):
-        raise ValueError(f"outcome {config.outcome!r} is not a home/away side")
-    return config.outcome
-
-
-def _should_filter_missing_sharp(config: FeatureConfig) -> bool:
-    """Whether to exclude events missing sharp bookmaker closing odds.
-
-    A raw target has no target bookmaker, so any configured sharp bookmaker filters.
-    A devigged target skips the filter when sharp_bookmakers equals the target
-    bookmaker, since there are then no cross-source features that would degrade
-    from missing data.
-    """
-    if config.target_type == "raw":
-        return True
-    return set(config.sharp_bookmakers) != {config.target_bookmaker}
-
-
 async def collect_event_data(
     event: Event,
     session: AsyncSession,
     config: FeatureConfig,
-    standings_cache: dict[str, list[Event]] | None = None,
-    match_stats_cache: MatchStatsCache | None = None,
-    fixtures_df: pd.DataFrame | None = None,
 ) -> EventDataBundle:
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
     - Loads all OddsSnapshot records once
     - Filters snapshots to those containing the configured market
-    - Finds closing snapshot (prefers target bookmaker when applicable)
+    - Takes the latest snapshot of the closing tier as the closing snapshot
     - Loads PM context (PM event, moneyline market, home_idx)
     - Bulk-loads all PM prices + orderbooks for the market (2 queries total)
     - Loads sequences via load_sequences_for_event when the LSTM adapter is configured
@@ -198,7 +158,7 @@ async def collect_event_data(
     # Derive closing snapshot from already-loaded snapshots (avoid extra DB query)
     closing_tier_value = config.closing_tier.value
     closing_candidates = [s for s in all_snapshots if s.fetch_tier == closing_tier_value]
-    closing_snapshot = _select_closing_snapshot(closing_candidates, event, config)
+    closing_snapshot = closing_candidates[-1] if closing_candidates else None
 
     # PM context (optional)
     pm_context: PMEventContext | None = None
@@ -277,22 +237,6 @@ async def collect_event_data(
                 all_logs.append(prev)
         game_logs = all_logs
 
-    # Prior season events for standings / epl_schedule features (from preloaded cache)
-    prior_season_events: list[Event] = []
-    if {"standings", "epl_schedule"} & set(config.feature_groups) and standings_cache is not None:
-        from odds_analytics.standings_features import get_prior_events_from_cache
-
-        prior_season_events = get_prior_events_from_cache(
-            standings_cache, event, before=event.commence_time
-        )
-
-    # Prior match stats for rolling match stats features (from preloaded cache)
-    prior_match_stats: dict[str, list[dict[str, int]]] = {}
-    if "match_stats" in config.feature_groups and match_stats_cache is not None:
-        from odds_analytics.match_stats_features import get_prior_match_stats_from_cache
-
-        prior_match_stats = get_prior_match_stats_from_cache(match_stats_cache, event)
-
     # Sequences for LSTM adapter
     sequences: list[list[Odds]] = []
     if config.adapter == "lstm":
@@ -308,9 +252,6 @@ async def collect_event_data(
         injury_reports=injury_reports,
         player_stats=player_stats,
         game_logs=game_logs,
-        prior_season_events=prior_season_events,
-        prior_match_stats=prior_match_stats,
-        fixtures_df=fixtures_df,
         sequences=sequences,
     )
 
@@ -438,8 +379,7 @@ def _make_sampler(config: FeatureConfig) -> SnapshotSampler:
     """Instantiate the sampler specified in config.sampling."""
     sc = config.sampling
     if sc.strategy == "tier":
-        required_bms = config.sharp_bookmakers if _should_filter_missing_sharp(config) else None
-        return TierSampler(sc.decision_tier.value, required_bms, config.primary_market)
+        return TierSampler(sc.decision_tier.value, config.sharp_bookmakers, config.primary_market)
     return TimeRangeSampler(sc.min_hours, sc.max_hours, sc.max_samples_per_event)
 
 
@@ -566,18 +506,6 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
         from odds_analytics.schedule_features import RestScheduleFeatures
 
         names.extend(f"rest_{n}" for n in RestScheduleFeatures.get_feature_names())
-    if "standings" in config.feature_groups:
-        from odds_analytics.standings_features import StandingsFeatures
-
-        names.extend(f"stnd_{n}" for n in StandingsFeatures.get_feature_names())
-    if "match_stats" in config.feature_groups:
-        from odds_analytics.match_stats_features import MatchStatsFeatures
-
-        names.extend(f"mstat_{n}" for n in MatchStatsFeatures.get_feature_names())
-    if "epl_schedule" in config.feature_groups:
-        from odds_analytics.epl_schedule_features import EplScheduleFeatures
-
-        names.extend(f"eplsched_{n}" for n in EplScheduleFeatures.get_feature_names())
     return names
 
 
@@ -724,69 +652,6 @@ def _extract_static_feature_parts(
                 logger.debug("rest_feature_extraction_failed", event_id=event.id)
                 parts.append(nan_block_rest)
 
-    # --- Standings features (NaN-fill when unavailable to keep row) ---
-    if "standings" in config.feature_groups:
-        from odds_analytics.standings_features import StandingsFeatures, extract_standings_features
-
-        n_stnd = len(StandingsFeatures.get_feature_names())
-        nan_block_stnd = np.full(n_stnd, np.nan)
-
-        if not bundle.prior_season_events:
-            parts.append(nan_block_stnd)
-        else:
-            try:
-                stnd_feats = extract_standings_features(
-                    bundle.prior_season_events, event, form_window=config.form_window
-                )
-                parts.append(stnd_feats.to_array())
-            except Exception:
-                logger.debug("standings_feature_extraction_failed", event_id=event.id)
-                parts.append(nan_block_stnd)
-
-    # --- Match stats features (NaN-fill when unavailable to keep row) ---
-    if "match_stats" in config.feature_groups:
-        from odds_analytics.match_stats_features import (
-            MatchStatsFeatures,
-            extract_match_stats_features,
-        )
-
-        n_mstat = len(MatchStatsFeatures.get_feature_names())
-        nan_block_mstat = np.full(n_mstat, np.nan)
-
-        if not bundle.prior_match_stats:
-            parts.append(nan_block_mstat)
-        else:
-            try:
-                mstat_feats = extract_match_stats_features(
-                    bundle.prior_match_stats, event, window=config.match_stats_window
-                )
-                parts.append(mstat_feats.to_array())
-            except Exception:
-                logger.debug("match_stats_feature_extraction_failed", event_id=event.id)
-                parts.append(nan_block_mstat)
-
-    # --- EPL schedule features (NaN-fill on failure to keep row) ---
-    if "epl_schedule" in config.feature_groups:
-        from odds_analytics.epl_schedule_features import (
-            EplScheduleFeatures,
-            extract_epl_schedule_features,
-        )
-
-        n_eplsched = len(EplScheduleFeatures.get_feature_names())
-        nan_block_eplsched = np.full(n_eplsched, np.nan)
-
-        try:
-            eplsched_feats = extract_epl_schedule_features(
-                bundle.prior_season_events,
-                event,
-                fixtures_df=bundle.fixtures_df,
-                known_at=event.commence_time,
-            )
-            parts.append(eplsched_feats.to_array())
-        except Exception:
-            logger.debug("epl_schedule_feature_extraction_failed", event_id=event.id)
-            parts.append(nan_block_eplsched)
-
     return parts
 
 
@@ -898,88 +763,14 @@ def _compute_target(
     event: Event,
     config: FeatureConfig,
 ) -> float | None:
-    """Compute regression target for one (snapshot, closing) pair."""
+    """Average implied-probability delta from one snapshot to the closing snapshot."""
     market = config.primary_market
-
-    closing_odds_all = extract_odds_from_snapshot(closing_snapshot, event.id, market=market)
-
-    if config.target_type == "devigged_bookmaker":
-        snapshot_odds_all = extract_odds_from_snapshot(snapshot, event.id, market=market)
-        if market == "totals":
-            outcome_name = resolve_outcome_name(config, event)
-            return calculate_devigged_totals_target(
-                snapshot_odds_all,
-                closing_odds_all,
-                bookmaker_key=_devigged_bookmaker(config),
-                outcome=outcome_name,
-            )
-        return calculate_devigged_bookmaker_target(
-            snapshot_odds_all,
-            closing_odds_all,
-            event.home_team,
-            event.away_team,
-            bookmaker_key=_devigged_bookmaker(config),
-            market_key=market,
-            outcome=_h2h_outcome(config),
-        )
-    else:
-        # "raw": avg implied prob delta (snapshot → closing)
-        outcome = resolve_outcome_name(config, event)
-        snap_odds = extract_odds_from_snapshot(snapshot, event.id, market=market, outcome=outcome)
-        closing_odds = extract_odds_from_snapshot(
-            closing_snapshot, event.id, market=market, outcome=outcome
-        )
-        return calculate_regression_target(snap_odds, closing_odds, market)
-
-
-def _has_bookmaker_closing(
-    closing_snapshot: OddsSnapshot, event: Event, bookmaker_key: str, market: str = "h2h"
-) -> bool:
-    """Check if closing snapshot has bookmaker data for the target market.
-
-    Only h2h and totals support devigged bookmaker targets. For other markets
-    (e.g. spreads), returns False since no devigging function exists.
-    """
-    closing_odds_all = extract_odds_from_snapshot(closing_snapshot, event.id, market=market)
-    if market == "totals":
-        return extract_devigged_totals_probs(closing_odds_all, bookmaker_key) is not None
-    if market in ("h2h", "1x2"):
-        return (
-            extract_devigged_h2h_probs(
-                closing_odds_all, event.home_team, event.away_team, bookmaker_key, market
-            )
-            is not None
-        )
-    return False
-
-
-def _select_closing_snapshot(
-    candidates: list[OddsSnapshot], event: Event, config: FeatureConfig
-) -> OddsSnapshot | None:
-    """Pick the best closing snapshot from candidates ordered chronologically.
-
-    Assumes candidates are sorted by snapshot_time ascending ([-1] = latest).
-    When target_type is bookmaker-specific, prefer candidates with the target
-    bookmaker's data. If closing_source_priority is set, prefer sources in that
-    order among candidates with the target bookmaker. Falls back to last-by-time.
-    """
-    if not candidates:
-        return None
-    if config.target_type == "devigged_bookmaker":
-        market = config.primary_market
-        with_bookmaker = [
-            c
-            for c in candidates
-            if _has_bookmaker_closing(c, event, _devigged_bookmaker(config), market)
-        ]
-        if with_bookmaker:
-            if config.closing_source_priority:
-                for source in config.closing_source_priority:
-                    source_matches = [c for c in with_bookmaker if c.api_request_id == source]
-                    if source_matches:
-                        return source_matches[-1]
-            return with_bookmaker[-1]
-    return candidates[-1]
+    outcome = resolve_outcome_name(config, event)
+    snap_odds = extract_odds_from_snapshot(snapshot, event.id, market=market, outcome=outcome)
+    closing_odds = extract_odds_from_snapshot(
+        closing_snapshot, event.id, market=market, outcome=outcome
+    )
+    return calculate_regression_target(snap_odds, closing_odds, market)
 
 
 # =============================================================================
@@ -1007,47 +798,6 @@ async def load_fixtures_df(
     df["date"] = pd.to_datetime(df["date"], utc=True)
     logger.info("espn_fixtures_loaded_from_db", rows=len(df))
     return df
-
-
-@dataclass
-class FeatureGroupCaches:
-    """Bulk-loaded caches shared across events during feature extraction.
-
-    Populated by :func:`preload_feature_group_caches` and forwarded into
-    :func:`collect_event_data` so per-event DB queries stay O(1).
-    """
-
-    standings: dict[str, list[Event]] | None = None
-    match_stats: MatchStatsCache | None = None
-    fixtures_df: pd.DataFrame | None = None
-
-
-async def preload_feature_group_caches(
-    session: AsyncSession,
-    config: FeatureConfig,
-    sport_key: str | None,
-) -> FeatureGroupCaches:
-    """Load every cache required by ``config.feature_groups`` in one pass.
-
-    Each cache is gated on its feature groups; sport-scoped caches
-    (standings, match_stats) are skipped when ``sport_key`` is ``None``.
-    """
-    caches = FeatureGroupCaches()
-
-    if {"standings", "epl_schedule"} & set(config.feature_groups) and sport_key:
-        from odds_analytics.standings_features import load_season_events_cache
-
-        caches.standings = await load_season_events_cache(session, sport_key)
-
-    if "match_stats" in config.feature_groups and sport_key:
-        from odds_analytics.match_stats_features import load_match_stats_cache
-
-        caches.match_stats = await load_match_stats_cache(session, sport_key)
-
-    if "epl_schedule" in config.feature_groups:
-        caches.fixtures_df = await load_fixtures_df(session)
-
-    return caches
 
 
 class PreparedFeatureData:
@@ -1096,10 +846,8 @@ async def prepare_training_data(
       - config.sampling.strategy="tier"        → single row per event
       - config.sampling.strategy="time_range"  → multiple rows per event
       - config.target_type="raw"               → avg implied-prob delta
-      - config.target_type="devigged_bookmaker" → devigged bookmaker delta
-      - config.target_type="retail_ev"          → ADR-0012 rows (odds_analytics.retail_ev)
+      - config.target_type="retail_ev"         → ADR-0012 rows (odds_analytics.retail_ev)
 
-    For devigged_bookmaker, events without target bookmaker closing data are dropped.
     Polymarket features NaN-fill when PM data is unavailable, so events are
     kept rather than dropped when PM is missing.
 
@@ -1141,46 +889,27 @@ async def prepare_training_data(
     lstm_adapter = isinstance(adapter, LSTMAdapter)
     static_names = _static_feature_group_names(config) if lstm_adapter else None
 
-    # Resolve sport_key once for cache loaders
-    sport_key = config.sport_key or (valid_events[0].sport_key if valid_events else None)
-
-    caches = await preload_feature_group_caches(session, config, sport_key)
-
     for event in valid_events:
         # Load all data for this event in bulk
-        bundle = await collect_event_data(
-            event,
-            session,
-            config,
-            standings_cache=caches.standings,
-            match_stats_cache=caches.match_stats,
-            fixtures_df=caches.fixtures_df,
-        )
+        bundle = await collect_event_data(event, session, config)
 
         # Closing snapshot is required
         if bundle.closing_snapshot is None:
             skipped_events += 1
             continue
 
-        # For devigged_bookmaker, must have bookmaker closing data
         market = config.primary_market
-        if config.target_type == "devigged_bookmaker" and not _has_bookmaker_closing(
-            bundle.closing_snapshot, event, _devigged_bookmaker(config), market
-        ):
-            skipped_events += 1
-            continue
 
         # Filter events missing ALL sharp bookmaker closing odds (cross-source features).
         # Events are kept if at least one sharp bookmaker is present, enabling
         # priority-ordered fallback (e.g. [pinnacle, betfair_exchange]).
-        if _should_filter_missing_sharp(config):
-            has_any_sharp = any(
-                snapshot_has_bookmaker(bundle.closing_snapshot, bm, market)
-                for bm in config.sharp_bookmakers
-            )
-            if not has_any_sharp:
-                sharp_filtered_count += 1
-                continue
+        has_any_sharp = any(
+            snapshot_has_bookmaker(bundle.closing_snapshot, bm, market)
+            for bm in config.sharp_bookmakers
+        )
+        if not has_any_sharp:
+            sharp_filtered_count += 1
+            continue
 
         # Get sampled decision snapshots
         decision_snapshots = sampler.sample(bundle)

@@ -1,7 +1,7 @@
 ---
 type: reference
 title: odds-mcp server
-description: How the FastMCP server is launched and mounted, the 17-tool catalogue and owning pages, sport sub-servers, shared vocabulary, and the scrape and scheduling tools (refresh_scrape, get_scrape_status, get_scheduled_jobs, schedule_next_wakeup).
+description: How the FastMCP server is launched and mounted, the 16-tool catalogue and owning pages, sport sub-servers, shared vocabulary, and the scrape and scheduling tools (refresh_scrape, get_scrape_status, get_scheduled_jobs, schedule_next_wakeup).
 sources:
   - odds_mcp.server.mcp
   - odds_mcp.server._assert_unique_tool_names
@@ -36,18 +36,18 @@ status: stable
 
 `.mcp.json` registers a stdio server named `odds` that runs `uv run fastmcp run odds_mcp.server`. Running the file directly (`python server.py`) first awaits `odds_mcp.server._assert_unique_tool_names`, then `mcp.run()`. The `fastmcp run` path never calls `odds_core.logging_setup.configure_logging` (nothing in `odds_mcp.server` does) and skips `odds_mcp.server._assert_unique_tool_names`, which is only invoked under `if __name__ == "__main__"` ([code conventions](../foundations/code-conventions.md)). Unprefixed mounts let a child tool silently shadow a parent tool with the same name; under `fastmcp run` the uniqueness assertion does not run, and `tests/unit/test_mcp_server.py` checks uniqueness.
 
-## Tool catalogue (17)
+## Tool catalogue (16)
 
 | Tool | Owning page |
 |---|---|
-| `odds_mcp.server.get_upcoming_fixtures`, `odds_mcp.server.get_current_odds`, `odds_mcp.server.get_odds_history`, `odds_mcp.server.get_predictions` | [market tools](mcp-market-tools.md) |
+| `odds_mcp.server.get_upcoming_fixtures`, `odds_mcp.server.get_current_odds`, `odds_mcp.server.get_odds_history` | [market tools](mcp-market-tools.md) |
 | `odds_mcp.server.find_retail_edges` | [market tools](mcp-market-tools.md#retail-edges) |
 | `odds_mcp.server.save_match_brief`, `odds_mcp.server.get_match_brief`, `odds_mcp.server.get_slate_briefs` | [briefs](match-briefs.md) |
 | `odds_mcp.server.paper_bet` (decimal price, optional candidate), `odds_mcp.server.get_portfolio` (with candidate summaries, or the registry's error), `odds_mcp.server.settle_bets` | [paper trading](paper-trading.md) |
 | `odds_mcp.server.refresh_scrape`, `odds_mcp.server.get_scrape_status`, `odds_mcp.server.get_scheduled_jobs`, `odds_mcp.server.schedule_next_wakeup` | [below](#scrape-and-scheduling-tools) |
 | `odds_mcp.tools.epl.get_team_context` (EPL), `odds_mcp.tools.mlb.get_probable_pitchers` (MLB) | [sport context tools](mcp-sport-context-tools.md) |
 
-15 tools are defined in `odds_mcp.server` (`odds_mcp.server.find_retail_edges`, which excludes the sharp list and `odds_core.bookmakers.NON_BETTABLE_BOOKMAKERS`, has its own test in `tests/unit/test_mcp_server.py`) and 2 in `odds_mcp/tools/`. `odds_mcp.server` has `_DEFAULT_SHARP_BOOKMAKERS = ["pinnacle", "betfair_exchange"]` and a comment saying it duplicates the feature default and must be kept in sync; the values differ deliberately (#421, [code copies](../modelling/sharp-benchmark.md#code-copies)).
+14 tools are defined in `odds_mcp.server` (`odds_mcp.server.find_retail_edges`, which excludes the sharp list and `odds_core.bookmakers.NON_BETTABLE_BOOKMAKERS`, has its own test in `tests/unit/test_mcp_server.py`) and 2 in `odds_mcp/tools/`. `odds_mcp.server` has `_DEFAULT_SHARP_BOOKMAKERS = ["pinnacle", "betfair_exchange"]` and a comment saying it duplicates the feature default and must be kept in sync; the values differ deliberately (#421, [code copies](../modelling/sharp-benchmark.md#code-copies)).
 
 ## Sport sub-servers
 
