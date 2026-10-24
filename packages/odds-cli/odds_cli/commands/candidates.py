@@ -7,6 +7,7 @@ import typer
 from odds_analytics.candidate_report import CandidateSummary, Verdict, candidate_report
 from odds_core.candidates import Candidate, CandidateStatus, candidates_dir, load_candidates
 from odds_core.database import async_session_maker
+from odds_lambda.candidate_rules import validate_candidate_rules
 from rich.console import Console
 from rich.table import Table
 
@@ -16,7 +17,9 @@ console = Console()
 
 def _load_registry() -> list[Candidate]:
     try:
-        return load_candidates(candidates_dir())
+        candidates = load_candidates(candidates_dir())
+        validate_candidate_rules(candidates)
+        return candidates
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]", soft_wrap=True)
         raise typer.Exit(1) from exc

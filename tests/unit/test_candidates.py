@@ -22,8 +22,8 @@ MECHANICAL: dict[str, object] = {
     "issue": 610,
     "start_date": "2026-11-01",
     "status": "active",
-    "rule": "longest_price",
-    "params": {"min_edge": 0.02},
+    "rule": "exchange_gap",
+    "params": {"threshold": 0.02, "minutes_before_kickoff": 60},
 }
 
 AGENT: dict[str, object] = {
@@ -52,7 +52,7 @@ class TestLoadCandidates:
 
         assert [c.name for c in loaded] == ["back-longest", "epl-agent"]
         assert isinstance(loaded[0], MechanicalCandidate)
-        assert loaded[0].params == {"min_edge": 0.02}
+        assert loaded[0].params == {"threshold": 0.02, "minutes_before_kickoff": 60}
         assert isinstance(loaded[1], AgentCandidate)
 
     def test_missing_directory_is_empty(self, tmp_path: Path) -> None:
@@ -132,3 +132,9 @@ class TestListCommand:
         result = CliRunner(env={"COLUMNS": "200"}).invoke(app, ["candidates", "list"])
         assert result.exit_code == 1
         assert "back-longest.yaml" in result.stdout
+
+    def test_unknown_rule_exits_1(self, registry: Path) -> None:
+        write(registry, {**MECHANICAL, "rule": "no_such_rule"})
+        result = CliRunner(env={"COLUMNS": "200"}).invoke(app, ["candidates", "list"])
+        assert result.exit_code == 1
+        assert "back-longest" in result.stdout and "no_such_rule" in result.stdout

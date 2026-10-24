@@ -23,7 +23,7 @@ A candidate is any rule that decides bets: a mechanical rule on prices, a model,
 - **Version.** Each candidate has a whole-number version, bumped whenever its rule, parameters or model changes. For an agent, a change to `packages/odds-mcp/agents/common.md`, its sport's `base.md` or the model passed by `odds_lambda.jobs.agent_run._run_claude_agent` is a new version. A change to `packages/odds-mcp/agents/<sport>/observations.md` is not: that file is the agent's own running playbook, and it is gitignored, so a version and git SHA do not pin it `(inferred)`.
 - **Tracking.** An idea starts as a GitHub issue labelled `candidate`. Once registered, its file's status is its stage.
 
-No candidate is running and no mechanical rule exists; mechanical rules are the current focus. The repo also holds:
+No candidate is running; mechanical rules are the current focus. The repo also holds:
 
 - **The EPL and MLB betting agents** synthesise prices, exchange data and match news ([The betting agent](../agent/betting-agent.md)). Neither is registered or being run.
 - **The EPL retail-EV model** predicts a retail bet's EV against the close ([retail-EV target](../modelling/clv-target.md#the-retail-ev-target)). Its development results are in [Price-only models on the retail-EV target](../evaluation/exp-epl-retail-ev-price-only.md), and it places no bets.
@@ -49,9 +49,10 @@ Most of the workflow's tooling does not exist (#608). What does:
 - The close, computed from stored snapshots when a report runs, so a trade stores none. MLB has no close defined, so its trades are reported without EV.
 - `odds candidates report`, which gives the checkpoint verdict ([Candidate registry](../evaluation/candidate-registry.md#odds-candidates-report)).
 
+- The [mechanical rule interface](../evaluation/candidate-rules.md) and its first rule, the exchange gap, with the market state at decision time and rule source pinning.
+
 Missing:
 
-- The interface a mechanical rule implements (#620).
 - The runner that places a mechanical candidate's paper trades; only the agent can place them today (#609).
 - A replay backtest of a rule on stored data (#621).
 

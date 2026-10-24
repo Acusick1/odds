@@ -10,6 +10,7 @@ sources:
   - odds_core.paper_trade_models.PaperTrade
   - odds_mcp.server.get_portfolio
   - scripts/check_candidate_versions.py
+  - odds_lambda.candidate_rules.validate_candidate_rules
 status: stable
 ---
 
@@ -24,7 +25,7 @@ The registry is the `candidates/` directory: one `<name>.yaml` file per candidat
 | Field | Model | Meaning |
 |---|---|---|
 | `name`, `description`, `sport`, `version`, `issue`, `start_date`, status | `odds_core.candidates._CandidateBase` | Shared by both kinds. `name` matches the file name and the pattern `odds_core.candidates.NAME_PATTERN`. `sport` is a [sport key](../collection/sport-and-market-keys.md). `issue` is the idea's GitHub issue. `start_date` is the first day it may place bets. The status is an `odds_core.candidates.CandidateStatus` |
-| `kind: mechanical`, `rule` and params | `odds_core.candidates.MechanicalCandidate` | `rule` names a rule function. The parameters are a free JSON mapping here, and the rule validates them (#609) |
+| `kind: mechanical`, `rule` and params | `odds_core.candidates.MechanicalCandidate` | `rule` names a rule function ([candidate rules](candidate-rules.md)). the parameters are a free JSON mapping here, validated against the rule's params model by `odds_lambda.candidate_rules.validate_candidate_rules` |
 | `kind: agent` | `odds_core.candidates.AgentCandidate` | No further fields; the agent's prompts and model are its definition ([agent run](../agent/agent-run-job.md)) |
 
 `odds_core.candidates.load_candidates` raises a `ValueError` naming the file when a file fails validation or its `name` differs from its file stem, and when a sport has more than one agent candidate whose status is active or promoted. Agents for one sport share `packages/odds-mcp/agents/common.md` and the sport's `base.md`, so two live agents for one sport would run identical prompts. A killed agent does not count, so its replacement can be added.
@@ -33,7 +34,7 @@ A change of status goes through a pull request. The version is a strict positive
 
 ## `odds candidates list`
 
-`odds_cli.commands.candidates.list_candidates` prints each candidate's name, kind, sport, version, status, start date and issue, optionally filtered by status. It reads the files in `odds_core.candidates.candidates_dir` and does not touch the database. An invalid registry prints the loader's error in red and exits 1.
+`odds_cli.commands.candidates.list_candidates` prints each candidate's name, kind, sport, version, status, start date and issue, optionally filtered by status. It reads the files in `odds_core.candidates.candidates_dir` and does not touch the database. It validates every mechanical candidate's rule and params with `odds_lambda.candidate_rules.validate_candidate_rules`. An invalid registry or rule prints the error in red and exits 1.
 
 ## `odds candidates report`
 
@@ -61,4 +62,4 @@ It fails when:
 - a file's `version` decreased;
 - any key other than the status and `description` changed and the version did not increase (`UNVERSIONED_KEYS` in the script).
 
-A new file always passes. The check compares YAML only. Changes to a mechanical rule's code (#609) and to an agent's prompts or model are not enforced by it.
+A new file always passes. The check compares YAML only. A mechanical rule's code is pinned by [source hash](candidate-rules.md#source-pinning), not by this check. Changes to an agent's prompts or model are not enforced by it.

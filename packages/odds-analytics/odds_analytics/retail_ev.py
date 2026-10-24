@@ -16,6 +16,12 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 
 import numpy as np
 import structlog
+from odds_core.as_of import (
+    EXCHANGE_AT_T_KINDS,
+    MAX_EXCHANGE_AGE,
+    RETAIL_KINDS,
+    latest_at_or_before,
+)
 from odds_core.betfair_close import (
     MAX_EXCHANGE_OVERROUND,
     ExchangePrice,
@@ -50,7 +56,6 @@ logger = structlog.get_logger()
 
 DECISION_WINDOW = timedelta(days=7)
 DECISION_CUTOFF = timedelta(minutes=5)
-MAX_EXCHANGE_AGE = timedelta(hours=2)
 POLYMARKET_BOOKMAKER = "polymarket"
 # Twice the coarsest step of the Polymarket history grid, and the exchange's age cap.
 MAX_POLYMARKET_AGE = timedelta(hours=2)
@@ -67,19 +72,8 @@ HORIZON_BUCKET_EDGES_HOURS: tuple[float, ...] = (0.0, 1.0, 6.0, 24.0, 72.0)
 HORIZON_BUCKET_LABELS: tuple[str, ...] = ("0-1h", "1-6h", "6-24h", "1-3d", "3-7d")
 SEASON_START_MONTH = 7
 
-RETAIL_KINDS: frozenset[SnapshotKind] = frozenset(
-    {
-        SnapshotKind.ODDS_API,
-        SnapshotKind.ODDSPORTAL,
-        SnapshotKind.ODDSPORTAL_LIVE,
-        SnapshotKind.FDUK_OPENING,
-    }
-)
 # Stamped at FDUK's latest documented collection time, an upper bound on when the price was taken.
 UPPER_BOUND_TIME_KINDS: frozenset[SnapshotKind] = frozenset({SnapshotKind.FDUK_OPENING})
-EXCHANGE_AT_T_KINDS: frozenset[SnapshotKind] = frozenset(
-    {SnapshotKind.BETFAIR_LIVE, SnapshotKind.FDUK_OPENING}
-)
 
 
 @dataclass(frozen=True)
@@ -245,13 +239,6 @@ def _polymarket_price(
     return PolymarketPrice(time=snapshot.snapshot_time, fair=devig(prices, outcomes), spread=spread)
 
 
-def _latest_at_or_before(times: list[datetime], at: datetime, max_age: timedelta) -> int | None:
-    idx = bisect.bisect_right(times, at) - 1
-    if idx < 0 or at - times[idx] > max_age:
-        return None
-    return idx
-
-
 def _consensus_move(now: _RetailQuote, before: _RetailQuote, outcome: Outcome) -> float | None:
     moves = [
         1 / prices[outcome] - 1 / before.books[book][outcome]
@@ -275,14 +262,14 @@ def _dynamics(
     exchange_moves: list[float | None] = []
     consensus_moves: list[float | None] = []
     for window in MOVE_WINDOWS:
-        idx = _latest_at_or_before(same_kind_exchange_times, t - window, MAX_LAGGED_PRICE_AGE)
+        idx = latest_at_or_before(same_kind_exchange_times, t - window, MAX_LAGGED_PRICE_AGE)
         lagged = None if idx is None else same_kind_exchange[idx]
         exchange_moves.append(
             None
             if lagged is None or lagged.time == exchange.time
             else exchange.fair[outcome] - lagged.fair[outcome]
         )
-        idx = _latest_at_or_before(same_kind_times, t - window, MAX_LAGGED_PRICE_AGE)
+        idx = latest_at_or_before(same_kind_times, t - window, MAX_LAGGED_PRICE_AGE)
         consensus_moves.append(
             None if idx is None else _consensus_move(quote, same_kind[idx], outcome)
         )
@@ -397,7 +384,7 @@ def build_event_rows(
                 drops.rows_without_own_exchange += n_candidates
                 continue
             exchange = own[-1]
-        pm_idx = _latest_at_or_before(polymarket_times, t, MAX_POLYMARKET_AGE) if exact else None
+        pm_idx = latest_at_or_before(polymarket_times, t, MAX_POLYMARKET_AGE) if exact else None
         pm_price = None if pm_idx is None else polymarket[pm_idx]
         dynamics = {
             outcome: _dynamics(
