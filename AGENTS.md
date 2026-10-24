@@ -1,6 +1,6 @@
 # Betting Odds Pipeline & Agent
 
-Single-user, sport-agnostic betting odds pipeline with per-sport LLM betting agents (EPL and MLB data collection active; the agents run by hand on the production host and are not currently being run; NBA code is deprioritized).
+Single-user, sport-agnostic betting odds pipeline with per-sport LLM betting agents (EPL and MLB data collection active; the agents run by hand on the production host and are paused; NBA code is deprioritized).
 
 ## Goal
 
