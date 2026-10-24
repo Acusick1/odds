@@ -265,3 +265,16 @@ class TestSettings:
         with patch.dict(os.environ, {"BETFAIR_ENABLED": "false"}, clear=True):
             cfg = BetfairConfig(_env_file=None)
             assert cfg.enabled is False
+
+
+class TestAPIConfigKeys:
+    def test_keys_alone_satisfy_config(self):
+        with patch.dict(
+            os.environ,
+            {"ODDS_API_KEYS": "a,b", "DATABASE_URL": "postgresql://test:test@localhost/test"},
+            clear=True,
+        ):
+            settings = Settings(_env_file=None)
+
+        assert settings.api.key is None
+        assert settings.api.keys == "a,b"

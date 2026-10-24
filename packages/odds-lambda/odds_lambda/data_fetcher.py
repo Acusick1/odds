@@ -17,7 +17,7 @@ from odds_core.config import get_settings
 from odds_core.utils import relabel_three_way_markets
 from tenacity import (
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
@@ -43,6 +43,16 @@ def canonicalize_bookmaker_keys(raw_events_data: list[dict[str, Any]]) -> None:
             bookmaker["key"] = ODDS_API_BOOKMAKER_KEY_MAP.get(bookmaker["key"], bookmaker["key"])
 
 
+def _is_transient_error(exc: BaseException) -> bool:
+    """Connection failures, timeouts and 5xx are worth retrying; other HTTP errors are not.
+
+    401, 429 and other 4xx responses cannot succeed on an immediate retry.
+    """
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return exc.status >= 500
+    return isinstance(exc, aiohttp.ClientError | TimeoutError)
+
+
 class TheOddsAPIClient:
     """Client for interacting with The Odds API."""
 
@@ -63,8 +73,10 @@ class TheOddsAPIClient:
             keys = [k.strip() for k in app_settings.api.keys.split(",") if k.strip()]
             self._key_manager = APIKeyManager(keys)
             self.api_key = self._key_manager.get_active_key()
-        else:
+        elif app_settings.api.key:
             self.api_key = app_settings.api.key
+        else:
+            raise ValueError("No Odds API key configured: set ODDS_API_KEYS or ODDS_API_KEY")
 
         self.base_url = base_url or app_settings.api.base_url
         self.session: aiohttp.ClientSession | None = None
@@ -85,16 +97,11 @@ class TheOddsAPIClient:
         """Get remaining API quota from last request."""
         return self._quota_remaining
 
-    @retry(
-        retry=retry_if_exception_type((aiohttp.ClientError, TimeoutError)),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-    )
     async def _make_request(
         self, endpoint: str, params: dict | None = None
     ) -> tuple[dict | list, int]:
         """
-        Make HTTP request with retry logic.
+        Make an HTTP request, rotating the API key on 401/429 when a key manager is configured.
 
         Args:
             endpoint: API endpoint path
@@ -104,67 +111,65 @@ class TheOddsAPIClient:
             Tuple of (response data, response time in ms)
 
         Raises:
-            aiohttp.ClientError: On request failure after retries
+            aiohttp.ClientResponseError: On a non-retryable HTTP error, or a 401/429 with no
+                further key to rotate to
+            AllKeysExhaustedError: When every configured key has returned 401/429
+            aiohttp.ClientError, TimeoutError: On transient failures that outlast the retries
         """
+        while True:
+            try:
+                return await self._send(endpoint, {**(params or {}), "apiKey": self.api_key})
+            except aiohttp.ClientResponseError as e:
+                if e.status not in (401, 429) or not self._key_manager:
+                    logger.error(
+                        "api_request_failed",
+                        endpoint=endpoint,
+                        status=e.status,
+                        message=str(e),
+                    )
+                    raise
+                try:
+                    self.api_key = self._key_manager.rotate_key()
+                except AllKeysExhaustedError:
+                    logger.error("all_api_keys_exhausted", endpoint=endpoint)
+                    raise
+                logger.info("api_key_rotated_on_error", status=e.status, endpoint=endpoint)
+            except Exception as e:
+                logger.error("api_request_error", endpoint=endpoint, error=str(e))
+                raise
+
+    @retry(
+        retry=retry_if_exception(_is_transient_error),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
+    )
+    async def _send(self, endpoint: str, params: dict) -> tuple[dict | list, int]:
+        """Send one request, retrying only transient failures."""
         if not self.session:
             self.session = aiohttp.ClientSession()
 
         url = f"{self.base_url}/{endpoint}"
-        params = params or {}
-        params["apiKey"] = self.api_key
-
         start_time = time.time()
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with self.session.get(url, params=params, timeout=timeout) as response:
+            if "x-requests-remaining" in response.headers:
+                self._quota_remaining = int(float(response.headers["x-requests-remaining"]))
 
-        try:
-            timeout = aiohttp.ClientTimeout(total=30)
-            async with self.session.get(url, params=params, timeout=timeout) as response:
-                response.raise_for_status()
+            response.raise_for_status()
 
-                # Track quota from headers
-                if "x-requests-remaining" in response.headers:
-                    self._quota_remaining = int(float(response.headers["x-requests-remaining"]))
+            data = await response.json()
+            elapsed_ms = int((time.time() - start_time) * 1000)
 
-                data = await response.json()
-                elapsed_ms = int((time.time() - start_time) * 1000)
-
-                logger.info(
-                    "api_request_success",
-                    endpoint=endpoint,
-                    status=response.status,
-                    elapsed_ms=elapsed_ms,
-                    quota_remaining=self._quota_remaining,
-                )
-
-                return data, elapsed_ms
-
-        except aiohttp.ClientResponseError as e:
-            if e.status in (401, 429) and self._key_manager:
-                try:
-                    self.api_key = self._key_manager.rotate_key()
-                    logger.info(
-                        "api_key_rotated_on_error",
-                        status=e.status,
-                        endpoint=endpoint,
-                    )
-                    params.pop("apiKey", None)
-                    return await self._make_request(endpoint, params)
-                except AllKeysExhaustedError:
-                    logger.error("all_api_keys_exhausted", endpoint=endpoint)
-                    raise
-            logger.error(
-                "api_request_failed",
+            logger.info(
+                "api_request_success",
                 endpoint=endpoint,
-                status=e.status,
-                message=str(e),
+                status=response.status,
+                elapsed_ms=elapsed_ms,
+                quota_remaining=self._quota_remaining,
             )
-            raise
-        except Exception as e:
-            logger.error(
-                "api_request_error",
-                endpoint=endpoint,
-                error=str(e),
-            )
-            raise
+
+            return data, elapsed_ms
 
     async def get_odds(
         self,

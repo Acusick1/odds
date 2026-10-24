@@ -2,9 +2,11 @@
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
+from odds_lambda.api_key_manager import AllKeysExhaustedError, APIKeyManager
 from odds_lambda.data_fetcher import TheOddsAPIClient, canonicalize_bookmaker_keys
 
 
@@ -74,3 +76,145 @@ class TestGetOddsBookmakers:
             "pinnacle",
             "betfair_exchange",
         ]
+
+
+def _response_error(status: int) -> aiohttp.ClientResponseError:
+    return aiohttp.ClientResponseError(
+        request_info=MagicMock(), history=(), status=status, message=f"HTTP {status}"
+    )
+
+
+class _StubResponse:
+    def __init__(self, status: int, payload: Any = None) -> None:
+        self.status = status
+        self.headers: dict[str, str] = {"x-requests-remaining": "100"}
+        self._payload = payload if payload is not None else []
+
+    def raise_for_status(self) -> None:
+        if self.status >= 400:
+            raise _response_error(self.status)
+
+    async def json(self) -> Any:
+        return self._payload
+
+    async def __aenter__(self) -> "_StubResponse":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
+class _StubSession:
+    """Serves queued statuses in order and records the apiKey of every call."""
+
+    def __init__(self, statuses: list[int]) -> None:
+        self._statuses = list(statuses)
+        self.api_keys: list[str] = []
+
+    def get(self, url: str, params: dict[str, Any], timeout: Any) -> _StubResponse:
+        self.api_keys.append(params["apiKey"])
+        return _StubResponse(self._statuses.pop(0))
+
+
+@pytest.fixture(autouse=True)
+def _no_retry_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(TheOddsAPIClient._send.retry, "sleep", AsyncMock())
+
+
+def _client(statuses: list[int], keys: list[str] | None = None) -> tuple[TheOddsAPIClient, Any]:
+    client = TheOddsAPIClient(api_key="only")
+    if keys:
+        client._key_manager = APIKeyManager(keys)
+        client._key_manager._ssm_available = False
+        client.api_key = client._key_manager.get_active_key()
+    session = _StubSession(statuses)
+    client.session = session  # type: ignore[assignment]
+    return client, session
+
+
+class TestRequestRetries:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", [401, 429])
+    async def test_auth_and_quota_errors_fail_fast_without_key_manager(self, status: int):
+        client, session = _client([status])
+
+        with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+            await client._make_request("sports")
+
+        assert exc_info.value.status == status
+        assert len(session.api_keys) == 1
+
+    @pytest.mark.asyncio
+    async def test_other_client_errors_are_not_retried(self):
+        client, session = _client([422])
+
+        with pytest.raises(aiohttp.ClientResponseError):
+            await client._make_request("sports")
+
+        assert len(session.api_keys) == 1
+
+    @pytest.mark.asyncio
+    async def test_server_errors_retry_then_reraise_original_exception(self):
+        client, session = _client([500, 500, 500])
+
+        with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+            await client._make_request("sports")
+
+        assert exc_info.value.status == 500
+        assert len(session.api_keys) == 3
+
+    @pytest.mark.asyncio
+    async def test_transient_error_recovers(self):
+        client, session = _client([503, 200])
+
+        data, _ = await client._make_request("sports")
+
+        assert data == []
+        assert len(session.api_keys) == 2
+
+    @pytest.mark.asyncio
+    async def test_rotates_key_on_429_without_nested_retries(self):
+        client, session = _client([429, 500, 500, 500], keys=["a", "b"])
+
+        with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+            await client._make_request("sports")
+
+        assert exc_info.value.status == 500
+        assert session.api_keys == ["a", "b", "b", "b"]
+
+    @pytest.mark.asyncio
+    async def test_all_keys_exhausted_stops_after_one_call_per_key(self):
+        client, session = _client([401, 429], keys=["a", "b"])
+
+        with pytest.raises(AllKeysExhaustedError):
+            await client._make_request("sports")
+
+        assert session.api_keys == ["a", "b"]
+
+
+class TestClientKeySource:
+    def test_no_key_configured_raises(self, mock_settings):
+        mock_settings.api.key = None
+        mock_settings.api.keys = None
+        with patch("odds_lambda.data_fetcher.get_settings", return_value=mock_settings):
+            with pytest.raises(ValueError, match="ODDS_API_KEYS or ODDS_API_KEY"):
+                TheOddsAPIClient()
+
+    def test_keys_alone_enable_rotation(self, mock_settings):
+        mock_settings.api.key = None
+        mock_settings.api.keys = "a, b"
+        with patch("odds_lambda.data_fetcher.get_settings", return_value=mock_settings):
+            client = TheOddsAPIClient()
+        assert client._key_manager is not None
+        assert client._key_manager.key_count == 2
+
+
+class TestQuotaOnErrors:
+    @pytest.mark.asyncio
+    async def test_quota_updates_from_error_response_headers(self):
+        client, _ = _client([429])
+
+        with pytest.raises(aiohttp.ClientResponseError):
+            await client._make_request("sports")
+
+        assert client.quota_remaining == 100

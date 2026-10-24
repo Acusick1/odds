@@ -14,7 +14,7 @@ Together these provide confidence the scheduler will work in production.
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from apscheduler import AsyncScheduler
@@ -44,6 +44,14 @@ _e2e_session_factory = None
 _e2e_original_main = None
 
 
+def _fake_api_client_class(stub: object) -> MagicMock:
+    """Stand-in for TheOddsAPIClient, which refuses to construct without an API key."""
+    client_class = MagicMock()
+    client_class.return_value.__aenter__ = AsyncMock(return_value=stub)
+    client_class.return_value.__aexit__ = AsyncMock(return_value=None)
+    return client_class
+
+
 def _in_memory_scheduler(**kwargs) -> AsyncScheduler:
     return AsyncScheduler(**kwargs)
 
@@ -61,6 +69,10 @@ async def _wrapped_fetch_odds(ctx: JobContext) -> None:
         )
 
     with (
+        patch(
+            "odds_lambda.jobs.fetch_odds.TheOddsAPIClient",
+            _fake_api_client_class(_e2e_stub_client),
+        ),
         patch("odds_lambda.jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
         patch("odds_lambda.jobs.fetch_odds.build_event_sync_service", return_value=mock_event_sync),
         patch("odds_core.database.async_session_maker", _e2e_session_factory),
@@ -299,6 +311,9 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
         mock_event_sync.sync_sports = AsyncMock(return_value=[])
         with (
             freeze_time(test_time),
+            patch(
+                "odds_lambda.jobs.fetch_odds.TheOddsAPIClient", _fake_api_client_class(stub_client)
+            ),
             patch("odds_lambda.jobs.fetch_odds.build_ingestion_service", side_effect=build_service),
             patch(
                 "odds_lambda.jobs.fetch_odds.build_event_sync_service", return_value=mock_event_sync

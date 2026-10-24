@@ -18,7 +18,7 @@ class APIConfig(BaseSettings):
         env_prefix="ODDS_API_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    key: str = Field(..., description="The Odds API key")
+    key: str | None = Field(default=None, description="A single Odds API key")
     keys: str | None = Field(
         default=None, description="Comma-separated API keys for rotation (overrides key)"
     )
