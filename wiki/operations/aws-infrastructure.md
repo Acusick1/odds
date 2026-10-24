@@ -26,7 +26,7 @@ The handler and registry are described on [scheduler-backends](../scheduling/sch
 
 ## Terraform
 
-`deployment/aws/terraform/`: `main.tf` (provider), `backend.tf` (S3 backend configured per environment by `backend.dev.hcl` / `backend.prod.hcl`), `variables.tf`, `lambda.tf`, `eventbridge.tf`, `terraform.tfvars.example`. `variables.tf` is authoritative; notable defaults: `aws_region` `eu-west-1`, `rule_prefix` `odds`, `enable_polymarket`/`betfair_enabled` false, `model_name` `epl-clv-home`.
+`deployment/aws/terraform/`: `main.tf` (provider), `backend.tf` (S3 backend configured per environment by `backend.dev.hcl` / `backend.prod.hcl`), `variables.tf`, `lambda.tf`, `eventbridge.tf`, `terraform.tfvars.example`. `variables.tf` is authoritative; notable defaults: `aws_region` `eu-west-1`, `rule_prefix` `odds`, `enable_polymarket`/`betfair_enabled` false.
 
 EventBridge rules are named `{rule_prefix}-{job}[-{sport suffix}]` and `eventbridge.tf` pre-creates each self-scheduling rule `DISABLED` with a `rate(1 day)` placeholder and `ignore_changes` on `schedule_expression` and `state`, so a clean `terraform plan` does not mean the rules are active ([scheduler-backends](../scheduling/scheduler-backends.md)). Production Terraform is applied from `.github/workflows/deploy-prod.yml` with `-var-file=terraform.tfvars.example` plus overrides, so the committed tfvars are not a record of what is deployed ([ci-cd-workflows](ci-cd-workflows.md)).
 

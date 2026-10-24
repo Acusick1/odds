@@ -227,7 +227,7 @@ async def copy_from_prod(
     skip_existing: bool = True,
 ) -> CopyStats:
     """
-    Copy all events, snapshots, and predictions from production to local database.
+    Copy all events and snapshots from production to local database.
 
     Args:
         start_date: Start date (YYYY-MM-DD)

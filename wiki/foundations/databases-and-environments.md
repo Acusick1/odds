@@ -66,7 +66,7 @@ The betting agent subprocess swaps in `AGENT_DATABASE_URL` when set (`odds_lambd
 - Events come from `odds_lambda.storage.readers.OddsReader.get_events_by_date_range` for the sport and window, in kick-off order. With `--skip-existing` (the default), an event already present locally is skipped untouched.
 - `--overwrite` replaces an existing event. Each event is read from production in its own session and replaced in one local transaction, so a failed production query fails only that event: its local odds rows and snapshots are deleted, the event row is merged with every column (status, scores and timestamps included), and production's snapshots (every column, so `api_request_id`, `fetch_tier` and `created_at` survive) and production's odds rows (copied, not regenerated from `raw_data`) are inserted. After the run the summary counts local matches stored as several events (`odds_lambda.copy_from_production.CopyStats.local_twin_matches`); the copier never merges them ([Event merge](../storage/event-merge.md)).
 - An event whose copy raises is rolled back whole, listed by id in the summary, counted in `events_failed` and never in `events_copied`; the run continues and the command exits 1 if any event failed.
-- Running `odds_lambda.copy_from_production` as a script bypasses the CLI: its `__main__` block reads only the two dates and `--dry-run`, so every other option is ignored.
+- Running `odds_lambda.copy_from_production` as a script bypasses the CLI: its `__main__` block reads only the two dates and `--dry-run`, so every other option is ignored. It copies events, snapshots and odds rows only.
 - `--dry-run` counts events and snapshots it would copy and writes nothing; its odds count stays 0.
 
 ## Related

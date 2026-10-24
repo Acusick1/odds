@@ -1,7 +1,7 @@
 """drop the predictions table and the snapshot key only it referenced
 
 Revision ID: e7b2c4d9a1f8
-Revises: a5c8d2e91f37
+Revises: e8b1c4d7a2f6
 Create Date: 2026-10-24 14:00:00.000000
 
 """
@@ -11,7 +11,7 @@ import sqlmodel
 from alembic import op
 
 revision = "e7b2c4d9a1f8"
-down_revision = "a5c8d2e91f37"
+down_revision = "e8b1c4d7a2f6"
 branch_labels = None
 depends_on = None
 

@@ -4,7 +4,7 @@ status: superseded by ADR-0012
 
 # Predict bet365 line movement as the CLV target
 
-The CLV model trains on the devigged bet365 close-minus-snapshot delta, not Pinnacle's.
+The CLV model trains on the devigged bet365 close-minus-snapshot delta, not Pinnacle's. The experiments behind it are on [Target bookmaker and data volume experiments](https://github.com/Acusick1/odds/blob/1ca09fe/wiki/evaluation/exp-target-and-data-volume.md).
 
 ## Context
 
@@ -25,7 +25,7 @@ Train on the devigged bet365 close-minus-snapshot delta: `target_type: devigged_
 ## Consequences
 
 - bet365 reached CV R² 0.058 on EPL, the deployed model (PR #362; deployed as `epl-clv-home` `v308058c`, PR #361).
-- The target bookmaker must exist in the selected data source: OddsPortal for NBA; OddsPortal plus FDUK with `data_source: null` for EPL.
+- The target bookmaker must exist in the selected data source: OddsPortal for NBA; OddsPortal plus FDUK with `data_source: null` for EPL ([training config](https://github.com/Acusick1/odds/blob/1ca09fe/wiki/modelling/howto-train-and-publish-model.md#choose-data)).
 - Pinnacle, with Betfair as fallback, becomes the sharp reference feature instead ([ADR-0003](0003-hybrid-sharp-reference.md)).
 - The code defaults stay `target_type: raw` and `target_bookmaker: pinnacle`. A YAML that omits both trains the raw average-implied-probability delta (#434); a YAML that sets `devigged_bookmaker` without a bookmaker trains the rejected Pinnacle target.
 - The bet365 and Pinnacle runs differ in source (OddsPortal against the Odds API), size (about 5K against about 800 events) and folds (11 against 4). In the project's learning curve, 500 events gave R² −0.066 and 1,500 events +0.036 (`experiments/results/exp6_learning_curve/FINDINGS.md`). No run compares the two targets on the same source and event count (#482).
@@ -34,6 +34,6 @@ Train on the devigged bet365 close-minus-snapshot delta: `target_type: devigged_
 
 - `docs/MODELING.md` commits 2840086 (PR #164), b950dc5 (PR #166) and d7c6621 (PR #167); text at `git show 7887039:docs/MODELING.md`.
 - PRs #161, #168, #361, #362; issues #434, #482.
-- `experiments/results/exp6_learning_curve/FINDINGS.md`; `experiments/scripts/exp6_learning_curve.py`.
-- Configs: `experiments/configs/xgboost_bet365_tuning.yaml`, `experiments/configs/xgboost_bet365_baseline_tuning.yaml`, `experiments/configs/xgboost_pinnacle_tuning.yaml`, `experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`.
-- Wiki: [CLV and the training target](../../wiki/modelling/clv-target.md).
+- [`experiments/results/exp6_learning_curve/FINDINGS.md`](https://github.com/Acusick1/odds/blob/1ca09fe/experiments/results/exp6_learning_curve/FINDINGS.md); [`experiments/scripts/exp6_learning_curve.py`](https://github.com/Acusick1/odds/blob/1ca09fe/experiments/scripts/exp6_learning_curve.py).
+- Configs: [`experiments/configs/xgboost_bet365_tuning.yaml`](https://github.com/Acusick1/odds/blob/1ca09fe/experiments/configs/xgboost_bet365_tuning.yaml), [`experiments/configs/xgboost_bet365_baseline_tuning.yaml`](https://github.com/Acusick1/odds/blob/1ca09fe/experiments/configs/xgboost_bet365_baseline_tuning.yaml), [`experiments/configs/xgboost_pinnacle_tuning.yaml`](https://github.com/Acusick1/odds/blob/1ca09fe/experiments/configs/xgboost_pinnacle_tuning.yaml), [`experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`](https://github.com/Acusick1/odds/blob/1ca09fe/experiments/configs/xgboost_epl_production_tabular_match_stats.yaml).
+- Wiki: [CLV and the training target](../../wiki/modelling/clv-target.md), [CLV model findings](https://github.com/Acusick1/odds/blob/1ca09fe/wiki/evaluation/clv-model-findings.md).

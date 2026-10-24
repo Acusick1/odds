@@ -4,13 +4,13 @@ status: superseded by ADR-0012
 
 # Keep bet365 over Pinnacle as the CLV target, on a like-for-like EPL test
 
-If the EPL CLV model is kept in any role, it keeps the devigged bet365 close-minus-snapshot delta as its target, not Pinnacle's. This supersedes [ADR-0002](0002-bet365-clv-target.md) once accepted. ADR-0002 made the same choice on NBA runs that the map #494 voids.
+If the EPL CLV model is kept in any role, it keeps the devigged bet365 close-minus-snapshot delta as its target, not Pinnacle's. This supersedes [ADR-0002](0002-bet365-clv-target.md) once accepted. ADR-0002 made the same choice on NBA runs that the map #494 voids. The evidence is on [Pinnacle against bet365 as the EPL CLV target](https://github.com/Acusick1/odds/blob/1ca09fe/wiki/evaluation/exp-epl-clv-pinnacle-retest.md).
 
 ## Context
 
 ADR-0002 rejected Pinnacle on two NBA runs that differ in source, size and folds: bet365 on about 5K OddsPortal events over 11 folds, and Pinnacle on about 800 Odds API events over 4 folds. Its stated reason was that Pinnacle lines move less, with an MSE 6.7 times lower than bet365's. Those runs also predate the training and CV validity fixes (#474, #434, #477, #437, #475, #481), and #494 voids every pre-fix result.
 
-FDUK EPL data quotes both bookmakers, so the two targets can be compared on the same events. The tabular bet365 model failed the keep test of #496. Under #495, a retarget means another target passing the same test. #482 pre-registered that test for Pinnacle, and the bet365 comparison alongside it.
+FDUK EPL data quotes both bookmakers, so the two targets can be compared on the same events. The tabular bet365 model failed the keep test of #496 ([EPL CLV re-baseline](https://github.com/Acusick1/odds/blob/1ca09fe/wiki/evaluation/exp-epl-clv-rebaseline.md)). Under #495, a retarget means another target passing the same test. #482 pre-registered that test for Pinnacle, and the bet365 comparison alongside it.
 
 ## Decision
 
@@ -42,4 +42,4 @@ Both targets were scored with tabular features, the hybrid sharp reference and t
 - Issues #482, #494, #495, #496.
 - `experiments/scripts/epl_clv_pinnacle_retest.py`; `experiments/results/epl_clv_pinnacle_retest/` (`summary.json`, `results.csv`, `event_counts.csv`, `lost_events.csv`, `folds.csv`, `oof_predictions.csv`).
 - `experiments/scripts/epl_clv_rebaseline.py`; `experiments/results/epl_clv_rebaseline/summary.json`.
-- Wiki: [CLV target](../../wiki/modelling/clv-target.md).
+- Wiki: [Pinnacle against bet365 as the EPL CLV target](https://github.com/Acusick1/odds/blob/1ca09fe/wiki/evaluation/exp-epl-clv-pinnacle-retest.md), [EPL CLV re-baseline](https://github.com/Acusick1/odds/blob/1ca09fe/wiki/evaluation/exp-epl-clv-rebaseline.md), [CLV target](../../wiki/modelling/clv-target.md).

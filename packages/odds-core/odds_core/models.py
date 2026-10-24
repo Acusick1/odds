@@ -12,7 +12,6 @@ from sqlalchemy import (
     DateTime,
     Float,
     Index,
-    UniqueConstraint,
     text,
 )
 from sqlmodel import Field, SQLModel
