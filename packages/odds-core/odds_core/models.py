@@ -4,7 +4,17 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, Column, DateTime, Float, Index, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Float,
+    Index,
+    UniqueConstraint,
+    text,
+)
 from sqlmodel import Field, SQLModel
 
 from odds_core.odds_math import decimal_to_american, decimal_to_implied_probability
@@ -67,6 +77,9 @@ class Event(SQLModel, table=True):
     home_team: str = Field(index=True, description="Home team name")
     away_team: str = Field(index=True, description="Away team name")
     status: EventStatus = Field(default=EventStatus.SCHEDULED, description="Event status")
+    mlb_game_pk: int | None = Field(
+        default=None, sa_column=Column(BigInteger), description="MLB Stats API gamePk"
+    )
 
     def model_post_init(self, __context: Any) -> None:
         self.home_team = normalize_team_name(self.home_team)
@@ -89,6 +102,15 @@ class Event(SQLModel, table=True):
         sa_column=Column(DateTime(timezone=True)),
         default_factory=utc_now,
         description="Record last update time",
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_events_mlb_game_pk",
+            "mlb_game_pk",
+            unique=True,
+            postgresql_where=text("mlb_game_pk IS NOT NULL"),
+        ),
     )
 
 
