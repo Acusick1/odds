@@ -458,6 +458,37 @@ class TestMainSelfSchedules:
         assert scheduled_calls[0]["job_name"] == "fetch-oddsportal-results-epl"
         assert scheduled_calls[0]["payload"] == {"sport": "soccer_epl"}
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("run_raises", "final"), [(False, True), (True, False)])
+    async def test_failed_booking_is_final_unless_the_chain_re_books(
+        self, run_raises: bool, final: bool
+    ) -> None:
+        from odds_lambda.jobs import fetch_oddsportal_results
+        from odds_lambda.scheduling.jobs import JobContext
+
+        async def process_results(**_kwargs) -> ResultsStats:
+            if run_raises:
+                raise RuntimeError("simulated failure")
+            return ResultsStats()
+
+        with (
+            patch.object(fetch_oddsportal_results, "process_results", process_results),
+            patch.object(fetch_oddsportal_results, "record_run_outcome", AsyncMock()),
+            patch.object(
+                fetch_oddsportal_results, "self_schedule", side_effect=RuntimeError("no backend")
+            ),
+            patch("odds_core.alerts.send_scheduling_failure", new_callable=AsyncMock) as failure,
+            patch("odds_core.alerts.record_to_alert_history", new_callable=AsyncMock),
+            patch("odds_core.alerts.alert_manager", MagicMock(enabled=False)),
+        ):
+            if run_raises:
+                with pytest.raises(RuntimeError, match="simulated failure"):
+                    await fetch_oddsportal_results.main(JobContext(sport="soccer_epl"))
+            else:
+                await fetch_oddsportal_results.main(JobContext(sport="soccer_epl"))
+
+        assert failure.call_args.kwargs["final"] is final
+
 
 class TestRecordRunOutcome:
     NOW = datetime(2026, 10, 20, 8, 0, tzinfo=UTC)

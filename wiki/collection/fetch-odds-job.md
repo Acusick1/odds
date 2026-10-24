@@ -26,7 +26,7 @@ It runs `sports` as `[ctx.sport]` or `data_collection.sports`:
 
 1. **Event sync**: `odds_lambda.event_sync.EventSyncService.sync_sports` calls the free `/events` endpoint and bulk-upserts events, then merges every `op_`, `op_live_` or `fduk_` event for the same match into each synced event (`odds_lambda.storage.event_merge.EventMerger.adopt_twins`, [Event merge](../storage/event-merge.md)); a failure is logged (`event_sync_failed`) and ignored. It runs on every invocation, before the gate, so `odds_lambda.scheduling.helpers.get_next_kickoff` sees fixtures. `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` leaves the status and scores of existing events alone ([events](../storage/events.md#upsert-verbs)).
 2. **Gate**: `decide_forward_resilient(sports, CADENCE, lookahead_days=settings.scheduler.lookahead_days)`. The cadence is `odds_lambda.jobs.fetch_odds.CADENCE` ([decision-engine](../scheduling/decision-engine.md#cadence)); it polls every 2 h within 3 h of a kickoff and every 3 h from 3 to 12 h to fit the free-tier quota ([odds-api-quota](odds-api-quota.md#scheduled-spend)). fetch-odds is the only job that takes `lookahead_days` from `odds_core.config.SchedulerConfig`, and it has no overnight window.
-3. **Pre-schedule** under the compound name. The rest of the run is inside [`odds_core.alerts.job_alert_context`](../operations/alerts.md#delivery) under that name, so a gated run also writes a heartbeat.
+3. **Pre-schedule** under the compound name; a failed booking sends a `scheduling_warning:<job>` warning when another booking is still to come or has succeeded, and a `scheduling_failure:<job>` critical when none survives (a skipped run's only booking, or a post-fetch booking after a failed pre-schedule; [alerts](../operations/alerts.md#delivery)). The rest of the run is inside [`odds_core.alerts.job_alert_context`](../operations/alerts.md#delivery) under that name, so a gated run also writes a heartbeat.
 4. **Skip** if the gate says so; otherwise **ingest**: `odds_lambda.ingestion.OddsIngestionService.ingest_sports`.
 5. **Quota alerts**: none; the health monitor is the only writer ([odds-api-quota](odds-api-quota.md)).
 6. **Empty-run check**: `odds_lambda.collection_calendar.require_rows_for_fixtures` raises `odds_lambda.collection_calendar.EmptyCollectionError` for an EPL run that stored no snapshot while a SCHEDULED fixture lies within 48 hours (`odds_lambda.jobs.fetch_odds.SOURCE`; sports it does not cover are skipped); the failure handler below sends the critical.
@@ -40,7 +40,7 @@ It runs `sports` as `[ctx.sport]` or `data_collection.sports`:
 
 ## Log events
 
-`fetch_odds_job_started`, `fetch_odds_executing` and `fetch_odds_next_scheduled` (`odds_lambda.jobs.fetch_odds.main`), `odds_snapshot_stored` (`odds_lambda.storage.writers.OddsWriter.store_odds_snapshot`) and `eventbridge_rule_updated` (`odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend._schedule_with_retry`).
+`fetch_odds_job_started`, `fetch_odds_executing`, `fetch_odds_next_scheduled`, `fetch_odds_scheduling_failed` (`odds_lambda.jobs.fetch_odds.main`), `odds_snapshot_stored` (`odds_lambda.storage.writers.OddsWriter.store_odds_snapshot`) and `eventbridge_rule_updated` (`odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend._schedule_with_retry`).
 
 ## Related
 

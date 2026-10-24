@@ -71,9 +71,9 @@ async def main(ctx: JobContext) -> None:
         logger.error("health_check_scheduling_failed", error=str(e), exc_info=True)
 
         # Send error alert
-        from odds_core.alerts import send_error
+        from odds_core.alerts import send_scheduling_failure
 
-        await send_error(f"Health check scheduling failed: {type(e).__name__}: {str(e)}")
+        await send_scheduling_failure("check-health", e, final=True)
 
         # Don't fail the job if scheduling fails - the health check itself succeeded
 

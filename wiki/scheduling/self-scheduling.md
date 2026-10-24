@@ -42,11 +42,11 @@ Five different failure behaviours exist across the jobs, and no code states whic
 
 | Job | Scheduling shape | If scheduling fails |
 |---|---|---|
-| `fetch-odds`, `fetch-scores`, `update-status` | pre and post | log and `odds_core.alerts.send_error`, continue |
+| `fetch-odds`, `fetch-scores`, `update-status` | pre and post | log and `odds_core.alerts.send_scheduling_failure` (critical when no booking survives, else warning), continue |
 | `fetch-oddsportal`, `fetch-betfair-exchange` | pre and post | pre-schedule failure raises; post logs only |
-| `fetch-oddsportal-results` | fixed next-day time in `finally`, no pre-schedule | log and `odds_core.alerts.send_critical`; a run that settles nothing while events are overdue sends a `results_stalled` warning |
-| `check-health` | after the work only, raw backend call | log and `odds_core.alerts.send_error` |
-| `fetch-polymarket` | after the work only, raw backend call | log and `odds_core.alerts.send_error` |
+| `fetch-oddsportal-results` | fixed next-day time in `finally`, no pre-schedule | log and `odds_core.alerts.send_scheduling_failure` (critical unless the run raised and the chain re-books); a run that settles nothing while events are overdue sends a `results_stalled` warning |
+| `check-health` | after the work only, raw backend call | log and `odds_core.alerts.send_scheduling_failure` (critical) |
+| `fetch-polymarket` | after the work only, raw backend call | log and `odds_core.alerts.send_scheduling_failure` (critical) |
 
 `fetch-oddsportal-results`, `check-health` and `fetch-polymarket` schedule only after their work, so a kill or exception ends the chain (#438). A hard kill skips the results job's `finally` (the scraper Lambda has a timeout, `deployment/aws/terraform/scraper.tf`). An exception in `odds_lambda.health_monitor.check_system_health` or in Polymarket's fetch body skips the reschedule (the Polymarket job is not bootstrapped on the production host). The `fetch-oddsportal` and `fetch-betfair-exchange` jobs pre-schedule, so an `odds_lambda.collection_calendar.EmptyCollectionError` or a failed league ends only that run, not the chain. On the local scheduler the health monitor's [schedule chain check](../operations/health-monitor.md#schedule-chain-check) alerts on an ended chain. A rule that was never rescheduled stays `DISABLED` on its `rate(1 day)` placeholder; see [Deployed state](job-deployment-matrix.md#deployed-state) for how to find those. The deploy workflows invoke every job after `terraform apply` to (re)start chains ([Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md), [CI/CD workflows](../operations/ci-cd-workflows.md)).
 

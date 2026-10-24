@@ -161,22 +161,6 @@ class AlertManager:
 alert_manager = AlertManager()
 
 
-# Convenience functions
-async def send_info(message: str):
-    """Send info alert."""
-    await alert_manager.alert(message, "info")
-
-
-async def send_warning(message: str):
-    """Send warning alert."""
-    await alert_manager.alert(message, "warning")
-
-
-async def send_error(message: str):
-    """Send error alert."""
-    await alert_manager.alert(message, "error")
-
-
 async def send_critical(message: str):
     """Send critical alert."""
     await alert_manager.alert(message, "critical")
@@ -285,17 +269,25 @@ async def send_recorded_alert(
     The one dedup rule for every alert that repeats while its condition holds: the first
     occurrence sends, later ones only once ``every`` has passed since the newest row.
     A ``reset_by`` row newer than the newest ``alert_type`` row starts a new condition
-    (a job's heartbeat ends its outage). The send is bounded by
+    (a job's heartbeat ends its outage). If the dedup read fails the alert is sent anyway.
+    The send is bounded by
     ``ALERT_SEND_TIMEOUT_SECONDS``; failures are logged, never raised.
 
     Returns True if sent, False if undeliverable, not yet due, or the send failed.
     """
     if not alert_manager.enabled:
         return False
+    alerted: datetime | None = None
     try:
         alerted = await open_alerted_at(alert_type, reset_by, session)
-        if alerted is not None and (now or datetime.now(UTC)) - alerted < every:
-            return False
+    except Exception:
+        # A database fault is often what is being alerted, so send rather than stay silent.
+        logger.error("alert_dedup_read_failed", alert_type=alert_type, exc_info=True)
+        if session is not None:
+            await session.rollback()
+    if alerted is not None and (now or datetime.now(UTC)) - alerted < every:
+        return False
+    try:
         async with asyncio.timeout(ALERT_SEND_TIMEOUT_SECONDS):
             await alert_manager.alert(message, severity)
         await record_to_alert_history(
@@ -307,6 +299,22 @@ async def send_recorded_alert(
             await session.rollback()
         return False
     return True
+
+
+async def send_scheduling_failure(job_name: str, error: Exception, *, final: bool) -> bool:
+    """Alert that ``job_name`` could not book its next run, once per ``stale_reminder_interval``.
+
+    A warning when another booking survives; critical when none does (``final``). They are
+    keyed apart so a warning never suppresses the critical.
+    """
+    alert_type = f"scheduling_failure:{job_name}" if final else f"scheduling_warning:{job_name}"
+    return await send_recorded_alert(
+        alert_type,
+        "critical" if final else "warning",
+        f"{'🚨' if final else '⚠️'} {job_name} could not book its next run: "
+        f"{type(error).__name__}: {error}",
+        every=stale_reminder_interval(),
+    )
 
 
 async def send_job_failure(job_name: str, error: Exception, *, now: datetime | None = None) -> None:

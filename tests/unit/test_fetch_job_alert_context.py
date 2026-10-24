@@ -162,6 +162,56 @@ class TestFetchOdds:
         assert odds_job.backend.booked > NOW + CHAIN_RETRY_DELAY
         odds_job.backend.schedule_next_execution.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    async def test_failed_pre_schedule_warns_and_failed_post_booking_is_final(
+        self, odds_job: SimpleNamespace, alerts: SimpleNamespace
+    ) -> None:
+        odds_job.ingestion.ingest_sports.return_value = SimpleNamespace(
+            sport_results=[], total_processed=0, total_events=0, total_failures=0
+        )
+
+        with (
+            patch.object(fetch_odds, "self_schedule", side_effect=RuntimeError("no backend")),
+            patch.object(fetch_odds, "send_scheduling_failure", new_callable=AsyncMock) as failure,
+        ):
+            await fetch_odds.main(JobContext(sport=EPL))
+
+        assert [c.args[0] for c in failure.call_args_list] == ["fetch-odds-epl"] * 2
+        assert [c.kwargs["final"] for c in failure.call_args_list] == [False, True]
+
+    @pytest.mark.asyncio
+    async def test_failed_only_booking_of_a_skipped_run_is_final(
+        self, odds_job: SimpleNamespace, alerts: SimpleNamespace
+    ) -> None:
+        odds_job.decide.return_value = _decision(should_execute=False)
+
+        with (
+            patch.object(fetch_odds, "self_schedule", side_effect=RuntimeError("no backend")),
+            patch.object(fetch_odds, "send_scheduling_failure", new_callable=AsyncMock) as failure,
+        ):
+            await fetch_odds.main(JobContext(sport=EPL))
+
+        assert failure.call_args_list[0].kwargs["final"] is True
+
+    @pytest.mark.asyncio
+    async def test_failed_post_booking_is_not_final_when_the_pre_schedule_stands(
+        self, odds_job: SimpleNamespace, alerts: SimpleNamespace
+    ) -> None:
+        odds_job.ingestion.ingest_sports.return_value = SimpleNamespace(
+            sport_results=[], total_processed=0, total_events=0, total_failures=0
+        )
+
+        with (
+            patch.object(
+                fetch_odds, "self_schedule", side_effect=[None, RuntimeError("no backend")]
+            ),
+            patch.object(fetch_odds, "send_scheduling_failure", new_callable=AsyncMock) as failure,
+        ):
+            await fetch_odds.main(JobContext(sport=EPL))
+
+        failure.assert_awaited_once()
+        assert failure.call_args.kwargs["final"] is False
+
 
 class TestFetchScores:
     @pytest.fixture

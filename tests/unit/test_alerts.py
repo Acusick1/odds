@@ -11,9 +11,9 @@ from odds_core.alerts import (
     job_alert_context,
     record_to_alert_history,
     send_critical,
-    send_error,
     send_job_failure,
-    send_warning,
+    send_recorded_alert,
+    send_scheduling_failure,
 )
 from odds_core.config import AlertConfig, SchedulerConfig, Settings, get_settings
 
@@ -171,23 +171,7 @@ class TestDiscordAlert:
             await alert.send("Test message", "error")
 
 
-class TestConvenienceFunctions:
-    """Test convenience functions for sending alerts."""
-
-    @pytest.mark.asyncio
-    async def test_send_warning_calls_alert_manager(self):
-        """send_warning should call alert manager with warning severity."""
-        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
-            await send_warning("Test warning")
-            mock_alert.assert_called_once_with("Test warning", "warning")
-
-    @pytest.mark.asyncio
-    async def test_send_error_calls_alert_manager(self):
-        """send_error should call alert manager with error severity."""
-        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
-            await send_error("Test error")
-            mock_alert.assert_called_once_with("Test error", "error")
-
+class TestSendCritical:
     @pytest.mark.asyncio
     async def test_send_critical_calls_alert_manager(self):
         """send_critical should call alert manager with critical severity."""
@@ -416,3 +400,44 @@ class TestSendJobFailure:
         await send_job_failure("test-job", ValueError("boom"), now=NOW)
 
         manager.alert.assert_not_called()
+
+
+class TestSendSchedulingFailure:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("final", "alert_type", "severity"),
+        [
+            (True, "scheduling_failure:fetch-odds-epl", "critical"),
+            (False, "scheduling_warning:fetch-odds-epl", "warning"),
+        ],
+    )
+    async def test_severity_and_key_follow_whether_the_booking_is_final(
+        self, final: bool, alert_type: str, severity: str
+    ) -> None:
+        with patch("odds_core.alerts.send_recorded_alert", new_callable=AsyncMock) as send:
+            await send_scheduling_failure("fetch-odds-epl", RuntimeError("no backend"), final=final)
+
+        assert send.call_args.args[:2] == (alert_type, severity)
+        assert "RuntimeError: no backend" in send.call_args.args[2]
+        assert send.call_args.kwargs["every"] == timedelta(
+            minutes=get_settings().alerts.stale_reminder_minutes
+        )
+        assert "reset_by" not in send.call_args.kwargs
+
+
+class TestSendRecordedAlertDedupFailure:
+    @pytest.mark.asyncio
+    async def test_unreadable_history_still_sends(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        manager = MagicMock(enabled=True, alert=AsyncMock())
+        record = AsyncMock(side_effect=ConnectionError("db down"))
+
+        async def unreachable(*_: object, **__: object) -> datetime | None:
+            raise ConnectionError("db down")
+
+        monkeypatch.setattr("odds_core.alerts.alert_manager", manager)
+        monkeypatch.setattr("odds_core.alerts.latest_sent_at", unreachable)
+        monkeypatch.setattr("odds_core.alerts.record_to_alert_history", record)
+
+        await send_recorded_alert("x", "critical", "boom", every=timedelta(hours=6))
+
+        manager.alert.assert_awaited_once_with("boom", "critical")
