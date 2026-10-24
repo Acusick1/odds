@@ -13,6 +13,9 @@ from sqlalchemy.orm import sessionmaker
 
 # Set required environment variables for testing BEFORE any imports of Settings
 os.environ.setdefault("ODDS_API_KEY", "test_api_key")
+# Overwritten, not defaulted: a developer's shell or .env can carry the real webhook.
+os.environ["DISCORD_WEBHOOK_URL"] = ""
+os.environ["ALERT_ENABLED"] = "false"
 
 
 @pytest.fixture(scope="session")
