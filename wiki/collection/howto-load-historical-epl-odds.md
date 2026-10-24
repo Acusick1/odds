@@ -11,7 +11,7 @@ status: stable
 
 # Load historical EPL odds
 
-The scripts load `odds_core.models.Event` and `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)) rows only, so the loaded events have no normalized `odds` rows and backtests skip them (#435). What each script reads, matches and writes is on [historical-ingest-scripts](historical-ingest-scripts.md). Run against the local database only: never set `DATABASE_URL` to production ([databases-and-environments](../foundations/databases-and-environments.md#environments)).
+The scripts load `odds_core.models.Event` and `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)) rows only, so the events they load have no normalized `odds` rows and backtests skip them (#435). What each script reads, matches and writes is on [historical-ingest-scripts](historical-ingest-scripts.md). Run against the local database only: never set `DATABASE_URL` to production ([databases-and-environments](../foundations/databases-and-environments.md#environments)).
 
 1. Scrape OddsPortal history.
    ```bash

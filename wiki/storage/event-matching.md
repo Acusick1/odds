@@ -17,6 +17,10 @@ sources:
   - odds_lambda.polymarket_odds.canonical_team
   - odds_lambda.polymarket_odds.EVENT_MATCH_WINDOW
   - odds_core.team.normalize_team_name
+  - odds_lambda.mlb_game_resolver
+mentions:
+  - odds_lambda.mlb_stats_fetcher.MlbStatsFetcher.fetch_results
+  - odds_lambda.mlb_stats_fetcher.MlbGameResult
 status: stable
 ---
 
@@ -44,6 +48,20 @@ There is no shared matcher for deciding which `events` row a piece of incoming d
 - **No normalization in the historical matcher.** `odds_lambda.oddsportal_common.find_existing_event` compares names as stored, so the historical path depends on names already being canonical.
 - **Alias gaps become NULL.** Injury and game-log matching fall back to the raw team name when `odds_lambda.polymarket_matching.normalize_team` returns `None` (the game-log writer tries its abbreviation map first), so an alias gap shows up as a NULL `event_id`. Injury reports are league-wide, so unmatched pairs are expected for teams not playing that day. Unmatched NBA rows keep `event_id` NULL and are invisible to per-event readers.
 - **Manual Polymarket linking.** Polymarket linking is manual and the fetch job does not call it ([Polymarket pipeline and tables](../collection/polymarket.md)).
+
+## MLB gamePk resolver
+
+`odds_lambda.mlb_game_resolver` maps listed MLB games to their MLB Stats API `gamePk`, the identity stored in `events.mlb_game_pk` ([Events table](events.md#columns)). No ingest path calls it yet, so every `mlb_game_pk` is NULL.
+
+`odds_lambda.mlb_game_resolver.resolve_batch` takes `odds_lambda.mlb_game_resolver.GameRow`s (home, away, start, and Betfair's game number when known) and makes one `odds_lambda.mlb_stats_fetcher.MlbStatsFetcher.fetch_results` range request over the MLB dates they span (split into 30-day calls only for longer spans). `odds_lambda.mlb_game_resolver.resolve_game_pks` returns, in input order, an `odds_lambda.mlb_game_resolver.ResolvedGame` (the `gamePk` and the `odds_lambda.mlb_game_resolver.ResolutionRule` that chose it) or an `odds_lambda.mlb_game_resolver.UnresolvedGame` with an `odds_lambda.mlb_game_resolver.UnresolvedReason`; `odds_lambda.mlb_game_resolver.resolve_batch` logs `mlb_game_unresolved` for each unresolved row.
+
+Rows and schedule slots are grouped by `odds_core.team.normalize_team_name` team pair and MLB date. A row's MLB date is the US Eastern date of its start (`odds_lambda.mlb_game_resolver.mlb_date`), so a 02:10Z start belongs to the previous day. A slot's date is the `dates[].date` it is listed under (`odds_lambda.mlb_stats_fetcher.MlbGameResult.schedule_date`), because a postponed slot stays under its original date while its `officialDate` moves to the day it is played. Every slot counts, postponed ones included, so a rescheduled game is found under both dates by one `gamePk`; the continuation slot of a resumed suspended game does not count. Within a group the first rule that applies wins:
+
+1. **One game**: that game, unless its start is more than `odds_lambda.mlb_game_resolver.MAX_SINGLE_GAME_GAP` from the row's and is not TBD.
+2. **Doubleheader**: the game with the row's game number; without one, when the batch lists as many un-numbered rows for the group as there are games, rows and games paired by start order. Order, not time, is the signal, because a TBD game 2 carries MLB's placeholder start a few minutes after game 1 while OddsPortal lists it at an estimated later time (#612).
+3. **Lone row**: the one game not yet Live or Final, when every started game began before the row's start.
+4. **Postponed slot**: the postponed slot whose start equals the row's, to the minute.
+5. Otherwise unresolved.
 
 How twins are merged and detected is on [Event merge](event-merge.md). The OddsWriter's own event handling, including how the live id embeds the start minute, is on [OddsWriter](odds-writer.md#find_or_create_event).
 

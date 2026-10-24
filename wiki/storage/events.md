@@ -31,6 +31,7 @@ status: stable
 - `odds_core.models.Event.status`: `odds_core.models.EventStatus` = scheduled, live, final, cancelled, postponed. Which job sets which status is on [Event status lifecycle](../collection/event-status-lifecycle.md). `odds_core.models.EventStatus.can_become` defines the allowed moves, FINAL being terminal.
 - `home_score`, `away_score`, `completed_at`: set only on completion (`odds_lambda.storage.writers.OddsWriter.update_event_status`).
 - `created_at`, `updated_at`.
+- `odds_core.models.Event.mlb_game_pk` (BIGINT, nullable): the MLB Stats API `gamePk` of an MLB event, unique where set (partial index `uq_events_mlb_game_pk`). Nothing writes it yet; [Event matching](event-matching.md#mlb-gamepk-resolver) describes the resolver that maps games to it.
 
 `odds_core.models.Event.model_post_init` runs `odds_core.team.normalize_team_name` on both team names at construction, so ORM-built events hold canonical aliases. `sport_key` is a plain string column; `odds_core.sports.SportKey` (`soccer_epl`, `baseball_mlb`, `basketball_nba`) is a typing `Literal` used by jobs and CLI, not a DB constraint ([Sport, market and bookmaker keys](../collection/sport-and-market-keys.md)).
 
