@@ -51,7 +51,7 @@ uv run pytest tests/unit tests/integration
 uv run pytest tests/unit/test_paper_trading.py -v
 ```
 
-Run unit and integration tests together; leave `tests/migration` to the deploy workflows ([AGENTS.md](../../AGENTS.md#tests)). What the suites run against, the shared fixtures in `tests/conftest.py`, the markers and the layout are in [Test suite](test-suite.md).
+Run unit and integration tests together; leave `tests/migration` to the deploy workflows ([AGENTS.md](../../AGENTS.md#tests)). What the suites run against, the shared fixtures in `tests/conftest.py`, the markers and the layout are in [Test suite](test-suite.md). A webhook exported in your shell or `.env` is safe: tests never post to it.
 
 ## Related
 
