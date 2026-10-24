@@ -65,6 +65,7 @@ _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
     "fetch-betfair-exchange": ("odds_lambda.jobs.fetch_betfair_exchange", "main"),
     "fetch-polymarket-odds": ("odds_lambda.jobs.fetch_polymarket_odds", "main"),
     "fetch-mlb-probables": ("odds_lambda.jobs.fetch_mlb_probables", "main"),
+    "run-candidates": ("odds_lambda.jobs.run_candidates", "main"),
 }
 
 # Bootstrap entry-point overrides: jobs listed here use a different function
@@ -84,10 +85,10 @@ _SPORT_SUFFIX_MAP: dict[str, SportKey] = {
 }
 
 # Jobs that must never run during a deploy smoke check, even when listed in
-# ``bootstrap_jobs``. ``agent-run`` places paper bets — executing it as part of
+# ``bootstrap_jobs``. ``agent-run`` and ``run-candidates`` place paper bets — executing it as part of
 # a pre-restart validation would pollute the live portfolio. The smoke command
 # skips these by default and only runs them under an explicit opt-in.
-_SMOKE_UNSAFE_JOBS: frozenset[str] = frozenset({"agent-run"})
+_SMOKE_UNSAFE_JOBS: frozenset[str] = frozenset({"agent-run", "run-candidates"})
 
 # Jobs whose runs spend Odds API quota units. The smoke command skips these by
 # default because every deploy would otherwise burn units off-schedule.
@@ -106,6 +107,7 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
         "fetch-betfair-exchange",
         "fetch-polymarket-odds",
         "fetch-mlb-probables",
+        "run-candidates",
     }
 )
 

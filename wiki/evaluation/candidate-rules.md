@@ -15,7 +15,7 @@ status: stable
 
 # Candidate rules
 
-A mechanical [candidate](candidate-registry.md)'s `rule` names a function in the rule registry. The live runner and the replay backtest are meant to call that one function, so a backtest and a forward test of one version run the same code ([goal and strategy](../foundations/goal-and-strategy.md#what-exists-today) lists what exists). Neither exists yet.
+A mechanical [candidate](candidate-registry.md)'s `rule` names a function in the rule registry. The [run-candidates job](run-candidates-job.md) and the replay backtest are meant to call that one function, so a backtest and a forward test of one version run the same code ([goal and strategy](../foundations/goal-and-strategy.md#what-exists-today) lists what exists). The job exists; the replay backtest does not yet.
 
 A mechanical candidate records the hash of its rule's code, so the YAML version check forces a new version when that code changes ([rule pinning](#rule-pinning)).
 
@@ -41,7 +41,7 @@ As-of-t rules:
 
 ### known_at
 
-`odds_lambda.candidate_rules.market_state.load_market_state` takes an optional `known_at`. When given, it also drops snapshots whose `created_at` is later than `known_at`: the data the system had stored by then. The live runner passes its run time and the parity check passes the trade's placed time, so neither sees a snapshot stamped before t but stored afterwards. A historical backtest passes `None`, because backfilled rows were created long after their snapshot times.
+`odds_lambda.candidate_rules.market_state.load_market_state` takes an optional `known_at`. When given, it also drops snapshots whose `created_at` is later than `known_at`: the data the system had stored by then. The [run-candidates job](run-candidates-job.md#decisions) passes its run time and the parity check passes the trade's placed time, so neither sees a snapshot stamped before t but stored afterwards. A historical backtest passes `None`, because backfilled rows were created long after their snapshot times.
 
 ## Rule interface
 
@@ -51,7 +51,7 @@ A rule is a function `(MarketState, params) -> list[BetIntent]`. `odds_lambda.ca
 
 ## Decision times
 
-`odds_lambda.candidate_rules.rules.decision_time` returns the kick-off minus the params' `minutes_before_kickoff`. The runner and the backtest both use it.
+`odds_lambda.candidate_rules.rules.decision_time` returns the kick-off minus the params' `minutes_before_kickoff`. The [run-candidates job](run-candidates-job.md#decisions) and the backtest both use it.
 
 ## Params validation
 

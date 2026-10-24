@@ -16,6 +16,7 @@ Backtests replay a strategy over stored events. The experiment pages record what
 - [Candidate rules](candidate-rules.md) — The market state a mechanical rule reads at decision time, the bets it returns, the rule registry, decision times, params validation, rule pinning and the exchange-gap rule.
 - [Experiment scripts and artifacts](experiment-scripts.md) — Layout of experiments/, config and script conventions, the verification artifact files, and the inventory of scripts.
 - [Retail-EV evaluation](retail-ev-evaluation.md) — The one-look evaluation of a frozen retail-EV model on a window of events, with its spec, the window-end guard, the refit blocks, the keep-bar statistics and verdict, the coverage report, the descriptive slices and the output files.
+- [The run-candidates job](run-candidates-job.md) — How the scheduled run-candidates job takes each active mechanical candidate's decisions at their decision times, what it records, when it skips a decision, and how it books its next run.
 
 ### Explanation
 

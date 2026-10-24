@@ -38,6 +38,10 @@ class PortfolioSummary:
     push_count: int
 
 
+# Flat-stake candidate trades record no bankroll and stay out of the agent's bankroll maths.
+BANKROLL_SIZED = PaperTrade.bankroll_before.is_not(None)  # type: ignore[union-attr]
+
+
 def _check_candidate(name: str, version: int, event: Event, market: str) -> None:
     """Raise ValueError unless the registry's candidate may place this bet today at this version."""
     candidate = next((c for c in load_candidates(candidates_dir()) if c.name == name), None)
@@ -67,18 +71,25 @@ async def place_trade(
     bookmaker: str,
     price_decimal: float,
     stake: float,
-    bankroll: float,
+    bankroll: float | None,
     reasoning: str | None = None,
     confidence: float | None = None,
     candidate_name: str | None = None,
     candidate_version: int | None = None,
+    decision_id: int | None = None,
 ) -> PaperTrade:
-    """Place a new paper trade. Validates stake against bankroll and the candidate."""
+    """Place a new paper trade. Validates stake against bankroll and the candidate.
+
+    ``bankroll=None`` places a flat-stake candidate trade, which records no bankroll.
+    """
     if price_decimal <= 1.0:
         raise ValueError(f"Decimal price must exceed 1.0, got {price_decimal}")
     if stake <= 0:
         raise ValueError("Stake must be positive")
-    if stake > bankroll:
+    if bankroll is None:
+        if candidate_name is None:
+            raise ValueError("A trade without a candidate needs a bankroll")
+    elif stake > bankroll:
         raise ValueError(f"Stake {stake} exceeds available bankroll {bankroll}")
     if market not in SETTLEABLE_MARKETS:
         raise ValueError(
@@ -113,6 +124,7 @@ async def place_trade(
         confidence=confidence,
         candidate_name=candidate_name,
         candidate_version=candidate_version,
+        decision_id=decision_id,
         git_sha=current_git_sha(),
     )
     session.add(trade)
@@ -161,7 +173,8 @@ async def settle_trades(session: AsyncSession) -> list[PaperTrade]:
 
         trade.result = result
         trade.pnl = pnl
-        trade.bankroll_after = trade.bankroll_before + pnl
+        if trade.bankroll_before is not None:
+            trade.bankroll_after = trade.bankroll_before + pnl
         trade.settled_at = now
 
         session.add(trade)
@@ -171,14 +184,14 @@ async def settle_trades(session: AsyncSession) -> list[PaperTrade]:
     return settled
 
 
-async def get_open_trades(session: AsyncSession) -> list[PaperTrade]:
-    """Return all unsettled paper trades."""
-    stmt = (
-        select(PaperTrade)
-        .where(PaperTrade.settled_at.is_(None))  # type: ignore[union-attr]
-        .order_by(PaperTrade.placed_at.desc())  # type: ignore[union-attr]
-    )
-    result = await session.execute(stmt)
+async def get_open_trades(
+    session: AsyncSession, *, include_flat_stake: bool = True
+) -> list[PaperTrade]:
+    """Return all unsettled paper trades, optionally only those sized from a bankroll."""
+    stmt = select(PaperTrade).where(PaperTrade.settled_at.is_(None))  # type: ignore[union-attr]
+    if not include_flat_stake:
+        stmt = stmt.where(BANKROLL_SIZED)
+    result = await session.execute(stmt.order_by(PaperTrade.placed_at.desc()))  # type: ignore[union-attr]
     return list(result.scalars().all())
 
 
@@ -203,9 +216,9 @@ async def get_portfolio_summary(
     *,
     initial_bankroll: float = 1000.0,
 ) -> PortfolioSummary:
-    """Compute aggregate portfolio metrics."""
+    """Compute aggregate portfolio metrics over the trades sized from a bankroll."""
     # Total counts
-    total_stmt = select(func.count()).select_from(PaperTrade)
+    total_stmt = select(func.count()).select_from(PaperTrade).where(BANKROLL_SIZED)
     total_trades = (await session.execute(total_stmt)).scalar_one()
 
     # Settled aggregates
@@ -213,7 +226,7 @@ async def get_portfolio_summary(
         func.count(),
         func.coalesce(func.sum(PaperTrade.pnl), 0.0),
         func.coalesce(func.sum(PaperTrade.stake), 0.0),
-    ).where(PaperTrade.settled_at.is_not(None))  # type: ignore[union-attr]
+    ).where(PaperTrade.settled_at.is_not(None), BANKROLL_SIZED)  # type: ignore[union-attr]
     settled_row = (await session.execute(settled_stmt)).one()
     settled_count: int = settled_row[0]
     total_pnl: float = float(settled_row[1])
@@ -222,7 +235,7 @@ async def get_portfolio_summary(
     # Open trade exposure
     open_stmt = (
         select(func.count(), func.coalesce(func.sum(PaperTrade.stake), 0.0)).where(
-            PaperTrade.settled_at.is_(None)
+            PaperTrade.settled_at.is_(None), BANKROLL_SIZED
         )  # type: ignore[union-attr]
     )
     open_row = (await session.execute(open_stmt)).one()
@@ -231,13 +244,19 @@ async def get_portfolio_summary(
 
     # Win/loss/push counts
     win_stmt = (
-        select(func.count()).select_from(PaperTrade).where(PaperTrade.result == TradeResult.WIN)
+        select(func.count())
+        .select_from(PaperTrade)
+        .where(PaperTrade.result == TradeResult.WIN, BANKROLL_SIZED)
     )
     loss_stmt = (
-        select(func.count()).select_from(PaperTrade).where(PaperTrade.result == TradeResult.LOSS)
+        select(func.count())
+        .select_from(PaperTrade)
+        .where(PaperTrade.result == TradeResult.LOSS, BANKROLL_SIZED)
     )
     push_stmt = (
-        select(func.count()).select_from(PaperTrade).where(PaperTrade.result == TradeResult.PUSH)
+        select(func.count())
+        .select_from(PaperTrade)
+        .where(PaperTrade.result == TradeResult.PUSH, BANKROLL_SIZED)
     )
 
     win_count = (await session.execute(win_stmt)).scalar_one()
@@ -262,10 +281,10 @@ async def get_portfolio_summary(
 
 
 async def get_exposure_by_event(session: AsyncSession) -> list[tuple[str, float]]:
-    """Return total open stake per event."""
+    """Return total open stake per event over the trades sized from a bankroll."""
     stmt = (
         select(PaperTrade.event_id, func.sum(PaperTrade.stake))
-        .where(PaperTrade.settled_at.is_(None))  # type: ignore[union-attr]
+        .where(PaperTrade.settled_at.is_(None), BANKROLL_SIZED)  # type: ignore[union-attr]
         .group_by(PaperTrade.event_id)
         .order_by(func.sum(PaperTrade.stake).desc())
     )
