@@ -17,6 +17,11 @@ from odds_core.models import (
 from sqlalchemy import select
 
 
+@pytest.fixture(autouse=True)
+def deliverable_alerts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("odds_core.alerts.alert_manager.enabled", True)
+
+
 async def _create_recent_heartbeats(session) -> None:
     """Insert recent heartbeat records for all monitored jobs."""
     from odds_core.config import AlertConfig
@@ -258,7 +263,6 @@ class TestHealthCheckIntegration:
             with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
                 mock_settings = get_settings()
                 mock_settings.alerts.alert_enabled = True  # Enable alerts
-                mock_settings.alerts.alert_rate_limit_minutes = 30
                 mock_get_settings.return_value = mock_settings
 
                 from odds_lambda.health_monitor import HealthMonitor
@@ -290,6 +294,84 @@ class TestHealthCheckIntegration:
         assert any(
             record.alert_type == "stale_data:oddsportal:soccer_epl" for record in alert_records
         )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("condition", ["data_quality_errors", "quota_critical"])
+    async def test_persistent_warning_repeats_only_after_reminder_interval(
+        self, test_session, condition
+    ):
+        """A condition that stays true alerts once, then again each reminder interval."""
+        await _create_recent_snapshot(test_session, minutes_ago=20)
+        await _create_recent_heartbeats(test_session)
+        test_session.add(
+            Event(
+                id="test_event",
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=datetime.now(UTC),
+                home_team="Test Team A",
+                away_team="Test Team B",
+                status=EventStatus.SCHEDULED,
+            )
+        )
+        await test_session.commit()
+        if condition == "data_quality_errors":
+            for i in range(12):
+                test_session.add(
+                    DataQualityLog(
+                        event_id="test_event",
+                        severity="error",
+                        issue_type="suspicious_odds",
+                        description=f"Test error {i}",
+                        created_at=datetime.now(UTC) - timedelta(hours=i),
+                    )
+                )
+        else:
+            test_session.add(
+                FetchLog(
+                    fetch_time=datetime.now(UTC) - timedelta(minutes=30),
+                    sport_key="basketball_nba",
+                    events_count=10,
+                    bookmakers_count=8,
+                    success=True,
+                    api_quota_remaining=25,
+                )
+            )
+        await test_session.commit()
+
+        from odds_lambda.health_monitor import HealthMonitor
+
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
+            settings = get_settings()
+            settings.alerts.alert_enabled = True
+            settings.api.quota = 500
+            reminder = timedelta(minutes=settings.alerts.stale_reminder_minutes)
+
+            async def run_check() -> list[str]:
+                status = await HealthMonitor(test_session, settings).check_system_health()
+                return status.alerts_sent
+
+            assert condition in await run_check()
+            for _ in range(3):
+                assert condition not in await run_check()
+            assert mock_alert.call_count == 1
+
+            row = (
+                await test_session.execute(
+                    select(AlertHistory).where(AlertHistory.alert_type == condition)
+                )
+            ).scalar_one()
+            row.sent_at = datetime.now(UTC) - reminder - timedelta(minutes=1)
+            await test_session.commit()
+
+            row.sent_at = datetime.now(UTC) - timedelta(minutes=60)
+            await test_session.commit()
+            assert condition not in await run_check()
+
+            row.sent_at = datetime.now(UTC) - reminder - timedelta(minutes=1)
+            await test_session.commit()
+            assert condition in await run_check()
+            assert mock_alert.call_count == 2
 
     @pytest.mark.asyncio
     async def test_health_check_with_configurable_thresholds(self, test_session):

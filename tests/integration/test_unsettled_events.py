@@ -50,7 +50,7 @@ class TestUnsettledEvents:
         kwargs = send.await_args.kwargs
         assert kwargs["alert_type"] == "unsettled_events:soccer_epl"
         assert kwargs["severity"] == "warning"
-        assert kwargs["rate_limit_minutes"] == UNSETTLED_ALERT_MINUTES == 1440
+        assert kwargs["every"] == timedelta(minutes=UNSETTLED_ALERT_MINUTES) == timedelta(hours=24)
         assert kwargs["context"]["event_ids"] == ["stuck-scheduled", "stuck-live"]
 
     @pytest.mark.asyncio

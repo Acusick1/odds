@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_core.config import AlertConfig, APIConfig, SchedulerConfig, Settings
-from odds_core.models import AlertHistory
 from odds_lambda.health_monitor import HealthMetrics, HealthMonitor, HealthStatus, StaleSource
 from odds_lambda.scheduling.backends.base import JobStatus, ScheduledJob
 
@@ -17,7 +16,7 @@ def mock_settings():
     return Settings(
         alerts=AlertConfig(
             alert_enabled=True,
-            alert_rate_limit_minutes=30,
+            stale_reminder_minutes=360,
             quota_warning_threshold=0.2,
             quota_critical_threshold=0.1,
             stale_data_hours=2,
@@ -38,59 +37,6 @@ async def mock_session():
 
 class TestHealthMonitor:
     """Test HealthMonitor class."""
-
-    @pytest.mark.asyncio
-    async def test_should_send_alert_when_no_recent_alerts(self, mock_session, mock_settings):
-        """Should allow alert when no recent alerts of same type."""
-        monitor = HealthMonitor(mock_session, mock_settings)
-
-        # Mock query to return 0 recent alerts
-        mock_result = MagicMock()
-        mock_result.scalar_one.return_value = 0
-        mock_session.execute.return_value = mock_result
-
-        should_send = await monitor._should_send_alert("test_alert")
-
-        assert should_send is True
-
-    @pytest.mark.asyncio
-    async def test_should_not_send_alert_when_recent_alert_exists(
-        self, mock_session, mock_settings
-    ):
-        """Should block alert when recent alert of same type exists."""
-        monitor = HealthMonitor(mock_session, mock_settings)
-
-        # Mock query to return 1 recent alert
-        mock_result = MagicMock()
-        mock_result.scalar_one.return_value = 1
-        mock_session.execute.return_value = mock_result
-
-        should_send = await monitor._should_send_alert("test_alert")
-
-        assert should_send is False
-
-    @pytest.mark.asyncio
-    async def test_record_alert_stores_in_database(self, mock_session, mock_settings):
-        """Should store alert record in database."""
-        monitor = HealthMonitor(mock_session, mock_settings)
-
-        await monitor._record_alert(
-            alert_type="test_alert",
-            severity="warning",
-            message="Test message",
-            context={"key": "value"},
-        )
-
-        # Verify session.add was called with AlertHistory
-        mock_session.add.assert_called_once()
-        added_record = mock_session.add.call_args[0][0]
-        assert isinstance(added_record, AlertHistory)
-        assert added_record.alert_type == "test_alert"
-        assert added_record.severity == "warning"
-        assert added_record.message == "Test message"
-
-        # Verify commit was called
-        mock_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_send_alert_respects_disabled_flag(self, mock_session, mock_settings):

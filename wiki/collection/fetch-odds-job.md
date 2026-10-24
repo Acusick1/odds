@@ -1,7 +1,7 @@
 ---
 type: reference
 title: The fetch-odds job
-description: Event sync, gate, pre/post-schedule, quota alerts and log events of odds_lambda.jobs.fetch_odds.
+description: Event sync, gate, pre/post-schedule and log events of odds_lambda.jobs.fetch_odds.
 sources:
   - odds_lambda.jobs.fetch_odds.main
   - odds_lambda.jobs.fetch_odds.CADENCE
@@ -28,13 +28,13 @@ It runs `sports` as `[ctx.sport]` or `data_collection.sports`:
 2. **Gate**: `decide_forward_resilient(sports, CADENCE, lookahead_days=settings.scheduler.lookahead_days)`. The cadence is `odds_lambda.jobs.fetch_odds.CADENCE` ([decision-engine](../scheduling/decision-engine.md#cadence)); it polls every 2 h within 3 h of a kickoff and every 3 h from 3 to 12 h to fit the free-tier quota ([odds-api-quota](odds-api-quota.md#scheduled-spend)). fetch-odds is the only job that takes `lookahead_days` from `odds_core.config.SchedulerConfig`, and it has no overnight window.
 3. **Pre-schedule** under the compound name. The rest of the run is inside [`odds_core.alerts.job_alert_context`](../operations/alerts.md#delivery) under that name, so a gated run also writes a heartbeat.
 4. **Skip** if the gate says so; otherwise **ingest**: `odds_lambda.ingestion.OddsIngestionService.ingest_sports`.
-5. **Quota alerts**: per sport, `quota_remaining / settings.api.quota` below `quota_critical_threshold` sends `odds_core.alerts.send_critical`; below `quota_warning_threshold` sends `odds_core.alerts.send_warning` ([odds-api-quota](odds-api-quota.md)). These calls use no `alert_type`, so they repeat on every run below threshold and are not recorded in `alert_history` (#442).
+5. **Quota alerts**: none; the health monitor is the only writer ([odds-api-quota](odds-api-quota.md)).
 6. **Empty-run check**: `odds_lambda.collection_calendar.require_rows_for_fixtures` raises `odds_lambda.collection_calendar.EmptyCollectionError` for an EPL run that stored no snapshot while a SCHEDULED fixture lies within 48 hours (`odds_lambda.jobs.fetch_odds.SOURCE`; sports it does not cover are skipped); the failure handler below sends the critical.
 7. **Post-schedule** after re-querying the next kickoff.
 
 ## Failure behaviour
 
-- A raised run sends the `job_failure:fetch-odds-epl` critical once per outage (the first failure since its last heartbeat, then a reminder every `odds_core.config.AlertConfig.stale_reminder_minutes`) through `odds_core.alerts.job_alert_context` and re-raises; a clean or gated run writes `heartbeat:fetch-odds-epl`, which `odds_core.config.AlertConfig.heartbeat_expectations` expects every 49 h (the 48 h opening-tier interval plus 1 h; the job does not pause overnight). The stale-source check leaves a source alone while that failure is recent ([health-monitor](../operations/health-monitor.md#stale-data-check)). On AWS the Lambda handler sends a second critical (#442; [lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
+- A raised run sends the `job_failure:fetch-odds-epl` critical once per outage (the first failure since its last heartbeat, then a reminder every `odds_core.config.AlertConfig.stale_reminder_minutes`, 360 min) through `odds_core.alerts.job_alert_context` and re-raises; a clean or gated run writes `heartbeat:fetch-odds-epl`, which `odds_core.config.AlertConfig.heartbeat_expectations` expects every 49 h (the 48 h opening-tier interval plus 1 h; the job does not pause overnight). The stale-source check leaves a source alone while that failure is recent ([health-monitor](../operations/health-monitor.md#stale-data-check)). On AWS the Lambda handler sends a second critical (#442; [lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
 - On the local scheduler a run past `odds_lambda.scheduling.runner.JOB_TIMEOUT` is cancelled and alerted. A failed run is re-booked 15 minutes later only when it booked nothing, and the pre-schedule has already booked the next tier interval (30 minutes at the closing tier), so a failing API call is retried at the normal cadence, not every 15 minutes ([Local scheduler](../scheduling/local-scheduler.md#scheduling-primitives)).
 - Invoked without a `sport` (for example `odds scheduler run-once fetch-odds`), the job runs all configured sports, MLB included, and reschedules under the bare `fetch-odds` name, which matches no bootstrapped schedule or EventBridge rule (#470).
 

@@ -213,18 +213,12 @@ class AlertConfig(BaseSettings):
     )
     stale_reminder_minutes: int = Field(
         default=360,
-        description="Minutes between repeat alerts while a source stays stale or a job keeps failing",
+        description="Minutes between repeats of an alert while its condition holds (stale source, failing job, health-check warning)",
     )
 
     betfair_close_lookback_hours: int = Field(
         default=24,
         description="Hours after kick-off an EPL event is still checked for a live Betfair close",
-    )
-
-    # Alert rate limiting
-    alert_rate_limit_minutes: int = Field(
-        default=30,
-        description="Minimum minutes between identical alerts to prevent spam",
     )
 
     # Data quality monitoring

@@ -9,7 +9,8 @@ sources:
   - odds_core.alerts.job_alert_context
   - odds_core.alerts.send_job_failure
   - odds_core.alerts.send_job_warning
-  - odds_core.alerts.check_rate_limit
+  - odds_core.alerts.send_recorded_alert
+  - odds_core.alerts.send_outage_warning
   - odds_core.alerts.record_to_alert_history
   - odds_core.config.AlertConfig
   - odds_core.models.AlertHistory
@@ -30,38 +31,38 @@ status: stable
 Helpers:
 
 - `odds_core.alerts.send_info`, `odds_core.alerts.send_warning`, `odds_core.alerts.send_error`, `odds_core.alerts.send_critical`: one-shot, not rate limited, not recorded.
-- `check_rate_limit(alert_type, rate_limit_minutes=30)`: true if no `alert_history` row of that type is newer than the window. The default is the constant `_DEFAULT_RATE_LIMIT_MINUTES`, a hard-coded 30 minutes; `ALERT_RATE_LIMIT_MINUTES` governs only the health monitor (#384).
-- `record_to_alert_history(alert_type, severity, message)`: inserts a row. It runs whether or not the POST succeeded, so a failed delivery still suppresses retries for the window (#457, #384). The rate-limit read and the insert are separate sessions with no lock, so two concurrent jobs of one type can both send (#457).
-- `send_job_failure(job_name, error)`: if the manager is enabled and `odds_core.alerts.outage_alert_due` holds, send a critical and record it. `odds_core.alerts.send_outage_warning` applies the same rule to a warning. An outage runs from a job's first failure to its next `heartbeat:<job_name>`: it alerts on the first failure and again every `odds_core.config.AlertConfig.stale_reminder_minutes` (360) while it lasts, whatever the job's cadence; `odds_core.alerts.job_outage_alerted_at` is the single definition of an open outage, shared with the health monitor. Used by `odds_core.alerts.job_alert_context` and by `odds_lambda.scheduling.runner.run_chain_job` for a run cancelled by its timeout.
+- `odds_core.alerts.send_recorded_alert(alert_type, severity, message, *, every, reset_by=None, context=None, session=None, now=None)`: the one dedup rule for every alert that repeats while its condition holds. It returns False when the manager is undeliverable; otherwise it reads the newest `alert_history` row of `alert_type` (ignored when a newer `reset_by` row exists, which starts a new condition), and sends and records only if there is none or it is older than `every`. The send is bounded by `odds_core.alerts.ALERT_SEND_TIMEOUT_SECONDS`, and a failure is logged, rolls back a caller-supplied `session` and returns False. The record uses `session` and `context` when given (the health monitor passes both). The read and the insert have no lock, so two concurrent senders of one type can both send (#457).
+- `odds_core.alerts.record_to_alert_history(alert_type, severity, message)`: inserts a row, whether or not the POST succeeded, so a failed delivery still suppresses retries for the interval (#457, #384); heartbeats use it directly.
+- `odds_core.alerts.send_job_failure(job_name, error)` and `odds_core.alerts.send_outage_warning` call `odds_core.alerts.send_recorded_alert` with `reset_by=heartbeat:<job_name>` and `every` of `odds_core.config.AlertConfig.stale_reminder_minutes` (360). An outage runs from a job's first failure to its next `heartbeat:<job_name>`, whatever the job's cadence; `odds_core.alerts.job_outage_alerted_at` is the single definition of an open outage, shared with the health monitor. Used by `odds_core.alerts.job_alert_context` and by `odds_lambda.scheduling.runner.run_chain_job` for a run cancelled by its timeout.
 - `job_alert_context(job_name)`: async context manager. On exception: `odds_core.alerts.send_job_failure`, the send is bounded by `odds_core.alerts.ALERT_SEND_TIMEOUT_SECONDS`, and a failing or timed-out send is logged (`job_failure_alert_failed`) and never masks the job's exception, which is always re-raised unchanged. On clean exit: record `heartbeat:<job_name>` (silent; under `SCHEDULER_DRY_RUN` `odds_core.alerts.record_to_alert_history` writes nothing, so no heartbeat row; failures to record are logged only).
-- `send_job_warning(alert_type, message)`: rate-limited warning for soft failures (empty scrape); returns whether it sent. Used by the [OddsPortal](../collection/fetch-oddsportal-job.md) and [Betfair](../collection/betfair-exchange.md) jobs.
+- `odds_core.alerts.send_job_warning(alert_type, message)`: warning for soft failures (empty scrape) through `odds_core.alerts.send_recorded_alert` at most every 30 minutes (`odds_core.alerts.JOB_WARNING_INTERVAL`); returns whether it sent. Used by the [OddsPortal](../collection/fetch-oddsportal-job.md) and [Betfair](../collection/betfair-exchange.md) jobs.
 
 On AWS, the Lambda handler also sends its own critical on any exception ([lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
 
-`odds_core.config.AlertConfig` (no env prefix; its docstring says "infrastructure for future use", yet it drives deployed alerting): `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED` (default false), quota thresholds 0.2 and 0.1, `STALE_DATA_HOURS` 2, `ALERT_RATE_LIMIT_MINUTES` 30, `DATA_QUALITY_ERROR_THRESHOLD` 10, `heartbeat_expectations` (hours per compound job name such as `fetch-polymarket-odds-epl`, `fetch-odds-epl` or `fetch-espn-fixtures`, 2 to 49 by default), `heartbeat_retention_days` 7 ([configuration](../foundations/configuration.md)).
+`odds_core.config.AlertConfig` (no env prefix; its docstring says "infrastructure for future use", yet it drives deployed alerting): `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED` (default false), quota thresholds 0.2 and 0.1, `STALE_DATA_HOURS` 2, `DATA_QUALITY_ERROR_THRESHOLD` 10, `heartbeat_expectations` (hours per compound job name such as `fetch-polymarket-odds-epl`, `fetch-odds-epl` or `fetch-espn-fixtures`, 2 to 49 by default), `heartbeat_retention_days` 7 ([configuration](../foundations/configuration.md)).
 
 ## Alert history
 
-`odds_core.models.AlertHistory` (`alert_history`) holds `alert_type`, `severity`, `message`, `sent_at`, nullable JSON `context`, with composite index `ix_alert_type_sent_at` that serves both rate-limit and heartbeat lookups. It is one table serving as dedup ledger and heartbeat log. Writers: `odds_core.alerts.record_to_alert_history` and `odds_lambda.health_monitor.HealthMonitor._record_alert`. Readers: `odds_core.alerts.check_rate_limit`, `odds_lambda.health_monitor.HealthMonitor._should_send_alert`, `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats`, `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats`.
+`odds_core.models.AlertHistory` (`alert_history`) holds `alert_type`, `severity`, `message`, `sent_at`, nullable JSON `context`, with composite index `ix_alert_type_sent_at` that serves both dedup and heartbeat lookups. It is one table serving as dedup ledger and heartbeat log. Writer: `odds_core.alerts.record_to_alert_history`. Readers: `odds_core.alerts.latest_sent_at` (behind `odds_core.alerts.send_recorded_alert`), `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats`, `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats`.
 
-| `alert_type` (the rate-limit key) | Source | Severity |
+| `alert_type` (the dedup key) | Source | Severity |
 |---|---|---|
 | `job_failure:<job>` | `odds_core.alerts.job_alert_context`; `odds_lambda.scheduling.runner.run_chain_job` for a run that exceeds its timeout | critical |
 | `job_chain_rebooked:<job>` (a failed local run re-booked 15 minutes on) | `odds_lambda.scheduling.runner.run_chain_job` through `odds_core.alerts.send_outage_warning` (once per outage) | warning |
 | `heartbeat:<job>` | `odds_core.alerts.job_alert_context` on success | info, never sent to Discord |
 | `job_empty:<job>` | `odds_core.alerts.send_job_warning` in the Polymarket odds job | warning |
-| `stale_data:<source>:<sport>` (repeats every `stale_reminder_minutes`, not the common window) | `odds_lambda.health_monitor.HealthMonitor.check_stale_sources` | critical |
-| `missing_betfair_close` (sent after kick-off as a coverage record; one alert per run listing events not already alerted in the lookback) | `odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes` | critical |
+| `stale_data:<source>:<sport>` (same rule as every monitor alert) | `odds_lambda.health_monitor.HealthMonitor.check_stale_sources` | critical |
+| `missing_betfair_close` (sent after kick-off as a coverage record; one alert per run listing events not already alerted in the lookback, so it ignores the reminder interval) | `odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes` | critical |
 | `quota_low`, `quota_critical` | `odds_lambda.health_monitor.HealthMonitor.check_api_quota` | warning, critical |
 | `data_quality_errors` | `odds_lambda.health_monitor.HealthMonitor.check_data_quality` | warning |
 | `duplicate_events:<sport>`, `repeated_fixtures:<sport>` | `odds_lambda.health_monitor.HealthMonitor.check_event_identity` | warning |
-| `unsettled_events:<sport>` (league sports; current-season events pending over 24 h after kick-off; repeats once a day, not the common window) | `odds_lambda.health_monitor.HealthMonitor.check_unsettled_events` | warning |
+| `unsettled_events:<sport>` (league sports; current-season events pending over 24 h after kick-off; reminds once a day, not every `stale_reminder_minutes`) | `odds_lambda.health_monitor.HealthMonitor.check_unsettled_events` | warning |
 | `results_stalled:<sport>` (an OddsPortal results run settled nothing while events that kicked off after its last settling run are pending over 24 h) | `odds_lambda.jobs.fetch_oddsportal_results.record_run_outcome` | warning |
 | `missing_heartbeat:<job>` | `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats` | warning |
 | `dead_schedule_chain:<job>` (a bootstrapped self-scheduling job with no run booked or one overdue) | `odds_lambda.health_monitor.HealthMonitor.check_schedule_chains` | critical |
 | `health_check_failure` (the monitor itself raised) | `odds_lambda.health_monitor.HealthMonitor.check_system_health` | critical |
 
-The default window is 30 minutes (`odds_core.alerts.check_rate_limit`'s argument for jobs, `odds_core.config.AlertConfig.alert_rate_limit_minutes` for the monitor). The key is `alert_type` alone, so a warning suppresses a critical of the same type for the window; the quota pair works only because the types differ (#384).
+A monitor alert goes through `odds_lambda.health_monitor.HealthMonitor._send_alert`, which calls `odds_core.alerts.send_recorded_alert` with `every` of `odds_core.config.AlertConfig.stale_reminder_minutes` (360), however often `check-health` runs. A health-check condition has no heartbeat to close it as a job outage has, so it is "new" when no alert of its type falls inside the interval: one that clears and returns within 6 h stays muted until the interval ends. Nothing is sent when a condition clears. The key is `alert_type` alone, so a warning suppresses a critical of the same type; the quota pair works only because the types differ. API quota is raised only by the monitor (`quota_low`, `quota_critical`); `fetch-odds` sends none (#587).
 
 Heartbeats are distinguished from sent alerts only by the `heartbeat:` prefix, which `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` also filters on (`startswith`); nothing enforces that heartbeat rows are silent and alert rows were sent (#384).
 

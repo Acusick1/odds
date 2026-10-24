@@ -12,7 +12,7 @@ import asyncio
 from datetime import timedelta
 
 import structlog
-from odds_core.alerts import job_alert_context, send_critical, send_error, send_warning
+from odds_core.alerts import job_alert_context, send_error
 from odds_core.config import Settings, get_settings
 
 from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
@@ -172,36 +172,6 @@ async def main(ctx: JobContext) -> None:
                     total_events=sport_result.total_events,
                     quota_remaining=sport_result.quota_remaining,
                 )
-
-                if sport_result.quota_remaining is not None:
-                    quota_fraction = sport_result.quota_remaining / app_settings.api.quota
-                    percentage_remaining = round(quota_fraction * 100, 1)
-
-                    if quota_fraction < app_settings.alerts.quota_critical_threshold:
-                        logger.error(
-                            "api_quota_critical",
-                            sport=sport_result.sport_key,
-                            remaining=sport_result.quota_remaining,
-                            quota=app_settings.api.quota,
-                            percentage=percentage_remaining,
-                        )
-                        await send_critical(
-                            f"🚨 API quota critical: {sport_result.quota_remaining} requests "
-                            f"remaining ({percentage_remaining}% of {app_settings.api.quota})"
-                        )
-
-                    elif quota_fraction < app_settings.alerts.quota_warning_threshold:
-                        logger.warning(
-                            "api_quota_low",
-                            sport=sport_result.sport_key,
-                            remaining=sport_result.quota_remaining,
-                            quota=app_settings.api.quota,
-                            percentage=percentage_remaining,
-                        )
-                        await send_warning(
-                            f"⚠️ API quota low: {sport_result.quota_remaining} requests "
-                            f"remaining ({percentage_remaining}% of {app_settings.api.quota})"
-                        )
 
             await require_rows_for_fixtures(
                 SOURCE, {r.sport_key: r.processed_events for r in results.sport_results}
