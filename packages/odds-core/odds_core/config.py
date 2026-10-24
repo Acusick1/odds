@@ -331,13 +331,6 @@ class BetfairConfig(BaseSettings):
         description="SSM SecureString parameter holding the key PEM (Lambda-only)",
     )
 
-    # Sport scoping override. ``None`` means "all sports the BFE adapter supports"
-    # (resolved at job-execution time from ``odds_lambda.betfair.SPORT_CONFIG``).
-    sports: list[SportKey] | None = Field(
-        default=None,
-        description="Override sport scope; defaults to all BFE-supported sports",
-    )
-
     # Look-ahead window for event discovery (covers an EPL gameweek + MLB week)
     lookahead_hours: int = Field(
         default=168, description="Hours ahead to look when discovering events"

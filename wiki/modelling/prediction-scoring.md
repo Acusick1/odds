@@ -18,7 +18,7 @@ status: stable
 
 ## Where it runs
 
-It is not scheduled on its own: the [fetch-oddsportal job](../collection/fetch-oddsportal-job.md) calls it after ingest when `model_supports_sport(ctx.sport)`. `main(ctx)` is also registered as `score-predictions`, so `odds scheduler run-once score-predictions-epl` runs it by hand ([job registry](../scheduling/job-registry.md)).
+It is not scheduled on its own: the [fetch-oddsportal job](../collection/fetch-oddsportal-job.md) calls it after ingest when `model_supports_sport(ctx.sport)`. `main(ctx)` is also registered as `score-predictions` and requires a sport, so `odds scheduler run-once score-predictions-epl` runs it by hand ([job registry](../scheduling/job-registry.md)).
 
 - No Lambda runs `fetch-oddsportal`, so inline scoring runs only where a local scheduler runs it ([local scheduler](../scheduling/local-scheduler.md), [AWS infrastructure](../operations/aws-infrastructure.md)).
 - A model saved with a base-margin column (`margin_feature`, the `retail_ev` residual arm) is refused before scoring with `base_margin_model_unsupported`, because the job calls the bare XGBoost model, whose predictions omit the margin.

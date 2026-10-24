@@ -201,7 +201,7 @@ class TestSettings:
             assert settings.polymarket.collect_player_props is True
 
     def test_betfair_defaults(self):
-        """Defaults: disabled, no creds, sports=None (resolved from SPORT_CONFIG at runtime)."""
+        """Defaults: disabled, no creds."""
         from odds_core.config import BetfairConfig
 
         with patch.dict(os.environ, {}, clear=True):
@@ -212,7 +212,6 @@ class TestSettings:
             assert cfg.app_key is None
             assert cfg.cert_file is None
             assert cfg.cert_key is None
-            assert cfg.sports is None
             assert cfg.lookahead_hours == 168
 
     def test_betfair_env_overrides(self):

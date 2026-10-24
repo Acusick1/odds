@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import typer
-from odds_cli.commands.scheduler import _print_scheduled_jobs, smoke
+from odds_cli.commands.scheduler import _print_scheduled_jobs, run_once, smoke
 from odds_lambda.scheduling.backends.base import JobStatus, ScheduledJob
 from rich.console import Console
 from typer.testing import CliRunner
@@ -230,3 +230,39 @@ class TestSmokeCommand:
 
         assert result.exit_code == 0
         assert recorder.ran_bases == {"fetch-oddsportal", "fetch-espn-fixtures"}
+
+
+class TestRunOnceCommand:
+    """``odds scheduler run-once`` requires a sport for per-sport jobs."""
+
+    @staticmethod
+    def _invoke(job: str, recorder: _JobRecorder):
+        test_app = typer.Typer()
+        test_app.command()(run_once)
+        with (
+            patch("odds_cli.commands.scheduler.get_settings", return_value=_settings([], [])),
+            patch("odds_lambda.scheduling.jobs.get_job_function", new=recorder),
+        ):
+            return runner.invoke(test_app, [job])
+
+    def test_per_sport_job_without_sport_fails(self) -> None:
+        recorder = _JobRecorder()
+        result = self._invoke("fetch-odds", recorder)
+
+        assert result.exit_code == 1
+        assert "per-sport job" in result.output
+        assert recorder.ran == []
+
+    def test_per_sport_job_with_suffix_runs_for_that_sport(self) -> None:
+        recorder = _JobRecorder()
+        result = self._invoke("fetch-odds-epl", recorder)
+
+        assert result.exit_code == 0
+        assert recorder.ran == [("fetch-odds", "soccer_epl")]
+
+    def test_global_job_runs_without_sport(self) -> None:
+        recorder = _JobRecorder()
+        result = self._invoke("update-status", recorder)
+
+        assert result.exit_code == 0
+        assert recorder.ran == [("update-status", None)]

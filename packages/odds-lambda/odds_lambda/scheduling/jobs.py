@@ -196,15 +196,27 @@ def sport_key_to_suffix(sport_key: str) -> str | None:
 def make_compound_job_name(base_job_name: str, sport: str | None) -> str:
     """Build the compound job name used for self-scheduling.
 
-    When a sport is provided and the job supports per-sport routing,
-    appends the sport suffix so the EventBridge rule name matches
-    Terraform (e.g. ``"fetch-odds"`` + ``"soccer_epl"`` -> ``"fetch-odds-epl"``).
+    A per-sport job appends the sport suffix so the schedule id matches the
+    rule name (e.g. ``"fetch-odds"`` + ``"soccer_epl"`` -> ``"fetch-odds-epl"``).
+
+    Raises:
+        ValueError: If a per-sport job is given no sport, since the bare name
+            matches no schedule and would start an unmanaged chain.
     """
-    if sport and base_job_name in _PER_SPORT_JOBS:
+    if base_job_name in _PER_SPORT_JOBS:
+        if not sport:
+            raise ValueError(f"Job '{base_job_name}' requires a sport")
         suffix = sport_key_to_suffix(sport)
         if suffix:
             return f"{base_job_name}-{suffix}"
     return base_job_name
+
+
+def require_sport(ctx: JobContext, job_name: str) -> SportKey:
+    """Return ``ctx.sport`` for a per-sport job, raising if it is unset."""
+    if ctx.sport is None:
+        raise ValueError(f"Job '{job_name}' requires a sport")
+    return ctx.sport
 
 
 def resolve_job_name(compound_name: str) -> tuple[str, SportKey | None]:
@@ -339,8 +351,7 @@ def get_bootstrap_function(job_name: str) -> Callable[[JobContext], Awaitable[No
         if job_name in _PER_SPORT_JOBS:
 
             async def _per_sport_wrapper(ctx: JobContext) -> None:
-                assert ctx.sport, f"Job '{job_name}' requires a sport in JobContext"
-                await raw_fn(ctx.sport)
+                await raw_fn(require_sport(ctx, job_name))
 
             return _per_sport_wrapper
         else:

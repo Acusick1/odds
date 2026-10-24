@@ -41,7 +41,7 @@ from odds_lambda.scheduling.decision import (
     ScheduleDecision,
 )
 from odds_lambda.scheduling.helpers import self_schedule
-from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
+from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -213,23 +213,22 @@ async def _log_failure(sport_key: SportKey, snapshot_time: datetime, error: str)
 
 
 async def main(ctx: JobContext) -> None:
+    sport = require_sport(ctx, "fetch-polymarket-odds")
     settings = get_settings()
     if not settings.polymarket.enabled:
         logger.info("polymarket_odds_disabled", reason="polymarket.enabled=False")
         return
 
-    sport: SportKey | None = ctx.sport
-    if sport is not None and sport not in MATCH_ODDS_SPORTS:
+    if sport not in MATCH_ODDS_SPORTS:
         logger.error("polymarket_odds_unknown_sport", sport=sport, supported=MATCH_ODDS_SPORTS)
         return
-    target_sports: list[SportKey] = [sport] if sport else list(MATCH_ODDS_SPORTS)
 
     compound_job_name = make_compound_job_name("fetch-polymarket-odds", sport)
-    overnight = OVERNIGHT_WINDOWS.get(target_sports[0]) if len(target_sports) == 1 else None
+    overnight = OVERNIGHT_WINDOWS.get(sport)
 
     async def _reschedule(label: str) -> ScheduleDecision:
         decision = await decide_collection_run(
-            target_sports, CADENCE, overnight=overnight, stored_only=True
+            [sport], CADENCE, overnight=overnight, stored_only=True
         )
         assert decision.next_execution is not None  # noqa: S101
         try:
@@ -250,35 +249,33 @@ async def main(ctx: JobContext) -> None:
 
     if not decision.should_execute:
         async with job_alert_context(compound_job_name):
-            logger.info("polymarket_odds_dormant", sports=target_sports, reason=decision.reason)
+            logger.info("polymarket_odds_dormant", sport=sport, reason=decision.reason)
         return
 
     snapshot_time = datetime.now(UTC)
-    all_stats: list[IngestionStats] = []
-    failures: list[str] = []
+    stats: IngestionStats | None = None
+    failure: str | None = None
     async with job_alert_context(compound_job_name):
-        for sport_key in target_sports:
-            try:
-                all_stats.append(await ingest_sport(sport_key, snapshot_time))
-            except Exception as e:
-                logger.error(
-                    "polymarket_odds_sport_ingestion_failed",
-                    sport=sport_key,
-                    error=str(e),
-                    exc_info=True,
-                )
-                failures.append(f"{sport_key}: {type(e).__name__}: {e}")
-                if not isinstance(e, EmptyListingError):
-                    await _log_failure(sport_key, snapshot_time, failures[-1])
+        try:
+            stats = await ingest_sport(sport, snapshot_time)
+        except Exception as e:
+            logger.error(
+                "polymarket_odds_sport_ingestion_failed",
+                sport=sport,
+                error=str(e),
+                exc_info=True,
+            )
+            failure = f"{sport}: {type(e).__name__}: {e}"
+            if not isinstance(e, EmptyListingError):
+                await _log_failure(sport, snapshot_time, failure)
 
-        matches_seen = sum(s.matches_seen for s in all_stats)
-        if matches_seen > 0 and sum(s.snapshots_stored for s in all_stats) == 0:
+        if stats is not None and stats.matches_seen > 0 and stats.snapshots_stored == 0:
             await send_job_warning(
                 f"job_empty:{compound_job_name}",
-                f"{compound_job_name} stored 0 snapshots from {matches_seen} match(es).",
+                f"{compound_job_name} stored 0 snapshots from {stats.matches_seen} match(es).",
             )
 
         await _reschedule("post-fetch")
 
-        if failures:
-            raise RuntimeError(f"{compound_job_name} failed: {'; '.join(failures)}")
+        if failure is not None:
+            raise RuntimeError(f"{compound_job_name} failed: {failure}")

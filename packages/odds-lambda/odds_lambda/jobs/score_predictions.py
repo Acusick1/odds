@@ -13,7 +13,6 @@ or ad-hoc scoring runs outside the scrape loop).
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 
 import numpy as np
@@ -33,7 +32,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.model_loader import get_cached_version, load_model
-from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
+from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 
 logger = structlog.get_logger()
 
@@ -229,12 +228,8 @@ async def main(ctx: JobContext) -> None:
     """Main job entry point."""
     from odds_core.alerts import job_alert_context
 
-    sport = ctx.sport
+    sport = require_sport(ctx, "score-predictions")
 
     async with job_alert_context(make_compound_job_name("score-predictions", sport)):
         logger.info("score_predictions_started", sport=sport)
         await score_events(sport=sport)
-
-
-if __name__ == "__main__":
-    asyncio.run(main(JobContext()))

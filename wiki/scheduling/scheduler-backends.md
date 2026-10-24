@@ -98,7 +98,7 @@ Failures return a 500 body rather than raising, so Lambda counts the invocation 
 
 On an exception the handler logs `lambda_failed` and calls `odds_core.alerts.send_critical` directly with the job name, in addition to the job's own alert (#442). That path does not touch `odds_core.models.AlertHistory`, so it is never rate limited. A job wrapped in [`odds_core.alerts.job_alert_context`](../operations/alerts.md#delivery) that raises sends its own critical first, once per outage; jobs without the wrapper send their own `odds_core.alerts.send_critical` before re-raising ([Alerts](../operations/alerts.md)). The local backend has no handler: `odds_lambda.scheduling.runner.run_scheduled_job` bounds each run, alerts a timeout and re-books a failed chain instead ([Local scheduler](local-scheduler.md#scheduling-primitives)).
 
-With a bare `fetch-odds` and no `sport`, the job runs every configured sport and reschedules under the bare name, which matches no rule, so manual invocations always pass `sport` ([Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md#invoke-manually)).
+A per-sport job invoked without a sport raises `ValueError`, so the handler returns the 500 body. Pass `sport` or a sport-suffixed job name ([Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md#invoke-manually)).
 
 ## Related
 

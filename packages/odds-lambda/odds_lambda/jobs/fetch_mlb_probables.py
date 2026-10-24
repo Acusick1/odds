@@ -25,7 +25,7 @@ from odds_core.database import async_session_maker
 
 from odds_lambda.collection_calendar import EmptyCollectionError, event_calendar
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher, dates_for_window
-from odds_lambda.scheduling.jobs import JobContext
+from odds_lambda.scheduling.jobs import JobContext, require_sport
 from odds_lambda.storage.mlb_pitcher_writer import MlbPitcherWriter
 
 logger = structlog.get_logger()
@@ -43,13 +43,14 @@ async def main(ctx: JobContext) -> None:
     """Fetch probable pitchers for today + next 3 UTC days.
 
     Raises:
-        ValueError: If ``ctx.sport`` is provided and does not match the sport
+        ValueError: If ``ctx.sport`` is unset or does not match the sport
             this job serves.
     """
     from odds_core.alerts import job_alert_context
 
-    if ctx.sport is not None and ctx.sport != SPORT_KEY:
-        raise ValueError(f"fetch-mlb-probables only supports {SPORT_KEY}, got sport={ctx.sport!r}")
+    sport = require_sport(ctx, "fetch-mlb-probables")
+    if sport != SPORT_KEY:
+        raise ValueError(f"fetch-mlb-probables only supports {SPORT_KEY}, got sport={sport!r}")
 
     app_settings = get_settings()
     now = datetime.now(UTC)

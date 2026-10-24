@@ -68,7 +68,7 @@ Deployed AWS state cannot be verified from the repo. Only `terraform.tfvars.exam
 Query the account with `odds scheduler list-jobs --backend aws` (needs `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX` and credentials). Every rule should be listed as cancelled (disabled). Compare it with `odds scheduler list-jobs` on the production host to find a job running in both places.
 
 - `scripts/verify-schedules.sh` fails disabled, placeholder-rate and past-year rules, so it fails every rule while AWS is dormant. #383 tracks the orphans from when the rules ran.
-- A Lambda payload without `sport` runs every configured sport and reschedules under the bare name, which matches no rule ([Lambda handler](scheduler-backends.md#lambda-handler)).
+- A Lambda payload for a per-sport job without `sport` raises `ValueError` ([Lambda handler](scheduler-backends.md#lambda-handler)).
 
 [Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md) covers the rule, target and permission commands.
 

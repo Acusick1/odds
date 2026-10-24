@@ -8,7 +8,6 @@ This job:
 4. Self-schedules next execution based on game proximity
 """
 
-import asyncio
 from datetime import timedelta
 
 import structlog
@@ -25,7 +24,7 @@ from odds_lambda.scheduling.decision import (
     decide_forward_resilient,
 )
 from odds_lambda.scheduling.helpers import self_schedule
-from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
+from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 
 logger = structlog.get_logger()
 
@@ -72,8 +71,8 @@ async def main(ctx: JobContext) -> None:
     5. Schedule next run via backend
     """
     app_settings = get_settings()
-    sport = ctx.sport
-    sports = [sport] if sport else app_settings.data_collection.sports
+    sport = require_sport(ctx, "fetch-odds")
+    sports = [sport]
 
     logger.info(
         "fetch_odds_job_started",
@@ -81,10 +80,6 @@ async def main(ctx: JobContext) -> None:
         sport=sport,
         sports=sports,
     )
-
-    if not sports:
-        logger.warning("fetch_odds_no_sports_configured")
-        return
 
     # Sync upcoming events first (free, 0 quota units).
     # Failures here should not block odds ingestion.
@@ -205,7 +200,3 @@ async def main(ctx: JobContext) -> None:
         else None,
         tier=post_decision.tier.value if post_decision.tier else None,
     )
-
-
-if __name__ == "__main__":
-    asyncio.run(main(JobContext()))

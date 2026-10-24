@@ -20,7 +20,6 @@ Interval table:
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -37,7 +36,7 @@ from odds_lambda.oddsportal_adapter import MatchOdds, convert_market
 from odds_lambda.oddsportal_client import OddsPortalClient, OddsPortalError
 from odds_lambda.scheduling.decision import CadenceConfig, ScheduleDecision
 from odds_lambda.scheduling.helpers import self_schedule
-from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
+from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -283,24 +282,16 @@ async def main(ctx: JobContext) -> None:
     from odds_core.config import get_settings
 
     settings = get_settings()
-    sport = ctx.sport
+    sport = require_sport(ctx, "fetch-oddsportal")
 
-    # Resolve which leagues to scrape
-    if sport:
-        spec = _LEAGUE_SPEC_BY_SPORT.get(sport)
-        if spec is None:
-            logger.error("unknown_sport_key", sport=sport, available=list(_LEAGUE_SPEC_BY_SPORT))
-            return
-        specs = [spec]
-    else:
-        specs = LEAGUE_SPECS
+    spec = _LEAGUE_SPEC_BY_SPORT.get(sport)
+    if spec is None:
+        logger.error("unknown_sport_key", sport=sport, available=list(_LEAGUE_SPEC_BY_SPORT))
+        return
 
     compound_job_name = make_compound_job_name("fetch-oddsportal", sport)
-    # Combined job (no --sport) uses first spec's overnight window.
-    # Production invokes per-sport; only relevant for local multi-league runs.
-    primary_spec = specs[0]
-    overnight = (primary_spec.overnight_start_utc, primary_spec.overnight_resume_utc)
-    sport_keys = [s.sport_key for s in specs]
+    overnight = (spec.overnight_start_utc, spec.overnight_resume_utc)
+    sport_keys = [spec.sport_key]
 
     async def _reschedule(label: str) -> ScheduleDecision:
         decision = await decide_collection_run(sport_keys, CADENCE, overnight=overnight)
@@ -332,66 +323,53 @@ async def main(ctx: JobContext) -> None:
         logger.info(
             "fetch_oddsportal_started",
             sport=sport,
-            leagues=len(specs),
         )
 
-        all_stats: list[IngestionStats] = []
-        failures: list[str] = []
+        try:
+            stats = await ingest_league(spec)
+        except Exception as e:
+            logger.error(
+                "league_failed",
+                league=spec.league,
+                error=str(e),
+                exc_info=True,
+            )
+            raise RuntimeError(
+                f"{compound_job_name} failed: {spec.league}: {type(e).__name__}: {e}"
+            ) from e
 
-        for spec in specs:
-            try:
-                stats = await ingest_league(spec)
-                all_stats.append(stats)
-            except Exception as e:
-                failures.append(f"{spec.league}: {type(e).__name__}: {e}")
-                logger.error(
-                    "league_failed",
-                    league=spec.league,
-                    error=str(e),
-                    exc_info=True,
-                )
-
-        total_scraped = sum(s.matches_scraped for s in all_stats)
-        total_snapshots = sum(s.snapshots_stored for s in all_stats)
-        total_errors = sum(len(s.errors) for s in all_stats)
+        total_scraped = stats.matches_scraped
 
         logger.info(
             "fetch_oddsportal_completed",
-            leagues_succeeded=len(all_stats),
-            leagues_failed=len(failures),
             total_matches_scraped=total_scraped,
-            total_snapshots_stored=total_snapshots,
-            total_errors=total_errors,
+            total_snapshots_stored=stats.snapshots_stored,
+            total_errors=len(stats.errors),
         )
 
-        if failures:
-            raise RuntimeError(f"{compound_job_name} failed: {'; '.join(failures)}")
-        checked: list[tuple[LeagueSpec, IngestionStats]] = []
-        for spec, stats in zip(specs, all_stats, strict=True):
-            if stats.all_listed_started:
-                logger.warning(
-                    "oddsportal_empty_run_check_skipped",
-                    sport=spec.sport_key,
-                    reason="every listed event has already started",
-                    events_listed=stats.events_listed,
-                    latest_listed_start=stats.latest_listed_start,
-                )
-                continue
-            checked.append((spec, stats))
-        await require_rows_for_fixtures(
-            SOURCE,
-            {spec.sport_key: stats.snapshots_stored for spec, stats in checked},
-            errors_by_sport={spec.sport_key: stats.errors for spec, stats in checked},
-        )
+        if stats.all_listed_started:
+            logger.warning(
+                "oddsportal_empty_run_check_skipped",
+                sport=spec.sport_key,
+                reason="every listed event has already started",
+                events_listed=stats.events_listed,
+                latest_listed_start=stats.latest_listed_start,
+            )
+        else:
+            await require_rows_for_fixtures(
+                SOURCE,
+                {spec.sport_key: stats.snapshots_stored},
+                errors_by_sport={spec.sport_key: stats.errors},
+            )
 
     # Outside job_alert_context so scoring failures don't fire scrape alerts.
     try:
         from odds_lambda.model_loader import model_supports_sport
 
-        if model_supports_sport(ctx.sport):
+        if model_supports_sport(sport):
             from odds_lambda.jobs.score_predictions import score_events
 
-            score_stats = await score_events(sport=ctx.sport)
+            score_stats = await score_events(sport=sport)
             logger.info("fetch_oddsportal_scoring_complete", **score_stats)
         else:
             logger.info("fetch_oddsportal_scoring_skipped", sport=sport)
@@ -407,7 +385,3 @@ async def main(ctx: JobContext) -> None:
     # and reschedule at the updated interval.
     if total_scraped > 0:
         await _reschedule("post-scrape")
-
-
-if __name__ == "__main__":
-    asyncio.run(main(JobContext()))

@@ -997,30 +997,6 @@ class TestOddsPortalJob:
 
         assert alerts.heartbeats == []
 
-    async def test_skipped_sport_does_not_mask_another_sport_with_no_rows(
-        self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
-    ) -> None:
-        await seed(datetime.now(UTC) + timedelta(hours=20))
-        by_league = {
-            "england-premier-league": fetch_oddsportal.IngestionStats(
-                league="england-premier-league", events_listed=1, upcoming_listed=0
-            ),
-            "mlb": fetch_oddsportal.IngestionStats(
-                league="mlb", events_listed=2, upcoming_listed=1
-            ),
-        }
-        monkeypatch.setattr(
-            fetch_oddsportal,
-            "ingest_league",
-            AsyncMock(side_effect=lambda spec: by_league[spec.league]),
-        )
-        required = AsyncMock()
-        monkeypatch.setattr(fetch_oddsportal, "require_rows_for_fixtures", required)
-
-        await fetch_oddsportal.main(JobContext())
-
-        assert list(required.await_args.args[1]) == ["baseball_mlb"]
-
     async def test_zero_rows_without_fixtures_writes_a_heartbeat(
         self, monkeypatch: pytest.MonkeyPatch, alerts: _AlertRecorder
     ) -> None:
@@ -1060,7 +1036,6 @@ class TestBetfairJob:
         _schedule_stubs(monkeypatch, fetch_betfair_exchange, "decide_collection_run")
         settings = MagicMock()
         settings.betfair.enabled = True
-        settings.betfair.sports = None
         monkeypatch.setattr(fetch_betfair_exchange, "get_settings", lambda: settings)
         monkeypatch.setattr(
             fetch_betfair_exchange, "resolve_cert_paths", lambda bf: ("cert", "key")

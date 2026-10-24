@@ -7,7 +7,6 @@ it via AlertManager. Skips sending when both sections are empty.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -20,7 +19,7 @@ from odds_core.sports import SportKey
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.scheduling.jobs import JobContext
+from odds_lambda.scheduling.jobs import JobContext, require_sport
 
 logger = structlog.get_logger()
 
@@ -347,15 +346,14 @@ async def main(ctx: JobContext) -> None:
 
     from odds_lambda.scheduling.jobs import make_compound_job_name
 
-    sport = ctx.sport
-    sport_key = sport or DEFAULT_SPORT_KEY
+    sport = require_sport(ctx, "daily-digest")
     lookback_hours = ctx.lookback_hours
     lookahead_hours = ctx.lookahead_hours
 
     async with job_alert_context(make_compound_job_name("daily-digest", sport)):
         logger.info(
             "daily_digest_started",
-            sport_key=sport_key,
+            sport_key=sport,
             lookback_hours=lookback_hours,
             lookahead_hours=lookahead_hours,
         )
@@ -363,10 +361,6 @@ async def main(ctx: JobContext) -> None:
         stats = await send_digest(
             lookback_hours=lookback_hours,
             lookahead_hours=lookahead_hours,
-            sport_key=sport_key,
+            sport_key=sport,
         )
         logger.info("daily_digest_complete", **stats)
-
-
-if __name__ == "__main__":
-    asyncio.run(main(JobContext()))
