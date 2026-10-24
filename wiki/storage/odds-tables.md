@@ -27,6 +27,7 @@ Odds are stored twice ([How odds are stored](odds-storage-model.md)). `odds_core
 - `event_id` (FK), `snapshot_time` (tz-aware), `raw_data` (JSON), `bookmaker_count`, `created_at`.
 - `fetch_tier` (string value of the [fetch tier](fetch-tier.md) enum: `in_play`, `closing`, `pregame`, `sharp`, `early`, `opening`) and `hours_until_commence`, both nullable.
 - `api_request_id`: free-text provenance tag, see [Provenance](#provenance).
+- Unique: `uq_odds_snapshot_id_event (id, event_id)`, the target of the composite foreign key from [predictions](../modelling/prediction-scoring.md#predictions-table), which ties a prediction to a snapshot of its own event.
 - Indexes: single-column `event_id`, `snapshot_time`, `fetch_tier`; composite `ix_event_snapshot_time (event_id, snapshot_time)` and `ix_event_tier (event_id, fetch_tier)`.
 
 ## raw_data format

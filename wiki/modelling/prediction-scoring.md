@@ -37,7 +37,9 @@ Returned counts: `events_checked`, `snapshots_scored`, `snapshots_skipped`, `err
 
 ## Predictions table
 
-`odds_core.prediction_models.Prediction` (`predictions`): `event_id`, `snapshot_id` (both FKs), `model_name`, `model_version`, `predicted_clv`, `created_at`, unique on `(event_id, snapshot_id, model_name)`, indexed on `(model_name, created_at)`.
+`odds_core.prediction_models.Prediction` (`predictions`): `event_id` (FK to `events`), `snapshot_id`, `model_name`, `model_version`, `predicted_clv`, `created_at`, unique on `(event_id, snapshot_id, model_name)`, indexed on `(model_name, created_at)`.
+
+A prediction's snapshot must belong to its event: the composite foreign key `fk_prediction_snapshot_event` on `(snapshot_id, event_id)` references the unique pair `(id, event_id)` of `odds_snapshots` ([odds_snapshots](../storage/odds-tables.md#odds_snapshots)), so the database rejects a mismatched row. The key is `DEFERRABLE INITIALLY DEFERRED`, checked at commit, so [merging events](../storage/event-merge.md#merging) can move `odds_snapshots.event_id` and `predictions.event_id` in either order. The scorer only scores snapshots of the event it writes the row for.
 
 - `model_version` is the S3 ETag from `odds_lambda.model_loader.get_cached_version`, or `"unknown"`, not the version label given to `odds model publish`.
 - Each snapshot is scored, so one event accumulates a prediction per snapshot; consumers pick the latest (the [daily digest](../operations/daily-digest.md) uses the highest `snapshot_id`), and the MCP `odds_mcp.server.get_predictions` tool returns stored rows only ([MCP market tools](../agent/mcp-market-tools.md)).

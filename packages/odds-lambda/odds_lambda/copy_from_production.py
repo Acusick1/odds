@@ -221,8 +221,9 @@ class ProductionDataCopier:
     def _local_snapshot_id(prediction: Prediction, snapshot_ids: dict[int, int]) -> int:
         if prediction.snapshot_id not in snapshot_ids:
             raise ValueError(
-                f"prediction {prediction.id} references production snapshot "
-                f"{prediction.snapshot_id}, which does not belong to event {prediction.event_id}"
+                f"prediction {prediction.id} of event {prediction.event_id} references "
+                f"production snapshot {prediction.snapshot_id}, which belongs to another event; "
+                "the source database has not run the migration that forbids this (#531)"
             )
         return snapshot_ids[prediction.snapshot_id]
 

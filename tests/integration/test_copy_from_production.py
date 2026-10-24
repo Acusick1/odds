@@ -11,6 +11,7 @@ from odds_cli.commands import copy_from_prod as copy_cli
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.odds_math import american_to_decimal
 from odds_core.prediction_models import Prediction
+from odds_lambda import copy_from_production
 from odds_lambda.copy_from_production import CopyStats, ProductionDataCopier
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -249,9 +250,23 @@ class TestCopyPreservesColumns:
 
 
 class TestCopyFailures:
+    def test_prediction_of_another_events_snapshot_names_the_event(self) -> None:
+        prediction = Prediction(
+            id=7,
+            event_id="evt_b",
+            snapshot_id=500,
+            model_name="m",
+            model_version="1",
+            predicted_clv=0.0,
+        )
+
+        with pytest.raises(ValueError, match="evt_b"):
+            ProductionDataCopier._local_snapshot_id(prediction, {600: 1})
+
     @pytest.mark.asyncio
     async def test_failed_event_is_rolled_back_and_reported_not_counted_as_copied(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         prod_session_maker: async_sessionmaker[AsyncSession],
         local_session_maker: async_sessionmaker[AsyncSession],
     ) -> None:
@@ -259,17 +274,19 @@ class TestCopyFailures:
         await _seed_prod_event(
             prod_session_maker, "evt_b", first_snapshot_id=600, kickoff=KICKOFF + timedelta(hours=3)
         )
-        async with prod_session_maker() as session:
-            session.add(
-                Prediction(
-                    event_id="evt_b",
-                    snapshot_id=500,
-                    model_name="other",
-                    model_version="v1",
-                    predicted_clv=0.0,
-                )
-            )
-            await session.commit()
+        real_insert = copy_from_production.insert
+
+        odds_inserts = 0
+
+        def failing_insert(model: Any) -> Any:
+            nonlocal odds_inserts
+            if model is Odds:
+                odds_inserts += 1
+                if odds_inserts == 2:
+                    raise RuntimeError("odds insert failed")
+            return real_insert(model)
+
+        monkeypatch.setattr(copy_from_production, "insert", failing_insert)
         copier = _copier(prod_session_maker, local_session_maker)
 
         stats = await copier.copy_events(*WINDOW, SPORT)

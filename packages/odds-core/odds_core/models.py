@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, Column, DateTime, Float, Index
+from sqlalchemy import JSON, CheckConstraint, Column, DateTime, Float, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from odds_core.odds_math import decimal_to_american, decimal_to_implied_probability
@@ -130,6 +130,7 @@ class OddsSnapshot(SQLModel, table=True):
     __table_args__ = (
         Index("ix_event_snapshot_time", "event_id", "snapshot_time"),
         Index("ix_event_tier", "event_id", "fetch_tier"),
+        UniqueConstraint("id", "event_id", name="uq_odds_snapshot_id_event"),
     )
 
 
