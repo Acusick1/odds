@@ -950,9 +950,17 @@ class TestOddsPortalJob:
         monkeypatch.setattr("odds_lambda.model_loader.model_supports_sport", lambda sport: False)
 
     @staticmethod
-    def _ingest(monkeypatch: pytest.MonkeyPatch, snapshots_stored: int) -> None:
+    def _ingest(
+        monkeypatch: pytest.MonkeyPatch,
+        snapshots_stored: int,
+        events_listed: int = 0,
+        upcoming_listed: int = 0,
+    ) -> None:
         stats = fetch_oddsportal.IngestionStats(
-            league="england-premier-league", snapshots_stored=snapshots_stored
+            league="england-premier-league",
+            snapshots_stored=snapshots_stored,
+            events_listed=events_listed,
+            upcoming_listed=upcoming_listed,
         )
         monkeypatch.setattr(fetch_oddsportal, "ingest_league", AsyncMock(return_value=stats))
 
@@ -966,6 +974,51 @@ class TestOddsPortalJob:
             await fetch_oddsportal.main(JobContext(sport="soccer_epl"))
 
         assert alerts.heartbeats == []
+
+    async def test_listing_of_only_started_events_passes_with_fixtures(
+        self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
+    ) -> None:
+        await seed(datetime.now(UTC) + timedelta(hours=20))
+        self._ingest(monkeypatch, 0, events_listed=1, upcoming_listed=0)
+
+        await fetch_oddsportal.main(JobContext(sport="soccer_epl"))
+
+        assert alerts.heartbeats == ["heartbeat:fetch-oddsportal-epl"]
+
+    async def test_upcoming_events_with_zero_rows_still_fails(
+        self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
+    ) -> None:
+        await seed(datetime.now(UTC) + timedelta(hours=20))
+        self._ingest(monkeypatch, 0, events_listed=2, upcoming_listed=1)
+
+        with pytest.raises(EmptyCollectionError):
+            await fetch_oddsportal.main(JobContext(sport="soccer_epl"))
+
+        assert alerts.heartbeats == []
+
+    async def test_skipped_sport_does_not_mask_another_sport_with_no_rows(
+        self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
+    ) -> None:
+        await seed(datetime.now(UTC) + timedelta(hours=20))
+        by_league = {
+            "england-premier-league": fetch_oddsportal.IngestionStats(
+                league="england-premier-league", events_listed=1, upcoming_listed=0
+            ),
+            "mlb": fetch_oddsportal.IngestionStats(
+                league="mlb", events_listed=2, upcoming_listed=1
+            ),
+        }
+        monkeypatch.setattr(
+            fetch_oddsportal,
+            "ingest_league",
+            AsyncMock(side_effect=lambda spec: by_league[spec.league]),
+        )
+        required = AsyncMock()
+        monkeypatch.setattr(fetch_oddsportal, "require_rows_for_fixtures", required)
+
+        await fetch_oddsportal.main(JobContext())
+
+        assert list(required.await_args.args[1]) == ["baseball_mlb"]
 
     async def test_zero_rows_without_fixtures_writes_a_heartbeat(
         self, monkeypatch: pytest.MonkeyPatch, alerts: _AlertRecorder

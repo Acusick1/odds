@@ -117,12 +117,19 @@ class IngestionStats:
     """Tracks results of a single league ingestion run."""
 
     league: str = ""
+    events_listed: int = 0
+    upcoming_listed: int = 0
+    latest_listed_start: datetime | None = None
     matches_scraped: int = 0
     matches_converted: int = 0
     events_matched: int = 0
     events_created: int = 0
     snapshots_stored: int = 0
     errors: list[str] = field(default_factory=list)
+
+    @property
+    def all_listed_started(self) -> bool:
+        return self.events_listed > 0 and self.upcoming_listed == 0
 
 
 @dataclass
@@ -131,6 +138,8 @@ class LeagueScrape:
 
     matches: list[MatchOdds] = field(default_factory=list)
     events_listed: int = 0
+    upcoming_listed: int = 0
+    latest_listed_start: datetime | None = None
     errors: list[str] = field(default_factory=list)
 
 
@@ -144,8 +153,10 @@ async def scrape_league(spec: LeagueSpec) -> LeagueScrape:
     async with OddsPortalClient() as client:
         events = await client.fetch_listing(spec.listing_path)
         scrape.events_listed = len(events)
+        scrape.latest_listed_start = max((e.start_time for e in events), default=None)
         now = datetime.now(UTC)
         upcoming = [e for e in events if e.start_time > now]
+        scrape.upcoming_listed = len(upcoming)
         if not upcoming:
             return scrape
 
@@ -192,6 +203,9 @@ async def ingest_league(
         logger.info("scraping_league", league=spec.league, sport=spec.sport)
         scraped = await scrape_league(spec)
 
+    stats.events_listed = scraped.events_listed
+    stats.upcoming_listed = scraped.upcoming_listed
+    stats.latest_listed_start = scraped.latest_listed_start
     all_converted = scraped.matches
     stats.errors.extend(scraped.errors)
     stats.matches_converted = len(all_converted)
@@ -355,15 +369,22 @@ async def main(ctx: JobContext) -> None:
 
         if failures:
             raise RuntimeError(f"{compound_job_name} failed: {'; '.join(failures)}")
+        checked: list[tuple[LeagueSpec, IngestionStats]] = []
+        for spec, stats in zip(specs, all_stats, strict=True):
+            if stats.all_listed_started:
+                logger.warning(
+                    "oddsportal_empty_run_check_skipped",
+                    sport=spec.sport_key,
+                    reason="every listed event has already started",
+                    events_listed=stats.events_listed,
+                    latest_listed_start=stats.latest_listed_start,
+                )
+                continue
+            checked.append((spec, stats))
         await require_rows_for_fixtures(
             SOURCE,
-            {
-                spec.sport_key: stats.snapshots_stored
-                for spec, stats in zip(specs, all_stats, strict=True)
-            },
-            errors_by_sport={
-                spec.sport_key: stats.errors for spec, stats in zip(specs, all_stats, strict=True)
-            },
+            {spec.sport_key: stats.snapshots_stored for spec, stats in checked},
+            errors_by_sport={spec.sport_key: stats.errors for spec, stats in checked},
         )
 
     # Outside job_alert_context so scoring failures don't fire scrape alerts.
