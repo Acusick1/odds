@@ -16,10 +16,15 @@ The goal is profit from betting at UK retail books on EPL and MLB. No approach i
 
 ## Candidates
 
-A candidate is any rule that decides bets. Each one has a version, and a change of rule is a new version. The candidates today:
+A candidate is any rule that decides bets: a mechanical rule on prices, a model, or an LLM agent.
 
-- **The EPL and MLB betting agents.** They synthesise prices, exchange data and match news, and are run by hand ([The betting agent](../agent/betting-agent.md)).
-- **The EPL retail-EV model.** It predicts a retail bet's EV against the close ([retail-EV target](../modelling/clv-target.md#the-retail-ev-target)). Its development results are level with the exchange-price baseline ([CLV model findings](../evaluation/clv-model-findings.md)), and it places no bets.
+- **Version.** Each candidate has a whole-number version, bumped whenever its rule, parameters or model changes. For an agent, a change to `packages/odds-mcp/agents/common.md` or its sport's `base.md` is a new version. A change to its `observations.md` is not, because that file is the agent's own learning.
+- **Tracking.** An idea starts as a GitHub issue labelled `candidate`. Once registered, the candidate's registry entry holds its status: active, promoted or killed.
+
+No candidate is running, and mechanical rules are the current focus. The two other approaches in the repo:
+
+- **The EPL and MLB betting agents** synthesise prices, exchange data and match news ([The betting agent](../agent/betting-agent.md)). They are not being run.
+- **The EPL retail-EV model** predicts a retail bet's EV against the close ([retail-EV target](../modelling/clv-target.md#the-retail-ev-target)). Its development results are level with the exchange-price baseline ([CLV model findings](../evaluation/clv-model-findings.md)), and it places no bets.
 
 The suspended bet365 CLV model is not a candidate. Its predictions are an input the agents may read ([prediction scoring](../modelling/prediction-scoring.md)).
 
@@ -30,14 +35,18 @@ The suspended bet365 CLV model is not a candidate. Its predictions are an input 
 - **The score is EV at the price taken against the Betfair Exchange close:** `p_close × decimal_odds − 1`, with the close as defined for the [retail-EV target](../modelling/clv-target.md#the-retail-ev-target). Betfair Exchange is the close because its closing prices exist from 2024-25 on, where FDUK Pinnacle closing prices end 2026-01-08 ([ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md), "Considered options"). That close is defined for EPL only.
 - **EV beats realised P&L as the score because of variance** `(inferred)`. A bet's P&L is a win or a loss of the whole stake, while its EV against the close varies only with how far the price moves before kick-off, so EV shows an edge in far fewer bets.
 - **P&L is reported beside EV.** Positive EV with P&L below it by more than variance explains means the close is the wrong benchmark for that market `(inferred)`.
-- **Promote or kill at fixed checkpoints.** A candidate is reviewed every 100 settled bets, on its mean EV per unit staked with an event-clustered bootstrap CI.
+- **Promote or kill at fixed checkpoints.** A candidate is scored on its first 100, 200, … settled bets, never on a running total, so the verdict does not depend on when it is read. The score is mean EV per unit staked, with an event-clustered bootstrap CI.
   - **Promote** when the 99% CI's lower bound is above zero. The stricter interval allows roughly for repeated looks and for many candidates running at once `(inferred)`.
   - **Kill** when the 95% CI's upper bound is at or below zero, or after 500 bets without promotion.
-- **Real money needs stake capacity too.** UK retail books restrict accounts that win, so a promoted candidate is also judged on how much it can stake `(inferred)`.
+- **Real money needs stake capacity too.** UK retail books restrict accounts that win, so a promoted candidate is also judged on how much it can stake `(inferred)`. That gate's rule is set when the first candidate is promoted.
 
 ## What scoring exists today
 
-`odds_core.paper_trade_models.PaperTrade` has no field for the candidate or its version, and stores no close, so no candidate is scored yet (#604). MLB has no close defined (#604).
+None of the workflow's tooling exists yet (#608):
+
+- There is no candidate registry (#610).
+- `odds_core.paper_trade_models.PaperTrade` has no field for the candidate or its version, and stores no close (#604). MLB has no close defined.
+- Nothing runs a mechanical candidate; only the agent places paper trades, through `odds_mcp.server.paper_bet` (#609).
 
 ## Related
 

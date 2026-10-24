@@ -24,11 +24,11 @@ Design principles `(inferred)`: robust collection and storage before analysis; a
 
 ## Sports
 
-EPL and MLB data collection is active. The agents are in interactive evaluation, not autonomous production: they are run by hand on the production host. NBA code (injuries, game logs, Polymarket targeting) exists but is deprioritized. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md).
+EPL and MLB data collection is active. The agents are in interactive evaluation, not autonomous production: they run by hand on the production host, and are not currently being run. NBA code (injuries, game logs, Polymarket targeting) exists but is deprioritized. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md).
 
 ## Goal
 
-Profit. Any approach can be a candidate (today the betting agents; models and mechanical rules qualify too), run in parallel and judged on live paper trades by EV against the Betfair Exchange close ([Goal and strategy](goal-and-strategy.md)). See [The betting agent](../agent/betting-agent.md) and [What the CLV model can and cannot do](../evaluation/clv-model-findings.md).
+Profit. Any approach can be a candidate (mechanical rules, models, agents), run in parallel and judged on live paper trades by EV against the Betfair Exchange close ([Goal and strategy](goal-and-strategy.md)). See [The betting agent](../agent/betting-agent.md) and [What the CLV model can and cannot do](../evaluation/clv-model-findings.md).
 
 ## What runs where
 
