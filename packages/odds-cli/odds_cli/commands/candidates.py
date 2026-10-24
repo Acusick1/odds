@@ -7,6 +7,7 @@ import typer
 from odds_analytics.candidate_report import CandidateSummary, Verdict, candidate_report
 from odds_core.candidates import Candidate, CandidateStatus, candidates_dir, load_candidates
 from odds_core.database import async_session_maker
+from odds_lambda.candidate_rules import RULES, rule_sha256, validate_candidate_rules
 from rich.console import Console
 from rich.table import Table
 
@@ -16,7 +17,9 @@ console = Console()
 
 def _load_registry() -> list[Candidate]:
     try:
-        return load_candidates(candidates_dir())
+        candidates = load_candidates(candidates_dir())
+        validate_candidate_rules(candidates)
+        return candidates
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]", soft_wrap=True)
         raise typer.Exit(1) from exc
@@ -56,6 +59,17 @@ def list_candidates(
             f"#{c.issue}",
         )
     console.print(table)
+
+
+@app.command("rule-hash")
+def rule_hash(rule: Annotated[str, typer.Argument(help="Rule name")]) -> None:
+    """Print the rule_sha256 a mechanical candidate records for the rule."""
+    if rule not in RULES:
+        console.print(
+            f"[red]unknown rule {rule!r}, known rules {sorted(RULES)}[/red]", soft_wrap=True
+        )
+        raise typer.Exit(1)
+    console.print(rule_sha256(rule), soft_wrap=True)
 
 
 _VERDICT_STYLE = {
