@@ -300,13 +300,14 @@ async def main(ctx: JobContext) -> None:
     Self-scheduling runs in a ``finally`` block so a failure inside
     ``process_results`` cannot leave the EventBridge rule disabled.
     """
-    from odds_core.alerts import job_alert_context
+    from odds_core.alerts import job_alert_context, send_scheduling_failure
     from odds_core.config import get_settings
 
     settings = get_settings()
     sport = ctx.sport
     schedule_job_name = make_compound_job_name("fetch-oddsportal-results", sport)
 
+    run_raised = True
     try:
         async with job_alert_context(schedule_job_name):
             logger.info("fetch_oddsportal_results_started", sport=sport)
@@ -317,6 +318,7 @@ async def main(ctx: JobContext) -> None:
                     f"{schedule_job_name} failed to settle {len(stats.errors)} event(s); "
                     f"first: {stats.errors[0]}"
                 )
+        run_raised = False
     finally:
         # Self-schedule: run again tomorrow at 08:00 UTC, regardless of outcome.
         # This is a once-a-day results sweep, not a proximity-driven fetch, so
@@ -336,18 +338,7 @@ async def main(ctx: JobContext) -> None:
             )
         except Exception as e:
             logger.error("fetch_oddsportal_results_scheduling_failed", error=str(e), exc_info=True)
-            # Escalate to Discord so the failure is visible. Alert dispatch is
-            # best-effort — any error here must not mask an upstream exception
-            # propagating through this ``finally`` block.
-            try:
-                from odds_core.alerts import send_critical
-
-                await send_critical(
-                    f"🚨 fetch-oddsportal-results self-schedule failed "
-                    f"(job={schedule_job_name}): {type(e).__name__}: {e}"
-                )
-            except Exception:
-                logger.warning("fetch_oddsportal_results_scheduling_alert_failed", exc_info=True)
+            await send_scheduling_failure(schedule_job_name, e, final=not run_raised)
 
 
 if __name__ == "__main__":

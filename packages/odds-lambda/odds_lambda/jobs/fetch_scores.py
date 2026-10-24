@@ -12,7 +12,7 @@ import asyncio
 from datetime import timedelta
 
 import structlog
-from odds_core.alerts import job_alert_context, send_error
+from odds_core.alerts import job_alert_context, send_scheduling_failure
 from odds_core.api_models import parse_scores_from_api_dict
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
@@ -73,9 +73,9 @@ async def main(ctx: JobContext) -> None:
     # Self-scheduling uses the sport-suffixed job name to match Terraform rules
     schedule_job_name = make_compound_job_name("fetch-scores", sport)
 
-    async def _schedule(decision: ScheduleDecision, *, label: str) -> None:
+    async def _schedule(decision: ScheduleDecision, *, label: str, final: bool = False) -> bool:
         if not decision.next_execution:
-            return
+            return False
         try:
             await self_schedule(
                 job_name=schedule_job_name,
@@ -86,13 +86,15 @@ async def main(ctx: JobContext) -> None:
             )
         except Exception as e:
             logger.error("fetch_scores_scheduling_failed", error=str(e), exc_info=True)
-            await send_error(f"Fetch scores scheduling failed: {type(e).__name__}: {str(e)}")
+            await send_scheduling_failure(schedule_job_name, e, final=final)
+            return False
+        return True
 
     # Smart execution gating, scoped to this job's sport(s).
     decision = await _scores_decision(sports)
 
     # Pre-schedule before any work so the chain survives crashes.
-    await _schedule(decision, label="pre-schedule")
+    pre_booked = await _schedule(decision, label="pre-schedule", final=not decision.should_execute)
 
     async with job_alert_context(schedule_job_name):
         if not decision.should_execute:
@@ -115,7 +117,7 @@ async def main(ctx: JobContext) -> None:
 
     # Re-evaluate and reschedule after fetching scores.
     post_decision = await _scores_decision(sports)
-    await _schedule(post_decision, label="post-fetch")
+    await _schedule(post_decision, label="post-fetch", final=not pre_booked)
     logger.info(
         "fetch_scores_next_scheduled",
         next_time=post_decision.next_execution.isoformat()

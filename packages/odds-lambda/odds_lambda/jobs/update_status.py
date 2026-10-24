@@ -66,9 +66,9 @@ async def main(ctx: JobContext) -> None:
 
     schedule_job_name = make_compound_job_name("update-status", sport)
 
-    async def _schedule(decision: ScheduleDecision, *, label: str) -> None:
+    async def _schedule(decision: ScheduleDecision, *, label: str, final: bool = False) -> bool:
         if not decision.next_execution:
-            return
+            return False
         try:
             await self_schedule(
                 job_name=schedule_job_name,
@@ -79,15 +79,17 @@ async def main(ctx: JobContext) -> None:
             )
         except Exception as e:
             logger.error("update_status_scheduling_failed", error=str(e), exc_info=True)
-            from odds_core.alerts import send_error
+            from odds_core.alerts import send_scheduling_failure
 
-            await send_error(f"Update status scheduling failed: {type(e).__name__}: {e}")
+            await send_scheduling_failure(schedule_job_name, e, final=final)
+            return False
+        return True
 
     # Smart execution gating, scoped to this job's sport(s).
     decision = await _status_decision(sports)
 
     # Pre-schedule before any work so the chain survives crashes.
-    await _schedule(decision, label="pre-schedule")
+    pre_booked = await _schedule(decision, label="pre-schedule", final=not decision.should_execute)
 
     if not decision.should_execute:
         logger.info(
@@ -108,7 +110,7 @@ async def main(ctx: JobContext) -> None:
 
     # Re-evaluate and reschedule after the status flip.
     post_decision = await _status_decision(sports)
-    await _schedule(post_decision, label="post-update")
+    await _schedule(post_decision, label="post-update", final=not pre_booked)
     logger.info(
         "update_status_next_scheduled",
         next_time=post_decision.next_execution.isoformat()

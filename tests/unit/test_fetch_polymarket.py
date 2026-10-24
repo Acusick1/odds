@@ -278,4 +278,10 @@ class TestFetchPolymarketMain:
         job.service.collect_snapshots.return_value = snapshot_result
         job.backend.schedule_next_execution.side_effect = Exception("Scheduler unreachable")
 
-        await fetch_polymarket.main(JobContext())  # must not raise
+        with patch(
+            "odds_lambda.jobs.fetch_polymarket.send_scheduling_failure", new_callable=AsyncMock
+        ) as failure:
+            await fetch_polymarket.main(JobContext())  # must not raise
+
+        assert failure.call_args.args[0] == "fetch-polymarket"
+        assert failure.call_args.kwargs["final"] is True

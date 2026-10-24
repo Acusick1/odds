@@ -11,6 +11,7 @@ sources:
   - odds_core.alerts.send_job_warning
   - odds_core.alerts.send_recorded_alert
   - odds_core.alerts.send_outage_warning
+  - odds_core.alerts.send_scheduling_failure
   - odds_core.alerts.record_to_alert_history
   - odds_core.config.AlertConfig
   - odds_core.models.AlertHistory
@@ -30,10 +31,11 @@ status: stable
 
 Helpers:
 
-- `odds_core.alerts.send_info`, `odds_core.alerts.send_warning`, `odds_core.alerts.send_error`, `odds_core.alerts.send_critical`: one-shot, not rate limited, not recorded.
+- `odds_core.alerts.send_critical`: one-shot, not rate limited, not recorded; only the Lambda handler uses it ([lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
 - `odds_core.alerts.send_recorded_alert(alert_type, severity, message, *, every, reset_by=None, context=None, session=None, now=None)`: the one dedup rule for every alert that repeats while its condition holds. It returns False when the manager is undeliverable; otherwise it reads the newest `alert_history` row of `alert_type` (ignored when a newer `reset_by` row exists, which starts a new condition), and sends and records only if there is none or it is older than `every`. The send is bounded by `odds_core.alerts.ALERT_SEND_TIMEOUT_SECONDS`, and a failure is logged, rolls back a caller-supplied `session` and returns False. The record uses `session` and `context` when given (the health monitor passes both). The read and the insert have no lock, so two concurrent senders of one type can both send (#457).
 - `odds_core.alerts.record_to_alert_history(alert_type, severity, message)`: inserts a row, whether or not the POST succeeded, so a failed delivery still suppresses retries for the interval (#457, #384); heartbeats use it directly.
 - `odds_core.alerts.send_job_failure(job_name, error)` and `odds_core.alerts.send_outage_warning` call `odds_core.alerts.send_recorded_alert` with `reset_by=heartbeat:<job_name>` and `every` of `odds_core.config.AlertConfig.stale_reminder_minutes` (360). An outage runs from a job's first failure to its next `heartbeat:<job_name>`, whatever the job's cadence; `odds_core.alerts.job_outage_alerted_at` is the single definition of an open outage, shared with the health monitor. Used by `odds_core.alerts.job_alert_context` and by `odds_lambda.scheduling.runner.run_chain_job` for a run cancelled by its timeout.
+- `odds_core.alerts.send_scheduling_failure(job_name, error, final=...)`: `odds_core.alerts.send_recorded_alert` with `every` of `odds_core.config.AlertConfig.stale_reminder_minutes`, no `reset_by`. `final` is true when no other booking survives, so the chain may end, and the alert is then a critical; otherwise it is a warning. A skipped run's pre-schedule is its only booking (final). For a run that executes, the pre-schedule is not final because the post-run booking follows, and the post-run booking is final only if the pre-schedule failed. A failed `fetch-oddsportal-results` booking is final unless the run raised, because `odds_lambda.scheduling.runner.run_chain_job` then re-books. The two severities are keyed apart so a warning never suppresses a critical. Used by every job that books its own next run.
 - `job_alert_context(job_name)`: async context manager. On exception: `odds_core.alerts.send_job_failure`, the send is bounded by `odds_core.alerts.ALERT_SEND_TIMEOUT_SECONDS`, and a failing or timed-out send is logged (`job_failure_alert_failed`) and never masks the job's exception, which is always re-raised unchanged. On clean exit: record `heartbeat:<job_name>` (silent; under `SCHEDULER_DRY_RUN` `odds_core.alerts.record_to_alert_history` writes nothing, so no heartbeat row; failures to record are logged only).
 - `odds_core.alerts.send_job_warning(alert_type, message)`: warning for soft failures (empty scrape) through `odds_core.alerts.send_recorded_alert` at most every 30 minutes (`odds_core.alerts.JOB_WARNING_INTERVAL`); returns whether it sent. Used by the [OddsPortal](../collection/fetch-oddsportal-job.md) and [Betfair](../collection/betfair-exchange.md) jobs.
 
@@ -49,6 +51,8 @@ On AWS, the Lambda handler also sends its own critical on any exception ([lambda
 |---|---|---|
 | `job_failure:<job>` | `odds_core.alerts.job_alert_context`; `odds_lambda.scheduling.runner.run_chain_job` for a run that exceeds its timeout | critical |
 | `job_chain_rebooked:<job>` (a failed local run re-booked 15 minutes on) | `odds_lambda.scheduling.runner.run_chain_job` through `odds_core.alerts.send_outage_warning` (once per outage) | warning |
+| `scheduling_failure:<job>` (no booking survives for the next run) | `odds_core.alerts.send_scheduling_failure` | critical |
+| `scheduling_warning:<job>` (a booking failed but another one survives; fetch-odds, fetch-scores, update-status, fetch-oddsportal-results) | `odds_core.alerts.send_scheduling_failure` | warning |
 | `heartbeat:<job>` | `odds_core.alerts.job_alert_context` on success | info, never sent to Discord |
 | `job_empty:<job>` | `odds_core.alerts.send_job_warning` in the Polymarket odds job | warning |
 | `stale_data:<source>:<sport>` (same rule as every monitor alert) | `odds_lambda.health_monitor.HealthMonitor.check_stale_sources` | critical |

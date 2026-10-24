@@ -14,7 +14,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from odds_core.alerts import job_alert_context, send_error
+from odds_core.alerts import job_alert_context, send_scheduling_failure
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.polymarket_models import PolymarketFetchLog
@@ -190,7 +190,7 @@ async def main(ctx: JobContext) -> None:
         except Exception as e:
             logger.error("fetch_polymarket_scheduling_failed", error=str(e), exc_info=True)
 
-            await send_error(f"Fetch Polymarket scheduling failed: {type(e).__name__}: {str(e)}")
+            await send_scheduling_failure("fetch-polymarket", e, final=True)
 
 
 if __name__ == "__main__":
