@@ -30,7 +30,7 @@ The runtime is a `claude` subprocess; everything it touches goes through one of 
 | Web search | press conferences, injury news |
 | Playwright MCP (not in `.mcp.json`, so supplied by the user's Claude configuration) | club sites, lineup pages, BBC and ESPN |
 
-The MCP server reads and writes PostgreSQL: `events`, `odds_snapshots`, `paper_trades`, `match_briefs`, `predictions` and `agent_wakeups` (`odds_core.models.Event`, `odds_core.models.OddsSnapshot`, `odds_core.paper_trade_models.PaperTrade`, `odds_core.match_brief_models.MatchBrief`, `odds_core.agent_wakeup_models.AgentWakeup`; predictions are written by [scoring](../modelling/prediction-scoring.md)). See [odds-mcp server](mcp-server.md) for the tools.
+The MCP server reads and writes PostgreSQL: `events`, `odds_snapshots`, `paper_trades`, `match_briefs`, `predictions` and `agent_wakeups` (`odds_core.models.Event`, `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.paper_trade_models.PaperTrade`, `odds_core.match_brief_models.MatchBrief`, `odds_core.agent_wakeup_models.AgentWakeup`; predictions are written by [scoring](../modelling/prediction-scoring.md)). See [odds-mcp server](mcp-server.md) for the tools.
 
 ## Prompts
 

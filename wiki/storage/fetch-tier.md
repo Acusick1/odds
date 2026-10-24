@@ -22,7 +22,7 @@ status: stable
 
 # Fetch tier
 
-A fetch tier labels an odds snapshot by how long before kickoff it was taken. `odds_lambda.fetch_tier.FetchTier` is the enum; the value is stored as a string in `odds_core.models.OddsSnapshot.fetch_tier` (nullable, indexed, with `ix_event_tier` on event and tier) next to `hours_until_commence`. Tiers feed scheduling cadence, validation and ML sampling.
+A fetch tier labels an odds snapshot by how long before kickoff it was taken. `odds_lambda.fetch_tier.FetchTier` is the enum; the value is stored as a string in `odds_core.models.OddsSnapshot.fetch_tier` ([odds_snapshots columns](odds-tables.md#odds_snapshots)) (nullable, indexed, with `ix_event_tier` on event and tier) next to `hours_until_commence`. Tiers feed scheduling cadence, validation and ML sampling.
 
 ## Tier table
 

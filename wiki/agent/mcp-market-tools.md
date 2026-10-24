@@ -36,7 +36,7 @@ Every snapshot for the event in time order, each with the extracted `market` odd
 
 ## `get_predictions(event_id, limit=5, since_hours=None)`
 
-Reads stored `predictions` rows newest first; it does not run the model. `total_matching` counts rows after the `since_hours` filter, `returned` the limited list (`limit` floored at 1). Each row: `id`, `snapshot_id`, `model_name`, `model_version`, `predicted_clv`, `created_at`. Rows are written only by inline scoring, which runs only on a local scheduler: one row per snapshot, with `model_version` an S3 ETag ([prediction scoring](../modelling/prediction-scoring.md), [model hub](../evaluation/clv-model-findings.md)). The tool returns whatever the scorer wrote; no row exists for events the scoring job never reached..
+Reads stored `predictions` rows newest first; it does not run the model. `total_matching` counts rows after the `since_hours` filter, `returned` the limited list (`limit` floored at 1). Each row: `id`, `snapshot_id` (always a snapshot of `event_id`, enforced by a foreign key), `model_name`, `model_version`, `predicted_clv`, `created_at`. Rows are written only by inline scoring, which runs only on a local scheduler: one row per snapshot, with `model_version` an S3 ETag ([prediction scoring](../modelling/prediction-scoring.md), [model hub](../evaluation/clv-model-findings.md)). The tool returns whatever the scorer wrote; no row exists for events the scoring job never reached..
 
 ## Market vocabulary
 

@@ -39,7 +39,7 @@ status: stable
 
 # Polymarket match prices as odds snapshots
 
-Polymarket's EPL match markets are stored as `odds_core.models.OddsSnapshot` rows whose only bookmaker is `polymarket`, so a training config can list `polymarket` in `sharp_bookmakers` ([sharp benchmark](../modelling/sharp-benchmark.md)). The decision is [ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md), which supersedes [ADR-0007](../../docs/adr/0007-deprioritise-polymarket.md); Polymarket is still not a UK trading venue. This is separate from the NBA price and order-book tables in [Polymarket pipeline and tables](polymarket.md). Why the venue is usable for EPL is in [Polymarket market character](polymarket-market-research.md#market-character-by-sport).
+Polymarket's EPL match markets are stored as `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)) rows whose only bookmaker is `polymarket`, so a training config can list `polymarket` in `sharp_bookmakers` ([sharp benchmark](../modelling/sharp-benchmark.md)). The decision is [ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md), which supersedes [ADR-0007](../../docs/adr/0007-deprioritise-polymarket.md); Polymarket is still not a UK trading venue. This is separate from the NBA price and order-book tables in [Polymarket pipeline and tables](polymarket.md). Why the venue is usable for EPL is in [Polymarket market character](polymarket-market-research.md#market-character-by-sport).
 
 ## Sport config and discovery
 

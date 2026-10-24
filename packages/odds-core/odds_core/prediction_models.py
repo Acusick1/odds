@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Index, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKeyConstraint, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
@@ -15,7 +15,7 @@ class Prediction(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     event_id: str = Field(foreign_key="events.id", index=True)
-    snapshot_id: int = Field(foreign_key="odds_snapshots.id", index=True)
+    snapshot_id: int = Field(index=True)
 
     model_name: str = Field(index=True)
     model_version: str = Field()
@@ -27,6 +27,13 @@ class Prediction(SQLModel, table=True):
     )
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["snapshot_id", "event_id"],
+            ["odds_snapshots.id", "odds_snapshots.event_id"],
+            name="fk_prediction_snapshot_event",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
         UniqueConstraint(
             "event_id", "snapshot_id", "model_name", name="uq_prediction_event_snap_model"
         ),

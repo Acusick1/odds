@@ -16,7 +16,7 @@ from odds_lambda.oddsportal_common import find_existing_event
 from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.event_name_repair import repair_team_names
 from odds_lambda.storage.writers import OddsWriter
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from tests.test_helpers import (
     API_EVENT_ID,
@@ -65,6 +65,23 @@ class TestAdoptTwins:
         for model in CHILD_MODELS:
             assert await _event_ids(session, model) == {API_EVENT_ID}, model
         assert await session.get(Event, TWIN_EVENT_ID) is None
+
+    @pytest.mark.asyncio
+    async def test_predictions_still_match_their_snapshots_after_the_merge(
+        self, live_twin_with_rows
+    ) -> None:
+        session = live_twin_with_rows
+        api_event = make_epl_event(API_EVENT_ID, TWIN_KICKOFF + timedelta(minutes=30))
+        session.add(api_event)
+        await session.flush()
+
+        await EventMerger(session).adopt_twins([api_event])
+        await session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+
+        prediction = (await session.execute(select(Prediction))).scalar_one()
+        snapshot = await session.get(OddsSnapshot, prediction.snapshot_id)
+        assert snapshot is not None
+        assert prediction.event_id == snapshot.event_id == API_EVENT_ID
 
     @pytest.mark.asyncio
     async def test_reads_every_table_referencing_events_from_the_catalog(
