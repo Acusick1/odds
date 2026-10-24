@@ -18,7 +18,7 @@ status: stable
 
 # The betting agent
 
-An LLM agent per sport (EPL and MLB) synthesises odds, sharp-market prices and unstructured match context and records bets as paper trades. Both agents are in interactive evaluation: the prompt calls itself a "first-draft workflow" (`packages/odds-mcp/agents/common.md`, #290). Nothing in code enforces that they are not autonomous `(inferred)`. The thesis is breadth and speed of information synthesis ([ADR-0005](../../docs/adr/0005-information-edge.md)). The thesis has no measured result: results exist only as paper trades, read through `odds_mcp.server.get_portfolio` and `odds paper`, and the [daily digest](../operations/daily-digest.md) does not read them ([paper trading](paper-trading.md)). The runtime is described in [Agent runtime and the agent-run job](agent-run-job.md).
+An LLM agent per sport (EPL and MLB) synthesises odds, sharp-market prices and unstructured match context and records bets as paper trades. Both agents are in interactive evaluation: the prompt calls itself a "first-draft workflow" (`packages/odds-mcp/agents/common.md`, #290). Nothing in code enforces that they are not autonomous `(inferred)`. Each agent is a [candidate](../foundations/goal-and-strategy.md) whose thesis is breadth and speed of information synthesis. The thesis has no measured result: results exist only as paper trades, read through `odds_mcp.server.get_portfolio` and `odds paper`, and the [daily digest](../operations/daily-digest.md) does not read them ([paper trading](paper-trading.md)). The runtime is described in [Agent runtime and the agent-run job](agent-run-job.md).
 
 ## Architecture
 
@@ -38,7 +38,7 @@ The agent's behaviour is defined by prompt files in `packages/odds-mcp/agents/`:
 
 ## Role of the CLV model
 
-A supplementary signal: weak, unprofitable alone, and its strongest feature is the sharp-retail spread, whose sharp side comes from the configured sharp books (`pinnacle` or `betfair_exchange`), and the agent sees the same spread directly via `odds_mcp.server.find_retail_edges` (per-book `price`, `price_decimal` and `implied_prob`), whose retail rows exclude the sharp list and the venues a UK bettor cannot use (Pinnacle, Polymarket). The prompt treats models as supplementary sanity checks (`packages/odds-mcp/agents/common.md`) ([CLV model findings](../evaluation/clv-model-findings.md), [sharp benchmark](../modelling/sharp-benchmark.md), [ADR-0005](../../docs/adr/0005-information-edge.md)).
+A supplementary signal: weak, unprofitable alone, and its strongest feature is the sharp-retail spread, whose sharp side comes from the configured sharp books (`pinnacle` or `betfair_exchange`), and the agent sees the same spread directly via `odds_mcp.server.find_retail_edges` (per-book `price`, `price_decimal` and `implied_prob`), whose retail rows exclude the sharp list and the venues a UK bettor cannot use (Pinnacle, Polymarket). The prompt treats models as supplementary sanity checks (`packages/odds-mcp/agents/common.md`) ([CLV model findings](../evaluation/clv-model-findings.md), [sharp benchmark](../modelling/sharp-benchmark.md)).
 
 ## EPL matchday timeline
 
@@ -61,7 +61,7 @@ Recorded without a decision record, so the reasons are `(inferred)` (the sharp-p
 
 ## Supporting code
 
-Under [ADR-0005](../../docs/adr/0005-information-edge.md) the agent's supporting code is the [odds-mcp server](mcp-server.md), [match briefs](match-briefs.md), [paper trading](paper-trading.md) and the [agent data sources](agent-data-sources.md). The thesis has no measured result (see the opening section).
+The agent's supporting code is the [odds-mcp server](mcp-server.md), [match briefs](match-briefs.md), [paper trading](paper-trading.md) and the [agent data sources](agent-data-sources.md). The thesis has no measured result (see the opening section).
 
 ## Related
 

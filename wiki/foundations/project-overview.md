@@ -1,7 +1,7 @@
 ---
 type: explanation
 title: About the system and its pivots
-description: What the system is, which sports are live, where the edge is meant to come from, what runs where in outline, the three pivots and the NBA-era defaults they left.
+description: What the system is, which sports are live, the goal in outline, what runs where in outline, the three pivots and the NBA-era defaults they left.
 sources:
   - odds_core.sports.SportKey
   - odds_core.config.SchedulerConfig.bootstrap_jobs
@@ -26,9 +26,9 @@ Design principles `(inferred)`: robust collection and storage before analysis; a
 
 EPL and MLB data collection is active. The agents are in interactive evaluation, not autonomous production: they are run by hand on the production host. NBA code (injuries, game logs, Polymarket targeting) exists but is deprioritized. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md).
 
-## Where the edge is meant to come from
+## Goal
 
-Breadth and speed of information synthesis by an LLM agent, not the XGBoost CLV model ([ADR-0005](../../docs/adr/0005-information-edge.md)). The deployed model is `epl-clv-home` `v308058c` with a CV R² of about 0.058. It is a supplementary signal the agent treats as a sanity check. See [The betting agent](../agent/betting-agent.md) and [What the CLV model can and cannot do](../evaluation/clv-model-findings.md).
+Profit. Agents, models and mechanical rules are candidates, run in parallel and judged on live paper trades by EV against the Betfair Exchange close ([Goal and strategy](goal-and-strategy.md)). The deployed model is `epl-clv-home` `v308058c` with a CV R² of about 0.058. It is a supplementary signal the agent treats as a sanity check. See [The betting agent](../agent/betting-agent.md) and [What the CLV model can and cannot do](../evaluation/clv-model-findings.md).
 
 ## What runs where
 

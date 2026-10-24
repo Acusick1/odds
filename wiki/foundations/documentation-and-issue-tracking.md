@@ -17,7 +17,7 @@ status: stable
 
 # Documentation and issue tracking
 
-The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README.md) is the human entry point and [AGENTS.md](../../AGENTS.md#documentation) tells coding agents to read the wiki first. Decisions live in `docs/adr/`: [ADR-0001](../../docs/adr/0001-wiki-replaces-docs.md) records why a code-citing wiki replaced the old long-form pages. Agent tooling conventions (issue tracker, triage labels, domain docs) live in `docs/agents/`. Code outranks every page: when a page and code disagree, the code is right and the page is stale.
+The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README.md) is the human entry point and [AGENTS.md](../../AGENTS.md#documentation) tells coding agents to read the wiki first. Hard-to-reverse engineering decisions live in `docs/adr/`; strategy lives on [Goal and strategy](goal-and-strategy.md), which is rewritten as it changes. [ADR-0001](../../docs/adr/0001-wiki-replaces-docs.md) records why a code-citing wiki replaced the old long-form pages. Agent tooling conventions (issue tracker, triage labels, domain docs) live in `docs/agents/`. Code outranks every page: when a page and code disagree, the code is right and the page is stale.
 
 ## Authoritative sources
 

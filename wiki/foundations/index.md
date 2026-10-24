@@ -21,9 +21,10 @@ Repo-wide material that every other area assumes: what the system is and which s
 
 ### Explanation
 
-- [About the system and its pivots](project-overview.md) — What the system is, which sports are live, where the edge is meant to come from, what runs where in outline, the three pivots and the NBA-era defaults they left.
+- [About the system and its pivots](project-overview.md) — What the system is, which sports are live, the goal in outline, what runs where in outline, the three pivots and the NBA-era defaults they left.
 - [Devigging and vig-inclusive prices](devigging.md) — What vig and proportional devigging are here, which consumers devig and which stay vig-inclusive, and what that means for comparing prices.
 - [Documentation and issue tracking](documentation-and-issue-tracking.md) — Where documentation lives (wiki, ADRs, docs/agents), what is authoritative for what, how the wiki lint and Vale keep pages current, and the issue-tracker conventions.
+- [Goal and strategy](goal-and-strategy.md) — What the project is for, what counts as a candidate, how a candidate is scored, promoted or killed, and what scoring exists today.
 
 ### How-to guides
 
