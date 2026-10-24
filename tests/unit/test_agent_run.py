@@ -23,14 +23,13 @@ _KICKOFF_PATCH = "odds_lambda.scheduling.decision.get_next_kickoff"
 
 
 class TestMainNoSport:
-    """Test that main() exits early without a sport."""
+    """Test that main() rejects a missing sport."""
 
     @pytest.mark.asyncio
-    async def test_no_sport_returns_early(self) -> None:
-        ctx = JobContext(sport=None)
-        # Should not raise, just log error and return
+    async def test_no_sport_raises(self) -> None:
         with patch(_KICKOFF_PATCH) as mock_kickoff:
-            await main(ctx)
+            with pytest.raises(ValueError, match="requires a sport"):
+                await main(JobContext(sport=None))
             mock_kickoff.assert_not_called()
 
 

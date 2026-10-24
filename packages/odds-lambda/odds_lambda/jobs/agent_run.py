@@ -33,7 +33,7 @@ from odds_lambda.scheduling.decision import (
     decide_forward_resilient,
 )
 from odds_lambda.scheduling.helpers import self_schedule
-from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
+from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 
 logger = structlog.get_logger()
 
@@ -317,11 +317,7 @@ async def schedule_next(sport: SportKey) -> ScheduleResult:
 async def main(ctx: JobContext) -> None:
     """Orchestrate agent wake-up: schedule, run, check override."""
     settings = get_settings()
-    sport = ctx.sport
-
-    if not sport:
-        logger.error("agent_run_no_sport", msg="sport is required for agent-run job")
-        return
+    sport = require_sport(ctx, "agent-run")
 
     # --- Pre-schedule before work (crash-safe) ---
     result = await schedule_next(sport)
@@ -363,7 +359,3 @@ async def main(ctx: JobContext) -> None:
             )
         except Exception as e:
             logger.error("agent_run_override_schedule_failed", error=str(e), exc_info=True)
-
-
-if __name__ == "__main__":
-    asyncio.run(main(JobContext(sport="soccer_epl")))

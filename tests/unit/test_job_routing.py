@@ -1,5 +1,6 @@
 """Tests for job name resolution, compound name construction, and bootstrap functions."""
 
+from importlib import import_module
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -14,6 +15,7 @@ from odds_lambda.scheduling.jobs import (
     get_job_cron,
     get_job_sports,
     make_compound_job_name,
+    require_sport,
     resolve_job_name,
     resolve_target_sports,
     sport_key_to_suffix,
@@ -112,8 +114,13 @@ class TestMakeCompoundJobName:
     def test_with_sport_mlb(self) -> None:
         assert make_compound_job_name("fetch-oddsportal", "baseball_mlb") == "fetch-oddsportal-mlb"
 
-    def test_without_sport(self) -> None:
-        assert make_compound_job_name("fetch-odds", None) == "fetch-odds"
+    @pytest.mark.parametrize("job", sorted(_PER_SPORT_JOBS))
+    def test_per_sport_job_without_sport_raises(self, job: str) -> None:
+        with pytest.raises(ValueError, match="requires a sport"):
+            make_compound_job_name(job, None)
+
+    def test_non_per_sport_job_without_sport_returns_base(self) -> None:
+        assert make_compound_job_name("check-health", None) == "check-health"
 
     def test_unknown_sport_returns_base(self) -> None:
         assert make_compound_job_name("fetch-odds", "basketball_nba") == "fetch-odds"
@@ -304,3 +311,21 @@ class TestExpectedCompoundJobNames:
             "fetch-polymarket-odds-epl"
         }
         assert "fetch-polymarket-odds-epl" in AlertConfig().heartbeat_expectations
+
+
+class TestRequireSport:
+    """``require_sport`` guards every per-sport job entry point."""
+
+    def test_returns_sport(self) -> None:
+        assert require_sport(JobContext(sport="soccer_epl"), "fetch-odds") == "soccer_epl"
+
+    def test_raises_without_sport(self) -> None:
+        with pytest.raises(ValueError, match="fetch-odds"):
+            require_sport(JobContext(), "fetch-odds")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("job", sorted(_PER_SPORT_JOBS))
+    async def test_every_per_sport_job_rejects_missing_sport(self, job: str) -> None:
+        module_path, func_name = _JOB_MODULE_MAP[job]
+        with pytest.raises(ValueError, match="requires a sport"):
+            await getattr(import_module(module_path), func_name)(JobContext())

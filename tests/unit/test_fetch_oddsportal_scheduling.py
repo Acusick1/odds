@@ -76,7 +76,7 @@ class TestProximityScheduling:
             ),
         ):
             mock_settings.return_value.scheduler.dry_run = False
-            await main(JobContext())
+            await main(JobContext(sport="soccer_epl"))
 
         assert call_order[0] == "schedule", (
             "schedule_next_execution must be called before ingest_league"
@@ -112,7 +112,7 @@ class TestProximityScheduling:
                 league="test", matches_scraped=5, snapshots_stored=3
             )
 
-            await main(JobContext())
+            await main(JobContext(sport="soccer_epl"))
 
         # Pre-schedule + success reschedule
         assert mock_backend.schedule_next_execution.call_count == 2
@@ -153,7 +153,7 @@ class TestProximityScheduling:
             mock_settings.return_value.scheduler.dry_run = False
             mock_ingest.return_value = IngestionStats(league="test", matches_scraped=0)
 
-            await main(JobContext())
+            await main(JobContext(sport="soccer_epl"))
 
         # Only the pre-schedule fires
         assert mock_backend.schedule_next_execution.call_count == 1
@@ -184,7 +184,7 @@ class TestProximityScheduling:
         ):
             mock_settings.return_value.scheduler.dry_run = False
             with pytest.raises(RuntimeError, match="simulated timeout"):
-                await main(JobContext())
+                await main(JobContext(sport="soccer_epl"))
 
         # Only the pre-schedule fires
         assert mock_backend.schedule_next_execution.call_count == 1
@@ -223,7 +223,7 @@ class TestProximityScheduling:
             )
 
             now = datetime.now(UTC)
-            await main(JobContext())
+            await main(JobContext(sport="soccer_epl"))
 
         # Pre-schedule should use fallback interval (~1h from now)
         first_call = mock_backend.schedule_next_execution.call_args_list[0]
@@ -267,7 +267,7 @@ class TestProximityScheduling:
             )
 
             now = datetime.now(UTC)
-            await main(JobContext())
+            await main(JobContext(sport="soccer_epl"))
 
         # Pre-schedule at ~30 min
         first_call = mock_backend.schedule_next_execution.call_args_list[0]
@@ -311,7 +311,7 @@ class TestProximityScheduling:
             )
 
             now = datetime.now(UTC)
-            await main(JobContext())
+            await main(JobContext(sport="soccer_epl"))
 
         # Pre-schedule at ~2h
         first_call = mock_backend.schedule_next_execution.call_args_list[0]

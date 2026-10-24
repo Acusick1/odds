@@ -22,7 +22,7 @@ Prerequisites: Python 3.12+, [uv](https://github.com/astral-sh/uv), Docker, and 
 ## Set up
 
 1. **Install.** `uv sync`. This installs the five workspace packages ([Workspace packages](workspace-packages.md)).
-2. **Create `.env`.** Start from `.env.example`, but do not copy it unchanged: `odds_core.config.get_settings` raises on its comma-separated lists ([List fields and the template](configuration.md#list-fields-and-the-template)):
+2. **Create `.env`.** Start from `.env.example` (it lists the optional variables commented out), but do not copy it unchanged: `odds_core.config.get_settings` raises on its comma-separated lists ([List fields and the template](configuration.md#list-fields-and-the-template)):
    - `ODDS_API_KEY=<your key>`
    - `DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/odds`, written literally. `${LOCAL_DATABASE_URL}` would expand to an empty string, because the template defines `LOCAL_DATABASE_URL` below `DATABASE_URL`. The template's `DATABASE_URL=${DEV_DATABASE_URL}` points at the shared dev database, so a fresh copy writes to dev (#429).
    - Write list values as JSON arrays: `SPORTS=["soccer_epl"]`, and the same for `MARKETS`, `REGIONS` if set. Leave `BOOKMAKERS` unset unless you need a JSON object of sport to bookmakers ([List fields](configuration.md#list-fields-and-the-template)). `SPORTS=basketball_nba` in the template is NBA.

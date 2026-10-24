@@ -12,7 +12,6 @@ without scores are pending, so re-runs after settling find nothing to process.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -32,7 +31,7 @@ from odds_lambda.oddsportal_client import (
     OddsPortalError,
 )
 from odds_lambda.scheduling.helpers import self_schedule
-from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
+from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 from odds_lambda.storage.event_merge import EVENT_MATCH_WINDOW, find_match_id
 from odds_lambda.storage.writers import OddsWriter
 
@@ -304,7 +303,7 @@ async def main(ctx: JobContext) -> None:
     from odds_core.config import get_settings
 
     settings = get_settings()
-    sport = ctx.sport
+    sport = require_sport(ctx, "fetch-oddsportal-results")
     schedule_job_name = make_compound_job_name("fetch-oddsportal-results", sport)
 
     run_raised = True
@@ -312,7 +311,7 @@ async def main(ctx: JobContext) -> None:
         async with job_alert_context(schedule_job_name):
             logger.info("fetch_oddsportal_results_started", sport=sport)
             stats = await process_results(sport=sport)
-            await record_run_outcome(sport or DEFAULT_SPORT_KEY, stats, datetime.now(UTC))
+            await record_run_outcome(sport, stats, datetime.now(UTC))
             if stats.errors:
                 raise RuntimeError(
                     f"{schedule_job_name} failed to settle {len(stats.errors)} event(s); "
@@ -339,7 +338,3 @@ async def main(ctx: JobContext) -> None:
         except Exception as e:
             logger.error("fetch_oddsportal_results_scheduling_failed", error=str(e), exc_info=True)
             await send_scheduling_failure(schedule_job_name, e, final=not run_raised)
-
-
-if __name__ == "__main__":
-    asyncio.run(main(JobContext()))

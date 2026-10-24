@@ -8,7 +8,6 @@ This job:
 4. Self-schedules next execution
 """
 
-import asyncio
 from datetime import timedelta
 
 import structlog
@@ -21,7 +20,7 @@ from odds_core.models import EventStatus
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.scheduling.decision import ScheduleDecision, decide_backward_resilient
 from odds_lambda.scheduling.helpers import self_schedule
-from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
+from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -56,8 +55,8 @@ async def main(ctx: JobContext) -> None:
     4. Schedule next run via backend
     """
     app_settings = get_settings()
-    sport = ctx.sport
-    sports = [sport] if sport else app_settings.data_collection.sports
+    sport = require_sport(ctx, "fetch-scores")
+    sports = [sport]
 
     logger.info(
         "fetch_scores_job_started",
@@ -65,10 +64,6 @@ async def main(ctx: JobContext) -> None:
         sport=sport,
         sports=sports,
     )
-
-    if not sports:
-        logger.warning("fetch_scores_no_sports_configured")
-        return
 
     # Self-scheduling uses the sport-suffixed job name to match Terraform rules
     schedule_job_name = make_compound_job_name("fetch-scores", sport)
@@ -172,7 +167,3 @@ async def _fetch_and_update_scores(sports: list[str]) -> None:
                 sport=sport_key,
                 updated=updated_count,
             )
-
-
-if __name__ == "__main__":
-    asyncio.run(main(JobContext()))

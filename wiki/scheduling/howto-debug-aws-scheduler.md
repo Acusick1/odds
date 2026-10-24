@@ -69,7 +69,7 @@ aws logs filter-log-events --log-group-name /aws/lambda/odds-scheduler --limit 1
 
 The payload file avoids shell-escaping problems.
 
-Always include `sport`; without it the job runs every sport and reschedules under the bare name, which matches no rule ([Lambda handler](scheduler-backends.md#lambda-handler)).
+Always include `sport`; a per-sport job without one raises `ValueError` ([Lambda handler](scheduler-backends.md#lambda-handler)).
 
 ## Related
 

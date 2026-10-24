@@ -236,7 +236,10 @@ def start_local(
 
 @app.command("run-once")
 def run_once(
-    job: str = typer.Argument(..., help="Job name: fetch-odds, fetch-scores, or update-status"),
+    job: str = typer.Argument(
+        ...,
+        help="Job name: a per-sport job with its sport suffix (fetch-odds-epl) or update-status",
+    ),
 ):
     """
     Execute a single job once and exit.
@@ -249,8 +252,8 @@ def run_once(
     - Railway cron invocation
 
     Usage:
-        odds scheduler run-once fetch-odds
-        odds scheduler run-once fetch-scores
+        odds scheduler run-once fetch-odds-epl
+        odds scheduler run-once fetch-scores-epl
         odds scheduler run-once update-status
     """
     app_settings = get_settings()
@@ -263,12 +266,19 @@ def run_once(
         from odds_lambda.scheduling.jobs import (
             JobContext,
             get_job_function,
+            is_per_sport_job,
             list_available_jobs,
             resolve_job_name,
         )
 
         base_name, sport = resolve_job_name(job)
         job_func = get_job_function(base_name)
+        if is_per_sport_job(base_name) and sport is None:
+            console.print(
+                f"[bold red]Error:[/bold red] {base_name} is a per-sport job; "
+                f"pass a sport-suffixed name such as {base_name}-epl"
+            )
+            raise typer.Exit(1)
         ctx = JobContext(sport=sport) if sport else JobContext()
 
         # Run job

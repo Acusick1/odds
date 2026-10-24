@@ -22,7 +22,7 @@ status: stable
 
 ## Flow
 
-`main(ctx)` runs `odds_lambda.jobs.daily_digest.send_digest` inside `job_alert_context("daily-digest-<suffix>")`, with `ctx.lookback_hours` (24) and `ctx.lookahead_hours` (48).
+`main(ctx)` requires `ctx.sport` and runs `odds_lambda.jobs.daily_digest.send_digest` inside `job_alert_context("daily-digest-<suffix>")`, with `ctx.lookback_hours` (24) and `ctx.lookahead_hours` (48).
 
 - Completed: `odds_lambda.jobs.daily_digest._get_completed_events_with_predictions` selects FINAL events with `completed_at >= now - lookback`, joined to the prediction with the highest `snapshot_id` per event for `model_name`, ordered by kickoff.
 - Upcoming: `odds_lambda.jobs.daily_digest._get_upcoming_events_with_predictions` selects SCHEDULED events kicking off in `(now, now + lookahead]` with the same join, ordered by `|predicted_clv|` descending.

@@ -40,7 +40,7 @@ from odds_lambda.collection_calendar import (
 )
 from odds_lambda.scheduling.decision import OVERNIGHT_WINDOWS, CadenceConfig, ScheduleDecision
 from odds_lambda.scheduling.helpers import self_schedule
-from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name
+from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -216,7 +216,8 @@ async def ingest_sport(
 
 
 async def main(ctx: JobContext) -> None:
-    """Job entry. Reads BetfairConfig, ingests one or all configured sports."""
+    """Job entry. Reads BetfairConfig and ingests the context's sport."""
+    sport = require_sport(ctx, "fetch-betfair-exchange")
     settings = get_settings()
     bf = settings.betfair
 
@@ -224,29 +225,15 @@ async def main(ctx: JobContext) -> None:
         logger.info("betfair_job_disabled", reason="betfair.enabled=False")
         return
 
-    sport: SportKey | None = ctx.sport
-    if sport:
-        if sport not in SPORT_CONFIG:
-            logger.error("betfair_unknown_sport", sport=sport, supported=list(SPORT_CONFIG))
-            return
-        target_sports: list[SportKey] = [sport]
-    else:
-        # Default to every adapter-supported sport; honour an explicit override.
-        configured = bf.sports if bf.sports is not None else list(SPORT_CONFIG)
-        target_sports = [s for s in configured if s in SPORT_CONFIG]
-
-    if not target_sports:
-        logger.warning("betfair_no_target_sports")
+    if sport not in SPORT_CONFIG:
+        logger.error("betfair_unknown_sport", sport=sport, supported=list(SPORT_CONFIG))
         return
 
     compound_job_name = make_compound_job_name("fetch-betfair-exchange", sport)
-    # Apply the overnight skip when a single sport is targeted (the production
-    # per-sport path). Combined local runs span sports with different windows,
-    # so no suppression is applied there.
-    overnight = OVERNIGHT_WINDOWS.get(target_sports[0]) if len(target_sports) == 1 else None
+    overnight = OVERNIGHT_WINDOWS.get(sport)
 
     async def _reschedule(label: str) -> ScheduleDecision:
-        decision = await decide_collection_run(target_sports, CADENCE, overnight=overnight)
+        decision = await decide_collection_run([sport], CADENCE, overnight=overnight)
         assert decision.next_execution is not None  # noqa: S101
         try:
             await self_schedule(
@@ -268,11 +255,10 @@ async def main(ctx: JobContext) -> None:
 
     if not decision.should_execute:
         async with job_alert_context(compound_job_name):
-            logger.info("betfair_job_dormant", sports=target_sports, reason=decision.reason)
+            logger.info("betfair_job_dormant", sport=sport, reason=decision.reason)
         return
 
     snapshot_time = datetime.now(UTC)
-    all_stats: list[IngestionStats] = []
     # BetfairConfig validator guarantees these are non-None when enabled=True.
     assert bf.username and bf.password and bf.app_key
     cert_file, cert_key = resolve_cert_paths(bf)
@@ -286,30 +272,27 @@ async def main(ctx: JobContext) -> None:
         )
         await asyncio.to_thread(client.login)
         try:
-            for sport_key in target_sports:
-                cfg = SPORT_CONFIG[sport_key]
-                try:
-                    stats = await ingest_sport(
-                        cfg,
-                        client=client,
-                        lookahead_hours=bf.lookahead_hours,
-                        snapshot_time=snapshot_time,
-                    )
-                except Exception as e:
-                    logger.error(
-                        "betfair_sport_ingestion_failed",
-                        sport=sport_key,
-                        error=str(e),
-                        exc_info=True,
-                    )
-                    stats = IngestionStats(sport=sport_key, errors=[str(e)])
-                all_stats.append(stats)
+            try:
+                stats = await ingest_sport(
+                    SPORT_CONFIG[sport],
+                    client=client,
+                    lookahead_hours=bf.lookahead_hours,
+                    snapshot_time=snapshot_time,
+                )
+            except Exception as e:
+                logger.error(
+                    "betfair_sport_ingestion_failed",
+                    sport=sport,
+                    error=str(e),
+                    exc_info=True,
+                )
+                stats = IngestionStats(sport=sport, errors=[str(e)])
         finally:
             await asyncio.to_thread(client.logout)
         await require_rows_for_fixtures(
             SOURCE,
-            {stats.sport: stats.snapshots_stored for stats in all_stats},
-            errors_by_sport={stats.sport: stats.errors for stats in all_stats},
+            {stats.sport: stats.snapshots_stored},
+            errors_by_sport={stats.sport: stats.errors},
         )
 
     # Reschedule based on (possibly updated) next kickoff after fetch.

@@ -22,7 +22,7 @@ status: stable
 
 ## Flow
 
-It runs `sports` as `[ctx.sport]` or `data_collection.sports`:
+It requires `ctx.sport` (a missing sport raises `ValueError` before any work) and runs for that one sport:
 
 1. **Event sync**: `odds_lambda.event_sync.EventSyncService.sync_sports` calls the free `/events` endpoint and bulk-upserts events, then merges every `op_`, `op_live_` or `fduk_` event for the same match into each synced event (`odds_lambda.storage.event_merge.EventMerger.adopt_twins`, [Event merge](../storage/event-merge.md)); a failure is logged (`event_sync_failed`) and ignored. It runs on every invocation, before the gate, so `odds_lambda.scheduling.helpers.get_next_kickoff` sees fixtures. `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` leaves the status and scores of existing events alone ([events](../storage/events.md#upsert-verbs)).
 2. **Gate**: `decide_forward_resilient(sports, CADENCE, lookahead_days=settings.scheduler.lookahead_days)`. The cadence is `odds_lambda.jobs.fetch_odds.CADENCE` ([decision-engine](../scheduling/decision-engine.md#cadence)); it polls every 2 h within 3 h of a kickoff and every 3 h from 3 to 12 h to fit the free-tier quota ([odds-api-quota](odds-api-quota.md#scheduled-spend)). fetch-odds is the only job that takes `lookahead_days` from `odds_core.config.SchedulerConfig`, and it has no overnight window.
@@ -36,7 +36,7 @@ It runs `sports` as `[ctx.sport]` or `data_collection.sports`:
 
 - A raised run sends the `job_failure:fetch-odds-epl` critical once per outage (the first failure since its last heartbeat, then a reminder every `odds_core.config.AlertConfig.stale_reminder_minutes`, 360 min) through `odds_core.alerts.job_alert_context` and re-raises; a clean or gated run writes `heartbeat:fetch-odds-epl`, which `odds_core.config.AlertConfig.heartbeat_expectations` expects every 49 h (the 48 h opening-tier interval plus 1 h; the job does not pause overnight). The stale-source check leaves a source alone while that failure is recent ([health-monitor](../operations/health-monitor.md#stale-data-check)). On AWS the Lambda handler sends a second critical (#442; [lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
 - On the local scheduler a run past `odds_lambda.scheduling.runner.JOB_TIMEOUT` is cancelled and alerted. A failed run is re-booked 15 minutes later only when it booked nothing, and the pre-schedule has already booked the next tier interval (30 minutes at the closing tier), so a failing API call is retried at the normal cadence, not every 15 minutes ([Local scheduler](../scheduling/local-scheduler.md#scheduling-primitives)).
-- Invoked without a `sport` (for example `odds scheduler run-once fetch-odds`), the job runs all configured sports, MLB included, and reschedules under the bare `fetch-odds` name, which matches no bootstrapped schedule or Terraform-declared EventBridge rule (#470).
+- A run without a sport raises `ValueError`, and `odds scheduler run-once fetch-odds` fails the same way; use `fetch-odds-epl`.
 
 ## Log events
 

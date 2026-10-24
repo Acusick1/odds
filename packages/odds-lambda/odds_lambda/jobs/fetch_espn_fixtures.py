@@ -37,7 +37,7 @@ from odds_lambda.espn_fixture_fetcher import (
     EspnUpcomingFetchError,
     current_season,
 )
-from odds_lambda.scheduling.jobs import JobContext
+from odds_lambda.scheduling.jobs import JobContext, require_sport
 from odds_lambda.storage.espn_fixture_reader import EspnFixtureReader
 from odds_lambda.storage.espn_fixture_writer import EspnFixtureWriter
 from odds_lambda.storage.event_merge import EVENT_MATCH_WINDOW, find_match_id
@@ -53,13 +53,14 @@ async def main(ctx: JobContext) -> None:
     """Fetch ESPN fixtures for the current season.
 
     Raises:
-        ValueError: If ``ctx.sport`` is provided and does not match the sport
+        ValueError: If ``ctx.sport`` is unset or does not match the sport
             this job serves.
     """
     from odds_core.alerts import job_alert_context
 
-    if ctx.sport is not None and ctx.sport != SPORT_KEY:
-        raise ValueError(f"fetch-espn-fixtures only supports {SPORT_KEY}, got sport={ctx.sport!r}")
+    sport = require_sport(ctx, "fetch-espn-fixtures")
+    if sport != SPORT_KEY:
+        raise ValueError(f"fetch-espn-fixtures only supports {SPORT_KEY}, got sport={sport!r}")
 
     app_settings = get_settings()
     season = current_season()
