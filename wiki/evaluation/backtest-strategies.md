@@ -24,12 +24,12 @@ Strategies subclass `odds_analytics.backtesting.services.BettingStrategy` and re
 | `flat` | `odds_analytics.strategies.FlatBettingStrategy` | `market` h2h, `outcome_pattern` home (or away, draw, favorite), `bookmaker` fanduel; confidence 0.5 |
 | `basic_ev` | `odds_analytics.strategies.BasicEVStrategy` | `sharp_book` pinnacle, `retail_books` fanduel/draftkings/betmgm, `min_ev_threshold` 0.03, `markets` h2h/spreads/totals |
 | `arbitrage` | `odds_analytics.strategies.ArbitrageStrategy` | `min_profit_margin` 0.01, `max_hold` 0.10, six US books incl. pinnacle |
-| `xgb_line_movement`, `lstm_line_movement` | model strategies | need `--model-path`; see [line-movement models](../modelling/line-movement-models.md) |
+| `xgb_line_movement` | model strategy | need `--model-path`; see [line-movement models](../modelling/line-movement-models.md) |
 
 - **flat** bets one outcome per event at one bookmaker; it is the baseline.
 - **basic_ev** treats the sharp book's implied probability as the true probability, computes EV at each retail book via `odds_analytics.utils.calculate_ev` on the book's American quote (`odds_core.models.Odds.american_price`), and bets where EV is at least the threshold. `confidence` is that probability, and it is vig-inclusive ([devigging](../foundations/devigging.md)).
 - **arbitrage** takes the best price per outcome across its books by `odds_core.models.Odds.price_decimal`, skips markets whose hold exceeds `max_hold`, and bets all legs when `odds_analytics.utils.detect_arbitrage` (which takes decimal prices) finds a gap of at least `min_profit_margin`. It covers h2h, 1x2, spreads and totals. The engine sizes each leg by `confidence` 1.0 and the stake split from `odds_analytics.utils.detect_arbitrage` is unused, so legs settle separately and a run can show losses (#436).
-- `odds backtest list-strategies` instantiates every registered class with no arguments and prints its docstring and parameters; every strategy module is imported when the command loads, including the torch-based LSTM one.
+- `odds backtest list-strategies` instantiates every registered class with no arguments and prints its docstring and parameters; every strategy module is imported when the command loads.
 
 ## Defaults and the CLI
 

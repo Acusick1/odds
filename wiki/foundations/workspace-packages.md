@@ -16,7 +16,7 @@ sources:
   - odds_lambda.copy_from_production.copy_from_prod
   - packages/odds-lambda/pyproject.toml
   - odds_analytics
-  - odds_analytics.sequence_loader.calculate_regression_target
+  - odds_analytics.targets.calculate_regression_target
   - odds_analytics.quality_metrics
   - odds_analytics.ml_strategy_example
   - odds_analytics.utils.per_book_market_holds
@@ -108,23 +108,23 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 
 ## odds-analytics
 
-`packages/odds-analytics/odds_analytics/` holds backtesting, strategies, feature extraction, model training and the backfill planner. It depends on core and odds-lambda (storage readers, `odds_lambda.fetch_tier.FetchTier`). Heavy dependencies (torch, mlflow, scikit-learn, optuna) sit behind the `training` extra; `odds_analytics` lazy-loads the modules that need them via `odds_analytics.__getattr__`.
+`packages/odds-analytics/odds_analytics/` holds backtesting, strategies, feature extraction, model training and the backfill planner. It depends on core and odds-lambda (storage readers, `odds_lambda.fetch_tier.FetchTier`). Heavy dependencies (mlflow, scikit-learn, optuna) sit behind the `training` extra; `odds_analytics` lazy-loads the modules that need them via `odds_analytics.__getattr__`.
 
 | Area | Modules | Page |
 |---|---|---|
 | Backtesting | `backtesting/` (`config.py`, `models.py`, `odds_analytics.backtesting.services`), `odds_analytics.strategies` | [Backtest engine](../evaluation/backtest-engine.md), [Backtest strategies](../evaluation/backtest-strategies.md) |
 | Features | `odds_analytics.feature_extraction`, `odds_analytics.feature_groups` (snapshot samplers and the training-array orchestrator), `odds_analytics.retail_ev` (retail-EV event selection, among events that have kicked off, by close, decision rows, their horizon and season labels, loss weights (scaled by the fixed `odds_analytics.retail_ev.LOSS_WEIGHT_SCALE`), kick-off times, drop counts and feature matrix), `odds_analytics.retail_ev_metrics` (keep-bar and candidate-report bootstrap metrics, from rows or from per-event totals), `odds_analytics.retail_ev_evaluation` (the one-look retail-EV evaluation: spec, window-end and readiness guards, refit blocks, verdict, coverage, accidental-rerun check and manifest), `odds_analytics.as_of_team_features` (schedule and standings from the matches played by a retail-EV decision time, optionally only up to a given kick-off), `odds_analytics.standings_features`, `odds_analytics.epl_schedule_features`, `odds_analytics.schedule_features`, `odds_analytics.injury_features`, `odds_analytics.polymarket_features` (Polymarket order-book features from the home side's view) | [Feature pipeline](../modelling/feature-pipeline.md) |
-| Training | `training/` (`odds_analytics.training.config`, `odds_analytics.training.data_preparation` (config-driven event selection by status and id-prefix source, and training-data preparation), `odds_analytics.training.cross_validation`, `odds_analytics.training.tuner` (Optuna wrapper with a seedable sampler; its objective takes sample weights), `odds_analytics.training.feature_selection`, `odds_analytics.training.tracking`) | [Training pipeline](../modelling/training-pipeline.md) |
-| Line-movement models | `odds_analytics.xgboost_line_movement` (accepts sample weights and a base-margin feature column), `odds_analytics.lstm_line_movement` (rejects them), `odds_analytics.sequence_loader` | [Line-movement strategies](../modelling/line-movement-models.md) |
+| Training | `training/` (`odds_analytics.training.config`, `odds_analytics.training.data_preparation` (config-driven event selection by status and id-prefix source, and training-data preparation), `odds_analytics.training.cross_validation`, `odds_analytics.training.tuner` (Optuna wrapper with a seedable sampler; its objective takes sample weights), `odds_analytics.training.feature_selection` (variance filter), `odds_analytics.training.tracking`) | [Training pipeline](../modelling/training-pipeline.md) |
+| Line-movement models | `odds_analytics.xgboost_line_movement` (accepts sample weights and a base-margin feature column) | [Line-movement strategy](../modelling/line-movement-models.md) |
 | Backfill | `odds_analytics.gap_backfill_planner`, `odds_analytics.game_selector`, `odds_analytics.backfill_executor` | [Odds API historical backfill](../collection/odds-api-backfill.md) |
+| Targets | `odds_analytics.targets` (the `raw` closing-line movement target function) | [Target functions](../modelling/clv-target-functions.md) |
 | Coverage reporting | `odds_analytics.quality_metrics` | [Coverage checks](../storage/coverage-checks.md) |
 | Helpers | `utils.py` (EV, holds, arbitrage), `odds_analytics.quality_metrics` | |
 
 ### Names that mislead
 
-- `odds_analytics.sequence_loader` is not LSTM-only: it holds the label maths for every model (`odds_analytics.sequence_loader.calculate_regression_target`, [Target functions](../modelling/clv-target-functions.md)).
 - `odds_analytics.quality_metrics` never touches `odds_core.models.DataQualityLog`; it counts game and odds coverage. Data-quality rows are a separate system ([Odds validation](../storage/odds-validator.md), [Coverage checks](../storage/coverage-checks.md)).
-- `odds_analytics.ml_strategy_example` (329 lines) is tested infrastructure for an XGBoost win-probability classifier, not the regression the training pipeline fits ([Line-movement strategies](../modelling/line-movement-models.md)).
+- `odds_analytics.ml_strategy_example` (329 lines) is tested infrastructure for an XGBoost win-probability classifier, not the regression the training pipeline fits ([Line-movement strategy](../modelling/line-movement-models.md)).
 - `odds_analytics.utils.per_book_market_holds` is the hold maths the MCP screener calls, over decimal prices ([retail edges](../agent/mcp-market-tools.md#retail-edges)); it is the only reason `odds-mcp` imports analytics ([odds-mcp server](../agent/mcp-server.md)).
 
 ## Dependency exceptions

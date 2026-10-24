@@ -18,7 +18,7 @@ status: stable
 
 ## Script and config conventions
 
-- Scripts load data through `odds_analytics.feature_groups.prepare_training_data` or `odds_analytics.retail_ev.load_retail_ev_dataset`, with an `odds_analytics.training.config.MLTrainingConfig` read from `experiments/configs/` (the loader validates strategy type, tuning metric and search-space keys, target fields, the validation split a non-CV tuning run needs and the limits of the `retail_ev` residual arm, and rejects a `direction` key) ([training config](../modelling/training-config.md)).
+- Scripts load training data through `odds_analytics.feature_groups.prepare_training_data` or `odds_analytics.retail_ev.load_retail_ev_dataset`, with an `odds_analytics.training.config.MLTrainingConfig` read from `experiments/configs/` (the loader validates strategy type, tuning metric and search-space keys, target fields, the validation split a non-CV tuning run needs and the limits of the `retail_ev` residual arm, and rejects a `direction` key) ([training config](../modelling/training-config.md)).
 - A YAML can name a parent in `base`; the loader deep-merges the child's keys over the parent's, so `experiments/configs/xgboost_epl_retail_ev_price_only.yaml` overrides only what differs from `experiments/configs/xgboost_epl_retail_ev.yaml`.
 - The default CV protocol is not walk-forward, so a YAML must set the target and protocol itself; `experiments/configs/xgboost_epl_retail_ev.yaml` sets `target_type: retail_ev` with expanding walk-forward ([target functions](../modelling/clv-target-functions.md), [cross-validation](../modelling/cross-validation.md)).
 - Scripts run as `uv run python experiments/scripts/<script>.py`.

@@ -22,7 +22,6 @@ from odds_analytics.training import (
     DataConfig,
     ExperimentConfig,
     FeatureConfig,
-    LSTMConfig,
     MLTrainingConfig,
     SearchSpace,
     TrackingConfig,
@@ -548,71 +547,6 @@ class TestXGBoostConfig:
 
 
 # =============================================================================
-# LSTMConfig Tests
-# =============================================================================
-
-
-class TestLSTMConfig:
-    """Tests for LSTMConfig."""
-
-    def test_default_values(self):
-        """Test default LSTM parameters."""
-        config = LSTMConfig()
-        assert config.hidden_size == 64
-        assert config.num_layers == 2
-        assert config.dropout == 0.2
-        assert config.bidirectional is False
-        assert config.lookback_hours == 72
-        assert config.timesteps == 24
-        assert config.epochs == 20
-        assert config.batch_size == 32
-        assert config.learning_rate == 0.001
-        assert config.loss_function == "mse"
-
-    def test_custom_parameters(self):
-        """Test custom LSTM parameters."""
-        config = LSTMConfig(
-            hidden_size=128,
-            num_layers=3,
-            dropout=0.3,
-            bidirectional=True,
-            lookback_hours=48,
-            timesteps=12,
-            epochs=50,
-            batch_size=64,
-            learning_rate=0.0001,
-            loss_function="huber",
-            patience=10,
-        )
-        assert config.hidden_size == 128
-        assert config.num_layers == 3
-        assert config.bidirectional is True
-        assert config.loss_function == "huber"
-        assert config.patience == 10
-
-    def test_invalid_hidden_size(self):
-        """Test invalid hidden_size validation."""
-        with pytest.raises(ValueError):
-            LSTMConfig(hidden_size=4)
-
-        with pytest.raises(ValueError):
-            LSTMConfig(hidden_size=2048)
-
-    def test_invalid_dropout(self):
-        """Test invalid dropout validation."""
-        with pytest.raises(ValueError):
-            LSTMConfig(dropout=-0.1)
-
-        with pytest.raises(ValueError):
-            LSTMConfig(dropout=1.0)
-
-    def test_invalid_loss_function(self):
-        """Test invalid loss function literal."""
-        with pytest.raises(ValueError):
-            LSTMConfig(loss_function="invalid")
-
-
-# =============================================================================
 # FeatureConfig Tests
 # =============================================================================
 
@@ -632,16 +566,10 @@ class TestFeatureConfig:
         assert config.adapter == "xgboost"
         assert config.closing_tier == FetchTier.CLOSING
         assert config.sampling.strategy == "time_range"
-        assert config.lookback_hours is None
-        assert config.timesteps is None
 
     def test_empty_feature_groups_rejected_for_xgboost(self):
         with pytest.raises(ValidationError, match="at least one group"):
             FeatureConfig(target_type="raw", adapter="xgboost", feature_groups=[])
-
-    def test_empty_feature_groups_allowed_for_lstm(self):
-        config = FeatureConfig(target_type="raw", adapter="lstm", feature_groups=[])
-        assert config.feature_groups == ()
 
     def test_missing_target_type_fails(self):
         with pytest.raises(ValidationError) as exc:
@@ -860,104 +788,6 @@ class TestTrainingConfig:
         assert isinstance(config.model, XGBoostConfig)
         assert config.model.n_estimators == 200
 
-    def test_lstm_config(self):
-        """Test training config with LSTM model."""
-        config = TrainingConfig(
-            strategy_type="lstm_line_movement",
-            data=DataConfig(
-                start_date=date(2024, 1, 1),
-                end_date=date(2024, 12, 31),
-            ),
-            model=LSTMConfig(hidden_size=128, epochs=30),
-            features=FeatureConfig(target_type="raw", adapter="lstm"),
-        )
-        assert config.strategy_type == "lstm_line_movement"
-        assert isinstance(config.model, LSTMConfig)
-        assert config.model.hidden_size == 128
-        assert config.model.epochs == 30
-
-    def test_lstm_auto_populates_sequence_params(self):
-        """Test that TrainingConfig propagates lookback_hours/timesteps from LSTMConfig."""
-        config = TrainingConfig(
-            strategy_type="lstm_line_movement",
-            data=DataConfig(
-                start_date=date(2024, 1, 1),
-                end_date=date(2024, 12, 31),
-            ),
-            model=LSTMConfig(lookback_hours=48, timesteps=12),
-            features=FeatureConfig(target_type="raw", adapter="lstm"),
-        )
-        assert config.features.lookback_hours == 48
-        assert config.features.timesteps == 12
-
-    def test_lstm_sequence_param_mismatch_raises(self):
-        """Test that mismatched lookback_hours/timesteps between LSTMConfig and FeatureConfig raises."""
-        with pytest.raises(ValueError, match="lookback_hours mismatch"):
-            TrainingConfig(
-                strategy_type="lstm_line_movement",
-                data=DataConfig(
-                    start_date=date(2024, 1, 1),
-                    end_date=date(2024, 12, 31),
-                ),
-                model=LSTMConfig(lookback_hours=72),
-                features=FeatureConfig(
-                    target_type="raw",
-                    adapter="lstm",
-                    lookback_hours=48,
-                ),
-            )
-
-    def test_lstm_requires_lstm_adapter(self):
-        """Test that LSTM strategy requires features.adapter='lstm'."""
-        with pytest.raises(ValueError, match="requires features.adapter='lstm'"):
-            TrainingConfig(
-                features=FeatureConfig(target_type="raw"),
-                strategy_type="lstm_line_movement",
-                data=DataConfig(
-                    start_date=date(2024, 1, 1),
-                    end_date=date(2024, 12, 31),
-                ),
-                model=LSTMConfig(),
-            )
-
-    def test_xgboost_leaves_sequence_params_none(self):
-        """Test that XGBoost TrainingConfig does not touch sequence params."""
-        config = TrainingConfig(
-            features=FeatureConfig(target_type="raw"),
-            strategy_type="xgboost_line_movement",
-            data=DataConfig(
-                start_date=date(2024, 1, 1),
-                end_date=date(2024, 12, 31),
-            ),
-            model=XGBoostConfig(),
-        )
-        assert config.features.lookback_hours is None
-        assert config.features.timesteps is None
-
-    def test_model_type_mismatch(self):
-        """Test that model type must match strategy type."""
-        with pytest.raises(ValueError, match="requires XGBoostConfig"):
-            TrainingConfig(
-                features=FeatureConfig(target_type="raw"),
-                strategy_type="xgboost_line_movement",
-                data=DataConfig(
-                    start_date=date(2024, 1, 1),
-                    end_date=date(2024, 12, 31),
-                ),
-                model=LSTMConfig(),
-            )
-
-        with pytest.raises(ValueError, match="requires LSTMConfig"):
-            TrainingConfig(
-                features=FeatureConfig(target_type="raw"),
-                strategy_type="lstm_line_movement",
-                data=DataConfig(
-                    start_date=date(2024, 1, 1),
-                    end_date=date(2024, 12, 31),
-                ),
-                model=XGBoostConfig(),
-            )
-
     def test_default_strategy_params(self):
         """Test default strategy parameters."""
         config = TrainingConfig(
@@ -1037,22 +867,22 @@ class TestMLTrainingConfig:
         config = MLTrainingConfig(
             experiment=ExperimentConfig(name="full_test"),
             training=TrainingConfig(
-                strategy_type="lstm_line_movement",
+                strategy_type="xgboost_line_movement",
                 data=DataConfig(
                     start_date=date(2024, 1, 1),
                     end_date=date(2024, 12, 31),
                 ),
-                model=LSTMConfig(),
+                model=XGBoostConfig(),
                 features=FeatureConfig(
                     target_type="raw",
-                    adapter="lstm",
+                    adapter="xgboost",
                     sharp_bookmakers=["pinnacle", "circasports"],
                 ),
             ),
             tuning=TuningConfig(
                 n_trials=50,
                 search_spaces={
-                    "hidden_size": SearchSpace(type="int", low=32, high=256),
+                    "n_estimators": SearchSpace(type="int", low=32, high=256),
                 },
             ),
             tracking=TrackingConfig(enabled=True),
@@ -1135,42 +965,6 @@ class TestYAMLLoading:
         try:
             with pytest.raises(ValueError, match="Empty configuration"):
                 MLTrainingConfig.from_yaml(temp_path)
-        finally:
-            Path(temp_path).unlink()
-
-    def test_yaml_with_lstm(self):
-        """Test YAML loading with LSTM config."""
-        config_data = {
-            "experiment": {"name": "lstm_yaml_test"},
-            "training": {
-                "strategy_type": "lstm_line_movement",
-                "data": {
-                    "start_date": "2024-01-01",
-                    "end_date": "2024-12-31",
-                },
-                "model": {
-                    "hidden_size": 128,
-                    "num_layers": 3,
-                    "epochs": 50,
-                    "loss_function": "huber",
-                },
-                "features": {
-                    "target_type": "raw",
-                    "adapter": "lstm",
-                },
-            },
-        }
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            yaml.dump(config_data, f)
-            temp_path = f.name
-
-        try:
-            config = MLTrainingConfig.from_yaml(temp_path)
-            assert config.training.strategy_type == "lstm_line_movement"
-            assert isinstance(config.training.model, LSTMConfig)
-            assert config.training.model.hidden_size == 128
-            assert config.training.model.loss_function == "huber"
         finally:
             Path(temp_path).unlink()
 
@@ -1397,20 +1191,6 @@ class TestValidationErrorMessages:
             SearchSpace(type="int", low=100, high=50)
         assert "must be less than" in str(excinfo.value)
 
-    def test_model_type_mismatch_error(self):
-        """Test clear error message for model type mismatch."""
-        with pytest.raises(ValueError) as excinfo:
-            TrainingConfig(
-                features=FeatureConfig(target_type="raw"),
-                strategy_type="xgboost_line_movement",
-                data=DataConfig(
-                    start_date=date(2024, 1, 1),
-                    end_date=date(2024, 12, 31),
-                ),
-                model=LSTMConfig(),
-            )
-        assert "requires XGBoostConfig" in str(excinfo.value)
-
 
 # =============================================================================
 # Edge Case Tests
@@ -1447,18 +1227,6 @@ class TestEdgeCases:
                     end_date=date(2024, 12, 31),
                 ),
                 model=XGBoostConfig(),
-            )
-            assert config.strategy_type == strategy
-
-        for strategy in ["lstm_line_movement"]:
-            config = TrainingConfig(
-                strategy_type=strategy,
-                data=DataConfig(
-                    start_date=date(2024, 1, 1),
-                    end_date=date(2024, 12, 31),
-                ),
-                model=LSTMConfig(),
-                features=FeatureConfig(target_type="raw", adapter="lstm"),
             )
             assert config.strategy_type == strategy
 
@@ -1531,11 +1299,6 @@ class TestUnknownFieldRejection:
         """Test that XGBoostConfig rejects unknown fields."""
         with pytest.raises(ValueError, match="Extra inputs are not permitted"):
             XGBoostConfig(n_estimators=100, unknown_param=42)
-
-    def test_lstm_config_unknown_field_rejected(self):
-        """Test that LSTMConfig rejects unknown fields."""
-        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
-            LSTMConfig(hidden_size=64, unknown_param="invalid")
 
     def test_feature_config_unknown_field_rejected(self):
         """Test that FeatureConfig rejects unknown fields."""
@@ -2230,13 +1993,13 @@ class TestSearchSpaceKeys:
         with pytest.raises(ValidationError, match="form_window"):
             make_ml_config(search_spaces={"form_window": SearchSpace(type="int", low=1, high=3)})
 
-    def test_lstm_key_on_xgboost_model_fails(self, make_ml_config):
+    def test_key_not_on_xgboost_model_fails(self, make_ml_config):
         with pytest.raises(ValidationError, match="hidden_size"):
             make_ml_config(search_spaces={"hidden_size": SearchSpace(type="int", low=1, high=3)})
 
 
 class TestStrategyTypeValues:
-    @pytest.mark.parametrize("name", ["xgboost", "lstm"])
+    @pytest.mark.parametrize("name", ["xgboost"])
     def test_unimplemented_alias_is_rejected(self, name, make_ml_config):
         with pytest.raises(ValidationError):
             make_ml_config(strategy_type=name)

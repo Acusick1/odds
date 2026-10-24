@@ -3,23 +3,17 @@ Analytics and ML functionality for betting odds pipeline.
 
 Provides strategies, backtesting, feature extraction, and game selection.
 
-Heavy dependencies (torch, mlflow, scikit-learn, etc.) are optional —
+Heavy dependencies (mlflow, scikit-learn, etc.) are optional —
 install with ``pip install odds-analytics[training]`` for full functionality.
 Modules that require training extras raise ImportError at import time if missing.
 """
 
-from odds_analytics.sequence_loader import load_sequences_for_event
 from odds_analytics.utils import calculate_ev
 
 
 def __getattr__(name: str) -> object:
     """Lazy-load modules that require optional training dependencies."""
     _training_imports: dict[str, tuple[str, str]] = {
-        "LSTMLineMovementStrategy": (
-            "odds_analytics.lstm_line_movement",
-            "LSTMLineMovementStrategy",
-        ),
-        "LSTMModel": ("odds_analytics.lstm_line_movement", "LSTMModel"),
         "XGBoostLineMovementStrategy": (
             "odds_analytics.xgboost_line_movement",
             "XGBoostLineMovementStrategy",
@@ -34,7 +28,6 @@ def __getattr__(name: str) -> object:
         "ExperimentConfig": ("odds_analytics.training", "ExperimentConfig"),
         "DataConfig": ("odds_analytics.training", "DataConfig"),
         "XGBoostConfig": ("odds_analytics.training", "XGBoostConfig"),
-        "LSTMConfig": ("odds_analytics.training", "LSTMConfig"),
         "FeatureConfig": ("odds_analytics.training", "FeatureConfig"),
         "SearchSpace": ("odds_analytics.training", "SearchSpace"),
         "TuningConfig": ("odds_analytics.training", "TuningConfig"),
@@ -54,15 +47,10 @@ __all__ = [
     "FlatBettingStrategy",
     "BasicEVStrategy",
     "ArbitrageStrategy",
-    "LSTMLineMovementStrategy",
     "XGBoostLineMovementStrategy",
-    # Models
-    "LSTMModel",
     # Backfill
     "BackfillExecutor",
     "GameSelector",
-    # Sequence Loading
-    "load_sequences_for_event",
     # Utils
     "calculate_ev",
     # Training Configuration
@@ -71,7 +59,6 @@ __all__ = [
     "ExperimentConfig",
     "DataConfig",
     "XGBoostConfig",
-    "LSTMConfig",
     "FeatureConfig",
     "SearchSpace",
     "TuningConfig",

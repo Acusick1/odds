@@ -17,7 +17,6 @@ Dependencies (install with uv):
 Architecture:
 - XGBoostStrategy uses dependency injection to accept any FeatureExtractor
 - Default: TabularFeatureExtractor for snapshot-based features
-- Extensible: Can swap in SequenceFeatureExtractor for LSTM models
 """
 
 from __future__ import annotations
@@ -59,7 +58,7 @@ class XGBoostStrategy(BettingStrategy):
     Architecture:
     - Uses dependency injection to accept any FeatureExtractor
     - Default: TabularFeatureExtractor for snapshot-based features
-    - Extensible: Can swap in custom feature extractors (e.g., SequenceFeatureExtractor for LSTM)
+    - Extensible: Can swap in custom feature extractors
 
     Example:
         ```python

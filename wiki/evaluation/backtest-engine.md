@@ -28,7 +28,7 @@ status: stable
 
 # Backtest engine
 
-`odds_analytics.backtesting.services.BacktestEngine` replays a [`odds_analytics.backtesting.services.BettingStrategy`](backtest-strategies.md) over historical events and returns a `odds_analytics.backtesting.models.BacktestResult`. Build it as `BacktestEngine(strategy, config, OddsReader(session))`; it takes a reader (`odds_lambda.storage.readers.OddsReader`) rather than a raw session ([OddsReader](../storage/odds-reader.md)). The CLI front end is `odds backtest` in `odds_cli.commands.backtest`; steps are on [Run a backtest](howto-run-backtest.md).
+`odds_analytics.backtesting.services.BacktestEngine` replays a [`odds_analytics.backtesting.services.BettingStrategy`](backtest-strategies.md) over historical events and returns a `odds_analytics.backtesting.models.BacktestResult`. Build it as `BacktestEngine(strategy, config, OddsReader(session))`; it takes a reader (`odds_lambda.storage.readers.OddsReader`) rather than a raw session ([OddsReader](../storage/odds-reader.md)). The CLI front end is `odds backtest` in `odds_cli.commands.backtest`, whose `--strategy` keys are those of `odds_cli.commands.backtest.STRATEGIES`; steps are on [Run a backtest](howto-run-backtest.md).
 
 ## Data prerequisites
 

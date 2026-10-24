@@ -22,7 +22,7 @@ status: stable
 1. **Check the data.** Confirm that the events in range have `odds_core.models.Odds` rows near the decision time (each carries `price_decimal`, above 1.0) and that the strategy's bookmakers and market key exist in them.
    - Historical OddsPortal and FDUK events have none, so they yield no bets ([data prerequisites](backtest-engine.md#data-prerequisites)).
 2. **List the strategies.** `odds backtest list-strategies`.
-   - `--strategy` is a key of `odds_cli.commands.backtest.STRATEGIES`: `flat`, `basic_ev`, `arbitrage`, `xgb_line_movement`, `lstm_line_movement` ([backtest strategies](backtest-strategies.md)).
+   - `--strategy` is a key of `odds_cli.commands.backtest.STRATEGIES`: `flat`, `basic_ev`, `arbitrage`, `xgb_line_movement` ([backtest strategies](backtest-strategies.md)).
 3. **Run.**
 
    ```bash

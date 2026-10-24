@@ -12,6 +12,8 @@ The wiki is the documentation. Before changing a subsystem, read [wiki/index.md]
 
 Every code change keeps the wiki current. `uv run python scripts/wiki_lint.py` (also a pre-commit hook and CI check) lists stale pages, with the changed symbols and the page lines that cite them. Edit those pages to match the new code. A new scheduled job, CLI command or MCP tool needs a page that cites it.
 
+A PR that replaces code deletes what it replaces, with its tests and wiki pages; git history is the record.
+
 ## Constraints
 
 - **The production host is currently the mini-PC**: Tailscale host `nucboxg10pro`, repo checkout at `~/odds`.

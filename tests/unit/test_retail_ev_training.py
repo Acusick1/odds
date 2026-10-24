@@ -100,7 +100,6 @@ class TestRetailEvConfig:
             {"retail_bookmakers": ["bet365"]},
             {"sampling": {"strategy": "tier"}},
             {"markets": ["totals"], "outcome": "over"},
-            {"adapter": "lstm"},
         ],
     )
     def test_rejects(self, overrides: dict[str, object]) -> None:

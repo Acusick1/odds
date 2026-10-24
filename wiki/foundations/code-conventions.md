@@ -48,7 +48,7 @@ Ruff selects only `DTZ003` and `DTZ005` for timezone checks ([Timezones](timezon
 - **Async only** for DB work: `AsyncSession` and `async with async_session_maker() as session`, never a sync `Session`, never a session shared across tasks ([Databases and environments](databases-and-environments.md)). The CLI wraps async code in `asyncio.run()`.
 - **Model types.** SQLModel for tables, Pydantic `BaseModel` for API responses and configs, `dataclass` for simple containers.
 - **Job entry points** are `async def main(ctx: JobContext)` in `odds_lambda/jobs/` ([Job registry](../scheduling/job-registry.md)).
-- **Dependencies.** A uv workspace of five packages ([Workspace packages](workspace-packages.md)); dependencies are managed with `uv add`, `uv remove` and `uv sync`, and the resolved `uv.lock` is committed and the workspace is declared in `pyproject.toml`. Enabling the hooks is a setup step ([Set up and run locally](howto-develop-locally.md)).
+- **Dependencies.** A uv workspace of five packages ([Workspace packages](workspace-packages.md)); dependencies are managed with `uv add`, `uv remove` (`--package <pkg>` for one package's own dependency) and `uv sync`, and the resolved `uv.lock` is committed and the workspace is declared in `pyproject.toml`. Enabling the hooks is a setup step ([Set up and run locally](howto-develop-locally.md)).
 
 ## Logging
 

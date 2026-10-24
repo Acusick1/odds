@@ -54,8 +54,6 @@ class TrainableStrategy(Protocol):
         y_val: np.ndarray | None = ...,
         tracker: ExperimentTracker | None = ...,
         trial: Any | None = ...,
-        static_train: np.ndarray | None = ...,
-        static_val: np.ndarray | None = ...,
         sample_weight_train: np.ndarray | None = ...,
         sample_weight_val: np.ndarray | None = ...,
     ) -> dict[str, Any]: ...
@@ -365,8 +363,6 @@ def run_cv(
     y: np.ndarray,
     feature_names: list[str],
     event_ids: np.ndarray | None = None,
-    static_features: np.ndarray | None = None,
-    masks: np.ndarray | None = None,
     sample_weights: np.ndarray | None = None,
     commence_times: np.ndarray | None = None,
 ) -> CVResult:
@@ -391,8 +387,7 @@ def run_cv(
     Args:
         strategy: Strategy instance implementing train_from_config() that returns
             a history dict with keys: train_mse, train_mae, train_r2, val_mse,
-            val_mae, val_r2. Supports XGBoostLineMovementStrategy and
-            LSTMLineMovementStrategy.
+            val_mae, val_r2.
         config: MLTrainingConfig with data.cv_method, data.n_folds, etc.
         X: Feature matrix (n_samples, n_features). Must be sorted chronologically
            when using cv_method='timeseries'.
@@ -495,13 +490,8 @@ def run_cv(
         y_train_fold = y[train_idx]
         X_val_fold = X[val_idx]
         y_val_fold = y[val_idx]
-        static_train_fold = static_features[train_idx] if static_features is not None else None
-        static_val_fold = static_features[val_idx] if static_features is not None else None
 
         fold_kwargs: dict[str, Any] = {}
-        if masks is not None:
-            fold_kwargs["masks_train"] = masks[train_idx]
-            fold_kwargs["masks_val"] = masks[val_idx]
         if sample_weights is not None:
             fold_kwargs["sample_weight_train"] = sample_weights[train_idx]
             fold_kwargs["sample_weight_val"] = sample_weights[val_idx]
@@ -523,8 +513,6 @@ def run_cv(
             feature_names=feature_names,
             X_val=X_val_fold,
             y_val=y_val_fold,
-            static_train=static_train_fold,
-            static_val=static_val_fold,
             **fold_kwargs,
         )
 
@@ -579,10 +567,6 @@ def train_with_cv(
     X_test: np.ndarray | None = None,
     y_test: np.ndarray | None = None,
     event_ids: np.ndarray | None = None,
-    static_features: np.ndarray | None = None,
-    static_test: np.ndarray | None = None,
-    masks: np.ndarray | None = None,
-    masks_test: np.ndarray | None = None,
     sample_weights: np.ndarray | None = None,
     sample_weights_test: np.ndarray | None = None,
     commence_times: np.ndarray | None = None,
@@ -608,8 +592,6 @@ def train_with_cv(
         y=y,
         feature_names=feature_names,
         event_ids=event_ids,
-        static_features=static_features,
-        masks=masks,
         sample_weights=sample_weights,
         commence_times=commence_times,
     )
@@ -621,9 +603,6 @@ def train_with_cv(
     )
 
     fold_kwargs: dict[str, Any] = {}
-    if masks is not None:
-        fold_kwargs["masks_train"] = masks
-        fold_kwargs["masks_val"] = masks_test
     if sample_weights is not None:
         fold_kwargs["sample_weight_train"] = sample_weights
         fold_kwargs["sample_weight_val"] = sample_weights_test
@@ -635,8 +614,6 @@ def train_with_cv(
         feature_names=feature_names,
         X_val=X_test,
         y_val=y_test,
-        static_train=static_features,
-        static_val=static_test,
         **fold_kwargs,
     )
 

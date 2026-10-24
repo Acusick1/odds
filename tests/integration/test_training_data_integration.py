@@ -22,7 +22,6 @@ from odds_analytics.training import (
     DataConfig,
     ExperimentConfig,
     FeatureConfig,
-    LSTMConfig,
     MLTrainingConfig,
     TrainingConfig,
     TrainingDataResult,
@@ -66,42 +65,6 @@ class TestTrainingDataIntegration:
                 ),
                 features=FeatureConfig(
                     target_type="raw",
-                    outcome="home",
-                    markets=["h2h"],
-                    sharp_bookmakers=["pinnacle"],
-                    retail_bookmakers=["fanduel", "draftkings"],
-                    closing_tier=FetchTier.CLOSING,
-                ),
-            ),
-        )
-
-    @pytest.fixture
-    def lstm_config(self):
-        """Create LSTM training configuration matching test data."""
-        return MLTrainingConfig(
-            experiment=ExperimentConfig(
-                name="integration_test_lstm",
-                tags=["integration", "lstm"],
-                description="Integration test for LSTM data preparation",
-            ),
-            training=TrainingConfig(
-                strategy_type="lstm_line_movement",
-                data=DataConfig(
-                    start_date=date(2024, 10, 1),
-                    end_date=date(2024, 10, 31),
-                    test_split=0.2,
-                    random_seed=42,
-                ),
-                model=LSTMConfig(
-                    hidden_size=64,
-                    num_layers=2,
-                    lookback_hours=72,
-                    timesteps=24,
-                    epochs=20,
-                ),
-                features=FeatureConfig(
-                    target_type="raw",
-                    adapter="lstm",
                     outcome="home",
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],
@@ -201,10 +164,6 @@ class TestTrainingDataIntegration:
         assert result.X_train.shape[1] == result.X_test.shape[1]
         assert result.X_train.shape[1] == len(result.feature_names)
 
-        # Verify no masks for XGBoost
-        assert result.masks_train is None
-        assert result.masks_test is None
-
         # Verify we have data
         assert result.num_train_samples > 0
         assert result.num_test_samples > 0
@@ -216,38 +175,6 @@ class TestTrainingDataIntegration:
         assert (
             abs(actual_test_ratio - expected_test_ratio) < 0.15
         )  # Allow tolerance for small dataset
-
-    @pytest.mark.asyncio
-    async def test_full_pipeline_lstm(
-        self, lstm_config, pglite_async_session, test_events_with_odds
-    ):
-        """Test full LSTM pipeline: config -> data -> result with masks."""
-        result = await prepare_training_data_from_config(lstm_config, pglite_async_session)
-
-        # Verify result structure
-        assert isinstance(result, TrainingDataResult)
-        assert result.strategy_type == "lstm_line_movement"
-
-        # Verify shapes
-        assert result.X_train.ndim == 3  # (samples, timesteps, features)
-        assert result.X_test.ndim == 3
-        assert result.y_train.ndim == 1
-        assert result.y_test.ndim == 1
-
-        # Verify masks present
-        assert result.masks_train is not None
-        assert result.masks_test is not None
-        assert result.masks_train.ndim == 2
-        assert result.masks_test.ndim == 2
-
-        # Verify shape consistency
-        assert result.X_train.shape[0] == result.masks_train.shape[0]
-        assert result.X_test.shape[0] == result.masks_test.shape[0]
-        assert result.X_train.shape[1] == result.masks_train.shape[1]  # timesteps
-
-        # Verify we have data
-        assert result.num_train_samples > 0
-        assert result.num_test_samples > 0
 
     @pytest.mark.asyncio
     async def test_result_to_dict_integration(

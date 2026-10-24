@@ -539,20 +539,6 @@ class TestApplyVarianceFilter:
         np.testing.assert_array_equal(X_out[:, 0], X[:, 0])
         np.testing.assert_array_equal(X_out[:, 1], X[:, 2])
 
-    def test_drops_constant_3d(self):
-        """Constant feature is removed from a 3D (samples, timesteps, features) array."""
-        X = np.zeros((4, 6, 3), dtype=np.float32)
-        X[:, :, 0] = np.arange(4)[:, None]  # varying across samples
-        X[:, :, 1] = 0.5  # constant
-        X[:, :, 2] = np.arange(6)[None, :]  # varying across timesteps
-        names = ["var_sample", "constant", "var_time"]
-
-        X_out, names_out, keep = apply_variance_filter(X, names, threshold=0.0)
-
-        assert names_out == ["var_sample", "var_time"]
-        assert X_out.shape == (4, 6, 2)
-        np.testing.assert_array_equal(keep, [True, False, True])
-
     def test_no_features_dropped_when_all_vary(self):
         """Nothing is dropped when all features have non-zero variance."""
         X = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32)

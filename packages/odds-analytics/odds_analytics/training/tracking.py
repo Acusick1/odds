@@ -55,7 +55,6 @@ from typing import Any
 
 import mlflow
 import mlflow.pyfunc
-import mlflow.pytorch
 import mlflow.sklearn
 import mlflow.xgboost
 import structlog
@@ -81,7 +80,7 @@ class _GenericModelWrapper:
     """
     Wrapper for logging arbitrary models via mlflow.pyfunc.
 
-    This is a fallback when specific MLflow flavors (xgboost, pytorch, sklearn)
+    This is a fallback when specific MLflow flavors (xgboost, sklearn)
     are not available. The wrapper stores the model and delegates predict calls.
     """
 
@@ -291,7 +290,6 @@ class MLflowTracker(ExperimentTracker):
             if self.log_metrics_enabled:
                 try:
                     mlflow.xgboost.autolog(log_models=False, log_input_examples=False)
-                    mlflow.pytorch.autolog(log_models=False, log_every_n_epoch=1)
                 except Exception as e:
                     logger.warning("autolog_setup_failed", error=str(e))
 
@@ -402,7 +400,6 @@ class MLflowTracker(ExperimentTracker):
 
         Automatically detects model type and uses appropriate flavor:
         - XGBoost models: mlflow.xgboost
-        - PyTorch models: mlflow.pytorch
         - Scikit-learn models: mlflow.sklearn
 
         Args:
@@ -423,8 +420,6 @@ class MLflowTracker(ExperimentTracker):
 
             if "xgboost" in model_type:
                 self._log_model_xgboost(model, artifact_path, registered_name)
-            elif "torch" in model_type:
-                self._log_model_pytorch(model, artifact_path, registered_name)
             elif "sklearn" in model_type:
                 self._log_model_sklearn(model, artifact_path, registered_name)
             else:
@@ -442,24 +437,6 @@ class MLflowTracker(ExperimentTracker):
             )
             logger.info(
                 "mlflow_xgboost_model_logged",
-                artifact_path=artifact_path,
-                registered_name=registered_name,
-            )
-        except Exception:
-            self._log_model_generic(model, artifact_path, registered_name)
-
-    def _log_model_pytorch(
-        self, model: Any, artifact_path: str, registered_name: str | None
-    ) -> None:
-        """Log PyTorch model using mlflow.pytorch flavor."""
-        try:
-            mlflow.pytorch.log_model(
-                model,
-                artifact_path=artifact_path,
-                registered_model_name=registered_name,
-            )
-            logger.info(
-                "mlflow_pytorch_model_logged",
                 artifact_path=artifact_path,
                 registered_name=registered_name,
             )
@@ -522,7 +499,6 @@ class MLflowTracker(ExperimentTracker):
                 # Disable autolog to avoid affecting subsequent runs
                 try:
                     mlflow.xgboost.autolog(disable=True)
-                    mlflow.pytorch.autolog(disable=True)
                 except Exception:
                     pass  # Ignore errors during cleanup
 

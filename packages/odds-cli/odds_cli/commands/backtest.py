@@ -7,7 +7,6 @@ from typing import Annotated
 
 import typer
 from odds_analytics.backtesting import BacktestConfig, BacktestEngine, BacktestResult
-from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
 from odds_analytics.strategies import ArbitrageStrategy, BasicEVStrategy, FlatBettingStrategy
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 from odds_core.database import async_session_maker
@@ -23,7 +22,6 @@ STRATEGIES = {
     "flat": FlatBettingStrategy,
     "basic_ev": BasicEVStrategy,
     "arbitrage": ArbitrageStrategy,
-    "lstm_line_movement": LSTMLineMovementStrategy,
     "xgb_line_movement": XGBoostLineMovementStrategy,
 }
 
@@ -43,7 +41,7 @@ def run_backtest(
         ...,
         "--strategy",
         "-s",
-        help="Strategy name (flat, basic_ev, arbitrage, lstm, lstm_line_movement, xgb_line_movement)",
+        help="Strategy name (flat, basic_ev, arbitrage, xgb_line_movement)",
     ),
     start: str = typer.Option(..., "--start", help="Start date (YYYY-MM-DD)"),
     end: str = typer.Option(..., "--end", help="End date (YYYY-MM-DD)"),
@@ -64,7 +62,7 @@ def run_backtest(
         None,
         "--model-path",
         "-m",
-        help="Path to pre-trained model (for lstm, lstm_line_movement, xgb_line_movement)",
+        help="Path to pre-trained model (for xgb_line_movement)",
     ),
     sport: str | None = typer.Option(
         None,
@@ -122,7 +120,7 @@ async def _run_backtest_async(
     strategy_class = STRATEGIES[strategy_name]
 
     # Pass model_path for strategies that support it
-    if strategy_name in ("lstm_line_movement", "xgb_line_movement") and model_path:
+    if strategy_name == "xgb_line_movement" and model_path:
         strategy = strategy_class(model_path=model_path)
     else:
         strategy = strategy_class()

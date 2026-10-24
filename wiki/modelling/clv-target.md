@@ -10,7 +10,7 @@ sources:
   - odds_analytics.retail_ev_metrics
   - odds_core.betfair_close.MAX_EXCHANGE_OVERROUND
   - experiments/scripts/retail_ev_exchange_overround.py
-  - odds_analytics.sequence_loader.calculate_regression_target
+  - odds_analytics.targets.calculate_regression_target
 status: stable
 ---
 
@@ -34,7 +34,7 @@ Rows exist only from 2024-25, where FDUK carries Betfair Exchange closing prices
 
 ## The raw close-minus-snapshot delta
 
-For `h2h`, `raw` is the closing mean implied probability minus the snapshot's, averaged over the bookmakers quoting the configured `outcome`; a positive value means the price at the snapshot was too low and the line moved up. For `spreads` and `totals` it is the change in the mean point, and any other market, `1x2` included, gives no target (`odds_analytics.sequence_loader.calculate_regression_target`). Why a delta rather than the closing price is `(inferred)`: the decision needs the size of the move, and a delta is stationary and roughly mean-zero. The implied probabilities include the vig ([devigging](../foundations/devigging.md)). The tabular group's `retail_sharp_diff` is built from the same prices ([sharp benchmark](sharp-benchmark.md)).
+For `h2h`, `raw` is the closing mean implied probability minus the snapshot's, averaged over the bookmakers quoting the configured `outcome`; a positive value means the price at the snapshot was too low and the line moved up. For `spreads` and `totals` it is the change in the mean point, and any other market, `1x2` included, gives no target (`odds_analytics.targets.calculate_regression_target`). Why a delta rather than the closing price is `(inferred)`: the decision needs the size of the move, and a delta is stationary and roughly mean-zero. The implied probabilities include the vig ([devigging](../foundations/devigging.md)). The tabular group's `retail_sharp_diff` is built from the same prices ([sharp benchmark](sharp-benchmark.md)).
 
 ## Sampling changes a delta target
 

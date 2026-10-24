@@ -20,7 +20,7 @@ Example usage:
     config = MLTrainingConfig.from_yaml("experiments/xgboost_v1.yaml")
 
     # Load from JSON
-    config = MLTrainingConfig.from_json("experiments/lstm_v1.json")
+    config = MLTrainingConfig.from_json("experiments/xgboost_v1.json")
 
     # Access nested configuration
     print(config.training.strategy_type)  # "xgboost"
@@ -116,7 +116,6 @@ __all__ = [
     "ExperimentConfig",
     "DataConfig",
     "XGBoostConfig",
-    "LSTMConfig",
     "SamplingConfig",
     "FeatureConfig",
     "FeatureSelectionConfig",
@@ -424,111 +423,6 @@ class XGBoostConfig(BaseModel):
     )
 
 
-class LSTMConfig(BaseModel):
-    """
-    LSTM model architecture and training hyperparameters.
-
-    Contains all configurable parameters for LSTM sequence models.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    # Architecture parameters
-    hidden_size: int = Field(
-        default=64,
-        ge=8,
-        le=1024,
-        description="Number of features in LSTM hidden state",
-    )
-    num_layers: int = Field(
-        default=2,
-        ge=1,
-        le=10,
-        description="Number of recurrent LSTM layers",
-    )
-    dropout: float = Field(
-        default=0.2,
-        ge=0.0,
-        le=0.9,
-        description="Dropout probability between LSTM layers",
-    )
-    bidirectional: bool = Field(
-        default=False,
-        description="Use bidirectional LSTM",
-    )
-
-    # Sequence parameters
-    lookback_hours: int = Field(
-        default=72,
-        ge=1,
-        le=168,
-        description="Hours of historical data to use",
-    )
-    timesteps: int = Field(
-        default=24,
-        ge=1,
-        le=168,
-        description="Number of sequence timesteps",
-    )
-
-    # Training parameters
-    epochs: int = Field(
-        default=20,
-        ge=1,
-        le=1000,
-        description="Number of training epochs",
-    )
-    batch_size: int = Field(
-        default=32,
-        ge=1,
-        le=1024,
-        description="Training batch size",
-    )
-    learning_rate: float = Field(
-        default=0.001,
-        gt=0.0,
-        le=1.0,
-        description="Learning rate for optimizer",
-    )
-
-    # Loss function
-    loss_function: Literal["mse", "mae", "huber"] = Field(
-        default="mse",
-        description="Loss function for training",
-    )
-
-    # Optimizer settings
-    weight_decay: float = Field(
-        default=0.0,
-        ge=0.0,
-        description="L2 regularization weight decay",
-    )
-    clip_grad_norm: float | None = Field(
-        default=None,
-        gt=0.0,
-        description="Maximum gradient norm for clipping",
-    )
-
-    # Early stopping
-    patience: int | None = Field(
-        default=None,
-        ge=1,
-        description="Number of epochs without improvement before stopping",
-    )
-    min_delta: float = Field(
-        default=0.0001,
-        ge=0.0,
-        description="Minimum change to qualify as improvement",
-    )
-
-    # Sequence filtering
-    min_valid_timesteps: int = Field(
-        default=2,
-        ge=1,
-        description="Minimum valid (non-padded) timesteps required per sample",
-    )
-
-
 # =============================================================================
 # Sampling Configuration
 # =============================================================================
@@ -592,8 +486,6 @@ _RETAIL_EV_UNUSED_FIELDS: tuple[str, ...] = (
     "outcome",
     "closing_tier",
     "sampling",
-    "lookback_hours",
-    "timesteps",
 )
 
 
@@ -607,7 +499,7 @@ class FeatureConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     # Adapter selection
-    adapter: Literal["xgboost", "lstm"] = Field(
+    adapter: Literal["xgboost"] = Field(
         default="xgboost",
         description="Model adapter type for feature formatting",
     )
@@ -654,21 +546,6 @@ class FeatureConfig(BaseModel):
         description="Snapshot sampling strategy",
     )
 
-    # Sequence model configuration (LSTM only — auto-populated from LSTMConfig
-    # by TrainingConfig.sync_lstm_sequence_params when using config-driven training)
-    lookback_hours: int | None = Field(
-        default=None,
-        ge=1,
-        le=168,
-        description="Hours of historical data for LSTM sequence extraction",
-    )
-    timesteps: int | None = Field(
-        default=None,
-        ge=1,
-        le=168,
-        description="Number of LSTM sequence timesteps",
-    )
-
     # Feature processing
     normalize: bool = Field(
         default=False,
@@ -678,7 +555,7 @@ class FeatureConfig(BaseModel):
     # Feature groups to compose
     feature_groups: tuple[FeatureGroupName | RetailEvFeatureGroupName, ...] = Field(
         default=("tabular",),
-        description="Feature groups to compose. May be empty only for the lstm adapter and "
+        description="Feature groups to compose. Empty only for "
         "retail_ev. Available: tabular, polymarket, injuries, rest; retail_ev takes only "
         "polymarket_at_t, dynamics, schedule_as_of_t, standings_as_of_t.",
     )
@@ -743,8 +620,6 @@ class FeatureConfig(BaseModel):
     @model_validator(mode="after")
     def validate_feature_groups_for_adapter(self) -> FeatureConfig:
         if self.target_type == "retail_ev":
-            if self.adapter != "xgboost":
-                raise ValueError("retail_ev supports only the xgboost adapter")
             event_level = [g for g in self.feature_groups if g not in RETAIL_EV_FEATURE_GROUPS]
             if event_level:
                 raise ValueError(
@@ -770,7 +645,7 @@ class FeatureConfig(BaseModel):
             raise ValueError(
                 f"{as_of_t} are retail_ev feature groups; target_type is {self.target_type}"
             )
-        if self.adapter == "xgboost" and not self.feature_groups:
+        if not self.feature_groups:
             raise ValueError("feature_groups must name at least one group for the xgboost adapter")
         return self
 
@@ -1085,15 +960,12 @@ class TrackingConfig(BaseModel):
 # =============================================================================
 
 
-StrategyType = Literal["xgboost_line_movement", "lstm_line_movement"]
+StrategyType = Literal["xgboost_line_movement"]
 
 
 class TrainingConfig(BaseModel):
     """
     Main training configuration with model-specific settings.
-
-    Uses discriminated unions to select the appropriate model configuration
-    based on strategy_type.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1110,9 +982,9 @@ class TrainingConfig(BaseModel):
     )
 
     # Model-specific configuration (discriminated union)
-    model: XGBoostConfig | LSTMConfig = Field(
+    model: XGBoostConfig = Field(
         ...,
-        description="Model hyperparameters (type depends on strategy_type)",
+        description="Model hyperparameters ",
     )
 
     # Feature configuration
@@ -1165,53 +1037,6 @@ class TrainingConfig(BaseModel):
             raise ValueError("retail_ev requires use_kfold and cv_method='walk_forward'")
         if data.test_split > 0 or data.validation_split > 0:
             raise ValueError("retail_ev requires test_split and validation_split of 0")
-        return self
-
-    @model_validator(mode="after")
-    def validate_model_type(self) -> TrainingConfig:
-        """Ensure model config matches strategy type."""
-        if self.strategy_type == "xgboost_line_movement":
-            if not isinstance(self.model, XGBoostConfig):
-                raise ValueError(
-                    f"Strategy '{self.strategy_type}' requires XGBoostConfig, "
-                    f"got {type(self.model).__name__}"
-                )
-        elif self.strategy_type == "lstm_line_movement":
-            if not isinstance(self.model, LSTMConfig):
-                raise ValueError(
-                    f"Strategy '{self.strategy_type}' requires LSTMConfig, "
-                    f"got {type(self.model).__name__}"
-                )
-        return self
-
-    @model_validator(mode="after")
-    def sync_lstm_sequence_params(self) -> TrainingConfig:
-        """Auto-populate LSTM sequence params from LSTMConfig into FeatureConfig.
-
-        LSTMConfig is the canonical source for lookback_hours and timesteps.
-        When FeatureConfig leaves them as None, this validator copies them from
-        the model config. If both are set explicitly, they must agree.
-        """
-        if not isinstance(self.model, LSTMConfig):
-            return self
-
-        for field_name in ("lookback_hours", "timesteps"):
-            model_val = getattr(self.model, field_name)
-            feat_val = getattr(self.features, field_name)
-
-            if feat_val is None:
-                object.__setattr__(self.features, field_name, model_val)
-            elif feat_val != model_val:
-                raise ValueError(
-                    f"{field_name} mismatch: features={feat_val}, model={model_val}. "
-                    f"Remove from features section (auto-populated from model config)."
-                )
-
-        if self.features.adapter != "lstm":
-            raise ValueError(
-                f"LSTM strategy requires features.adapter='lstm', got '{self.features.adapter}'"
-            )
-
         return self
 
 
@@ -1401,9 +1226,6 @@ class MLTrainingConfig(BaseModel):
         # Load with inheritance support
         data = cls._load_with_inheritance(filepath, visited=set(), depth=0)
 
-        # Handle model config discriminated union
-        data = cls._preprocess_model_config(data)
-
         return cls.model_validate(data)
 
     @classmethod
@@ -1439,9 +1261,6 @@ class MLTrainingConfig(BaseModel):
 
         # Load with inheritance support
         data = cls._load_with_inheritance(filepath, visited=set(), depth=0)
-
-        # Handle model config discriminated union
-        data = cls._preprocess_model_config(data)
 
         return cls.model_validate(data)
 
@@ -1524,29 +1343,6 @@ class MLTrainingConfig(BaseModel):
 
         return data
 
-    @classmethod
-    def _preprocess_model_config(cls, data: dict) -> dict:
-        """
-        Preprocess configuration data to handle model type discrimination.
-
-        Converts raw model config dict to appropriate typed config based on strategy_type.
-        """
-        if "training" not in data:
-            return data
-
-        training = data["training"]
-        strategy_type = training.get("strategy_type", "")
-        model_data = training.get("model", {})
-
-        # Convert dict to appropriate config type based on strategy
-        if isinstance(model_data, dict):
-            if strategy_type == "xgboost_line_movement":
-                training["model"] = XGBoostConfig.model_validate(model_data)
-            elif strategy_type == "lstm_line_movement":
-                training["model"] = LSTMConfig.model_validate(model_data)
-
-        return data
-
     def to_yaml(self, filepath: str | Path) -> None:
         """
         Save configuration to a YAML file.
@@ -1626,7 +1422,6 @@ class MLTrainingConfig(BaseModel):
         Returns:
             MLTrainingConfig instance
         """
-        data = cls._preprocess_model_config(data)
         return cls.model_validate(data)
 
 
