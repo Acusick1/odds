@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from enum import StrEnum
 from typing import Any
 
 import httpx
@@ -42,6 +43,14 @@ _REQUEST_TIMEOUT_SECONDS = 15.0
 _RESULTS_CHUNK_DAYS = 30
 
 
+class MlbGameState(StrEnum):
+    SCHEDULED = "scheduled"
+    LIVE = "live"
+    FINAL = "final"
+    POSTPONED = "postponed"
+    CANCELLED = "cancelled"
+
+
 @dataclass(frozen=True)
 class MlbGameResult:
     """One MLB game from the schedule with its score once it is Final."""
@@ -56,6 +65,9 @@ class MlbGameResult:
     game_number: int = 1
     start_time_tbd: bool = False
     official_date: date | None = None
+    state: MlbGameState = MlbGameState.SCHEDULED
+    schedule_date: date | None = None
+    resumed: bool = False
 
     @property
     def day(self) -> date:
@@ -228,8 +240,9 @@ class MlbStatsFetcher:
                 },
             )
             for day in data.get("dates", []):
+                schedule_date = date.fromisoformat(day["date"]) if day.get("date") else None
                 for game in day.get("games", []):
-                    result = _result_from_game(game)
+                    result = _result_from_game(game, schedule_date)
                     if result is not None:
                         results.append(result)
             chunk_start = chunk_end + timedelta(days=1)
@@ -318,8 +331,27 @@ def _record_from_game(
     )
 
 
-def _result_from_game(game: dict[str, Any]) -> MlbGameResult | None:
-    """Convert a raw ``games[]`` entry of a linescore-hydrated schedule; ``None`` without core fields."""
+def _game_state(status: dict[str, Any]) -> MlbGameState:
+    # A postponed or cancelled slot reports abstractGameState "Final", so the coded state decides.
+    coded = status.get("codedGameState")
+    if coded == "D":
+        return MlbGameState.POSTPONED
+    if coded == "C":
+        return MlbGameState.CANCELLED
+    abstract = status.get("abstractGameState")
+    if abstract == "Live":
+        return MlbGameState.LIVE
+    if abstract == "Final":
+        return MlbGameState.FINAL
+    return MlbGameState.SCHEDULED
+
+
+def _result_from_game(game: dict[str, Any], schedule_date: date | None) -> MlbGameResult | None:
+    """Convert a raw ``games[]`` entry of a linescore-hydrated schedule; ``None`` without core fields.
+
+    ``schedule_date`` is the ``dates[].date`` the entry is listed under: a postponed slot is listed
+    under its original date while its ``officialDate`` is the date it is played.
+    """
     game_pk = game.get("gamePk")
     game_date = game.get("gameDate")
     teams = game.get("teams") or {}
@@ -354,4 +386,7 @@ def _result_from_game(game: dict[str, Any]) -> MlbGameResult | None:
         official_date=date.fromisoformat(game["officialDate"])
         if game.get("officialDate")
         else None,
+        state=_game_state(game.get("status") or {}),
+        schedule_date=schedule_date,
+        resumed=bool(game.get("resumedFrom")),
     )
