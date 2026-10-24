@@ -1,10 +1,14 @@
 ---
 type: reference
 title: Candidate registry
-description: The candidate file format, the odds candidates list command, and the version check that stops a candidate changing without a new version.
+description: The candidate file format, the odds candidates list and report commands, how paper trades are scored and judged per candidate, and the version check that stops a candidate changing without a new version.
 sources:
   - odds_core.candidates
   - odds_cli.commands.candidates
+  - odds_analytics.candidate_report
+  - odds_core.betfair_close.event_close
+  - odds_core.paper_trade_models.PaperTrade
+  - odds_mcp.server.get_portfolio
   - scripts/check_candidate_versions.py
 status: stable
 ---
@@ -30,6 +34,20 @@ A change of status goes through a pull request. The version is a strict positive
 ## `odds candidates list`
 
 `odds_cli.commands.candidates.list_candidates` prints each candidate's name, kind, sport, version, status, start date and issue, optionally filtered by status. It reads the files in `odds_core.candidates.candidates_dir` and does not touch the database. An invalid registry prints the loader's error in red and exits 1.
+
+## `odds candidates report`
+
+`odds_cli.commands.candidates.report` prints one row per candidate version: settled bets, bets with and without a close, stake, P&L, ROI and the checkpoint (n, mean EV, 95% and 99% CIs, verdict). It reads the database through `odds_analytics.candidate_report.candidate_report` and the registry files. Every registered candidate appears, with zero bets before it trades, and so does any (name, version) with trades whose version differs from the registry's (or whose candidate is absent from it), shown as "not current".
+
+`odds_mcp.server.get_portfolio` returns the same summaries as `candidates`, from the same function.
+
+What is scored, in `odds_analytics.candidate_report`:
+
+- **Trades.** `odds_analytics.candidate_report.load_scored_trades` takes settled paper trades that carry a candidate, in placement order (`placed_at`, then id), and drops void ones ([paper trading](../agent/paper-trading.md#candidate-fields)). Pushes count as settled bets.
+- **Close.** `p_close` is the devigged probability of the trade's selection in `odds_core.betfair_close.event_close`, computed from the event's stored snapshots when the report runs, so nothing is recorded at settlement and the close can be re-derived. Only the `1x2` market has a close (`odds_analytics.candidate_report.selection_close_probability`): an `h2h` trade, which is every MLB trade, has none, and so does a `1x2` trade whose event has no close. Such a trade counts in P&L and in the settled bets without a close.
+- **EV.** `odds_analytics.candidate_report.ScoredTrade.ev` is `p_close × price_decimal − 1`.
+- **Checkpoint.** `odds_analytics.candidate_report.checkpoint_of` takes the largest multiple of `odds_analytics.candidate_report.CHECKPOINT_SIZE` (100) not above the number of bets with a close and scores only that many, the earliest. The score is the stake-weighted mean EV per unit staked, `Σ stake·EV / Σ stake`, with `odds_analytics.retail_ev_metrics.event_clustered_ratio` giving percentile CIs at 95% and 99% from `odds_analytics.candidate_report.DEFAULT_BOOTSTRAP_SAMPLES` resamples of whole events under a fixed seed, so the same trades always give the same verdict.
+- **Verdict.** `odds_analytics.candidate_report.verdict_of` returns an `odds_analytics.candidate_report.Verdict`: `not_yet` below 100 bets with a close; `promote` when the 99% CI's lower bound is above zero; `kill` when the 95% CI's upper bound is at or below zero, or when the checkpoint is `odds_analytics.candidate_report.KILL_AT_BETS` (500) or more without promotion; otherwise `continue`. The rules and their rationale are on [Goal and strategy](../foundations/goal-and-strategy.md#how-a-candidate-is-judged). The verdict is advice: a status change is still a pull request.
 
 ## Version check
 

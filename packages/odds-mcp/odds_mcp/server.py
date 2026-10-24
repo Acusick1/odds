@@ -13,9 +13,11 @@ from typing import Any, Literal
 
 import structlog
 from fastmcp import FastMCP
+from odds_analytics.candidate_report import CandidateSummary, candidate_report
 from odds_analytics.utils import per_book_market_holds
 from odds_core.agent_wakeup_models import AgentWakeup
 from odds_core.bookmakers import NON_BETTABLE_BOOKMAKERS
+from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.database import async_session_maker
 from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
@@ -645,6 +647,30 @@ async def paper_bet(
     }
 
 
+def _candidate_summary_to_dict(summary: CandidateSummary) -> dict[str, Any]:
+    checkpoint = summary.checkpoint
+    return {
+        "name": summary.name,
+        "version": summary.version,
+        "status": summary.status.value if summary.status else None,
+        "settled_bets": summary.settled_bets,
+        "bets_with_close": summary.bets_with_close,
+        "bets_without_close": summary.bets_without_close,
+        "total_stake": summary.total_stake,
+        "pnl": summary.pnl,
+        "roi": summary.roi,
+        "checkpoint": None
+        if checkpoint is None
+        else {
+            "n": checkpoint.n,
+            "mean_ev": checkpoint.mean_ev,
+            "ci95": list(checkpoint.ci95),
+            "ci99": list(checkpoint.ci99),
+        },
+        "verdict": summary.verdict.value,
+    }
+
+
 @mcp.tool()
 async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
     """Get paper trading portfolio summary: open bets, P&L, bankroll.
@@ -653,11 +679,12 @@ async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
         initial_bankroll: Starting bankroll for ROI calculation.
 
     Returns:
-        Dict with portfolio metrics, list of open trades.
+        Dict with portfolio metrics, list of open trades and per-candidate results.
     """
     async with async_session_maker() as session:
         portfolio = await get_portfolio_summary(session, initial_bankroll=initial_bankroll)
         open_trades = await get_open_trades(session)
+        candidates = await candidate_report(session, load_candidates(candidates_dir()))
 
     return {
         "current_bankroll": portfolio.current_bankroll,
@@ -673,6 +700,7 @@ async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
             "pushes": portfolio.push_count,
         },
         "open_trade_details": [_trade_to_dict(t) for t in open_trades],
+        "candidates": [_candidate_summary_to_dict(c) for c in candidates],
     }
 
 

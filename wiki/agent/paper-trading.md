@@ -47,7 +47,7 @@ Columns: `event_id` (FK), `market`, `selection` (`home`/`draw`/`away`), `bookmak
 | Surface | Command | Notes |
 |---|---|---|
 | MCP `odds_mcp.server.paper_bet` | place | Takes `price_decimal` and the optional `candidate_name` and `candidate_version`. Event must be `scheduled`; `bankroll` defaults to the portfolio's current bankroll; errors come back as dicts |
-| MCP `odds_mcp.server.get_portfolio` | read | Summary plus open trade details |
+| MCP `odds_mcp.server.get_portfolio` | read | Summary, open trade details and the per-candidate checkpoint summaries of the [candidate report](../evaluation/candidate-registry.md#odds-candidates-report) |
 | MCP `odds_mcp.server.settle_bets` | settle | Settled count, total P&L, trades |
 | CLI `odds paper list [--settled] [-n 50]` (`odds_cli.commands.paper.list_trades`), `odds paper settle` (`odds_cli.commands.paper.settle`), `odds paper summary [--bankroll 1000]` (`odds_cli.commands.paper.summary`) | mirror | the summary command adds open exposure per event ([odds CLI](../foundations/odds-cli.md)) |
 

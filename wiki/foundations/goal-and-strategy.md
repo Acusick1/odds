@@ -49,7 +49,7 @@ Most of the workflow's tooling does not exist (#608). What does:
 - The [candidate registry](../evaluation/candidate-registry.md), with no candidate in it.
 - The candidate, its version and the git commit on each paper trade (`odds_core.paper_trade_models.PaperTrade`), with the candidate checked against the registry when the bet is placed through `odds_mcp.server.paper_bet` ([paper trading](../agent/paper-trading.md#candidate-fields)).
 - The close, computed from stored snapshots when a report runs, so a trade stores none. MLB has no close defined, so its trades are reported without EV.
-- `odds candidates report`, which gives the checkpoint verdict.
+- `odds candidates report`, which gives the checkpoint verdict ([Candidate registry](../evaluation/candidate-registry.md#odds-candidates-report)).
 
 Missing: nothing runs a mechanical candidate; only the agent can place paper trades (#609).
 

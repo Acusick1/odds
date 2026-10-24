@@ -715,6 +715,57 @@ class TestPaperBetCandidate:
         assert "not in the registry" in result["error"]
 
 
+class TestGetPortfolioCandidates:
+    @pytest.mark.asyncio
+    async def test_includes_candidate_summaries(self) -> None:
+        from odds_analytics.candidate_report import summarize_candidates
+        from odds_core.candidates import AgentCandidate
+        from odds_lambda.paper_trading import PortfolioSummary
+        from odds_mcp.server import get_portfolio
+
+        entry = AgentCandidate(
+            name="cand",
+            description="d",
+            sport="soccer_epl",
+            version=1,
+            issue=1,
+            start_date="2026-01-01",
+            status="active",
+            kind="agent",
+        )
+        portfolio = PortfolioSummary(1000.0, 0, 0, 0, 0.0, 0.0, 0.0, 0, 0, 0)
+
+        with (
+            patch("odds_mcp.server.async_session_maker") as maker,
+            patch("odds_mcp.server.get_portfolio_summary", AsyncMock(return_value=portfolio)),
+            patch("odds_mcp.server.get_open_trades", AsyncMock(return_value=[])),
+            patch("odds_mcp.server.load_candidates", return_value=[entry]),
+            patch(
+                "odds_mcp.server.candidate_report",
+                AsyncMock(return_value=summarize_candidates([], [entry])),
+            ),
+        ):
+            maker.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
+            maker.return_value.__aexit__ = AsyncMock()
+            result = await get_portfolio()
+
+        assert result["candidates"] == [
+            {
+                "name": "cand",
+                "version": 1,
+                "status": "active",
+                "settled_bets": 0,
+                "bets_with_close": 0,
+                "bets_without_close": 0,
+                "total_stake": 0,
+                "pnl": 0,
+                "roi": 0.0,
+                "checkpoint": None,
+                "verdict": "not_yet",
+            }
+        ]
+
+
 class TestFindRetailEdges:
     """Unit tests for the ``find_retail_edges`` MCP tool."""
 

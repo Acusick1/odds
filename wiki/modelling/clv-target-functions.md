@@ -77,6 +77,7 @@ The event-level groups (`tabular`, standings, match stats, EPL schedule and the 
 
 - `odds_analytics.retail_ev_metrics.mse_gain`: baseline weighted MSE minus the model's, with the loss weights; positive means the model is better.
 - `odds_analytics.retail_ev_metrics.pick_ev_gain`: the total `w_event × target` over rows the model predicts EV > 0, minus the same total over rows the baseline predicts EV > 0. An empty pick set totals zero.
+- `odds_analytics.retail_ev_metrics.event_clustered_ratio`: a sum of numerators over a sum of denominators with percentile CIs at chosen levels from whole-event resamples; the [candidate report](../evaluation/candidate-registry.md#odds-candidates-report) uses it for its stake-weighted mean EV.
 - `odds_analytics.retail_ev_metrics.mse_gain_of_event_totals` and `odds_analytics.retail_ev_metrics.pick_ev_gain_of_event_totals` run the same bootstraps on per-event totals (weighted squared errors and loss-weight totals, or pick-EV differences), which the row-level functions compute and pass to them. The [keep-bar power simulation](../evaluation/exp-retail-ev-power.md) calls them directly.
 
 ## Devigged delta
