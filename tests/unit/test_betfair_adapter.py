@@ -10,6 +10,7 @@ from odds_lambda.betfair.adapter import (
     _normalize_runner_name,
     betfair_book_to_bookmaker_entry,
     canonical_teams,
+    doubleheader_game_number,
     resolve_teams,
     strip_pitcher_annotation,
 )
@@ -275,6 +276,20 @@ class TestBookToBookmakerEntry:
         )
         entry = betfair_book_to_bookmaker_entry(book, cfg, home_team="A", away_team="B")
         assert entry is None
+
+
+class TestDoubleheaderGameNumber:
+    @pytest.mark.parametrize(
+        ("event_name", "expected"),
+        [
+            ("St. Louis Cardinals @ Cincinnati Reds Game 1", 1),
+            ("Milwaukee Brewers @ Pittsburgh Pirates - Game 2", 2),
+            ("Boston Red Sox (B Bello) @ New York Yankees (G Cole)", None),
+            ("Milwaukee Brewers @ Pittsburgh Pirates - Game", None),
+        ],
+    )
+    def test_reads_the_game_label(self, event_name: str, expected: int | None) -> None:
+        assert doubleheader_game_number(event_name) == expected
 
 
 class TestCanonicalTeams:

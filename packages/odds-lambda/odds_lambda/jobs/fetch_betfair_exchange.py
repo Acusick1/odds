@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import structlog
 from odds_core.alerts import job_alert_context
@@ -30,6 +31,7 @@ from odds_lambda.betfair import (
     BetfairExchangeClient,
     SportBetfairConfig,
     betfair_book_to_bookmaker_entry,
+    doubleheader_game_number,
     resolve_teams,
 )
 from odds_lambda.betfair.cert_loader import resolve_cert_paths
@@ -38,6 +40,14 @@ from odds_lambda.collection_calendar import (
     decide_collection_run,
     require_rows_for_fixtures,
 )
+from odds_lambda.live_events import (
+    DroppedGame,
+    LiveEventFinder,
+    SkipReason,
+    alert_dropped_games,
+    count_dropped,
+)
+from odds_lambda.mlb_game_resolver import GameRow
 from odds_lambda.scheduling.decision import OVERNIGHT_WINDOWS, CadenceConfig, ScheduleDecision
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
@@ -85,7 +95,16 @@ class IngestionStats:
     snapshots_stored: int = 0
     events_matched: int = 0
     events_created: int = 0
+    dropped_games: list[DroppedGame] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+
+    @property
+    def games_unresolved(self) -> int:
+        return count_dropped(self.dropped_games, SkipReason.UNRESOLVED)
+
+    @property
+    def games_skipped_schedule_unavailable(self) -> int:
+        return count_dropped(self.dropped_games, SkipReason.SCHEDULE_UNAVAILABLE)
 
 
 def _should_skip_book(book: BetfairBook, sport_cfg: SportBetfairConfig) -> bool:
@@ -125,43 +144,53 @@ async def ingest_sport(
         )
         return stats
 
+    priced: list[tuple[BetfairBook, GameRow, dict[str, Any]]] = []
+    for book in books:
+        if _should_skip_book(book, sport_cfg):
+            if book.inplay:
+                stats.books_in_play += 1
+            continue
+
+        if (book.market_status or "").upper() == "SUSPENDED":
+            stats.books_suspended += 1
+
+        teams = resolve_teams(book, sport_cfg)
+        if teams is None:
+            stats.errors.append(f"unparseable_event_name: {book.betfair_event_name}")
+            continue
+        home, away = teams
+
+        entry = betfair_book_to_bookmaker_entry(
+            book,
+            sport_cfg,
+            home_team=home,
+            away_team=away,
+            snapshot_time=snapshot_time,
+        )
+        if entry is None:
+            stats.errors.append(f"unusable_outcomes: {book.betfair_event_name}")
+            continue
+        game = GameRow(
+            home, away, book.market_start_time, doubleheader_game_number(book.betfair_event_name)
+        )
+        priced.append((book, game, entry))
+
+    finder = await LiveEventFinder.for_run(
+        sport_cfg.sport_key, sport_cfg.sport_title, (game for _, game, _ in priced)
+    )
+    if finder.schedule_unavailable:
+        stats.errors.append("MLB schedule unavailable: no new events created")
+
     async with async_session_maker() as session:
         writer = OddsWriter(session)
 
-        for book in books:
-            if _should_skip_book(book, sport_cfg):
-                if book.inplay:
-                    stats.books_in_play += 1
-                continue
-
-            if (book.market_status or "").upper() == "SUSPENDED":
-                stats.books_suspended += 1
-
-            teams = resolve_teams(book, sport_cfg)
-            if teams is None:
-                stats.errors.append(f"unparseable_event_name: {book.betfair_event_name}")
-                continue
-            home, away = teams
-
-            entry = betfair_book_to_bookmaker_entry(
-                book,
-                sport_cfg,
-                home_team=home,
-                away_team=away,
-                snapshot_time=snapshot_time,
-            )
-            if entry is None:
-                stats.errors.append(f"unusable_outcomes: {book.betfair_event_name}")
-                continue
-
+        for book, game, entry in priced:
             try:
-                event_id, created = await writer.find_or_create_event(
-                    home_team=home,
-                    away_team=away,
-                    match_date=book.market_start_time,
-                    sport_key=sport_cfg.sport_key,
-                    sport_title=sport_cfg.sport_title,
-                )
+                found = await finder.find_or_create(writer, game)
+                if isinstance(found, DroppedGame):
+                    stats.dropped_games.append(found)
+                    continue
+                event_id, created = found
                 if created:
                     stats.events_created += 1
                 else:
@@ -210,6 +239,8 @@ async def ingest_sport(
         snapshots_stored=stats.snapshots_stored,
         events_matched=stats.events_matched,
         events_created=stats.events_created,
+        games_unresolved=stats.games_unresolved,
+        games_skipped_schedule_unavailable=stats.games_skipped_schedule_unavailable,
         errors=len(stats.errors),
     )
     return stats
@@ -289,6 +320,7 @@ async def main(ctx: JobContext) -> None:
                 stats = IngestionStats(sport=sport, errors=[str(e)])
         finally:
             await asyncio.to_thread(client.logout)
+        await alert_dropped_games(compound_job_name, stats.dropped_games)
         await require_rows_for_fixtures(
             SOURCE,
             {stats.sport: stats.snapshots_stored},

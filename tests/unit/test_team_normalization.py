@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from odds_core.models import Event, EventStatus
 from odds_core.team import normalize_team_name
+from odds_lambda.mlb_game_resolver import ResolutionRule, ResolvedGame
 
 
 class TestNormalizeTeamName:
@@ -237,7 +238,7 @@ class TestFindOrCreateEventOnWriter:
 
 
 class TestFindOrCreateEventMatchWindow:
-    """Regression tests for the ±2h team+date match window.
+    """Regression tests for MLB games stored as one event each.
 
     The prior ±24h window silently merged back-to-back same-matchup games
     (MLB series pattern) and same-day doubleheaders into a single event row.
@@ -262,6 +263,7 @@ class TestFindOrCreateEventMatchWindow:
             match_date=day_one,
             sport_key="baseball_mlb",
             sport_title="MLB",
+            mlb_game=ResolvedGame(1001, ResolutionRule.SINGLE_GAME),
         )
         await test_session.flush()
 
@@ -271,6 +273,7 @@ class TestFindOrCreateEventMatchWindow:
             match_date=day_two,
             sport_key="baseball_mlb",
             sport_title="MLB",
+            mlb_game=ResolvedGame(1002, ResolutionRule.SINGLE_GAME),
         )
 
         assert created_1 is True
@@ -296,6 +299,7 @@ class TestFindOrCreateEventMatchWindow:
             match_date=game_one,
             sport_key="baseball_mlb",
             sport_title="MLB",
+            mlb_game=ResolvedGame(1001, ResolutionRule.SINGLE_GAME),
         )
         await test_session.flush()
 
@@ -305,6 +309,7 @@ class TestFindOrCreateEventMatchWindow:
             match_date=game_two,
             sport_key="baseball_mlb",
             sport_title="MLB",
+            mlb_game=ResolvedGame(1002, ResolutionRule.SINGLE_GAME),
         )
 
         assert created_1 is True
@@ -331,6 +336,7 @@ class TestFindOrCreateEventMatchWindow:
             match_date=first_scrape,
             sport_key="baseball_mlb",
             sport_title="MLB",
+            mlb_game=ResolvedGame(1001, ResolutionRule.SINGLE_GAME),
         )
         await test_session.flush()
 
@@ -340,6 +346,7 @@ class TestFindOrCreateEventMatchWindow:
             match_date=second_scrape,
             sport_key="baseball_mlb",
             sport_title="MLB",
+            mlb_game=ResolvedGame(1001, ResolutionRule.SINGLE_GAME),
         )
 
         assert created_1 is True

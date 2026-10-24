@@ -36,6 +36,10 @@ CANCELLED = {"abstractGameState": "Final", "codedGameState": "C", "detailedState
 OTHER = {"abstractGameState": "Other", "codedGameState": "W", "detailedState": "Other"}
 
 
+def _picks(result: list[GameResolution]) -> list[tuple[int, ResolutionRule] | GameResolution]:
+    return [(r.game_pk, r.rule) if isinstance(r, ResolvedGame) else r for r in result]
+
+
 def _slot(
     pk: int,
     game_date: str,
@@ -164,14 +168,14 @@ class TestSingleGame:
 
         result = await resolve([GameRow(METS, ROCKIES, _utc("2026-04-24T23:10"))])
 
-        assert result == [ResolvedGame(823638, ResolutionRule.SINGLE_GAME)]
+        assert _picks(result) == [(823638, ResolutionRule.SINGLE_GAME)]
 
     async def test_matches_betfair_team_names(self, server, resolve) -> None:
         server.add(PADRES_CARDINALS)
 
         result = await resolve([GameRow(PADRES, "St Louis Cardinals", _utc("2026-05-09T01:45"))])
 
-        assert result == [ResolvedGame(823303, ResolutionRule.SINGLE_GAME)]
+        assert _picks(result) == [(823303, ResolutionRule.SINGLE_GAME)]
 
     async def test_late_night_utc_start_resolves_on_its_eastern_date(self, server, resolve) -> None:
         server.add(PADRES_CARDINALS)
@@ -190,7 +194,7 @@ class TestSingleGame:
 
         result = await resolve([GameRow(BRAVES, GIANTS, _utc("2026-06-17T23:15"))])
 
-        assert result == [ResolvedGame(824913, ResolutionRule.SINGLE_GAME)]
+        assert _picks(result) == [(824913, ResolutionRule.SINGLE_GAME)]
 
     async def test_three_game_series_listed_newest_first(self, server, resolve) -> None:
         server.add(_mets_rockies())
@@ -217,7 +221,7 @@ class TestPostponedSlot:
 
         result = await resolve([GameRow(METS, ROCKIES, _utc("2026-04-25T20:10"))])
 
-        assert result == [ResolvedGame(823637, ResolutionRule.SINGLE_GAME)]
+        assert _picks(result) == [(823637, ResolutionRule.SINGLE_GAME)]
 
     async def test_postponed_slot_beside_another_game_is_matched_by_start_time(
         self, server, resolve
@@ -235,7 +239,7 @@ class TestPostponedSlot:
         # OddsPortal often lists a start one minute after MLB's.
         result = await resolve([GameRow(ROYALS, BREWERS, _utc("2026-07-01T17:06"))])
 
-        assert result == [ResolvedGame(900001, ResolutionRule.START_TIME)]
+        assert _picks(result) == [(900001, ResolutionRule.START_TIME)]
 
 
 class TestDoubleheader:
@@ -249,9 +253,9 @@ class TestDoubleheader:
             ]
         )
 
-        assert result == [
-            ResolvedGame(824134, ResolutionRule.START_ORDER),
-            ResolvedGame(824132, ResolutionRule.START_ORDER),
+        assert _picks(result) == [
+            (824134, ResolutionRule.START_ORDER),
+            (824132, ResolutionRule.START_ORDER),
         ]
 
     async def test_tbd_game_two_listed_at_an_estimated_start_pairs_by_order(
@@ -267,9 +271,9 @@ class TestDoubleheader:
             ]
         )
 
-        assert result == [
-            ResolvedGame(823635, ResolutionRule.START_ORDER),
-            ResolvedGame(823637, ResolutionRule.START_ORDER),
+        assert _picks(result) == [
+            (823635, ResolutionRule.START_ORDER),
+            (823637, ResolutionRule.START_ORDER),
         ]
 
     async def test_betfair_game_number_picks_the_game(self, server, resolve) -> None:
@@ -279,7 +283,7 @@ class TestDoubleheader:
             [GameRow("NY Mets", ROCKIES, _utc("2026-04-26T17:45"), game_number=2)]
         )
 
-        assert result == [ResolvedGame(823637, ResolutionRule.GAME_NUMBER)]
+        assert _picks(result) == [(823637, ResolutionRule.GAME_NUMBER)]
 
     @pytest.mark.parametrize("game_one", [FINAL, LIVE])
     async def test_lone_row_takes_the_game_not_yet_started(
@@ -291,7 +295,7 @@ class TestDoubleheader:
 
         result = await resolve([GameRow(METS, ROCKIES, _utc("2026-04-26T21:11"))])
 
-        assert result == [ResolvedGame(823637, ResolutionRule.SIBLING_STARTED)]
+        assert _picks(result) == [(823637, ResolutionRule.SIBLING_STARTED)]
 
     async def test_lone_game_one_row_while_game_two_is_pending(self, server, resolve) -> None:
         days = {
@@ -302,7 +306,7 @@ class TestDoubleheader:
 
         result = await resolve([GameRow(ROYALS, BREWERS, _utc("2026-04-04T18:11"))])
 
-        assert result == [ResolvedGame(824132, ResolutionRule.START_TIME)]
+        assert _picks(result) == [(824132, ResolutionRule.START_TIME)]
 
     async def test_lone_game_one_row_while_game_one_is_live(self, server, resolve) -> None:
         days = {
@@ -315,7 +319,7 @@ class TestDoubleheader:
 
         result = await resolve([GameRow(ROYALS, BREWERS, _utc("2026-04-04T18:11"))])
 
-        assert result == [ResolvedGame(824132, ResolutionRule.START_TIME)]
+        assert _picks(result) == [(824132, ResolutionRule.START_TIME)]
 
 
 # The four 2026 doubleheaders whose game 2 had startTimeTBD: (date, home, away, game 1, game 2),
@@ -380,7 +384,7 @@ class TestTbdDoubleheaderLoneRowAtPlaceholder:
 
         result = await resolve([GameRow(home, away, _utc(game_two[1]) + timedelta(minutes=1))])
 
-        assert result == [ResolvedGame(game_two[0], ResolutionRule.SIBLING_STARTED)]
+        assert _picks(result) == [(game_two[0], ResolutionRule.SIBLING_STARTED)]
 
     async def test_unresolved_while_game_one_is_scheduled(
         self, server, resolve, day, home, away, game_one, game_two

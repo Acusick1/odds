@@ -395,3 +395,60 @@ class TestDormancy:
         ingest, _, _ = await self._run(kickoff)
 
         ingest.assert_awaited_once()
+
+
+class TestDroppedGamesAlert:
+    @pytest.mark.asyncio
+    async def test_mlb_run_alerts_dropped_games_and_still_completes(self) -> None:
+        from odds_lambda.jobs.fetch_oddsportal import IngestionStats
+        from odds_lambda.live_events import DroppedGame, SkipReason
+        from odds_lambda.mlb_game_resolver import GameRow
+        from odds_lambda.scheduling.jobs import make_compound_job_name
+
+        completed: list[str] = []
+
+        @asynccontextmanager
+        async def recording_alert_context(name: str) -> AsyncIterator[None]:
+            yield
+            completed.append(name)
+
+        dropped = DroppedGame(
+            GameRow("Chicago Cubs", "St. Louis Cardinals", datetime.now(UTC) + timedelta(hours=5)),
+            SkipReason.UNRESOLVED,
+            "ambiguous_doubleheader",
+        )
+        mock_backend = AsyncMock()
+        mock_backend.get_backend_name = Mock(return_value="test")
+        with (
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal.ingest_league",
+                new_callable=AsyncMock,
+                return_value=IngestionStats(
+                    league="mlb", matches_scraped=2, snapshots_stored=1, dropped_games=[dropped]
+                ),
+            ),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal.alert_dropped_games", new_callable=AsyncMock
+            ) as alert,
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal.require_rows_for_fixtures",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "odds_lambda.scheduling.helpers.get_scheduler_backend",
+                return_value=mock_backend,
+            ),
+            patch("odds_core.config.get_settings") as mock_settings,
+            patch("odds_core.alerts.job_alert_context", side_effect=recording_alert_context),
+            patch(
+                "odds_lambda.collection_calendar.next_fixture_kickoff",
+                new_callable=AsyncMock,
+                return_value=datetime.now(UTC) + timedelta(hours=5),
+            ),
+        ):
+            mock_settings.return_value.scheduler.dry_run = False
+            await main(JobContext(sport="baseball_mlb"))
+
+        job_name = make_compound_job_name("fetch-oddsportal", "baseball_mlb")
+        alert.assert_awaited_once_with(job_name, [dropped])
+        assert completed == [job_name]

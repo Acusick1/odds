@@ -6,6 +6,7 @@ sources:
   - odds_lambda.storage.event_merge.EventMerger
   - odds_lambda.storage.event_merge.EVENT_MATCH_WINDOW
   - odds_lambda.storage.event_merge.find_match_id
+  - odds_lambda.storage.event_merge.find_match_candidates
   - odds_lambda.storage.event_merge.find_historical_match_id
   - odds_lambda.storage.event_merge.source_pair
   - odds_lambda.storage.event_name_repair.repair_team_names
@@ -13,6 +14,8 @@ sources:
   - odds_core.event_source.EventSource
   - odds_core.event_source.canonical_event_id
   - odds_lambda.health_monitor.HealthMonitor.check_event_identity
+  - odds_lambda.health_monitor.HealthMonitor.find_mlb_events_without_game_pk
+  - odds_lambda.health_monitor.GAME_PK_GRACE
   - odds_lambda.copy_from_production.ProductionDataCopier
   - odds_cli.commands.events
 status: stable
@@ -26,9 +29,11 @@ A match must be one `events` row, because rows that join prices from several sou
 
 `odds_core.event_source.canonical_event_id` keeps the Odds API event when one exists, because score and status jobs match on its id. Otherwise `odds_core.event_source.EventSource` orders the sources: historical OddsPortal (`op_`), live OddsPortal (`op_live_`), then football-data.co.uk (`fduk_`). The smallest id breaks ties, so the choice is deterministic. The kept event keeps its own commence time.
 
+Events holding different MLB `gamePk`s (`events.mlb_game_pk`, [Event matching](event-matching.md#mlb-gamepk-resolver)) are different games, so they are never twins and never merge.
+
 ## Finding and merging are separate
 
-The finders only read. `odds_lambda.storage.event_merge.find_match_id` (±2 h, used by `odds_lambda.storage.writers.OddsWriter.find_or_create_event`) returns the canonical candidate. `odds_lambda.storage.event_merge.find_historical_match_id` (±24 h, same sport, used by `odds_lambda.oddsportal_common.find_existing_event`) returns a lone candidate, or among several only the canonical one of those within ±2 h, else `None`. So neighbouring fixtures of the same teams (an NBA back-to-back) are never conflated, and a loader that gets `None` creates its own event. No finder merges or deletes.
+The finders only read. `odds_lambda.storage.event_merge.find_match_id` (±2 h, used by `odds_lambda.storage.writers.OddsWriter.find_or_create_event`) returns the canonical candidate; `odds_lambda.storage.event_merge.find_match_candidates` returns every candidate, for the MLB claim rules ([live MLB events](event-matching.md#live-mlb-events)). `odds_lambda.storage.event_merge.find_historical_match_id` (±24 h, same sport, used by `odds_lambda.oddsportal_common.find_existing_event`) returns a lone candidate, or among several only the canonical one of those within ±2 h, else `None`. So neighbouring fixtures of the same teams (an NBA back-to-back) are never conflated, and a loader that gets `None` creates its own event. No finder merges or deletes.
 
 Merging happens in three places only:
 
@@ -42,18 +47,19 @@ The production copier does not merge. It replaces an event's rows by event id, s
 
 ## Merging
 
-`odds_lambda.storage.event_merge.EventMerger.merge` re-points every foreign key to `events.id`, recomputes `hours_until_commence` and `fetch_tier` of a duplicate's snapshots against the kept event's kick-off when the two kick-offs differ (`odds_lambda.storage.event_merge.EventMerger._rebase_snapshot_timing`), copies status, scores and `completed_at` from a duplicate when the kept event has no scores (logging `merge_conflicting_scores` when both have different ones), and deletes the duplicates. The foreign keys are read from the PostgreSQL catalog (`odds_lambda.storage.event_merge.EventMerger._event_reference_columns`), so every referencing table is covered whichever models the process imported. It runs in the caller's transaction and logs `events_merged` with the rows moved per table.
+`odds_lambda.storage.event_merge.EventMerger.merge` re-points every foreign key to `events.id`, recomputes `hours_until_commence` and `fetch_tier` of a duplicate's snapshots against the kept event's kick-off when the two kick-offs differ (`odds_lambda.storage.event_merge.EventMerger._rebase_snapshot_timing`, through `odds_lambda.storage.event_merge.retime_snapshots`), copies status, scores and `completed_at` from a duplicate when the kept event has no scores (logging `merge_conflicting_scores` when both have different ones), and deletes the duplicates. When the events hold more than one distinct non-NULL `mlb_game_pk` it raises `odds_lambda.storage.event_merge.ConflictingGamePks` before changing anything; otherwise a kept event with no `gamePk` takes its duplicate's once the duplicate is deleted. Every merge path goes through it, so `odds_lambda.storage.event_merge.EventMerger.adopt_twins`, `odds events merge`, `merge-twins` and `repair-names` all refuse to merge two games. The foreign keys are read from the PostgreSQL catalog (`odds_lambda.storage.event_merge.EventMerger._event_reference_columns`), so every referencing table is covered whichever models the process imported. It runs in the caller's transaction and logs `events_merged` with the rows moved per table.
 
 ## Detection
 
 No database constraint forbids twins. `odds_lambda.health_monitor.HealthMonitor.check_event_identity` runs on every check-health run ([health monitor](../operations/health-monitor.md)) and raises one warning per sport and kind, none merging anything:
 
-- **Twins** (`duplicate_events:<sport>`): `odds_lambda.storage.event_merge.EventMerger.find_twin_groups` clusters events with the same sport and teams whose commence times are within ±2 h of the cluster's first event.
+- **Twins** (`duplicate_events:<sport>`): `odds_lambda.storage.event_merge.EventMerger.find_twin_groups` clusters events with the same sport and teams whose commence times are within ±2 h of the cluster's first event. A cluster holding different `gamePk`s is two games, so it is left out and logged as `twin_group_conflicting_game_pks`.
 - **Repeated fixtures** (`repeated_fixtures:<sport>`): `odds_lambda.storage.event_merge.EventMerger.find_repeated_fixtures` finds a home and away pair stored more than once in a season (August to July) further apart than ±2 h, for `odds_lambda.health_monitor.LEAGUE_SPORTS`. This is a rescheduled match under a second id.
+- **MLB events without a gamePk** (`missing_game_pk:baseball_mlb`): `odds_lambda.health_monitor.HealthMonitor.find_mlb_events_without_game_pk` lists MLB events created more than `odds_lambda.health_monitor.GAME_PK_GRACE` (24 h) ago with a NULL `mlb_game_pk`. Only events created at or after the earliest-created event that holds a `gamePk` count, so events stored before the live jobs assigned `gamePk`s are left out; while no event holds one the check is silent. The alert lists the event ids and reminds once a day (`odds_lambda.health_monitor.GAME_PK_ALERT_INTERVAL`).
 
 ## Command
 
-`odds events merge-twins [--sport SPORT] [--apply]` (`odds_cli.commands.events`) prints a table of twin groups by source set (`odds_lambda.storage.event_merge.source_pair`) and their count. Without `--apply` it writes nothing. With it, the groups are merged in one transaction and the remaining count is printed. `odds events repair-names [--sport SPORT] [--apply]` (default `baseball_mlb`, `odds_cli.commands.events`) fixes the annotated ("(D Rasm"), cut-off ("St. Louis Cardin") and `Game N` team names of every `op_live_` event with `odds_lambda.betfair.adapter.canonical_teams`, against the full runner names in the event's latest `betfair_api` snapshot where it has one. It prints each merge group as the kept id with its status, then the ids merged into it, and the count of events renamed in place. An event with no twin within ±2 h keeps its id and takes the new name, so the results job can settle it. Doubleheader games in production start 4 to 6 h apart, so they stay separate events; a doubleheader listed less than 2 h apart would merge. Without `--apply` the whole plan runs and is rolled back; running it again changes nothing. It never merges repeated fixtures; `odds events merge KEEP_ID DROP_ID [--apply]` merges one named pair (same sport and teams required, the two ids must differ, dry run without `--apply`), for a rescheduled match that `repeated_fixtures` flags. Keep the event with the real kick-off and result. `odds events repair-scores` (same module) corrects the scores of FINAL MLB events (doubleheader games paired by order) and never merges or deletes ([results jobs](../collection/results-jobs.md#verifying-mlb-scores)).
+`odds events merge-twins [--sport SPORT] [--apply]` (`odds_cli.commands.events`) prints a table of twin groups by source set (`odds_lambda.storage.event_merge.source_pair`) and their count. Without `--apply` it writes nothing. With it, the groups are merged in one transaction and the remaining count is printed. `odds events repair-names [--sport SPORT] [--apply]` (default `baseball_mlb`, `odds_cli.commands.events`) fixes the annotated ("(D Rasm"), cut-off ("St. Louis Cardin") and `Game N` team names of every `op_live_` event with `odds_lambda.betfair.adapter.canonical_teams`, against the full runner names in the event's latest `betfair_api` snapshot where it has one. It prints each merge group as the kept id with its status, then the ids merged into it, and the count of events renamed in place. An event with no twin within ±2 h keeps its id and takes the new name, so the results job can settle it. Doubleheader games in production start 4 to 6 h apart, so they stay separate events; a doubleheader listed less than 2 h apart merges only when at most one of its games holds a `gamePk`. Without `--apply` the whole plan runs and is rolled back; running it again changes nothing. It never merges repeated fixtures; `odds events merge KEEP_ID DROP_ID [--apply]` merges one named pair (same sport and teams required, the two ids must differ, dry run without `--apply`), for a rescheduled match that `repeated_fixtures` flags. Keep the event with the real kick-off and result. `odds events repair-scores` (same module) corrects the scores of FINAL MLB events (doubleheader games paired by order) and never merges or deletes ([results jobs](../collection/results-jobs.md#verifying-mlb-scores)).
 
 ## Related
 

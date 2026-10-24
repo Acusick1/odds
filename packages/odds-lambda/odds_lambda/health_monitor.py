@@ -36,6 +36,7 @@ from odds_lambda.collection_calendar import (
     fixture_calendar,
     latest_snapshot_time,
 )
+from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY
 from odds_lambda.scheduling.backends.base import ScheduledJob
 from odds_lambda.scheduling.decision import classify_tier
 from odds_lambda.scheduling.jobs import (
@@ -52,8 +53,10 @@ logger = structlog.get_logger()
 
 LEAGUE_SPORTS: tuple[str, ...] = ("soccer_epl",)
 UNSETTLED_AGE = timedelta(hours=24)
-UNSETTLED_IDS_SHOWN = 10
+EVENT_IDS_SHOWN = 10
 UNSETTLED_ALERT_MINUTES = 24 * 60
+GAME_PK_GRACE = timedelta(hours=24)
+GAME_PK_ALERT_INTERVAL = timedelta(hours=24)
 BETFAIR_CLOSE_SPORT = "soccer_epl"
 BETFAIR_CLOSE_JOB = "fetch-betfair-exchange"
 BETFAIR_HISTORY_WINDOW = timedelta(hours=72)
@@ -466,9 +469,32 @@ class HealthMonitor:
 
         return is_healthy, total_errors
 
-    async def check_event_identity(self) -> list[str]:
+    async def find_mlb_events_without_game_pk(self, now: datetime) -> list[str]:
+        """MLB events created over ``GAME_PK_GRACE`` ago with no ``mlb_game_pk``.
+
+        Only events created since the earliest event that holds a ``gamePk`` count, so events
+        stored before the live jobs assigned ``gamePk``s are left out.
         """
-        Check that each match is one event.
+        first_assigned = (
+            select(func.min(Event.created_at))
+            .where(Event.mlb_game_pk.is_not(None))
+            .scalar_subquery()
+        )
+        result = await self.session.execute(
+            select(Event.id)
+            .where(
+                Event.sport_key == MLB_SPORT_KEY,
+                Event.mlb_game_pk.is_(None),
+                Event.created_at < now - GAME_PK_GRACE,
+                Event.created_at >= first_assigned,
+            )
+            .order_by(Event.created_at, Event.id)
+        )
+        return list(result.scalars().all())
+
+    async def check_event_identity(self, now: datetime | None = None) -> list[str]:
+        """
+        Check that each match is one event and that MLB events carry their ``gamePk``.
 
         Each issue names its sport and is alerted separately; none merges anything.
         Run ``odds events merge-twins --sport <sport> --apply`` for twins.
@@ -476,6 +502,7 @@ class HealthMonitor:
         Returns:
             Issue descriptions, empty when healthy.
         """
+        moment = now or datetime.now(UTC)
         merger = EventMerger(self.session)
         issues: list[str] = []
 
@@ -502,6 +529,24 @@ class HealthMonitor:
                     context={"sport_key": sport, "repeated_fixtures": repeated},
                 )
 
+        missing = await self.find_mlb_events_without_game_pk(moment)
+        if missing:
+            shown = ", ".join(missing[:EVENT_IDS_SHOWN])
+            more = (
+                f" and {len(missing) - EVENT_IDS_SHOWN} more"
+                if len(missing) > EVENT_IDS_SHOWN
+                else ""
+            )
+            issue = f"{len(missing)} {MLB_SPORT_KEY} events have no gamePk: {shown}{more}"
+            issues.append(issue)
+            await self._send_alert(
+                alert_type=f"missing_game_pk:{MLB_SPORT_KEY}",
+                severity="warning",
+                message=f"⚠️ {issue}",
+                context={"sport_key": MLB_SPORT_KEY, "event_ids": missing},
+                every=GAME_PK_ALERT_INTERVAL,
+            )
+
         return issues
 
     async def check_unsettled_events(self, now: datetime) -> list[str]:
@@ -521,12 +566,8 @@ class HealthMonitor:
             if not events:
                 continue
             ids = [event.id for event in events]
-            shown = ", ".join(ids[:UNSETTLED_IDS_SHOWN])
-            more = (
-                f" and {len(ids) - UNSETTLED_IDS_SHOWN} more"
-                if len(ids) > UNSETTLED_IDS_SHOWN
-                else ""
-            )
+            shown = ", ".join(ids[:EVENT_IDS_SHOWN])
+            more = f" and {len(ids) - EVENT_IDS_SHOWN} more" if len(ids) > EVENT_IDS_SHOWN else ""
             issue = f"{len(ids)} {sport} events unsettled over 24 h after kick-off: {shown}{more}"
             issues.append(issue)
             await self._send_alert(
@@ -664,7 +705,7 @@ class HealthMonitor:
         2. API quota levels
         3. Data quality issues
         4. Job heartbeats (missing completions)
-        5. Event identity: twins, repeated fixtures, stale scheduled events
+        5. Event identity: twins, repeated fixtures, MLB events without a gamePk
         6. Self-scheduling chains with no run booked or an overdue run
 
         Returns:
@@ -768,7 +809,7 @@ class HealthMonitor:
             issues_detected.extend(heartbeat_issues)
 
             # Check 5: One event per match
-            issues_detected.extend(await self.check_event_identity())
+            issues_detected.extend(await self.check_event_identity(moment))
 
             # Check 5b: League events settle after kick-off
             issues_detected.extend(await self.check_unsettled_events(moment))

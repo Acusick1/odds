@@ -6,15 +6,22 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.event_ids import LIVE_EVENT_ID_PREFIX
+from odds_core.event_source import canonical_event_id
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 from odds_core.odds_math import outcome_price_decimal
 from odds_core.team import normalize_team_name, team_abbrev
 from odds_core.time import ensure_utc, parse_api_datetime
 from sqlalchemy import and_, case, literal, or_, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.storage.event_merge import find_match_id
+from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY, ResolvedGame
+from odds_lambda.storage.event_merge import (
+    find_match_candidates,
+    find_match_id,
+    retime_snapshots,
+)
 from odds_lambda.storage.validators import OddsValidator
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 
@@ -91,6 +98,23 @@ class OddsWriter:
         date_str = match_date.strftime("%Y-%m-%dT%H%M")
         return f"{LIVE_EVENT_ID_PREFIX}{home_abbrev}_{away_abbrev}_{date_str}"
 
+    async def find_unscheduled_mlb_event(
+        self, home_team: str, away_team: str, match_date: datetime, game_number: int | None
+    ) -> str | None:
+        """The MLB event of a listed game while the MLB schedule is unavailable: the one event of
+        the pair within ±2 h. A doubleheader game (``game_number`` set) or a window holding
+        several events matches nothing, since without the schedule it could be another game."""
+        if game_number is not None:
+            return None
+        candidates = await find_match_candidates(
+            self.session,
+            normalize_team_name(home_team),
+            normalize_team_name(away_team),
+            match_date,
+            MLB_SPORT_KEY,
+        )
+        return candidates[0].id if len(candidates) == 1 else None
+
     async def find_or_create_event(
         self,
         home_team: str,
@@ -98,27 +122,157 @@ class OddsWriter:
         match_date: datetime,
         sport_key: str,
         sport_title: str,
+        *,
+        mlb_game: ResolvedGame | None = None,
     ) -> tuple[str, bool]:
-        """Find existing event by team+date or create a new one.
+        """Find the event for a listed game or create it.
+
+        An MLB game must come resolved (``mlb_game``): see ``_find_or_create_game``. Other
+        sports match on teams within ±2 h.
 
         Returns:
             (event_id, was_created)
         """
         home_team = normalize_team_name(home_team)
         away_team = normalize_team_name(away_team)
+        if sport_key == MLB_SPORT_KEY:
+            if mlb_game is None:
+                raise ValueError(f"an MLB event needs its gamePk: {home_team} v {away_team}")
+            return await self._find_or_create_game(
+                home_team, away_team, match_date, sport_title, mlb_game
+            )
 
         existing_id = await find_match_id(self.session, home_team, away_team, match_date, sport_key)
         if existing_id is not None:
             return existing_id, False
-
-        # Create new event
         event_id = self._build_event_id(home_team, away_team, match_date)
-
-        # Check idempotency
-        existing = await self.session.get(Event, event_id)
-        if existing:
+        if await self.session.get(Event, event_id) is not None:
             return event_id, False
+        self._add_event(event_id, home_team, away_team, match_date, sport_key, sport_title)
+        return event_id, True
 
+    async def _event_by_game_pk(self, game_pk: int) -> Event | None:
+        result = await self.session.execute(select(Event).where(Event.mlb_game_pk == game_pk))
+        return result.scalar_one_or_none()
+
+    async def _find_or_create_game(
+        self,
+        home_team: str,
+        away_team: str,
+        match_date: datetime,
+        sport_title: str,
+        game: ResolvedGame,
+    ) -> tuple[str, bool]:
+        """The event holding the game's ``gamePk``; else a claimable event, which takes it; else a
+        new event created with it. The event's ``commence_time`` follows the game's scheduled
+        start when the schedule has one."""
+        anchor = game.start or match_date
+        held = await self._event_by_game_pk(game.game_pk)
+        if held is not None:
+            await self._follow_schedule(held, game)
+            return held.id, False
+
+        claimable = await self._claimable_event(home_team, away_team, anchor, game)
+        # Read before the savepoint: a rollback expires the claimed event's attributes.
+        claimable_id = claimable.id if claimable is not None else None
+        # A concurrent run may take the gamePk first; the savepoint keeps its unique-index
+        # violation from aborting the rest of this run's batch.
+        try:
+            async with self.session.begin_nested():
+                if claimable is not None:
+                    claimable.mlb_game_pk = game.game_pk
+                    await self._follow_schedule(claimable, game)
+                    outcome = (claimable.id, False)
+                else:
+                    outcome = (
+                        await self._create_game_event(
+                            home_team, away_team, anchor, sport_title, game.game_pk
+                        ),
+                        True,
+                    )
+        except IntegrityError:
+            held = await self._event_by_game_pk(game.game_pk)
+            if held is None:
+                raise
+            logger.warning(
+                "mlb_game_pk_duplicate",
+                game_pk=game.game_pk,
+                event_id=held.id,
+                duplicate_id=claimable_id,
+            )
+            await self._follow_schedule(held, game)
+            return held.id, False
+        return outcome
+
+    async def _claimable_event(
+        self, home_team: str, away_team: str, anchor: datetime, game: ResolvedGame
+    ) -> Event | None:
+        """The nearest same-pair event within ±2 h of ``anchor``, when it holds no ``gamePk`` and
+        no other game of the pair that day is scheduled nearer to it."""
+        candidates = await find_match_candidates(
+            self.session, home_team, away_team, anchor, MLB_SPORT_KEY
+        )
+        if not candidates:
+            return None
+
+        def gap(event: Event, start: datetime) -> timedelta:
+            return abs(ensure_utc(event.commence_time) - ensure_utc(start))
+
+        nearest_gap = min(gap(e, anchor) for e in candidates)
+        nearest_ids = [e.id for e in candidates if gap(e, anchor) == nearest_gap]
+        nearest = next(e for e in candidates if e.id == canonical_event_id(nearest_ids))
+        if nearest.mlb_game_pk is not None:
+            return None
+        if any(gap(nearest, start) < nearest_gap for start in game.sibling_starts):
+            return None
+        return nearest
+
+    async def _follow_schedule(self, event: Event, game: ResolvedGame) -> None:
+        """Move the event to the game's scheduled start and re-time its stored snapshots."""
+        if game.start is None or ensure_utc(event.commence_time) == ensure_utc(game.start):
+            return
+        event_id = event.id
+        moved_from = ensure_utc(event.commence_time)
+        event.commence_time = game.start
+        event.updated_at = datetime.now(UTC)
+        if event.status == EventStatus.POSTPONED:
+            event.status = EventStatus.SCHEDULED
+        retimed = await retime_snapshots(self.session, event_id, game.start)
+        logger.info(
+            "mlb_event_rescheduled",
+            event_id=event_id,
+            game_pk=game.game_pk,
+            commence_time=moved_from.isoformat(),
+            scheduled_start=ensure_utc(game.start).isoformat(),
+            snapshots_retimed=retimed,
+        )
+
+    async def _create_game_event(
+        self, home_team: str, away_team: str, start: datetime, sport_title: str, game_pk: int
+    ) -> str:
+        event_id = self._build_event_id(home_team, away_team, start)
+        taken = await self.session.get(Event, event_id)
+        if taken is not None:
+            logger.warning(
+                "mlb_event_id_collision",
+                event_id=event_id,
+                held_game_pk=taken.mlb_game_pk,
+                game_pk=game_pk,
+            )
+            event_id = f"{event_id}_{game_pk}"
+        self._add_event(event_id, home_team, away_team, start, MLB_SPORT_KEY, sport_title, game_pk)
+        return event_id
+
+    def _add_event(
+        self,
+        event_id: str,
+        home_team: str,
+        away_team: str,
+        match_date: datetime,
+        sport_key: str,
+        sport_title: str,
+        mlb_game_pk: int | None = None,
+    ) -> None:
         if event_id.startswith(LIVE_EVENT_ID_PREFIX):
             stale_cutoff = datetime.now(UTC) - self.LIVE_EVENT_STALE_THRESHOLD
             if ensure_utc(match_date) < stale_cutoff:
@@ -127,18 +281,18 @@ class OddsWriter:
                     f"home={home_team} away={away_team} "
                     f"match_date={match_date.isoformat()}"
                 )
-
-        event = Event(
-            id=event_id,
-            sport_key=sport_key,
-            sport_title=sport_title,
-            commence_time=match_date,
-            home_team=home_team,
-            away_team=away_team,
-            status=EventStatus.SCHEDULED,
+        self.session.add(
+            Event(
+                id=event_id,
+                sport_key=sport_key,
+                sport_title=sport_title,
+                commence_time=match_date,
+                home_team=home_team,
+                away_team=away_team,
+                status=EventStatus.SCHEDULED,
+                mlb_game_pk=mlb_game_pk,
+            )
         )
-        self.session.add(event)
-        return event_id, True
 
     async def store_odds_snapshot(
         self,
@@ -496,10 +650,12 @@ class OddsWriter:
 
         events_table = Event.__table__
         result_columns = {"status", "home_score", "away_score", "completed_at"}
+        # A discovery record carries no gamePk, so a stored one is kept.
+        kept_columns = {"created_at", "mlb_game_pk", *result_columns}
         set_ = {
             col.name: stmt.excluded[col.name]
             for col in events_table.columns
-            if not col.primary_key and col.name != "created_at" and col.name not in result_columns
+            if not col.primary_key and col.name not in kept_columns
         }
         now = now or datetime.now(UTC)
         rescheduled = or_(
