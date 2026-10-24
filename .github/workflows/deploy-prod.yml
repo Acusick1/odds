@@ -63,14 +63,6 @@ jobs:
           IMAGE_TAG="prod-$(git rev-parse --short HEAD)"
           echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Build and push scraper container image
-        id: build-scraper
-        run: |
-          cd deployment/aws
-          ./build_and_push_scraper.sh prod ${{ env.AWS_REGION }} ${{ secrets.AWS_ACCOUNT_ID }}
-          IMAGE_TAG="prod-$(git rev-parse --short HEAD)"
-          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-
       - name: Terraform Init
         run: |
           cd deployment/aws/terraform
@@ -90,8 +82,6 @@ jobs:
             -var="odds_api_keys=$ODDS_API_KEYS" \
             -var="discord_webhook_url=$DISCORD_WEBHOOK_URL" \
             -var="image_tag=${{ steps.build-image.outputs.image_tag }}" \
-            -var="enable_oddsportal_scraper=true" \
-            -var="scraper_image_tag=${{ steps.build-scraper.outputs.image_tag }}" \
             -var="betfair_enabled=true" \
             -var="betfair_username=$BETFAIR_USERNAME" \
             -var="betfair_password=$BETFAIR_PASSWORD" \
@@ -104,7 +94,6 @@ jobs:
           cd deployment/aws/terraform
           terraform apply -auto-approve tfplan
           echo "jobs=$(terraform output -raw scheduler_jobs)" >> $GITHUB_OUTPUT
-          echo "scraper_jobs=$(terraform output -raw scraper_jobs)" >> $GITHUB_OUTPUT
 
       - name: Run database migrations
         run: uv run alembic upgrade head
@@ -118,18 +107,9 @@ jobs:
       - name: Test scheduler Lambda (invokes scheduler jobs to trigger self-scheduling)
         run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
 
-      - name: Test scraper Lambda (invokes scraper jobs to trigger self-scheduling)
-        if: steps.deploy.outputs.scraper_jobs != ''
-        continue-on-error: true
-        run: uv run python scripts/ci/test_lambda.py --lambda-name odds-scheduler-scraper --jobs "${{ steps.deploy.outputs.scraper_jobs }}" --region ${{ env.AWS_REGION }}
-
       - name: Verify schedule activation
         run: |
-          ALL_JOBS="${{ steps.deploy.outputs.jobs }}"
-          if [ -n "${{ steps.deploy.outputs.scraper_jobs }}" ]; then
-            ALL_JOBS="${ALL_JOBS},${{ steps.deploy.outputs.scraper_jobs }}"
-          fi
-          bash scripts/verify-schedules.sh --rule-prefix odds --jobs "$ALL_JOBS" --region ${{ env.AWS_REGION }}
+          bash scripts/verify-schedules.sh --rule-prefix odds --jobs "${{ steps.deploy.outputs.jobs }}" --region ${{ env.AWS_REGION }}
 
       - name: Verify database writes
         run: uv run python scripts/ci/verify_database.py

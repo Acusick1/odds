@@ -184,7 +184,6 @@ class TestIngestLeague:
 
     async def test_scrapes_when_not_given_data(self) -> None:
         spec = LeagueSpec(
-            sport="football",
             league="x",
             listing_path="/x/",
             sport_key="soccer_x",

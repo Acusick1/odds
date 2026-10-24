@@ -70,8 +70,7 @@ SOURCE = CollectionSource(
 class LeagueSpec:
     """Configuration for a single league to scrape."""
 
-    sport: str  # OddsHarvester sport name (e.g. "football"), used by the results job
-    league: str  # OddsHarvester league name (e.g. "england-premier-league")
+    league: str  # OddsPortal league slug (e.g. "england-premier-league")
     listing_path: str  # OddsPortal listing page (e.g. "/football/england/premier-league/")
     sport_key: str  # Pipeline sport key (e.g. "soccer_epl")
     sport_title: str  # Display name (e.g. "EPL")
@@ -84,7 +83,6 @@ class LeagueSpec:
 
 LEAGUE_SPECS: list[LeagueSpec] = [
     LeagueSpec(
-        sport="football",
         league="england-premier-league",
         listing_path="/football/england/premier-league/",
         sport_key="soccer_epl",
@@ -92,7 +90,6 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         markets=["1x2", "over_under_2_5"],
     ),
     LeagueSpec(
-        sport="baseball",
         league="mlb",
         listing_path="/baseball/usa/mlb/",
         sport_key="baseball_mlb",
@@ -200,7 +197,7 @@ async def ingest_league(
     stats = IngestionStats(league=spec.league)
 
     if scraped is None:
-        logger.info("scraping_league", league=spec.league, sport=spec.sport)
+        logger.info("scraping_league", league=spec.league, sport_key=spec.sport_key)
         scraped = await scrape_league(spec)
 
     stats.events_listed = scraped.events_listed

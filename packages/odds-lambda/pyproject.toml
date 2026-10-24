@@ -15,7 +15,6 @@ dependencies = [
     "nbainjuries>=1.1.1",
     "playwright>=1.58.0",
     "requests>=2.31.0",
-    "fake-useragent>=2.2.0",
     "betfairlightweight>=2.23.2",
     "joblib>=1.3.0",
     "cryptography>=46.0.3",

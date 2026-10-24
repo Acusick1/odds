@@ -380,12 +380,12 @@ class TestCitations:
         assert "scripts/tool.py" in linter.cites
 
     def test_root_and_nested_non_python_files_are_citations(self, repo: Path) -> None:
-        write_file(repo, "deployment/aws/Dockerfile.scraper", "FROM x\n")
-        put_a(repo, "`pyproject.toml` and `deployment/aws/Dockerfile.scraper`")
+        write_file(repo, "deployment/aws/Dockerfile.lambda", "FROM x\n")
+        put_a(repo, "`pyproject.toml` and `deployment/aws/Dockerfile.lambda`")
         linter = lint_repo(repo)
         assert linter.findings == []
         assert linter.cites["pyproject.toml"] == {"a"}
-        assert linter.cites["deployment/aws/Dockerfile.scraper"] == {"a"}
+        assert linter.cites["deployment/aws/Dockerfile.lambda"] == {"a"}
 
     def test_bad_path_is_error(self, repo: Path) -> None:
         put_a(repo, "`packages/lib/missing.py` and `packages/missing.toml`")

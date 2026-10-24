@@ -40,7 +40,7 @@ tests/fixtures/     sample Odds API JSON
 
 ## Migration tests
 
-`tests/migration` connects to whatever `DATABASE_URL` points at and replaces `odds_core.database.engine` and `odds_core.database.async_session_maker` with a `NullPool` pair in `pytest_configure`. Only the deploy workflows run it: dev runs all of it, prod runs `test_schema_validation.py` and `test_cli_readonly.py` ([CI/CD workflows](../operations/ci-cd-workflows.md)). Because `testpaths` is `tests`, a bare `uv run pytest` also collects it ([Databases and environments](databases-and-environments.md#environments)).
+`tests/migration` connects to whatever `DATABASE_URL` points at and replaces `odds_core.database.engine` and `odds_core.database.async_session_maker` with a `NullPool` pair in `pytest_configure`. Only the deploy workflows run it, each after `terraform apply`: dev runs all of it, prod runs `test_schema_validation.py` and `test_cli_readonly.py` ([CI/CD workflows](../operations/ci-cd-workflows.md)). Because `testpaths` is `tests`, a bare `uv run pytest` also collects it ([Databases and environments](databases-and-environments.md#environments)).
 
 ## Related
 

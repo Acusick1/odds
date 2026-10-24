@@ -11,7 +11,6 @@ sources:
   - odds_lambda.scheduling.backends.aws
   - odds_lambda.lambda_handler.lambda_handler
   - deployment/aws/terraform/lambda.tf
-  - deployment/aws/terraform/scraper.tf
   - deployment/aws/terraform/eventbridge.tf
   - odds_lambda.fetch_tier
   - odds_lambda.tier_utils
@@ -31,7 +30,7 @@ Deployed Lambda and rule state cannot be verified from the repo; every command b
 
 ## Where things are
 
-Region `eu-west-1`. Scheduler function `odds-scheduler`, log group `/aws/lambda/odds-scheduler`; scraper `odds-scheduler-scraper`. Rules `odds-{job}[-{sport}]`. Live schedule: `odds scheduler list-jobs --backend aws`. The Lambda role lacks `events:ListRules`, so listing works only from a local shell with broader credentials (#443).
+Region `eu-west-1`. Scheduler function `odds-scheduler`, log group `/aws/lambda/odds-scheduler`. Rules `odds-{job}[-{sport}]`. Live schedule: `odds scheduler list-jobs --backend aws`. The Lambda role lacks `events:ListRules`, so listing works only from a local shell with broader credentials (#443).
 
 ## Workflow
 

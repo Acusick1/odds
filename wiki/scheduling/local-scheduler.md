@@ -65,7 +65,7 @@ In `odds_cli.commands.scheduler`:
 
 `odds_lambda.scheduling.jobs._JOB_SPORTS` holds the sport allowlists for cron and self-scheduling jobs alike; [Where each job runs](job-deployment-matrix.md#where-each-job-runs) lists each job's sports. An allowlist keeps a job whose `main()` raises on other sports from alerting on every fire, or keeps a job from spending quota on every configured sport. A sport in an allowlist but absent from `data_collection.sports` is not scheduled.
 
-Inline CLV scoring inside `fetch-oddsportal` works only here: the scraper Lambda image lacks the analytics stack ([Prediction scoring](../modelling/prediction-scoring.md)). A re-enabled AWS rule would run the same job on both hosts and double-fetch; `odds scheduler list-jobs --backend aws` shows the rule states ([Deployed state](job-deployment-matrix.md#deployed-state)).
+Inline CLV scoring inside `fetch-oddsportal` works only here: no Lambda image runs `fetch-oddsportal` ([Prediction scoring](../modelling/prediction-scoring.md)). A re-enabled AWS rule would run the same job on both hosts and double-fetch; `odds scheduler list-jobs --backend aws` shows the rule states ([Deployed state](job-deployment-matrix.md#deployed-state)).
 
 ## Related
 

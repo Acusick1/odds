@@ -2,8 +2,8 @@
 
 These utilities are dependency-free and safe to use from any layer of the
 pipeline (core, lambda, analytics, mcp). They intentionally avoid any data or
-ML dependencies so that the scraper Lambda — which bundles odds-lambda but not
-odds-analytics — can call them without pulling in numpy, pandas, etc.
+ML dependencies so that odds-lambda, which does not declare odds-analytics, can
+call them without pulling in numpy, pandas, etc.
 """
 
 from __future__ import annotations
