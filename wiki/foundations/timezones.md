@@ -45,7 +45,7 @@ Helpers in `odds_core.time`:
 | `odds_core.time.to_eastern`, `odds_core.time.EASTERN` | America/New_York for NBA game days and injury reports |
 | `odds_core.time.utc_isoformat` | ISO 8601 with a trailing `Z` |
 
-`Z`-suffix ISO parsing is inlined in `odds_core.snapshot_utils` (which parses `last_update` and each outcome's price in one pass), `odds_lambda.espn_fixture_fetcher` (team-schedule and month-scoreboard events, whose status text is stored as ESPN gives it), `odds_lambda.mlb_stats_fetcher` (MLB game start times), the MCP EPL tools and `odds_analytics.sequence_loader` (bookmaker `last_update`) instead of calling `odds_core.time.parse_api_datetime`. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/look-ahead-bias.md).
+`Z`-suffix ISO parsing is inlined in `odds_core.snapshot_utils` (which parses `last_update` and each outcome's price in one pass), `odds_lambda.espn_fixture_fetcher` (team-schedule and month-scoreboard events, whose status text is stored as ESPN gives it), `odds_lambda.mlb_stats_fetcher` (MLB game start times, for both probables and results; a game with `startTimeTBD` carries a placeholder time), the MCP EPL tools and `odds_analytics.sequence_loader` (bookmaker `last_update`) instead of calling `odds_core.time.parse_api_datetime`. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/look-ahead-bias.md).
 
 ## Naive datetimes in current code
 

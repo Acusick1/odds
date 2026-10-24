@@ -6,8 +6,10 @@ from collections import Counter
 import typer
 from odds_core.database import async_session_maker
 from odds_core.models import Event
+from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
 from odds_lambda.storage.event_merge import EventMerger, source_pair
 from odds_lambda.storage.event_name_repair import repair_team_names
+from odds_lambda.storage.mlb_score_repair import ScoreOutcome, repair_scores
 from rich.console import Console
 from rich.table import Table
 
@@ -126,3 +128,46 @@ def repair_names(
         odds events repair-names --sport baseball_mlb --apply
     """
     asyncio.run(_repair_names(sport, apply))
+
+
+async def _repair_scores(apply: bool) -> None:
+    async with async_session_maker() as session, MlbStatsFetcher() as fetcher:
+        checks = await repair_scores(session, fetcher, apply)
+        counts = Counter(check.outcome for check in checks)
+        console.print(
+            f"FINAL baseball_mlb events: {len(checks)}; "
+            + "; ".join(f"{o.value}: {counts[o]}" for o in ScoreOutcome)
+        )
+        for check in checks:
+            event = check.event
+            label = f"{event.id} {event.commence_time:%Y-%m-%d %H:%M} {event.away_team} @ {event.home_team}"
+            if check.outcome is ScoreOutcome.MISMATCH and check.game is not None:
+                console.print(
+                    f"  MISMATCH {label}: stored {event.home_score}-{event.away_score}, "
+                    f"MLB {check.game.home_score}-{check.game.away_score} (game {check.game.game_pk}, "
+                    f"start gap {abs(check.game.start_time - event.commence_time)})"
+                )
+            elif check.outcome in (ScoreOutcome.UNMATCHED, ScoreOutcome.AMBIGUOUS):
+                console.print(f"  {check.outcome.value.upper()} {label}: {check.reason}")
+        if not apply:
+            await session.rollback()
+            console.print("Dry run: nothing written. Re-run with --apply.")
+            return
+        await session.commit()
+        console.print(f"Corrected {counts[ScoreOutcome.MISMATCH]} scores.")
+
+
+@app.command("repair-scores")
+def repair_scores_command(
+    apply: bool = typer.Option(False, "--apply", help="Write; without it only the diff is shown"),
+) -> None:
+    """Compare FINAL MLB events' scores with the MLB Stats API and correct the wrong ones.
+
+    Matches each event to the game of the same teams nearest its kick-off (within 36 h) and
+    reports mismatches, plus events it cannot match or that are ambiguous, which it never
+    changes. --apply writes home_score and away_score only, in one transaction. Safe to re-run.
+
+    Example:
+        odds events repair-scores --apply
+    """
+    asyncio.run(_repair_scores(apply))

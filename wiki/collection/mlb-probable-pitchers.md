@@ -27,6 +27,8 @@ Point-in-time snapshots of MLBAM's announced probable starters, stored in `mlb_p
 
 The job raises unless `ctx.sport` is `baseball_mlb`.
 
+`odds_lambda.mlb_stats_fetcher.MlbStatsFetcher.fetch_results` reads the same endpoint with `hydrate=linescore` for game scores, used only by the score check in [results-jobs](results-jobs.md#verifying-mlb-scores).
+
 ## Where it runs
 
 Its fixed cron `0 6 * * *` UTC (`odds_lambda.scheduling.jobs._JOB_CRON_MAP`) runs it, MLB only through `odds_lambda.scheduling.jobs._JOB_SPORTS`, in the default local bootstrap, so it runs on the production host ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Terraform declares no rule for it. It keeps running through the MLB off-season (#487). The MLB overnight window (05:00-14:00 UTC) belongs to the self-scheduling jobs, not this cron ([decision-engine](../scheduling/decision-engine.md#overnight-windows)).

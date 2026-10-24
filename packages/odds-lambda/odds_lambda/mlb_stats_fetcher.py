@@ -12,6 +12,7 @@ The MLB Stats API is free and unauthenticated.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -35,6 +36,30 @@ DEFAULT_REQUEST_DELAY_SECONDS = 0.25
 _MAX_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = 1.0
 _REQUEST_TIMEOUT_SECONDS = 15.0
+
+
+# Longest span requested in one schedule call, so a season-long backfill is a handful of calls.
+_RESULTS_CHUNK_DAYS = 30
+
+
+@dataclass(frozen=True)
+class MlbGameResult:
+    """One MLB game from the schedule with its score once it is Final."""
+
+    game_pk: int
+    start_time: datetime
+    home_team: str
+    away_team: str
+    is_final: bool
+    home_score: int | None
+    away_score: int | None
+    game_number: int = 1
+    start_time_tbd: bool = False
+    official_date: date | None = None
+
+    @property
+    def day(self) -> date:
+        return self.official_date or self.start_time.date()
 
 
 def _parse_utc(value: str) -> datetime:
@@ -180,6 +205,36 @@ class MlbStatsFetcher:
                     records.append(record)
         return records
 
+    async def fetch_results(self, start: date, end: date) -> list[MlbGameResult]:
+        """Fetch every MLB game from ``start`` to ``end``, with scores from the linescore hydration.
+
+        ``start`` and ``end`` are inclusive and resolved by MLBAM in US Eastern time, so pad
+        them by a day when matching UTC kick-offs. The range is split into calls of at most
+        ``_RESULTS_CHUNK_DAYS`` days.
+        """
+        results: list[MlbGameResult] = []
+        chunk_start = start
+        while chunk_start <= end:
+            chunk_end = min(chunk_start + timedelta(days=_RESULTS_CHUNK_DAYS - 1), end)
+            if results and self.request_delay_seconds > 0:
+                await asyncio.sleep(self.request_delay_seconds)
+            data = await self._fetch_json(
+                f"{BASE_URL}/schedule",
+                {
+                    "sportId": str(_SPORT_ID),
+                    "startDate": chunk_start.isoformat(),
+                    "endDate": chunk_end.isoformat(),
+                    "hydrate": "linescore",
+                },
+            )
+            for day in data.get("dates", []):
+                for game in day.get("games", []):
+                    result = _result_from_game(game)
+                    if result is not None:
+                        results.append(result)
+            chunk_start = chunk_end + timedelta(days=1)
+        return results
+
     async def fetch_dates(
         self,
         target_dates: list[date],
@@ -260,4 +315,43 @@ def _record_from_game(
             IF_NECESSARY_STATUS if game.get("ifNecessary") == "Y" else status.get("detailedState")
         ),
         start_time_tbd=bool(status.get("startTimeTBD")),
+    )
+
+
+def _result_from_game(game: dict[str, Any]) -> MlbGameResult | None:
+    """Convert a raw ``games[]`` entry of a linescore-hydrated schedule; ``None`` without core fields."""
+    game_pk = game.get("gamePk")
+    game_date = game.get("gameDate")
+    teams = game.get("teams") or {}
+    home_name = ((teams.get("home") or {}).get("team") or {}).get("name")
+    away_name = ((teams.get("away") or {}).get("team") or {}).get("name")
+    if not isinstance(game_pk, int) or not game_date or not home_name or not away_name:
+        return None
+
+    linescore_teams = (game.get("linescore") or {}).get("teams") or {}
+
+    def score(side: str) -> int | None:
+        value = (teams.get(side) or {}).get("score")
+        if value is None:
+            value = (linescore_teams.get(side) or {}).get("runs")
+        return value if isinstance(value, int) else None
+
+    home_score, away_score = score("home"), score("away")
+    is_final = (game.get("status") or {}).get("abstractGameState") == "Final" and None not in (
+        home_score,
+        away_score,
+    )
+    return MlbGameResult(
+        game_pk=game_pk,
+        start_time=_parse_utc(game_date),
+        home_team=home_name,
+        away_team=away_name,
+        is_final=is_final,
+        home_score=home_score,
+        away_score=away_score,
+        game_number=game["gameNumber"] if isinstance(game.get("gameNumber"), int) else 1,
+        start_time_tbd=bool((game.get("status") or {}).get("startTimeTBD")),
+        official_date=date.fromisoformat(game["officialDate"])
+        if game.get("officialDate")
+        else None,
     )
