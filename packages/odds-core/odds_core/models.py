@@ -152,7 +152,6 @@ class OddsSnapshot(SQLModel, table=True):
     __table_args__ = (
         Index("ix_event_snapshot_time", "event_id", "snapshot_time"),
         Index("ix_event_tier", "event_id", "fetch_tier"),
-        UniqueConstraint("id", "event_id", name="uq_odds_snapshot_id_event"),
     )
 
 

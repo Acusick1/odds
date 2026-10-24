@@ -10,7 +10,7 @@ The next EPL CLV model predicts the expected value of a bet at a UK retail price
 
 ## Context
 
-The bet365 own-movement target failed its keep test, and the model was suspended (map #494; [EPL CLV re-baseline](../../wiki/evaluation/exp-epl-clv-rebaseline.md)). ADR-0011 was only ever proposed. That target predicts how far one book's line moves. It does not measure the thing a bet earns, which is the gap between the price taken and the fair price at the close. Bets can be placed at any time before kick-off, so the decision time is an input, not a fixed horizon (map #506).
+The bet365 own-movement target failed its keep test, and the model was suspended (map #494). ADR-0011 was only ever proposed. That target predicts how far one book's line moves. It does not measure the thing a bet earns, which is the gap between the price taken and the fair price at the close. Bets can be placed at any time before kick-off, so the decision time is an input, not a fixed horizon (map #506).
 
 ## Decision
 
@@ -78,5 +78,4 @@ Agreed 2026-10-18 (#515, under the map #506):
 ## Evidence
 
 - Issues #494, #506, #515.
-- [EPL CLV re-baseline](../../wiki/evaluation/exp-epl-clv-rebaseline.md), [Pinnacle against bet365](../../wiki/evaluation/exp-epl-clv-pinnacle-retest.md).
 - FDUK coverage research (#511), Polymarket price-history research (#518).

@@ -45,4 +45,3 @@ The scripts load `odds_core.models.Event` and `odds_core.models.OddsSnapshot` ([
 
 - [Historical ingest scripts](historical-ingest-scripts.md)
 - [Backfill Odds API history](howto-backfill-odds-api-history.md), the NBA-only paid route
-- [Train and publish a CLV model](../modelling/howto-train-and-publish-model.md)

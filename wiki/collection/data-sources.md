@@ -27,13 +27,13 @@ ESPN and MLB are non-odds feeds: [epl-context-data](epl-context-data.md), [mlb-p
 
 ## Bookmaker roles
 
-(Inferred.) Pinnacle and Circa Sports are sharp, low-margin books (Circa is Vegas-based). DraftKings, FanDuel, BetMGM and Caesars (`williamhill_us`) are major US retail books, BetRivers is regional retail and Bovada is offshore. UK books come from OddsPortal and, for EPL, from the Odds API (William Hill, Paddy Power, Sky Bet, Ladbrokes, Coral, Betfred, BetVictor, 888sport). bet365 is the suspended model's target, and only OddsPortal and FDUK carry it ([ADR-0002](../../docs/adr/0002-bet365-clv-target.md)); Betway, Betfred and bwin are retail. The per-sport Odds API bookmaker lists are `odds_core.config.DataCollectionConfig.bookmakers` ([sport-and-market-keys](sport-and-market-keys.md#odds-api-scope)).
+(Inferred.) Pinnacle and Circa Sports are sharp, low-margin books (Circa is Vegas-based). DraftKings, FanDuel, BetMGM and Caesars (`williamhill_us`) are major US retail books, BetRivers is regional retail and Bovada is offshore. UK books come from OddsPortal and, for EPL, from the Odds API (William Hill, Paddy Power, Sky Bet, Ladbrokes, Coral, Betfred, BetVictor, 888sport). Only OddsPortal and FDUK carry bet365; Betway, Betfred and bwin are retail. The per-sport Odds API bookmaker lists are `odds_core.config.DataCollectionConfig.bookmakers` ([sport-and-market-keys](sport-and-market-keys.md#odds-api-scope)).
 
 One book has one key whatever the source: the Odds API keys are renamed to the OddsPortal and FDUK keys (`betfair_exchange`, `betfred`, `ladbrokes`, `888sport`), and the Odds API's EPL three-way market is stored as `1x2` with canonical team names, so the same book from two sources shares one slot ([sport-and-market-keys](sport-and-market-keys.md#odds-api-scope)). EPL `1x2` reads therefore see Odds API rows: readers that take the newest price per book, such as `odds_mcp.server.find_retail_edges`, take it from whichever source wrote last, and `odds_analytics.feature_groups.TierSampler` with `required_bookmakers` can pick an Odds API snapshot, which carries no bet365.
 
 ## Pinnacle coverage gap
 
-Pinnacle's Odds API coverage of EPL stopped in January 2026 (71 events lost; a request on 2026-10-18 returned Pinnacle for all 21 upcoming events), and FDUK's Pinnacle odds are unreliable after July 2025. Betfair Exchange is the sharp fallback ([ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md); the experiments are in [exp-epl-sharp-reference](../evaluation/exp-epl-sharp-reference.md)). Event counts and season coverage are data facts the repo cannot confirm; query the database.
+Pinnacle's Odds API coverage of EPL stopped in January 2026 (71 events lost; a request on 2026-10-18 returned Pinnacle for all 21 upcoming events), and FDUK's Pinnacle odds are unreliable after July 2025. Betfair Exchange is the sharp fallback ([ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md)). Event counts and season coverage are data facts the repo cannot confirm; query the database.
 
 ## Deployed state
 
@@ -43,4 +43,3 @@ The deployed schedule of each collector is not in the repo. `odds scheduler list
 
 - [Sport, market and bookmaker keys](sport-and-market-keys.md)
 - [Odds API quota accounting](odds-api-quota.md)
-- [CLV model findings](../evaluation/clv-model-findings.md), for which source each experiment used

@@ -61,8 +61,6 @@ The AWS stack is dormant and production runs on a single local host ([ADR-0008](
    uv run odds scheduler list-jobs --backend aws
    ```
    - Terraform does not show the live schedule, so `list-jobs` is the only record of what runs ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
-6. If scoring is wanted, publish a model: `uv run odds model publish --name epl-clv-home --path <model.pkl>` ([model-store](../modelling/model-store.md)).
-   - Scoring runs only where the scheduler image has `odds-analytics` ([prediction-scoring](../modelling/prediction-scoring.md)).
 
 ## Related
 

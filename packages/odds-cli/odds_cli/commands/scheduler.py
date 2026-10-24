@@ -315,12 +315,6 @@ def smoke(
         help="Also run jobs that spend Odds API quota (fetch-odds, fetch-scores). "
         "Off by default so a deploy check spends no units.",
     ),
-    no_side_effects: bool = typer.Option(
-        False,
-        "--no-side-effects",
-        help="Drop outward-posting jobs (daily-digest) so the check stays silent "
-        "on shared channels.",
-    ),
     only: list[str] | None = typer.Option(  # noqa: B008 — typer option idiom
         None,
         "--only",
@@ -344,8 +338,7 @@ def smoke(
     ``agent-run`` is skipped by default (never place paper bets during a deploy
     check); pass ``--include-agent`` to run it. ``fetch-odds`` and ``fetch-scores``
     are skipped by default because they spend Odds API quota; pass
-    ``--include-paid-api`` to run them. ``daily-digest`` posts to Discord; pass
-    ``--no-side-effects`` to drop it.
+    ``--include-paid-api`` to run them.
 
     Run with ``SCHEDULER_DRY_RUN=true`` (as ``deploy.sh`` does) so self-scheduling
     and Discord alerting are no-ops and the live schedule store is untouched.
@@ -357,7 +350,6 @@ def smoke(
 
     Usage:
         SCHEDULER_DRY_RUN=true odds scheduler smoke
-        odds scheduler smoke --no-side-effects
         odds scheduler smoke --only fetch-oddsportal --only fetch-espn-fixtures
         odds scheduler smoke --include-agent
     """
@@ -367,7 +359,6 @@ def smoke(
         JobContext,
         expected_compound_job_names,
         get_job_function,
-        is_outward_posting,
         is_smoke_unsafe,
         resolve_job_name,
         spends_api_quota,
@@ -434,8 +425,6 @@ def smoke(
             skipped.append((name, "smoke-unsafe (pass --include-agent)"))
         elif spends_api_quota(name) and not include_paid_api:
             skipped.append((name, "spends Odds API quota (pass --include-paid-api)"))
-        elif is_outward_posting(name) and no_side_effects:
-            skipped.append((name, "outward-posting (--no-side-effects)"))
         else:
             to_run.append(name)
 

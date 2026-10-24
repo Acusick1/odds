@@ -622,29 +622,6 @@ class TestTrainBest:
         assert "top_k_features" in strip_ansi(result.output)
         mock_run.assert_not_called()
 
-    def test_saved_yaml_is_readable_by_the_model_loader(self, tmp_path, make_ml_config):
-        import shutil
-        from unittest.mock import Mock
-
-        from odds_cli.commands.train import _save_model_with_config
-        from odds_lambda.model_loader import _load_feature_config
-
-        config = make_ml_config()
-        config.training.features.sharp_bookmakers = ["pinnacle", "betfair_exchange"]
-        strategy = Mock()
-        strategy.save_model.side_effect = lambda path: Path(path).write_bytes(b"model")
-        model_path = tmp_path / "model.pkl"
-
-        _save_model_with_config(strategy, config, str(model_path))
-
-        s3 = Mock()
-        s3.download_file.side_effect = lambda bucket, key, dest: shutil.copy(
-            model_path.with_suffix(".yaml"), dest
-        )
-        feature_config = _load_feature_config(s3, "bucket", "model")
-        assert feature_config is not None
-        assert feature_config.sharp_bookmakers == ["pinnacle", "betfair_exchange"]
-
     def test_config_write_failure_fails_the_command(self, tmp_path):
         from unittest.mock import Mock
 

@@ -32,10 +32,6 @@ class JobContext:
     include_totals: bool = False
     dry_run: bool = False
 
-    # daily-digest configuration
-    lookback_hours: float = 24
-    lookahead_hours: float = 48
-
     @classmethod
     def from_payload(cls, payload: dict[str, object]) -> JobContext:
         """Construct a ``JobContext`` from a raw event/scheduler payload.
@@ -54,9 +50,7 @@ class JobContext:
 
 
 # Maps job name to (module_path, function_name).
-# Modules are imported lazily when the job is first requested, so the
-# registry never imports score_predictions (which needs odds_analytics /
-# xgboost) unless that job runs.
+# Modules are imported lazily when the job is first requested.
 _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
     "fetch-odds": ("odds_lambda.jobs.fetch_odds", "main"),
     "fetch-scores": ("odds_lambda.jobs.fetch_scores", "main"),
@@ -66,8 +60,6 @@ _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
     "backfill-polymarket": ("odds_lambda.jobs.backfill_polymarket", "main"),
     "fetch-oddsportal": ("odds_lambda.jobs.fetch_oddsportal", "main"),
     "fetch-oddsportal-results": ("odds_lambda.jobs.fetch_oddsportal_results", "main"),
-    "score-predictions": ("odds_lambda.jobs.score_predictions", "main"),
-    "daily-digest": ("odds_lambda.jobs.daily_digest", "main"),
     "agent-run": ("odds_lambda.jobs.agent_run", "main"),
     "fetch-espn-fixtures": ("odds_lambda.jobs.fetch_espn_fixtures", "main"),
     "fetch-betfair-exchange": ("odds_lambda.jobs.fetch_betfair_exchange", "main"),
@@ -101,11 +93,6 @@ _SMOKE_UNSAFE_JOBS: frozenset[str] = frozenset({"agent-run"})
 # default because every deploy would otherwise burn units off-schedule.
 _PAID_API_JOBS: frozenset[str] = frozenset({"fetch-odds", "fetch-scores"})
 
-# Jobs that post to outward channels (e.g. Discord) on every run. The smoke
-# command drops these under ``--no-side-effects`` so a validation run can stay
-# silent on shared channels.
-_OUTWARD_POSTING_JOBS: frozenset[str] = frozenset({"daily-digest"})
-
 # Jobs that accept a sport parameter. When invoked with a sport suffix
 # (e.g. "fetch-odds-epl"), the sport_key is extracted and passed as a kwarg.
 _PER_SPORT_JOBS: frozenset[str] = frozenset(
@@ -114,8 +101,6 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
         "fetch-scores",
         "fetch-oddsportal",
         "fetch-oddsportal-results",
-        "score-predictions",
-        "daily-digest",
         "agent-run",
         "fetch-espn-fixtures",
         "fetch-betfair-exchange",
@@ -130,7 +115,6 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
 # self-schedules must not be listed: bootstrap re-applies every cron, which
 # would replace the job's pending run under the shared schedule id.
 _JOB_CRON_MAP: dict[str, str] = {
-    "daily-digest": "0 8 * * *",
     "fetch-espn-fixtures": "0 6 * * *",
     # MLB probable pitchers — once daily at 06:00 UTC. Backstop only:
     # the MCP ``get_probable_pitchers`` tool writes through every call.
@@ -143,8 +127,6 @@ _JOB_CRON_MAP: dict[str, str] = {
 # raise inside ``job_alert_context`` and spam critical Discord alerts) or
 # that should not spend resources on every configured sport.
 _JOB_SPORTS: dict[str, tuple[SportKey, ...]] = {
-    # The digest formatter and heartbeat_expectations are EPL-only today.
-    "daily-digest": ("soccer_epl",),
     "fetch-espn-fixtures": ("soccer_epl",),
     # Allowlist derived from the BFE adapter's supported-sports map so adding
     # a new sport requires only a SPORT_CONFIG entry.
@@ -291,15 +273,6 @@ def is_smoke_unsafe(job_name: str) -> bool:
     """
     base_name, _ = resolve_job_name(job_name)
     return base_name in _SMOKE_UNSAFE_JOBS
-
-
-def is_outward_posting(job_name: str) -> bool:
-    """Whether a job posts to outward channels (e.g. Discord) on every run.
-
-    Accepts a compound (sport-suffixed) or base job name.
-    """
-    base_name, _ = resolve_job_name(job_name)
-    return base_name in _OUTWARD_POSTING_JOBS
 
 
 def resolve_target_sports(job_name: str, configured_sports: Sequence[SportKey]) -> list[SportKey]:

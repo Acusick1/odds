@@ -27,7 +27,6 @@ Odds are stored twice ([How odds are stored](odds-storage-model.md)). `odds_core
 - `event_id` (FK), `snapshot_time` (tz-aware), `raw_data` (JSON), `bookmaker_count`, `created_at`.
 - `fetch_tier` (string value of the [fetch tier](fetch-tier.md) enum: `in_play`, `closing`, `pregame`, `sharp`, `early`, `opening`) and `hours_until_commence`, both nullable.
 - `api_request_id`: free-text provenance tag, see [Provenance](#provenance).
-- Unique: `uq_odds_snapshot_id_event (id, event_id)`, the target of the composite foreign key from [predictions](../modelling/prediction-scoring.md#predictions-table), which ties a prediction to a snapshot of its own event.
 - Indexes: single-column `event_id`, `snapshot_time`, `fetch_tier`; composite `ix_event_snapshot_time (event_id, snapshot_time)` and `ix_event_tier (event_id, fetch_tier)`.
 
 ## raw_data format
@@ -47,7 +46,7 @@ Two free-text fields tag where a snapshot came from. Each producer sets them as 
 | `football_data_uk` | `scripts/ingest_football_data_uk.py` (attaches to an existing event of the same sport when one matches and fills its scores when it has none); market key `1x2`; snapshot times are approximations recorded in `raw_data.timing` ([Historical ingest scripts](../collection/historical-ingest-scripts.md#snapshot-shape)) |
 | `polymarket` | `odds_lambda.polymarket_odds.build_raw_data` (price is the reciprocal of the Yes probability as `price_decimal`; exact probabilities in `polymarket_meta`, bid and ask only on live rows), from the backfill and the fetch-polymarket-odds job ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)) |
 
-`api_request_id` is matched by training's `closing_source_priority`; the `data_source` filter matches event-ID prefixes (`op_`, `fduk_`; `odds_core.event_ids.SCRAPED_EVENT_ID_PREFIXES`) instead (`odds_analytics.training.data_preparation.filter_events_by_date_range`, #468) ([CLV and the training target](../modelling/clv-target.md), [Training config](../modelling/training-config.md)): `oddsportal` (or `oddsportal_<market>`), `football_data_uk`, `betfair_api_<iso time>`, `polymarket_history` and `polymarket_live_<iso time>`; null for Odds API rows.
+Training's `data_source` filter matches event-ID prefixes (`op_`, `fduk_`; `odds_core.event_ids.SCRAPED_EVENT_ID_PREFIXES`), not `api_request_id` (`odds_analytics.training.data_preparation.filter_events_by_date_range`, #468) ([Training config](../modelling/training-config.md)). The `api_request_id` values are `oddsportal` (or `oddsportal_<market>`), `football_data_uk`, `betfair_api_<iso time>`, `polymarket_history` and `polymarket_live_<iso time>`; null for Odds API rows.
 
 ## odds
 

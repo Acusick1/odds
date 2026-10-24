@@ -221,10 +221,9 @@ async def test_events_with_odds(pglite_async_session):
 
 @pytest.fixture
 async def live_twin_with_rows(pglite_async_session):
-    """An op_live_ event owning a snapshot, odds, prediction, paper trade and match brief."""
+    """An op_live_ event owning a snapshot, odds, paper trade and match brief."""
     from odds_core.match_brief_models import BriefDecision, MatchBrief
     from odds_core.paper_trade_models import PaperTrade
-    from odds_core.prediction_models import Prediction
 
     session = pglite_async_session
     session.add(make_epl_event(TWIN_EVENT_ID))
@@ -250,13 +249,6 @@ async def live_twin_with_rows(pglite_async_session):
                 price_decimal=american_to_decimal(150),
                 odds_timestamp=snapshot.snapshot_time,
                 last_update=snapshot.snapshot_time,
-            ),
-            Prediction(
-                event_id=TWIN_EVENT_ID,
-                snapshot_id=snapshot.id,
-                model_name="m",
-                model_version="1",
-                predicted_clv=0.01,
             ),
             PaperTrade(
                 event_id=TWIN_EVENT_ID,

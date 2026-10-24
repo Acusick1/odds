@@ -25,7 +25,7 @@ status: stable
 
 # NBA injury reports, game logs and player stats
 
-Three manual-CLI NBA feeds. NBA is deprioritized and no scheduled job collects any of them ([project-overview](../foundations/project-overview.md)). The deployed EPL model does not use them; the experiments that found no CLV value in the injury features are in [exp-nba-timing-and-injuries](../evaluation/exp-nba-timing-and-injuries.md), and the feature groups built on these tables are in [feature-groups](../modelling/feature-groups.md).
+Three manual-CLI NBA feeds. NBA is deprioritized and no scheduled job collects any of them ([project-overview](../foundations/project-overview.md)). The feature groups built on these tables are in [feature-groups](../modelling/feature-groups.md).
 
 | | Injury reports | Game logs | Player stats |
 |---|---|---|---|
@@ -66,5 +66,4 @@ Both writers link rows to `events` with the same ET window rule: events whose `c
 
 - [Event matching across sources](../storage/event-matching.md)
 - [Feature groups](../modelling/feature-groups.md), the `injuries` and `rest` groups
-- [NBA timing and injury experiments](../evaluation/exp-nba-timing-and-injuries.md)
 - [The odds CLI](../foundations/odds-cli.md)

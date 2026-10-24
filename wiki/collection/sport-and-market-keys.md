@@ -20,7 +20,6 @@ sources:
   - odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP
   - odds_lambda.scheduling.jobs._PER_SPORT_JOBS
   - odds_lambda.scheduling.jobs.make_compound_job_name
-  - odds_lambda.jobs.daily_digest
   - odds_mcp.server.MarketKey
   - scripts/ingest_football_data_uk.py
 status: stable
@@ -53,7 +52,7 @@ These filters apply only to Odds API requests ([configuration](../foundations/co
 
 Job names use a short suffix: `odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP` maps `epl` to `soccer_epl` and `mlb` to `baseball_mlb`, and `odds_lambda.scheduling.jobs.make_compound_job_name("fetch-odds", "soccer_epl")` gives `fetch-odds-epl`, and only for jobs in `odds_lambda.scheduling.jobs._PER_SPORT_JOBS` ([job-registry](../scheduling/job-registry.md#compound-job-names)). NBA has no suffix, so its compound names stay bare. A per-sport job given no sport raises `ValueError`. The suffix names EventBridge rules, heartbeat keys and `odds_mcp.server.get_scheduled_jobs` filters.
 
-Sport naming is translated separately per surface: compound job names (`daily-digest-epl`), sport keys (`soccer_epl`), heartbeat keys, CloudWatch metrics, embed titles and CLI names each have their own table (`odds_lambda.jobs.daily_digest`, `odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP`; #384).
+Sport naming is translated separately per surface: compound job names (`fetch-odds-epl`), sport keys (`soccer_epl`), heartbeat keys, CloudWatch metrics, embed titles and CLI names each have their own table (`odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP` is the job-name one; #384).
 
 CLI `--sport` defaults differ by command ([odds-cli](../foundations/odds-cli.md#sport-defaults)). Several NBA-era defaults remain ([project-overview](../foundations/project-overview.md)), so an NBA default and an empty EPL window look alike.
 

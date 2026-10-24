@@ -120,7 +120,6 @@ class SchedulerConfig(BaseSettings):
             "check-health",
             "fetch-oddsportal",
             "fetch-oddsportal-results",
-            # "daily-digest",
             "fetch-espn-fixtures",
             "fetch-betfair-exchange",
             "fetch-polymarket-odds",
@@ -145,26 +144,6 @@ class AWSConfig(BaseSettings):
     rule_prefix: str | None = Field(
         default=None,
         description="EventBridge rule name prefix (e.g. 'odds') for querying deployed schedules",
-    )
-
-
-class ModelConfig(BaseSettings):
-    """CLV model artifact location (S3) for local scoring and Lambda inference."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="MODEL_",
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
-
-    name: str | None = Field(
-        default=None,
-        description="S3 key prefix for the model artifact (e.g. 'epl-clv-home')",
-    )
-    bucket: str | None = Field(
-        default=None,
-        description="S3 bucket containing '<name>/latest/model.pkl' and 'config.yaml'",
     )
 
 
@@ -384,7 +363,6 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
-        protected_namespaces=(),
     )
 
     # Repository root (walk up from packages/odds-core/odds_core/config.py)
@@ -396,7 +374,6 @@ class Settings(BaseSettings):
     data_collection: DataCollectionConfig = Field(default_factory=DataCollectionConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     aws: AWSConfig = Field(default_factory=AWSConfig)
-    model: ModelConfig = Field(default_factory=ModelConfig)
     data_quality: DataQualityConfig = Field(default_factory=DataQualityConfig)
     alerts: AlertConfig = Field(default_factory=AlertConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)

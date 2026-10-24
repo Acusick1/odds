@@ -11,8 +11,8 @@ Read this page, then one area index, then the page, then the cited code. Code is
 - [Data collection](collection/index.md) — read when changing how odds, results or sport context data is fetched, or loading history.
 - [Scheduling](scheduling/index.md) — read when adding, changing, deploying or debugging a scheduled job, or asking where a job runs.
 - [Operations](operations/index.md) — read when deploying, touching Terraform or workflows, or changing alerts, health checks or reports.
-- [CLV modelling](modelling/index.md) — read when changing features, the target, training config or the deployed model and its scoring.
-- [Backtests and model research](evaluation/index.md) — read when running a backtest or an experiment, or asking what the model can and cannot do.
+- [Modelling](modelling/index.md) — read when changing features, the retail-EV target or training config.
+- [Backtests and model research](evaluation/index.md) — read when running a backtest or an experiment, or looking up a retail-EV result.
 - [Betting agent](agent/index.md) — read when changing the agent, its prompts or MCP tools, or its briefs and paper trades.
 
 ## Constraints

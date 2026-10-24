@@ -24,7 +24,7 @@ def copy_from_production(
     local_url: str | None = typer.Option(None, "--local-url", help="Local database URL"),
 ):
     """
-    Copy events, snapshots, and predictions from production to local database.
+    Copy events, snapshots and odds from production to local database.
 
     Examples:
         odds copy from-prod 2025-08-01 2026-04-10

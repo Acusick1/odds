@@ -648,20 +648,6 @@ class TestFeatureConfig:
             FeatureConfig()  # type: ignore[call-arg]
         assert exc.value.errors()[0]["loc"] == ("target_type",)
 
-    def test_devigged_requires_target_bookmaker(self):
-        with pytest.raises(ValidationError, match="target_bookmaker is required"):
-            FeatureConfig(target_type="devigged_bookmaker")
-
-    def test_raw_rejects_target_bookmaker(self):
-        with pytest.raises(ValidationError, match="must be omitted"):
-            FeatureConfig(target_type="raw", target_bookmaker="pinnacle")
-
-    def test_devigged_rejects_spreads(self):
-        with pytest.raises(ValidationError, match="no target for market 'spreads'"):
-            FeatureConfig(
-                target_type="devigged_bookmaker", target_bookmaker="bet365", markets=["spreads"]
-            )
-
     @pytest.mark.parametrize(
         ("markets", "outcome"),
         [
@@ -1032,7 +1018,7 @@ class TestMLTrainingConfig:
         )
 
     def test_tuned_feature_groups_valid_choices_accepted(self):
-        config = self._with_tuned_feature_groups([["tabular"], ["tabular", "standings"]])
+        config = self._with_tuned_feature_groups([["tabular"], ["tabular", "polymarket"]])
         assert config.tuning is not None
 
     def test_tuned_feature_groups_unknown_choice_rejected(self):

@@ -4,7 +4,7 @@ status: accepted
 
 # Use Pinnacle with Betfair Exchange fallback as the sharp reference
 
-`sharp_bookmakers` is `[pinnacle, betfair_exchange]` for EPL, and the first bookmaker with odds in the market wins. The runs behind it are on [EPL sharp-reference experiments](../../wiki/evaluation/exp-epl-sharp-reference.md).
+`sharp_bookmakers` is `[pinnacle, betfair_exchange]` for EPL, and the first bookmaker with odds in the market wins.
 
 ## Context
 

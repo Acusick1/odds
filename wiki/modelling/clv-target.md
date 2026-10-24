@@ -1,7 +1,7 @@
 ---
 type: explanation
 title: CLV and the training target
-description: What CLV means here, the retail-EV target against the Betfair Exchange close and its baseline and weights, the older close-minus-snapshot delta, and how sampling changes a target.
+description: What CLV means here, the retail-EV target against the Betfair Exchange close and its baseline and weights, the raw close-minus-snapshot delta, and how sampling changes a target.
 sources:
   - odds_analytics.retail_ev.build_event_rows
   - odds_analytics.retail_ev.RetailEvRow
@@ -10,13 +10,13 @@ sources:
   - odds_analytics.retail_ev_metrics
   - odds_core.betfair_close.MAX_EXCHANGE_OVERROUND
   - experiments/scripts/retail_ev_exchange_overround.py
-  - odds_analytics.sequence_loader.calculate_devigged_bookmaker_target
+  - odds_analytics.sequence_loader.calculate_regression_target
 status: stable
 ---
 
 # CLV and the training target
 
-CLV (closing line value) is how much better a price is than the fair price at the close. The training pipeline has two kinds of target. `target_type: retail_ev` predicts what a bet at a UK retail price is worth against the devigged Betfair Exchange close, as [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md) decides. The older targets, `devigged_bookmaker` and `raw`, regress how far one line moves between a decision snapshot and the close; the suspended EPL model uses the first. The functions, dispatch and config fields are on [Target functions](clv-target-functions.md).
+CLV (closing line value) is how much better a price is than the fair price at the close. The training pipeline has two kinds of target. `target_type: retail_ev` predicts what a bet at a UK retail price is worth against the devigged Betfair Exchange close, as [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md) decides. `raw` regresses how far the line moves between a decision snapshot and the close: the vig-inclusive implied probability for `h2h`, the point for `spreads` and `totals`. The functions, dispatch and config fields are on [Target functions](clv-target-functions.md).
 
 ## The retail-EV target
 
@@ -32,18 +32,15 @@ ADR-0012 measures what a bet earns, which is the gap between the price taken and
 
 Rows exist only from 2024-25, where FDUK carries Betfair Exchange closing prices, and are dense only where live collection ran: before the live Betfair job, the 2-hour cap keeps few rows other than the FDUK opening snapshot's own books ([data sources](../collection/data-sources.md)). That history is development data, and only a live forward test promotes a model ([goal and strategy](../foundations/goal-and-strategy.md)). Offline, `odds_analytics.retail_ev_metrics` computes ADR-0012's two keep-bar tests: a weighted-MSE gain over the baseline, and a gain in the total `w_event`-weighted realised EV of rows predicted EV > 0, each with an event-clustered bootstrap 95% CI that excludes zero (the same bootstrap scores paper-trading candidates on [the candidate report](../evaluation/candidate-registry.md#odds-candidates-report)). The clusters are events because an event's rows share one close `(inferred)`. Simulated on resampled development events, one season of 380 events gives the MSE test 80% power at a gain of about 4.5% to 6% of the baseline's weighted MSE; the pick test's power depends more on the shape of a model's edge than on its gain ([keep-bar power](../evaluation/exp-retail-ev-power.md)).
 
-## The close-minus-snapshot delta
+## The raw close-minus-snapshot delta
 
-`devigged_bookmaker` regresses `devigged_fair_close - devigged_fair_at_snapshot` for one bookmaker (`target_bookmaker`). A positive value means the price at the snapshot was too low and the line moved up (`odds_analytics.sequence_loader.calculate_devigged_bookmaker_target` returns closing probability minus snapshot probability for the configured `outcome`). Why a delta rather than the closing price is `(inferred)`: the decision needs the size of the move, and a delta is stationary and roughly mean-zero.
-
-The suspended model's target is the devigged bet365 delta, recorded in [ADR-0002](../../docs/adr/0002-bet365-clv-target.md) on NBA runs the map #494 voids, and superseded with [ADR-0011](../../docs/adr/0011-bet365-clv-target-on-like-for-like-evidence.md) by ADR-0012. On EPL, scored on the same events, folds and features, a Pinnacle-target model has no out-of-sample skill (R² about 0 against the training-fold mean), against about 0.023 for bet365. The difference is within bootstrap noise ([Pinnacle against bet365](../evaluation/exp-epl-clv-pinnacle-retest.md)). Pinnacle's EPL lines move almost as much as bet365's, with a target variance 91% of bet365's. The NBA runs are on [Target bookmaker and data volume experiments](../evaluation/exp-target-and-data-volume.md). The target bookmaker's snapshot price is also an input to that model's strongest feature, `retail_sharp_diff` ([sharp benchmark](sharp-benchmark.md)).
+For `h2h`, `raw` is the closing mean implied probability minus the snapshot's, averaged over the bookmakers quoting the configured `outcome`; a positive value means the price at the snapshot was too low and the line moved up. For `spreads` and `totals` it is the change in the mean point, and any other market, `1x2` included, gives no target (`odds_analytics.sequence_loader.calculate_regression_target`). Why a delta rather than the closing price is `(inferred)`: the decision needs the size of the move, and a delta is stationary and roughly mean-zero. The implied probabilities include the vig ([devigging](../foundations/devigging.md)). The tabular group's `retail_sharp_diff` is built from the same prices ([sharp benchmark](sharp-benchmark.md)).
 
 ## Sampling changes a delta target
 
-The delta is measured from the sampled snapshot to the close ([decision time](look-ahead-bias.md)), so the same event can yield different targets under different samplers. A target measured from a closing-tier snapshot has std 0.0016 against 0.054 at the sharp tier, so any R² near 0.6 on it is an artefact, not skill ([NBA timing and injury experiments](../evaluation/exp-nba-timing-and-injuries.md#nba-injury-features-exp-6-6b)). The retail-EV target has no sampler: every retail snapshot in the window is a row, and the horizon is a feature.
+The delta is measured from the sampled snapshot to the close ([decision time](look-ahead-bias.md)), so the same event can yield different targets under different samplers. A target measured from a closing-tier snapshot has almost no variance, so a high R² on it is an artefact, not skill `(inferred)`. The retail-EV target has no sampler: every retail snapshot in the window is a row, and the horizon is a feature.
 
 ## Related
 
 - [Training config](training-config.md), [training pipeline](training-pipeline.md) and [cross-validation](cross-validation.md): how a target is trained and evaluated
-- [CLV model findings](../evaluation/clv-model-findings.md): what the model can predict
 - [Look-ahead bias](look-ahead-bias.md): inputs must precede the decision time

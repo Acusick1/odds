@@ -1,21 +1,19 @@
 ---
 type: reference
-title: MCP odds, prediction and retail-edge tools
-description: get_upcoming_fixtures, get_current_odds, get_odds_history, get_predictions and find_retail_edges, with inputs, anchor-relative price resolution, ranking and dispersion statistics, and the limits of their prices.
+title: MCP odds and retail-edge tools
+description: get_upcoming_fixtures, get_current_odds, get_odds_history and find_retail_edges, with inputs, anchor-relative price resolution, ranking and dispersion statistics, and the limits of their prices.
 sources:
   - odds_mcp.server.get_upcoming_fixtures
   - odds_mcp.server.get_current_odds
   - odds_mcp.server.get_odds_history
-  - odds_mcp.server.get_predictions
   - odds_mcp.server.find_retail_edges
   - odds_analytics.utils.per_book_market_holds
-  - odds_core.prediction_models.Prediction
 status: stable
 ---
 
-# MCP odds, prediction and retail-edge tools
+# MCP odds and retail-edge tools
 
-Five read-only market-data tools, defined in `odds_mcp.server`, part of the [odds-mcp server](mcp-server.md). Unknown event ids return `{"error": "Event '<id>' not found"}`. The first four read stored data; `odds_mcp.server.find_retail_edges` is the [betting agent](betting-agent.md)'s flagship screener, about 290 lines.
+Four read-only market-data tools, defined in `odds_mcp.server`, part of the [odds-mcp server](mcp-server.md). Unknown event ids return `{"error": "Event '<id>' not found"}`. The first three read stored data; `odds_mcp.server.find_retail_edges` is the [betting agent](betting-agent.md)'s flagship screener, about 290 lines.
 
 ## `get_upcoming_fixtures(league="soccer_epl", days_ahead=7)`
 
@@ -33,10 +31,6 @@ Response: `event` plus `snapshot` with `anchor_snapshot_id`, `snapshot_time` (ne
 ## `get_odds_history(event_id, market)`
 
 Every snapshot for the event in time order, each with the extracted `market` odds instead of raw JSON, plus `snapshot_count`. There is no pagination or limit, so a long-lived event returns a large payload ([odds reader](../storage/odds-reader.md)).
-
-## `get_predictions(event_id, limit=5, since_hours=None)`
-
-Reads stored `predictions` rows newest first; it does not run the model. `total_matching` counts rows after the `since_hours` filter, `returned` the limited list (`limit` floored at 1). Each row: `id`, `snapshot_id` (always a snapshot of `event_id`, enforced by a foreign key), `model_name`, `model_version`, `predicted_clv`, `created_at`. Rows are written only by inline scoring, which runs only on a local scheduler: one row per snapshot, with `model_version` an S3 ETag ([prediction scoring](../modelling/prediction-scoring.md), [model hub](../evaluation/clv-model-findings.md)). The tool returns whatever the scorer wrote; no row exists for events the scoring job never reached..
 
 ## Market vocabulary
 

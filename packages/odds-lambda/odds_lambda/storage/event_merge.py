@@ -114,10 +114,6 @@ class EventMerger:
     event keeps its own commence time: it is the best source, and the Odds API
     id is kept because score and status jobs match on it. Runs in the caller's
     transaction.
-
-    The ``predictions`` unique key ``(event_id, snapshot_id, model_name)``
-    cannot collide: snapshot ids are per-row and a duplicate's snapshots move
-    with its predictions.
     """
 
     def __init__(self, session: AsyncSession) -> None:

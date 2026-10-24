@@ -144,7 +144,7 @@ Sparse model, as the share of informed events f; the 380-event rows are six-seed
 ## What it means for pre-registration
 
 - **One season is enough for the MSE condition at a gain of about 4.5% to 6%** on either collection regime under persistent errors. Which error structure a real model has is not known; a model that mostly learns event-level information, such as team news, would have persistent errors (inferred).
-- **One season is enough for the pick condition only for a large diffuse gain (about 16% to 21%) or a concentrated edge.** For comparison, the suspended bet365 model, on a different target, explained 2.3% of its target's variance out of sample ([Pinnacle against bet365](exp-epl-clv-pinnacle-retest.md#results)); taking that as a guide to a diffuse model's gain here is (inferred). A model whose edge is information on a few events, such as late team news, is the shape the pick condition can detect in one season.
+- **One season is enough for the pick condition only for a large diffuse gain (about 16% to 21%) or a concentrated edge.** A model whose edge is information on a few events, such as late team news, is the shape the pick condition can detect in one season.
 - **Dense collection raises pick power for the sparse model with h = 1 and under the renewing-error bound.** For the calibrated model with persistent errors it gives a minimum detectable gain of 16–19% against 19–21% on FDUK-only rows, and for the sparse model with h = 0.5 the two regimes' ranges overlap; both differences are within the seed spread.
 
 ## Assumptions and limitations
@@ -157,4 +157,4 @@ Sparse model, as the share of informed events f; the 380-event rows are six-seed
 
 ## Related
 
-- [CLV target](../modelling/clv-target.md), [Target functions](../modelling/clv-target-functions.md#keep-bar-metrics), [CLV model findings](clv-model-findings.md)
+- [CLV target](../modelling/clv-target.md), [Target functions](../modelling/clv-target-functions.md#keep-bar-metrics)

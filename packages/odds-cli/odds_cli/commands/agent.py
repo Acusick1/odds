@@ -30,7 +30,7 @@ def run(
     runs don't disturb the scheduler. By default the agent runs against the
     local ``odds`` database (same host/credentials as the configured
     DATABASE_URL, just a different dbname), which is also where the local
-    scheduler writes scraper output and scored predictions.
+    scheduler writes scraper output.
     """
     override_database_url(db)
 

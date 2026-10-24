@@ -32,7 +32,6 @@ from odds_core.polymarket_models import (
     PolymarketOrderBookSnapshot,
     PolymarketPriceSnapshot,
 )
-from odds_core.prediction_models import Prediction
 from odds_core.team import normalize_team_name, team_abbrev
 
 __all__ = [
@@ -43,8 +42,6 @@ __all__ = [
     "OddsSnapshot",
     "DataQualityLog",
     "FetchLog",
-    # Prediction
-    "Prediction",
     # Paper Trading
     "PaperTrade",
     "TradeResult",

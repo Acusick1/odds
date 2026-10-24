@@ -26,13 +26,11 @@ A candidate is any rule that decides bets: a mechanical rule on prices, a model,
 No candidate is running and no mechanical rule exists; mechanical rules are the current focus. The repo also holds:
 
 - **The EPL and MLB betting agents** synthesise prices, exchange data and match news ([The betting agent](../agent/betting-agent.md)). Neither is registered or being run.
-- **The EPL retail-EV model** predicts a retail bet's EV against the close ([retail-EV target](../modelling/clv-target.md#the-retail-ev-target)). Its development results are level with the exchange-price baseline ([CLV model findings](../evaluation/clv-model-findings.md)), and it places no bets.
-
-The suspended bet365 CLV model is not a candidate. Its predictions are an input the agents may read ([prediction scoring](../modelling/prediction-scoring.md)).
+- **The EPL retail-EV model** predicts a retail bet's EV against the close ([retail-EV target](../modelling/clv-target.md#the-retail-ev-target)). Its development results are in [Price-only models on the retail-EV target](../evaluation/exp-epl-retail-ev-price-only.md), and it places no bets.
 
 ## How a candidate is judged
 
-- **Development data generates and kills ideas, and never promotes one.** The EPL 2024–26 range has been used for evaluation several times ([EPL CLV re-baseline](../evaluation/exp-epl-clv-rebaseline.md)). Choosing the best of many ideas on data already seen finds edges that are not there `(inferred)`.
+- **Development data generates and kills ideas, and never promotes one.** The EPL 2024–26 development data has been examined many times ([price-only runs](../evaluation/exp-epl-retail-ev-price-only.md)). Choosing the best of many ideas on data already seen finds edges that are not there `(inferred)`.
 - **A candidate is judged on a live forward test.** It paper-trades from a start date at a fixed version. Any number of candidates run in parallel, and none waits on another.
 - **The score is EV at the price taken against the Betfair Exchange close:** `p_close × decimal_odds − 1`, with the close as defined for the [retail-EV target](../modelling/clv-target.md#the-retail-ev-target) (`odds_core.betfair_close.event_close`). Betfair Exchange is the close because its closing prices exist from 2024-25 on, where FDUK Pinnacle closing prices end 2026-01-08 ([ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md), "Considered options"). That close is defined for EPL only.
 - **EV beats realised P&L as the score because of variance** `(inferred)`. A bet's P&L is a win or a loss of the whole stake, while its EV against the close varies only with how far the price moves before kick-off, so EV shows an edge in far fewer bets.

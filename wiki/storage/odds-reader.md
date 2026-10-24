@@ -49,7 +49,7 @@ status: stable
 ## Naming
 
 - `odds_lambda.storage.readers.OddsReader.get_database_stats` is the only `*_stats` method on this class; the sibling readers (`odds_lambda.storage.polymarket_reader.PolymarketReader`, `odds_lambda.storage.injury_reader.InjuryReader`, `odds_lambda.storage.game_log_reader.GameLogReader`, `odds_lambda.storage.pbpstats_reader.PbpStatsReader`) name theirs `odds_lambda.storage.polymarket_reader.PolymarketReader.get_pipeline_stats` and its counterparts.
-- "Snapshot" means an `odds_core.models.OddsSnapshot` ([columns and constraints](odds-tables.md#odds_snapshots)) row in most methods, a list of `odds_core.models.Odds` (each with `price_decimal`) at one time in `odds_lambda.storage.readers.OddsReader.get_odds_at_time`, and something else again in the Polymarket tables.
+- "Snapshot" means an `odds_core.models.OddsSnapshot` ([columns and indexes](odds-tables.md#odds_snapshots)) row in most methods, a list of `odds_core.models.Odds` (each with `price_decimal`) at one time in `odds_lambda.storage.readers.OddsReader.get_odds_at_time`, and something else again in the Polymarket tables.
 
 ## Related
 

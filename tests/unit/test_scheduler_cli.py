@@ -143,23 +143,6 @@ class TestSmokeCommand:
         assert result.exit_code == 0
         assert recorder.ran_bases == {"fetch-oddsportal", "fetch-odds", "fetch-scores"}
 
-    def test_daily_digest_runs_by_default(self) -> None:
-        settings = _settings(["fetch-oddsportal", "daily-digest"], ["soccer_epl"])
-        recorder = _JobRecorder()
-        result = _invoke_smoke([], settings, recorder)
-
-        assert result.exit_code == 0
-        assert "daily-digest" in recorder.ran_bases
-
-    def test_no_side_effects_drops_daily_digest(self) -> None:
-        settings = _settings(["fetch-oddsportal", "daily-digest"], ["soccer_epl"])
-        recorder = _JobRecorder()
-        result = _invoke_smoke(["--no-side-effects"], settings, recorder)
-
-        assert result.exit_code == 0
-        assert "fetch-oddsportal" in recorder.ran_bases
-        assert "daily-digest" not in recorder.ran_bases
-
     def test_only_by_base_name_matches_all_compounds(self) -> None:
         settings = _settings(["fetch-oddsportal", "fetch-scores"], ["soccer_epl", "baseball_mlb"])
         recorder = _JobRecorder()

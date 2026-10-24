@@ -7,13 +7,12 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from odds_analytics.sequence_loader import extract_devigged_h2h_probs
 from odds_core.models import OddsSnapshot
+from odds_core.odds_math import devig_probabilities
 from odds_core.snapshot_utils import extract_odds_from_snapshot
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.polymarket_fetcher import MAX_HISTORY_WINDOW, PolymarketClient
 from odds_lambda.polymarket_odds import (
-    BOOKMAKER_KEY,
     MAX_HORIZON,
     MAX_STALENESS,
     TIER_STEPS,
@@ -308,11 +307,11 @@ class TestBuildRawData:
         )
 
         odds = extract_odds_from_snapshot(snapshot, "e1", market="1x2")
-        probs = extract_devigged_h2h_probs(odds, "Bournemouth", "Chelsea", BOOKMAKER_KEY, "1x2")
+        implied = {o.outcome_name: o.implied_probability for o in odds}
+        probs = devig_probabilities(implied["Bournemouth"], implied["Draw"], implied["Chelsea"])
 
         assert raw_data["source"] == "polymarket"
-        assert probs is not None
-        assert (probs.home, probs.draw, probs.away) == pytest.approx((0.53, 0.25, 0.22), abs=2e-3)
+        assert probs == pytest.approx((0.53, 0.25, 0.22), abs=2e-3)
 
     def test_outcomes_carry_the_reciprocal_decimal_price(self, gamma_event) -> None:
         match = parse_match_event(gamma_event(), EPL)

@@ -84,7 +84,7 @@ DEFAULT_CONFIG_DIR = Path("experiments")
 def _save_model_with_config(
     strategy: LineMovementStrategy, config: MLTrainingConfig, path: str
 ) -> None:
-    """Save the model and, beside it, the full training config that scoring reads."""
+    """Save the model and, beside it, the full training config that produced it."""
     try:
         strategy.save_model(path)
         console.print(f"\n[green]Model saved to {path}[/green]")

@@ -22,7 +22,7 @@ status: stable
 
 # Training pipeline
 
-`odds train run` and `odds train tune` (`odds_cli.commands.train`) turn an `odds_analytics.training.config.MLTrainingConfig` YAML (its `training.features` block is required), validated at load (strategy, feature groups, tuning metric, search-space keys and the `retail_ev` residual arm's limits) ([training config](training-config.md)), into a pickled model. `odds train validate` loads the file and checks strategy, dates and splits; it warns "Very small test split" for `test_split < 0.1`, including 0.0 (`odds_cli.commands.train.validate_config`); 0.0 is the production value and holds out nothing (step 4). `odds train list-configs` tabulates a directory.
+`odds train run` and `odds train tune` (`odds_cli.commands.train`) turn an `odds_analytics.training.config.MLTrainingConfig` YAML (its `training.features` block is required), validated at load (strategy, feature groups, tuning metric, search-space keys and the `retail_ev` residual arm's limits) ([training config](training-config.md)), into a pickled model. `odds train validate` loads the file and checks strategy, dates and splits; it warns "Very small test split" for `test_split < 0.1`, including 0.0 (`odds_cli.commands.train.validate_config`); 0.0 holds out nothing (step 4). `odds train list-configs` tabulates a directory.
 
 ## Steps of `odds train run`
 
@@ -32,7 +32,7 @@ status: stable
 4. **Split.** With event ids, the last `int(n_events * test_split)` events become the test set (at least one when `test_split > 0`); `validation_split` is cut the same way. `test_split: 0.0` holds out no events, so `odds_analytics.training.data_preparation.TrainingDataResult` has no test arrays (`None`), as it has none for validation without a `validation_split`. Under `tune` the objective re-stacks train and validation rows for CV ([cross-validation](cross-validation.md)); test rows are never used for tuning.
 5. **Verification artifacts.** `feature_stats.csv`, `feature_sample.csv` and `feature_target_corr.csv` are written to `experiments/results/<experiment.name>/verification/` from the concatenated splits ([run an experiment](../evaluation/experiment-scripts.md#verification-artifacts)).
 6. **Train.** If `use_kfold` (default true), `odds_analytics.training.cross_validation.train_with_cv` runs [walk-forward CV](cross-validation.md) and then fits a final model on all training rows; otherwise a single `odds_analytics.training.cross_validation.TrainableStrategy.train_from_config`. `odds_cli.commands.train.STRATEGY_CLASSES` has exactly the `odds_analytics.training.config.StrategyType` values, `xgboost_line_movement` and `lstm_line_movement` ([line-movement models](line-movement-models.md)).
-7. **Save.** The model goes to `<output_path>/<strategy_type>_<experiment.name>.pkl` (or `model_name`), and the full config is written beside it as `.yaml`, which the loader needs; a failed config write fails the command. `tune --train-best` saves through the same helper.
+7. **Save.** The model goes to `<output_path>/<strategy_type>_<experiment.name>.pkl` (or `model_name`), and the full config is written beside it as `.yaml`; a failed config write fails the command. `tune --train-best` saves through the same helper.
 
 ## Sample weights
 
@@ -40,7 +40,7 @@ status: stable
 
 ## Tune
 
-`odds train tune` ([hyperparameter tuner](hyperparameter-tuner.md)) prepares data once, pre-computes features per `feature_groups` choice if that is searched, runs Optuna (study `<experiment>_<UTC timestamp>` unless `--study-name` is given), writes the best config to `<config>_best.yaml`, and with `--train-best` trains and saves a model. Studies are stored in the SQLite file `optuna.db` in `experiments/`, relative to the working directory, unless `--storage` names another store or `--in-memory` is passed; they never use `DATABASE_URL`. `--train-best` writes the full best config beside the model, as `odds train run` does, so `odds model publish` uploads a `.yaml` with the `training.features` section the S3 loader reads ([model store](model-store.md), [prediction scoring](prediction-scoring.md)).
+`odds train tune` ([hyperparameter tuner](hyperparameter-tuner.md)) prepares data once, pre-computes features per `feature_groups` choice if that is searched, runs Optuna (study `<experiment>_<UTC timestamp>` unless `--study-name` is given), writes the best config to `<config>_best.yaml`, and with `--train-best` trains and saves a model. Studies are stored in the SQLite file `optuna.db` in `experiments/`, relative to the working directory, unless `--storage` names another store or `--in-memory` is passed; they never use `DATABASE_URL`. `--train-best` writes the full best config beside the model, as `odds train run` does.
 
 ## MLflow
 
@@ -48,4 +48,4 @@ status: stable
 
 ## Related
 
-- [Training config](training-config.md), [Cross-validation](cross-validation.md), [Train and publish a model](howto-train-and-publish-model.md)
+- [Training config](training-config.md), [Cross-validation](cross-validation.md)

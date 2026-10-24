@@ -21,7 +21,7 @@ Briefs are what the [betting agent](betting-agent.md) concluded about a match, w
 
 ## The match_briefs table
 
-`match_briefs` (`odds_core.match_brief_models.MatchBrief`) is the agent's cross-session memory: one row per researched match per wake-up, never updated. Each [wake-up](agent-prompts.md) appends a new brief; the agent reads the latest per match for triage and the full history only for matches it researches (Triage and Existing Briefs in `packages/odds-mcp/agents/common.md`).
+`match_briefs` (`odds_core.match_brief_models.MatchBrief`) is the agent's cross-session memory: one row per researched match per wake-up, never updated afterwards. Each [wake-up](agent-prompts.md) appends a new brief; the agent reads the latest per match for triage and the full history only for matches it researches (Triage and Existing Briefs in `packages/odds-mcp/agents/common.md`).
 
 | Column | Notes |
 |---|---|

@@ -19,7 +19,6 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 | `data_quality_logs` | `odds_core.models.DataQualityLog` | [Odds validation](odds-validator.md) |
 | `fetch_logs` | `odds_core.models.FetchLog` | [Odds API ingestion](../collection/odds-ingestion-service.md) |
 | `alert_history` | `odds_core.models.AlertHistory` | [Alerts and health](../operations/alerts.md) |
-| `predictions` | `odds_core.prediction_models.Prediction` | [Model publishing and scoring](../modelling/prediction-scoring.md) |
 | `match_briefs` | `odds_core.match_brief_models.MatchBrief` | [Match briefs](../agent/match-briefs.md) |
 | `paper_trades` | `odds_core.paper_trade_models.PaperTrade` | [Paper trading](../agent/paper-trading.md) |
 | `agent_wakeups` | `odds_core.agent_wakeup_models.AgentWakeup` | [Agent runtime and the agent-run job](../agent/agent-run-job.md) |

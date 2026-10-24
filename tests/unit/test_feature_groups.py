@@ -1,19 +1,16 @@
 """Unit tests for feature_groups helpers."""
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_analytics.feature_groups import (
     _STATIC_FEATURE_GROUPS,
     _compute_target,
-    _should_filter_missing_sharp,
-    preload_feature_group_caches,
     snapshot_has_bookmaker,
 )
 from odds_analytics.training.config import FeatureConfig
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_core.odds_math import calculate_implied_probability, devig_probabilities
+from odds_core.odds_math import calculate_implied_probability
 from pydantic import ValidationError
 
 
@@ -144,50 +141,6 @@ class TestSnapshotHasBookmaker:
         assert snapshot_has_bookmaker(snap, "pinnacle", "h2h") is False
 
 
-class TestShouldFilterMissingSharp:
-    def _make_config(self, sharp_bookmakers: list[str], target_bookmaker: str) -> FeatureConfig:
-        return FeatureConfig(
-            target_type="devigged_bookmaker",
-            sharp_bookmakers=sharp_bookmakers,
-            target_bookmaker=target_bookmaker,
-            markets=["h2h"],
-        )
-
-    def test_sharp_equals_target_no_filter(self) -> None:
-        config = self._make_config(["bet365"], "bet365")
-        assert _should_filter_missing_sharp(config) is False
-
-    def test_sharp_differs_from_target_filter(self) -> None:
-        config = self._make_config(["pinnacle"], "bet365")
-        assert _should_filter_missing_sharp(config) is True
-
-    def test_multiple_sharp_includes_target_still_filters(self) -> None:
-        config = self._make_config(["pinnacle", "bet365"], "bet365")
-        assert _should_filter_missing_sharp(config) is True
-
-    def test_raw_filters_whenever_sharp_configured(self) -> None:
-        config = FeatureConfig(target_type="raw", sharp_bookmakers=["bet365"], markets=["h2h"])
-        assert _should_filter_missing_sharp(config) is True
-
-    def test_multiple_sharp_none_is_target(self) -> None:
-        config = self._make_config(["pinnacle", "circa"], "bet365")
-        assert _should_filter_missing_sharp(config) is True
-
-
-def _config_with_groups(*groups: str) -> FeatureConfig:
-    return FeatureConfig(
-        adapter="xgboost",
-        sharp_bookmakers=["bet365"],
-        retail_bookmakers=["betway", "betfred", "bwin"],
-        markets=["h2h"],
-        outcome="home",
-        feature_groups=tuple(groups),
-        target_type="devigged_bookmaker",
-        target_bookmaker="bet365",
-        sport_key="soccer_epl",
-    )
-
-
 class TestFeatureGroupValidation:
     """FeatureConfig.feature_groups rejects names no code dispatches on."""
 
@@ -205,166 +158,6 @@ class TestFeatureGroupValidation:
         assert FeatureConfig(target_type="raw", feature_groups=names).feature_groups == names
 
 
-class TestPreloadFeatureGroupCaches:
-    """Gating behaviour of the shared preload helper."""
-
-    @pytest.mark.asyncio
-    @patch("odds_analytics.feature_groups.load_fixtures_df", new_callable=AsyncMock)
-    @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
-    @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
-    async def test_tabular_only_loads_no_caches(
-        self,
-        mock_standings: AsyncMock,
-        mock_match_stats: AsyncMock,
-        mock_fixtures: AsyncMock,
-    ) -> None:
-        config = _config_with_groups("tabular")
-        session = AsyncMock()
-
-        caches = await preload_feature_group_caches(session, config, "soccer_epl")
-
-        assert caches.standings is None
-        assert caches.match_stats is None
-        assert caches.fixtures_df is None
-        mock_standings.assert_not_called()
-        mock_match_stats.assert_not_called()
-        mock_fixtures.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("odds_analytics.feature_groups.load_fixtures_df", new_callable=AsyncMock)
-    @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
-    @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
-    async def test_standings_only_loads_standings_cache(
-        self,
-        mock_standings: AsyncMock,
-        mock_match_stats: AsyncMock,
-        mock_fixtures: AsyncMock,
-    ) -> None:
-        sentinel: dict[str, list[Event]] = {"2025-26": []}
-        mock_standings.return_value = sentinel
-        config = _config_with_groups("tabular", "standings")
-        session = AsyncMock()
-
-        caches = await preload_feature_group_caches(session, config, "soccer_epl")
-
-        assert caches.standings is sentinel
-        assert caches.match_stats is None
-        assert caches.fixtures_df is None
-        mock_standings.assert_awaited_once_with(session, "soccer_epl")
-        mock_match_stats.assert_not_called()
-        mock_fixtures.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("odds_analytics.feature_groups.load_fixtures_df", new_callable=AsyncMock)
-    @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
-    @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
-    async def test_match_stats_only_loads_match_stats_cache(
-        self,
-        mock_standings: AsyncMock,
-        mock_match_stats: AsyncMock,
-        mock_fixtures: AsyncMock,
-    ) -> None:
-        sentinel = MagicMock(name="match_stats_cache")
-        mock_match_stats.return_value = sentinel
-        config = _config_with_groups("tabular", "match_stats")
-        session = AsyncMock()
-
-        caches = await preload_feature_group_caches(session, config, "soccer_epl")
-
-        assert caches.standings is None
-        assert caches.match_stats is sentinel
-        assert caches.fixtures_df is None
-        mock_standings.assert_not_called()
-        mock_match_stats.assert_awaited_once_with(session, "soccer_epl")
-        mock_fixtures.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("odds_analytics.feature_groups.load_fixtures_df", new_callable=AsyncMock)
-    @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
-    @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
-    async def test_epl_schedule_loads_fixtures_and_standings(
-        self,
-        mock_standings: AsyncMock,
-        mock_match_stats: AsyncMock,
-        mock_fixtures: AsyncMock,
-    ) -> None:
-        """epl_schedule pulls in standings_cache too (shared by season-rest features)."""
-        standings_sentinel: dict[str, list[Event]] = {"2025-26": []}
-        fixtures_sentinel = MagicMock(name="fixtures_df")
-        mock_standings.return_value = standings_sentinel
-        mock_fixtures.return_value = fixtures_sentinel
-        config = _config_with_groups("tabular", "epl_schedule")
-        session = AsyncMock()
-
-        caches = await preload_feature_group_caches(session, config, "soccer_epl")
-
-        assert caches.standings is standings_sentinel
-        assert caches.match_stats is None
-        assert caches.fixtures_df is fixtures_sentinel
-        mock_standings.assert_awaited_once_with(session, "soccer_epl")
-        mock_fixtures.assert_awaited_once_with(session)
-        mock_match_stats.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("odds_analytics.feature_groups.load_fixtures_df", new_callable=AsyncMock)
-    @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
-    @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
-    async def test_all_groups_load_all_caches(
-        self,
-        mock_standings: AsyncMock,
-        mock_match_stats: AsyncMock,
-        mock_fixtures: AsyncMock,
-    ) -> None:
-        standings_sentinel: dict[str, list[Event]] = {"2025-26": []}
-        match_stats_sentinel = MagicMock(name="match_stats_cache")
-        fixtures_sentinel = MagicMock(name="fixtures_df")
-        mock_standings.return_value = standings_sentinel
-        mock_match_stats.return_value = match_stats_sentinel
-        mock_fixtures.return_value = fixtures_sentinel
-
-        config = _config_with_groups(
-            "tabular",
-            "standings",
-            "match_stats",
-            "epl_schedule",
-        )
-        session = AsyncMock()
-
-        caches = await preload_feature_group_caches(session, config, "soccer_epl")
-
-        assert caches.standings is standings_sentinel
-        assert caches.match_stats is match_stats_sentinel
-        assert caches.fixtures_df is fixtures_sentinel
-        mock_standings.assert_awaited_once_with(session, "soccer_epl")
-        mock_match_stats.assert_awaited_once_with(session, "soccer_epl")
-        mock_fixtures.assert_awaited_once_with(session)
-
-    @pytest.mark.asyncio
-    @patch("odds_analytics.feature_groups.load_fixtures_df", new_callable=AsyncMock)
-    @patch("odds_analytics.match_stats_features.load_match_stats_cache", new_callable=AsyncMock)
-    @patch("odds_analytics.standings_features.load_season_events_cache", new_callable=AsyncMock)
-    async def test_sport_scoped_caches_skipped_when_sport_key_missing(
-        self,
-        mock_standings: AsyncMock,
-        mock_match_stats: AsyncMock,
-        mock_fixtures: AsyncMock,
-    ) -> None:
-        """Standings and match_stats skip when sport_key is None; sport-agnostic caches still load."""
-        fixtures_sentinel = MagicMock(name="fixtures_df")
-        mock_fixtures.return_value = fixtures_sentinel
-        config = _config_with_groups("standings", "match_stats", "epl_schedule")
-        session = AsyncMock()
-
-        caches = await preload_feature_group_caches(session, config, None)
-
-        assert caches.standings is None
-        assert caches.match_stats is None
-        assert caches.fixtures_df is fixtures_sentinel
-        mock_standings.assert_not_called()
-        mock_match_stats.assert_not_called()
-        mock_fixtures.assert_awaited_once_with(session)
-
-
 def _priced_snapshot(home: int, draw: int, away: int, hours_before: float) -> OddsSnapshot:
     commence = datetime(2025, 12, 1, 15, 0, tzinfo=UTC)
     snapshot_time = commence - timedelta(hours=hours_before)
@@ -379,7 +172,7 @@ def _priced_snapshot(home: int, draw: int, away: int, hours_before: float) -> Od
                     "last_update": snapshot_time.isoformat(),
                     "markets": [
                         {
-                            "key": "1x2",
+                            "key": "h2h",
                             "outcomes": [
                                 {"name": "Arsenal", "price": home},
                                 {"name": "Draw", "price": draw},
@@ -397,34 +190,26 @@ def _priced_snapshot(home: int, draw: int, away: int, hours_before: float) -> Od
     )
 
 
-class TestComputeDeviggedTargetOutcome:
-    """The devigged h2h/1x2 target follows ``FeatureConfig.outcome``."""
+class TestComputeRawTarget:
+    """The raw target is the implied-probability delta of ``FeatureConfig.outcome``."""
 
     @staticmethod
     def _target(outcome: str) -> float | None:
         config = FeatureConfig(
-            target_type="devigged_bookmaker",
-            target_bookmaker="bet365",
-            markets=["1x2"],
+            target_type="raw",
+            markets=["h2h"],
             outcome=outcome,  # type: ignore[arg-type]
         )
         snapshot = _priced_snapshot(100, 250, 300, hours_before=6)
         closing = _priced_snapshot(-125, 260, 380, hours_before=0.1)
         return _compute_target(snapshot, closing, _make_event(), config)
 
-    def test_away_gives_away_side_delta(self):
-        away = self._target("away")
-        home = self._target("home")
+    def test_home_delta_is_the_implied_probability_change(self) -> None:
+        expected = calculate_implied_probability(-125) - calculate_implied_probability(100)
 
-        assert away is not None and home is not None
-        assert away < 0 < home
-        assert away != pytest.approx(-home)
+        assert self._target("home") == pytest.approx(expected)
 
-    def test_away_delta_matches_devigged_probabilities(self):
-        def away_prob(prices: tuple[int, int, int]) -> float:
-            raw = [calculate_implied_probability(p) for p in prices]
-            return devig_probabilities(*raw)[2]
-
-        expected = away_prob((-125, 260, 380)) - away_prob((100, 250, 300))
+    def test_away_delta_is_the_away_side_change(self) -> None:
+        expected = calculate_implied_probability(380) - calculate_implied_probability(300)
 
         assert self._target("away") == pytest.approx(expected)

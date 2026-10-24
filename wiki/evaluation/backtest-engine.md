@@ -32,7 +32,7 @@ status: stable
 
 ## Data prerequisites
 
-The engine needs `FINAL` events with scores (a rerun of the FDUK ingest fills them for matched events that lack them) and normalized `odds_core.models.Odds` rows near the decision time. Historical OddsPortal and football-data.co.uk (FDUK) events have `odds_core.models.OddsSnapshot` rows but no `odds_core.models.Odds` rows: `scripts/ingest_oddsportal.py` and `scripts/ingest_football_data_uk.py` write events and snapshots only (no `odds_core.models.Odds` rows; FDUK snapshots are tagged `odds_core.snapshot_sources.SnapshotSource.FOOTBALL_DATA_UK`), so those events log `no_odds_at_decision_time` and produce no bets (#435; [historical ingest scripts](../collection/historical-ingest-scripts.md), [odds tables](../storage/odds-tables.md#odds_snapshots)). The Odds API historical backfill does write `odds_core.models.Odds` rows but is NBA-only and paid, so EPL backtests have little or no usable data ([Odds API backfill](../collection/odds-api-backfill.md)).
+The engine needs `FINAL` events with scores (a rerun of the FDUK ingest fills them for matched events that lack them) and normalized `odds_core.models.Odds` rows near the decision time. Historical OddsPortal and football-data.co.uk (FDUK) events have `odds_core.models.OddsSnapshot` rows but no `odds_core.models.Odds` rows: `scripts/ingest_oddsportal.py` and `scripts/ingest_football_data_uk.py` write events and snapshots only (FDUK snapshots are tagged `odds_core.snapshot_sources.SnapshotSource.FOOTBALL_DATA_UK`), so those events log `no_odds_at_decision_time` and produce no bets (#435; [historical ingest scripts](../collection/historical-ingest-scripts.md), [odds tables](../storage/odds-tables.md#odds_snapshots)). The Odds API historical backfill does write `odds_core.models.Odds` rows but is NBA-only and paid, so EPL backtests have little or no usable data ([Odds API backfill](../collection/odds-api-backfill.md)).
 
 ## Event loop
 
@@ -87,4 +87,4 @@ The CLI parses `--start` and `--end` as naive datetimes, while code callers pass
 
 ## Related
 
-- [Run a backtest](howto-run-backtest.md), [Backtest strategies](backtest-strategies.md), [CLV model findings](clv-model-findings.md), [Line-movement models](../modelling/line-movement-models.md)
+- [Run a backtest](howto-run-backtest.md), [Backtest strategies](backtest-strategies.md), [Line-movement models](../modelling/line-movement-models.md)

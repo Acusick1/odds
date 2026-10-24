@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Feature groups
-description: The catalogue of feature groups and column counts, the tabular extractor and its sharp and retail defaults, and the NBA injury, rest and Polymarket groups.
+description: The catalogue of static feature groups and column counts, the tabular extractor and its sharp and retail defaults, and the NBA injury, rest and Polymarket groups.
 sources:
   - odds_analytics.feature_groups._STATIC_FEATURE_GROUPS
   - odds_analytics.training.config.FeatureGroupName
@@ -12,9 +12,6 @@ sources:
   - odds_analytics.feature_extraction.TabularFeatureExtractor
   - odds_analytics.feature_extraction.DEFAULT_RETAIL_BOOKMAKERS
   - odds_analytics.feature_extraction.DEFAULT_SHARP_BOOKMAKERS
-  - odds_analytics.standings_features.StandingsFeatures
-  - odds_analytics.match_stats_features.MatchStatsFeatures
-  - odds_analytics.epl_schedule_features.EplScheduleFeatures
   - odds_analytics.schedule_features.RestScheduleFeatures
   - odds_analytics.injury_features.InjuryFeatures
   - odds_analytics.injury_features.extract_injury_features
@@ -29,14 +26,11 @@ Counts are dataclass fields, checked against code; each ends up as one prefixed 
 | Group | Cols | Sports | Notes |
 |---|---|---|---|
 | `tabular` | 6 | all | `consensus_prob`, `sharp_prob`, `retail_sharp_diff`, `num_bookmakers`, `is_weekend`, `day_of_week`; outcome-relative |
-| `standings` | 11 | EPL | position, points gap, goal difference, form (`form_window`), goal rates |
-| `match_stats` | 14 | EPL | rolling means (`match_stats_window`) of shots, shots on target, corners, fouls, cards, half-time goals |
-| `epl_schedule` | 8 | EPL | rest days, midweek, matches in 14 days, European match in 7 days |
-| `rest` | 5 | NBA | days rest and back-to-back flags from game logs; all NaN for EPL, so the variance filter removes it |
+| `rest` | 5 | NBA | days rest and back-to-back flags from game logs; all NaN for EPL |
 | `injuries` | 6 | NBA | impact-weighted OUT and GTD burden, report timing |
 | `polymarket` | 16 | NBA | 14 Polymarket columns (price, volume and velocity from price snapshots; best bid, best ask, spread, midpoint and depth from order-book snapshots, taken from the home side's view) plus 2 cross-source divergences |
 
-These groups serve the delta targets; `retail_ev` takes only its own groups computed as of each row's decision time ([retail-EV features](clv-target-functions.md#retail-ev-features)). The EPL groups are detailed on [EPL context features](epl-context-features.md) and Polymarket data on [Polymarket](../collection/polymarket.md). The valid names are the `odds_analytics.training.config.FeatureGroupName` literal, which `odds_analytics.training.config.FeatureConfig` validates, along with `odds_analytics.training.config.FeatureConfig.retail_ev_arm` (`direct` or `residual`, a `retail_ev` setting; any other target must leave it `direct`) (an `xgboost` config needs at least one group unless its `target_type` is `retail_ev`, which takes none of these; an `lstm` config may have none) and from which `odds_analytics.feature_groups._STATIC_FEATURE_GROUPS` is derived. The groups are dispatched by string in `odds_analytics.feature_groups._static_feature_group_names`, `odds_analytics.feature_groups._extract_static_feature_parts`, `odds_analytics.feature_groups.collect_event_data` and the preload caches, with no registry (#475); `odds_analytics.feature_groups.collect_event_data` also drops snapshots whose only bookmaker is Polymarket (`odds_core.bookmakers.is_reference_only_snapshot`); the places to touch are listed in [Add a feature group](howto-add-feature-group.md).
+These groups serve the `raw` target; `retail_ev` takes only its own groups computed as of each row's decision time ([retail-EV features](clv-target-functions.md#retail-ev-features), [EPL standings and schedule features](epl-context-features.md)). Polymarket data is on [Polymarket](../collection/polymarket.md). The valid names are the `odds_analytics.training.config.FeatureGroupName` literal, which `odds_analytics.training.config.FeatureConfig` validates, along with `odds_analytics.training.config.FeatureConfig.retail_ev_arm` (`direct` or `residual`, a `retail_ev` setting; any other target must leave it `direct`) (an `xgboost` config needs at least one group unless its `target_type` is `retail_ev`, which takes none of these; an `lstm` config may have none) and from which `odds_analytics.feature_groups._STATIC_FEATURE_GROUPS` is derived. The groups are dispatched by string in `odds_analytics.feature_groups._static_feature_group_names`, `odds_analytics.feature_groups._extract_static_feature_parts` and `odds_analytics.feature_groups.collect_event_data`, with no registry (#475); `odds_analytics.feature_groups.collect_event_data` also drops snapshots whose only bookmaker is Polymarket (`odds_core.bookmakers.is_reference_only_snapshot`); the places to touch are listed in [Add a feature group](howto-add-feature-group.md).
 
 ## Tabular extractor
 
@@ -56,4 +50,4 @@ The injury reports and player stats are written by the pipeline on [NBA injuries
 
 ## Related
 
-- [Feature pipeline](feature-pipeline.md), [CLV model findings](../evaluation/clv-model-findings.md#current-conclusions)
+- [Feature pipeline](feature-pipeline.md)

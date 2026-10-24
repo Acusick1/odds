@@ -27,11 +27,11 @@ EPL and MLB data collection is active. The agents run by hand on the production 
 
 ## Goal
 
-Profit. Any approach can be a candidate (mechanical rules, models, agents), run in parallel and judged on live paper trades by EV against the Betfair Exchange close ([Goal and strategy](goal-and-strategy.md)). See [The betting agent](../agent/betting-agent.md) and [What the CLV model can and cannot do](../evaluation/clv-model-findings.md).
+Profit. Any approach can be a candidate (mechanical rules, models, agents), run in parallel and judged on live paper trades by EV against the Betfair Exchange close ([Goal and strategy](goal-and-strategy.md)). See [The betting agent](../agent/betting-agent.md).
 
 ## What runs where
 
-One host, the production host, runs every scheduled job under its local scheduler and holds the production database ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The default job set is `odds_core.config.SchedulerConfig.bootstrap_jobs`, with `agent-run` and `daily-digest` commented out; it includes the EPL Polymarket price job. The `odds-scheduler` Lambda and its Terraform remain but are dormant (a disabled `odds-scheduler-scraper` function may still exist in the account, with no Terraform), and the Neon database they wrote to is a frozen archive. The repo does not record the deployed AWS state; the only check is `odds scheduler list-jobs --backend aws`.
+One host, the production host, runs every scheduled job under its local scheduler and holds the production database ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The default job set is `odds_core.config.SchedulerConfig.bootstrap_jobs`, with `agent-run` commented out; it includes the EPL Polymarket price job. The `odds-scheduler` Lambda and its Terraform remain but are dormant (a disabled `odds-scheduler-scraper` function may still exist in the account, with no Terraform), and the Neon database they wrote to is a frozen archive. The repo does not record the deployed AWS state; the only check is `odds scheduler list-jobs --backend aws`.
 
 Per-job table: [Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs); local backend: [Local scheduler](../scheduling/local-scheduler.md).
 
@@ -39,9 +39,9 @@ Per-job table: [Where each job runs](../scheduling/job-deployment-matrix.md#wher
 
 The repo carries the residue of three pivots (PRs `#214`, `#217`, `#267`, `#387`). Knowing which era a module comes from tells you whether its defaults match the active sports.
 
-1. **NBA to EPL and MLB.** The first experiments are NBA (February 2026); EPL work starts in March (`experiments/results/exp1_feature_correlations/FINDINGS.md`; PRs `#214`, `#217`). NBA code remains (injuries, game logs, Polymarket targeting).
-2. **Model edge to information edge**, in April 2026 (`#290`, [ADR-0005](../../docs/adr/0005-information-edge.md)). Injury features add no signal (`experiments/results/exp6b_injury_closing_tier/`); see [NBA injury reports, game logs and player stats](../collection/nba-injuries-and-stats.md).
-3. **Structural consolidations**: alerts moved from odds-cli to odds-core (`#267`), self-scheduling unified into one decision module (`#387`), scoring inlined into the OddsPortal job. See [Alerts and the alert_history table](../operations/alerts.md), [Self-scheduling](../scheduling/self-scheduling.md), [Prediction scoring](../modelling/prediction-scoring.md).
+1. **NBA to EPL and MLB.** The first experiments are NBA (February 2026); EPL work starts in March (PRs `#214`, `#217`). NBA code remains (injuries, game logs, Polymarket targeting).
+2. **Model edge to information edge**, in April 2026 (`#290`, [ADR-0005](../../docs/adr/0005-information-edge.md)).
+3. **Structural consolidations**: alerts moved from odds-cli to odds-core (`#267`), self-scheduling unified into one decision module (`#387`). See [Alerts and the alert_history table](../operations/alerts.md), [Self-scheduling](../scheduling/self-scheduling.md).
 
 ## NBA-era defaults still in live code
 

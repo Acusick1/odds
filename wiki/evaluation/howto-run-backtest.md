@@ -61,4 +61,4 @@ Imports: `odds_analytics.backtesting` (`odds_analytics.backtesting.config.Backte
 
 ## Reading results
 
-Interpretation of the metrics is on [Reading backtest-engine results](exp-betting-simulation.md#reading-backtest-engine-results); what each metric computes is on [backtest engine](backtest-engine.md#metrics).
+What each metric computes is on [backtest engine](backtest-engine.md#metrics).

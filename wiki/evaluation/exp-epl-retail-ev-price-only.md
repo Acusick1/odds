@@ -64,7 +64,7 @@ This page records the first model run on the retail-EV target of [ADR-0012](../.
 - **Tuning range.** Hyperparameters are tuned only on the 380 events of 2024-25 (3,861 rows, all from FDUK opening snapshots).
   - The tuning folds are expanding walk-forward inside that season: `min_train_events` 130, 50-event steps and the 7-day gap, which makes 5 folds.
   - Each run gets 50 TPE trials, with the Optuna study in sqlite under `experiments/optuna/`.
-  - The best trial is then frozen, as [ADR-0010](../../docs/adr/0010-expanding-walk-forward-and-evaluation-range.md) does for its evaluation range. No trial saw a scored row.
+  - The best trial is then frozen. No trial saw a scored row.
 - **Scoring folds.** `odds_analytics.training.cross_validation.make_walk_forward_splits` uses `min_train_events` 380, so the first validation event is the first 2025-26 event. Training events that kick off within 7 days of a validation block's first event are dropped.
   - The 68-event step is chosen so that the 340 scored 2025-26 events make 5 folds with no partial block. With 50-event steps, the last 40 events, which hold 40 of the 44 OddsPortal live events of April and May 2026, would fall in an unscored partial block.
   - The scored range is 340 events and 108,789 rows, kicking off from 2025-08-15 to 2026-05-24.
@@ -311,4 +311,4 @@ The [retail-EV evaluation](retail-ev-evaluation.md) rescores the frozen residual
 
 ## Related
 
-- [CLV and the training target](../modelling/clv-target.md), [Cross-validation](../modelling/cross-validation.md), [Hyperparameter tuner](../modelling/hyperparameter-tuner.md), [What the CLV model can and cannot do](clv-model-findings.md), [EPL CLV re-baseline against the simple baseline](exp-epl-clv-rebaseline.md)
+- [CLV and the training target](../modelling/clv-target.md), [Cross-validation](../modelling/cross-validation.md), [Hyperparameter tuner](../modelling/hyperparameter-tuner.md)
