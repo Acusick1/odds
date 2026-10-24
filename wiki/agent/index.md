@@ -5,7 +5,7 @@ description: "The per-sport LLM agent: runtime and wake-up scheduling, its promp
 
 # Betting agent
 
-An LLM agent per sport (EPL, MLB) runs as a `claude` subprocess over the odds-mcp tool server and records its decisions as match briefs and paper trades. Both agents are in interactive evaluation; the pages here cover the code around the agent, while the prompt files it follows are the authority on its behaviour.
+An LLM agent per sport (EPL, MLB) runs as a `claude` subprocess over the odds-mcp tool server and records its decisions as match briefs and paper trades. Both agents run by hand and are paused; the pages here cover the code around the agent, while the prompt files it follows are the authority on its behaviour.
 
 <!-- pages:start -->
 ### Reference

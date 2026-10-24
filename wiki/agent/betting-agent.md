@@ -18,7 +18,7 @@ status: stable
 
 # The betting agent
 
-An LLM agent per sport (EPL and MLB) synthesises odds, sharp-market prices and unstructured match context and records bets as paper trades. Both agents are in interactive evaluation: the prompt calls itself a "first-draft workflow" (`packages/odds-mcp/agents/common.md`, #290). Nothing in code enforces that they are not autonomous `(inferred)`. Each agent is a [candidate](../foundations/goal-and-strategy.md) whose thesis is breadth and speed of information synthesis. The thesis has no measured result: results exist only as paper trades, read through `odds_mcp.server.get_portfolio` and `odds paper`, and the [daily digest](../operations/daily-digest.md) does not read them ([paper trading](paper-trading.md)). The runtime is described in [Agent runtime and the agent-run job](agent-run-job.md).
+An LLM agent per sport (EPL and MLB) synthesises odds, sharp-market prices and unstructured match context and records bets as paper trades. Both agents run by hand and are paused: neither is being run. The prompt calls itself a "first-draft workflow" (`packages/odds-mcp/agents/common.md`, #290). Nothing in code enforces that they are not autonomous `(inferred)`. Each agent can be registered as a [candidate](../foundations/goal-and-strategy.md), one per sport; its thesis is breadth and speed of information synthesis. The thesis has no measured result: results exist only as paper trades, read through `odds_mcp.server.get_portfolio` and `odds paper`, and the [daily digest](../operations/daily-digest.md) does not read them ([paper trading](paper-trading.md)). The runtime is described in [Agent runtime and the agent-run job](agent-run-job.md).
 
 ## Architecture
 

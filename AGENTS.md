@@ -1,10 +1,10 @@
 # Betting Odds Pipeline & Agent
 
-Single-user, sport-agnostic betting odds pipeline with per-sport LLM betting agents (EPL and MLB data collection active; the agents are run by hand on the production host; NBA code is deprioritized).
+Single-user, sport-agnostic betting odds pipeline with per-sport LLM betting agents (EPL and MLB data collection active; the agents run by hand on the production host and are paused; NBA code is deprioritized).
 
 ## Goal
 
-The goal is profit. Any approach that might get there is fair game, and candidates run in parallel (today the betting agents; models and mechanical rules qualify too). Development data generates ideas and never promotes one. A candidate is promoted or killed at fixed checkpoints of a live paper-trading forward test, scored by EV at the price taken against the Betfair Exchange close. No candidate can be scored yet (#604). See [goal and strategy](wiki/foundations/goal-and-strategy.md).
+The goal is profit. Any approach that might get there is fair game, and candidates run in parallel; mechanical rules are the current focus. Development data generates ideas and never promotes one. A candidate is promoted or killed at fixed checkpoints of a live paper-trading forward test, scored by EV at the price taken against the Betfair Exchange close. No candidate can be scored yet (#604). See [goal and strategy](wiki/foundations/goal-and-strategy.md).
 
 ## Documentation
 

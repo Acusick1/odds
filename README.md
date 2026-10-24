@@ -1,8 +1,8 @@
 # Betting Odds Pipeline & Agent
 
 A single-user, sport-agnostic betting odds pipeline with sport-specific LLM betting agents.
-The goal is profit; any approach (today the betting agents; models and mechanical rules qualify
-too) is a candidate judged on live paper trades ([goal and strategy](wiki/foundations/goal-and-strategy.md)).
+The goal is profit; any approach (mechanical rules, models, agents) is a candidate judged on
+live paper trades ([goal and strategy](wiki/foundations/goal-and-strategy.md)).
 Shared infrastructure (odds collection, storage, paper trading, scheduling, alerting) is
 reused across sports; each sport adds its own data sources, feature extractors, agent
 prompts, and MCP tools.
