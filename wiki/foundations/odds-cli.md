@@ -77,7 +77,6 @@ Pass `--sport` explicitly. [About the system and its pivots](project-overview.md
 The help text disagrees with the code in four places (#448, #466):
 
 - The root help, banner and callback docstring say "NBA" (`odds_cli.main.app`, `odds_cli.main.callback`).
-- `--strategy` on `odds backtest run` lists `lstm`, which is not a key of `odds_cli.commands.backtest.STRATEGIES`.
 - `odds scheduler run-once` help names a sport-suffixed per-sport job and `update-status` of the 13 in `odds_lambda.scheduling.jobs._JOB_MODULE_MAP` (`odds_cli.commands.scheduler.run_once`).
 - `odds scheduler info` has no help text, because its docstring follows a statement (`odds_cli.commands.scheduler.info`). It lists each sport's Odds API bookmakers.
 

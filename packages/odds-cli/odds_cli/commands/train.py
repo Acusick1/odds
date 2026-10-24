@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import typer
-from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
 from odds_analytics.training import (
     CVResult,
     MLTrainingConfig,
@@ -31,12 +30,9 @@ if TYPE_CHECKING:
 app = typer.Typer()
 console = Console()
 
-LineMovementStrategy = XGBoostLineMovementStrategy | LSTMLineMovementStrategy
-
 # Strategy registry mapping strategy_type to class
-STRATEGY_CLASSES: dict[StrategyType, type[LineMovementStrategy]] = {
+STRATEGY_CLASSES: dict[StrategyType, type[XGBoostLineMovementStrategy]] = {
     "xgboost_line_movement": XGBoostLineMovementStrategy,
-    "lstm_line_movement": LSTMLineMovementStrategy,
 }
 
 
@@ -82,7 +78,7 @@ DEFAULT_CONFIG_DIR = Path("experiments")
 
 
 def _save_model_with_config(
-    strategy: LineMovementStrategy, config: MLTrainingConfig, path: str
+    strategy: XGBoostLineMovementStrategy, config: MLTrainingConfig, path: str
 ) -> None:
     """Save the model and, beside it, the full training config that produced it."""
     try:
@@ -195,10 +191,10 @@ def run_training(
 
     Example:
         odds train run --config experiments/xgb_line_movement.yaml
-        odds train run --config experiments/lstm_v1.yaml --output models/custom_path.pkl
+        odds train run --config experiments/xgboost_v1.yaml --output models/custom_path.pkl
         odds train run --config experiments/config.yaml --dry-run
         odds train run --config experiments/xgb_line_movement.yaml --track
-        odds train run --config experiments/lstm_v1.yaml --track --tracking-uri http://localhost:5000
+        odds train run --config experiments/xgboost_v1.yaml --track --tracking-uri http://localhost:5000
     """
     # Load and validate configuration
     ml_config = load_config(config)
@@ -338,11 +334,6 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                     )
 
                     try:
-                        mask_kw: dict[str, Any] = {}
-                        if data_result.masks_train is not None:
-                            mask_kw["masks"] = data_result.masks_train
-                            mask_kw["masks_test"] = data_result.masks_test
-
                         history, cv_result = strategy.train_with_cv(
                             config,
                             data_result.X_train,
@@ -351,12 +342,9 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             X_test=data_result.X_test,
                             y_test=data_result.y_test,
                             event_ids=getattr(data_result, "event_ids_train", None),
-                            static_features=data_result.static_train,
-                            static_test=data_result.static_test,
                             sample_weights=data_result.sample_weights_train,
                             sample_weights_test=data_result.sample_weights_test,
                             commence_times=data_result.commence_times_train,
-                            **mask_kw,
                         )
                     except Exception:
                         progress.stop()
@@ -378,11 +366,6 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                     task = progress.add_task("Training model...", total=None)
 
                     try:
-                        mask_kw_direct: dict[str, Any] = {}
-                        if data_result.masks_train is not None:
-                            mask_kw_direct["masks_train"] = data_result.masks_train
-                            mask_kw_direct["masks_val"] = data_result.masks_test
-
                         history = strategy.train_from_config(
                             config,
                             data_result.X_train,
@@ -391,11 +374,8 @@ async def _run_training_async(config: MLTrainingConfig, verbose: bool):
                             X_val=data_result.X_test,
                             y_val=data_result.y_test,
                             tracker=tracker,
-                            static_train=data_result.static_train,
-                            static_val=data_result.static_test,
                             sample_weight_train=data_result.sample_weights_train,
                             sample_weight_val=data_result.sample_weights_test,
-                            **mask_kw_direct,
                         )
                     except Exception:
                         progress.stop()
@@ -976,11 +956,6 @@ async def _run_tuning_async(
                 f"[green]Pre-computed {len(precomputed_features)} feature combinations[/green]\n"
             )
 
-        tune_mask_obj_kw: dict[str, Any] = {}
-        if data_result.masks_train is not None:
-            tune_mask_obj_kw["masks_train"] = data_result.masks_train
-            tune_mask_obj_kw["masks_val"] = val_data.masks if val_data else None
-
         objective = create_objective(
             config=ml_config,
             X_train=data_result.X_train,
@@ -989,15 +964,12 @@ async def _run_tuning_async(
             X_val=X_val,
             y_val=y_val,
             precomputed_features=precomputed_features,
-            static_train=data_result.static_train,
-            static_val=val_data.static if val_data else None,
             event_ids_train=data_result.event_ids_train,
             event_ids_val=data_result.event_ids_val,
             sample_weights_train=data_result.sample_weights_train,
             sample_weights_val=val_data.sample_weights if val_data else None,
             commence_times_train=data_result.commence_times_train,
             commence_times_val=data_result.commence_times_val,
-            **tune_mask_obj_kw,
         )
 
         # Step 4: Run optimization
@@ -1089,11 +1061,6 @@ async def _run_tuning_async(
                 task = progress.add_task("Training model...", total=None)
 
                 try:
-                    tune_mask_kw: dict[str, Any] = {}
-                    if data_result.masks_train is not None:
-                        tune_mask_kw["masks_train"] = data_result.masks_train
-                        tune_mask_kw["masks_val"] = val_data.masks if val_data else None
-
                     history = strategy.train_from_config(
                         config=best_config,
                         X_train=data_result.X_train,
@@ -1101,11 +1068,8 @@ async def _run_tuning_async(
                         feature_names=data_result.feature_names,
                         X_val=X_val,
                         y_val=y_val,
-                        static_train=data_result.static_train,
-                        static_val=val_data.static if val_data else None,
                         sample_weight_train=data_result.sample_weights_train,
                         sample_weight_val=val_data.sample_weights if val_data else None,
-                        **tune_mask_kw,
                     )
                 except Exception:
                     progress.stop()

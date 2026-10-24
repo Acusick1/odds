@@ -92,12 +92,6 @@ def flatten_config_for_tracking(
         }
     )
 
-    # Add LSTM-specific feature config if present
-    if hasattr(features, "lookback_hours") and features.lookback_hours is not None:
-        config_params["lookback_hours"] = features.lookback_hours
-    if hasattr(features, "timesteps") and features.timesteps is not None:
-        config_params["timesteps"] = features.timesteps
-
     # Experiment tags (comma-separated)
     if config.experiment.tags:
         config_params["tags"] = ",".join(config.experiment.tags)

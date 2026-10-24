@@ -22,6 +22,7 @@ Every code change keeps the wiki current. `uv run python scripts/wiki_lint.py` (
 - **Historical analysis uses only data at or before decision time.** `get_odds_at_time` searches both sides of the target time. See [look-ahead](wiki/modelling/look-ahead-bias.md).
 - **The retail-EV model's target, EV against the Betfair Exchange close, is `target_type: retail_ev`.** See [target](wiki/modelling/clv-target.md).
 - **Use one `async with async_session_maker() as session` per task.** Lambda gets `NullPool` automatically. See [databases](wiki/foundations/databases-and-environments.md).
+- **A PR that replaces code deletes what it replaces, with its tests and wiki pages; git history is the record.**
 
 ## Tests
 

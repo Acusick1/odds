@@ -22,7 +22,7 @@ status: stable
    - Return `BetOpportunity(event_id, market, outcome, bookmaker, odds, line, confidence, rationale)`, with `odds` the integer American quote (`odds_core.models.Odds.american_price`); compare prices by `price_decimal`. The engine reads `confidence` as the win probability for Kelly sizing and does not consult `recommended_stake`.
    - Return only opportunities you want bet: a zero or negative Kelly stake is floored to the minimum bet size ([backtest engine](backtest-engine.md#sizing)).
    - Avoid queries through `session` that read past the decision time; the engine hands you its reader's `AsyncSession`, which is not time-fenced ([look-ahead bias](../modelling/look-ahead-bias.md#where-the-rule-breaks)).
-3. **Register** it in the `odds_cli.commands.backtest.STRATEGIES` dict; the key is the `--strategy` value.
+3. **Register** it in the `odds_cli.commands.backtest.STRATEGIES` dict; the key is the `--strategy` value, and `xgb_line_movement` is the one model strategy there.
 4. **Test.** Add unit tests under `tests/unit/` next to `test_backtesting_engine.py`, and run `odds backtest run` on a small range ([run a backtest](howto-run-backtest.md)).
 5. **Document** it in the table on [Backtest strategies](backtest-strategies.md).
    - Model-driven strategies also implement training ([line-movement models](../modelling/line-movement-models.md)).

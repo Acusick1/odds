@@ -8,7 +8,6 @@ from odds_analytics.training.config import (
     DataConfig,
     ExperimentConfig,
     FeatureConfig,
-    LSTMConfig,
     MLTrainingConfig,
     SearchSpace,
     TrainingConfig,
@@ -69,36 +68,6 @@ def sample_xgboost_line_movement_config():
                 max_depth=5,
                 learning_rate=0.08,
             ),
-        ),
-    )
-
-
-@pytest.fixture
-def sample_lstm_config():
-    """Create a sample LSTM training configuration."""
-    return MLTrainingConfig(
-        experiment=ExperimentConfig(
-            name="test_lstm",
-            tags=["test", "lstm"],
-            description="Test LSTM configuration",
-        ),
-        training=TrainingConfig(
-            strategy_type="lstm_line_movement",
-            data=DataConfig(
-                start_date=date(2024, 10, 1),
-                end_date=date(2024, 12, 31),
-            ),
-            model=LSTMConfig(
-                hidden_size=32,
-                num_layers=1,
-                dropout=0.1,
-                epochs=5,
-                batch_size=16,
-                learning_rate=0.002,
-                lookback_hours=48,
-                timesteps=12,
-            ),
-            features=FeatureConfig(target_type="raw", adapter="lstm"),
         ),
     )
 
@@ -259,7 +228,7 @@ class TestXGBoostLineMovementStrategyTrainFromConfig:
                 model=XGBoostConfig(),
             ),
         )
-        invalid_config.training.strategy_type = "lstm_line_movement"
+        invalid_config.training.strategy_type = "unknown_strategy"
 
         with pytest.raises(ValueError, match="Invalid strategy_type"):
             strategy.train_from_config(invalid_config, X_train, y_train, feature_names)
@@ -316,23 +285,3 @@ class TestConfigValidation:
         assert hasattr(model_config, "objective")
         assert hasattr(model_config, "random_state")
         assert hasattr(model_config, "n_jobs")
-
-    def test_config_extracts_all_lstm_params(self, sample_lstm_config):
-        """Test that all LSTM parameters are extracted from config."""
-        model_config = sample_lstm_config.training.model
-
-        # Verify all expected params are in the config
-        assert hasattr(model_config, "hidden_size")
-        assert hasattr(model_config, "num_layers")
-        assert hasattr(model_config, "dropout")
-        assert hasattr(model_config, "bidirectional")
-        assert hasattr(model_config, "lookback_hours")
-        assert hasattr(model_config, "timesteps")
-        assert hasattr(model_config, "epochs")
-        assert hasattr(model_config, "batch_size")
-        assert hasattr(model_config, "learning_rate")
-        assert hasattr(model_config, "loss_function")
-        assert hasattr(model_config, "weight_decay")
-        assert hasattr(model_config, "clip_grad_norm")
-        assert hasattr(model_config, "patience")
-        assert hasattr(model_config, "min_delta")

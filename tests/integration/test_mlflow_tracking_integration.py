@@ -5,7 +5,6 @@ Tests the full flow:
 1. Config with tracking enabled
 2. Training with MLflow logging
 3. Verification of logged parameters, metrics, and artifacts
-4. Both XGBoost and LSTM strategies
 
 These tests verify that the tracking abstraction is properly wired into
 the training flow and logs all expected data to MLflow.

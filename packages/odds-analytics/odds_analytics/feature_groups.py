@@ -4,8 +4,8 @@
 Separates data collection from model-specific formatting via five layers:
   1. Collection   — EventDataBundle (loads all data once per event)
   2. Sampling     — SnapshotSampler protocol (TierSampler / TimeRangeSampler)
-  3. Target       — pure functions from sequence_loader
-  4. Adapters     — FeatureAdapter protocol (XGBoostAdapter, LSTMAdapter)
+  3. Target       — pure functions from targets
+  4. Adapters     — FeatureAdapter protocol (XGBoostAdapter)
   5. Orchestrator — single prepare_training_data() entry point
 
 Example:
@@ -29,7 +29,7 @@ import structlog
 from odds_core.bookmakers import is_reference_only_snapshot
 from odds_core.game_log_models import NbaTeamGameLog
 from odds_core.injury_models import InjuryReport
-from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.player_stats_models import NbaPlayerSeasonStats
 from odds_core.polymarket_models import (
     PolymarketEvent,
@@ -51,10 +51,7 @@ from odds_analytics.polymarket_features import (
     PolymarketTabularFeatures,
     resolve_home_outcome_index,
 )
-from odds_analytics.sequence_loader import (
-    calculate_regression_target,
-    load_sequences_for_event,
-)
+from odds_analytics.targets import calculate_regression_target
 from odds_analytics.training.config import FeatureGroupName
 
 if TYPE_CHECKING:
@@ -70,7 +67,6 @@ __all__ = [
     "TimeRangeSampler",
     "AdapterOutput",
     "XGBoostAdapter",
-    "LSTMAdapter",
     "PreparedFeatureData",
     "prepare_training_data",
     "filter_completed_events",
@@ -108,7 +104,6 @@ class EventDataBundle:
     injury_reports: list[InjuryReport] = field(default_factory=list)
     player_stats: dict[str, NbaPlayerSeasonStats] = field(default_factory=dict)
     game_logs: list[NbaTeamGameLog] = field(default_factory=list)
-    sequences: list[list[Odds]] = field(default_factory=list)
 
 
 def snapshot_has_bookmaker(snapshot: OddsSnapshot, bookmaker_key: str, market: str) -> bool:
@@ -136,7 +131,6 @@ async def collect_event_data(
     - Takes the latest snapshot of the closing tier as the closing snapshot
     - Loads PM context (PM event, moneyline market, home_idx)
     - Bulk-loads all PM prices + orderbooks for the market (2 queries total)
-    - Loads sequences via load_sequences_for_event when the LSTM adapter is configured
     """
     from odds_lambda.storage.polymarket_reader import PolymarketReader
     from odds_lambda.storage.readers import OddsReader
@@ -237,11 +231,6 @@ async def collect_event_data(
                 all_logs.append(prev)
         game_logs = all_logs
 
-    # Sequences for LSTM adapter
-    sequences: list[list[Odds]] = []
-    if config.adapter == "lstm":
-        sequences = await load_sequences_for_event(event.id, session)
-
     return EventDataBundle(
         event=event,
         snapshots=all_snapshots,
@@ -252,7 +241,6 @@ async def collect_event_data(
         injury_reports=injury_reports,
         player_stats=player_stats,
         game_logs=game_logs,
-        sequences=sequences,
     )
 
 
@@ -460,9 +448,7 @@ def _find_velocity_prices(
 class AdapterOutput:
     """Structured output from a FeatureAdapter.transform() call."""
 
-    features: np.ndarray  # 1D for XGBoost, 2D (timesteps, features) for LSTM
-    mask: np.ndarray | None = None  # (timesteps,) boolean, LSTM only
-    static_features: np.ndarray | None = None  # 1D static feature vector, LSTM only
+    features: np.ndarray
 
 
 class FeatureAdapter(Protocol):
@@ -677,78 +663,9 @@ class XGBoostAdapter:
         return AdapterOutput(features=np.concatenate(parts))
 
 
-class LSTMAdapter:
-    """Sequence + optional static feature adapter for LSTM models.
-
-    Produces a fixed 14-feature ``SequenceFeatures`` vector per timestep
-    via ``SequenceFeatureExtractor``. When static feature groups (tabular,
-    injuries, rest, etc.) are configured, also extracts a 1-D static feature
-    vector returned via ``AdapterOutput.static_features``.
-    """
-
-    def _has_static_groups(self, config: FeatureConfig) -> bool:
-        return bool(_STATIC_FEATURE_GROUPS & set(config.feature_groups))
-
-    def feature_names(self, config: FeatureConfig) -> list[str]:
-        from odds_analytics.feature_extraction import SequenceFeatures
-
-        names = SequenceFeatures.get_feature_names()
-        if self._has_static_groups(config):
-            names = names + _static_feature_group_names(config)
-        return names
-
-    def transform(
-        self,
-        bundle: EventDataBundle,
-        snapshot: OddsSnapshot,
-        config: FeatureConfig,
-    ) -> AdapterOutput | None:
-        from odds_analytics.feature_extraction import SequenceFeatureExtractor
-
-        event = bundle.event
-        market = config.primary_market
-        outcome = resolve_outcome_name(config, event)
-        backtest_event = make_backtest_event(event)
-
-        # Filter sequences to those whose first entry is at or before the snapshot time,
-        # ensuring no look-ahead bias: snapshot_time is the look-ahead cutoff.
-        seqs_up_to = [
-            s for s in bundle.sequences if s and s[0].odds_timestamp <= snapshot.snapshot_time
-        ]
-
-        extractor = SequenceFeatureExtractor.from_config(config)
-        try:
-            result = extractor.extract_features(
-                event=backtest_event,
-                odds_data=seqs_up_to,
-                outcome=outcome,
-                market=market,
-            )
-        except Exception as e:
-            logger.debug("sequence_extraction_failed", event_id=event.id, error=str(e))
-            return None
-
-        # Extract optional static features (injuries, rest, tabular, etc.)
-        static_vec: np.ndarray | None = None
-        if self._has_static_groups(config):
-            parts = _extract_static_feature_parts(bundle, snapshot, config)
-            if parts is None:
-                return None
-            if parts:
-                static_vec = np.concatenate(parts)
-
-        return AdapterOutput(
-            features=result["sequence"],
-            mask=result["mask"],
-            static_features=static_vec,
-        )
-
-
 def _make_adapter(config: FeatureConfig) -> FeatureAdapter:
     if config.adapter == "xgboost":
         return XGBoostAdapter()
-    if config.adapter == "lstm":
-        return LSTMAdapter()
     raise NotImplementedError(f"Adapter '{config.adapter}' is not yet implemented")
 
 
@@ -808,20 +725,14 @@ class PreparedFeatureData:
         X: np.ndarray,
         y: np.ndarray,
         feature_names: list[str],
-        masks: np.ndarray | None = None,
         event_ids: np.ndarray | None = None,
-        static_features: np.ndarray | None = None,
-        static_feature_names: list[str] | None = None,
         sample_weights: np.ndarray | None = None,
         commence_times: np.ndarray | None = None,
     ) -> None:
         self.X = X
         self.y = y
         self.feature_names = feature_names
-        self.masks = masks
         self.event_ids = event_ids
-        self.static_features = static_features
-        self.static_feature_names = static_feature_names
         self.sample_weights = sample_weights
         self.commence_times = commence_times
 
@@ -858,7 +769,7 @@ async def prepare_training_data(
         sampler: Decision-snapshot sampler replacing the one ``config.sampling`` specifies
 
     Returns:
-        PreparedFeatureData with X, y, feature_names, masks, and event_ids for CV
+        PreparedFeatureData with X, y, feature_names, and event_ids for CV
     """
     if config.target_type == "retail_ev":
         if sampler is not None:
@@ -878,16 +789,10 @@ async def prepare_training_data(
 
     X_list: list[np.ndarray] = []
     y_list: list[float] = []
-    masks_list: list[np.ndarray] = []
-    static_list: list[np.ndarray] = []
     event_id_list: list[str] = []
     skipped_events = 0
     sharp_filtered_count = 0
     total_rows = 0
-
-    # Determine static feature names upfront (empty list if no static groups)
-    lstm_adapter = isinstance(adapter, LSTMAdapter)
-    static_names = _static_feature_group_names(config) if lstm_adapter else None
 
     for event in valid_events:
         # Load all data for this event in bulk
@@ -928,10 +833,6 @@ async def prepare_training_data(
                 continue
 
             X_list.append(output.features)
-            if output.mask is not None:
-                masks_list.append(output.mask)
-            if output.static_features is not None:
-                static_list.append(output.static_features)
             y_list.append(target)
             event_id_list.append(event.id)
             event_had_rows = True
@@ -949,12 +850,6 @@ async def prepare_training_data(
     X = np.array(X_list, dtype=np.float32)
     y = np.array(y_list, dtype=np.float32)
     event_ids = np.array(event_id_list)
-    masks = np.array(masks_list, dtype=bool) if masks_list else None
-
-    # Stack static features if collected
-    static_features: np.ndarray | None = None
-    if static_list:
-        static_features = np.array(static_list, dtype=np.float32)
 
     from odds_analytics.training.feature_selection import apply_variance_filter
 
@@ -974,7 +869,6 @@ async def prepare_training_data(
         num_samples=len(X),
         num_events=n_events,
         num_features=len(feature_names),
-        num_static_features=static_features.shape[1] if static_features is not None else 0,
         avg_rows_per_event=total_rows / max(n_events, 1),
         skipped_events=skipped_events,
         sharp_filtered=sharp_filtered_count,
@@ -988,8 +882,5 @@ async def prepare_training_data(
         X=X,
         y=y,
         feature_names=feature_names,
-        masks=masks,
         event_ids=event_ids,
-        static_features=static_features,
-        static_feature_names=static_names if static_features is not None else None,
     )

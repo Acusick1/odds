@@ -15,7 +15,7 @@ These pages cover the training targets (the `retail_ev` target and the `raw` lin
 - [Feature groups](feature-groups.md) — The catalogue of static feature groups and column counts, the tabular extractor and its sharp and retail defaults, and the NBA injury, rest and Polymarket groups.
 - [Feature pipeline](feature-pipeline.md) — The five layers of odds_analytics.feature_groups, samplers, adapters, orchestrator, NaN-fill and variance policy.
 - [Hyperparameter tuner (Optuna)](hyperparameter-tuner.md) — OptunaTuner, the objective, search-space schema, feature selection and CLI options, with the example search spaces cited by file.
-- [Line-movement strategies (XGBoost, LSTM)](line-movement-models.md) — The two strategy classes, their shared confidence mapping, defaults, save and load, and ml_strategy_example.
+- [Line-movement strategy (XGBoost)](line-movement-models.md) — The XGBoost strategy class, its confidence mapping, defaults, save and load, and ml_strategy_example.
 - [Target functions](clv-target-functions.md) — The retail-EV row builder, its features, weights and keep-bar metrics, the raw delta function, the `_compute_target` dispatch, closing-snapshot selection, and the target fields of FeatureConfig.
 - [Training config](training-config.md) — The MLTrainingConfig schema, every section's fields and defaults, data-source selection, and values the schema accepts that cannot train.
 - [Training pipeline](training-pipeline.md) — What odds train run, tune, validate and list-configs do step by step, the splits, verification artifacts and MLflow tracking.

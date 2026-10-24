@@ -12,7 +12,7 @@ sources:
   - odds_core.snapshot_sources
   - odds_core.bookmakers.UK_RETAIL_BOOKMAKERS
   - odds_core.bookmakers.canonical_bookmaker_key
-  - odds_analytics.sequence_loader.calculate_regression_target
+  - odds_analytics.targets.calculate_regression_target
   - odds_analytics.feature_groups._compute_target
   - odds_analytics.training.config.FeatureConfig
 status: stable
@@ -20,7 +20,7 @@ status: stable
 
 # Target functions
 
-`odds_analytics.training.config.FeatureConfig.target_type` selects the target: `retail_ev` is built by `odds_analytics.retail_ev` and `raw` by `odds_analytics.sequence_loader.calculate_regression_target`, in a module whose name suggests only LSTM sequence loading. Why each target is shaped as it is is on [CLV and the training target](clv-target.md).
+`odds_analytics.training.config.FeatureConfig.target_type` selects the target: `retail_ev` is built by `odds_analytics.retail_ev` and `raw` by `odds_analytics.targets.calculate_regression_target`. Why each target is shaped as it is is on [CLV and the training target](clv-target.md).
 
 ## Retail-EV rows
 
@@ -78,7 +78,7 @@ The event-level groups (`tabular`, `polymarket`, `injuries` and `rest`) are reje
 
 ## Raw delta and dispatch
 
-`odds_analytics.feature_groups._compute_target` serves the `raw` target: it extracts the configured `outcome`'s odds from the decision and closing snapshots for the primary market and returns `odds_analytics.sequence_loader.calculate_regression_target`, the closing minus snapshot mean implied-probability delta for `h2h` and point delta for `spreads` and `totals`; any other market, `1x2` included, returns `None` and the row is dropped. The implied probabilities are `odds_core.models.Odds.implied_probability` (1 over the stored decimal price), not devigged ([odds arithmetic](../foundations/odds-math.md), [devigging](../foundations/devigging.md)).
+`odds_analytics.feature_groups._compute_target` serves the `raw` target: it extracts the configured `outcome`'s odds from the decision and closing snapshots for the primary market and returns `odds_analytics.targets.calculate_regression_target`, the closing minus snapshot mean implied-probability delta for `h2h` and point delta for `spreads` and `totals`; any other market, `1x2` included, returns `None` and the row is dropped. The implied probabilities are `odds_core.models.Odds.implied_probability` (1 over the stored decimal price), not devigged ([odds arithmetic](../foundations/odds-math.md), [devigging](../foundations/devigging.md)).
 
 `odds_analytics.training.config.FeatureConfig` requires `target_type` (`raw` or `retail_ev`). `retail_ev_arm` (`odds_analytics.training.config.RetailEvArm`) is `direct` unless `target_type` is `retail_ev`; its `residual` value makes the model fit the target minus the baseline ([residual arm](training-config.md#retail-ev-arm)). `retail_ev` is valid only for `h2h` and `1x2` with the `xgboost` adapter, and ignores `outcome`. A config that breaks these rules fails validation.
 

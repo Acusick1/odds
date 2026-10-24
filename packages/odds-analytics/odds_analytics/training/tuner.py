@@ -582,7 +582,7 @@ class OptunaTuner(HyperparameterTuner):
         to persist it alongside the hyperparameter tuning study metadata.
 
         Args:
-            model: The trained model object (XGBoost, PyTorch, etc.)
+            model: The trained model object (XGBoost)
             artifact_path: Path within artifact store for the model
 
         Raises:
@@ -735,12 +735,8 @@ def create_objective(
     X_val: ndarray | None = None,
     y_val: ndarray | None = None,
     precomputed_features: dict[tuple[str, ...], TrainingDataResult] | None = None,
-    static_train: ndarray | None = None,
-    static_val: ndarray | None = None,
     event_ids_train: ndarray | None = None,
     event_ids_val: ndarray | None = None,
-    masks_train: ndarray | None = None,
-    masks_val: ndarray | None = None,
     sample_weights_train: ndarray | None = None,
     sample_weights_val: ndarray | None = None,
     commence_times_train: ndarray | None = None,
@@ -811,20 +807,6 @@ def create_objective(
     # Check if top_k_features is being tuned
     tuning_top_k_features = TOP_K_FEATURES_KEY in search_spaces
 
-    # Check if this is an LSTM strategy (feature selection not supported for 3D sequences)
-    is_lstm_strategy = strategy_type == "lstm_line_movement"
-
-    # Warn if LSTM + feature selection combination detected
-    if is_lstm_strategy and tuning_top_k_features:
-        logger.warning(
-            "feature_selection_not_supported_for_lstm",
-            strategy_type=strategy_type,
-            message="top_k_features tuning is not supported for LSTM strategies. "
-            "LSTM uses 3D sequences while feature selectors expect 2D data. "
-            "LSTM gating mechanisms handle implicit feature weighting. "
-            "Ignoring top_k_features parameter.",
-        )
-
     logger.info(
         "objective_created",
         strategy_type=strategy_type,
@@ -876,10 +858,8 @@ def create_objective(
         trial_X_train, trial_y_train = X_train, y_train
         trial_X_val, trial_y_val = X_val, y_val
         trial_feature_names = feature_names
-        trial_static_train, trial_static_val = static_train, static_val
         trial_event_ids = event_ids_train
         trial_event_ids_val = event_ids_val
-        trial_masks_train, trial_masks_val = masks_train, masks_val
         trial_weights_train, trial_weights_val = sample_weights_train, sample_weights_val
         trial_kickoffs_train, trial_kickoffs_val = commence_times_train, commence_times_val
 
@@ -893,12 +873,8 @@ def create_objective(
                 trial_X_val = val_data.X if val_data else None
                 trial_y_val = val_data.y if val_data else None
                 trial_feature_names = data.feature_names
-                trial_static_train = data.static_train
-                trial_static_val = val_data.static if val_data else None
                 trial_event_ids = data.event_ids_train
                 trial_event_ids_val = data.event_ids_val
-                trial_masks_train = data.masks_train
-                trial_masks_val = val_data.masks if val_data else None
                 trial_weights_train = data.sample_weights_train
                 trial_weights_val = val_data.sample_weights if val_data else None
                 trial_kickoffs_train = data.commence_times_train
@@ -911,12 +887,7 @@ def create_objective(
                 )
 
         # Feature selection integration for top_k_features tuning
-        # Skip for LSTM strategies - they use 3D sequences incompatible with 2D selectors
-        if (
-            tuning_top_k_features
-            and config.training.feature_selection.enabled
-            and not is_lstm_strategy
-        ):
+        if tuning_top_k_features and config.training.feature_selection.enabled:
             # Rank once per study: the first trial of a fresh study computes it
             if "feature_ranking_names" not in trial.study.user_attrs:
                 from odds_analytics.training.feature_selection import get_feature_selector
@@ -974,10 +945,6 @@ def create_objective(
             from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 
             strategy = XGBoostLineMovementStrategy()
-        elif strategy_type == "lstm_line_movement":
-            from odds_analytics.lstm_line_movement import LSTMLineMovementStrategy
-
-            strategy = LSTMLineMovementStrategy()
         else:
             raise ValueError(f"Unknown strategy type: {strategy_type}")
 
@@ -993,16 +960,6 @@ def create_objective(
             if trial_X_val is not None and trial_y_val is not None:
                 X_full = np.vstack([trial_X_train, trial_X_val])
                 y_full = np.concatenate([trial_y_train, trial_y_val])
-                static_full = (
-                    np.vstack([trial_static_train, trial_static_val])
-                    if trial_static_train is not None and trial_static_val is not None
-                    else trial_static_train
-                )
-                masks_full = (
-                    np.vstack([trial_masks_train, trial_masks_val])
-                    if trial_masks_train is not None and trial_masks_val is not None
-                    else trial_masks_train
-                )
                 weights_full = (
                     np.concatenate([trial_weights_train, trial_weights_val])
                     if trial_weights_train is not None and trial_weights_val is not None
@@ -1016,8 +973,6 @@ def create_objective(
             else:
                 X_full = trial_X_train
                 y_full = trial_y_train
-                static_full = trial_static_train
-                masks_full = trial_masks_train
                 weights_full = trial_weights_train
                 kickoffs_full = trial_kickoffs_train
 
@@ -1043,9 +998,7 @@ def create_objective(
                 X=X_full,
                 y=y_full,
                 feature_names=trial_feature_names,
-                static_features=static_full,
                 event_ids=event_ids_full,
-                masks=masks_full,
                 sample_weights=weights_full,
                 commence_times=kickoffs_full,
             )
@@ -1070,11 +1023,6 @@ def create_objective(
             )
         else:
             # Use simple train/validation split (backward compatibility)
-            mask_kw: dict[str, Any] = {}
-            if trial_masks_train is not None:
-                mask_kw["masks_train"] = trial_masks_train
-                mask_kw["masks_val"] = trial_masks_val
-
             history = strategy.train_from_config(
                 config=modified_config,
                 X_train=trial_X_train,
@@ -1083,11 +1031,8 @@ def create_objective(
                 X_val=trial_X_val,
                 y_val=trial_y_val,
                 trial=trial,  # Pass trial for pruning support
-                static_train=trial_static_train,
-                static_val=trial_static_val,
                 sample_weight_train=trial_weights_train,
                 sample_weight_val=trial_weights_val,
-                **mask_kw,
             )
 
             # Extract metric value

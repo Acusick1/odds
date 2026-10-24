@@ -22,13 +22,9 @@ Example usage:
     async with async_session_maker() as session:
         result = await prepare_training_data_from_config(config, session)
 
-        # For XGBoost
         X_train, X_test = result.X_train, result.X_test
         y_train, y_test = result.y_train, result.y_test
         feature_names = result.feature_names
-
-        # For LSTM
-        masks_train, masks_test = result.masks_train, result.masks_test
     ```
 """
 
@@ -207,16 +203,12 @@ class EvalData:
 
     X: np.ndarray
     y: np.ndarray
-    static: np.ndarray | None
-    masks: np.ndarray | None
     sample_weights: np.ndarray | None
 
 
 class TrainingDataResult:
     """
     Container for training data preparation results.
-
-    Provides a unified interface for both tabular (XGBoost) and sequence (LSTM) data.
 
     Attributes:
         X_train: Training features
@@ -226,13 +218,10 @@ class TrainingDataResult:
         y_val: Validation targets (optional, None if no validation split)
         y_test: Test targets (None when test_split is 0)
         feature_names: List of feature names
-        masks_train: Training masks (LSTM only, None for XGBoost)
-        masks_val: Validation masks (LSTM only, None for XGBoost)
-        masks_test: Test masks (LSTM only, None for XGBoost)
         num_train_samples: Number of training samples
         num_val_samples: Number of validation samples (0 if no validation split)
         num_test_samples: Number of test samples
-        strategy_type: Type of strategy (xgboost_line_movement, lstm_line_movement, etc.)
+        strategy_type: Type of strategy (xgboost_line_movement)
     """
 
     def __init__(
@@ -243,18 +232,11 @@ class TrainingDataResult:
         y_test: np.ndarray | None,
         feature_names: list[str],
         strategy_type: str,
-        masks_train: np.ndarray | None = None,
-        masks_test: np.ndarray | None = None,
         X_val: np.ndarray | None = None,
         y_val: np.ndarray | None = None,
-        masks_val: np.ndarray | None = None,
         event_ids_train: np.ndarray | None = None,
         event_ids_val: np.ndarray | None = None,
         event_ids_test: np.ndarray | None = None,
-        static_train: np.ndarray | None = None,
-        static_val: np.ndarray | None = None,
-        static_test: np.ndarray | None = None,
-        static_feature_names: list[str] | None = None,
         sample_weights_train: np.ndarray | None = None,
         sample_weights_val: np.ndarray | None = None,
         sample_weights_test: np.ndarray | None = None,
@@ -271,16 +253,9 @@ class TrainingDataResult:
         self.y_test = y_test
         self.feature_names = feature_names
         self.strategy_type = strategy_type
-        self.masks_train = masks_train
-        self.masks_val = masks_val
-        self.masks_test = masks_test
         self.event_ids_train = event_ids_train
         self.event_ids_val = event_ids_val
         self.event_ids_test = event_ids_test
-        self.static_train = static_train
-        self.static_val = static_val
-        self.static_test = static_test
-        self.static_feature_names = static_feature_names
         self.sample_weights_train = sample_weights_train
         self.sample_weights_val = sample_weights_val
         self.sample_weights_test = sample_weights_test
@@ -313,9 +288,7 @@ class TrainingDataResult:
         """Validation rows, or None without a validation split. Never the test rows."""
         if self.X_val is None or self.y_val is None or len(self.X_val) == 0:
             return None
-        return EvalData(
-            self.X_val, self.y_val, self.static_val, self.masks_val, self.sample_weights_val
-        )
+        return EvalData(self.X_val, self.y_val, self.sample_weights_val)
 
     def to_dict(self) -> dict:
         """Convert to dictionary format for backward compatibility."""
@@ -337,12 +310,6 @@ class TrainingDataResult:
             result["X_val"] = self.X_val
         if self.y_val is not None:
             result["y_val"] = self.y_val
-        if self.masks_train is not None:
-            result["masks_train"] = self.masks_train
-        if self.masks_val is not None:
-            result["masks_val"] = self.masks_val
-        if self.masks_test is not None:
-            result["masks_test"] = self.masks_test
         return result
 
 
@@ -499,9 +466,7 @@ async def prepare_training_data_from_config(
     X = prep_result.X
     y = prep_result.y
     feature_names = prep_result.feature_names
-    masks = prep_result.masks
     event_ids = prep_result.event_ids
-    static = prep_result.static_features
     weights = prep_result.sample_weights
     kickoffs = prep_result.commence_times
 
@@ -513,13 +478,11 @@ async def prepare_training_data_from_config(
     event_ids_test = None
     X_test: np.ndarray | None = None
     y_test: np.ndarray | None = None
-    masks_test: np.ndarray | None = None
-    static_test: np.ndarray | None = None
     weights_test: np.ndarray | None = None
     kickoffs_test: np.ndarray | None = None
 
     if data_config.test_split == 0:
-        X_trainval, y_trainval, masks_trainval, static_trainval = X, y, masks, static
+        X_trainval, y_trainval = X, y
         weights_trainval = weights
         kickoffs_trainval = kickoffs
         event_ids_train = event_ids
@@ -538,35 +501,25 @@ async def prepare_training_data_from_config(
         y_test = y[test_mask]
         event_ids_train = event_ids[train_mask]
         event_ids_test = event_ids[test_mask]
-        masks_trainval = masks[train_mask] if masks is not None else None
-        masks_test = masks[test_mask] if masks is not None else None
-        static_trainval = static[train_mask] if static is not None else None
-        static_test = static[test_mask] if static is not None else None
         weights_trainval = weights[train_mask] if weights is not None else None
         weights_test = weights[test_mask] if weights is not None else None
         kickoffs_trainval = kickoffs[train_mask] if kickoffs is not None else None
         kickoffs_test = kickoffs[test_mask] if kickoffs is not None else None
     else:
         split_result = _split_aligned_arrays(
-            [X, y, masks, static, weights, kickoffs],
+            [X, y, weights, kickoffs],
             test_size=data_config.test_split,
             random_state=data_config.random_seed,
             shuffle=data_config.shuffle,
         )
         X_trainval, X_test = split_result[0], split_result[1]
         y_trainval, y_test = split_result[2], split_result[3]
-        masks_trainval, masks_test = split_result[4], split_result[5]
-        static_trainval, static_test = split_result[6], split_result[7]
-        weights_trainval, weights_test = split_result[8], split_result[9]
-        kickoffs_trainval, kickoffs_test = split_result[10], split_result[11]
+        weights_trainval, weights_test = split_result[4], split_result[5]
+        kickoffs_trainval, kickoffs_test = split_result[6], split_result[7]
 
     # Second split: separate validation set from training set (if validation_split > 0)
     X_val = None
     y_val = None
-    masks_val = None
-    masks_train = None
-    static_val = None
-    static_train = None
     weights_val: np.ndarray | None = None
     weights_train: np.ndarray | None = None
     kickoffs_val: np.ndarray | None = None
@@ -590,10 +543,6 @@ async def prepare_training_data_from_config(
             y_train = y_trainval[tv_train_mask]
             X_val = X_trainval[tv_val_mask]
             y_val = y_trainval[tv_val_mask]
-            masks_train = masks_trainval[tv_train_mask] if masks_trainval is not None else None
-            masks_val = masks_trainval[tv_val_mask] if masks_trainval is not None else None
-            static_train = static_trainval[tv_train_mask] if static_trainval is not None else None
-            static_val = static_trainval[tv_val_mask] if static_trainval is not None else None
             if weights_trainval is not None:
                 weights_train = weights_trainval[tv_train_mask]
                 weights_val = weights_trainval[tv_val_mask]
@@ -604,29 +553,18 @@ async def prepare_training_data_from_config(
             event_ids_train = event_ids_train[tv_train_mask]
         else:
             val_result = _split_aligned_arrays(
-                [
-                    X_trainval,
-                    y_trainval,
-                    masks_trainval,
-                    static_trainval,
-                    weights_trainval,
-                    kickoffs_trainval,
-                ],
+                [X_trainval, y_trainval, weights_trainval, kickoffs_trainval],
                 test_size=val_size_relative,
                 random_state=data_config.random_seed,
                 shuffle=data_config.shuffle,
             )
             X_train, X_val = val_result[0], val_result[1]
             y_train, y_val = val_result[2], val_result[3]
-            masks_train, masks_val = val_result[4], val_result[5]
-            static_train, static_val = val_result[6], val_result[7]
-            weights_train, weights_val = val_result[8], val_result[9]
-            kickoffs_train, kickoffs_val = val_result[10], val_result[11]
+            weights_train, weights_val = val_result[4], val_result[5]
+            kickoffs_train, kickoffs_val = val_result[6], val_result[7]
     else:
         X_train = X_trainval
         y_train = y_trainval
-        masks_train = masks_trainval
-        static_train = static_trainval
         weights_train = weights_trainval
         kickoffs_train = kickoffs_trainval
 
@@ -641,7 +579,6 @@ async def prepare_training_data_from_config(
         val_samples=len(X_val) if X_val is not None else 0,
         test_samples=len(X_test) if X_test is not None else 0,
         num_features=len(feature_names),
-        num_static_features=static.shape[1] if static is not None else 0,
         test_split=data_config.test_split,
         validation_split=data_config.validation_split,
     )
@@ -653,18 +590,11 @@ async def prepare_training_data_from_config(
         y_test=y_test,
         feature_names=feature_names,
         strategy_type=strategy_type,
-        masks_train=masks_train,
-        masks_test=masks_test,
         X_val=X_val,
         y_val=y_val,
-        masks_val=masks_val,
         event_ids_train=event_ids_train,
         event_ids_val=event_ids_val,
         event_ids_test=event_ids_test,
-        static_train=static_train,
-        static_val=static_val,
-        static_test=static_test,
-        static_feature_names=prep_result.static_feature_names,
         sample_weights_train=weights_train,
         sample_weights_val=weights_val,
         sample_weights_test=weights_test,

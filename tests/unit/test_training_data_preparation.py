@@ -23,7 +23,6 @@ from odds_analytics.training import (
     DataConfig,
     ExperimentConfig,
     FeatureConfig,
-    LSTMConfig,
     MLTrainingConfig,
     TrainingConfig,
     TrainingDataResult,
@@ -66,33 +65,6 @@ class TestTrainingDataResult:
         assert result.num_test_samples == 20
         assert result.num_features == 10
         assert result.strategy_type == "xgboost_line_movement"
-        assert result.masks_train is None
-        assert result.masks_test is None
-
-    def test_with_masks(self):
-        """Test result container with LSTM masks."""
-        X_train = np.random.randn(80, 24, 17)
-        X_test = np.random.randn(20, 24, 17)
-        y_train = np.random.randn(80)
-        y_test = np.random.randn(20)
-        masks_train = np.ones((80, 24), dtype=bool)
-        masks_test = np.ones((20, 24), dtype=bool)
-        feature_names = [f"feature_{i}" for i in range(17)]
-
-        result = TrainingDataResult(
-            X_train=X_train,
-            X_test=X_test,
-            y_train=y_train,
-            y_test=y_test,
-            feature_names=feature_names,
-            strategy_type="lstm_line_movement",
-            masks_train=masks_train,
-            masks_test=masks_test,
-        )
-
-        assert result.masks_train is not None
-        assert result.masks_test is not None
-        assert result.masks_train.shape == (80, 24)
 
     def test_to_dict(self):
         """Test converting result to dictionary."""
@@ -122,32 +94,6 @@ class TestTrainingDataResult:
         assert result_dict["num_train_samples"] == 10
         assert result_dict["num_test_samples"] == 5
         assert result_dict["num_features"] == 5
-
-    def test_to_dict_with_masks(self):
-        """Test that masks are included in dict when present."""
-        X_train = np.random.randn(10, 24, 17)
-        X_test = np.random.randn(5, 24, 17)
-        y_train = np.random.randn(10)
-        y_test = np.random.randn(5)
-        masks_train = np.ones((10, 24), dtype=bool)
-        masks_test = np.ones((5, 24), dtype=bool)
-        feature_names = [f"f{i}" for i in range(17)]
-
-        result = TrainingDataResult(
-            X_train=X_train,
-            X_test=X_test,
-            y_train=y_train,
-            y_test=y_test,
-            feature_names=feature_names,
-            strategy_type="lstm_line_movement",
-            masks_train=masks_train,
-            masks_test=masks_test,
-        )
-
-        result_dict = result.to_dict()
-
-        assert "masks_train" in result_dict
-        assert "masks_test" in result_dict
 
 
 # =============================================================================
@@ -224,32 +170,6 @@ class TestPrepareTrainingDataFromConfig:
         )
 
     @pytest.fixture
-    def basic_lstm_config(self):
-        """Create a basic LSTM training configuration."""
-        return MLTrainingConfig(
-            experiment=ExperimentConfig(
-                name="test_lstm",
-                tags=["test"],
-            ),
-            training=TrainingConfig(
-                strategy_type="lstm_line_movement",
-                data=DataConfig(
-                    start_date=date(2024, 10, 1),
-                    end_date=date(2024, 10, 31),
-                    test_split=0.2,
-                    validation_split=0.0,  # No validation split for basic tests
-                    random_seed=42,
-                ),
-                model=LSTMConfig(
-                    hidden_size=64,
-                    lookback_hours=72,
-                    timesteps=24,
-                ),
-                features=FeatureConfig(target_type="raw", adapter="lstm"),
-            ),
-        )
-
-    @pytest.fixture
     def mock_events(self):
         """Create mock events for testing."""
         events = []
@@ -284,9 +204,7 @@ class TestPrepareTrainingDataFromConfig:
             X = np.random.randn(10, 31).astype(np.float32)
             y = np.random.randn(10).astype(np.float32)
             feature_names = [f"feature_{i}" for i in range(31)]
-            mock_prepare.return_value = PreparedFeatureData(
-                X=X, y=y, feature_names=feature_names, masks=None
-            )
+            mock_prepare.return_value = PreparedFeatureData(X=X, y=y, feature_names=feature_names)
 
             # Call the function
             result = await prepare_training_data_from_config(basic_xgboost_config, session)
@@ -297,40 +215,6 @@ class TestPrepareTrainingDataFromConfig:
             assert result.num_train_samples + result.num_test_samples == 10
             assert result.num_val_samples == 0  # No validation split
             assert result.num_features == 31
-            assert result.masks_train is None  # XGBoost has no masks
-
-    @pytest.mark.asyncio
-    async def test_lstm_data_preparation(self, basic_lstm_config, mock_events):
-        """Test LSTM data preparation returns correct structure with masks."""
-        from odds_analytics.feature_groups import PreparedFeatureData
-
-        session = AsyncMock()
-
-        # Mock the dependencies
-        with (
-            patch(
-                "odds_analytics.training.data_preparation.filter_events_by_date_range"
-            ) as mock_filter,
-            patch("odds_analytics.feature_groups.prepare_training_data") as mock_prepare,
-        ):
-            # Setup mocks
-            mock_filter.return_value = mock_events
-            X = np.random.randn(10, 24, 17).astype(np.float32)
-            y = np.random.randn(10).astype(np.float32)
-            masks = np.ones((10, 24), dtype=bool)
-            feature_names = [f"feature_{i}" for i in range(17)]
-            mock_prepare.return_value = PreparedFeatureData(
-                X=X, y=y, feature_names=feature_names, masks=masks
-            )
-
-            # Call the function
-            result = await prepare_training_data_from_config(basic_lstm_config, session)
-
-            # Verify result structure
-            assert isinstance(result, TrainingDataResult)
-            assert result.strategy_type == "lstm_line_movement"
-            assert result.masks_train is not None
-            assert result.masks_test is not None
 
     @pytest.mark.asyncio
     async def test_validation_split_with_event_ids(self, mock_events):
@@ -373,7 +257,6 @@ class TestPrepareTrainingDataFromConfig:
                 X=X,
                 y=y,
                 feature_names=feature_names,
-                masks=None,
                 event_ids=event_ids,
             )
 
@@ -433,7 +316,7 @@ class TestPrepareTrainingDataFromConfig:
             X = np.random.randn(10, 5).astype(np.float32)
             y = np.random.randn(10).astype(np.float32)
             mock_prepare.return_value = PreparedFeatureData(
-                X=X, y=y, feature_names=[f"f_{i}" for i in range(5)], masks=None
+                X=X, y=y, feature_names=[f"f_{i}" for i in range(5)]
             )
 
             await prepare_training_data_from_config(config, session)
@@ -470,7 +353,7 @@ class TestPrepareTrainingDataFromConfig:
             mock_filter.return_value = mock_events
             # Return empty arrays
             mock_prepare.return_value = PreparedFeatureData(
-                X=np.array([]), y=np.array([]), feature_names=[], masks=None
+                X=np.array([]), y=np.array([]), feature_names=[]
             )
 
             with pytest.raises(ValueError, match="No valid training data"):
@@ -497,9 +380,7 @@ class TestPrepareTrainingDataFromConfig:
             X = np.random.randn(100, 31).astype(np.float32)
             y = np.random.randn(100).astype(np.float32)
             feature_names = [f"feature_{i}" for i in range(31)]
-            mock_prepare.return_value = PreparedFeatureData(
-                X=X, y=y, feature_names=feature_names, masks=None
-            )
+            mock_prepare.return_value = PreparedFeatureData(X=X, y=y, feature_names=feature_names)
 
             # Config has test_split=0.2
             result = await prepare_training_data_from_config(basic_xgboost_config, session)
@@ -592,9 +473,7 @@ class TestConfigLoadingIntegration:
             X = np.random.randn(num_samples, num_features).astype(np.float32)
             y = np.random.randn(num_samples).astype(np.float32)
             feature_names = [f"feature_{i}" for i in range(num_features)]
-            mock_prepare.return_value = PreparedFeatureData(
-                X=X, y=y, feature_names=feature_names, masks=None
-            )
+            mock_prepare.return_value = PreparedFeatureData(X=X, y=y, feature_names=feature_names)
 
             # Execute pipeline
             result = await prepare_training_data_from_config(config, session)
@@ -998,7 +877,6 @@ class TestTestSplitZero:
         assert result.num_train_samples == 20
         assert result.num_test_samples == 0
         assert result.X_test is None and result.y_test is None
-        assert result.masks_test is None and result.static_test is None
         assert result.validation_data is None
 
     @pytest.mark.asyncio
