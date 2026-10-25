@@ -71,6 +71,9 @@ class TestEventStatusTransitions:
             (EventStatus.POSTPONED, EventStatus.SCHEDULED),
             (EventStatus.CANCELLED, EventStatus.FINAL),
             (EventStatus.FINAL, EventStatus.FINAL),
+            (EventStatus.SCHEDULED, EventStatus.UNMATCHED),
+            (EventStatus.POSTPONED, EventStatus.UNMATCHED),
+            (EventStatus.UNMATCHED, EventStatus.SCHEDULED),
         ],
     )
     def test_allowed(self, current: EventStatus, target: EventStatus) -> None:
@@ -85,6 +88,9 @@ class TestEventStatusTransitions:
         [
             (EventStatus.CANCELLED, EventStatus.SCHEDULED),
             (EventStatus.CANCELLED, EventStatus.POSTPONED),
+            (EventStatus.CANCELLED, EventStatus.UNMATCHED),
+            (EventStatus.UNMATCHED, EventStatus.FINAL),
+            (EventStatus.UNMATCHED, EventStatus.LIVE),
         ],
     )
     def test_refused(self, current: EventStatus, target: EventStatus) -> None:

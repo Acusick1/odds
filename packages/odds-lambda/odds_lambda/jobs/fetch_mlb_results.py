@@ -20,6 +20,7 @@ import structlog
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus
 from odds_core.time import ensure_utc
+from odds_core.vocabulary import Source
 
 from odds_lambda.mlb_game_resolver import (
     MLB_SPORT_KEY,
@@ -37,7 +38,7 @@ from odds_lambda.results_run import (
     run_daily_results_job,
 )
 from odds_lambda.scheduling.jobs import JobContext
-from odds_lambda.storage.event_merge import follow_schedule
+from odds_lambda.storage.event_kickoff import move_kickoff
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -109,10 +110,7 @@ async def _fetch_slots(
 
 async def _apply(writer: OddsWriter, event: Event, game_pk: int, outcome: GameOutcome) -> Applied:
     """Move the event to its game's played slot, then set the outcome's status. Caller commits."""
-    moves = outcome.start is not None and ensure_utc(event.commence_time) != ensure_utc(
-        outcome.start
-    )
-    await follow_schedule(writer.session, event, game_pk, outcome.start)
+    moves = await move_kickoff(writer.session, event, Source.MLB_STATS_API, outcome.start)
     if outcome.status is EventStatus.FINAL and outcome.score is not None:
         await writer.update_event_status(
             event.id, EventStatus.FINAL, home_score=outcome.score[0], away_score=outcome.score[1]

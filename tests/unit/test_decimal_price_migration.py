@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
@@ -11,7 +12,7 @@ from typing import Any
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventStatus
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -168,6 +169,9 @@ class TestUpgradeAndDowngrade:
             "ALTER TABLE odds DROP COLUMN price_decimal",
             "ALTER TABLE odds ADD COLUMN price integer NOT NULL DEFAULT 0",
             "ALTER TABLE odds ALTER COLUMN price DROP DEFAULT",
+            # The migration's SQL aliases a JSON element as ``market``, which a later
+            # odds_snapshots.market column would shadow.
+            "ALTER TABLE odds_snapshots DROP COLUMN market",
         ):
             await session.execute(text(statement))
         session.add(
@@ -187,14 +191,13 @@ class TestUpgradeAndDowngrade:
     async def _add(
         self, session: AsyncSession, raw: dict, rows: list[tuple[str, str, str, int]]
     ) -> None:
-        session.add(
-            OddsSnapshot(
-                event_id="e1",
-                snapshot_time=self.MOMENT,
-                raw_data=raw,
-                bookmaker_count=len(raw["bookmakers"]),
-                hours_until_commence=1.0,
-            )
+        await session.execute(
+            text(
+                "INSERT INTO odds_snapshots (event_id, snapshot_time, raw_data, bookmaker_count, "
+                "hours_until_commence, created_at) "
+                "VALUES ('e1', :t, CAST(:raw AS json), :n, 1.0, now())"
+            ),
+            {"t": self.MOMENT, "raw": json.dumps(raw), "n": len(raw["bookmakers"])},
         )
         for bookmaker, market, name, price in rows:
             await session.execute(

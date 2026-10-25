@@ -39,6 +39,8 @@ The boundaries in the table are `odds_lambda.fetch_tier.FetchTier.max_hours` and
 
 ## Where tiers are written and read
 
+`fetch_tier` is a column of `odds_core.models.OddsSnapshot`; the redesigned snapshot columns beside it (source, market, time basis and market metadata) carry no tier ([odds_snapshots](odds-tables.md#odds_snapshots)).
+
 - **Written** by `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot`, on the snapshot only (odds rows carry no tier), which always computes the tier per event from `snapshot_time` and `event.commence_time` via `odds_lambda.tier_utils.calculate_tier_from_timestamps`, so all ingestion paths through the writer agree. The Polymarket writer and the gap-backfill planner call the same function. The tier is NULL when the event row is missing ([OddsWriter](odds-writer.md#store_odds_snapshot)). Rows stored before per-event tiering were recalculated by `migrations/versions/9ff81f073e6b_recalculate_historical_fetch_tiers.py`. Historical scripts compute it with `odds_lambda.oddsportal_common.hours_to_tier` instead; an FDUK snapshot exactly 24 h out becomes `early`, not `sharp`, for that reason ([Historical ingest scripts](../collection/historical-ingest-scripts.md)).
 - **Scheduling** uses the tier to pick a cadence; the per-job cadence table is on [Decision engine](../scheduling/decision-engine.md#cadence).
 - **Validation**: `odds_lambda.storage.tier_validator.TierCoverageValidator` treats pregame and closing (`odds_lambda.storage.tier_validator.CRITICAL_TIERS`) as required, depending on tiers stored with `<=` boundaries ([Coverage and completeness checks](coverage-checks.md)).

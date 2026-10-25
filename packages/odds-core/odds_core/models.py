@@ -1,24 +1,45 @@
 """SQLModel database schema definitions."""
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Any
 
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
     Float,
+    ForeignKey,
+    Identity,
     Index,
+    Integer,
+    Numeric,
     Text,
+    UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 from odds_core.odds_math import decimal_to_american, decimal_to_implied_probability
 from odds_core.team import normalize_team_name
+from odds_core.vocabulary import (
+    EXTERNAL_ID_SOURCES,
+    PRICE_SOURCES,
+    HealthCheck,
+    Market,
+    MarketStatus,
+    PriceOutcome,
+    Side,
+    Source,
+    StrEnumText,
+    TimeBasis,
+    closed_set_check,
+)
 
 
 def utc_now() -> datetime:
@@ -39,6 +60,8 @@ class EventStatus(str, Enum):
     FINAL = "final"
     CANCELLED = "cancelled"
     POSTPONED = "postponed"
+    # An MLB event with no game in MLB's schedule; its reason is a health-check acknowledgement.
+    UNMATCHED = "unmatched"
 
     def can_become(self, target: "EventStatus") -> bool:
         """Whether a stored event in this status may be moved to ``target``."""
@@ -47,16 +70,30 @@ class EventStatus(str, Enum):
 
 _STATUS_TRANSITIONS: dict[EventStatus, frozenset[EventStatus]] = {
     EventStatus.SCHEDULED: frozenset(
-        {EventStatus.LIVE, EventStatus.FINAL, EventStatus.CANCELLED, EventStatus.POSTPONED}
+        {
+            EventStatus.LIVE,
+            EventStatus.FINAL,
+            EventStatus.CANCELLED,
+            EventStatus.POSTPONED,
+            EventStatus.UNMATCHED,
+        }
     ),
     EventStatus.LIVE: frozenset(
-        {EventStatus.SCHEDULED, EventStatus.FINAL, EventStatus.CANCELLED, EventStatus.POSTPONED}
+        {
+            EventStatus.SCHEDULED,
+            EventStatus.FINAL,
+            EventStatus.CANCELLED,
+            EventStatus.POSTPONED,
+            EventStatus.UNMATCHED,
+        }
     ),
     EventStatus.POSTPONED: frozenset(
-        {EventStatus.SCHEDULED, EventStatus.FINAL, EventStatus.CANCELLED}
+        {EventStatus.SCHEDULED, EventStatus.FINAL, EventStatus.CANCELLED, EventStatus.UNMATCHED}
     ),
     EventStatus.CANCELLED: frozenset({EventStatus.FINAL}),
     EventStatus.FINAL: frozenset(),
+    # A game found in the schedule later makes the event a scheduled one again.
+    EventStatus.UNMATCHED: frozenset({EventStatus.SCHEDULED}),
 }
 
 
@@ -67,6 +104,10 @@ class Event(SQLModel, table=True):
 
     # Primary identification
     id: str = Field(primary_key=True, description="API event ID")
+    # The event's key once the string ids are dropped; new tables reference it already.
+    surrogate_id: int | None = Field(
+        default=None, sa_column=Column(BigInteger, Identity(), nullable=False)
+    )
     sport_key: str = Field(index=True, description="Sport identifier")
     sport_title: str = Field(description="Sport display name")
 
@@ -124,6 +165,7 @@ class Event(SQLModel, table=True):
             "mlb_game_pk IS NULL OR no_game_pk_reason IS NULL",
             name="ck_events_game_pk_or_no_game_pk_reason",
         ),
+        UniqueConstraint("surrogate_id", name="uq_events_surrogate_id"),
     )
 
 
@@ -156,6 +198,23 @@ class OddsSnapshot(SQLModel, table=True):
         default=None, description="Hours between snapshot and game start"
     )
 
+    # Nullable until the backfill fills every stored snapshot.
+    source: Source | None = Field(default=None, sa_column=Column(StrEnumText(Source)))
+    market: Market | None = Field(default=None, sa_column=Column(StrEnumText(Market)))
+    time_basis: TimeBasis | None = Field(default=None, sa_column=Column(StrEnumText(TimeBasis)))
+    in_play: bool | None = Field(default=None, sa_column=Column(Boolean))
+    market_status: MarketStatus | None = Field(
+        default=None, sa_column=Column(StrEnumText(MarketStatus))
+    )
+    total_matched: Decimal | None = Field(default=None, sa_column=Column(Numeric))
+    market_start_time: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True))
+    )
+    payload_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, ForeignKey("snapshot_payloads.id"), index=True, nullable=True),
+    )
+
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True)),
         default_factory=utc_now,
@@ -165,6 +224,109 @@ class OddsSnapshot(SQLModel, table=True):
     __table_args__ = (
         Index("ix_event_snapshot_time", "event_id", "snapshot_time"),
         Index("ix_event_tier", "event_id", "fetch_tier"),
+        UniqueConstraint(
+            "event_id",
+            "source",
+            "market",
+            "snapshot_time",
+            name="uq_odds_snapshots_event_source_market_time",
+        ),
+        closed_set_check("source", PRICE_SOURCES, "ck_odds_snapshots_source"),
+        closed_set_check("market", Market, "ck_odds_snapshots_market"),
+        closed_set_check("time_basis", TimeBasis, "ck_odds_snapshots_time_basis"),
+        closed_set_check("market_status", MarketStatus, "ck_odds_snapshots_market_status"),
+    )
+
+
+class SnapshotPayload(SQLModel, table=True):
+    """What a source returned, kept only to re-parse snapshots after an adapter bug."""
+
+    __tablename__ = "snapshot_payloads"
+
+    id: int | None = Field(default=None, sa_column=Column(BigInteger, Identity(), primary_key=True))
+    payload: dict[str, Any] | list[Any] = Field(sa_column=Column(JSONB, nullable=False))
+    received_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False), default_factory=utc_now
+    )
+
+
+class Price(SQLModel, table=True):
+    """One price in a snapshot: a bookmaker's quote for one outcome, line and side."""
+
+    __tablename__ = "prices"
+
+    id: int | None = Field(default=None, sa_column=Column(BigInteger, Identity(), primary_key=True))
+    snapshot_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer, ForeignKey("odds_snapshots.id", ondelete="CASCADE"), nullable=False
+        ),
+    )
+    bookmaker: str = Field(sa_column=Column(Text, nullable=False))
+    outcome: PriceOutcome = Field(sa_column=Column(StrEnumText(PriceOutcome), nullable=False))
+    line: Decimal | None = Field(default=None, sa_column=Column(Numeric))
+    side: Side = Field(sa_column=Column(StrEnumText(Side), nullable=False))
+    price: Decimal = Field(sa_column=Column(Numeric, nullable=False))
+    size: Decimal | None = Field(default=None, sa_column=Column(Numeric))
+    matched: Decimal | None = Field(default=None, sa_column=Column(Numeric))
+    changed_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "snapshot_id",
+            "bookmaker",
+            "outcome",
+            "line",
+            "side",
+            name="uq_prices_snapshot_book_outcome_line_side",
+            postgresql_nulls_not_distinct=True,
+        ),
+        CheckConstraint("price > 1.0", name="ck_prices_price_gt_one"),
+        closed_set_check("outcome", PriceOutcome, "ck_prices_outcome"),
+        closed_set_check("side", Side, "ck_prices_side"),
+    )
+
+
+class EventExternalId(SQLModel, table=True):
+    """An id a source issued for an event: one per source per event, one event per id."""
+
+    __tablename__ = "event_external_ids"
+
+    source: Source = Field(sa_column=Column(StrEnumText(Source), primary_key=True))
+    external_id: str = Field(sa_column=Column(Text, primary_key=True))
+    event_id: int = Field(
+        sa_column=Column(BigInteger, ForeignKey("events.surrogate_id"), nullable=False)
+    )
+    created_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False), default_factory=utc_now
+    )
+
+    __table_args__ = (
+        UniqueConstraint("event_id", "source", name="uq_event_external_ids_event_source"),
+        closed_set_check("source", EXTERNAL_ID_SOURCES, "ck_event_external_ids_source"),
+    )
+
+
+class HealthCheckAcknowledgement(SQLModel, table=True):
+    """An event a health check should no longer report, and why."""
+
+    __tablename__ = "health_check_acknowledgements"
+
+    id: int | None = Field(default=None, sa_column=Column(BigInteger, Identity(), primary_key=True))
+    event_id: int = Field(
+        sa_column=Column(BigInteger, ForeignKey("events.surrogate_id"), nullable=False)
+    )
+    check_name: HealthCheck = Field(sa_column=Column(StrEnumText(HealthCheck), nullable=False))
+    reason: str = Field(sa_column=Column(Text, nullable=False))
+    acknowledged_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False), default_factory=utc_now
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "event_id", "check_name", name="uq_health_check_acknowledgements_event_check"
+        ),
+        closed_set_check("check_name", HealthCheck, "ck_health_check_acknowledgements_check"),
     )
 
 
