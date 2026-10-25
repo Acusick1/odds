@@ -31,7 +31,6 @@ from odds_analytics.candidate_report import (
     ScoredBet,
     checkpoint_at,
     close_candidate_snapshots,
-    promote_level,
     scoreable_prefix,
     selection_close_probability,
     summarize_candidate,
@@ -167,6 +166,7 @@ async def replay(
                         p_close=selection_close_probability(
                             market, selection, event, snapshots.get(event.id, [])
                         ),
+                        placed_at=decision_time(event.commence_time, params),
                     )
                 )
         # Read-only session: drop the loaded snapshots rather than hold the whole range.
@@ -204,14 +204,15 @@ def score(
     n_boot: int,
     seed: int,
 ) -> BacktestResult:
-    """Summarise replayed ``bets`` with the forward-test report's code."""
+    """Summarise replayed ``bets`` with the forward-test report's code, at one family size for all
+    checkpoints: a replay has no placement history to count versions against."""
     summary = summarize_candidate(
         candidate.name,
         candidate.version,
         candidate.status,
         bets,
         now,
-        family_versions,
+        lambda _: family_versions,
         n_boot,
         seed,
     )
@@ -226,9 +227,7 @@ def score(
         hash_status=hash_status(candidate),
         coverage=coverage,
         summary=summary,
-        overall=checkpoint_at(
-            with_close, len(with_close), promote_level(family_versions), n_boot, seed
-        )
+        overall=checkpoint_at(with_close, len(with_close), family_versions, n_boot, seed)
         if with_close
         else None,
     )

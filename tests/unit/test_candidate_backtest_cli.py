@@ -35,11 +35,11 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     async def session():
         yield None
 
-    async def no_decisions(_session: Any) -> set[tuple[str, int]]:
-        return set()
+    async def no_decisions(_session: Any) -> dict[tuple[str, int], datetime]:
+        return {}
 
     monkeypatch.setattr("odds_cli.commands.candidates.async_session_maker", session)
-    monkeypatch.setattr("odds_cli.commands.candidates.load_decided_versions", no_decisions)
+    monkeypatch.setattr("odds_cli.commands.candidates.load_decision_starts", no_decisions)
     return directory
 
 
@@ -122,6 +122,22 @@ class TestBacktestCommand:
             ],
         )
         assert "k=1" in result.stdout
+
+    def test_draft_backtest_survives_a_rule_hash_mismatch_in_the_registry(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        fake_replay(monkeypatch)
+        write(registry, {**MECHANICAL, "name": "stale", "rule_sha256": "0" * 64})
+        draft = tmp_path / "draft.yaml"
+        draft.write_text(yaml.safe_dump({**MECHANICAL, "name": "draft"}))
+
+        result = RUNNER.invoke(
+            app,
+            ["candidates", "backtest", str(draft), "--from", "2025-08-01", "--to", "2025-12-31"],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        assert "k=" in result.stdout
 
     def test_draft_path_without_hash_is_reported(
         self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

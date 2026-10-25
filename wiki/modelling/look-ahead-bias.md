@@ -21,7 +21,7 @@ Decision time is the instant a prediction or bet is assumed to be made. Everythi
 
 ## Backtests
 
-`odds_analytics.candidate_backtest.replay` decides each completed event at `odds_lambda.candidate_rules.rules.decision_time` before its kick-off and builds the market state with `odds_lambda.candidate_rules.market_state.load_market_state`, which reads only snapshots stamped at or before that time ([replay backtest](../evaluation/candidate-backtest.md#replay)). `odds_lambda.storage.readers.OddsReader.get_odds_at_time` is a separate reader for other analyses ([odds at a point in time](../storage/odds-reader.md#odds-at-a-point-in-time)).
+`odds_analytics.candidate_backtest.replay` decides each event at `odds_lambda.candidate_rules.rules.decision_time` before its kick-off and builds the market state with `odds_lambda.candidate_rules.market_state.load_market_state`, which reads only snapshots stamped at or before that time ([replay backtest](../evaluation/candidate-backtest.md#replay)). `odds_lambda.storage.readers.OddsReader.get_odds_at_time` is a separate reader for other analyses ([odds at a point in time](../storage/odds-reader.md#odds-at-a-point-in-time)).
 
 ## Training
 

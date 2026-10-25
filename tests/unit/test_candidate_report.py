@@ -12,7 +12,8 @@ from odds_analytics.candidate_report import (
     candidate_report,
     checkpoint_at,
     close_candidate_snapshots,
-    family_versions,
+    family_size_at,
+    family_starts,
     judge,
     promote_level,
     summarize_candidates,
@@ -31,7 +32,10 @@ from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_b
 N_BOOT = 400
 NOW = datetime(2026, 6, 1, tzinfo=UTC)
 LONG_AGO = NOW - timedelta(days=30)
-LEVEL = promote_level(1)
+
+
+def one(_when: datetime) -> int:
+    return 1
 
 
 def trade(
@@ -55,6 +59,7 @@ def trade(
         pnl=pnl,
         price_decimal=3.0,
         p_close=None if ev is None else (1 + ev) / 3,
+        placed_at=LONG_AGO + timedelta(minutes=index),
     )
 
 
@@ -85,7 +90,9 @@ def registry_entry(name: str = "cand", version: int = 1) -> AgentCandidate:
 
 class TestEv:
     def test_ev_is_close_probability_times_price_minus_one(self) -> None:
-        t = ScoredBet("c", 1, "e", LONG_AGO, 2.0, 0.0, price_decimal=2.5, p_close=0.5)
+        t = ScoredBet(
+            "c", 1, "e", LONG_AGO, 2.0, 0.0, price_decimal=2.5, p_close=0.5, placed_at=LONG_AGO
+        )
         assert t.ev == pytest.approx(0.25)
 
     def test_no_close_has_no_ev(self) -> None:
@@ -99,70 +106,70 @@ class TestCheckpoint:
         assert summary.verdict is Verdict.NOT_YET
 
     def test_exactly_100_scores_all(self) -> None:
-        checkpoint = checkpoint_at(trades(100), 100, LEVEL, N_BOOT, 0)
+        checkpoint = checkpoint_at(trades(100), 100, 1, N_BOOT, 0)
         assert checkpoint.n == 100
         assert checkpoint.mean_ev == pytest.approx(0.5)
 
     def test_checkpoint_scores_only_the_earliest_n(self) -> None:
         sequence = trades(200, 0.5) + trades(50, -0.5, start=200)
-        assert checkpoint_at(sequence, 200, LEVEL, N_BOOT, 0).mean_ev == pytest.approx(0.5)
+        assert checkpoint_at(sequence, 200, 1, N_BOOT, 0).mean_ev == pytest.approx(0.5)
 
     def test_mean_is_stake_weighted(self) -> None:
         sequence = [trade(i, 1.0, stake=3.0) for i in range(50)] + [
             trade(50 + i, -1.0, stake=1.0) for i in range(50)
         ]
-        assert checkpoint_at(sequence, 100, LEVEL, N_BOOT, 0).mean_ev == pytest.approx(0.5)
+        assert checkpoint_at(sequence, 100, 1, N_BOOT, 0).mean_ev == pytest.approx(0.5)
 
     def test_events_are_resampled_as_clusters(self) -> None:
         sequence = [trade(i, 1.0, event_id="a") for i in range(50)] + [
             trade(50 + i, -1.0, event_id="b") for i in range(50)
         ]
-        checkpoint = checkpoint_at(sequence, 100, LEVEL, N_BOOT, 0)
+        checkpoint = checkpoint_at(sequence, 100, 1, N_BOOT, 0)
         assert checkpoint.mean_ev == pytest.approx(0.0)
         assert checkpoint.promote_ci == pytest.approx((-1.0, 1.0))
 
     def test_seed_is_deterministic(self) -> None:
         sequence = [trade(i, 1.0 if i % 3 else -1.0) for i in range(100)]
-        assert checkpoint_at(sequence, 100, LEVEL, N_BOOT, 7) == checkpoint_at(
-            sequence, 100, LEVEL, N_BOOT, 7
+        assert checkpoint_at(sequence, 100, 1, N_BOOT, 7) == checkpoint_at(
+            sequence, 100, 1, N_BOOT, 7
         )
 
 
 class TestVerdict:
     def test_promote_when_99_lower_bound_above_zero(self) -> None:
-        verdict, checkpoint = judge(trades(100, 0.5), LEVEL, N_BOOT, 0)
+        verdict, checkpoint = judge(trades(100, 0.5), one, N_BOOT, 0)
         assert verdict is Verdict.PROMOTE
         assert checkpoint is not None and checkpoint.n == 100
 
     def test_kill_when_95_upper_bound_at_or_below_zero(self) -> None:
-        assert judge(trades(100, -0.5), LEVEL, N_BOOT, 0)[0] is Verdict.KILL
+        assert judge(trades(100, -0.5), one, N_BOOT, 0)[0] is Verdict.KILL
 
     def test_continue_when_interval_straddles_zero(self) -> None:
-        verdict, checkpoint = judge(noise(400), LEVEL, N_BOOT, 0)
+        verdict, checkpoint = judge(noise(400), one, N_BOOT, 0)
         assert verdict is Verdict.CONTINUE
         assert checkpoint is not None and checkpoint.n == 400
 
     def test_kill_at_500_without_promotion(self) -> None:
-        verdict, checkpoint = judge(noise(500), LEVEL, N_BOOT, 0)
+        verdict, checkpoint = judge(noise(500), one, N_BOOT, 0)
         assert verdict is Verdict.KILL
         assert checkpoint is not None and checkpoint.n == 500
 
     def test_promotion_at_500_beats_the_kill_limit(self) -> None:
-        assert judge(trades(500, 0.5), LEVEL, N_BOOT, 0)[0] is Verdict.PROMOTE
+        assert judge(trades(500, 0.5), one, N_BOOT, 0)[0] is Verdict.PROMOTE
 
     def test_no_checkpoint_is_not_yet(self) -> None:
-        assert judge(trades(99), LEVEL, N_BOOT, 0) == (Verdict.NOT_YET, None)
+        assert judge(trades(99), one, N_BOOT, 0) == (Verdict.NOT_YET, None)
 
     def test_first_verdict_stands_when_later_bets_reverse_the_estimate(self) -> None:
         sequence = trades(100, 0.5) + trades(300, -0.5, start=100)
-        verdict, checkpoint = judge(sequence, LEVEL, N_BOOT, 0)
+        verdict, checkpoint = judge(sequence, one, N_BOOT, 0)
         assert verdict is Verdict.PROMOTE
         assert checkpoint is not None and checkpoint.n == 100
-        assert checkpoint_at(sequence, 400, LEVEL, N_BOOT, 0).promote_ci[0] < 0
+        assert checkpoint_at(sequence, 400, 1, N_BOOT, 0).promote_ci[0] < 0
 
     def test_a_kill_stands_when_later_bets_recover(self) -> None:
         sequence = trades(100, -0.5) + trades(300, 0.5, start=100)
-        verdict, checkpoint = judge(sequence, LEVEL, N_BOOT, 0)
+        verdict, checkpoint = judge(sequence, one, N_BOOT, 0)
         assert verdict is Verdict.KILL
         assert checkpoint is not None and checkpoint.n == 100
 
@@ -265,7 +272,8 @@ def mechanical(name: str, version: int = 1, start: str = "2026-01-01", **overrid
     )
 
 
-TODAY = NOW.date()
+def at(day: int) -> datetime:
+    return datetime(2026, 5, day, tzinfo=UTC)
 
 
 class TestPromoteLevel:
@@ -277,7 +285,8 @@ class TestPromoteLevel:
 
     def test_k_above_one_widens_the_promote_interval_only(self) -> None:
         sequence = [trade(i, 1.0 if i % 4 else -1.0) for i in range(100)]
-        base, wide = (checkpoint_at(sequence, 100, promote_level(k), N_BOOT, 0) for k in (1, 8))
+        base, wide = (checkpoint_at(sequence, 100, k, N_BOOT, 0) for k in (1, 8))
+        assert (base.family_versions, wide.family_versions) == (1, 8)
         assert wide.promote_level > base.promote_level
         assert wide.promote_ci[0] <= base.promote_ci[0]
         assert wide.ci95 == base.ci95
@@ -285,31 +294,20 @@ class TestPromoteLevel:
     def test_a_higher_k_can_withhold_a_promotion(self) -> None:
         # 10 big winners in 100 events give a positive 99% lower bound but not a positive 99.999% one.
         sequence = [trade(i, 5.0 if i < 10 else -0.2, event_id=f"e{i}") for i in range(100)]
-        k1 = summarize_candidates(sequence, [], NOW, n_boot=N_BOOT)[0]
-        verdict_k1 = judge(sequence, promote_level(1), N_BOOT, 0)[0]
-        verdict_wide = judge(sequence, promote_level(1000), N_BOOT, 0)[0]
-        assert k1.family_versions == 1
-        assert verdict_k1 is Verdict.PROMOTE
-        assert verdict_wide is not Verdict.PROMOTE
+        assert judge(sequence, one, N_BOOT, 0)[0] is Verdict.PROMOTE
+        assert judge(sequence, lambda _: 1000, N_BOOT, 0)[0] is not Verdict.PROMOTE
 
 
-class TestFamilyVersions:
-    def size(self, registry, decided=(), draft=None, sport="soccer_epl") -> int:
-        return family_versions("exchange_gap", sport, registry, decided, TODAY, draft)
+class TestFamilyStarts:
+    def starts(self, registry, decisions=None, draft=None, draft_start=None, sport="soccer_epl"):
+        return family_starts("exchange_gap", sport, registry, decisions or {}, draft, draft_start)
 
-    def test_single_started_version_is_k_1(self) -> None:
-        assert self.size([mechanical("a")]) == 1
+    def test_registered_version_starts_at_its_start_date(self) -> None:
+        assert self.starts([mechanical("a", start="2026-05-03")]) == [at(3)]
 
-    def test_started_siblings_all_count_whatever_their_status(self) -> None:
-        registry = [mechanical("a"), mechanical("b"), mechanical("c", status="killed")]
-        assert self.size(registry) == 3
-
-    def test_a_version_that_has_not_started_does_not_count(self) -> None:
-        registry = [mechanical("a"), mechanical("b", start="2026-06-02")]
-        assert self.size(registry) == 1
-
-    def test_start_day_itself_counts(self) -> None:
-        assert self.size([mechanical("a"), mechanical("b", start="2026-06-01")]) == 2
+    def test_killed_and_inactive_siblings_count(self) -> None:
+        registry = [mechanical("a"), mechanical("b", status="killed")]
+        assert len(self.starts(registry)) == 2
 
     def test_other_rule_or_sport_is_another_family(self) -> None:
         registry = [
@@ -317,33 +315,70 @@ class TestFamilyVersions:
             mechanical("b", rule="polymarket_gap"),
             mechanical("c", sport="baseball_mlb"),
         ]
-        assert self.size(registry) == 1
+        assert len(self.starts(registry)) == 1
 
-    def test_earlier_versions_count_from_recorded_decisions(self) -> None:
-        registry = [mechanical("a", version=3), mechanical("b")]
-        decided = {("a", 1), ("a", 2), ("a", 3), ("b", 1), ("ghost", 1)}
-        assert self.size(registry, decided) == 4
+    def test_earlier_versions_start_at_their_first_decision(self) -> None:
+        registry = [mechanical("a", version=3, start="2026-05-20"), mechanical("b")]
+        decisions = {("a", 1): at(2), ("a", 2): at(9), ("a", 3): at(21), ("ghost", 1): at(1)}
+        assert self.starts(registry, decisions) == [
+            datetime(2026, 1, 1, tzinfo=UTC),
+            at(2),
+            at(9),
+            at(20),
+        ]
 
-    def test_draft_counts_itself_once(self) -> None:
-        registry = [mechanical("a"), mechanical("b", start="2026-12-01")]
-        assert self.size(registry, draft=("new", 1)) == 2
-        assert self.size(registry, draft=("a", 1)) == 1
-        assert self.size(registry, draft=("b", 1)) == 2
+    def test_draft_starts_at_the_given_time_and_is_counted_once(self) -> None:
+        registry = [mechanical("a", start="2026-05-03")]
+        assert self.starts(registry, draft=("new", 1), draft_start=at(30)) == [at(3), at(30)]
+        assert self.starts(registry, draft=("a", 1), draft_start=at(30)) == [at(30)]
 
-    def test_no_started_version_has_the_base_bar(self) -> None:
-        assert self.size([mechanical("a", start="2026-12-01")]) == 1
+    def test_size_counts_the_versions_started_by_a_time_and_is_at_least_one(self) -> None:
+        starts = [at(3), at(10)]
+        assert family_size_at(starts, at(1)) == 1
+        assert family_size_at(starts, at(3)) == 1
+        assert family_size_at(starts, at(10)) == 2
 
 
-class TestSummaryFamily:
-    def test_each_version_of_a_family_member_uses_the_family_size(self) -> None:
-        registry = [mechanical("a", version=2), mechanical("b")]
-        sequence = [trade(0, name="a", version=1), trade(1, name="a", version=2)]
-        decided = {("a", 1), ("a", 2), ("b", 1)}
-        summaries = summarize_candidates(sequence, registry, NOW, decided, N_BOOT)
+class TestKAtEachCheckpoint:
+    def test_a_variant_starting_after_a_promote_leaves_it_standing(self) -> None:
+        # Trade i is placed i minutes after LONG_AGO, long before the variant starts.
+        registry = [
+            mechanical("a", start="2026-01-01"),
+            mechanical("b", start="2026-05-31"),
+        ]
+        summary = summarize_candidates(
+            [trade(i, 0.5, name="a") for i in range(100)], registry, NOW, n_boot=N_BOOT
+        )
+        by_name = {s.name: s for s in summary}
+        assert by_name["a"].verdict is Verdict.PROMOTE
+        assert by_name["a"].family_versions == 1
+        assert by_name["b"].family_versions == 2
+
+    def test_a_variant_starting_before_the_checkpoint_raises_its_k(self) -> None:
+        late_registry = [mechanical("a", start="2026-01-01"), mechanical("b", start="2026-05-02")]
+        summaries = summarize_candidates(
+            [trade(i, 0.5, name="a") for i in range(100)], late_registry, NOW, n_boot=N_BOOT
+        )
+        a = next(s for s in summaries if s.name == "a")
+        assert a.family_versions == 2
+        assert a.checkpoint is not None and a.checkpoint.family_versions == 2
+
+    def test_each_checkpoint_uses_the_family_at_its_nth_bet(self) -> None:
+        sequence = noise(300)
+        verdict, checkpoint = judge(
+            sequence, lambda when: 1 if when < LONG_AGO + timedelta(minutes=200) else 3, N_BOOT, 0
+        )
+        assert verdict is Verdict.CONTINUE
+        assert checkpoint is not None and checkpoint.family_versions == 3
+
+    def test_earlier_versions_count_from_their_first_decision(self) -> None:
+        registry = [mechanical("a", version=2)]
+        sequence = [trade(i, name="a", version=1) for i in range(3)]
+        decisions = {("a", 1): LONG_AGO - timedelta(days=1), ("a", 2): at(31)}
+        summaries = summarize_candidates(sequence, registry, NOW, decisions, N_BOOT)
         assert {(s.name, s.version): s.family_versions for s in summaries} == {
-            ("a", 1): 3,
-            ("a", 2): 3,
-            ("b", 1): 3,
+            ("a", 1): 2,
+            ("a", 2): 2,
         }
 
     def test_unregistered_name_and_agent_have_k_1(self) -> None:

@@ -15,8 +15,9 @@ from odds_analytics.candidate_report import (
     Checkpoint,
     Verdict,
     candidate_report,
-    family_versions,
-    load_decided_versions,
+    family_size_at,
+    family_starts,
+    load_decision_starts,
 )
 from odds_core.candidates import (
     Candidate,
@@ -247,8 +248,8 @@ def _backtest_tables(result: BacktestResult) -> list[Table]:
     if summary.verdict is Verdict.PROMOTE:
         label += " (development data, not a promotion)"
     verdict.caption = (
-        f"[{style}]{label}[/{style}]  family versions k={summary.family_versions}  staked {summary.total_stake:.2f}  "
-        f"P&L {summary.pnl:+.2f}  ROI {summary.roi:+.1%}"
+        f"[{style}]{label}[/{style}]  family versions k={summary.family_versions}  "
+        f"staked {summary.total_stake:.2f}  P&L {summary.pnl:+.2f}  ROI {summary.roi:+.1%}"
     )
     return [coverage, verdict]
 
@@ -267,21 +268,27 @@ def backtest(
     Development data can kill an idea, never promote one.
     """
     resolved = _resolve(candidate)
-    registry = _load_registry()
+    try:
+        # Not _load_registry: a rule edited since its hash was recorded must stay a warning.
+        registry = load_candidates(candidates_dir())
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
     first, last = _parse_day(start), _parse_day(end)
     if last < first:
         raise _fail("--to is before --from")
 
     async def run() -> BacktestResult:
         async with async_session_maker() as session:
-            k = family_versions(
+            now = datetime.now(UTC)
+            starts = family_starts(
                 resolved.rule,
                 resolved.sport,
                 registry,
-                await load_decided_versions(session),
-                datetime.now(UTC).date(),
+                await load_decision_starts(session),
                 draft=(resolved.name, resolved.version),
+                draft_start=now,
             )
+            k = family_size_at(starts, now)
             return await replay(session, resolved, first, last, k)
 
     try:

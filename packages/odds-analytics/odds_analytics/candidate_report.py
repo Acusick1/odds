@@ -8,10 +8,11 @@ reported beside it.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections import defaultdict
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from enum import StrEnum
 
 import numpy as np
@@ -21,8 +22,9 @@ from odds_core.market_prices import THREE_WAY_MARKET, Outcome
 from odds_core.models import Event, OddsSnapshot
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotSource
-from sqlalchemy import Select, and_, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from odds_analytics.retail_ev_metrics import event_clustered_ratio
 
@@ -31,7 +33,7 @@ KILL_AT_BETS = 500
 # The family-wise false-promote rate; each version's promote level is 1 - this / family size.
 PROMOTE_ERROR = 0.01
 KILL_LEVEL = 0.95
-# A family's promote level reaches 99.9%, whose tail is a few resamples at 2000.
+# The family's promote levels put the interval tails at a few resamples when this is 2000.
 DEFAULT_BOOTSTRAP_SAMPLES = 10_000
 BOOTSTRAP_SEED = 0
 # The FDUK closing price can arrive days after the match, so a missing close is final only later.
@@ -58,6 +60,7 @@ class ScoredBet:
     pnl: float | None
     price_decimal: float
     p_close: float | None
+    placed_at: datetime
 
     @property
     def settled(self) -> bool:
@@ -70,11 +73,13 @@ class ScoredBet:
 
 @dataclass(frozen=True)
 class Checkpoint:
-    """Mean EV per unit staked over the first ``n`` bets with a close."""
+    """Mean EV per unit staked over the first ``n`` bets with a close, with the promote
+    interval at the level of the ``family_versions`` started when the nth bet was placed."""
 
     n: int
     mean_ev: float
     ci95: tuple[float, float]
+    family_versions: int
     promote_level: float
     promote_ci: tuple[float, float]
 
@@ -121,42 +126,52 @@ def promote_level(family_versions: int) -> float:
     return 1 - PROMOTE_ERROR / family_versions
 
 
-def family_versions(
+def family_starts(
     rule: str,
     sport: str,
     registry: Sequence[Candidate],
-    decided: Collection[tuple[str, int]],
-    today: date,
+    decision_starts: Mapping[tuple[str, int], datetime],
     draft: tuple[str, int] | None = None,
-) -> int:
-    """Versions in the (rule, sport) family that have started, killed ones included.
+    draft_start: datetime | None = None,
+) -> list[datetime]:
+    """When each version in the (rule, sport) family started, sorted; killed ones included.
 
-    The registry holds each candidate's current version, counted once its start date has
-    passed. Earlier versions are counted from ``decided``, the (name, version) pairs that
-    have a recorded decision, for the names whose registry entry is in the family. ``draft``
-    is an unregistered version being backtested, which counts as one more. A family with
-    no started version has size 1, the base bar.
+    A registry entry, which holds its candidate's current version, starts at midnight UTC of
+    its ``start_date``. An earlier version is not in the registry, so it starts at its first
+    recorded decision in ``decision_starts``, for names whose registry entry is in the family.
+    A version with no decision, and not current, never started. An unregistered ``draft``
+    starts at ``draft_start``.
     """
     members = {
         c.name
         for c in registry
         if isinstance(c, MechanicalCandidate) and c.rule == rule and c.sport == sport
     }
-    versions = {
-        (c.name, c.version) for c in registry if c.name in members and c.start_date <= today
+    starts = {
+        (c.name, c.version): datetime.combine(c.start_date, time.min, tzinfo=UTC)
+        for c in registry
+        if c.name in members
     }
-    versions |= {key for key in decided if key[0] in members}
-    if draft is not None:
-        versions.add(draft)
-    return max(1, len(versions))
+    for key, first in decision_starts.items():
+        if key[0] in members:
+            starts.setdefault(key, first)
+    if draft is not None and draft_start is not None:
+        starts[draft] = draft_start
+    return sorted(starts.values())
+
+
+def family_size_at(starts: Sequence[datetime], when: datetime) -> int:
+    """Versions started by ``when`` in a family with the sorted ``starts``; at least 1."""
+    return max(1, bisect_right(starts, when))
 
 
 def checkpoint_at(
-    scored: Sequence[ScoredBet], n: int, level: float, n_boot: int, seed: int
+    scored: Sequence[ScoredBet], n: int, family_versions: int, n_boot: int, seed: int
 ) -> Checkpoint:
     """Score the first ``n`` of ``scored``, which are trades with a close in placement order,
-    with a promote interval at ``level``."""
+    with the promote interval at ``promote_level(family_versions)``."""
     head = scored[:n]
+    level = promote_level(family_versions)
     estimate = event_clustered_ratio(
         np.array([t.event_id for t in head]),
         np.array([t.stake * t.ev for t in head]),  # type: ignore[operator]
@@ -169,22 +184,28 @@ def checkpoint_at(
         n=n,
         mean_ev=estimate.point,
         ci95=estimate.intervals[KILL_LEVEL],
+        family_versions=family_versions,
         promote_level=level,
         promote_ci=estimate.intervals[level],
     )
 
 
 def judge(
-    scored: Sequence[ScoredBet], level: float, n_boot: int, seed: int
+    scored: Sequence[ScoredBet],
+    family_size: Callable[[datetime], int],
+    n_boot: int,
+    seed: int,
 ) -> tuple[Verdict, Checkpoint | None]:
     """The first promote or kill at checkpoints 100, 200, ... 500, and the checkpoint it fired at.
 
-    A verdict stands once reached, so later bets cannot reverse it. Without one, the verdict
-    is continue with the last checkpoint reached, or not_yet with none.
+    A checkpoint's family size is ``family_size`` at the placement of its nth bet, so a version
+    that starts later never changes a verdict already reached. A verdict stands once reached,
+    so later bets cannot reverse it. Without one, the verdict is continue with the last
+    checkpoint reached, or not_yet with none.
     """
     checkpoint: Checkpoint | None = None
     for n in range(CHECKPOINT_SIZE, min(len(scored), KILL_AT_BETS) + 1, CHECKPOINT_SIZE):
-        checkpoint = checkpoint_at(scored, n, level, n_boot, seed)
+        checkpoint = checkpoint_at(scored, n, family_size(scored[n - 1].placed_at), n_boot, seed)
         if checkpoint.promote_ci[0] > 0:
             return Verdict.PROMOTE, checkpoint
         if checkpoint.ci95[1] <= 0 or n >= KILL_AT_BETS:
@@ -218,16 +239,17 @@ def summarize_candidate(
     status: CandidateStatus | None,
     trades: Sequence[ScoredBet],
     now: datetime,
-    family_versions: int,
+    family_size: Callable[[datetime], int],
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> CandidateSummary:
     """Summarise one candidate version's non-void trades, which must be in placement order.
 
-    The promote bar is at ``promote_level(family_versions)``.
+    ``family_size`` gives the family's started versions at a time. The summary's family size is
+    the verdict checkpoint's, or the size at ``now`` before any checkpoint.
     """
     with_close, prefix_length = scoreable_prefix(trades, now)
-    verdict, checkpoint = judge(with_close, promote_level(family_versions), n_boot, seed)
+    verdict, checkpoint = judge(with_close, family_size, n_boot, seed)
     settled = [t for t in trades if t.pnl is not None]
     return CandidateSummary(
         name=name,
@@ -241,7 +263,7 @@ def summarize_candidate(
         pnl=sum(t.pnl for t in settled if t.pnl is not None),
         checkpoint=checkpoint,
         verdict=verdict,
-        family_versions=family_versions,
+        family_versions=checkpoint.family_versions if checkpoint else family_size(now),
     )
 
 
@@ -249,16 +271,16 @@ def summarize_candidates(
     trades: Sequence[ScoredBet],
     registry: Sequence[Candidate],
     now: datetime,
-    decided: Collection[tuple[str, int]] = (),
+    decision_starts: Mapping[tuple[str, int], datetime] | None = None,
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> list[CandidateSummary]:
     """One summary per (candidate, version) with trades, plus each registered candidate's version.
 
     ``trades`` must be in placement order. A version other than the registry's has no status.
-    Every version of a name takes the family size of the registry's entry for that name; a name
-    absent from the registry, and an agent, has a family of one. ``decided`` is as in
-    ``family_versions``.
+    Every version of a name takes the family of the registry's entry for that name; a name
+    absent from the registry, and an agent, has a family of one. ``decision_starts`` is as in
+    ``family_starts``.
     """
     by_key: dict[tuple[str, int], list[ScoredBet]] = defaultdict(list)
     for trade in trades:
@@ -268,11 +290,12 @@ def summarize_candidates(
         by_key.setdefault(key, [])
     current = {c.name: c for c in registry}
 
-    def family_size(name: str) -> int:
+    def family_size(name: str) -> Callable[[datetime], int]:
         entry = current.get(name)
         if not isinstance(entry, MechanicalCandidate):
-            return 1
-        return family_versions(entry.rule, entry.sport, registry, decided, now.date())
+            return lambda _: 1
+        starts = family_starts(entry.rule, entry.sport, registry, decision_starts or {})
+        return lambda when: family_size_at(starts, when)
 
     return [
         summarize_candidate(
@@ -342,17 +365,19 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
                 p_close=selection_close_probability(
                     trade.market, trade.selection, event, snapshots[event.id]
                 ),
+                placed_at=trade.placed_at,
             )
         )
     return scored
 
 
-async def load_decided_versions(session: AsyncSession) -> set[tuple[str, int]]:
-    """The (name, version) of every mechanical candidate version with a recorded decision."""
+async def load_decision_starts(session: AsyncSession) -> dict[tuple[str, int], datetime]:
+    """The first recorded decision time of every candidate version that has one."""
+    name, version = col(CandidateDecision.candidate_name), col(CandidateDecision.candidate_version)
     rows = await session.execute(
-        select(CandidateDecision.candidate_name, CandidateDecision.candidate_version).distinct()
+        select(name, version, func.min(CandidateDecision.decision_time)).group_by(name, version)
     )
-    return {(name, version) for name, version in rows.all()}
+    return {(name, version): first for name, version, first in rows.all()}
 
 
 async def candidate_report(
@@ -366,7 +391,7 @@ async def candidate_report(
         await load_scored_trades(session),
         registry,
         now or datetime.now(UTC),
-        await load_decided_versions(session),
+        await load_decision_starts(session),
         n_boot,
         seed,
     )

@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 from odds_analytics.candidate_backtest import HashStatus, replay
-from odds_analytics.candidate_report import candidate_report
+from odds_analytics.candidate_report import candidate_report, load_decision_starts
 from odds_core.candidates import MechanicalCandidate
 from odds_core.event_source import canonical_event_id
 from odds_core.models import EventStatus
@@ -252,27 +252,34 @@ class TestSharedScoring:
 
 
 class TestFamilySize:
-    async def test_report_counts_versions_with_recorded_decisions(
+    async def test_report_starts_earlier_versions_at_their_first_decision(
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
         await add_event(session, "e1", KICKOFF)
-        for version in (1, 2):
+        await add_event(session, "e2", KICKOFF + timedelta(days=1))
+        for version, event_id, when in (
+            (1, "e1", KICKOFF),
+            (1, "e2", KICKOFF + timedelta(days=1)),
+            (2, "e2", KICKOFF + timedelta(days=1)),
+        ):
             session.add(
                 CandidateDecision(
                     candidate_name="gap",
                     candidate_version=version,
-                    event_id="e1",
-                    decision_time=KICKOFF,
-                    kickoff_at_decision=KICKOFF,
-                    known_at=KICKOFF,
+                    event_id=event_id,
+                    decision_time=when,
+                    kickoff_at_decision=when,
+                    known_at=when,
                 )
             )
         await session.commit()
+
+        starts = await load_decision_starts(session)
+        assert starts == {("gap", 1): KICKOFF, ("gap", 2): KICKOFF + timedelta(days=1)}
+
         registry = [candidate(version=3), candidate(name="sibling")]
-
         summaries = await candidate_report(session, registry, N_BOOT, now=NOW)
-
         assert {(s.name, s.version): s.family_versions for s in summaries} == {
             ("gap", 3): 4,
             ("sibling", 1): 4,
