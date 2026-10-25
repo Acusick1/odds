@@ -21,10 +21,18 @@ FDUK_CLOSE = (2.25, 3.45, 3.7)
 WIDE = (1.8, 3.2, 3.2)
 
 
-def _betfair(minutes_before: float, prices: tuple[float, float, float], inplay: bool = False):
-    book = three_way_bookmaker(
-        "betfair_exchange", prices, betfair_meta={"inplay": inplay, "market_status": "OPEN"}
-    )
+def _betfair(
+    minutes_before: float,
+    prices: tuple[float, float, float],
+    inplay: bool = False,
+    betfair_start: datetime = KICKOFF,
+):
+    meta = {
+        "inplay": inplay,
+        "market_status": "OPEN",
+        "market_start_time": betfair_start.isoformat(),
+    }
+    book = three_way_bookmaker("betfair_exchange", prices, betfair_meta=meta)
     return make_tagged_snapshot(
         EVENT_ID, KICKOFF - timedelta(minutes=minutes_before), [book], "betfair_api"
     )
@@ -67,6 +75,19 @@ class TestEventClose:
         snapshots = [_betfair(10, LATE), _betfair(1, (5.0, 5.0, 1.5), inplay=True)]
         close = event_close(event, snapshots, "1x2")
         assert close is not None and close.fair == pytest.approx(_fair(LATE))
+
+    def test_latest_pre_play_snapshot_wins_whatever_the_betfair_start(self, event: Event) -> None:
+        betfair_start = KICKOFF - timedelta(minutes=25)
+        snapshots = [
+            _betfair(20, EARLY, betfair_start=betfair_start),
+            _betfair(5, LATE, betfair_start=betfair_start),
+            _betfair(2, (5.0, 5.0, 1.5), inplay=True, betfair_start=betfair_start),
+            _betfair(-5, (2.0, 3.6, 4.4), betfair_start=betfair_start),
+        ]
+        close = event_close(event, snapshots, "1x2")
+        assert close is not None
+        assert close.time == KICKOFF - timedelta(minutes=5)
+        assert close.fair == pytest.approx(_fair(LATE))
 
     def test_snapshot_outside_window_falls_back_to_fduk(self, event: Event) -> None:
         snapshots = [_betfair(45, EARLY), _fduk_close(FDUK_CLOSE)]

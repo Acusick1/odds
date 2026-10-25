@@ -17,6 +17,7 @@ from odds_lambda.scheduling.decision import (
     DORMANCY_HORIZON_DAYS,
     OVERNIGHT_WINDOWS,
     CadenceConfig,
+    KickoffLookup,
     OvernightWindow,
     ScheduleDecision,
     decide_forward_resilient,
@@ -199,14 +200,17 @@ async def published_schedule_kickoff(
     return None
 
 
-async def next_fixture_kickoff(sport_key: str, *, now: datetime) -> datetime | None:
-    """Earliest upcoming kickoff in the stored events or the published schedule.
+async def next_fixture_kickoff(
+    sport_key: str, *, now: datetime, stored_kickoff: KickoffLookup = get_next_kickoff
+) -> datetime | None:
+    """Earliest upcoming kickoff in the stored events (read by ``stored_kickoff``) or the
+    published schedule.
 
     A collector that goes dormant stops creating events, so the stored events
     alone could never end the dormancy. The published schedule wakes it, and the
     stored events keep a sport awake when the schedule source is down.
     """
-    stored = await get_next_kickoff(sport_key, now=now)
+    stored = await stored_kickoff(sport_key, now=now)
     async with async_session_maker() as session:
         published = await published_schedule_kickoff(session, sport_key, now=now)
     return min((k for k in (stored, published) if k is not None), default=None)
@@ -219,19 +223,30 @@ async def decide_collection_run(
     overnight: OvernightWindow | None,
     now: datetime | None = None,
     stored_only: bool = False,
+    stored_kickoff: KickoffLookup | None = None,
 ) -> ScheduleDecision:
     """Next run of a collector, dormant while no fixture is within ``DORMANCY_HORIZON_DAYS``.
 
     ``stored_only`` looks at stored events alone, for a job that only pairs
-    with events other jobs create.
+    with events other jobs create. ``stored_kickoff`` replaces the stored events'
+    ``commence_time`` as their kickoff, for the cadence and the close run.
     """
+    lookup: KickoffLookup | None = None if stored_only else next_fixture_kickoff
+    if stored_kickoff is not None:
+        stored = stored_kickoff
+
+        async def with_stored(sport_key: str, *, now: datetime) -> datetime | None:
+            return await next_fixture_kickoff(sport_key, now=now, stored_kickoff=stored)
+
+        lookup = stored if stored_only else with_stored
     return await decide_forward_resilient(
         sport_keys,
         cadence,
         overnight=overnight,
         lookahead_days=DORMANCY_HORIZON_DAYS,
         now=now,
-        next_kickoff_lookup=None if stored_only else next_fixture_kickoff,
+        next_kickoff_lookup=lookup,
+        close_kickoff_lookup=stored_kickoff,
     )
 
 

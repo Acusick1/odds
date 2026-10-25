@@ -65,8 +65,9 @@ class TestBetfairDormancy:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch(
-                "odds_lambda.scheduling.decision.get_next_kickoff",
+            patch.object(
+                fetch_betfair_exchange,
+                "next_betfair_kickoff",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -108,8 +109,9 @@ class TestBetfairDormancy:
                 new_callable=AsyncMock,
                 return_value=datetime.now(UTC) + timedelta(days=DORMANCY_HORIZON_DAYS - 1),
             ),
-            patch(
-                "odds_lambda.scheduling.decision.get_next_kickoff",
+            patch.object(
+                fetch_betfair_exchange,
+                "next_betfair_kickoff",
                 new_callable=AsyncMock,
                 return_value=None,
             ),

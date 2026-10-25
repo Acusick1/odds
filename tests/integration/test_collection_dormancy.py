@@ -10,9 +10,13 @@ from odds_core.epl_data_models import EspnFixture
 from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import Event, EventStatus
 from odds_lambda import collection_calendar
+from odds_lambda.betfair.kickoff import next_betfair_kickoff
 from odds_lambda.collection_calendar import decide_collection_run, next_fixture_kickoff
+from odds_lambda.jobs import fetch_betfair_exchange
 from odds_lambda.jobs.fetch_oddsportal import CADENCE
 from odds_lambda.scheduling.decision import DORMANCY_HORIZON_DAYS
+
+from tests.test_helpers import make_tagged_snapshot
 
 NOW = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
 HORIZON = timedelta(days=DORMANCY_HORIZON_DAYS)
@@ -187,3 +191,99 @@ class TestSeasonCycle:
 
         assert asleep.should_execute is False
         assert awake.should_execute is True
+
+
+class TestBetfairKickoff:
+    """The Betfair job also runs before an earlier Betfair start (#640)."""
+
+    FIRST_PITCH = datetime(2026, 10, 25, 0, 0, tzinfo=UTC)
+    BETFAIR_START = datetime(2026, 10, 24, 23, 0, tzinfo=UTC)
+    LAST_RUN = datetime(2026, 10, 24, 22, 47, tzinfo=UTC)
+
+    async def _seed(
+        self, session: Any, *starts: str | None, sport_key: str = "baseball_mlb"
+    ) -> None:
+        event = _event(self.FIRST_PITCH, sport_key=sport_key)
+        session.add(event)
+        if sport_key == "baseball_mlb":
+            session.add(_mlb_game(849802, self.FIRST_PITCH, self.LAST_RUN - timedelta(hours=6)))
+        for minutes, start in enumerate(starts):
+            meta = {"inplay": False, "market_start_time": start}
+            snapshot_time = self.LAST_RUN - timedelta(minutes=30 - minutes)
+            snapshot = make_tagged_snapshot(
+                event.id,
+                snapshot_time,
+                [{"key": "betfair_exchange", "markets": [], "betfair_meta": meta}],
+                "betfair_api",
+            )
+            snapshot.api_request_id = f"betfair_api_{snapshot_time.isoformat()}"
+            session.add(snapshot)
+        await session.commit()
+
+    @staticmethod
+    async def _decide(sport_key: str, now: datetime, *, betfair: bool = True) -> datetime | None:
+        decision = await decide_collection_run(
+            [sport_key],
+            fetch_betfair_exchange.CADENCE,
+            overnight=None,
+            now=now,
+            stored_kickoff=next_betfair_kickoff if betfair else None,
+        )
+        return decision.next_execution
+
+    async def test_a_close_run_lands_before_an_earlier_betfair_start(
+        self, pglite_async_session: Any
+    ) -> None:
+        await self._seed(pglite_async_session, self.BETFAIR_START.isoformat())
+
+        assert await self._decide("baseball_mlb", self.LAST_RUN) == self.BETFAIR_START - timedelta(
+            minutes=5
+        )
+
+    async def test_the_commence_time_close_run_is_kept_after_the_betfair_start(
+        self, pglite_async_session: Any
+    ) -> None:
+        await self._seed(pglite_async_session, self.BETFAIR_START.isoformat())
+
+        after_start = self.BETFAIR_START + timedelta(minutes=1)
+        assert await next_betfair_kickoff("baseball_mlb", now=after_start) == self.FIRST_PITCH
+        last_cadence_run = self.FIRST_PITCH - timedelta(minutes=14)
+        assert await self._decide("baseball_mlb", last_cadence_run) == self.FIRST_PITCH - timedelta(
+            minutes=5
+        )
+
+    async def test_the_latest_snapshot_decides_the_betfair_start(
+        self, pglite_async_session: Any
+    ) -> None:
+        later = (self.FIRST_PITCH + timedelta(hours=1)).isoformat()
+        await self._seed(pglite_async_session, self.BETFAIR_START.isoformat(), later)
+
+        assert await next_betfair_kickoff("baseball_mlb", now=self.LAST_RUN) == self.FIRST_PITCH
+
+    @pytest.mark.parametrize(
+        "start",
+        [
+            None,
+            "not-a-time",
+            (FIRST_PITCH + timedelta(minutes=75)).isoformat(),
+            (FIRST_PITCH - timedelta(hours=3, minutes=1)).isoformat(),
+        ],
+        ids=["no_start", "malformed_start", "later_start", "start_beyond_the_bound"],
+    )
+    async def test_the_kickoff_stays_the_commence_time(
+        self, pglite_async_session: Any, start: str | None
+    ) -> None:
+        await self._seed(pglite_async_session, start)
+
+        assert await next_betfair_kickoff("baseball_mlb", now=self.LAST_RUN) == self.FIRST_PITCH
+
+    @pytest.mark.parametrize("minutes_before", [60, 20, 4], ids=["pregame", "closing", "close_run"])
+    async def test_a_betfair_start_at_kickoff_keeps_the_timing(
+        self, pglite_async_session: Any, minutes_before: int
+    ) -> None:
+        await self._seed(pglite_async_session, self.FIRST_PITCH.isoformat(), sport_key="soccer_epl")
+        now = self.FIRST_PITCH - timedelta(minutes=minutes_before)
+
+        assert await self._decide("soccer_epl", now) == await self._decide(
+            "soccer_epl", now, betfair=False
+        )

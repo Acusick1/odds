@@ -215,12 +215,16 @@ def _decide_from_kickoff(
 
 
 async def _get_close_kickoff(
-    sport_key: str, cadence: CadenceConfig, *, now: datetime
+    sport_key: str,
+    cadence: CadenceConfig,
+    *,
+    now: datetime,
+    lookup: KickoffLookup | None = None,
 ) -> datetime | None:
     """Earliest kickoff whose close run (``close_lead`` before it) is still ahead of ``now``."""
     if cadence.close_lead is None:
         return None
-    return await get_next_kickoff(sport_key, now=now + cadence.close_lead)
+    return await (lookup or get_next_kickoff)(sport_key, now=now + cadence.close_lead)
 
 
 async def decide_forward(
@@ -273,11 +277,13 @@ async def decide_forward_resilient(
     lookahead_days: int = 7,
     now: datetime | None = None,
     next_kickoff_lookup: KickoffLookup | None = None,
+    close_kickoff_lookup: KickoffLookup | None = None,
 ) -> ScheduleDecision:
     """``decide_forward`` over one-or-more sports, resilient to query failure.
 
     The proximity gate keys off the *soonest* kickoff across ``sport_keys`` (a
-    single sport for per-sport jobs, several for combined runs). If the kickoff
+    single sport for per-sport jobs, several for combined runs), and the close
+    run off ``close_kickoff_lookup`` (stored events by default). If the kickoff
     query itself fails, falls back to ``cadence.db_fallback`` so scheduling
     never blocks on DB availability — preserving the self-scheduling chain.
     """
@@ -291,7 +297,7 @@ async def decide_forward_resilient(
             ko = await lookup(sk, now=now)
             if ko is not None and (soonest is None or ko < soonest):
                 soonest, soonest_sport = ko, sk
-            close_ko = await _get_close_kickoff(sk, cadence, now=now)
+            close_ko = await _get_close_kickoff(sk, cadence, now=now, lookup=close_kickoff_lookup)
             if close_ko is not None and (close_kickoff is None or close_ko < close_kickoff):
                 close_kickoff = close_ko
         return _decide_from_kickoff(

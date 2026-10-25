@@ -243,6 +243,7 @@ class TestBookToBookmakerEntry:
         meta = entry["betfair_meta"]
         assert meta["market_id"] == "1.123"
         assert meta["market_status"] == "OPEN"
+        assert meta["market_start_time"] == "2026-04-25T14:00:00+00:00"
         assert meta["inplay"] is False
         assert meta["total_matched"] == pytest.approx(385702.0)
         assert len(meta["runners"]) == 3

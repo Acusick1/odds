@@ -35,6 +35,8 @@ from odds_lambda.betfair import (
     resolve_teams,
 )
 from odds_lambda.betfair.cert_loader import resolve_cert_paths
+from odds_lambda.betfair.constants import LIVE_REQUEST_ID_PREFIX
+from odds_lambda.betfair.kickoff import next_betfair_kickoff
 from odds_lambda.collection_calendar import (
     CollectionSource,
     FixtureKey,
@@ -60,7 +62,8 @@ logger = structlog.get_logger()
 # aggressively than browser-driven fetch-oddsportal. 12h+ to kickoff all poll
 # at 2h, matching the previous "far" band. ``close_lead``
 # adds a run 5 minutes before every kickoff: the latest decision time and
-# inside the live close window of ADR-0012.
+# inside the live close window of ADR-0012. Kickoffs come from
+# ``next_betfair_kickoff``, so the run also lands before an earlier Betfair start.
 CADENCE = CadenceConfig(
     closing=0.25,
     pregame=0.5,
@@ -72,10 +75,8 @@ CADENCE = CadenceConfig(
     close_lead=timedelta(minutes=5),
 )
 
-LIVE_REQUEST_ID_PREFIX = "betfair_api_"
-
 # Betfair's start time for a game can pass before the game's own, and it differs from the MLB
-# schedule's, so a started game stays listed long enough to be seen in play.
+# schedule's, so a game stays listed, and priced while pre-play, until it is seen in play.
 LOOKBACK_HOURS = 12
 
 SOURCE = CollectionSource(
@@ -98,6 +99,7 @@ class IngestionStats:
     books_in_play: int = 0
     accounted_fixtures: set[FixtureKey] = field(default_factory=set)
     books_suspended: int = 0
+    books_pre_play_past_start: int = 0
     snapshots_stored: int = 0
     events_matched: int = 0
     events_created: int = 0
@@ -114,7 +116,7 @@ class IngestionStats:
 
 
 def _should_skip_book(book: BetfairBook, sport_cfg: SportBetfairConfig) -> bool:
-    """Skip in-play and clearly-closed markets; we ingest pre-match only."""
+    """Skip in-play and clearly-closed markets; we ingest pre-play only, whatever the Betfair start."""
     if book.inplay:
         return True
     status = (book.market_status or "").upper()
@@ -128,7 +130,8 @@ def _should_skip_book(book: BetfairBook, sport_cfg: SportBetfairConfig) -> bool:
 def _account_for(
     accounted: list[GameRow], book: BetfairBook, sport_cfg: SportBetfairConfig
 ) -> None:
-    """Note the game of a book the run saw but did not price (in play, started, or priceless).
+    """Note the game of a book the run saw but did not price (in play, skipped after its Betfair
+    start, or suspended with no prices).
 
     A book with no start time or unparseable teams identifies no fixture, so it accounts for none.
     """
@@ -173,7 +176,7 @@ async def ingest_sport(
         started = book.market_start_time is not None and book.market_start_time <= snapshot_time
         if book.inplay:
             stats.books_in_play += 1
-        if _should_skip_book(book, sport_cfg) or started:
+        if _should_skip_book(book, sport_cfg):
             if book.inplay or started:
                 _account_for(accounted, book, sport_cfg)
             continue
@@ -203,6 +206,8 @@ async def ingest_sport(
             if is_suspended:
                 _account_for(accounted, book, sport_cfg)
             continue
+        if started:
+            stats.books_pre_play_past_start += 1
         game = GameRow(
             home, away, book.market_start_time, doubleheader_game_number(book.betfair_event_name)
         )
@@ -276,6 +281,7 @@ async def ingest_sport(
         books_fetched=stats.books_fetched,
         books_in_play=stats.books_in_play,
         books_suspended=stats.books_suspended,
+        books_pre_play_past_start=stats.books_pre_play_past_start,
         snapshots_stored=stats.snapshots_stored,
         events_matched=stats.events_matched,
         events_created=stats.events_created,
@@ -304,7 +310,9 @@ async def main(ctx: JobContext) -> None:
     overnight = OVERNIGHT_WINDOWS.get(sport)
 
     async def _reschedule(label: str) -> ScheduleDecision:
-        decision = await decide_collection_run([sport], CADENCE, overnight=overnight)
+        decision = await decide_collection_run(
+            [sport], CADENCE, overnight=overnight, stored_kickoff=next_betfair_kickoff
+        )
         assert decision.next_execution is not None  # noqa: S101
         try:
             await self_schedule(
