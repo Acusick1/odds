@@ -28,7 +28,7 @@ status: stable
 | Module | Class | Notes |
 |---|---|---|
 | `odds_lambda.storage.writers` / `odds_lambda.storage.readers` | [`odds_lambda.storage.writers.OddsWriter`](odds-writer.md) / [`odds_lambda.storage.readers.OddsReader`](odds-reader.md) | Events (status and scores, discovery upserts), snapshots with their odds rows and, given a snapshot shape, their source, market and price rows, fetch logs, including their API quota, and data-quality logs |
-| `odds_lambda.storage.event_resolver` | functions | [Event resolver](event-resolver.md): finds or creates a listed game's event under an advisory lock taken in key order, and records its external ids; flushes |
+| `odds_lambda.storage.event_resolver` | functions | [Event resolver](event-resolver.md): finds or creates a listed game's event (or only attaches to an existing one) under an advisory lock taken in key order, and records its external ids; flushes |
 | `odds_lambda.storage.event_kickoff` | functions | [Kick-off authority](kickoff-authority.md): the one function that moves `commence_time`, for the sources in the sport's authority order, against a clock the caller passes (the MLB Stats API alone may move to a past start); flushes when it re-times snapshots |
 | `odds_lambda.storage.shaped_snapshots` | functions | [Writing price rows](price-tables.md#writing-price-rows): stores an envelope's snapshot with its source, market, time basis and prices (one snapshot per market), and a fetch's payload; flushes |
 | `odds_lambda.storage.snapshot_store` | functions | [Storing a snapshot under its key](price-tables.md#storing-a-snapshot-under-its-key): inserts a snapshot and its prices, or keeps the stored one; flushes in a savepoint |

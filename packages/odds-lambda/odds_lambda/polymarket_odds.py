@@ -5,20 +5,19 @@ from __future__ import annotations
 import json
 import re
 from bisect import bisect_right
-from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
 import structlog
-from odds_core.event_ids import is_odds_api_event_id
-from odds_core.models import Event
 from odds_core.odds_math import PRICE_DECIMAL_KEY
 from odds_core.team import normalize_team_name
+from odds_core.vocabulary import Source
 
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.polymarket_sports import PolymarketSportConfig
+from odds_lambda.storage.event_resolver import ListedGame, event_lock_key
 
 logger = structlog.get_logger()
 
@@ -49,7 +48,6 @@ SUM_TOLERANCE = 0.03
 MAX_STALENESS = timedelta(minutes=30)
 # A live midpoint is only quoted when the book is tight; a wider spread is an empty book.
 MAX_QUOTE_SPREAD = 0.03
-EVENT_MATCH_WINDOW = timedelta(hours=3)
 
 _CLUB_SUFFIX = re.compile(r"\s+A?FC$")
 
@@ -126,15 +124,6 @@ class Resampled:
     off_sum: int = 0
 
 
-@dataclass
-class Pairing:
-    pairs: list[tuple[Event, PolymarketMatch]] = field(default_factory=list)
-    twins: list[tuple[PolymarketMatch, list[Event]]] = field(default_factory=list)
-    unmatched_events: list[Event] = field(default_factory=list)
-    ambiguous_events: list[Event] = field(default_factory=list)
-    unmatched_matches: list[PolymarketMatch] = field(default_factory=list)
-
-
 def canonical_team(name: str) -> str:
     return normalize_team_name(_CLUB_SUFFIX.sub("", name))
 
@@ -189,54 +178,24 @@ def parse_match_event(
     )
 
 
-def preferred_event(events: Sequence[Event]) -> Event:
-    """The Odds API event when there is one, as ``OddsWriter.find_or_create_event`` prefers."""
-    api = [e for e in events if is_odds_api_event_id(e.id)]
-    return min(api or events, key=lambda e: e.id)
+def listed_game(match: PolymarketMatch, sport: PolymarketSportConfig) -> ListedGame:
+    """The game a match lists, for attaching to its event. Polymarket creates no events, so the
+    ``legacy_id`` an event created for it would take is never used."""
+    return ListedGame(
+        source=Source.POLYMARKET,
+        sport_key=sport.sport_key,
+        sport_title=sport.sport_title,
+        home_team=match.home_team,
+        away_team=match.away_team,
+        commence_time=match.start_time,
+        legacy_id=match.ticker,
+        external_id=match.pm_event_id,
+    )
 
 
-def pair_events(events: Sequence[Event], matches: Sequence[PolymarketMatch]) -> Pairing:
-    """Pair events with matches, one event per match.
-
-    Several events can match one Polymarket match when one fixture exists under
-    several ids, a data defect: only the preferred event is paired and the rest
-    are listed in ``twins``.
-    """
-    by_teams: dict[tuple[str, str], list[PolymarketMatch]] = defaultdict(list)
-    for match in matches:
-        by_teams[(match.home_team, match.away_team)].append(match)
-
-    pairing = Pairing()
-    claimed: dict[str, list[Event]] = defaultdict(list)
-    by_id = {m.pm_event_id: m for m in matches}
-    for event in events:
-        candidates = [
-            match
-            for match in by_teams[(event.home_team, event.away_team)]
-            if abs(match.start_time - event.commence_time) <= EVENT_MATCH_WINDOW
-        ]
-        if len(candidates) == 1:
-            claimed[candidates[0].pm_event_id].append(event)
-        elif candidates:
-            pairing.ambiguous_events.append(event)
-        else:
-            pairing.unmatched_events.append(event)
-
-    for pm_event_id, claimants in claimed.items():
-        match = by_id[pm_event_id]
-        chosen = preferred_event(claimants)
-        pairing.pairs.append((chosen, match))
-        if len(claimants) > 1:
-            pairing.twins.append((match, claimants))
-            logger.warning(
-                "polymarket_event_twins",
-                ticker=match.ticker,
-                event_ids=sorted(e.id for e in claimants),
-                chosen=chosen.id,
-            )
-    pairing.pairs.sort(key=lambda pair: pair[0].commence_time)
-    pairing.unmatched_matches = [m for m in matches if m.pm_event_id not in claimed]
-    return pairing
+def lock_order(match: PolymarketMatch, sport: PolymarketSportConfig) -> int:
+    """Sort key that attaches a run's matches in fixture-lock order within one transaction."""
+    return event_lock_key(sport.sport_key, match.home_team, match.away_team)
 
 
 def grid_offsets() -> list[timedelta]:
@@ -299,15 +258,14 @@ def resample(
 def build_raw_data(
     match: PolymarketMatch,
     sport: PolymarketSportConfig,
-    event: Event,
     prices: Prices,
     snapshot_time: datetime,
     include_quotes: bool = False,
 ) -> dict[str, Any]:
     names: dict[Side, str] = {
-        "home": event.home_team,
+        "home": match.home_team,
         "draw": DRAW_OUTCOME,
-        "away": event.away_team,
+        "away": match.away_team,
     }
     return {
         "bookmakers": [

@@ -129,8 +129,9 @@ def backfill_odds(
 ):
     """Store Polymarket price history as `polymarket` odds snapshots for finished events.
 
-    Reads events from DATABASE_URL and skips events that already have history
-    snapshots, so it is safe to rerun.
+    Attaches each Polymarket match to its existing event in DATABASE_URL, recording
+    the Polymarket event id, and skips events that already have history snapshots, so
+    it is safe to rerun.
     """
     from odds_core.sports import SUPPORTED_SPORTS
     from odds_lambda.polymarket_odds_backfill import backfill_sport
@@ -150,17 +151,16 @@ def backfill_odds(
     table.add_column("Metric")
     table.add_column("Count", justify="right")
     for name, value in (
-        ("Finished events", report.events_considered),
-        ("Paired with a Polymarket match", report.events_paired),
+        ("Polymarket matches", report.matches_considered),
+        ("Attached to an event", report.matches_attached),
+        ("Skipped (event not finished)", report.matches_not_final),
         ("Skipped (already backfilled)", report.events_skipped_existing),
-        ("Skipped (twin of another event)", report.twin_events_skipped),
         ("Events written", report.events_written),
         ("Events with no usable points", report.events_without_points),
         ("Snapshots written", report.snapshots_written),
         ("Grid points dropped, missing prices", report.points_missing),
         ("Grid points dropped, prices off sum", report.points_off_sum),
         ("Events without a Polymarket match", len(report.unmatched_event_ids)),
-        ("Events with several Polymarket matches", len(report.ambiguous_event_ids)),
         ("Polymarket matches without an event", len(report.unmatched_pm_tickers)),
     ):
         table.add_row(name, str(value))

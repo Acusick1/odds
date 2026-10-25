@@ -45,6 +45,10 @@ Then it records the ids and moves the kick-off:
 
 It flushes and never commits ([Commit contract](storage-layer.md#commit-contract)).
 
+## Attaching without creating
+
+`odds_lambda.storage.event_resolver.attach_event(session, game)` is for a source that creates no events (Polymarket, through `odds_lambda.polymarket_odds.listed_game`). It takes the fixture lock and looks the game up as `odds_lambda.storage.event_resolver.resolve_event` does (steps 1 to 4), then records the source's id on the event it found. With no match it returns `None` and creates nothing. It does not offer the listed start to `odds_lambda.storage.event_kickoff.move_kickoff`, since such a source is not a schedule authority. Its `odds_lambda.storage.event_resolver.ListedGame` `legacy_id` is unused. It flushes and never commits, and the [lock order](#locks-and-transactions) applies.
+
 ## MLB without the schedule
 
 `odds_lambda.storage.event_resolver.resolve_unscheduled_mlb_event` is the lookup for an MLB game listed while the MLB schedule is unavailable. Under the same fixture lock it matches only the one event of the pair within ±2 h, and only for a row with no doubleheader game number, since without the schedule either game could be another. It records the source's id on that event, never creates one and moves no kick-off; with no match it returns `None`.

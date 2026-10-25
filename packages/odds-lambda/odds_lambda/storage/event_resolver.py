@@ -136,6 +136,24 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     return resolved
 
 
+async def attach_event(session: AsyncSession, game: ListedGame) -> ResolvedEvent | None:
+    """The existing event of ``game``, recording the source's id on it; ``None`` when none
+    matches, and no event is created. The lookup, lock and id recording are ``resolve_event``'s;
+    the listed start is not offered to ``move_kickoff``, for a source that is not a schedule
+    authority. Flushes; the caller commits.
+
+    Raises:
+        LockOrderError: as ``resolve_event``.
+    """
+    home_team = normalize_team_name(game.home_team)
+    away_team = normalize_team_name(game.away_team)
+    await _lock(session, _lock_key(game))
+    resolved = await _find(session, game, home_team, away_team)
+    if resolved is not None and game.external_id is not None:
+        await _record_external_id(session, resolved.event, game.source, game.external_id)
+    return resolved
+
+
 async def resolve_unscheduled_mlb_event(
     session: AsyncSession,
     source: Source,

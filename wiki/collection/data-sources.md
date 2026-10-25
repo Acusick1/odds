@@ -19,7 +19,7 @@ Five feeds write `raw_data` snapshots in The Odds API shape ([odds tables](../st
 |---|---|---|---|---|
 | The Odds API | Pinnacle, Betfair Exchange and UK retail books for EPL; US books for MLB and NBA; dense snapshots | `fetch-odds` job ([fetch-odds-job](fetch-odds-job.md), [client](odds-api-client.md)) | production host, EPL only | API hex ids |
 | OddsPortal | UK books, upcoming and closing odds | `fetch-oddsportal` job ([fetch-oddsportal-job](fetch-oddsportal-job.md)) | production host | `op_live_*` (`odds_core.event_ids.LIVE_EVENT_ID_PREFIX`) |
-| Betfair Exchange | Best back price per outcome | `fetch-betfair-exchange` job ([betfair-exchange](betfair-exchange.md)) | production host | joins existing events |
+| Betfair Exchange | Best back price per outcome | `fetch-betfair-exchange` job ([betfair-exchange](betfair-exchange.md)) | production host | attaches to existing events, recording the Polymarket id, and creates none |
 | Polymarket | EPL three-way match midpoints, history from 2025-08 | `odds polymarket backfill-odds` (manual) and the bootstrapped per-sport `fetch-polymarket-odds-epl` job ([polymarket-odds-snapshots](polymarket-odds-snapshots.md)) | backfill manual; the job self-schedules and is dormant with no stored event in 28 days | joins existing events |
 | football-data.co.uk (FDUK) | Historical EPL opening and closing odds from Pinnacle, the exchange and UK retail books, with snapshot times stamped from FDUK's documented collection times (`odds_core.snapshot_sources.FdukTimeBasis`) and the full-time score for events that have none; snapshots only, no odds rows | manual script ([historical-ingest-scripts](historical-ingest-scripts.md)) | manual | `fduk_*` / `op_<season>_*` |
 

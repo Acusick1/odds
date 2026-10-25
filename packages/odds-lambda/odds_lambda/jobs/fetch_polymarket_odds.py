@@ -1,15 +1,16 @@
 """Fetch current Polymarket match prices as ``polymarket`` odds snapshots.
 
-Reads the open match events of a sport from Gamma, pairs them with scheduled
-``events`` rows, and stores each pair's three Yes midpoints through
-``OddsWriter.store_odds_snapshot``. Self-schedules with the cadence that
-mirrors the backfill grid spacing.
+Reads the open match events of a sport from Gamma, attaches each to its existing
+event through the resolver (Polymarket creates none), and stores the three Yes
+midpoints and quotes through ``OddsWriter.store_odds_snapshot``. Self-schedules
+with the cadence that mirrors the backfill grid spacing.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import structlog
 from odds_core.alerts import job_alert_context, send_job_warning
@@ -18,19 +19,22 @@ from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, FetchLog
 from odds_core.snapshot_sources import SnapshotSource
 from odds_core.sports import SportKey
-from sqlalchemy import select
+from odds_core.vocabulary import Source, TimeBasis
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.collection_calendar import CollectionSource, decide_collection_run
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.polymarket_fetcher import PolymarketClient
 from odds_lambda.polymarket_odds import (
-    EVENT_MATCH_WINDOW,
     LIVE_REQUEST_ID_PREFIX,
     MAX_HORIZON,
     MAX_QUOTE_SPREAD,
     TIER_STEPS,
+    PolymarketMatch,
     build_raw_data,
-    pair_events,
+    listed_game,
+    lock_order,
     parse_match_event,
     sum_is_valid,
 )
@@ -42,6 +46,8 @@ from odds_lambda.scheduling.decision import (
 )
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
+from odds_lambda.storage.event_resolver import attach_event
+from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -91,6 +97,20 @@ class IngestionStats:
     errors: list[str] = field(default_factory=list)
 
 
+async def _scheduled_soon(session: AsyncSession, sport_key: SportKey, now: datetime) -> int:
+    result = await session.execute(
+        select(func.count())
+        .select_from(Event)
+        .where(
+            Event.sport_key == sport_key,
+            Event.status == EventStatus.SCHEDULED,
+            Event.commence_time > now,
+            Event.commence_time <= now + LISTING_CHECK_HORIZON,
+        )
+    )
+    return result.scalar_one()
+
+
 async def ingest_sport(sport_key: SportKey, snapshot_time: datetime) -> IngestionStats:
     sport = POLYMARKET_SPORTS[sport_key]
     stats = IngestionStats(sport=sport_key)
@@ -107,38 +127,32 @@ async def ingest_sport(sport_key: SportKey, snapshot_time: datetime) -> Ingestio
     stats.matches_seen = len(matches)
 
     async with async_session_maker() as session:
-        events = list(
-            (
-                await session.execute(
-                    select(Event).where(
-                        Event.sport_key == sport_key,
-                        Event.commence_time > snapshot_time - EVENT_MATCH_WINDOW,
-                        Event.commence_time <= horizon + EVENT_MATCH_WINDOW,
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
         listing_error: EmptyListingError | None = None
-        scheduled_soon = [
-            e
-            for e in events
-            if e.status == EventStatus.SCHEDULED
-            and snapshot_time < e.commence_time <= snapshot_time + LISTING_CHECK_HORIZON
-        ]
-        if not matches and scheduled_soon:
-            listing_error = EmptyListingError(
-                f"Gamma lists no upcoming {sport_key} match; "
-                f"{len(scheduled_soon)} event(s) are scheduled within {LISTING_CHECK_HORIZON}"
-            )
-            stats.errors.append(str(listing_error))
+        if not matches:
+            scheduled_soon = await _scheduled_soon(session, sport_key, snapshot_time)
+            if scheduled_soon:
+                listing_error = EmptyListingError(
+                    f"Gamma lists no upcoming {sport_key} match; "
+                    f"{scheduled_soon} event(s) are scheduled within {LISTING_CHECK_HORIZON}"
+                )
+                stats.errors.append(str(listing_error))
 
-        pairing = pair_events(events, matches)
-        stats.matches_unpaired = len(pairing.unmatched_matches)
+        attached: list[tuple[PolymarketMatch, Event]] = []
+        for match in sorted(matches, key=lambda m: lock_order(m, sport)):
+            try:
+                async with session.begin_nested():
+                    found = await attach_event(session, listed_game(match, sport))
+            except Exception as e:
+                stats.errors.append(f"{match.ticker}: {type(e).__name__}: {e}")
+                logger.error("polymarket_odds_ingestion_failed", ticker=match.ticker, exc_info=True)
+                continue
+            if found is None:
+                stats.matches_unpaired += 1
+            else:
+                attached.append((match, found.event))
 
-        writer = OddsWriter(session)
-        for event, match in pairing.pairs:
+        quoted: list[tuple[PolymarketMatch, Event, dict[str, Any]]] = []
+        for match, event in attached:
             if snapshot_time >= event.commence_time:
                 stats.already_started += 1
                 continue
@@ -153,19 +167,29 @@ async def ingest_sport(sport_key: SportKey, snapshot_time: datetime) -> Ingestio
             if not sum_is_valid(prices):
                 stats.sum_rejected += 1
                 continue
-            try:
-                snapshot, _ = await writer.store_odds_snapshot(
-                    event_id=event.id,
-                    raw_data=build_raw_data(
-                        match, sport, event, prices, snapshot_time, include_quotes=True
-                    ),
-                    snapshot_time=snapshot_time,
-                )
-                snapshot.api_request_id = f"{LIVE_REQUEST_ID_PREFIX}{snapshot_time.isoformat()}"
-                stats.snapshots_stored += 1
-            except Exception as e:
-                stats.errors.append(f"{match.ticker}: {type(e).__name__}: {e}")
-                logger.error("polymarket_odds_ingestion_failed", ticker=match.ticker, exc_info=True)
+            envelope = build_raw_data(match, sport, prices, snapshot_time, include_quotes=True)
+            quoted.append((match, event, envelope))
+
+        if quoted:
+            payload_id = await store_payload(session, [envelope for _, _, envelope in quoted])
+            shape = SnapshotShape(Source.POLYMARKET, TimeBasis.OBSERVED, payload_id)
+            writer = OddsWriter(session)
+            for match, event, envelope in quoted:
+                try:
+                    async with session.begin_nested():
+                        await writer.store_odds_snapshot(
+                            event_id=event.id,
+                            raw_data=envelope,
+                            snapshot_time=snapshot_time,
+                            shape=shape,
+                            api_request_id=f"{LIVE_REQUEST_ID_PREFIX}{snapshot_time.isoformat()}",
+                        )
+                    stats.snapshots_stored += 1
+                except Exception as e:
+                    stats.errors.append(f"{match.ticker}: {type(e).__name__}: {e}")
+                    logger.error(
+                        "polymarket_odds_ingestion_failed", ticker=match.ticker, exc_info=True
+                    )
 
         if stats.matches_seen or stats.errors:
             session.add(

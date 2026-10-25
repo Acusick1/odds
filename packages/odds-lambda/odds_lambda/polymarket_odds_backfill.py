@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 import structlog
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.sports import SportKey
+from odds_core.vocabulary import Source, TimeBasis
 from sqlalchemy import select
 
 from odds_lambda.polymarket_fetcher import MAX_CONCURRENT_REQUESTS, PolymarketClient
@@ -23,31 +25,31 @@ from odds_lambda.polymarket_odds import (
     PolymarketMatch,
     Side,
     build_raw_data,
-    pair_events,
+    listed_game,
+    lock_order,
     parse_match_event,
     resample,
 )
-from odds_lambda.polymarket_sports import POLYMARKET_SPORTS, PolymarketSportConfig
+from odds_lambda.polymarket_sports import POLYMARKET_SPORTS
+from odds_lambda.storage.event_resolver import attach_event
+from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier
 
 logger = structlog.get_logger()
 
-INSERT_BATCH_SIZE = 50
-
 
 @dataclass
 class BackfillReport:
-    events_considered: int = 0
-    events_paired: int = 0
+    matches_considered: int = 0
+    matches_attached: int = 0
+    matches_not_final: int = 0
     events_skipped_existing: int = 0
-    twin_events_skipped: int = 0
     events_written: int = 0
     events_without_points: int = 0
     snapshots_written: int = 0
     points_missing: int = 0
     points_off_sum: int = 0
     unmatched_event_ids: list[str] = field(default_factory=list)
-    ambiguous_event_ids: list[str] = field(default_factory=list)
     unmatched_pm_tickers: list[str] = field(default_factory=list)
 
 
@@ -67,14 +69,12 @@ async def _fetch_series(
     return dict(zip(SIDES, await asyncio.gather(*(one(side) for side in SIDES)), strict=True))
 
 
-def _snapshot(
-    event: Event, match: PolymarketMatch, sport: PolymarketSportConfig, point: GridPoint
-) -> OddsSnapshot:
+def _snapshot(event: Event, envelope: dict[str, Any], point: GridPoint) -> OddsSnapshot:
     hours = calculate_hours_until_commence(point.time, event.commence_time)
     return OddsSnapshot(
         event_id=event.id,
         snapshot_time=point.time,
-        raw_data=build_raw_data(match, sport, event, point.prices, point.time),
+        raw_data=envelope,
         bookmaker_count=1,
         api_request_id=HISTORY_REQUEST_ID,
         fetch_tier=calculate_tier(hours).value,
@@ -98,12 +98,16 @@ async def backfill_sport(
 
     async with PolymarketClient() as client, async_session_maker() as session:
         raw_events = await client.get_all_events(sport_key, active=None, closed=True)
-        matches = [m for raw in raw_events if (m := parse_match_event(raw, sport))]
+        matches = [
+            m
+            for raw in raw_events
+            if (m := parse_match_event(raw, sport)) and m.start_time >= since
+        ]
 
-        events = list(
+        final_event_ids = list(
             (
                 await session.execute(
-                    select(Event)
+                    select(Event.id)
                     .where(
                         Event.sport_key == sport_key,
                         Event.status == EventStatus.FINAL,
@@ -115,14 +119,6 @@ async def backfill_sport(
             .scalars()
             .all()
         )
-        report.events_considered = len(events)
-        pairing = pair_events(events, matches)
-        report.events_paired = len(pairing.pairs)
-        report.twin_events_skipped = sum(len(events) - 1 for _, events in pairing.twins)
-        report.unmatched_event_ids = [e.id for e in pairing.unmatched_events]
-        report.ambiguous_event_ids = [e.id for e in pairing.ambiguous_events]
-        report.unmatched_pm_tickers = [m.ticker for m in pairing.unmatched_matches]
-
         existing = set(
             (
                 await session.execute(
@@ -134,10 +130,30 @@ async def backfill_sport(
             .scalars()
             .all()
         )
+        report.matches_considered = len(matches)
 
-        todo = [(e, m) for e, m in pairing.pairs if e.id not in existing]
-        report.events_skipped_existing = len(pairing.pairs) - len(todo)
-        for event, match in todo[:limit]:
+        attached_ids: set[str] = set()
+        written = 0
+        for match in sorted(matches, key=lambda m: lock_order(m, sport)):
+            found = await attach_event(session, listed_game(match, sport))
+            if not dry_run:
+                await session.commit()
+            if found is None:
+                report.unmatched_pm_tickers.append(match.ticker)
+                continue
+            event = found.event
+            report.matches_attached += 1
+            if event.status != EventStatus.FINAL or event.commence_time < since:
+                report.matches_not_final += 1
+                continue
+            attached_ids.add(event.id)
+            if event.id in existing:
+                report.events_skipped_existing += 1
+                continue
+            if limit is not None and written >= limit:
+                continue
+            written += 1
+
             kickoff = event.commence_time
             cutoff = min(kickoff, match.start_time)
             series = await _fetch_series(
@@ -151,20 +167,27 @@ async def backfill_sport(
                 logger.warning("polymarket_no_grid_points", event_id=event.id, ticker=match.ticker)
                 continue
 
-            snapshots = [_snapshot(event, match, sport, point) for point in resampled.points]
-            report.snapshots_written += len(snapshots)
+            envelopes = [
+                build_raw_data(match, sport, point.prices, point.time) for point in resampled.points
+            ]
+            report.snapshots_written += len(envelopes)
             report.events_written += 1
             if not dry_run:
-                for start in range(0, len(snapshots), INSERT_BATCH_SIZE):
-                    session.add_all(snapshots[start : start + INSERT_BATCH_SIZE])
-                    await session.flush()
+                shape = SnapshotShape(Source.POLYMARKET, TimeBasis.OBSERVED, None)
+                for point, envelope in zip(resampled.points, envelopes, strict=True):
+                    await store_shaped_snapshot(
+                        session, _snapshot(event, envelope, point), event, shape
+                    )
                 await session.commit()
             logger.info(
                 "polymarket_event_backfilled",
                 event_id=event.id,
                 ticker=match.ticker,
-                snapshots=len(snapshots),
+                snapshots=len(envelopes),
                 missing=resampled.missing,
                 off_sum=resampled.off_sum,
             )
+        if dry_run:
+            await session.rollback()
+        report.unmatched_event_ids = [i for i in final_event_ids if i not in attached_ids]
     return report
