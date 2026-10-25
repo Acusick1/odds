@@ -114,6 +114,7 @@ async def replay(
     candidate: MechanicalCandidate,
     start: date,
     end: date,
+    family_versions: int,
     now: datetime | None = None,
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
@@ -165,6 +166,7 @@ async def replay(
                         p_close=selection_close_probability(
                             market, selection, event, snapshots.get(event.id, [])
                         ),
+                        placed_at=decision_time(event.commence_time, params),
                     )
                 )
         # Read-only session: drop the loaded snapshots rather than hold the whole range.
@@ -178,7 +180,17 @@ async def replay(
         bets=len(bets),
         bets_with_close=sum(b.p_close is not None for b in bets),
     )
-    return score(candidate, start, end, bets, coverage, now or datetime.now(UTC), n_boot, seed)
+    return score(
+        candidate,
+        start,
+        end,
+        bets,
+        coverage,
+        family_versions,
+        now or datetime.now(UTC),
+        n_boot,
+        seed,
+    )
 
 
 def score(
@@ -187,13 +199,22 @@ def score(
     end: date,
     bets: Sequence[ScoredBet],
     coverage: Coverage,
+    family_versions: int,
     now: datetime,
     n_boot: int,
     seed: int,
 ) -> BacktestResult:
-    """Summarise replayed ``bets`` with the forward-test report's code."""
+    """Summarise replayed ``bets`` with the forward-test report's code, at one family size for all
+    checkpoints: a replay has no placement history to count versions against."""
     summary = summarize_candidate(
-        candidate.name, candidate.version, candidate.status, bets, now, n_boot, seed
+        candidate.name,
+        candidate.version,
+        candidate.status,
+        bets,
+        now,
+        lambda _: family_versions,
+        n_boot,
+        seed,
     )
     with_close, _ = scoreable_prefix(bets, now)
     return BacktestResult(
@@ -206,5 +227,7 @@ def score(
         hash_status=hash_status(candidate),
         coverage=coverage,
         summary=summary,
-        overall=checkpoint_at(with_close, len(with_close), n_boot, seed) if with_close else None,
+        overall=checkpoint_at(with_close, len(with_close), family_versions, n_boot, seed)
+        if with_close
+        else None,
     )

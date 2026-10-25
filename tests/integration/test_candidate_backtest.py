@@ -7,11 +7,11 @@ from typing import Any
 
 import pytest
 from odds_analytics.candidate_backtest import HashStatus, replay
-from odds_analytics.candidate_report import candidate_report
+from odds_analytics.candidate_report import candidate_report, load_decision_starts
 from odds_core.candidates import MechanicalCandidate
 from odds_core.event_source import canonical_event_id
 from odds_core.models import EventStatus
-from odds_core.paper_trade_models import PaperTrade, TradeResult
+from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
 from odds_lambda.candidate_rules import rule_sha256
 
 from tests.test_helpers import (
@@ -115,6 +115,7 @@ async def run(session: Any, cand: MechanicalCandidate | None = None, **kwargs: A
         cand or candidate(),
         date(2026, 4, 1),
         date(2026, 4, 30),
+        1,
         now=NOW,
         n_boot=N_BOOT,
         **kwargs,
@@ -248,3 +249,39 @@ class TestSharedScoring:
         assert result.summary.checkpoint == forward.checkpoint
         assert result.summary.verdict == forward.verdict
         assert result.summary.pnl == pytest.approx(forward.pnl)
+
+
+class TestFamilySize:
+    async def test_report_counts_versions_from_their_first_decision(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        await add_event(session, "e1", KICKOFF)
+        await add_event(session, "e2", KICKOFF + timedelta(days=1))
+        for version, event_id, when in (
+            (1, "e1", KICKOFF),
+            (1, "e2", KICKOFF + timedelta(days=1)),
+            (2, "e2", KICKOFF + timedelta(days=1)),
+        ):
+            session.add(
+                CandidateDecision(
+                    candidate_name="gap",
+                    candidate_version=version,
+                    event_id=event_id,
+                    decision_time=when,
+                    kickoff_at_decision=when,
+                    known_at=when,
+                )
+            )
+        await session.commit()
+
+        starts = await load_decision_starts(session)
+        assert starts == {("gap", 1): KICKOFF, ("gap", 2): KICKOFF + timedelta(days=1)}
+
+        # The registered gap v3 and the sibling have not decided, so only v1 and v2 count.
+        registry = [candidate(version=3), candidate(name="sibling")]
+        summaries = await candidate_report(session, registry, N_BOOT, now=NOW)
+        assert {(s.name, s.version): s.family_versions for s in summaries} == {
+            ("gap", 3): 2,
+            ("sibling", 1): 2,
+        }

@@ -35,19 +35,23 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     async def session():
         yield None
 
+    async def no_decisions(_session: Any) -> dict[tuple[str, int], datetime]:
+        return {}
+
     monkeypatch.setattr("odds_cli.commands.candidates.async_session_maker", session)
+    monkeypatch.setattr("odds_cli.commands.candidates.load_decision_starts", no_decisions)
     return directory
 
 
 def fake_replay(monkeypatch: pytest.MonkeyPatch) -> list[MechanicalCandidate]:
     seen: list[MechanicalCandidate] = []
 
-    async def replay(_session: Any, candidate: MechanicalCandidate, start: date, end: date):
+    async def replay(_session: Any, candidate: MechanicalCandidate, start: date, end: date, k: int):
         seen.append(candidate)
         coverage = Coverage(
             events=10, with_exchange=8, with_retail=9, with_bet=0, bets=0, bets_with_close=0
         )
-        return score(candidate, start, end, [], coverage, NOW, N_BOOT, 0)
+        return score(candidate, start, end, [], coverage, k, NOW, N_BOOT, 0)
 
     monkeypatch.setattr("odds_cli.commands.candidates.replay", replay)
     return seen
@@ -83,6 +87,65 @@ class TestBacktestCommand:
         assert summary["coverage"]["events"] == 10
         assert summary["hash_status"] == HashStatus.MATCH
         assert summary["start"] == "2025-08-01"
+
+    def backtest(self, name: str = "back-longest"):
+        return RUNNER.invoke(
+            app, ["candidates", "backtest", name, "--from", "2025-08-01", "--to", "2025-12-31"]
+        )
+
+    def decisions(self, monkeypatch: pytest.MonkeyPatch, *keys: tuple[str, int]) -> None:
+        async def recorded(_session: Any) -> dict[tuple[str, int], datetime]:
+            return dict.fromkeys(keys, NOW)
+
+        monkeypatch.setattr("odds_cli.commands.candidates.load_decision_starts", recorded)
+
+    def test_sibling_with_a_decision_raises_k_and_is_shown(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        fake_replay(monkeypatch)
+        write(registry, {**MECHANICAL, "name": "sibling"})
+        self.decisions(monkeypatch, ("sibling", 1))
+        out = tmp_path / "result.json"
+
+        result = RUNNER.invoke(
+            app,
+            ["candidates", "backtest", "back-longest", "--from", "2025-08-01", "--to", "2025-12-31"]
+            + ["--json", str(out)],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        assert "k=2" in result.stdout
+        assert json.loads(out.read_text())["summary"]["family_versions"] == 2
+
+    def test_registered_sibling_without_a_decision_does_not_count(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_replay(monkeypatch)
+        write(registry, {**MECHANICAL, "name": "sibling"})
+        assert "k=1" in self.backtest().stdout
+
+    def test_registered_candidate_with_decisions_is_not_counted_twice(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_replay(monkeypatch)
+        self.decisions(monkeypatch, ("back-longest", 1))
+        assert "k=1" in self.backtest().stdout
+
+    def test_draft_backtest_survives_a_rule_hash_mismatch_in_the_registry(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        fake_replay(monkeypatch)
+        write(registry, {**MECHANICAL, "name": "stale", "rule_sha256": "0" * 64})
+        draft = tmp_path / "draft.yaml"
+        draft.write_text(yaml.safe_dump({**MECHANICAL, "name": "draft"}))
+
+        result = RUNNER.invoke(
+            app,
+            ["candidates", "backtest", str(draft), "--from", "2025-08-01", "--to", "2025-12-31"],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        assert "k=" in result.stdout
 
     def test_draft_path_without_hash_is_reported(
         self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -187,6 +250,7 @@ class TestBacktestVerdictWording:
             date(2025, 9, 1),
             [],
             cov,
+            1,
             NOW,
             N_BOOT,
             0,

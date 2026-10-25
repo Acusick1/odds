@@ -16,6 +16,7 @@ dependencies = [
     "pydantic>=2.12.4",
     "scipy>=1.16.3",
     "xgboost>=3.1.1",
+    "sqlmodel>=0.0.27",
 ]
 
 [project.optional-dependencies]
