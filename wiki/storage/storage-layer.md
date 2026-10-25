@@ -5,7 +5,6 @@ description: The odds_lambda.storage module map, the commit and flush contract, 
 sources:
   - odds_lambda.storage
   - odds_lambda.storage.event_merge.EventMerger
-  - odds_lambda.storage.writers.OddsWriter.bulk_upsert_events
   - odds_lambda.storage.readers.OddsReader
   - odds_lambda.storage.validators.OddsValidator
   - odds_lambda.storage.tier_validator.TierCoverageValidator
@@ -27,9 +26,9 @@ status: stable
 
 | Module | Class | Notes |
 |---|---|---|
-| `odds_lambda.storage.writers` / `odds_lambda.storage.readers` | [`odds_lambda.storage.writers.OddsWriter`](odds-writer.md) / [`odds_lambda.storage.readers.OddsReader`](odds-reader.md) | Events (status and scores, discovery upserts), snapshots with their odds rows (reporting whether each was inserted) and, given a snapshot shape, their source, market and price rows, fetch logs, including their API quota, and data-quality logs |
+| `odds_lambda.storage.writers` / `odds_lambda.storage.readers` | [`odds_lambda.storage.writers.OddsWriter`](odds-writer.md) / [`odds_lambda.storage.readers.OddsReader`](odds-reader.md) | Event status and scores, snapshots (one per market of an envelope, counted as distinct snapshot times by the reader) with their odds rows (reporting whether each was inserted) and, given a snapshot shape, their source, market and price rows, fetch logs, including their API quota, and data-quality logs |
 | `odds_lambda.storage.event_unmatched` | functions | [Event resolver](event-resolver.md#no-game-in-the-schedule): marks an MLB event with no game UNMATCHED with an acknowledgement, and clears both when it gets a `gamePk`; flushes (clearing does not) |
-| `odds_lambda.storage.event_resolver` | functions | [Event resolver](event-resolver.md): finds or creates a listed game's event (or, for `odds_lambda.storage.event_resolver.attach_event`, only attaches to an existing one) under an advisory lock taken in key order (±2 h live window, ±24 h historical), and records its external ids; flushes |
+| `odds_lambda.storage.event_resolver` | functions | [Event resolver](event-resolver.md): finds or creates a listed game's event (or, for `odds_lambda.storage.event_resolver.attach_event`, only attaches to an existing one) under an advisory lock taken in key order (±2 h live window, ±24 h historical), and records its external ids; flushes. The live jobs call it through `odds_lambda.live_events` and the Odds API writers (ingestion, event sync, `odds discover games`, the backfill) through `odds_lambda.odds_api_events` |
 | `odds_lambda.storage.event_kickoff` | functions | [Kick-off authority](kickoff-authority.md): the one function that moves `commence_time`, for the sources in the sport's authority order, against a clock the caller passes (the MLB Stats API, and football-data.co.uk for an event no other source observed, may move to a past start); flushes when it re-times snapshots |
 | `odds_lambda.storage.shaped_snapshots` | functions | [Writing price rows](price-tables.md#writing-price-rows): stores an envelope's snapshot with its source, market, time basis and prices (one snapshot per market), and a fetch's payload (removing one whose snapshots were all skipped); flushes |
 | `odds_lambda.storage.snapshot_store` | functions | [Storing a snapshot under its key](price-tables.md#storing-a-snapshot-under-its-key): inserts a snapshot and its prices, or keeps the stored one; flushes in a savepoint |
@@ -51,7 +50,7 @@ status: stable
 
 ## Verb conventions
 
-- `upsert_*`: Postgres `ON CONFLICT DO UPDATE`, usually with a dynamically built `set_` excluding the key columns (`odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` also leaves `created_at`, `surrogate_id`, `mlb_game_pk`, `no_game_pk_reason`, status, scores and `completed_at` out). Each per-source writer has its own copy of this loop.
+- `upsert_*`: Postgres `ON CONFLICT DO UPDATE`, usually with a dynamically built `set_` excluding the key columns. Each per-source writer has its own copy of this loop. Events are not upserted: the [event resolver](event-resolver.md) finds or creates them.
 - `insert_*` / `bulk_insert_*`: `ON CONFLICT DO NOTHING` (`odds_lambda.storage.mlb_pitcher_writer.MlbPitcherWriter.insert_snapshots`).
 - `store_*`: plain `session.add()`.
 - The rule is not enforced anywhere; check the method body before relying on conflict behaviour.

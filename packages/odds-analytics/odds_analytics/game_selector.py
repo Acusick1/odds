@@ -287,6 +287,7 @@ class GameSelector:
 
                 game_plan = {
                     "event_id": event.get("id"),
+                    "odds_api_id": event.get("odds_api_id"),
                     "home_team": event.get("home_team"),
                     "away_team": event.get("away_team"),
                     "commence_time": utc_isoformat(commence_time),

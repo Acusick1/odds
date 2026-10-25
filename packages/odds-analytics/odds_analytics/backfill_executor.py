@@ -2,13 +2,20 @@
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import structlog
 from odds_core.database import async_session_maker
 from odds_core.time import parse_api_datetime
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.data_fetcher import TheOddsAPIClient
+from odds_lambda.live_events import DroppedGame, LiveEventFinder, alert_dropped_games
+from odds_lambda.odds_api_events import (
+    odds_api_finder,
+    resolve_odds_api_event,
+)
 from odds_lambda.storage.readers import OddsReader
+from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -23,6 +30,7 @@ class BackfillResult:
     failed_snapshots: int
     skipped_snapshots: int
     total_quota_used: int
+    dropped_games: list[DroppedGame] = field(default_factory=list)
 
 
 @dataclass
@@ -66,6 +74,9 @@ class BackfillExecutor:
         self.skip_existing = skip_existing
         self.dry_run = dry_run
         self.rate_limit_seconds = rate_limit_seconds
+        # NBA only, so the finder reads no MLB schedule and one serves the whole run
+        self._finder: LiveEventFinder | None = None
+        self._dropped_games: list[DroppedGame] = []
 
     async def __aenter__(self):
         """Context manager entry."""
@@ -113,6 +124,7 @@ class BackfillExecutor:
         # Process each game
         for game in games:
             event_id = game["event_id"]
+            odds_api_id = game.get("odds_api_id", event_id)
             home_team = game["home_team"]
             away_team = game["away_team"]
             snapshots = game["snapshots"]
@@ -124,6 +136,7 @@ class BackfillExecutor:
                 try:
                     result = await self._process_snapshot(
                         event_id=event_id,
+                        odds_api_id=odds_api_id,
                         home_team=home_team,
                         away_team=away_team,
                         snapshot_time=snapshot_time,
@@ -179,7 +192,10 @@ class BackfillExecutor:
             if game_success:
                 successful_games += 1
 
+        await alert_dropped_games("odds-backfill", self._dropped_games)
+
         return BackfillResult(
+            dropped_games=list(self._dropped_games),
             successful_games=successful_games,
             successful_snapshots=successful_snapshots,
             failed_snapshots=failed_snapshots,
@@ -190,6 +206,7 @@ class BackfillExecutor:
     async def _process_snapshot(
         self,
         event_id: str,
+        odds_api_id: str | None,
         home_team: str,
         away_team: str,
         snapshot_time: str,
@@ -199,6 +216,7 @@ class BackfillExecutor:
 
         Args:
             event_id: Event identifier
+            odds_api_id: The id The Odds API gives the event
             home_team: Home team name
             away_team: Away team name
             snapshot_time: ISO format snapshot time
@@ -235,6 +253,16 @@ class BackfillExecutor:
                         message="Already exists",
                     )
 
+        if odds_api_id is None:
+            return BackfillProgress(
+                event_id=event_id,
+                home_team=home_team,
+                away_team=away_team,
+                snapshot_time=snapshot_time,
+                status="skipped",
+                message="Event has no Odds API id",
+            )
+
         # Fetch historical odds - API client returns parsed Event instances
         client = self._client
         if client is None:
@@ -249,7 +277,7 @@ class BackfillExecutor:
         event = None
         event_data = None
         for evt, raw_evt in zip(response.events, response.raw_events_data, strict=True):
-            if evt.id == event_id:
+            if evt.id == odds_api_id:
                 event = evt
                 event_data = raw_evt
                 break
@@ -270,13 +298,25 @@ class BackfillExecutor:
         async with self._session_factory() as session:
             writer = OddsWriter(session)
 
-            # Upsert event - already parsed by API client
-            await writer.upsert_event(event)
-            await session.flush()
+            if self._finder is None:
+                self._finder = await odds_api_finder(event.sport_key, [event])
+            found = await resolve_odds_api_event(self._finder, session, event)
+            if isinstance(found, DroppedGame):
+                self._dropped_games.append(found)
+                return BackfillProgress(
+                    event_id=event_id,
+                    home_team=home_team,
+                    away_team=away_team,
+                    snapshot_time=snapshot_time,
+                    status="skipped",
+                    message=f"Game dropped: {found.describe()}",
+                )
+            payload_id = await store_payload(session, [event_data])
             await writer.store_odds_snapshot(
-                event_id=event.id,
+                event_id=found.event.id,
                 raw_data=event_data,
                 snapshot_time=snapshot_dt,
+                shape=SnapshotShape(Source.ODDS_API, TimeBasis.UPPER_BOUND, payload_id),
             )
             await session.commit()
 

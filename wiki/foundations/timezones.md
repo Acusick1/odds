@@ -14,7 +14,6 @@ sources:
   - odds_lambda.oddsportal_common.fix_odds_timestamp
   - odds_lambda.injury_fetcher._to_naive_et
   - odds_cli.commands.quality
-  - odds_cli.commands.discover
   - odds_cli.commands.pbpstats
   - odds_cli.commands.nba_stats
   - odds_core.snapshot_utils

@@ -3,6 +3,7 @@
 import asyncio
 from datetime import timedelta
 
+import structlog
 import typer
 from odds_core.api_models import parse_scores_from_api_dict
 from odds_core.config import get_settings
@@ -11,10 +12,12 @@ from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.ingestion import OddsIngestionCallbacks, OddsIngestionService
 from odds_lambda.jobs import fetch_mlb_results, fetch_oddsportal_results
 from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY
+from odds_lambda.odds_api_events import find_event_by_odds_api_id
 from odds_lambda.storage.writers import OddsWriter
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+logger = structlog.get_logger()
 app = typer.Typer()
 console = Console()
 
@@ -150,18 +153,24 @@ async def _fetch_scores(sport: str, days: int):
 
                     for score_data in response.scores_data:
                         try:
-                            event_id = score_data.get("id")
+                            odds_api_id = score_data.get("id")
                             completed = score_data.get("completed", False)
 
-                            if completed and event_id:
+                            if completed and odds_api_id:
                                 # Extract scores using helper
                                 home_score, away_score = parse_scores_from_api_dict(score_data)
 
                                 if home_score is not None and away_score is not None:
                                     from odds_core.models import EventStatus
 
+                                    event = await find_event_by_odds_api_id(session, odds_api_id)
+                                    if event is None:
+                                        logger.warning(
+                                            "score_event_not_found", odds_api_id=odds_api_id
+                                        )
+                                        continue
                                     await writer.update_event_status(
-                                        event_id=event_id,
+                                        event_id=event.id,
                                         status=EventStatus.FINAL,
                                         home_score=home_score,
                                         away_score=away_score,

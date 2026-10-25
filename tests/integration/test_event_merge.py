@@ -6,7 +6,6 @@ from datetime import timedelta
 
 import pytest
 from odds_cli.commands import events as events_cli
-from odds_core.api_models import EventsResponse
 from odds_core.match_brief_models import MatchBrief
 from odds_core.models import (
     Event,
@@ -17,7 +16,6 @@ from odds_core.models import (
     utc_now,
 )
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
-from odds_lambda.event_sync import EventSyncService
 from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.event_name_repair import repair_team_names
 from odds_lambda.storage.event_unmatched import mark_unmatched
@@ -27,7 +25,6 @@ from tests.test_helpers import (
     API_EVENT_ID,
     TWIN_EVENT_ID,
     TWIN_KICKOFF,
-    StubOddsClient,
     make_epl_event,
 )
 
@@ -121,7 +118,7 @@ class TestMergeDecidedTwins:
         assert await session.get(Event, TWIN_EVENT_ID) is None
 
 
-class TestAdoptTwins:
+class TestMerge:
     @pytest.mark.asyncio
     async def test_moves_every_row_and_deletes_twin(self, live_twin_with_rows) -> None:
         session = live_twin_with_rows
@@ -129,9 +126,8 @@ class TestAdoptTwins:
         session.add(api_event)
         await session.flush()
 
-        adopted = await EventMerger(session).adopt_twins([api_event])
+        await EventMerger(session).merge(api_event, [await session.get(Event, TWIN_EVENT_ID)])
 
-        assert adopted == 1
         for model in CHILD_MODELS:
             assert await _event_ids(session, model) == {API_EVENT_ID}, model
         assert await session.get(Event, TWIN_EVENT_ID) is None
@@ -155,7 +151,7 @@ class TestAdoptTwins:
         session.add(api_event)
         await session.flush()
 
-        await EventMerger(session).adopt_twins([api_event])
+        await EventMerger(session).merge(api_event, [twin])
 
         stored = await session.get(Event, API_EVENT_ID)
         assert stored.status == EventStatus.FINAL
@@ -174,65 +170,10 @@ class TestAdoptTwins:
         session.add(api_event)
         await session.flush()
 
-        await EventMerger(session).adopt_twins([api_event])
+        await EventMerger(session).merge(api_event, [twin])
 
         stored = await session.get(Event, API_EVENT_ID)
         assert (stored.home_score, stored.away_score) == (3, 0)
-
-    @pytest.mark.asyncio
-    async def test_no_twin_is_a_noop(self, pglite_async_session) -> None:
-        api_event = make_epl_event(API_EVENT_ID)
-        pglite_async_session.add(api_event)
-        await pglite_async_session.flush()
-
-        assert await EventMerger(pglite_async_session).adopt_twins([api_event]) == 0
-
-    @pytest.mark.asyncio
-    async def test_twin_outside_window_untouched(self, live_twin_with_rows) -> None:
-        session = live_twin_with_rows
-        api_event = make_epl_event(API_EVENT_ID, TWIN_KICKOFF + timedelta(hours=3))
-        session.add(api_event)
-        await session.flush()
-
-        assert await EventMerger(session).adopt_twins([api_event]) == 0
-        assert await session.get(Event, TWIN_EVENT_ID) is not None
-        assert await _event_ids(session, OddsSnapshot) == {TWIN_EVENT_ID}
-
-    @pytest.mark.asyncio
-    async def test_different_teams_untouched(self, live_twin_with_rows) -> None:
-        session = live_twin_with_rows
-        api_event = make_epl_event(API_EVENT_ID, away_team="Liverpool")
-        session.add(api_event)
-        await session.flush()
-
-        assert await EventMerger(session).adopt_twins([api_event]) == 0
-        assert await session.get(Event, TWIN_EVENT_ID) is not None
-
-    @pytest.mark.asyncio
-    async def test_event_sync_adopts_twin_of_existing_api_event(
-        self, live_twin_with_rows, mock_session_factory, test_engine
-    ) -> None:
-        session = live_twin_with_rows
-        api_event = make_epl_event(API_EVENT_ID)
-        session.add(api_event)
-        await session.commit()
-
-        client = StubOddsClient(
-            None,
-            EventsResponse(
-                events=[make_epl_event(API_EVENT_ID)],
-                response_time_ms=1,
-                quota_remaining=None,
-                timestamp=utc_now(),
-            ),
-        )
-        service = EventSyncService(client=client, session_factory=mock_session_factory)  # type: ignore
-
-        await service.sync_sport("soccer_epl")
-
-        session.expire_all()
-        assert await session.get(Event, TWIN_EVENT_ID) is None
-        assert await _event_ids(session, PaperTrade) == {API_EVENT_ID}
 
 
 FDUK_EVENT_ID = "fduk_2025-2026_ARS_CHE_2026-04-15"

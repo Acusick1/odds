@@ -9,13 +9,12 @@ from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.readers import OddsReader
 
+from tests.test_helpers import add_event
+
 
 @pytest.fixture
 async def events_with_gaps(test_session):
     """Create events with tier coverage gaps for integration testing."""
-    from odds_lambda.storage.writers import OddsWriter
-
-    writer = OddsWriter(test_session)
 
     # Event 1: Missing CLOSING tier (highest priority gap)
     event1 = Event(
@@ -57,7 +56,7 @@ async def events_with_gaps(test_session):
     )
 
     for event in [event1, event2, event3]:
-        await writer.upsert_event(event)
+        await add_event(test_session, event)
 
     await test_session.commit()
 
@@ -308,10 +307,8 @@ class TestGapDetectionWorkflow:
     @pytest.mark.asyncio
     async def test_no_gaps_returns_empty_plan(self, test_session):
         """Test that date range with complete coverage returns empty plan."""
-        from odds_lambda.storage.writers import OddsWriter
 
         # Create event with complete tier coverage
-        writer = OddsWriter(test_session)
 
         event = Event(
             id="complete_event",
@@ -325,7 +322,7 @@ class TestGapDetectionWorkflow:
             away_score=95,
         )
 
-        await writer.upsert_event(event)
+        await add_event(test_session, event)
 
         # Add all 5 tiers
         for tier in FetchTier.get_priority_order():

@@ -139,7 +139,7 @@ A job inside [`odds_core.alerts.job_alert_context`](alerts.md#delivery) inserts 
 
 `odds_cli.commands.status` is the on-demand view of the same tables. It prints Rich tables only; there is no machine-readable output.
 
-- `odds status show [--verbose]`: latest fetch (minutes ago, tick or cross), event counts by status, odds and snapshot totals, quota from `odds_lambda.storage.readers.OddsReader.get_database_stats`; `--verbose` adds data-quality rows from the last 24 h (limit 10).
+- `odds status show [--verbose]`: latest fetch (minutes ago, tick or cross), event counts by status, odds and snapshot totals (snapshots counted as distinct event and snapshot-time pairs), quota from `odds_lambda.storage.readers.OddsReader.get_database_stats`; `--verbose` adds data-quality rows from the last 24 h (limit 10).
 - `odds status quota`: latest quota plus the last 10 `odds_core.models.FetchLog` rows that have a quota (`odds_cli.commands.status._show_quota`). Rows with a null quota are skipped ([odds-api-quota](../collection/odds-api-quota.md#where-quota-is-recorded-alerted-and-checked)); when none has a quota it prints `No fetch log records an API quota`.
 - `odds scheduler health` (not part of `odds status`): prints a green or red overall status, the backend name, the passed and failed checks and any details from `odds_lambda.scheduling.backends.base.SchedulerBackend.health_check`, and exits 1 when unhealthy or on error.
 - `odds status events --days N --team T` (default 7 days): recent events with status and scores. It has no sport filter.

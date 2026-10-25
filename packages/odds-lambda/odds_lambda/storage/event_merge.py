@@ -409,30 +409,6 @@ class EventMerger:
                 duplicate_score=(duplicate.home_score, duplicate.away_score),
             )
 
-    async def adopt_twins(self, events: Sequence[Event]) -> int:
-        """Merge every non-Odds-API event for the same match into each given event."""
-        adopted = 0
-        for event in events:
-            stored = await self.session.get(Event, event.id, populate_existing=True)
-            if stored is None:
-                continue
-            twins = [
-                twin
-                for twin in await _candidates(
-                    self.session,
-                    stored.home_team,
-                    stored.away_team,
-                    stored.commence_time,
-                    EVENT_MATCH_WINDOW,
-                    stored.sport_key,
-                )
-                if twin.id != stored.id and EventSource.of(twin.id) is not EventSource.ODDS_API
-            ]
-            if twins:
-                await self.merge(stored, twins)
-                adopted += len(twins)
-        return adopted
-
     async def _event_reference_columns(self) -> list[tuple[str, str, str, str]]:
         """``(schema, table, column, events column)`` for every foreign key to ``events``.
 

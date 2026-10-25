@@ -1257,6 +1257,7 @@ class TestFetchOddsJob:
             total_events=processed,
             quota_remaining=None,
             failures=[],
+            dropped_games=[],
         )
         results = SimpleNamespace(
             sport_results=[sport_result],

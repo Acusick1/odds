@@ -9,7 +9,7 @@ from odds_core.database import async_session_maker
 from odds_core.models import Event
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.event_sync import EventSyncService
-from odds_lambda.storage.writers import OddsWriter
+from odds_lambda.odds_api_events import odds_api_finder, resolve_odds_api_events
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeElapsedColumn
 
@@ -168,32 +168,40 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
                 total=len(unique_events),
             )
 
+            finder = await odds_api_finder(sport, unique_events)
             async with async_session_maker() as session:
-                writer = OddsWriter(session)
-
-                # Batch upsert in chunks of 100
+                # Batches of 100, each committed, so one transaction never holds thousands of
+                # fixture locks.
                 batch_size = 100
                 total_inserted = 0
                 total_updated = 0
+                total_dropped = 0
 
                 for i in range(0, len(unique_events), batch_size):
                     batch = unique_events[i : i + batch_size]
 
                     try:
-                        result = await writer.bulk_upsert_events(batch)
-                        total_inserted += result["inserted"]
-                        total_updated += result["updated"]
-
-                        progress.update(store_task, advance=len(batch))
+                        resolved = await resolve_odds_api_events(session, finder, batch)
+                        await session.commit()
                     except Exception as e:
+                        await session.rollback()
                         console.print(f"[yellow]Warning: Batch upsert failed: {str(e)}[/yellow]")
+                        continue
 
-                # Commit transaction
-                await session.commit()
+                    total_inserted += resolved.created
+                    total_updated += resolved.matched
+                    total_dropped += len(resolved.dropped)
+                    for error in resolved.errors:
+                        console.print(f"[yellow]Warning: {error.describe()}[/yellow]")
+                    for dropped in resolved.dropped:
+                        console.print(f"[yellow]Warning: dropped {dropped.describe()}[/yellow]")
+                    progress.update(store_task, advance=len(batch))
 
         console.print("\n[bold green]✓ Storage completed![/bold green]")
         console.print(f"  Events inserted: {total_inserted}")
         console.print(f"  Events updated: {total_updated}")
+        if total_dropped:
+            console.print(f"  Events dropped: {total_dropped}")
         console.print("\n[dim]Note: Events stored with SCHEDULED status (no scores).[/dim]")
         console.print(
             "[dim]Use 'odds backfill' to fetch historical odds for discovered games.[/dim]"

@@ -24,6 +24,7 @@ from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade
 from odds_core.snapshot_utils import extract_odds_from_snapshot
 from odds_core.sports import SportKey
+from odds_core.utils import raw_data_has_market
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME
 from odds_lambda.oddsportal_client import FEED_MARKETS
 from odds_lambda.paper_trading import (
@@ -345,7 +346,11 @@ async def get_odds_history(event_id: str, market: MarketKey) -> dict[str, Any]:
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        snapshots = await reader.get_snapshots_for_event(event_id)
+        snapshots = [
+            s
+            for s in await reader.get_snapshots_for_event(event_id)
+            if raw_data_has_market(s.raw_data, market)
+        ]
 
     serialized = []
     for s in snapshots:

@@ -26,7 +26,7 @@ The retail-EV config `experiments/configs/xgboost_epl_retail_ev.yaml` sets `cv_m
 - `expanding` trains on every earlier event; `sliding` trains on the previous `max_train_events` only.
 - With a positive `gap` and per-row `commence_times`, training events must kick off at least `gap` before the block's first validation event. `odds_analytics.training.cross_validation.run_cv` sets it to `odds_analytics.retail_ev.DECISION_WINDOW` (7 days) for `retail_ev`, whose validation decisions start that long before kick-off, so no training close falls after one. A fold left with no training event raises. The gap filter runs after the window is cut, so a sliding window then holds fewer than `max_train_events` events.
 - Splits are row indices, so multi-row events (time-range sampling) stay whole on one side.
-- Chronological order is assumed, not checked. Order comes from `odds_lambda.storage.readers.OddsReader.get_events_by_date_range`, which sorts by `commence_time` and then event ID, so kick-off ties have a fixed order that does not depend on the query plan; a caller passing shuffled data gets no error ([feature pipeline](feature-pipeline.md)).
+- Chronological order is assumed, not checked. Order comes from `odds_lambda.storage.readers.OddsReader.get_events_by_date_range`, which sorts by `commence_time` and then event ID (its `min_snapshots` filter counts distinct snapshot times), so kick-off ties have a fixed order that does not depend on the query plan; a caller passing shuffled data gets no error ([feature pipeline](feature-pipeline.md)).
 
 ## CV methods and metrics
 

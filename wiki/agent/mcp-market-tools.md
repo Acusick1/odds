@@ -30,7 +30,7 @@ Response: `event` plus `snapshot` with `anchor_snapshot_id`, `snapshot_time` (ne
 
 ## `get_odds_history(event_id, market)`
 
-Every snapshot for the event in time order, each with the extracted `market` odds instead of raw JSON, plus `snapshot_count`. There is no pagination or limit, so a long-lived event returns a large payload ([odds reader](../storage/odds-reader.md)).
+Every snapshot of the event that contains `market`, in time order, each with the extracted `market` odds instead of raw JSON, plus `snapshot_count`. There is no pagination or limit, so a long-lived event returns a large payload ([odds reader](../storage/odds-reader.md)).
 
 ## Market vocabulary
 

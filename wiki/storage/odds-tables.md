@@ -66,7 +66,7 @@ Training's `data_source` filter matches event-ID prefixes (`op_`, `fduk_`; `odds
 - Indexes: single-column `event_id`, `snapshot_id`, `bookmaker_key`, `market_key`, `odds_timestamp`; composite `ix_event_bookmaker_market (event_id, bookmaker_key, market_key)` for lookups and line movement, and `ix_bookmaker_time (bookmaker_key, odds_timestamp)` for per-bookmaker analysis.
 - `odds` has no unique constraint beyond `id`, so storing a snapshot twice duplicates its rows (#448). A writer passing a snapshot shape stores no odds rows for a snapshot whose key is already stored ([OddsWriter](odds-writer.md#store_odds_snapshot)).
 
-Written by `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` and copied, with the snapshots and their price rows, by `odds_lambda.copy_from_production.ProductionDataCopier`; read for prices by exactly three `odds_lambda.storage.readers.OddsReader` methods: `odds_lambda.storage.readers.OddsReader.get_odds_at_time`, `odds_lambda.storage.readers.OddsReader.get_line_movement` and `odds_lambda.storage.readers.OddsReader.get_best_odds` ([OddsReader](odds-reader.md)).
+Written by `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` and copied, with the snapshots and their price rows, by `odds_lambda.copy_from_production.ProductionDataCopier`; each linked to the snapshot of its own market; read for prices by exactly three `odds_lambda.storage.readers.OddsReader` methods: `odds_lambda.storage.readers.OddsReader.get_odds_at_time`, `odds_lambda.storage.readers.OddsReader.get_line_movement` and `odds_lambda.storage.readers.OddsReader.get_best_odds` ([OddsReader](odds-reader.md)).
 
 ## Snapshot link
 
@@ -77,7 +77,7 @@ Rows written before the column existed were linked by `migrations/versions/b6e3d
 - **Shared copies:** several snapshots quote the key. Each is one copy of a [same-time pair](#same-time-pairs), and `odds events delete-same-time-pairs` links or deletes it.
 - **Orphans:** no snapshot at that event and time quotes the key, because the snapshot the row was parsed from is missing. The largest group is EPL OddsPortal live rows from March to August 2026 whose market's snapshot is missing while the other market's snapshot at that time survived. Orphans are kept with a NULL `snapshot_id`; nothing resolves them.
 
-The column is therefore nullable, with no database constraint, while every writer links each new row; `tests/integration/test_odds_snapshot_link.py` fails if code outside the known writers builds odds rows, or if `odds_lambda.storage.writers.OddsWriter.store_envelope` leaves one unlinked. `ix_odds_snapshot_id` makes `SELECT count(*) FROM odds WHERE snapshot_id IS NULL` cheap, and the command prints that count split into orphans and shared copies.
+The column is therefore nullable, with no database constraint, while every writer links each new row; `tests/integration/test_odds_snapshot_link.py` fails if code outside the known writers builds odds rows, or if `odds_lambda.storage.writers.OddsWriter.store_envelope` leaves one unlinked; it links each row to the snapshot of its own market. `ix_odds_snapshot_id` makes `SELECT count(*) FROM odds WHERE snapshot_id IS NULL` cheap, and the command prints that count split into orphans and shared copies.
 
 ## Same-time pairs
 

@@ -66,7 +66,7 @@ class TestDiscoverIntegration:
     async def test_discover_updates_existing_events(
         self, test_session, mock_historical_events_response, mock_api_client_factory
     ):
-        """Test that re-running discover updates existing events (idempotency)."""
+        """Test that re-running discover finds existing events (idempotency)."""
         from unittest.mock import AsyncMock
 
         from odds_cli.commands.discover import _discover_games
@@ -110,13 +110,13 @@ class TestDiscoverIntegration:
         result = await test_session.execute(select(Event))
         events = result.scalars().all()
 
-        # Should still have 2 events (1 updated, 1 inserted)
+        # Should still have 2 events (1 found, 1 inserted)
         assert len(events) == 2
 
-        # Verify the existing event was updated
+        # The event the API's id names is found, not duplicated, and keeps its teams.
         updated_event = next(e for e in events if e.id == "event1")
-        assert updated_event.home_team == "Lakers"  # Updated
-        assert updated_event.away_team == "Celtics"  # Updated
+        assert updated_event.home_team == "OldTeam1"
+        assert updated_event.away_team == "OldTeam2"
         # A historical start is in the past, so it is not offered as a kick-off move.
         assert updated_event.commence_time == datetime(2024, 10, 14, 19, 0, 0, tzinfo=UTC)
 
@@ -289,12 +289,5 @@ class TestDiscoverIntegration:
             result = await test_session.execute(select(Event).where(Event.id == "event1"))
             event = result.scalar_one()
 
-            # Note: bulk_upsert_events will update the event, but the discover command
-            # creates events with SCHEDULED status and no scores.
-            # The existing FINAL status and scores will be overwritten because
-            # bulk_upsert updates ALL fields.
-            #
-            # This is expected behavior: discover is for initial game discovery,
-            # not for updating completed games.
-            # Users should not re-run discover on date ranges with completed games.
-            assert event is not None
+            assert event.status == EventStatus.FINAL
+            assert (event.home_score, event.away_score) == (108, 105)

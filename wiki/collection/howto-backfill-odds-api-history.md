@@ -20,12 +20,13 @@ Loads historical Odds API snapshots and scores for NBA. It spends paid quota and
    ```bash
    uv run odds discover games --start 2025-01-01 --end 2025-01-07
    ```
-   - It upserts the events as SCHEDULED. Events already in the database keep their status and scores.
+   - It resolves each listed game to its event: a game already in the database (stored by any source) keeps its status, scores and teams, and a new one is created as SCHEDULED. It commits every 100 games and prints dropped counts.
 2. Build a plan.
    ```bash
    uv run odds backfill plan --start 2025-01-01 --end 2025-01-07 --games 20 --output plan.json
    ```
    - The plan fixes five snapshots per game, so cost is known before you spend it.
+   - Each game carries the stored event's id and the id the Odds API uses for it (`odds_api_id`); the executor stores the snapshots on the stored event and skips a game whose `odds_api_id` is null.
 3. Dry-run, then execute.
    ```bash
    uv run odds backfill execute --plan plan.json --dry-run

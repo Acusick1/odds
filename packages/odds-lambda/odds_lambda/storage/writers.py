@@ -9,13 +9,11 @@ import structlog
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 from odds_core.odds_math import outcome_price_decimal
 from odds_core.time import ensure_utc, parse_api_datetime
-from odds_core.vocabulary import Source
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.storage.event_kickoff import move_kickoff
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
+from odds_lambda.storage.snapshot_store import SnapshotWriteOutcome
 from odds_lambda.storage.validators import OddsValidator
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 
@@ -43,36 +41,6 @@ class OddsWriter:
         """
         self.session = session
         self.validator = OddsValidator()
-
-    async def upsert_event(self, event: Event, now: datetime | None = None) -> Event:
-        """Insert an Odds API event, or update the stored one's sport and teams.
-
-        The stored ``commence_time`` moves only through ``move_kickoff`` on the Odds API's
-        authority, against the clock ``now`` (defaults to the current time).
-        """
-        result = await self.session.execute(select(Event).where(Event.id == event.id))
-        existing_event = result.scalar_one_or_none()
-
-        if existing_event:
-            existing_event.sport_key = event.sport_key
-            existing_event.sport_title = event.sport_title
-            existing_event.home_team = event.home_team
-            existing_event.away_team = event.away_team
-            existing_event.updated_at = datetime.now(UTC)
-            await move_kickoff(
-                self.session,
-                existing_event,
-                Source.ODDS_API,
-                event.commence_time,
-                now=now or datetime.now(UTC),
-            )
-
-            logger.info("event_updated", event_id=event.id)
-            return existing_event
-        else:
-            self.session.add(event)
-            logger.info("event_created", event_id=event.id)
-            return event
 
     async def store_envelope(
         self,
@@ -143,28 +111,37 @@ class OddsWriter:
         if shape is None:
             self.session.add(snapshot)
             await self.session.flush()
+            new_snapshots = [snapshot]
         else:
             if event is None:
                 raise ValueError(f"event {event_id} is not stored")
             written = await store_shaped_snapshot(self.session, snapshot, event, shape)
-            if not written.inserted:
+            new_snapshots = [
+                w.snapshot
+                for w in ([written.first] if written.first else []) + list(written.others)
+                if w.outcome is SnapshotWriteOutcome.INSERTED
+            ]
+            if written.first is None:
+                new_snapshots = [written.snapshot]
+            if not new_snapshots:
                 logger.info(
                     "odds_snapshot_already_stored",
                     event_id=event_id,
                     snapshot_id=written.snapshot.id,
-                    outcome=written.first.outcome if written.first else None,
                 )
                 return StoredEnvelope(written.snapshot, [], inserted=False)
             snapshot = written.snapshot
-        assert snapshot.id is not None
 
-        # Parse and store normalized odds
-        odds_records = await self._parse_and_store_odds(
-            event_id=event_id,
-            snapshot_id=snapshot.id,
-            bookmakers=bookmakers,
-            snapshot_time=snapshot_time,
-        )
+        # Each odds row sits on the snapshot whose raw_data holds it
+        odds_records: list[Odds] = []
+        for stored in new_snapshots:
+            assert stored.id is not None
+            odds_records += await self._parse_and_store_odds(
+                event_id=event_id,
+                snapshot_id=stored.id,
+                bookmakers=stored.raw_data.get("bookmakers", []),
+                snapshot_time=snapshot_time,
+            )
 
         logger.info(
             "odds_snapshot_stored",
@@ -377,109 +354,3 @@ class OddsWriter:
         )
 
         return quality_log
-
-    async def bulk_upsert_events(
-        self, events: list[Event], now: datetime | None = None
-    ) -> dict[str, int]:
-        """
-        Bulk upsert event records for efficient backfill operations.
-
-        Args:
-            events: List of Event instances to insert or update
-            now: Clock for the LIVE exception below (defaults to the current time)
-
-        Returns:
-            Dictionary with keys 'inserted' and 'updated' containing approximate counts
-
-        Note:
-            Uses PostgreSQL INSERT ... ON CONFLICT DO UPDATE pattern.
-            Preserves created_at timestamps on updates, updates updated_at field.
-            Status, scores, completed_at and commence_time are never overwritten, because the
-            incoming events are discovery records (scheduled, no scores). A stored event's
-            kick-off moves through ``move_kickoff`` on the Odds API's authority against the
-            clock ``now``, which makes a POSTPONED event that moves, or a LIVE one moved to a
-            start after ``now``, SCHEDULED.
-
-        Example:
-            events = [
-                Event(id="abc", sport_key="basketball_nba", ...),
-                Event(id="def", sport_key="basketball_nba", ...),
-            ]
-            result = await writer.bulk_upsert_events(events)
-            # result = {'inserted': 1, 'updated': 1}
-        """
-        if not events:
-            logger.info("bulk_events_upserted", inserted=0, updated=0)
-            return {"inserted": 0, "updated": 0}
-
-        # Deduplicate by event ID (API returns same event across multiple dates)
-        seen: dict[str, Event] = {}
-        for event in events:
-            seen[event.id] = event
-        events = list(seen.values())
-
-        # Determine which events already exist
-        event_ids = [event.id for event in events]
-        result = await self.session.execute(select(Event.id).where(Event.id.in_(event_ids)))
-        existing_ids = {row[0] for row in result.fetchall()}
-
-        # Calculate counts
-        updated_count = len(existing_ids)
-        inserted_count = len(events) - updated_count
-
-        # Convert Event instances to dicts for bulk upsert
-        # Use model_dump() to include all fields with defaults; the database numbers new events.
-        event_dicts = [event.model_dump(exclude={"surrogate_id"}) for event in events]
-
-        # Build upsert statement
-        stmt = insert(Event).values(event_dicts)
-
-        events_table = Event.__table__
-        result_columns = {"status", "home_score", "away_score", "completed_at"}
-        # A discovery record carries no gamePk or mark, so stored ones are kept.
-        kept_columns = {
-            "created_at",
-            "surrogate_id",
-            "commence_time",
-            "mlb_game_pk",
-            "no_game_pk_reason",
-            *result_columns,
-        }
-        set_ = {
-            col.name: stmt.excluded[col.name]
-            for col in events_table.columns
-            if not col.primary_key and col.name not in kept_columns
-        }
-        # Override updated_at to current time (SQLAlchemy doesn't auto-apply Python defaults)
-        set_["updated_at"] = datetime.now(UTC)
-
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["id"],
-            set_=set_,
-        )
-
-        await self.session.execute(stmt)
-
-        now = now or datetime.now(UTC)
-        if existing_ids:
-            stored = await self.session.execute(
-                select(Event)
-                .where(Event.id.in_(existing_ids))  # type: ignore[attr-defined]
-                .execution_options(populate_existing=True)
-            )
-            stored_by_id = {e.id: e for e in stored.scalars()}
-            for event in events:
-                held = stored_by_id.get(event.id)
-                if held is not None:
-                    await move_kickoff(
-                        self.session, held, Source.ODDS_API, event.commence_time, now=now
-                    )
-
-        logger.info(
-            "bulk_events_upserted",
-            inserted=inserted_count,
-            updated=updated_count,
-            total=len(events),
-        )
-
-        return {"inserted": inserted_count, "updated": updated_count}
