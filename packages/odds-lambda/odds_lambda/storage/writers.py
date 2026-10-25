@@ -167,7 +167,9 @@ class OddsWriter:
         anchor = game.start or match_date
         held = await self._event_by_game_pk(game.game_pk)
         if held is not None:
-            await move_kickoff(self.session, held, Source.MLB_STATS_API, game.start)
+            await move_kickoff(
+                self.session, held, Source.MLB_STATS_API, game.start, now=datetime.now(UTC)
+            )
             return held.id, False
 
         claimable = await self._claimable_event(home_team, away_team, anchor, game)
@@ -179,7 +181,13 @@ class OddsWriter:
             async with self.session.begin_nested():
                 if claimable is not None:
                     claimable.assign_game_pk(game.game_pk)
-                    await move_kickoff(self.session, claimable, Source.MLB_STATS_API, game.start)
+                    await move_kickoff(
+                        self.session,
+                        claimable,
+                        Source.MLB_STATS_API,
+                        game.start,
+                        now=datetime.now(UTC),
+                    )
                     outcome = (claimable.id, False)
                 else:
                     outcome = (
@@ -198,7 +206,9 @@ class OddsWriter:
                 event_id=held.id,
                 duplicate_id=claimable_id,
             )
-            await move_kickoff(self.session, held, Source.MLB_STATS_API, game.start)
+            await move_kickoff(
+                self.session, held, Source.MLB_STATS_API, game.start, now=datetime.now(UTC)
+            )
             return held.id, False
         return outcome
 

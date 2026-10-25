@@ -357,7 +357,9 @@ async def apply_assignment(
         rows_moved = report.rows_moved
     if kept.mlb_game_pk is None:
         kept.assign_game_pk(assignment.game_pk)
-    await move_kickoff(session, kept, Source.MLB_STATS_API, assignment.target_start())
+    await move_kickoff(
+        session, kept, Source.MLB_STATS_API, assignment.target_start(), now=datetime.now(UTC)
+    )
 
     merged_score = _score(kept)
     others = sorted({s for s in duplicate_scores if s != merged_score})
