@@ -44,7 +44,7 @@ A change of status goes through a pull request. The version is a strict positive
 
 `odds_cli.commands.candidates.report` prints one row per candidate version: settled bets, bets with a close, bets without one, pending bets, stake, P&L, ROI and the checkpoint the verdict rests on (n, mean EV, 95% and 99% CIs, verdict). It reads the database through `odds_analytics.candidate_report.candidate_report` and the registry files. Every registered candidate appears, with zero bets before it trades, and so does any (name, version) with trades whose version differs from the registry's (or whose candidate is absent from it), shown as "not current".
 
-`odds_mcp.server.get_portfolio` returns the same summaries as `candidates`, from the same function. When the registry is invalid it returns `{"error": <message>}` there and the rest of the portfolio unchanged.
+`odds_mcp.server.get_portfolio` returns the same summaries as `candidates`, from the same function. The trades behind them come from the agent and from the [run-candidates job](run-candidates-job.md). When the registry is invalid it returns `{"error": <message>}` there and the rest of the portfolio unchanged.
 
 What is scored, in `odds_analytics.candidate_report`:
 

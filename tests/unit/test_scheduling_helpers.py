@@ -140,6 +140,12 @@ class TestSelfSchedule:
 class TestSmokeTags:
     """Tags distinguishing smoke-unsafe and outward-posting jobs."""
 
+    def test_run_candidates_has_its_own_smoke_gate(self) -> None:
+        from odds_lambda.scheduling.jobs import is_smoke_unsafe, places_candidate_trades
+
+        assert places_candidate_trades("run-candidates-epl")
+        assert not is_smoke_unsafe("run-candidates-epl")
+
     def test_agent_run_is_smoke_unsafe(self) -> None:
         from odds_lambda.scheduling.jobs import is_smoke_unsafe
 

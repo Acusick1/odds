@@ -124,6 +124,7 @@ class SchedulerConfig(BaseSettings):
             "fetch-betfair-exchange",
             "fetch-polymarket-odds",
             "fetch-mlb-probables",
+            "run-candidates",
         ],
         description="Jobs to bootstrap when starting the local scheduler",
     )

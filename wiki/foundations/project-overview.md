@@ -31,7 +31,7 @@ Profit. Any approach can be a candidate (mechanical rules, models, agents), run 
 
 ## What runs where
 
-One host, the production host, runs every scheduled job under its local scheduler and holds the production database ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The default job set is `odds_core.config.SchedulerConfig.bootstrap_jobs`, with `agent-run` commented out; it includes the EPL Polymarket price job. The `odds-scheduler` Lambda and its Terraform remain but are dormant (a disabled `odds-scheduler-scraper` function may still exist in the account, with no Terraform), and the Neon database they wrote to is a frozen archive. The repo does not record the deployed AWS state; the only check is `odds scheduler list-jobs --backend aws`.
+One host, the production host, runs every scheduled job under its local scheduler and holds the production database ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The default job set is `odds_core.config.SchedulerConfig.bootstrap_jobs`, with `agent-run` commented out; it includes the EPL Polymarket price job and the `run-candidates` job that places mechanical candidates' paper trades. The `odds-scheduler` Lambda and its Terraform remain but are dormant (a disabled `odds-scheduler-scraper` function may still exist in the account, with no Terraform), and the Neon database they wrote to is a frozen archive. The repo does not record the deployed AWS state; the only check is `odds scheduler list-jobs --backend aws`.
 
 Per-job table: [Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs); local backend: [Local scheduler](../scheduling/local-scheduler.md).
 

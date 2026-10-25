@@ -28,7 +28,7 @@ status: stable
 
 # odds-mcp server
 
-`odds_mcp.server` defines `mcp = FastMCP("odds-mcp", ...)`, the tool interface the [betting agent](betting-agent.md) uses. Tools are thin wrappers around `odds_lambda.storage.readers.OddsReader` queries, job code and the paper-trading service; they return JSON-safe dicts, open their own sessions with `odds_core.database.async_session_maker()` and report many failures as `{"error": ...}` dicts. All times are UTC. The `@mcp.tool()` definitions are the source of truth for the toolset (`odds_mcp.server.mcp`).
+`odds_mcp.server` defines `mcp = FastMCP("odds-mcp", ...)`, the tool interface the [betting agent](betting-agent.md) uses. Tools are thin wrappers around `odds_lambda.storage.readers.OddsReader` queries, job code and the paper-trading service (the agent's bets carry a bankroll; flat-stake candidate trades come from the [run-candidates job](../evaluation/run-candidates-job.md)); they return JSON-safe dicts, open their own sessions with `odds_core.database.async_session_maker()` and report many failures as `{"error": ...}` dicts. All times are UTC. The `@mcp.tool()` definitions are the source of truth for the toolset (`odds_mcp.server.mcp`).
 
 ## Launch
 
@@ -43,7 +43,7 @@ status: stable
 | `odds_mcp.server.get_upcoming_fixtures`, `odds_mcp.server.get_current_odds`, `odds_mcp.server.get_odds_history` | [market tools](mcp-market-tools.md) |
 | `odds_mcp.server.find_retail_edges` | [market tools](mcp-market-tools.md#retail-edges) |
 | `odds_mcp.server.save_match_brief`, `odds_mcp.server.get_match_brief`, `odds_mcp.server.get_slate_briefs` | [briefs](match-briefs.md) |
-| `odds_mcp.server.paper_bet` (decimal price, optional candidate), `odds_mcp.server.get_portfolio` (with candidate summaries, or the registry's error), `odds_mcp.server.settle_bets` | [paper trading](paper-trading.md) |
+| `odds_mcp.server.paper_bet` (decimal price, optional candidate), `odds_mcp.server.get_portfolio` (bankroll-sized portfolio and open trades, with candidate summaries, or the registry's error), `odds_mcp.server.settle_bets` | [paper trading](paper-trading.md) |
 | `odds_mcp.server.refresh_scrape`, `odds_mcp.server.get_scrape_status`, `odds_mcp.server.get_scheduled_jobs`, `odds_mcp.server.schedule_next_wakeup` | [below](#scrape-and-scheduling-tools) |
 | `odds_mcp.tools.epl.get_team_context` (EPL), `odds_mcp.tools.mlb.get_probable_pitchers` (MLB) | [sport context tools](mcp-sport-context-tools.md) |
 

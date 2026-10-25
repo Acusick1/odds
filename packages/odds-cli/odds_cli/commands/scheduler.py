@@ -309,6 +309,12 @@ def smoke(
         help="Also run smoke-unsafe jobs (agent-run). Off by default so a deploy "
         "check never places paper bets.",
     ),
+    include_candidates: bool = typer.Option(
+        False,
+        "--include-candidates",
+        help="Also run run-candidates. Off by default so a deploy check never places "
+        "candidate paper trades.",
+    ),
     include_paid_api: bool = typer.Option(
         False,
         "--include-paid-api",
@@ -336,7 +342,8 @@ def smoke(
     Exits non-zero (exit code = number of failed jobs) if any job fails.
 
     ``agent-run`` is skipped by default (never place paper bets during a deploy
-    check); pass ``--include-agent`` to run it. ``fetch-odds`` and ``fetch-scores``
+    check); pass ``--include-agent`` to run it. ``run-candidates`` is skipped
+    likewise unless ``--include-candidates``. ``fetch-odds`` and ``fetch-scores``
     are skipped by default because they spend Odds API quota; pass
     ``--include-paid-api`` to run them.
 
@@ -352,6 +359,7 @@ def smoke(
         SCHEDULER_DRY_RUN=true odds scheduler smoke
         odds scheduler smoke --only fetch-oddsportal --only fetch-espn-fixtures
         odds scheduler smoke --include-agent
+        odds scheduler smoke --include-candidates
     """
     app_settings = get_settings()
 
@@ -360,6 +368,7 @@ def smoke(
         expected_compound_job_names,
         get_job_function,
         is_smoke_unsafe,
+        places_candidate_trades,
         resolve_job_name,
         spends_api_quota,
     )
@@ -423,6 +432,8 @@ def smoke(
             skipped.append((name, "excluded (--exclude)"))
         elif is_smoke_unsafe(name) and not include_agent:
             skipped.append((name, "smoke-unsafe (pass --include-agent)"))
+        elif places_candidate_trades(name) and not include_candidates:
+            skipped.append((name, "places candidate trades (pass --include-candidates)"))
         elif spends_api_quota(name) and not include_paid_api:
             skipped.append((name, "spends Odds API quota (pass --include-paid-api)"))
         else:

@@ -61,6 +61,7 @@ class TestSettings:
                 "fetch-betfair-exchange",
                 "fetch-polymarket-odds",
                 "fetch-mlb-probables",
+                "run-candidates",
             ]
             assert settings.data_quality.enable_validation is True
             assert settings.data_quality.reject_invalid_odds is False

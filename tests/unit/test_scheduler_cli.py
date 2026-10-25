@@ -126,6 +126,17 @@ class TestSmokeCommand:
         assert result.exit_code == 0
         assert "agent-run" in recorder.ran_bases
 
+    def test_run_candidates_needs_its_own_flag(self) -> None:
+        settings = _settings(["fetch-oddsportal", "run-candidates"], ["soccer_epl"])
+
+        with_agent = _JobRecorder()
+        _invoke_smoke(["--include-agent"], settings, with_agent)
+        with_candidates = _JobRecorder()
+        _invoke_smoke(["--include-candidates"], settings, with_candidates)
+
+        assert "run-candidates" not in with_agent.ran_bases
+        assert "run-candidates" in with_candidates.ran_bases
+
     def test_default_run_skips_jobs_that_spend_api_quota(self) -> None:
         settings = _settings(["fetch-oddsportal", "fetch-odds", "fetch-scores"], ["soccer_epl"])
         recorder = _JobRecorder()

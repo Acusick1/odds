@@ -624,7 +624,7 @@ async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
     """
     async with async_session_maker() as session:
         portfolio = await get_portfolio_summary(session, initial_bankroll=initial_bankroll)
-        open_trades = await get_open_trades(session)
+        open_trades = await get_open_trades(session, include_flat_stake=False)
         candidates: list[dict[str, Any]] | dict[str, str]
         try:
             candidates = [

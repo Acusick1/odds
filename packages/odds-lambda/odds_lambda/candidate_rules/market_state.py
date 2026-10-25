@@ -139,7 +139,7 @@ async def load_market_state(
 
     With ``known_at``, only snapshots stored (``created_at``) by then count: the data the
     system had when it acted. The live runner passes its run time and the parity check
-    passes the trade's placed time. A historical backtest passes ``None``, because
+    passes the decision's recorded ``known_at``. A historical backtest passes ``None``, because
     backfilled rows were created long after their snapshot time.
     """
     conditions = [

@@ -18,7 +18,7 @@ status: stable
 
 # The betting agent
 
-An LLM agent per sport (EPL and MLB) synthesises odds, sharp-market prices and unstructured match context and records bets as paper trades at the decimal price quoted by the book, optionally under a registered candidate, which placement checks against the registry ([paper trading](paper-trading.md#candidate-fields)). Both agents run by hand and are paused: neither is being run. The prompt calls itself a "first-draft workflow" (`packages/odds-mcp/agents/common.md`, #290). Nothing in code enforces that they are not autonomous `(inferred)`. Each agent can be registered as a [candidate](../foundations/goal-and-strategy.md), one per sport; its thesis is breadth and speed of information synthesis. The thesis has no measured result: results exist only as paper trades, read through `odds_mcp.server.get_portfolio` (with per-candidate checkpoint results), `odds paper` and `odds candidates report` ([paper trading](paper-trading.md)). The runtime is described in [Agent runtime and the agent-run job](agent-run-job.md).
+An LLM agent per sport (EPL and MLB) synthesises odds, sharp-market prices and unstructured match context and records bets as paper trades, sized from a bankroll, at the decimal price quoted by the book, optionally under a registered candidate, which placement checks against the registry ([paper trading](paper-trading.md#candidate-fields)). Both agents run by hand and are paused: neither is being run. The prompt calls itself a "first-draft workflow" (`packages/odds-mcp/agents/common.md`, #290). Nothing in code enforces that they are not autonomous `(inferred)`. Each agent can be registered as a [candidate](../foundations/goal-and-strategy.md), one per sport; its thesis is breadth and speed of information synthesis. The thesis has no measured result: results exist only as paper trades, read through `odds_mcp.server.get_portfolio` (with per-candidate checkpoint results), `odds paper` and `odds candidates report` ([paper trading](paper-trading.md)). The runtime is described in [Agent runtime and the agent-run job](agent-run-job.md).
 
 ## Architecture
 
@@ -30,7 +30,7 @@ The runtime is a `claude` subprocess; everything it touches goes through one of 
 | Web search | press conferences, injury news |
 | Playwright MCP (not in `.mcp.json`, so supplied by the user's Claude configuration) | club sites, lineup pages, BBC and ESPN |
 
-The MCP server reads and writes these PostgreSQL tables: `events`, `odds_snapshots`, `paper_trades`, `match_briefs` and `agent_wakeups` (`odds_core.models.Event`, `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.paper_trade_models.PaperTrade`, `odds_core.match_brief_models.MatchBrief`, `odds_core.agent_wakeup_models.AgentWakeup`). See [odds-mcp server](mcp-server.md) for the tools.
+The MCP server reads and writes these PostgreSQL tables: `events`, `odds_snapshots`, `paper_trades`, `match_briefs` and `agent_wakeups` (`odds_core.models.Event`, `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.paper_trade_models.PaperTrade` (agent and flat-stake candidate trades alike), `odds_core.match_brief_models.MatchBrief`, `odds_core.agent_wakeup_models.AgentWakeup`). See [odds-mcp server](mcp-server.md) for the tools.
 
 ## Prompts
 
