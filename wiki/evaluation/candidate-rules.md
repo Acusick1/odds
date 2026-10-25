@@ -1,10 +1,11 @@
 ---
 type: reference
 title: Candidate rules
-description: The market state a mechanical rule reads at decision time, the bets it returns, the rule registry, decision times and the once-per-outcome rule, maximum input age, params validation, rule pinning and the exchange-gap rule.
+description: The market state a mechanical rule reads at decision time, the bets it returns, the rule registry, decision times and the once-per-outcome rule, maximum input age, params validation, rule pinning, the exchange-gap rule and the retail-EV model rule.
 sources:
   - odds_lambda.candidate_rules
   - odds_core.as_of
+  - odds_analytics.candidate_model
 mentions:
   - odds_core.betfair_close.ExchangePrice
   - odds_core.betfair_close.exchange_price
@@ -38,7 +39,7 @@ As-of-t rules:
 - **Retail.** The snapshot's books in the UK retail roster. Book keys are canonical (`odds_core.bookmakers.canonical_bookmaker_key`), and books outside the roster are dropped.
 - **Exchange.** The snapshot's own Betfair Exchange row through `odds_core.betfair_close.exchange_price`, devigged proportionally. It is `None` when the row does not price every outcome or its back overround exceeds `odds_core.betfair_close.MAX_EXCHANGE_OVERROUND` ([ADR-0014](../../docs/adr/0014-ignore-wide-exchange-prices.md)). The close the report scores against is still the live Betfair API price ([ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md)).
 
-The state does not match the rows of `odds_analytics.retail_ev.build_event_rows`, which take the exchange price at t from live Betfair snapshots, separately from the retail snapshot ([target functions](../modelling/clv-target-functions.md#retail-ev-rows)).
+The state does not match the rows of `odds_analytics.retail_ev.build_event_rows`, which take the exchange price at t from live Betfair snapshots, separately from the retail snapshot ([target functions](../modelling/clv-target-functions.md#retail-ev-rows)). The [retail-EV model rule](#the-retail-ev-model-rule) therefore trains on rows built from market states, not on those rows.
 
 ### known_at
 
@@ -48,7 +49,7 @@ The state does not match the rows of `odds_analytics.retail_ev.build_event_rows`
 
 A rule is a function `(MarketState, params) -> list[BetIntent]`. `odds_lambda.candidate_rules.BetIntent` is a frozen dataclass of `outcome` (`odds_core.market_prices.Outcome`), `bookmaker`, `price_decimal` and `stake`.
 
-`odds_lambda.candidate_rules.rules.RULES` maps each rule name to an `odds_lambda.candidate_rules.RuleSpec`: the function and its params model. A params model subclasses `odds_lambda.candidate_rules.RuleParams`, which is frozen, rejects unknown fields and requires `minutes_before_kickoff`, a non-empty list of distinct positive integers ([decision times](#decision-times)), and `max_input_age_minutes`, a positive integer: the oldest snapshot the state may be built from (`odds_lambda.candidate_rules.max_input_age`). Registered versions use 10 minutes, which the [OddsPortal runs before each decision](../collection/fetch-oddsportal-job.md#runs-before-candidate-decisions) meet. A draft backtest may widen it to screen an idea on older data, and its output names the age it used ([coverage](candidate-backtest.md#coverage)).
+`odds_lambda.candidate_rules.rules.RULES` maps each rule name to an `odds_lambda.candidate_rules.RuleSpec`, the function and its params model, or to an `odds_lambda.candidate_rules.ModelRuleSpec` for a [model rule](#model-rules). A params model subclasses `odds_lambda.candidate_rules.RuleParams`, which is frozen, rejects unknown fields and requires `minutes_before_kickoff`, a non-empty list of distinct positive integers ([decision times](#decision-times)), and `max_input_age_minutes`, a positive integer: the oldest snapshot the state may be built from (`odds_lambda.candidate_rules.max_input_age`). Registered versions use 10 minutes, which the [OddsPortal runs before each decision](../collection/fetch-oddsportal-job.md#runs-before-candidate-decisions) meet. A draft backtest may widen it to screen an idea on older data, and its output names the age it used ([coverage](candidate-backtest.md#coverage)).
 
 ## Running a rule
 
@@ -68,7 +69,7 @@ A candidate version bets each outcome of a match at most once, at the first of i
 
 ## Rule pinning
 
-A `odds_core.candidates.MechanicalCandidate` records `odds_core.candidates.MechanicalCandidate.rule_sha256`, 64 lowercase hex characters. `odds_lambda.candidate_rules.rules.rule_sha256` computes the current value: the sha256, in a fixed order, of `inspect.getsource` for the rule function, its params model class, `odds_lambda.candidate_rules.RuleParams`, `odds_lambda.candidate_rules.apply_rule` (the [once-per-outcome](#once-per-outcome) filter), the `odds_lambda.candidate_rules.market_state` module, the `odds_core.as_of` module and the functions outside the package that pick a state's prices (`odds_lambda.candidate_rules.rules.RULE_INPUT_FUNCTIONS`: `odds_core.betfair_close.exchange_price` and the helpers it calls, `odds_core.market_prices.book_prices` and `odds_core.bookmakers.canonical_bookmaker_key`), then of the values in `odds_lambda.candidate_rules.rules.rule_input_constants`: `odds_core.bookmakers.UK_RETAIL_BOOKMAKERS`, the bookmaker alias maps, `odds_core.betfair_close.EXCHANGE_BOOKMAKER` and `odds_core.betfair_close.MAX_EXCHANGE_OVERROUND`. Code those functions call in turn, such as the devig arithmetic in `odds_core.odds_math`, is not hashed. `odds_lambda.candidate_rules.validate_candidate_rules` fails a candidate whose recorded value differs, saying the rule's code changed and that a new candidate version must record the new hash. Changing the hash in the file is a change to the YAML, so [the version check](candidate-registry.md#version-check) applies to it. `odds candidates rule-hash <rule>` prints the current hash.
+A `odds_core.candidates.MechanicalCandidate` records `odds_core.candidates.MechanicalCandidate.rule_sha256`, 64 lowercase hex characters. `odds_lambda.candidate_rules.rules.rule_sha256` computes the current value: the sha256, in a fixed order, of `inspect.getsource` for the rule function, its params model class, `odds_lambda.candidate_rules.RuleParams`, `odds_lambda.candidate_rules.apply_rule` (the [once-per-outcome](#once-per-outcome) filter), the `odds_lambda.candidate_rules.market_state` module, the `odds_core.as_of` module and the functions outside the package that pick a state's prices (`odds_lambda.candidate_rules.rules.RULE_INPUT_FUNCTIONS`: `odds_core.betfair_close.exchange_price` and the helpers it calls, `odds_core.market_prices.book_prices` and `odds_core.bookmakers.canonical_bookmaker_key`), then, for a [model rule](#model-rules), of the source of each module in its `model_modules`, then of the values in `odds_lambda.candidate_rules.rules.rule_input_constants`: `odds_core.bookmakers.UK_RETAIL_BOOKMAKERS`, the bookmaker alias maps, `odds_core.betfair_close.EXCHANGE_BOOKMAKER` and `odds_core.betfair_close.MAX_EXCHANGE_OVERROUND`. Code those functions call in turn, such as the devig arithmetic in `odds_core.odds_math`, is not hashed. `odds_lambda.candidate_rules.validate_candidate_rules` fails a candidate whose recorded value differs, saying the rule's code changed and that a new candidate version must record the new hash. Changing the hash in the file is a change to the YAML, so [the version check](candidate-registry.md#version-check) applies to it. `odds candidates rule-hash <rule>` prints the current hash.
 
 ## Rules
 
@@ -77,3 +78,23 @@ A `odds_core.candidates.MechanicalCandidate` records `odds_core.candidates.Mecha
 Params `odds_lambda.candidate_rules.ExchangeGapParams`: `threshold` (> 0), `minutes_before_kickoff` (the list of decision times), `max_input_age_minutes` and `stake` (> 0, default 1.0).
 
 `odds_lambda.candidate_rules.rules.exchange_gap` returns no bets when the state has no exchange price. For each outcome it takes the longest decimal price among the retail books (ties go to the alphabetically first book key) and bets that book at that price when `exchange.fair[outcome] × price − 1` is greater than `threshold`. It places at most one bet per outcome in a decision, and each outcome is decided on its own.
+
+## Model rules
+
+An `odds_lambda.candidate_rules.ModelRuleSpec` is a rule whose function also takes a predictor (`odds_lambda.candidate_rules.EvPredictor`): the predicted EV of each UK retail book and outcome quoted in a state. `odds_lambda.candidate_rules.ModelRuleSpec.bind` fixes a fitted predictor into an ordinary `odds_lambda.candidate_rules.RuleSpec`, so a bound model rule decides through `odds_lambda.candidate_rules.apply_rule` like any other rule, with the same once-per-outcome filter.
+
+Only the [replay backtest](candidate-backtest.md#model-rules) fits and binds a model. The [run-candidates job](run-candidates-job.md#one-run) skips a model-rule candidate with a `candidate_invalid` alert, and the [parity check](candidate-parity.md#command) refuses one. Pinning a fitted model for a live forward test does not exist yet: it waits on the model passing its re-test ([#657](https://github.com/Acusick1/odds/issues/657)).
+
+`model_modules` names the modules that build, fit and query the model. `odds_lambda` does not depend on `odds_analytics`, so `odds_lambda.candidate_rules.rules.rule_sha256` imports them by name and hashes their source ([rule pinning](#rule-pinning)).
+
+### The retail-EV model rule
+
+Params `odds_lambda.candidate_rules.RetailEvModelParams`: `model` (`retail_ev_price_only`), `threshold` (> 0), `training_matches` and `refit_every_matches` (positive integers, the [replay's](candidate-backtest.md#model-rules) training-only prefix and refit cadence), `minutes_before_kickoff`, `max_input_age_minutes` and `stake` (> 0, default 1.0).
+
+`odds_lambda.candidate_rules.rules.retail_ev_model` returns no bets when the state has no exchange price. For each outcome it takes the longest decimal price among the retail books (ties go to the alphabetically first book key), as [the exchange-gap rule](#the-exchange-gap-rule) does, and bets that book at that price when the predicted EV of that quote is greater than `threshold`. The two rules differ only in the EV estimate: the exchange gap's `exchange.fair[outcome] × price − 1` against the model's prediction.
+
+`odds_analytics.candidate_model` holds the model, in the rule's `model_modules` with `odds_analytics.retail_ev` and `odds_analytics.xgboost_line_movement`:
+
+- **Model.** `retail_ev_price_only` is the residual arm on the price features of `odds_analytics.retail_ev.RetailEvFeatures`, with no optional groups. Its XGBoost parameters, `odds_analytics.candidate_model.MODEL_XGBOOST_PARAMS`, are the frozen residual seed-42 trial that the [ADR-0016 evaluation](retail-ev-evaluation.md) uses, written out in full so the hash covers each one. `odds_analytics.candidate_model.fit_model` fits it through `odds_analytics.retail_ev.fit_retail_ev`, with the target and loss weights of the [retail-EV target](../modelling/clv-target.md#the-retail-ev-target).
+- **Inputs.** `odds_analytics.candidate_model.state_inputs` turns a state's quotes into `odds_analytics.retail_ev.RetailEvInput` with `odds_analytics.retail_ev.quote_inputs`, stamped at the state's snapshot time, with its own exchange price and no Polymarket price or dynamics. A state without an exchange price has none. `odds_analytics.candidate_model.RetailEvPredictor` predicts every input.
+- **Training rows.** `odds_analytics.candidate_model.training_rows` builds, for each snapshot of a match from `odds_analytics.retail_ev.DECISION_WINDOW` to `odds_analytics.retail_ev.DECISION_CUTOFF` before kick-off, the state `odds_lambda.candidate_rules.build_market_state` gives at that snapshot's own time, and takes its inputs against the match's close (`odds_core.betfair_close.event_close`). Only co-timed snapshots give rows, the exchange price is always the row's own snapshot's, and a training row is the input the rule would have predicted from had it decided at that time. A match without a close has no rows.

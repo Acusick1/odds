@@ -47,7 +47,7 @@ The columns are `odds_analytics.retail_ev.RetailEvFeatures.names` for the spec's
 
 ## Refit blocks
 
-`odds_analytics.retail_ev_evaluation.evaluation_blocks` splits the window events that have rows into blocks of `refit_every_events` in kick-off order. The last block may be partial and is scored. Each block's model trains on every row of the events that kick off at least `gap` before the block's first event, including earlier window events. `odds_analytics.retail_ev_evaluation.xgboost_fitter` fits the model wrapper `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy`, which takes the row arrays as given, with the loss weights and predicts on the target's own scale.
+`odds_analytics.retail_ev_evaluation.evaluation_blocks` splits the window events that have rows into blocks of `refit_every_events` in kick-off order. The last block may be partial and is scored. Each block's model trains on every row of the events that kick off at least `gap` before the block's first event, including earlier window events. `odds_analytics.retail_ev_evaluation.xgboost_fitter` fits the model wrapper `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy` through `odds_analytics.retail_ev.fit_retail_ev`, the fit the [retail-EV model rule](candidate-rules.md#the-retail-ev-model-rule) also uses, which takes the row arrays as given, with the loss weights and predicts on the target's own scale.
 
 ## Statistics and verdict
 

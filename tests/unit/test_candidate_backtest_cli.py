@@ -45,9 +45,18 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def fake_replay(monkeypatch: pytest.MonkeyPatch) -> list[MechanicalCandidate]:
     seen: list[MechanicalCandidate] = []
+    only: list[object] = []
 
-    async def replay(_session: Any, candidate: MechanicalCandidate, start: date, end: date, k: int):
+    async def replay(
+        _session: Any,
+        candidate: MechanicalCandidate,
+        start: date,
+        end: date,
+        k: int,
+        only_events: object = None,
+    ):
         seen.append(candidate)
+        only.append(only_events)
         coverage = Coverage(
             events=10,
             decisions=10,
@@ -61,6 +70,7 @@ def fake_replay(monkeypatch: pytest.MonkeyPatch) -> list[MechanicalCandidate]:
         return score(candidate, start, end, [], coverage, k, NOW, N_BOOT, 0)
 
     monkeypatch.setattr("odds_cli.commands.candidates.replay", replay)
+    fake_replay.only_events = only  # type: ignore[attr-defined]
     return seen
 
 
@@ -95,6 +105,29 @@ class TestBacktestCommand:
         assert summary["coverage"]["events"] == 10
         assert summary["hash_status"] == HashStatus.MATCH
         assert summary["start"] == "2025-08-01"
+
+    def test_compare_replays_the_other_candidate_and_reports_both(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        seen = fake_replay(monkeypatch)
+        write(registry, {**MECHANICAL, "name": "other"})
+        out = tmp_path / "result.json"
+
+        result = RUNNER.invoke(
+            app,
+            ["candidates", "backtest", "back-longest", "--from", "2025-08-01", "--to", "2025-12-31"]
+            + ["--compare", "other", "--json", str(out)],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        assert [c.name for c in seen] == ["back-longest", "other"]
+        # A rule without a model decides every range event, so the comparison is not restricted.
+        assert fake_replay.only_events == [None, None]  # type: ignore[attr-defined]
+        assert "Compared with other" in result.stdout
+        assert "Mean EV on the same decided matches" in result.stdout
+        payload = json.loads(out.read_text())
+        assert payload["comparison"]["name"] == "other"
+        assert payload["comparison"]["summary"]["verdict"] == "not_yet"
 
     def backtest(self, name: str = "back-longest"):
         return RUNNER.invoke(

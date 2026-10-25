@@ -31,6 +31,7 @@ sources:
   - odds_analytics.training.config.RetailEvArm
   - odds_analytics.retail_ev.RetailEvFeatures
   - odds_analytics.retail_ev.RetailEvRow
+  - odds_analytics.retail_ev.RetailEvInput
   - odds_analytics.retail_ev_metrics.mse_gain
   - odds_analytics.retail_ev_metrics.pick_ev_gain
   - odds_analytics.training.cross_validation.make_walk_forward_splits
@@ -80,7 +81,7 @@ This page records the first model run on the retail-EV target of [ADR-0012](../.
   - Both come with event-clustered bootstrap 95% CIs over per-event totals (2,000 resamples, the same resampled events for every comparison).
   - A pick total is in event units: `w_event` sums to 1 per event, so 0.28 is 0.28 of one event's worth of EV.
   - Shrinkage by β > 0 never changes the sign of a prediction, so its picks equal the baseline's and its pick gain is zero by construction.
-  - The horizon buckets and season labels are properties of each `odds_analytics.retail_ev.RetailEvRow`, computed from its decision time and kick-off.
+  - The horizon buckets and season labels are properties of each row's inputs (`odds_analytics.retail_ev.RetailEvInput`), computed from its decision time and kick-off.
 
 ## The scored rows
 

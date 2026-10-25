@@ -487,6 +487,33 @@ class TestCandidateSelection:
             "candidate_invalid:bad-rule",
         ]
 
+    async def test_a_model_rule_candidate_is_skipped_with_an_alert(
+        self, registry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        alert = AsyncMock()
+        monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
+        write_candidate(registry, "good")
+        write_candidate(
+            registry,
+            "model",
+            rule="retail_ev_model",
+            params={
+                "model": "retail_ev_price_only",
+                "threshold": 0.01,
+                "training_matches": 50,
+                "refit_every_matches": 10,
+                "minutes_before_kickoff": [60],
+                "max_input_age_minutes": 10,
+            },
+        )
+
+        runnable = await runnable_candidates(EPL, NOW)
+
+        assert [r.candidate.name for r in runnable] == ["good"]
+        [call] = alert.await_args_list
+        assert call.args[0] == "candidate_invalid:model"
+        assert "needs a fitted model" in call.args[2]
+
     async def test_unreadable_registry_alerts_and_runs_nothing(
         self, registry, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -53,9 +53,12 @@ def candidate(**overrides: Any) -> MechanicalCandidate:
     return MechanicalCandidate.model_validate(fields)
 
 
-def betfair(prices: tuple[float, float, float]) -> dict[str, Any]:
+def betfair(prices: tuple[float, float, float], **teams: str) -> dict[str, Any]:
     return three_way_bookmaker(
-        "betfair_exchange", prices, betfair_meta={"inplay": False, "market_status": "OPEN"}
+        "betfair_exchange",
+        prices,
+        betfair_meta={"inplay": False, "market_status": "OPEN"},
+        **teams,
     )
 
 
@@ -83,9 +86,10 @@ async def add_event(
         **fields,
     )
     session.add(event)
+    teams = {"home_team": event.home_team, "away_team": event.away_team}
     books = [
-        *([three_way_bookmaker("bet365", retail)] if retail is not None else []),
-        *([betfair(exchange)] if exchange is not None else []),
+        *([three_way_bookmaker("bet365", retail, **teams)] if retail is not None else []),
+        *([betfair(exchange, **teams)] if exchange is not None else []),
     ]
     if books:
         session.add(
@@ -96,7 +100,7 @@ async def add_event(
     if close is not None:
         session.add(
             make_tagged_snapshot(
-                event_id, kickoff - timedelta(minutes=2), [betfair(close)], "betfair_api"
+                event_id, kickoff - timedelta(minutes=2), [betfair(close, **teams)], "betfair_api"
             )
         )
     await session.commit()
@@ -313,3 +317,90 @@ class TestFamilySize:
             ("gap", 3): 2,
             ("sibling", 1): 2,
         }
+
+
+def model_candidate(**params: Any) -> MechanicalCandidate:
+    return candidate(
+        name="model",
+        rule="retail_ev_model",
+        rule_sha256=rule_sha256("retail_ev_model"),
+        params={
+            "model": "retail_ev_price_only",
+            "threshold": 0.01,
+            "training_matches": 3,
+            "refit_every_matches": 1,
+            "minutes_before_kickoff": [60],
+            "max_input_age_minutes": 10,
+            **params,
+        },
+    )
+
+
+async def add_days(session: Any, n: int) -> list[str]:
+    ids = [f"m{i}" for i in range(n)]
+    for i, event_id in enumerate(ids):
+        await add_event(session, event_id, KICKOFF + timedelta(days=i), away_team=f"Team {i}")
+    return ids
+
+
+class TestModelReplay:
+    async def test_scores_only_the_matches_after_the_training_prefix(
+        self, pglite_async_session
+    ) -> None:
+        ids = await add_days(pglite_async_session, 5)
+
+        result = await run(pglite_async_session, model_candidate())
+
+        assert result.range_events == 5
+        assert result.decided_event_ids == tuple(ids[3:])
+        assert result.coverage.events == 2 and result.coverage.decisions == 2
+        assert [(r.training_matches, r.event_ids) for r in result.refits] == [
+            (3, (ids[3],)),
+            (4, (ids[4],)),
+        ]
+
+    async def test_a_model_that_learns_nothing_bets_like_the_exchange_gap(
+        self, pglite_async_session
+    ) -> None:
+        # The close equals the exchange price at t, so the residual is zero and the
+        # prediction is the baseline: the same EV the exchange-gap rule computes.
+        ids = await add_days(pglite_async_session, 5)
+
+        model = await run(pglite_async_session, model_candidate())
+        gap = await run(pglite_async_session, candidate(), only_events=model.decided_event_ids)
+
+        assert model.coverage.bets == gap.coverage.bets == 2
+        assert gap.coverage.events == 2
+        assert model.overall is not None and gap.overall is not None
+        assert model.overall.mean_ev == pytest.approx(gap.overall.mean_ev)
+        assert gap.decided_event_ids is None and set(ids[3:]) == set(model.decided_event_ids)
+
+    async def test_trains_only_on_matches_kicked_off_before_the_refit(
+        self, pglite_async_session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # m2 kicks off 30 minutes before m3 and after m3's KO-60 decision.
+        await add_event(pglite_async_session, "m0", KICKOFF, away_team="A")
+        await add_event(pglite_async_session, "m1", KICKOFF + timedelta(days=1), away_team="B")
+        await add_event(
+            pglite_async_session, "m2", KICKOFF + timedelta(days=2, minutes=-30), away_team="C"
+        )
+        await add_event(pglite_async_session, "m3", KICKOFF + timedelta(days=2), away_team="D")
+        from odds_analytics import candidate_model
+
+        real = candidate_model.fit_model
+        seen: list[set[str]] = []
+
+        def fit(model: str, market: str, rows: Any) -> Any:
+            seen.append({r.event_id for r in rows})
+            return real(model, market, rows)
+
+        monkeypatch.setattr(candidate_model, "fit_model", fit)
+
+        result = await run(pglite_async_session, model_candidate())
+
+        assert seen == [{"m0", "m1"}]
+        assert result.refits[0].training_matches == 2
+
+    async def test_cannot_be_restricted_to_other_events(self, pglite_async_session) -> None:
+        with pytest.raises(ValueError, match="model rule"):
+            await run(pglite_async_session, model_candidate(), only_events={"x"})

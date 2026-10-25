@@ -10,8 +10,8 @@ never promote one.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Collection, Sequence
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 
@@ -19,11 +19,22 @@ from odds_core.candidates import MechanicalCandidate
 from odds_core.market_prices import THREE_WAY_MARKET, Outcome
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.odds_math import calculate_profit_from_decimal, determine_h2h_winner
-from odds_lambda.candidate_rules import decision_times, resolve_rule, rule_sha256, run_rule
+from odds_lambda.candidate_rules import (
+    RULES,
+    ModelRuleSpec,
+    RetailEvModelParams,
+    RuleParams,
+    RuleSpec,
+    decision_times,
+    resolve_rule,
+    rule_sha256,
+    run_rule,
+)
 from odds_lambda.storage.event_merge import canonical_events
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_analytics.candidate_model import Refit, model_blocks
 from odds_analytics.candidate_report import (
     BOOTSTRAP_SEED,
     DEFAULT_BOOTSTRAP_SAMPLES,
@@ -49,8 +60,9 @@ class HashStatus(StrEnum):
 
 @dataclass(frozen=True)
 class Coverage:
-    """How much of the range the rule could act on. ``events`` counts events; the other
-    fields count decisions, one per event and decision time, and bets."""
+    """How much of the range the rule could act on. ``events`` counts the events decided (a
+    model rule's scored matches); the other fields count decisions, one per event and decision
+    time, and bets."""
 
     events: int
     decisions: int
@@ -65,7 +77,9 @@ class Coverage:
 @dataclass(frozen=True)
 class BacktestResult:
     """``overall`` is the estimate over every bet with a close in the scoreable prefix,
-    beyond the checkpoint cap of the verdict."""
+    beyond the checkpoint cap of the verdict. ``range_events`` counts the canonical events in
+    the range, a model rule's training prefix included, and ``refits`` records a model rule's
+    fits. ``comparison`` is another candidate replayed on the same decided events."""
 
     name: str
     version: int
@@ -77,6 +91,16 @@ class BacktestResult:
     coverage: Coverage
     summary: CandidateSummary
     overall: Checkpoint | None
+    range_events: int = 0
+    refits: tuple[Refit, ...] = ()
+    comparison: BacktestResult | None = None
+
+    @property
+    def decided_event_ids(self) -> tuple[str, ...] | None:
+        """A model rule's scored matches; ``None`` for a rule that decides every range event."""
+        if not isinstance(RULES[self.rule], ModelRuleSpec):
+            return None
+        return tuple(event_id for refit in self.refits for event_id in refit.event_ids)
 
 
 def hash_status(candidate: MechanicalCandidate) -> HashStatus:
@@ -113,30 +137,25 @@ async def _close_snapshots(
     return snapshots
 
 
-async def replay(
+@dataclass
+class _Counts:
+    decisions: int = 0
+    with_input: int = 0
+    with_exchange: int = 0
+    with_retail: int = 0
+    with_bet: int = 0
+
+
+async def _decide(
     session: AsyncSession,
     candidate: MechanicalCandidate,
-    start: date,
-    end: date,
-    family_versions: int,
-    now: datetime | None = None,
-    n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
-    seed: int = BOOTSTRAP_SEED,
-) -> BacktestResult:
-    """Replay ``candidate`` over the events kicked off from ``start`` to ``end`` inclusive.
-
-    The decision times are the rule's leads before the event's final kick-off, which is the
-    only kick-off a completed event has; a live run saw the kick-off as it was then. An
-    event's times are decided earliest first, and an outcome bet at one is not bet again.
-    State is built with ``known_at=None`` because backfilled rows were created long after
-    their snapshot time. Bets are scored in decision-time order, as the live report orders
-    trades by placement, all settled.
-    """
-    spec, params = resolve_rule(candidate)
-    events = await final_events(session, candidate.sport, start, end)
-
+    spec: RuleSpec,
+    params: RuleParams,
+    events: Sequence[Event],
+    counts: _Counts,
+) -> list[ScoredBet]:
+    """Decide ``events`` at each of their decision times and settle the bets."""
     bets: list[ScoredBet] = []
-    decisions = with_input = with_exchange = with_retail = with_bet = 0
     for offset in range(0, len(events), EVENT_BATCH_SIZE):
         batch = events[offset : offset + EVENT_BATCH_SIZE]
         decided = []
@@ -147,11 +166,11 @@ async def replay(
                     session, spec, params, event, t, None, bet_outcomes=bet_outcomes
                 )
                 bet_outcomes.update(intent.outcome for intent in intents)
-                decisions += 1
-                with_input += state.has_input
-                with_exchange += state.exchange is not None
-                with_retail += bool(state.retail)
-                with_bet += bool(intents)
+                counts.decisions += 1
+                counts.with_input += state.has_input
+                counts.with_exchange += state.exchange is not None
+                counts.with_retail += bool(state.retail)
+                counts.with_bet += bool(intents)
                 decided.append((event, t, state.market, intents))
 
         has_close = {
@@ -182,20 +201,68 @@ async def replay(
                 )
         # Read-only session: drop the loaded snapshots rather than hold the whole range.
         session.expunge_all()
+    return bets
+
+
+async def replay(
+    session: AsyncSession,
+    candidate: MechanicalCandidate,
+    start: date,
+    end: date,
+    family_versions: int,
+    now: datetime | None = None,
+    n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
+    seed: int = BOOTSTRAP_SEED,
+    only_events: Collection[str] | None = None,
+) -> BacktestResult:
+    """Replay ``candidate`` over the events kicked off from ``start`` to ``end`` inclusive.
+
+    The decision times are the rule's leads before the event's final kick-off, which is the
+    only kick-off a completed event has; a live run saw the kick-off as it was then. An
+    event's times are decided earliest first, and an outcome bet at one is not bet again.
+    State is built with ``known_at=None`` because backfilled rows were created long after
+    their snapshot time. Bets are scored in decision-time order, as the live report orders
+    trades by placement, all settled.
+
+    A model rule decides only the matches after its training prefix, each block with the
+    model refitted before it (``odds_analytics.candidate_model``). ``only_events`` restricts a
+    rule without a model to those event ids, to replay it on another replay's scored matches.
+    """
+    spec, params = resolve_rule(candidate)
+    events = await final_events(session, candidate.sport, start, end)
+    counts = _Counts()
+    refits: list[Refit] = []
+    if isinstance(spec, ModelRuleSpec):
+        if only_events is not None:
+            raise ValueError(
+                f"candidate {candidate.name!r}: a model rule trains on its own range, so it "
+                "cannot be restricted to other events"
+            )
+        assert isinstance(params, RetailEvModelParams)  # noqa: S101
+        bets: list[ScoredBet] = []
+        async for refit, bound, block in model_blocks(session, spec, params, events):
+            refits.append(refit)
+            bets += await _decide(session, candidate, bound, params, block, counts)
+        scored_events = sum(len(r.event_ids) for r in refits)
+    else:
+        if only_events is not None:
+            events = [e for e in events if e.id in only_events]
+        bets = await _decide(session, candidate, spec, params, events, counts)
+        scored_events = len(events)
     # Stable, so bets placed at one time keep kick-off and rule order.
     bets.sort(key=lambda bet: bet.placed_at)
 
     coverage = Coverage(
-        events=len(events),
-        decisions=decisions,
-        with_input=with_input,
-        with_exchange=with_exchange,
-        with_retail=with_retail,
-        with_bet=with_bet,
+        events=scored_events,
+        decisions=counts.decisions,
+        with_input=counts.with_input,
+        with_exchange=counts.with_exchange,
+        with_retail=counts.with_retail,
+        with_bet=counts.with_bet,
         bets=len(bets),
         bets_with_close=sum(b.p_close is not None for b in bets),
     )
-    return score(
+    result = score(
         candidate,
         start,
         end,
@@ -206,6 +273,7 @@ async def replay(
         n_boot,
         seed,
     )
+    return replace(result, range_events=len(events), refits=tuple(refits))
 
 
 def score(

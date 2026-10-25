@@ -32,7 +32,6 @@ from odds_core.snapshot_sources import SnapshotKind, snapshot_kind
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, PositiveInt, model_validator
 
 from odds_analytics.retail_ev import (
-    BASELINE_FEATURE,
     DECISION_WINDOW,
     HORIZON_BUCKET_LABELS,
     LOSS_WEIGHT_SCALE,
@@ -40,6 +39,7 @@ from odds_analytics.retail_ev import (
     DropCounts,
     RetailEvDataset,
     RetailEvFeatures,
+    fit_retail_ev,
     load_retail_ev_dataset,
 )
 from odds_analytics.retail_ev_metrics import (
@@ -420,22 +420,11 @@ Fitter = Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray], np.ndarray]
 
 def xgboost_fitter(feature_names: list[str], model: XGBoostConfig, arm: RetailEvArm) -> Fitter:
     """Fit on (X, y, loss weights) and predict the eval rows on the target's scale."""
-    from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
-
-    margin = BASELINE_FEATURE if arm is RetailEvArm.RESIDUAL else None
 
     def fit_predict(
         X_train: np.ndarray, y_train: np.ndarray, w_train: np.ndarray, X_eval: np.ndarray
     ) -> np.ndarray:
-        strategy = XGBoostLineMovementStrategy()
-        strategy.train(
-            X_train,
-            y_train,
-            feature_names,
-            sample_weight_train=w_train,
-            margin_feature=margin,
-            **model.model_dump(),
-        )
+        strategy = fit_retail_ev(X_train, y_train, w_train, feature_names, model.model_dump(), arm)
         return strategy.predict(X_eval).astype(np.float64)
 
     return fit_predict
