@@ -28,10 +28,9 @@ from odds_lambda.mlb_game_resolver import (
     UnresolvedGame,
     UnresolvedReason,
     mlb_date,
-    played_starts,
     resolve_game_pks,
 )
-from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbStatsFetcher
+from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState, MlbStatsFetcher
 from odds_lambda.storage.event_merge import EventMerger, follow_schedule
 from odds_lambda.storage.writers import OddsWriter
 
@@ -95,16 +94,39 @@ Score = tuple[int, int]
 class GamePkAssignment:
     """Events of one game: ``kept`` takes ``game_pk`` and ``merged`` are merged into it.
 
-    ``start`` is the game's scheduled start, which ``kept`` moves to; ``rule`` is ``None`` for a
-    hand assignment. ``final_score`` is the MLB (home, away) score when the game is Final.
+    ``played`` is the slot the game is (or was) played in, ``None`` while it has only postponed
+    slots; ``rule`` is ``None`` for a hand assignment. ``final_score`` is the MLB (home, away)
+    score when the game is Final.
     """
 
     game_pk: int
     kept: Event
     merged: tuple[Event, ...]
-    start: datetime | None
+    played: PlayedSlot | None
     rule: ResolutionRule | None
     final_score: Score | None = None
+
+    def target_start(self) -> datetime | None:
+        """Where ``kept`` moves: the scheduled start; for a TBD start, MLB's placeholder start
+        only when ``kept`` is not on the played date already, since its listed time there is
+        a better estimate than the placeholder; otherwise nowhere."""
+        if self.played is None:
+            return None
+        if not self.played.tbd:
+            return self.played.start
+        if mlb_date(ensure_utc(self.kept.commence_time)) == self.played.day:
+            return None
+        return self.played.start
+
+
+@dataclass(frozen=True)
+class PlayedSlot:
+    """A game's slot that is neither postponed, cancelled nor a resumed continuation. ``day`` is
+    its MLB date; ``start`` is MLB's placeholder when ``tbd``."""
+
+    day: date
+    start: datetime
+    tbd: bool
 
 
 @dataclass(frozen=True)
@@ -149,6 +171,7 @@ class AssignmentOutcome:
     pairs: SnapshotPairs = SnapshotPairs()
     moved_from: datetime | None = None
     moved_to: datetime | None = None
+    start_tbd: bool = False
     score: ScoreCarry = ScoreCarry.NONE
     score_detail: str = ""
     settled: Settlement | None = None
@@ -163,6 +186,20 @@ class AssignmentOutcome:
                 if table in READ_ONLY_TABLES:
                     touched[table] = touched.get(table, 0) + count
         return dict(sorted(touched.items()))
+
+
+def played_slots(schedule: Sequence[MlbGameResult]) -> dict[int, PlayedSlot]:
+    """Each game's played slot, preferring one with a set start over a TBD one."""
+    slots: dict[int, PlayedSlot] = {}
+    for slot in schedule:
+        if slot.resumed or slot.state in (MlbGameState.POSTPONED, MlbGameState.CANCELLED):
+            continue
+        held = slots.get(slot.game_pk)
+        if held is None or (held.tbd and not slot.start_time_tbd):
+            slots[slot.game_pk] = PlayedSlot(
+                slot.schedule_date or slot.day, slot.start_time, slot.start_time_tbd
+            )
+    return slots
 
 
 def final_scores(schedule: Sequence[MlbGameResult]) -> dict[int, Score]:
@@ -214,17 +251,23 @@ def _rows_by_event(events: Sequence[Event]) -> dict[str, GameRow]:
 
 
 def _choose_kept(
-    events: Sequence[Event], holder: Event | None, start: datetime | None
+    events: Sequence[Event], holder: Event | None, played: PlayedSlot | None
 ) -> tuple[Event, tuple[Event, ...]]:
-    """The event holding the gamePk, else the one nearest the scheduled start, ties (or no
-    start) going to ``canonical_event_id``."""
+    """The event holding the gamePk; else, among the events on the played slot's MLB date when
+    there are any (so a postponed slot's event never wins over one on the played date), the one
+    nearest the played slot's start (MLB's placeholder when TBD), ties going to the latest and
+    then to ``canonical_event_id``; with no played slot, ``canonical_event_id``."""
     if holder is not None:
         return holder, tuple(sorted(events, key=lambda e: e.id))
     candidates = list(events)
-    if start is not None:
-        gaps = {e.id: abs(ensure_utc(e.commence_time) - ensure_utc(start)) for e in events}
+    if played is not None:
+        on_day = [e for e in events if mlb_date(ensure_utc(e.commence_time)) == played.day]
+        candidates = on_day or candidates
+        gaps = {e.id: abs(ensure_utc(e.commence_time) - played.start) for e in candidates}
         nearest = min(gaps.values())
-        candidates = [e for e in events if gaps[e.id] == nearest]
+        candidates = [e for e in candidates if gaps[e.id] == nearest]
+        latest = max(ensure_utc(e.commence_time) for e in candidates)
+        candidates = [e for e in candidates if ensure_utc(e.commence_time) == latest]
     kept_id = canonical_event_id([e.id for e in candidates])
     kept = next(e for e in events if e.id == kept_id)
     return kept, tuple(sorted((e for e in events if e.id != kept_id), key=lambda e: e.id))
@@ -271,6 +314,7 @@ async def plan_game_pks(
     schedule = await fetcher.fetch_results(first_day, last_day)
     resolutions = dict(zip(rows, resolve_game_pks(rows, schedule), strict=True))
     scores = final_scores(schedule)
+    played = played_slots(schedule)
 
     mismatched: dict[_PairDate, str] = {}
     for event in held:
@@ -303,10 +347,10 @@ async def plan_game_pks(
     assignments: list[GamePkAssignment] = []
     for game_pk in sorted(by_pk):
         resolution = resolved_by_pk[game_pk]
-        kept, merged = _choose_kept(by_pk[game_pk], holders.get(game_pk), resolution.start)
+        kept, merged = _choose_kept(by_pk[game_pk], holders.get(game_pk), played.get(game_pk))
         assignments.append(
             GamePkAssignment(
-                game_pk, kept, merged, resolution.start, resolution.rule, scores.get(game_pk)
+                game_pk, kept, merged, played.get(game_pk), resolution.rule, scores.get(game_pk)
             )
         )
 
@@ -399,7 +443,7 @@ async def apply_assignment(
         rows_moved = report.rows_moved
     if kept.mlb_game_pk is None:
         kept.assign_game_pk(assignment.game_pk)
-    await follow_schedule(session, kept, assignment.game_pk, assignment.start)
+    await follow_schedule(session, kept, assignment.game_pk, assignment.target_start())
 
     merged_score = _score(kept)
     others = sorted({s for s in duplicate_scores if s != merged_score})
@@ -427,6 +471,7 @@ async def apply_assignment(
         pairs=await same_time_snapshot_pairs(session, kept_id),
         moved_from=moved_from if moved_to != moved_from else None,
         moved_to=moved_to if moved_to != moved_from else None,
+        start_tbd=assignment.played is not None and assignment.played.tbd,
         score=score,
         score_detail=score_detail,
         settled=settled,
@@ -542,16 +587,16 @@ async def plan_hand_assignment(
             f"game {game_pk} has no slot on {event_day} or within {MAX_SINGLE_GAME_GAP} of "
             f"{event_id}'s start"
         )
-    start = played_starts(slots).get(game_pk)
+    played = played_slots(slots).get(game_pk)
     final = final_scores(slots).get(game_pk)
     holder = (
         await session.execute(select(Event).where(Event.mlb_game_pk == game_pk))
     ).scalar_one_or_none()
     if holder is None:
-        return GamePkAssignment(game_pk, event, (), start, None, final)
+        return GamePkAssignment(game_pk, event, (), played, None, final)
     if not merge:
         raise GamePkRefused(f"{holder.id} holds gamePk {game_pk}; pass --merge to merge into it")
-    return GamePkAssignment(game_pk, holder, (event,), start, None, final)
+    return GamePkAssignment(game_pk, holder, (event,), played, None, final)
 
 
 async def mark_no_game_pk(session: AsyncSession, event_id: str, reason: str) -> Event:
