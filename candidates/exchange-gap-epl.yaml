@@ -4,11 +4,12 @@ kind: mechanical
 sport: soccer_epl
 version: 1
 issue: 626
-start_date: 2026-11-09
+start_date: 2026-10-27
 status: active
 rule: exchange_gap
-rule_sha256: 15ea06dd93b473f0ab3e692e3bb9e35d6f9f979b6cac9d3b758a01aaa7c378ba
+rule_sha256: 05300abb15f44b50056092f16bef4de61570092efa2dee488f5bba119bf97f5f
 params:
   threshold: 0.01
   minutes_before_kickoff: 60
+  max_input_age_minutes: 10
   stake: 1.0

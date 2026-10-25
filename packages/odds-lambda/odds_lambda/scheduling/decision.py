@@ -23,7 +23,7 @@ another sport's fixtures.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -65,9 +65,25 @@ class KickoffLookup(Protocol):
     async def __call__(self, sport_key: str, *, now: datetime) -> datetime | None: ...
 
 
-# A close run due within this gap would rerun the job straight away; the run
-# in progress already sits at the close.
-MIN_CLOSE_RUN_GAP = timedelta(seconds=60)
+# A run that started this soon before a lead time, or later, serves that lead run.
+MIN_LEAD_RUN_GAP = timedelta(seconds=60)
+
+
+@dataclass(slots=True, frozen=True)
+class Lead:
+    """A run ``before`` each kickoff; one that falls behind still runs until ``until`` before it."""
+
+    before: timedelta
+    until: timedelta = timedelta(0)
+
+
+@dataclass(slots=True, frozen=True)
+class LeadRun:
+    """The run of ``lead`` for ``kickoff``, booked at ``at``: its lead time, or now when that passed."""
+
+    lead: Lead
+    kickoff: datetime
+    at: datetime
 
 
 @dataclass(slots=True, frozen=True)
@@ -101,10 +117,7 @@ class CadenceConfig:
     and is brought forward to the moment the next fixture enters the lookahead.
     ``db_fallback`` is the interval a caller should use when the kickoff query
     itself fails (DB unreachable), so scheduling never blocks on DB
-    availability. ``close_lead``, when set,
-    pulls ``next_execution`` forward to ``close_lead`` before the next kickoff
-    the cadence would otherwise step over, so a run always lands just before
-    each kickoff.
+    availability.
     """
 
     closing: float
@@ -114,7 +127,6 @@ class CadenceConfig:
     opening: float
     no_game: float
     db_fallback: float = 1.0
-    close_lead: timedelta | None = None
 
     def interval_for(self, tier: FetchTier) -> float:
         """Return the polling interval (hours) for a tier.
@@ -176,7 +188,7 @@ def _decide_from_kickoff(
     now: datetime,
     overnight: OvernightWindow | None,
     lookahead_days: int,
-    close_kickoff: datetime | None,
+    lead_run: LeadRun | None,
 ) -> ScheduleDecision:
     """Classify an already-resolved kickoff into a decision (no DB access).
 
@@ -200,11 +212,9 @@ def _decide_from_kickoff(
     next_execution = _next_time(now, interval, overnight)
     reason = f"Next {sport_key} game in {hours_until:.1f}h ({tier.value} tier)"
 
-    if cadence.close_lead is not None and close_kickoff is not None:
-        close_run = close_kickoff - cadence.close_lead
-        if close_run - now >= MIN_CLOSE_RUN_GAP and close_run < next_execution:
-            next_execution = close_run
-            reason += f", close run {cadence.close_lead} before {close_kickoff:%H:%M} UTC"
+    if lead_run is not None and lead_run.at < next_execution:
+        next_execution = lead_run.at
+        reason += f", lead run {lead_run.lead.before} before {lead_run.kickoff:%H:%M} UTC"
 
     return ScheduleDecision(
         should_execute=True,
@@ -214,17 +224,29 @@ def _decide_from_kickoff(
     )
 
 
-async def _get_close_kickoff(
-    sport_key: str,
-    cadence: CadenceConfig,
+async def next_lead_run(
+    sport_keys: Sequence[str],
+    leads: Sequence[Lead],
     *,
     now: datetime,
+    run_started: datetime | None = None,
     lookup: KickoffLookup | None = None,
-) -> datetime | None:
-    """Earliest kickoff whose close run (``close_lead`` before it) is still ahead of ``now``."""
-    if cadence.close_lead is None:
-        return None
-    return await (lookup or get_next_kickoff)(sport_key, now=now + cadence.close_lead)
+) -> LeadRun | None:
+    """The earliest lead run the run that started at ``run_started`` (default ``now``) did not serve.
+
+    A run serves a lead time when it started at most ``MIN_LEAD_RUN_GAP`` before it, or after
+    it. A lead time already past is booked for ``now`` while the kickoff is more than the
+    lead's ``until`` away. Kickoffs come from ``lookup``, stored events by default.
+    """
+    started = run_started or now
+    runs: list[LeadRun] = []
+    for sport_key in sport_keys:
+        for lead in set(leads):
+            after = max(started + lead.before + MIN_LEAD_RUN_GAP, now + lead.until)
+            kickoff = await (lookup or get_next_kickoff)(sport_key, now=after)
+            if kickoff is not None:
+                runs.append(LeadRun(lead, kickoff, max(kickoff - lead.before, now)))
+    return min(runs, key=lambda run: run.at, default=None)
 
 
 async def decide_forward(
@@ -265,7 +287,7 @@ async def decide_forward(
         now=now,
         overnight=overnight,
         lookahead_days=lookahead_days,
-        close_kickoff=await _get_close_kickoff(sport_key, cadence, now=now),
+        lead_run=None,
     )
 
 
@@ -277,29 +299,31 @@ async def decide_forward_resilient(
     lookahead_days: int = 7,
     now: datetime | None = None,
     next_kickoff_lookup: KickoffLookup | None = None,
-    close_kickoff_lookup: KickoffLookup | None = None,
+    leads: Sequence[Lead] = (),
+    lead_kickoff_lookup: KickoffLookup | None = None,
+    run_started: datetime | None = None,
 ) -> ScheduleDecision:
     """``decide_forward`` over one-or-more sports, resilient to query failure.
 
     The proximity gate keys off the *soonest* kickoff across ``sport_keys`` (a
-    single sport for per-sport jobs, several for combined runs), and the close
-    run off ``close_kickoff_lookup`` (stored events by default). If the kickoff
-    query itself fails, falls back to ``cadence.db_fallback`` so scheduling
-    never blocks on DB availability — preserving the self-scheduling chain.
+    single sport for per-sport jobs, several for combined runs). Each of
+    ``leads`` pulls ``next_execution`` forward to that long before the next
+    kickoff the cadence would otherwise step over and the run that started at
+    ``run_started`` did not serve (``next_lead_run``), with kickoffs from
+    ``lead_kickoff_lookup`` (stored events by default). If the
+    kickoff query itself fails, falls back to ``cadence.db_fallback`` so
+    scheduling never blocks on DB availability — preserving the self-scheduling
+    chain.
     """
     now = now or datetime.now(UTC)
     lookup = next_kickoff_lookup or get_next_kickoff
     try:
         soonest: datetime | None = None
         soonest_sport = sport_keys[0]
-        close_kickoff: datetime | None = None
         for sk in sport_keys:
             ko = await lookup(sk, now=now)
             if ko is not None and (soonest is None or ko < soonest):
                 soonest, soonest_sport = ko, sk
-            close_ko = await _get_close_kickoff(sk, cadence, now=now, lookup=close_kickoff_lookup)
-            if close_ko is not None and (close_kickoff is None or close_ko < close_kickoff):
-                close_kickoff = close_ko
         return _decide_from_kickoff(
             soonest_sport,
             cadence,
@@ -307,7 +331,9 @@ async def decide_forward_resilient(
             now=now,
             overnight=overnight,
             lookahead_days=lookahead_days,
-            close_kickoff=close_kickoff,
+            lead_run=await next_lead_run(
+                sport_keys, leads, now=now, run_started=run_started, lookup=lead_kickoff_lookup
+            ),
         )
     except Exception as e:
         logger.warning("next_kickoff_query_failed", error=str(e), exc_info=True)

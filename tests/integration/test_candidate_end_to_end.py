@@ -44,15 +44,12 @@ async def seed(
     session: Any, event_id: str, retail: tuple[float, float, float], away_team: str = "Chelsea"
 ) -> None:
     session.add(make_epl_event(event_id, KICKOFF, away_team=away_team))
+    books = [three_way_bookmaker("bet365", retail), betfair(EXCHANGE)]
     snapshots = [
+        make_tagged_snapshot(event_id, T - timedelta(minutes=8), books, "oddsportal_live"),
+        make_tagged_snapshot(event_id, T - timedelta(minutes=5), books, "oddsportal_live"),
         make_tagged_snapshot(
-            event_id, T - timedelta(minutes=5), [betfair(EXCHANGE)], "betfair_api"
-        ),
-        make_tagged_snapshot(
-            event_id,
-            T - timedelta(minutes=20),
-            [three_way_bookmaker("bet365", retail)],
-            "oddsportal_live",
+            event_id, T - timedelta(minutes=3), [betfair(EXCHANGE)], "betfair_api"
         ),
     ]
     for snapshot in snapshots:
@@ -82,15 +79,21 @@ class TestRunnerThenParity:
         trades = (await pglite_async_session.execute(select(PaperTrade))).scalars().all()
         assert len(trades) == 1
 
-    async def test_recorded_inputs_are_every_loaded_snapshot(
+    async def test_recorded_input_is_the_snapshot_decided_from(
         self, pglite_async_session, registry
     ) -> None:
         await seed(pglite_async_session, "bet", RETAIL)
         await decide(pglite_async_session)
 
         [decision] = (await pglite_async_session.execute(select(CandidateDecision))).scalars()
-        snapshot_ids = (await pglite_async_session.execute(select(OddsSnapshot.id))).scalars().all()
-        assert sorted(decision.input_snapshot_ids) == sorted(snapshot_ids)
+        [latest] = (
+            await pglite_async_session.execute(
+                select(OddsSnapshot.id).where(
+                    OddsSnapshot.snapshot_time == T - timedelta(minutes=5)
+                )
+            )
+        ).scalars()
+        assert decision.input_snapshot_ids == [latest]
 
     async def test_a_later_twin_merge_is_a_data_difference_not_a_mismatch(
         self, pglite_async_session, registry
@@ -100,8 +103,8 @@ class TestRunnerThenParity:
         # A twin's snapshot, stored before the run but moved onto the event after it.
         merged = make_tagged_snapshot(
             "bet",
-            T - timedelta(minutes=5),
-            [three_way_bookmaker("bet365", (2.5, 3.0, 3.0))],
+            T - timedelta(minutes=2),
+            [three_way_bookmaker("bet365", (2.5, 3.0, 3.0)), betfair(EXCHANGE)],
             "oddsportal_live",
         )
         merged.created_at = NOW - timedelta(hours=2)

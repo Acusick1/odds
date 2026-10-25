@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from odds_core.models import Event, EventStatus
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.scheduling.decision import (
     CadenceConfig,
+    Lead,
     ScheduleDecision,
     decide_backward,
     decide_backward_resilient,
@@ -270,18 +272,18 @@ class TestDecideForwardResilient:
         assert decision.tier == FetchTier.CLOSING
 
 
-class TestCloseLead:
-    """``close_lead`` adds a run just before each kickoff the cadence would step over."""
+class TestLeadRuns:
+    """``leads`` add a run that long before each kickoff the cadence would step over."""
 
-    CLOSE_CADENCE = CadenceConfig(
+    LEAD_CADENCE = CadenceConfig(
         closing=0.25,
         pregame=0.5,
         sharp=2.0,
         early=2.0,
         opening=2.0,
         no_game=2.0,
-        close_lead=timedelta(minutes=5),
     )
+    LEADS = [Lead(timedelta(minutes=5))]
 
     @staticmethod
     def _kickoffs(monkeypatch: pytest.MonkeyPatch, kickoffs: list[datetime]) -> None:
@@ -290,68 +292,87 @@ class TestCloseLead:
 
         monkeypatch.setattr("odds_lambda.scheduling.decision.get_next_kickoff", fake_kickoff)
 
+    async def _decide(
+        self, now: datetime = NOW, leads: list[Lead] | None = None, **kwargs: Any
+    ) -> ScheduleDecision:
+        return await decide_forward_resilient(
+            ["soccer_epl"],
+            self.LEAD_CADENCE,
+            now=now,
+            leads=self.LEADS if leads is None else leads,
+            **kwargs,
+        )
+
     @pytest.mark.asyncio
-    async def test_pulls_next_run_to_close_lead_before_kickoff(
+    async def test_pulls_next_run_to_lead_before_kickoff(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         kickoff = NOW + timedelta(minutes=12)
         self._kickoffs(monkeypatch, [kickoff])
 
-        decision = await decide_forward_resilient(["soccer_epl"], self.CLOSE_CADENCE, now=NOW)
+        decision = await self._decide()
 
         assert decision.tier == FetchTier.CLOSING
         assert decision.next_execution == kickoff - timedelta(minutes=5)
 
     @pytest.mark.asyncio
-    async def test_keeps_cadence_when_it_lands_before_close_run(
+    async def test_keeps_cadence_when_it_lands_before_lead_run(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         self._kickoffs(monkeypatch, [NOW + timedelta(minutes=50)])
 
-        decision = await decide_forward_resilient(["soccer_epl"], self.CLOSE_CADENCE, now=NOW)
+        decision = await self._decide()
 
         assert decision.next_execution == NOW + timedelta(minutes=15)
 
     @pytest.mark.asyncio
-    async def test_close_run_moves_to_next_kickoff_once_inside_lead(
+    async def test_lead_run_moves_to_next_kickoff_once_inside_lead(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """At the close run itself, the next close run belongs to a later kickoff."""
+        """At the lead run itself, the next lead run belongs to a later kickoff."""
         first = NOW + timedelta(minutes=5)
         second = NOW + timedelta(minutes=15)
         self._kickoffs(monkeypatch, [first, second])
 
-        decision = await decide_forward_resilient(["soccer_epl"], self.CLOSE_CADENCE, now=NOW)
+        decision = await self._decide()
 
         assert decision.next_execution == second - timedelta(minutes=5)
 
     @pytest.mark.asyncio
-    async def test_close_run_within_a_minute_is_skipped(
+    async def test_lead_run_within_a_minute_is_skipped(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A run that started just before its close run does not book a second one seconds later."""
+        """A run that started just before its lead run does not book a second one seconds later."""
         self._kickoffs(monkeypatch, [NOW + timedelta(minutes=5, seconds=30)])
 
-        decision = await decide_forward_resilient(["soccer_epl"], self.CLOSE_CADENCE, now=NOW)
+        decision = await self._decide()
 
         assert decision.next_execution == NOW + timedelta(minutes=15)
 
     @pytest.mark.asyncio
-    async def test_close_run_overrides_overnight_skip(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_earliest_of_several_leads_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A decision lead of 65 minutes runs before the 5-minute close run of the same kickoff."""
+        kickoff = NOW + timedelta(minutes=70)
+        self._kickoffs(monkeypatch, [kickoff])
+
+        decision = await self._decide(
+            leads=[Lead(timedelta(minutes=5)), Lead(timedelta(minutes=65))]
+        )
+
+        assert decision.next_execution == kickoff - timedelta(minutes=65)
+
+    @pytest.mark.asyncio
+    async def test_lead_run_overrides_overnight_skip(self, monkeypatch: pytest.MonkeyPatch) -> None:
         now = datetime(2026, 6, 2, 21, 50, tzinfo=UTC)
         kickoff = datetime(2026, 6, 2, 22, 30, tzinfo=UTC)
         self._kickoffs(monkeypatch, [kickoff])
 
-        decision = await decide_forward_resilient(
-            ["soccer_epl"], self.CLOSE_CADENCE, now=now, overnight=(22, 6)
-        )
+        decision = await self._decide(now=now, overnight=(22, 6))
 
         assert decision.next_execution == kickoff - timedelta(minutes=5)
 
     @pytest.mark.asyncio
-    async def test_a_close_kickoff_lookup_replaces_the_stored_kickoffs(
+    async def test_a_lead_kickoff_lookup_replaces_the_stored_kickoffs(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         kickoff = NOW + timedelta(minutes=50)
@@ -361,21 +382,70 @@ class TestCloseLead:
         async def earlier(sport_key: str, *, now: datetime) -> datetime | None:
             return betfair_start if betfair_start > now else None
 
-        decision = await decide_forward_resilient(
-            ["baseball_mlb"], self.CLOSE_CADENCE, now=NOW, close_kickoff_lookup=earlier
-        )
+        decision = await self._decide(lead_kickoff_lookup=earlier)
 
         assert decision.next_execution == betfair_start - timedelta(minutes=5)
 
+    DECISION_LEAD = Lead(timedelta(minutes=65), until=timedelta(minutes=60))
+
     @pytest.mark.asyncio
-    async def test_without_close_lead_cadence_is_unchanged(
+    async def test_a_run_that_started_before_the_lead_time_does_not_cancel_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        kickoff = NOW + timedelta(minutes=66)
+        self._kickoffs(monkeypatch, [kickoff])
+
+        decision = await self._decide(
+            leads=[self.DECISION_LEAD], run_started=kickoff - timedelta(minutes=67, seconds=30)
+        )
+
+        assert decision.next_execution == kickoff - timedelta(minutes=65)
+
+    @pytest.mark.asyncio
+    async def test_a_passed_lead_time_runs_now_until_its_deadline(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        kickoff = NOW + timedelta(minutes=64)
+        self._kickoffs(monkeypatch, [kickoff])
+        started = kickoff - timedelta(minutes=67, seconds=30)
+
+        decision = await self._decide(leads=[self.DECISION_LEAD], run_started=started)
+
+        assert decision.next_execution == NOW
+
+    @pytest.mark.asyncio
+    async def test_a_lead_time_past_its_deadline_is_dropped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        kickoff = NOW + timedelta(minutes=59)
+        self._kickoffs(monkeypatch, [kickoff])
+        started = kickoff - timedelta(minutes=67, seconds=30)
+
+        decision = await self._decide(leads=[self.DECISION_LEAD], run_started=started)
+
+        assert decision.next_execution == NOW + timedelta(minutes=15)
+
+    @pytest.mark.asyncio
+    async def test_a_run_that_started_at_the_lead_time_serves_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        kickoff = NOW + timedelta(minutes=64)
+        self._kickoffs(monkeypatch, [kickoff])
+        started = kickoff - timedelta(minutes=65, seconds=30)
+
+        decision = await self._decide(leads=[self.DECISION_LEAD], run_started=started)
+
+        assert decision.next_execution == NOW + timedelta(minutes=15)
+
+    @pytest.mark.asyncio
+    async def test_without_leads_cadence_is_unchanged(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         self._kickoffs(monkeypatch, [NOW + timedelta(minutes=12)])
 
-        decision = await decide_forward_resilient(["soccer_epl"], CADENCE, now=NOW)
+        decision = await self._decide(leads=[])
 
-        assert _hours_after(NOW, decision.next_execution) == CADENCE.closing
+        assert _hours_after(NOW, decision.next_execution) == self.LEAD_CADENCE.closing
 
 
 class TestDecideBackward:

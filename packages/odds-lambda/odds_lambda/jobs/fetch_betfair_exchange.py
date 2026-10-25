@@ -51,7 +51,12 @@ from odds_lambda.live_events import (
     count_dropped,
 )
 from odds_lambda.mlb_game_resolver import GameRow
-from odds_lambda.scheduling.decision import OVERNIGHT_WINDOWS, CadenceConfig, ScheduleDecision
+from odds_lambda.scheduling.decision import (
+    OVERNIGHT_WINDOWS,
+    CadenceConfig,
+    Lead,
+    ScheduleDecision,
+)
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 from odds_lambda.storage.writers import OddsWriter
@@ -60,10 +65,7 @@ logger = structlog.get_logger()
 
 # Proximity-based polling cadence (hours): cheap delayed API — poll more
 # aggressively than browser-driven fetch-oddsportal. 12h+ to kickoff all poll
-# at 2h, matching the previous "far" band. ``close_lead``
-# adds a run 5 minutes before every kickoff: the latest decision time and
-# inside the live close window of ADR-0012. Kickoffs come from
-# ``next_betfair_kickoff``, so the run also lands before an earlier Betfair start.
+# at 2h, matching the previous "far" band.
 CADENCE = CadenceConfig(
     closing=0.25,
     pregame=0.5,
@@ -72,8 +74,11 @@ CADENCE = CadenceConfig(
     opening=2.0,
     no_game=6.0,
     db_fallback=1.0,
-    close_lead=timedelta(minutes=5),
 )
+# A run this long before every kickoff: the latest decision time and inside the
+# live close window of ADR-0012. Kickoffs come from ``next_betfair_kickoff``, so
+# the run also lands before an earlier Betfair start.
+CLOSE_LEAD = Lead(timedelta(minutes=5))
 
 # Betfair's start time for a game can pass before the game's own, and it differs from the MLB
 # schedule's, so a game stays listed, and priced while pre-play, until it is seen in play.
@@ -308,10 +313,16 @@ async def main(ctx: JobContext) -> None:
 
     compound_job_name = make_compound_job_name("fetch-betfair-exchange", sport)
     overnight = OVERNIGHT_WINDOWS.get(sport)
+    started = datetime.now(UTC)
 
     async def _reschedule(label: str) -> ScheduleDecision:
         decision = await decide_collection_run(
-            [sport], CADENCE, overnight=overnight, stored_kickoff=next_betfair_kickoff
+            [sport],
+            CADENCE,
+            overnight=overnight,
+            stored_kickoff=next_betfair_kickoff,
+            leads=[CLOSE_LEAD],
+            run_started=started,
         )
         assert decision.next_execution is not None  # noqa: S101
         try:

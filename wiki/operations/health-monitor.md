@@ -99,7 +99,7 @@ The thresholds are computed from each job's cadence, not configured. The Odds AP
 
 The missing events of a run are one critical `missing_betfair_close` listing every event, so a matchday cannot storm. Its `alert_history` context holds the event ids. A later run reports only events not named in an alert inside the lookback, so an event drops out of `issues_detected` once its alert was recorded; a run whose send failed, or whose alerts are off, records nothing and lists the events again next run. The check reads the snapshot's prices, not their quality, so a wide back book (ADR-0014) still counts.
 
-The alert fires after kick-off, when the close cannot be collected. It is a coverage record for the retail-EV evaluation and does not catch a gap in time to fill it. Protection before kick-off is in the job's schedule: it books a run 5 min before each kickoff ([close run](../scheduling/decision-engine.md#close-run)), and a scheduler restart keeps that pending run ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)). An alert therefore has one of these causes:
+The alert fires after kick-off, when the close cannot be collected. It is a coverage record for the retail-EV evaluation and does not catch a gap in time to fill it. Protection before kick-off is in the job's schedule: it books a run 5 min before each kickoff ([lead runs](../scheduling/decision-engine.md#lead-runs)), and a scheduler restart keeps that pending run ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)). An alert therefore has one of these causes:
 
 - the close run failed;
 - the scheduler was down at the close;

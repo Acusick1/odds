@@ -49,7 +49,13 @@ def fake_replay(monkeypatch: pytest.MonkeyPatch) -> list[MechanicalCandidate]:
     async def replay(_session: Any, candidate: MechanicalCandidate, start: date, end: date, k: int):
         seen.append(candidate)
         coverage = Coverage(
-            events=10, with_exchange=8, with_retail=9, with_bet=0, bets=0, bets_with_close=0
+            events=10,
+            with_input=9,
+            with_exchange=8,
+            with_retail=9,
+            with_bet=0,
+            bets=0,
+            bets_with_close=0,
         )
         return score(candidate, start, end, [], coverage, k, NOW, N_BOOT, 0)
 
@@ -81,7 +87,8 @@ class TestBacktestCommand:
 
         assert result.exit_code == 0, result.stdout
         assert seen[0].name == "back-longest"
-        assert "With exchange" in result.stdout and "not_yet" in result.stdout
+        assert "With input" in result.stdout and "not_yet" in result.stdout
+        assert "max input age 10 min" in result.stdout
         assert "promote" not in result.stdout
         summary = json.loads(out.read_text())
         assert summary["coverage"]["events"] == 10
@@ -242,7 +249,13 @@ class TestBacktestVerdictWording:
         from rich.console import Console
 
         cov = Coverage(
-            events=1, with_exchange=1, with_retail=1, with_bet=0, bets=0, bets_with_close=0
+            events=1,
+            with_input=1,
+            with_exchange=1,
+            with_retail=1,
+            with_bet=0,
+            bets=0,
+            bets_with_close=0,
         )
         result = score(
             MechanicalCandidate.model_validate(MECHANICAL),

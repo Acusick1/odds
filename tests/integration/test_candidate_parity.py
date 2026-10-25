@@ -26,44 +26,37 @@ KNOWN_AT = T + timedelta(minutes=1)
 
 async def add_event(
     session: Any,
-    retail: tuple[float, float, float] | None = RETAIL,
+    retail: tuple[float, float, float] = RETAIL,
     late_retail: tuple[float, float, float] | None = None,
     late_stored: timedelta = timedelta(minutes=-1),
 ) -> list[int]:
-    """An event whose snapshots were stored before the run, and the ids of those snapshots.
+    """An event whose OddsPortal snapshot was stored before the run, and that snapshot's id.
 
-    ``late_retail`` adds a snapshot stamped 5 minutes before the decision time and stored
+    ``late_retail`` adds a snapshot stamped 2 minutes before the decision time and stored
     ``late_stored`` after ``KNOWN_AT`` (negative: before it); the run did not see it, so its
     id is not returned.
     """
     session.add(make_epl_event("e1", KICKOFF))
-    stored = KNOWN_AT - timedelta(hours=1)
-    snapshots = [
-        make_tagged_snapshot("e1", T - timedelta(minutes=5), [betfair(EXCHANGE)], "betfair_api"),
-    ]
-    if retail is not None:
-        snapshots.append(
-            make_tagged_snapshot(
-                "e1",
-                T - timedelta(minutes=20),
-                [three_way_bookmaker("bet365", retail)],
-                "oddsportal_live",
-            )
-        )
-    for snapshot in snapshots:
-        snapshot.created_at = stored
-    session.add_all(snapshots)
+    snapshot = make_tagged_snapshot(
+        "e1",
+        T - timedelta(minutes=5),
+        [three_way_bookmaker("bet365", retail), betfair(EXCHANGE)],
+        "oddsportal_live",
+    )
+    snapshot.created_at = KNOWN_AT - timedelta(hours=1)
+    session.add(snapshot)
     if late_retail is not None:
         late = make_tagged_snapshot(
             "e1",
-            T - timedelta(minutes=5),
-            [three_way_bookmaker("bet365", late_retail)],
+            T - timedelta(minutes=2),
+            [three_way_bookmaker("bet365", late_retail), betfair(EXCHANGE)],
             "oddsportal_live",
         )
         late.created_at = KNOWN_AT + late_stored
         session.add(late)
     await session.commit()
-    return sorted(s.id for s in snapshots)
+    assert snapshot.id is not None
+    return [snapshot.id]
 
 
 async def add_decision(

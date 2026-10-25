@@ -16,7 +16,7 @@ What a candidate is and when it is promoted or killed is on [Goal and strategy](
    - State the rule, the reason it might earn EV and the pre-registered grid: the parameter values, the data range and how a cell is selected. Fix these before any backtest runs, as [#626](https://github.com/Acusick1/odds/issues/626) does.
    - A rule that is not in `odds_lambda.candidate_rules.rules.RULES` needs a rule function first ([candidate rules](candidate-rules.md#rule-interface)).
 2. **Backtest a draft on development data.**
-   - Write a draft file outside `candidates/` with every required field of `odds_core.candidates.MechanicalCandidate` except its hash: name, description, kind (`mechanical`), sport, version, issue, start date, status, rule and the rule's params, which include `minutes_before_kickoff`.
+   - Write a draft file outside `candidates/` with every required field of `odds_core.candidates.MechanicalCandidate` except its hash: name, description, kind (`mechanical`), sport, version, issue, start date, status, rule and the rule's params, which include `minutes_before_kickoff` and `max_input_age_minutes` (10 for a version to register; a draft may widen it to reach older snapshots, [rule interface](candidate-rules.md#rule-interface)).
    - For example:
 
      ```yaml
@@ -32,10 +32,11 @@ What a candidate is and when it is promoted or killed is on [Goal and strategy](
      params:
        threshold: 0.02
        minutes_before_kickoff: 60
+       max_input_age_minutes: 10
      ```
 
    - Run `uv run odds candidates backtest <path> --from 2024-08-01 --to 2026-07-31`, with `--json <file>` to keep the result ([replay backtest](candidate-backtest.md)).
-   - Read the coverage first: events with an exchange price and a retail quote at the decision time, and bets with a close. Then read k, the family's versions with a recorded decision plus this draft, and the checkpoint and overall estimates, whose promote interval widens as k grows.
+   - Read the coverage first: events with an input snapshot (UK retail and Betfair Exchange prices together) within the maximum input age, with an exchange price and a retail quote at the decision time, and bets with a close. Such snapshots start with live OddsPortal collection in March 2026. Then read k, the family's versions with a recorded decision plus this draft, and the checkpoint and overall estimates, whose promote interval widens as k grows.
    - Development data can kill an idea and never promotes one: the output says `meets_promote_bar`, not `promote`, and the range has been examined many times.
 3. **Register it** with a pull request that adds `candidates/<name>.yaml`.
    - Take the hash from `uv run odds candidates rule-hash <rule>`, and set `version: 1`, the issue, a `start_date` and `status: active` ([file format](candidate-registry.md#file-format)).

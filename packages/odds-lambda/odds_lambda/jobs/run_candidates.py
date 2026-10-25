@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
+from enum import StrEnum
 
 import structlog
 from odds_core.alerts import job_alert_context, send_recorded_alert, stale_reminder_interval
@@ -57,6 +58,11 @@ RETRY_DELAY = timedelta(minutes=2)
 class RunnableCandidate:
     candidate: MechanicalCandidate
     params: RuleParams
+
+
+class MissReason(StrEnum):
+    LATE = "late"
+    NO_INPUT = "no_input"
 
 
 @dataclass
@@ -143,9 +149,20 @@ def next_decision_wakeup(
     return min([now + MAX_WAIT, *times])
 
 
+async def _alert_no_input(decision: CandidateDecision) -> None:
+    await send_recorded_alert(
+        f"candidate_no_input:{decision.candidate_name}",
+        "warning",
+        f"⚠️ Candidate {decision.candidate_name} missed the decision on {decision.event_id} at "
+        f"{decision.decision_time:%Y-%m-%d %H:%M} UTC: no snapshot with UK retail and Betfair "
+        f"Exchange prices within its maximum input age",
+        every=stale_reminder_interval(),
+    )
+
+
 async def _decide(
     session: AsyncSession, item: RunnableCandidate, event: Event, now: datetime
-) -> CandidateDecision:
+) -> tuple[CandidateDecision, MissReason | None]:
     candidate = item.candidate
     t = decision_time(event.commence_time, item.params)
     decision = CandidateDecision(
@@ -160,18 +177,16 @@ async def _decide(
     session.add(decision)
     await session.flush()
     if decision.missed:
-        logger.warning(
-            "candidate_decision_missed",
-            candidate=candidate.name,
-            event_id=event.id,
-            decision_time=t.isoformat(),
-            now=now.isoformat(),
-        )
-        return decision
+        _log_missed(decision, MissReason.LATE, now)
+        return decision, MissReason.LATE
 
     state, intents = await run_rule(
         session, RULES[candidate.rule], item.params, event, t, known_at=now
     )
+    if not state.has_input:
+        decision.missed = True
+        _log_missed(decision, MissReason.NO_INPUT, now)
+        return decision, MissReason.NO_INPUT
     for intent in intents:
         await place_trade(
             session,
@@ -187,8 +202,20 @@ async def _decide(
             decision_id=decision.id,
         )
     decision.bets_placed = len(intents)
-    decision.input_snapshot_ids = list(state.snapshot_ids)
-    return decision
+    assert state.snapshot_id is not None  # noqa: S101
+    decision.input_snapshot_ids = [state.snapshot_id]
+    return decision, None
+
+
+def _log_missed(decision: CandidateDecision, reason: MissReason, now: datetime) -> None:
+    logger.warning(
+        "candidate_decision_missed",
+        candidate=decision.candidate_name,
+        event_id=decision.event_id,
+        decision_time=decision.decision_time.isoformat(),
+        now=now.isoformat(),
+        reason=reason.value,
+    )
 
 
 async def _is_decided(session: AsyncSession, item: RunnableCandidate, event_id: str) -> bool:
@@ -237,7 +264,7 @@ async def run_decisions(
             try:
                 event = await session.get(Event, event_id, populate_existing=True)
                 assert event is not None  # noqa: S101
-                decision = await _decide(session, item, event, now)
+                decision, miss = await _decide(session, item, event, now)
                 await session.commit()
             except IntegrityError:
                 await session.rollback()
@@ -267,6 +294,8 @@ async def run_decisions(
                 )
                 summary.failed += 1
                 continue
+            if miss is MissReason.NO_INPUT:
+                await _alert_no_input(decision)
             if decision.missed:
                 summary.missed += 1
             elif decision.bets_placed:
