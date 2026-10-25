@@ -58,7 +58,7 @@ What is scored, in `odds_analytics.candidate_report`:
 
 ## Replay commands
 
-`odds_cli.commands.candidates.backtest` replays a rule over completed events, refitting a model rule's model as it goes, and scores it with the functions above, optionally beside a second candidate on the same matches ([replay backtest](candidate-backtest.md)). It is the only command that runs a [model rule](candidate-rules.md#model-rules). `odds_cli.commands.candidates.parity` replays each recorded decision from its recorded input snapshots and compares the bets ([parity check](candidate-parity.md)). The steps that use them are on [From idea to verdict](howto-take-an-idea-to-a-verdict.md).
+`odds_cli.commands.candidates.backtest` replays a rule over completed events, tuning a model rule's model on its training matches and refitting it as it goes, and scores it with the functions above, optionally beside a second candidate on the same matches ([replay backtest](candidate-backtest.md)). It is the only command that runs a [model rule](candidate-rules.md#model-rules). `odds_cli.commands.candidates.parity` replays each recorded decision from its recorded input snapshots and compares the bets ([parity check](candidate-parity.md)). The steps that use them are on [From idea to verdict](howto-take-an-idea-to-a-verdict.md).
 
 ## Version check
 

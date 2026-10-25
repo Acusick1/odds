@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import fields
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from odds_analytics.candidate_model import (
-    MODEL_XGBOOST_PARAMS,
+    FIXED_XGBOOST_PARAMS,
+    SEARCH_SPACES,
+    choose_hyperparameters,
     refit_blocks,
     state_inputs,
     training_rows,
+    tuning_folds,
 )
 from odds_analytics.retail_ev import RetailEvInput
-from odds_analytics.training.config import XGBoostConfig
-from odds_core.config import get_settings
 from odds_core.market_prices import Outcome
 from odds_core.models import Event, OddsSnapshot
-from odds_core.snapshot_sources import SnapshotKind
+from odds_core.snapshot_sources import FdukTimeBasis, SnapshotKind
 from odds_lambda.candidate_rules import RetailEvModelParams, build_market_state
 
 from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
@@ -99,6 +99,18 @@ class TestTrainingRows:
     def test_an_event_without_a_close_gives_no_rows(self) -> None:
         assert training_rows(EVENT, [CO_TIMED]) == []
 
+    def test_an_fduk_close_is_not_a_label(self) -> None:
+        # Published days after kick-off, so a refit at the next matchday would not have it.
+        fduk_close = make_tagged_snapshot(
+            EVENT.id,
+            KICKOFF,
+            [_betfair((1.9, 4.2, 4.4))],
+            "football_data_uk",
+            FdukTimeBasis.KICKOFF,
+        )
+        assert training_rows(EVENT, [CO_TIMED, fduk_close]) == []
+        assert training_rows(EVENT, [CO_TIMED, fduk_close, CLOSE]) != []
+
 
 class TestStateInputs:
     def test_a_decision_sees_the_inputs_its_snapshot_trains_on(self) -> None:
@@ -132,6 +144,10 @@ def _params(**overrides: Any) -> RetailEvModelParams:
         "threshold": 0.01,
         "training_matches": 3,
         "refit_every_matches": 2,
+        "tuning_trials": 3,
+        "tuning_seed": 7,
+        "tuning_min_train_matches": 1,
+        "tuning_step_matches": 1,
         "minutes_before_kickoff": (90, 30),
         "max_input_age_minutes": 10,
         **overrides,
@@ -154,19 +170,56 @@ class TestRefitBlocks:
         assert refit_blocks(_events(3), _params()) == []
 
 
-class TestModel:
-    def test_is_the_frozen_price_only_residual_trial(self) -> None:
-        summary = json.loads(
-            (
-                get_settings().project_root
-                / "experiments/results/retail_ev_as_of_t_groups/summary.json"
-            ).read_text()
-        )
-        trial = next(
-            run["best_params"]
-            for run in summary["variants"]["price_only"]["runs"]
-            if run["run"] == "residual_s42"
-        )
-        assert MODEL_XGBOOST_PARAMS["retail_ev_price_only"] == (
-            XGBoostConfig(**trial, n_jobs=1, random_state=42).model_dump()
-        )
+def _weekly(n: int) -> list[Event]:
+    return [make_epl_event(f"w{i}", KICKOFF + timedelta(days=8 * i)) for i in range(n)]
+
+
+class TestTuningFolds:
+    def test_expanding_folds_validate_the_training_matches_in_steps(self) -> None:
+        events = _weekly(6)
+        folds = tuning_folds(events, _params(tuning_min_train_matches=2, tuning_step_matches=2))
+        assert [([e.id for e in f.train], [e.id for e in f.validate]) for f in folds] == [
+            (["w0", "w1"], ["w2", "w3"]),
+            (["w0", "w1", "w2", "w3"], ["w4", "w5"]),
+        ]
+
+    def test_training_matches_end_a_decision_window_before_validation(self) -> None:
+        events = [*_events(2), make_epl_event("late", KICKOFF + timedelta(days=9))]
+        [first, second] = tuning_folds(events, _params(training_matches=3))
+        assert first.train == ()
+        assert [e.id for e in second.train] == ["e0", "e1"]
+
+
+class TestTune:
+    def _folds(self) -> list[tuple[list[Any], list[Any]]]:
+        rows = []
+        for i, home in enumerate((2.2, 2.0, 1.9)):
+            event = make_epl_event(f"t{i}", KICKOFF + timedelta(days=8 * i))
+            snap = make_tagged_snapshot(
+                event.id,
+                event.commence_time - timedelta(hours=3),
+                [three_way_bookmaker("bet365", (home, 3.4, 3.8)), _betfair()],
+                "oddsportal_live",
+            )
+            close = make_tagged_snapshot(
+                event.id,
+                event.commence_time - timedelta(minutes=2),
+                [_betfair((1.9, 4.2, 4.4))],
+                "betfair_api",
+            )
+            rows.append(training_rows(event, [snap, close]))
+        return [(rows[0], rows[1]), ([], rows[2]), (rows[0] + rows[1], rows[2])]
+
+    def test_chooses_from_the_search_space_reproducibly(self) -> None:
+        params = _params()
+        first = choose_hyperparameters("1x2", self._folds(), params)
+        assert first == choose_hyperparameters("1x2", self._folds(), params)
+        assert set(first.params) == set(SEARCH_SPACES)
+        assert not set(first.params) & set(FIXED_XGBOOST_PARAMS)
+        assert first.trials == 3
+        # The fold without training rows is skipped.
+        assert first.folds == 2
+
+    def test_without_a_usable_fold_it_refuses(self) -> None:
+        with pytest.raises(ValueError, match="no tuning fold"):
+            choose_hyperparameters("1x2", [([], [])], _params())

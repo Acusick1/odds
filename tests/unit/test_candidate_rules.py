@@ -303,6 +303,10 @@ MODEL_PARAMS = RetailEvModelParams(
     threshold=0.01,
     training_matches=50,
     refit_every_matches=10,
+    tuning_trials=50,
+    tuning_seed=42,
+    tuning_min_train_matches=20,
+    tuning_step_matches=10,
     minutes_before_kickoff=(60,),
     max_input_age_minutes=10,
 )
@@ -354,13 +358,29 @@ class TestRetailEvModel:
         assert predict.seen == []
 
     @pytest.mark.parametrize(
-        "missing", ["model", "threshold", "training_matches", "refit_every_matches"]
+        "missing",
+        [
+            "model",
+            "threshold",
+            "training_matches",
+            "refit_every_matches",
+            "tuning_trials",
+            "tuning_seed",
+            "tuning_min_train_matches",
+            "tuning_step_matches",
+        ],
     )
     def test_params_are_required(self, missing: str) -> None:
         fields = MODEL_PARAMS.model_dump()
         del fields[missing]
         with pytest.raises(ValidationError):
             RetailEvModelParams.model_validate(fields)
+
+    def test_tuning_must_leave_a_training_match_to_validate(self) -> None:
+        with pytest.raises(ValidationError, match="leaves no match"):
+            RetailEvModelParams.model_validate(
+                {**MODEL_PARAMS.model_dump(), "tuning_min_train_matches": 50}
+            )
 
     def test_unknown_model_is_rejected(self) -> None:
         with pytest.raises(ValidationError):

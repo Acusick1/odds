@@ -23,6 +23,7 @@ from pydantic import (
     PositiveInt,
     ValidationError,
     field_validator,
+    model_validator,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -144,14 +145,33 @@ class ModelRuleSpec:
 
 
 class RetailEvModelParams(RuleParams):
-    """``model`` names the fitted model. A replay leaves the first ``training_matches`` of its
-    range to training only and refits before every ``refit_every_matches`` scored matches."""
+    """``model`` names the model. A replay leaves the first ``training_matches`` of its range
+    to training only and refits before every ``refit_every_matches`` scored matches.
+
+    Its hyperparameters are tuned once, on the training matches alone: ``tuning_trials``
+    trials seeded with ``tuning_seed`` (also the model's random state), scored on expanding
+    walk-forward folds that first train on ``tuning_min_train_matches`` matches and then
+    validate ``tuning_step_matches`` matches at a time.
+    """
 
     model: Literal["retail_ev_price_only"]
     threshold: PositiveFloat
     training_matches: PositiveInt
     refit_every_matches: PositiveInt
+    tuning_trials: PositiveInt
+    tuning_seed: int
+    tuning_min_train_matches: PositiveInt
+    tuning_step_matches: PositiveInt
     stake: PositiveFloat = 1.0
+
+    @model_validator(mode="after")
+    def _folds_fit_the_training_matches(self) -> RetailEvModelParams:
+        if self.tuning_min_train_matches >= self.training_matches:
+            raise ValueError(
+                f"tuning_min_train_matches {self.tuning_min_train_matches} leaves no match of "
+                f"the {self.training_matches} training matches to validate"
+            )
+        return self
 
 
 def retail_ev_model(

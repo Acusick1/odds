@@ -34,7 +34,7 @@ from odds_lambda.storage.event_merge import canonical_events
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_analytics.candidate_model import Refit, model_blocks
+from odds_analytics.candidate_model import ModelReplay, Refit, Tuning
 from odds_analytics.candidate_report import (
     BOOTSTRAP_SEED,
     DEFAULT_BOOTSTRAP_SAMPLES,
@@ -78,8 +78,8 @@ class Coverage:
 class BacktestResult:
     """``overall`` is the estimate over every bet with a close in the scoreable prefix,
     beyond the checkpoint cap of the verdict. ``range_events`` counts the canonical events in
-    the range, a model rule's training prefix included, and ``refits`` records a model rule's
-    fits. ``comparison`` is another candidate replayed on the same decided events."""
+    the range, a model rule's training prefix included; ``tuning`` and ``refits`` record a model
+    rule's hyperparameters chosen on that prefix and its fits. ``comparison`` is another candidate replayed on the same decided events."""
 
     name: str
     version: int
@@ -92,6 +92,7 @@ class BacktestResult:
     summary: CandidateSummary
     overall: Checkpoint | None
     range_events: int = 0
+    tuning: Tuning | None = None
     refits: tuple[Refit, ...] = ()
     comparison: BacktestResult | None = None
 
@@ -224,8 +225,9 @@ async def replay(
     their snapshot time. Bets are scored in decision-time order, as the live report orders
     trades by placement, all settled.
 
-    A model rule decides only the matches after its training prefix, each block with the
-    model refitted before it (``odds_analytics.candidate_model``). ``only_events`` restricts a
+    A model rule decides only the matches after its training prefix, on which its
+    hyperparameters are tuned, each block with the model refitted before it
+    (``odds_analytics.candidate_model``). ``only_events`` restricts a
     rule without a model to those event ids, to replay it on another replay's scored matches.
     """
     spec, params = resolve_rule(candidate)
@@ -233,6 +235,7 @@ async def replay(
     range_events = len(events)
     counts = _Counts()
     refits: list[Refit] = []
+    tuning: Tuning | None = None
     if isinstance(spec, ModelRuleSpec):
         if only_events is not None:
             raise ValueError(
@@ -241,9 +244,12 @@ async def replay(
             )
         assert isinstance(params, RetailEvModelParams)  # noqa: S101
         bets: list[ScoredBet] = []
-        async for refit, bound, block in model_blocks(session, spec, params, events):
-            refits.append(refit)
-            bets += await _decide(session, candidate, bound, params, block, counts)
+        model = ModelReplay(session, spec, params, events)
+        tuning = await model.tuned_hyperparameters()
+        if tuning is not None:
+            async for refit, bound, block in model.blocks(tuning):
+                refits.append(refit)
+                bets += await _decide(session, candidate, bound, params, block, counts)
         scored_events = sum(len(r.event_ids) for r in refits)
     else:
         if only_events is not None:
@@ -274,7 +280,7 @@ async def replay(
         n_boot,
         seed,
     )
-    return replace(result, range_events=range_events, refits=tuple(refits))
+    return replace(result, range_events=range_events, tuning=tuning, refits=tuple(refits))
 
 
 def score(

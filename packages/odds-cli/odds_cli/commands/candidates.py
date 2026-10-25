@@ -287,6 +287,25 @@ def _refit_table(result: BacktestResult) -> Table:
     return table
 
 
+def _tuning_table(result: BacktestResult) -> Table:
+    tuning = result.tuning
+    assert tuning is not None  # noqa: S101
+    table = Table(
+        title=(
+            f"Hyperparameters tuned on the training matches: {tuning.trials} trials, "
+            f"{tuning.folds} walk-forward folds"
+        )
+    )
+    table.add_column("Parameter")
+    table.add_column("Value", justify="right")
+    for name, value in tuning.params.items():
+        table.add_row(name, f"{value:.4g}" if isinstance(value, float) else str(value))
+    table.caption = (
+        f"mean fold weighted MSE {tuning.cv_wmse:.6f}, baseline {tuning.baseline_cv_wmse:.6f}"
+    )
+    return table
+
+
 def _comparison_table(result: BacktestResult, comparison: BacktestResult) -> Table:
     table = Table(title="Mean EV on the same decided matches, every bet with a close")
     table.add_column("Candidate")
@@ -316,6 +335,8 @@ def _print_backtest(result: BacktestResult) -> None:
             f"current hash)[/yellow]",
             soft_wrap=True,
         )
+    if result.tuning is not None:
+        console.print(_tuning_table(result))
     if result.decided_event_ids is not None:
         console.print(_refit_table(result))
     for table in _backtest_tables(result):
