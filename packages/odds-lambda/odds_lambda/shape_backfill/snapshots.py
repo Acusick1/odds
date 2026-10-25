@@ -97,6 +97,9 @@ class StoredSnapshot:
     # An untagged football-data.co.uk snapshot with a later untagged one on its event, which
     # makes it the opening of the pair the loader wrote before timing tags existed.
     earlier_untagged_fduk: bool = False
+    # A historical OddsPortal opening whose closing the loader stored at the same time: the
+    # closing's id. The closing's prices are the state at that time, so it keeps the key.
+    closed_by: int | None = None
 
 
 def classify(snapshot: StoredSnapshot) -> tuple[Source, TimeBasis]:
@@ -181,11 +184,13 @@ def plan_snapshot(snapshot: StoredSnapshot) -> SnapshotPlan:
 def assign_keys(plans: Sequence[SnapshotPlan], held: dict[SnapshotKey, int]) -> None:
     """Give each planned market its snapshot key unless ``held`` has it already; ``held`` takes
     every key claimed. Plans claim in id order, so of legacy snapshots sharing a key the first
-    stored keeps it, as ``store_snapshot`` keeps the stored snapshot over a later write."""
+    stored keeps it, as ``store_snapshot`` keeps the stored snapshot over a later write. The
+    exception is a historical OddsPortal opening stored at the same time as its closing
+    (``StoredSnapshot.closed_by``): it yields the key to the closing."""
     for plan in sorted(plans, key=lambda p: p.snapshot.id):
         for market in plan.expanded:
             key = plan.key_of(market.market)
-            holder = held.get(key)
+            holder = held.get(key) or plan.snapshot.closed_by
             if holder is None:
                 held[key] = plan.snapshot.id
                 plan.kept.append(market)
@@ -291,6 +296,23 @@ async def load_snapshots(
         later.raw_data["timing"].is_(None),  # type: ignore[index]
         later.snapshot_time > OddsSnapshot.snapshot_time,  # type: ignore[operator]
     )
+    # The historical OddsPortal loader stores a game's opening, then its closing, under one
+    # api_request_id; a later one at the same time is that opening's closing.
+    pair = aliased(OddsSnapshot)
+    historical_oddsportal = (
+        OddsSnapshot.raw_data["source"].as_string() == SnapshotSource.ODDSPORTAL.value  # type: ignore[index]
+    )
+    closing = (
+        select(func.min(pair.id))
+        .where(
+            pair.event_id == OddsSnapshot.event_id,
+            pair.snapshot_time == OddsSnapshot.snapshot_time,
+            pair.api_request_id == OddsSnapshot.api_request_id,
+            pair.raw_data["source"].as_string() == SnapshotSource.ODDSPORTAL.value,  # type: ignore[index]
+            pair.id > OddsSnapshot.id,  # type: ignore[operator]
+        )
+        .scalar_subquery()
+    )
     query = (
         select(
             OddsSnapshot.id,
@@ -312,6 +334,7 @@ async def load_snapshots(
             OddsSnapshot.total_matched,
             OddsSnapshot.market_start_time,
             case((untagged_fduk, has_later), else_=False).label("earlier_untagged_fduk"),
+            case((historical_oddsportal, closing), else_=None).label("closed_by"),
         )
         .join(Event, Event.id == OddsSnapshot.event_id)  # type: ignore[arg-type]
         .where(
@@ -351,6 +374,7 @@ async def load_snapshots(
                 market_start_time=row.market_start_time,
             ),
             earlier_untagged_fduk=bool(row.earlier_untagged_fduk),
+            closed_by=row.closed_by,
         )
         for row in rows
     ]

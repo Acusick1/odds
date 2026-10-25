@@ -156,10 +156,14 @@ def _fduk_envelope(basis: str | None, price: float) -> dict[str, Any]:
 
 
 async def _legacy(
-    session: AsyncSession, event_id: str, raw_data: dict[str, Any], snapshot_time: datetime
+    session: AsyncSession,
+    event_id: str,
+    raw_data: dict[str, Any],
+    snapshot_time: datetime,
+    api_request_id: str | None = None,
 ) -> OddsSnapshot:
     snapshot, _ = await OddsWriter(session).store_odds_snapshot(
-        event_id, raw_data, snapshot_time, validate=False
+        event_id, raw_data, snapshot_time, validate=False, api_request_id=api_request_id
     )
     return snapshot
 
@@ -364,32 +368,71 @@ class TestSnapshotBackfill:
         applied = await _backfill(pglite_async_session)
         assert (applied.prices, applied.new_snapshots) == (report.prices, report.new_snapshots)
 
-    async def test_a_duplicate_key_keeps_the_first_and_archives_the_other(
-        self, pglite_async_session: AsyncSession
+    @pytest.mark.parametrize("batch_size", [1, 2])
+    async def test_a_same_time_historical_oddsportal_pair_keeps_the_closing(
+        self, pglite_async_session: AsyncSession, batch_size: int
     ) -> None:
         session = pglite_async_session
         await add_event(session, make_epl_event("op_x", commence_time=KICKOFF))
         at = KICKOFF - timedelta(hours=2)
-        first = await _legacy(session, "op_x", _oddsportal_envelope("oddsportal", 2.0), at)
-        second = await _legacy(session, "op_x", _oddsportal_envelope("oddsportal", 2.5), at)
-        first_id, second_id, second_raw = first.id, second.id, second.raw_data
+        opening = await _legacy(
+            session, "op_x", _oddsportal_envelope("oddsportal", 2.0), at, "oddsportal"
+        )
+        closing = await _legacy(
+            session, "op_x", _oddsportal_envelope("oddsportal", 2.5), at, "oddsportal"
+        )
+        opening_id, closing_id, opening_raw = opening.id, closing.id, opening.raw_data
         await session.commit()
 
-        report = await _backfill(session)
+        cutoff = await capture_cutoff(session)
+        report = await backfill_snapshots(session, cutoff=cutoff, batch_size=batch_size)
 
-        assert await session.get(OddsSnapshot, first_id) is not None
-        assert await session.get(OddsSnapshot, second_id) is None
+        assert await session.get(OddsSnapshot, opening_id) is None
+        kept_source = await session.scalar(
+            select(OddsSnapshot.source).where(OddsSnapshot.id == closing_id)
+        )
+        assert kept_source is Source.ODDSPORTAL
         assert (
-            await session.execute(select(func.count()).where(Odds.snapshot_id == second_id))
+            await session.execute(select(func.count()).where(Odds.snapshot_id == opening_id))
         ).scalar_one() == 0
         log = (
             await session.execute(
                 select(DataQualityLog).where(DataQualityLog.issue_type == "snapshot_key_conflict")
             )
         ).scalar_one()
+        assert log.raw_data["kept_snapshot_id"] == closing_id  # type: ignore[index]
         archived = await session.get(SnapshotPayload, log.raw_data["payload_id"])  # type: ignore[index]
-        assert archived is not None and archived.payload == second_raw
+        assert archived is not None and archived.payload == opening_raw
         assert report.deleted == 1 and len(report.conflicts) == 1
+
+    async def test_a_same_time_live_pair_keeps_the_first(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
+        session = pglite_async_session
+        await add_event(session, make_epl_event("op_live_x", commence_time=KICKOFF))
+        at = KICKOFF - timedelta(hours=2)
+        first = await _legacy(
+            session,
+            "op_live_x",
+            _oddsportal_envelope("oddsportal_live", 2.0),
+            at,
+            "oddsportal_live",
+        )
+        second = await _legacy(
+            session,
+            "op_live_x",
+            _oddsportal_envelope("oddsportal_live", 2.5),
+            at,
+            "oddsportal_live",
+        )
+        first_id, second_id = first.id, second.id
+        await session.commit()
+
+        report = await _backfill(session)
+
+        assert await session.get(OddsSnapshot, first_id) is not None
+        assert await session.get(OddsSnapshot, second_id) is None
+        assert report.conflicts[0].held_by == first_id
 
     async def test_stops_when_a_decision_recorded_a_snapshot_it_would_split(
         self, pglite_async_session: AsyncSession, stored: dict[str, int]
