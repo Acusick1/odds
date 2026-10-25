@@ -32,7 +32,9 @@ Three lists in code decide what the production scheduler runs:
 | `fetch-odds` | yes | EPL (allowlist; Odds API quota) | self-scheduling by [tier](../storage/fetch-tier.md), 30 min to 48 h |
 | `fetch-scores` | yes | EPL (allowlist; Odds API quota) | self-scheduling, game activity |
 | `update-status`, `check-health` | yes | global | self-scheduling; health every 60 min |
-| `fetch-oddsportal`, `fetch-oddsportal-results` | yes | every configured sport | proximity (30 min to 2 h), dormant with no fixture in 28 days / daily 08:00 UTC |
+| `fetch-oddsportal` | yes | every configured sport | proximity (30 min to 2 h), dormant with no fixture in 28 days |
+| `fetch-oddsportal-results` | yes | EPL (allowlist) | daily 08:00 UTC |
+| `fetch-mlb-results` | yes | MLB (not per sport) | daily 08:00 UTC |
 | `fetch-betfair-exchange` | yes | every Betfair-supported sport | self-scheduling, 15 min to 2 h, plus a run 5 min before each kickoff, dormant with no fixture in 28 days ([Betfair job](../collection/betfair-exchange.md#flow)) |
 | `fetch-polymarket-odds` | yes ([ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md)) | every sport with three-way Polymarket match markets (EPL) | self-scheduling, 5 min to 2 h, dormant with no event in 28 days ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#the-fetch-polymarket-odds-job)) |
 | `run-candidates` | yes | every configured sport | self-scheduling, at the next decision time of an active mechanical candidate, at most 30 min apart ([run-candidates job](../evaluation/run-candidates-job.md#next-run)) |
@@ -43,13 +45,13 @@ Three lists in code decide what the production scheduler runs:
 
 The betting agent is not scheduled: it is run by hand on the production host with `odds agent run` as the restricted `odds_agent` role ([Agent runtime](../agent/agent-run-job.md)). A collection job goes dormant for a sport with no fixture in the next 28 days, and wakes by itself ([dormancy](decision-engine.md#dormancy)).
 
-Per-job pages: [fetch-odds](../collection/fetch-odds-job.md), [fetch-scores and update-status](../collection/results-jobs.md), [status lifecycle](../collection/event-status-lifecycle.md), [OddsPortal](../collection/fetch-oddsportal-job.md), [Betfair](../collection/betfair-exchange.md), [health](../operations/health-monitor.md), [agent](../agent/agent-run-job.md), [ESPN fixtures](../collection/epl-context-data.md), [MLB probables](../collection/mlb-probable-pitchers.md), [Polymarket](../collection/polymarket.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md), [run-candidates](../evaluation/run-candidates-job.md).
+Per-job pages: [fetch-odds](../collection/fetch-odds-job.md), [fetch-scores, update-status and the results jobs](../collection/results-jobs.md), [status lifecycle](../collection/event-status-lifecycle.md), [OddsPortal](../collection/fetch-oddsportal-job.md), [Betfair](../collection/betfair-exchange.md), [health](../operations/health-monitor.md), [agent](../agent/agent-run-job.md), [ESPN fixtures](../collection/epl-context-data.md), [MLB probables](../collection/mlb-probable-pitchers.md), [Polymarket](../collection/polymarket.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md), [run-candidates](../evaluation/run-candidates-job.md).
 
 Known defects on the production host: OddsPortal scrapes return 0 matches (#484) and one hung OddsPortal run ends the local chains (#485).
 
 ## Dormant AWS rules
 
-Terraform still declares the AWS jobs: in `deployment/aws/terraform/eventbridge.tf`, `local.sport_configs` (EPL only; MLB commented out) plus the always-created `update-status` and `check-health`, and in `deployment/aws/terraform/variables.tf` the `enable_polymarket` and `betfair_enabled` gates. No Terraform rule exists for `fetch-oddsportal` or `fetch-oddsportal-results`. The rules are disabled in the account, and the Lambdas, ECR images and Terraform state are left in place so the move can be reversed ([AWS infrastructure](../operations/aws-infrastructure.md)).
+Terraform still declares the AWS jobs: in `deployment/aws/terraform/eventbridge.tf`, `local.sport_configs` (EPL only; MLB commented out) plus the always-created `update-status` and `check-health`, and in `deployment/aws/terraform/variables.tf` the `enable_polymarket` and `betfair_enabled` gates. No Terraform rule exists for `fetch-oddsportal`, `fetch-oddsportal-results` or `fetch-mlb-results`. The rules are disabled in the account, and the Lambdas, ECR images and Terraform state are left in place so the move can be reversed ([AWS infrastructure](../operations/aws-infrastructure.md)).
 
 > [!WARNING]
 > The Deploy to Production workflow (`deploy-prod.yml`) is disabled in GitHub; keep it disabled while AWS is dormant (`gh workflow list --all` shows the state). Its post-deploy invocations make every job reschedule itself, which re-enables every rule, so both hosts would collect and the Lambdas would write to the Neon archive ([CI/CD workflows](../operations/ci-cd-workflows.md#prod-deploy)).

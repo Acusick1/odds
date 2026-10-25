@@ -13,7 +13,7 @@ from odds_core.config import get_settings
 from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import AlertHistory, Event, EventStatus, OddsSnapshot
 from odds_core.snapshot_sources import SnapshotSource
-from odds_lambda import collection_calendar
+from odds_lambda import collection_calendar, results_run
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
 from odds_lambda.betfair.constants import SPORT_CONFIG
 from odds_lambda.collection_calendar import (
@@ -1297,12 +1297,12 @@ class TestResultsJob:
     async def test_a_settlement_error_fails_the_job_without_a_heartbeat(
         self, monkeypatch: pytest.MonkeyPatch, alerts: _AlertRecorder
     ) -> None:
-        stats = fetch_oddsportal_results.ResultsStats(errors=["Fulham vs Burnley: boom"])
+        stats = results_run.ResultsStats(errors=["Fulham vs Burnley: boom"])
         monkeypatch.setattr(
             fetch_oddsportal_results, "process_results", AsyncMock(return_value=stats)
         )
-        monkeypatch.setattr(fetch_oddsportal_results, "self_schedule", AsyncMock())
-        monkeypatch.setattr(fetch_oddsportal_results, "record_run_outcome", AsyncMock())
+        monkeypatch.setattr(results_run, "self_schedule", AsyncMock())
+        monkeypatch.setattr(results_run, "record_run_outcome", AsyncMock())
 
         with pytest.raises(RuntimeError, match="failed to settle 1 event"):
             await fetch_oddsportal_results.main(JobContext(sport="soccer_epl"))
@@ -1315,14 +1315,14 @@ class TestResultsJob:
         monkeypatch.setattr(
             fetch_oddsportal_results,
             "process_results",
-            AsyncMock(return_value=fetch_oddsportal_results.ResultsStats()),
+            AsyncMock(return_value=results_run.ResultsStats()),
         )
-        monkeypatch.setattr(fetch_oddsportal_results, "self_schedule", AsyncMock())
+        monkeypatch.setattr(results_run, "self_schedule", AsyncMock())
         record_outcome = AsyncMock()
-        monkeypatch.setattr(fetch_oddsportal_results, "record_run_outcome", record_outcome)
+        monkeypatch.setattr(results_run, "record_run_outcome", record_outcome)
 
         await fetch_oddsportal_results.main(JobContext(sport="soccer_epl"))
 
         record_outcome.assert_awaited_once()
-        assert record_outcome.await_args.args[0] == "soccer_epl"
+        assert record_outcome.await_args.args[:2] == ("fetch-oddsportal-results-epl", "soccer_epl")
         assert alerts.heartbeats == ["heartbeat:fetch-oddsportal-results-epl"]

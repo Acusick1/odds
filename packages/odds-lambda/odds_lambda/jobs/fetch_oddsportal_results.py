@@ -1,10 +1,11 @@
-"""Settle events from OddsPortal's results pages.
+"""Settle EPL events from OddsPortal's results pages.
 
 Reads finished matches over HTTP from the results page's archive feed (no
 browser; see docs/adr/0009-oddsportal-feed-client.md) and sets matching
 unsettled events FINAL with their scores, or CANCELLED for cancelled matches.
-Sport-aware: the results page path comes from the shared ``LeagueSpec``
-registry in ``fetch_oddsportal``.
+The results page path comes from the shared ``LeagueSpec`` registry in
+``fetch_oddsportal``. MLB is settled from the MLB Stats API instead
+(``fetch_mlb_results``).
 
 Idempotency: only events past kick-off that are SCHEDULED, LIVE, POSTPONED, or FINAL
 without scores are pending, so re-runs after settling find nothing to process.
@@ -12,17 +13,15 @@ without scores are pending, so re-runs after settling find nothing to process.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.database import async_session_maker
-from odds_core.models import AlertHistory, Event, EventStatus
+from odds_core.models import EventStatus
 from odds_core.team import normalize_team_name
-from sqlalchemy import and_, func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
+from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY
 from odds_lambda.oddsportal_client import (
     CancelledMatch,
     FetchedResults,
@@ -30,7 +29,14 @@ from odds_lambda.oddsportal_client import (
     OddsPortalClient,
     OddsPortalError,
 )
-from odds_lambda.scheduling.helpers import self_schedule
+from odds_lambda.results_run import (
+    SCHEDULED_LOOKBACK,
+    STALE_AFTER,
+    PendingEvent,
+    ResultsStats,
+    get_pending_events,
+    run_daily_results_job,
+)
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 from odds_lambda.storage.event_merge import EVENT_MATCH_WINDOW, find_match_id
 from odds_lambda.storage.writers import OddsWriter
@@ -38,59 +44,6 @@ from odds_lambda.storage.writers import OddsWriter
 logger = structlog.get_logger()
 
 DEFAULT_SPORT_KEY = "soccer_epl"
-SCHEDULED_LOOKBACK = timedelta(days=14)
-STALE_AFTER = timedelta(hours=24)
-
-
-@dataclass
-class ResultsStats:
-    """Tracks results of a single results-collection run."""
-
-    matches_fetched: int = 0
-    events_updated: int = 0
-    events_cancelled: int = 0
-    events_unresolved: int = 0
-    unresolved_kickoffs: list[datetime] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
-
-
-@dataclass
-class PendingEvent:
-    """Plain-data snapshot of a pending event, decoupled from any DB session.
-
-    The results job reads pending events into these dataclasses so the DB
-    session can be closed before the network fetch begins.
-    """
-
-    id: str
-    commence_time: datetime
-    status: EventStatus
-
-
-async def get_pending_events(
-    session: AsyncSession, sport_key: str = DEFAULT_SPORT_KEY, since: datetime | None = None
-) -> list[PendingEvent]:
-    """Events of the sport past kick-off (and not before ``since``) that are not FINAL with scores."""
-    conditions = [
-        Event.sport_key == sport_key,
-        Event.commence_time < datetime.now(UTC),
-        or_(
-            Event.status.in_([EventStatus.SCHEDULED, EventStatus.LIVE, EventStatus.POSTPONED]),
-            and_(
-                Event.status == EventStatus.FINAL,
-                or_(Event.home_score.is_(None), Event.away_score.is_(None)),
-            ),
-        ),
-    ]
-    if since is not None:
-        conditions.append(Event.commence_time >= since)
-    result = await session.execute(
-        select(Event.id, Event.commence_time, Event.status).where(and_(*conditions))
-    )
-    return [
-        PendingEvent(id=row.id, commence_time=row.commence_time, status=row.status)
-        for row in result.all()
-    ]
 
 
 def _raise_if_feed_parsed_nothing(fetched: FetchedResults, pending: list[PendingEvent]) -> None:
@@ -126,6 +79,8 @@ async def process_results(
     """
     stats = ResultsStats()
     sport_key = sport or DEFAULT_SPORT_KEY
+    if sport_key == MLB_SPORT_KEY:
+        raise ValueError(f"{MLB_SPORT_KEY} is settled from the MLB Stats API (fetch-mlb-results)")
 
     spec = _LEAGUE_SPEC_BY_SPORT.get(sport_key)
     if spec is None:
@@ -175,9 +130,6 @@ async def process_results(
         )
         for m in fetched.cancelled
     ]
-    starts_by_teams: dict[tuple[str, str], list[datetime]] = {}
-    for match in (*matches, *cancelled):
-        starts_by_teams.setdefault((match.home_team, match.away_team), []).append(match.start_time)
     pending_by_id = {event.id: event for event in pending_events}
 
     async with async_session_maker() as session:
@@ -189,12 +141,6 @@ async def process_results(
             )
             event = pending_by_id.get(event_id) if event_id is not None else None
             if event is None:
-                continue
-            nearest = min(
-                starts_by_teams[(match.home_team, match.away_team)],
-                key=lambda start: abs(start - event.commence_time),
-            )
-            if nearest != match.start_time:
                 continue
             if isinstance(match, CancelledMatch) and not event.status.can_become(
                 EventStatus.CANCELLED
@@ -243,98 +189,12 @@ async def process_results(
     return stats
 
 
-def _settled_alert_type(sport_key: str) -> str:
-    return f"results_settled:{sport_key}"
-
-
-async def _last_settled_at(sport_key: str) -> datetime | None:
-    async with async_session_maker() as session:
-        return (
-            await session.execute(
-                select(func.max(AlertHistory.sent_at)).where(
-                    AlertHistory.alert_type == _settled_alert_type(sport_key)
-                )
-            )
-        ).scalar_one()
-
-
-async def record_run_outcome(sport_key: str, stats: ResultsStats, now: datetime) -> None:
-    """Record that the run settled events, or warn when it settled none and events are overdue.
-
-    A run is stalled when it settled nothing while events that kicked off after
-    the job's last settling run are still pending more than ``STALE_AFTER`` on.
-    Unmatched events from before that run do not count, so one unresolvable
-    match does not alert while the job keeps settling others. Without a
-    settling run on record the job has no baseline and stays quiet.
-    """
-    from odds_core.alerts import record_to_alert_history, send_job_warning
-
-    if stats.events_updated:
-        await record_to_alert_history(
-            _settled_alert_type(sport_key),
-            "info",
-            f"Settled {stats.events_updated} {sport_key} events",
-        )
-        return
-    last_settled = await _last_settled_at(sport_key)
-    if last_settled is None:
-        return
-    overdue = [
-        kickoff
-        for kickoff in stats.unresolved_kickoffs
-        if kickoff < now - STALE_AFTER and kickoff > last_settled
-    ]
-    if overdue:
-        await send_job_warning(
-            f"results_stalled:{sport_key}",
-            f"⚠️ OddsPortal results settled nothing: {len(overdue)} {sport_key} events "
-            f"kicked off since {min(overdue):%Y-%m-%d %H:%M} UTC are still pending "
-            f"(last settling run: {last_settled:%Y-%m-%d %H:%M} UTC)",
-        )
-
-
 async def main(ctx: JobContext) -> None:
-    """Main job entry point — runs results collection, then self-schedules for tomorrow.
-
-    Self-scheduling runs in a ``finally`` block so a failure inside
-    ``process_results`` cannot leave the EventBridge rule disabled.
-    """
-    from odds_core.alerts import job_alert_context, send_scheduling_failure
-    from odds_core.config import get_settings
-
-    settings = get_settings()
+    """Settle the sport's events, then book tomorrow's run at 08:00 UTC whatever the outcome."""
     sport = require_sport(ctx, "fetch-oddsportal-results")
-    schedule_job_name = make_compound_job_name("fetch-oddsportal-results", sport)
-
-    run_raised = True
-    try:
-        async with job_alert_context(schedule_job_name):
-            logger.info("fetch_oddsportal_results_started", sport=sport)
-            stats = await process_results(sport=sport)
-            await record_run_outcome(sport, stats, datetime.now(UTC))
-            if stats.errors:
-                raise RuntimeError(
-                    f"{schedule_job_name} failed to settle {len(stats.errors)} event(s); "
-                    f"first: {stats.errors[0]}"
-                )
-        run_raised = False
-    finally:
-        # Self-schedule: run again tomorrow at 08:00 UTC, regardless of outcome.
-        # This is a once-a-day results sweep, not a proximity-driven fetch, so
-        # it intentionally uses a fixed wake time and does NOT apply the
-        # overnight skip (08:00 UTC is outside every configured overnight
-        # window anyway).
-        now = datetime.now(UTC)
-        tomorrow_8am = (now + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
-
-        try:
-            await self_schedule(
-                job_name=schedule_job_name,
-                next_time=tomorrow_8am,
-                dry_run=settings.scheduler.dry_run,
-                sport=sport,
-                reason="daily results sweep (fixed 08:00 UTC)",
-            )
-        except Exception as e:
-            logger.error("fetch_oddsportal_results_scheduling_failed", error=str(e), exc_info=True)
-            await send_scheduling_failure(schedule_job_name, e, final=not run_raised)
+    await run_daily_results_job(
+        make_compound_job_name("fetch-oddsportal-results", sport),
+        sport,
+        lambda: process_results(sport=sport),
+        schedule_sport=sport,
+    )

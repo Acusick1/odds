@@ -52,6 +52,7 @@ status: stable
 4. `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats`: compares the newest `heartbeat:<job>` row per key in `odds_core.config.AlertConfig.heartbeat_expectations` to its allowed hours. The default keys and allowed hours are in [Heartbeats](#heartbeats). A job with no history is not alerted (#384).
 5. `odds_lambda.health_monitor.HealthMonitor.check_event_identity`: per sport, matches stored as several events, EPL fixtures stored twice in a season, and MLB events over 24 h old without a `gamePk` and not marked as having none, each its own warning (`duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `missing_game_pk:baseball_mlb`). Nothing is merged; `odds events merge-twins --sport <sport> --apply` clears twins, and `odds events assign-game-pks --apply` the missing `gamePk`s ([Event merge](../storage/event-merge.md#detection)).
 6. `odds_lambda.health_monitor.HealthMonitor.check_schedule_chains`: dead self-scheduling chains, each its own critical `dead_schedule_chain:<job>` ([Schedule chain check](#schedule-chain-check)).
+7. `odds_lambda.health_monitor.HealthMonitor.check_unsettled_events`: per sport in `odds_lambda.health_monitor.UNSETTLED_SPORTS` (EPL and MLB), current-season events still SCHEDULED or LIVE more than 24 h after kick-off (`odds_lambda.storage.unsettled_events.find_unsettled_events`), one warning `unsettled_events:<sport>` naming them, repeated once a day. The season starts on 1 August for EPL and on 1 January for MLB (`odds_lambda.storage.unsettled_events.season_start`). POSTPONED and CANCELLED events are not pending, so a postponed MLB game waiting on its replay stays quiet, and events marked as having no `gamePk` (`no_game_pk_reason`) are left out because no results job can settle them ([results jobs](../collection/results-jobs.md)).
 
 Then `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` runs on every health check, and it deletes `heartbeat:%` rows older than `heartbeat_retention_days` (7) and is the only retention sweep in the system.
 
@@ -112,7 +113,8 @@ A job inside [`odds_core.alerts.job_alert_context`](alerts.md#delivery) inserts 
 | Job | Writes a heartbeat | Default expectation |
 |---|---|---|
 | fetch-oddsportal (per sport) | yes | 11 h EPL, 12 h MLB (overnight window plus polling interval) |
-| fetch-oddsportal-results (per sport) | yes | 26 h (EPL, MLB) |
+| fetch-oddsportal-results (EPL) | yes | 26 h |
+| fetch-mlb-results | yes | 26 h |
 | check-health | yes | 2 h |
 | update-status | yes | none |
 | fetch-betfair-exchange (per sport) | yes | 10 h EPL, 11 h MLB (overnight window plus the 2 h interval) |

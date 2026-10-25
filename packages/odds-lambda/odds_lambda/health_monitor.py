@@ -52,6 +52,7 @@ from odds_lambda.storage.unsettled_events import find_unsettled_events
 logger = structlog.get_logger()
 
 LEAGUE_SPORTS: tuple[str, ...] = ("soccer_epl",)
+UNSETTLED_SPORTS: tuple[str, ...] = ("soccer_epl", "baseball_mlb")
 UNSETTLED_AGE = timedelta(hours=24)
 EVENT_IDS_SHOWN = 10
 UNSETTLED_ALERT_MINUTES = 24 * 60
@@ -555,15 +556,15 @@ class HealthMonitor:
         """
         Check that no league event stays pending long after kick-off.
 
-        Alerts per league sport, at most once a day, naming the events of the
-        current season still SCHEDULED or LIVE more than ``UNSETTLED_AGE``
-        after kick-off.
+        Alerts per sport in ``UNSETTLED_SPORTS``, at most once a day, naming the
+        events of the current season still SCHEDULED or LIVE more than
+        ``UNSETTLED_AGE`` after kick-off.
 
         Returns:
             Issue descriptions, empty when healthy.
         """
         issues: list[str] = []
-        for sport in LEAGUE_SPORTS:
+        for sport in UNSETTLED_SPORTS:
             events = await find_unsettled_events(self.session, sport, UNSETTLED_AGE, now)
             if not events:
                 continue

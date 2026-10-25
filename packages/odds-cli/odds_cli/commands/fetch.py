@@ -9,7 +9,8 @@ from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.ingestion import OddsIngestionCallbacks, OddsIngestionService
-from odds_lambda.jobs.fetch_oddsportal_results import process_results
+from odds_lambda.jobs import fetch_mlb_results, fetch_oddsportal_results
+from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY
 from odds_lambda.storage.writers import OddsWriter
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -92,12 +93,19 @@ def fetch_results(
         None, "--lookback-days", help="Only events this recent; omit for every pending event"
     ),
 ) -> None:
-    """Settle past events from OddsPortal results pages."""
+    """Settle past events: MLB from the MLB Stats API by gamePk, other sports from OddsPortal."""
     lookback = timedelta(days=lookback_days) if lookback_days is not None else None
-    stats = asyncio.run(process_results(sport=sport, lookback=lookback))
+    if sport == MLB_SPORT_KEY:
+        stats = asyncio.run(fetch_mlb_results.process_results(lookback=lookback))
+    else:
+        stats = asyncio.run(
+            fetch_oddsportal_results.process_results(sport=sport, lookback=lookback)
+        )
     console.print(
         f"fetched={stats.matches_fetched} updated={stats.events_updated} "
-        f"unresolved={stats.events_unresolved} errors={len(stats.errors)}"
+        f"cancelled={stats.events_cancelled} postponed={stats.events_postponed} "
+        f"moved={stats.events_moved} unresolved={stats.events_unresolved} "
+        f"errors={len(stats.errors)}"
     )
     if stats.errors:
         raise typer.Exit(code=1)

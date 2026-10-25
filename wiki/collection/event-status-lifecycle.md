@@ -8,6 +8,7 @@ sources:
   - odds_lambda.jobs.update_status._update_event_statuses
   - odds_lambda.jobs.fetch_scores._fetch_and_update_scores
   - odds_lambda.jobs.fetch_oddsportal_results.process_results
+  - odds_lambda.jobs.fetch_mlb_results.process_results
   - odds_lambda.jobs.fetch_espn_fixtures._mark_postponed_events
   - odds_lambda.storage.espn_fixture_reader.EspnFixtureReader.get_postponed_home_fixtures
   - odds_lambda.storage.writers.OddsWriter.bulk_upsert_events
@@ -20,7 +21,7 @@ status: stable
 
 # Event status lifecycle
 
-`odds_core.models.EventStatus` has five values: `scheduled`, `live`, `final`, `cancelled`, `postponed`. New [events](../storage/events.md) default to SCHEDULED. Every transition but one goes through `odds_lambda.storage.writers.OddsWriter.update_event_status` (the FDUK loader sets FINAL on the event directly), which stamps `updated_at`, refuses FINAL without both scores, refuses a move that `odds_core.models.EventStatus.can_become` does not allow, and for FINAL sets `home_score`, `away_score` and `completed_at` ([odds-writer](../storage/odds-writer.md)). Four jobs, the FDUK loader and two commands write status. The jobs themselves are described on [results-jobs](results-jobs.md).
+`odds_core.models.EventStatus` has five values: `scheduled`, `live`, `final`, `cancelled`, `postponed`. New [events](../storage/events.md) default to SCHEDULED. Every transition but one goes through `odds_lambda.storage.writers.OddsWriter.update_event_status` (the FDUK loader sets FINAL on the event directly), which stamps `updated_at`, refuses FINAL without both scores, refuses a move that `odds_core.models.EventStatus.can_become` does not allow, and for FINAL sets `home_score`, `away_score` and `completed_at` ([odds-writer](../storage/odds-writer.md)). Five jobs, the FDUK loader and two commands write status. The jobs themselves are described on [results-jobs](results-jobs.md).
 
 ## Allowed moves
 
@@ -43,18 +44,19 @@ A result is the strongest evidence, so every status but FINAL can reach FINAL, a
 | (new) → SCHEDULED | event sync (`odds_lambda.storage.writers.OddsWriter.bulk_upsert_events`), `odds_lambda.storage.writers.OddsWriter.find_or_create_event` (only when no event matches, by `gamePk` or teams for MLB), `odds discover games` | default status |
 | SCHEDULED → LIVE | `odds_lambda.jobs.update_status._update_event_statuses` | events already past `commence_time` within `odds_lambda.jobs.update_status.STATUS_WINDOW`; `reader.get_events_by_date_range(status=SCHEDULED)` |
 | → FINAL | `odds_lambda.jobs.fetch_scores._fetch_and_update_scores` | Odds API `/scores` ([results-jobs](results-jobs.md#fetch-scores)), only when `completed` and both scores parse |
-| → FINAL | `odds_lambda.jobs.fetch_oddsportal_results.process_results` | OddsPortal finished matches for events already past kickoff that are SCHEDULED, LIVE, POSTPONED, or FINAL without scores (`odds_lambda.jobs.fetch_oddsportal_results.get_pending_events`); a run that settles nothing alerts ([results-jobs](results-jobs.md)) |
-| → CANCELLED | `odds_lambda.jobs.fetch_oddsportal_results.process_results` | OddsPortal results row with status 5 ("Canceled") matched to a pending SCHEDULED or LIVE event ([results-jobs](results-jobs.md#fetch-oddsportal-results)) |
+| → FINAL | `odds_lambda.jobs.fetch_oddsportal_results.process_results` | EPL: OddsPortal finished matches for events already past kickoff that are SCHEDULED, LIVE, POSTPONED, or FINAL without scores (`odds_lambda.results_run.get_pending_events`); a run that settles nothing alerts ([results-jobs](results-jobs.md#fetch-oddsportal-results)) |
+| → CANCELLED | `odds_lambda.jobs.fetch_oddsportal_results.process_results` | EPL: OddsPortal results row with status 5 ("Canceled") matched to a pending SCHEDULED or LIVE event ([results-jobs](results-jobs.md#fetch-oddsportal-results)) |
+| → FINAL, CANCELLED, POSTPONED | `odds_lambda.jobs.fetch_mlb_results.process_results` | MLB: the state of the game a pending event's `gamePk` names in the MLB Stats API schedule; a run that settles nothing alerts ([results-jobs](results-jobs.md#fetch-mlb-results)) |
 | → POSTPONED | `odds_lambda.jobs.fetch_espn_fixtures._mark_postponed_events` | a Premier League `espn_fixtures` row with status "Postponed" at the event's kick-off (within the event-matching window), for a SCHEDULED or LIVE event ([EPL context data](epl-context-data.md#espn-fixtures)) |
 | POSTPONED → SCHEDULED | `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` | the re-discovered event's `commence_time` differs from the stored one |
-| POSTPONED → SCHEDULED | `odds_lambda.storage.event_merge.follow_schedule`, from the live OddsPortal and Betfair jobs and `odds events assign-game-pks` / `set-game-pk` | an MLB event moves to its game's scheduled start ([Event matching](../storage/event-matching.md#live-mlb-events)) |
+| POSTPONED → SCHEDULED | `odds_lambda.storage.event_merge.follow_schedule`, from the live OddsPortal and Betfair jobs, `fetch-mlb-results` and `odds events assign-game-pks` / `set-game-pk` | an MLB event moves to its game's scheduled start ([Event matching](../storage/event-matching.md#live-mlb-events)) |
 | LIVE → SCHEDULED | `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` | the re-discovered event's `commence_time` is after the clock passed to the call (a delayed kick-off) |
 | → FINAL | `scripts/ingest_football_data_uk.py` | an existing event with no scores gets FDUK's full-time score and FINAL ([historical-ingest-scripts](historical-ingest-scripts.md)) |
 | → FINAL | `odds fetch scores` (`odds_cli.commands.fetch.fetch_scores`), `odds backfill scores` | manual; `backfill scores` sets FINAL from NBA game logs ([odds-api-backfill](odds-api-backfill.md)) |
 
 Re-discovery changes a status in exactly two cases, both back to SCHEDULED: a POSTPONED event whose `commence_time` differs, and a LIVE event whose incoming `commence_time` is in the future. Every other status, and every score and `completed_at`, is left alone: `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` ([events](../storage/events.md#upsert-verbs)).
 
-Two kinds of orphan have no source signal and stay SCHEDULED or LIVE: a fixture whose kick-off moved by more than the matching window leaves its old `op_live_` event beside a new one (`op_live_ASTVIL_LIV_2026-05-17T1130` in development), and a match that neither OddsPortal nor ESPN reports as cancelled or postponed. They age out of the status and scores windows ([results-jobs](results-jobs.md)). ESPN's "Canceled" description and OddsPortal's postponed status id have not been observed in collected data, so neither is mapped.
+Two kinds of orphan have no source signal and stay SCHEDULED or LIVE: a fixture whose kick-off moved by more than the matching window leaves its old `op_live_` event beside a new one (`op_live_ASTVIL_LIV_2026-05-17T1130` in development), and an EPL match that neither OddsPortal nor ESPN reports as cancelled or postponed. They age out of the status and scores windows ([results-jobs](results-jobs.md)). ESPN's "Canceled" description and OddsPortal's postponed status id have not been observed in collected data, so neither is mapped.
 
 `update-status` and `fetch-scores` self-schedule with a backward decision. The status job counts only SCHEDULED events as needing work, the scores job any non-FINAL event in its window ([self-scheduling](../scheduling/self-scheduling.md)).
 

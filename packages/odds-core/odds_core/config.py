@@ -120,6 +120,7 @@ class SchedulerConfig(BaseSettings):
             "check-health",
             "fetch-oddsportal",
             "fetch-oddsportal-results",
+            "fetch-mlb-results",
             "fetch-espn-fixtures",
             "fetch-betfair-exchange",
             "fetch-polymarket-odds",
@@ -221,7 +222,7 @@ class AlertConfig(BaseSettings):
             "fetch-oddsportal-epl": 11,
             "fetch-oddsportal-results-epl": 26,
             "fetch-oddsportal-mlb": 12,
-            "fetch-oddsportal-results-mlb": 26,
+            "fetch-mlb-results": 26,
             "fetch-mlb-probables": 30,
             # Daily 06:00 UTC cron, plus slack.
             "fetch-espn-fixtures": 26,

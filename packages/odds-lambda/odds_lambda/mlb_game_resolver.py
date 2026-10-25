@@ -11,7 +11,7 @@ import httpx
 import structlog
 from odds_core.sports import SportKey
 from odds_core.team import normalize_team_name
-from odds_core.time import to_eastern
+from odds_core.time import ensure_utc, to_eastern
 
 from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState, MlbStatsFetcher
 
@@ -108,6 +108,55 @@ def played_starts(schedule: Sequence[MlbGameResult]) -> dict[int, datetime]:
         if not slot.resumed
         and not slot.start_time_tbd
         and slot.state not in (MlbGameState.POSTPONED, MlbGameState.CANCELLED)
+    }
+
+
+Score = tuple[int, int]
+
+
+@dataclass(frozen=True)
+class PlayedSlot:
+    """A game's slot that is neither postponed, cancelled nor a resumed continuation. ``day`` is
+    its MLB date; ``start`` is MLB's placeholder when ``tbd``."""
+
+    day: date
+    start: datetime
+    tbd: bool
+
+    def start_for(self, commence_time: datetime) -> datetime | None:
+        """Where an event starting at ``commence_time`` moves: the scheduled start; for a TBD
+        start, MLB's placeholder only when the event is not on the played date already, since
+        its listed time there is a better estimate than the placeholder; otherwise nowhere."""
+        if not self.tbd:
+            return self.start
+        if mlb_date(ensure_utc(commence_time)) == self.day:
+            return None
+        return self.start
+
+
+def played_slots(schedule: Sequence[MlbGameResult]) -> dict[int, PlayedSlot]:
+    """Each game's played slot, preferring one with a set start over a TBD one."""
+    slots: dict[int, PlayedSlot] = {}
+    for slot in schedule:
+        if slot.resumed or slot.state in (MlbGameState.POSTPONED, MlbGameState.CANCELLED):
+            continue
+        held = slots.get(slot.game_pk)
+        if held is None or (held.tbd and not slot.start_time_tbd):
+            slots[slot.game_pk] = PlayedSlot(
+                slot.schedule_date or slot.day, slot.start_time, slot.start_time_tbd
+            )
+    return slots
+
+
+def final_scores(schedule: Sequence[MlbGameResult]) -> dict[int, Score]:
+    """Each Final game's (home, away) score."""
+    return {
+        slot.game_pk: (slot.home_score, slot.away_score)
+        for slot in schedule
+        if slot.is_final
+        and not slot.resumed
+        and slot.home_score is not None
+        and slot.away_score is not None
     }
 
 
