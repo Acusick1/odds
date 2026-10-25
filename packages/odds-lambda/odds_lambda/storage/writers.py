@@ -11,17 +11,15 @@ from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds,
 from odds_core.odds_math import outcome_price_decimal
 from odds_core.team import normalize_team_name, team_abbrev
 from odds_core.time import ensure_utc, parse_api_datetime
+from odds_core.vocabulary import Source
 from sqlalchemy import and_, case, literal, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY, ResolvedGame
-from odds_lambda.storage.event_merge import (
-    find_match_candidates,
-    find_match_id,
-    follow_schedule,
-)
+from odds_lambda.storage.event_kickoff import move_kickoff
+from odds_lambda.storage.event_merge import find_match_candidates, find_match_id
 from odds_lambda.storage.validators import OddsValidator
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 
@@ -169,7 +167,7 @@ class OddsWriter:
         anchor = game.start or match_date
         held = await self._event_by_game_pk(game.game_pk)
         if held is not None:
-            await follow_schedule(self.session, held, game.game_pk, game.start)
+            await move_kickoff(self.session, held, Source.MLB_STATS_API, game.start)
             return held.id, False
 
         claimable = await self._claimable_event(home_team, away_team, anchor, game)
@@ -181,7 +179,7 @@ class OddsWriter:
             async with self.session.begin_nested():
                 if claimable is not None:
                     claimable.assign_game_pk(game.game_pk)
-                    await follow_schedule(self.session, claimable, game.game_pk, game.start)
+                    await move_kickoff(self.session, claimable, Source.MLB_STATS_API, game.start)
                     outcome = (claimable.id, False)
                 else:
                     outcome = (
@@ -200,7 +198,7 @@ class OddsWriter:
                 event_id=held.id,
                 duplicate_id=claimable_id,
             )
-            await follow_schedule(self.session, held, game.game_pk, game.start)
+            await move_kickoff(self.session, held, Source.MLB_STATS_API, game.start)
             return held.id, False
         return outcome
 
@@ -593,8 +591,8 @@ class OddsWriter:
         inserted_count = len(events) - updated_count
 
         # Convert Event instances to dicts for bulk upsert
-        # Use model_dump() to include all fields with defaults
-        event_dicts = [event.model_dump() for event in events]
+        # Use model_dump() to include all fields with defaults; the database numbers new events.
+        event_dicts = [event.model_dump(exclude={"surrogate_id"}) for event in events]
 
         # Build upsert statement
         stmt = insert(Event).values(event_dicts)
@@ -602,7 +600,13 @@ class OddsWriter:
         events_table = Event.__table__
         result_columns = {"status", "home_score", "away_score", "completed_at"}
         # A discovery record carries no gamePk or mark, so stored ones are kept.
-        kept_columns = {"created_at", "mlb_game_pk", "no_game_pk_reason", *result_columns}
+        kept_columns = {
+            "created_at",
+            "surrogate_id",
+            "mlb_game_pk",
+            "no_game_pk_reason",
+            *result_columns,
+        }
         set_ = {
             col.name: stmt.excluded[col.name]
             for col in events_table.columns

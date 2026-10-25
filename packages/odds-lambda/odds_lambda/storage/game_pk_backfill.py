@@ -13,6 +13,7 @@ from odds_core.event_source import canonical_event_id
 from odds_core.models import Event, EventStatus
 from odds_core.team import normalize_team_name
 from odds_core.time import ensure_utc
+from odds_core.vocabulary import Source
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +34,8 @@ from odds_lambda.mlb_game_resolver import (
     resolve_game_pks,
 )
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
-from odds_lambda.storage.event_merge import EventMerger, follow_schedule
+from odds_lambda.storage.event_kickoff import move_kickoff
+from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.same_time_pairs import SnapshotPairs, event_same_time_pairs
 from odds_lambda.storage.writers import OddsWriter
 
@@ -355,7 +357,7 @@ async def apply_assignment(
         rows_moved = report.rows_moved
     if kept.mlb_game_pk is None:
         kept.assign_game_pk(assignment.game_pk)
-    await follow_schedule(session, kept, assignment.game_pk, assignment.target_start())
+    await move_kickoff(session, kept, Source.MLB_STATS_API, assignment.target_start())
 
     merged_score = _score(kept)
     others = sorted({s for s in duplicate_scores if s != merged_score})

@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import structlog
 from odds_core.event_source import EventSource, canonical_event_id
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, OddsSnapshot
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.time import ensure_utc
 from sqlalchemy import and_, delete, select, text
@@ -156,30 +156,6 @@ async def retime_snapshots(session: AsyncSession, event_id: str, commence_time: 
     return len(snapshots)
 
 
-async def follow_schedule(
-    session: AsyncSession, event: Event, game_pk: int, start: datetime | None
-) -> None:
-    """Move the event to its game's scheduled ``start`` and re-time its stored snapshots; a
-    postponed event becomes scheduled. No-op when ``start`` is ``None`` or unchanged."""
-    if start is None or ensure_utc(event.commence_time) == ensure_utc(start):
-        return
-    event_id = event.id
-    moved_from = ensure_utc(event.commence_time)
-    event.commence_time = start
-    event.updated_at = datetime.now(UTC)
-    if event.status == EventStatus.POSTPONED:
-        event.status = EventStatus.SCHEDULED
-    retimed = await retime_snapshots(session, event_id, start)
-    logger.info(
-        "mlb_event_rescheduled",
-        event_id=event_id,
-        game_pk=game_pk,
-        commence_time=moved_from.isoformat(),
-        scheduled_start=ensure_utc(start).isoformat(),
-        snapshots_retimed=retimed,
-    )
-
-
 class EventMerger:
     """The one way to collapse several events for one match into a single event.
 
@@ -281,9 +257,7 @@ class EventMerger:
             await self._rebase_snapshot_timing(duplicate, keep)
             for table, count in (await self._drop_clashing_decisions(duplicate, keep)).items():
                 rows_deleted[table] = rows_deleted.get(table, 0) + count
-            for table, count in (
-                await self._repoint_event_references(duplicate.id, keep.id)
-            ).items():
+            for table, count in (await self._repoint_event_references(duplicate, keep)).items():
                 rows_moved[table] = rows_moved.get(table, 0) + count
             self._carry_result(keep, duplicate)
             await self.session.delete(duplicate)
@@ -393,53 +367,60 @@ class EventMerger:
                 adopted += len(twins)
         return adopted
 
-    async def _event_reference_columns(self) -> list[tuple[str, str, str]]:
-        """``(schema, table, column)`` for every foreign key to ``events.id``.
+    async def _event_reference_columns(self) -> list[tuple[str, str, str, str]]:
+        """``(schema, table, column, events column)`` for every foreign key to ``events``.
 
         Read from the database catalog rather than ``SQLModel.metadata``, which
         only holds models the running process has imported.
         """
         result = await self.session.execute(
             text(
-                "SELECT n.nspname, r.relname, a.attname"
+                "SELECT n.nspname, r.relname, a.attname, ra.attname"
                 " FROM pg_constraint c"
                 " JOIN pg_class r ON r.oid = c.conrelid"
                 " JOIN pg_namespace n ON n.oid = r.relnamespace"
-                " JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)"
+                " JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]"
+                " JOIN pg_attribute ra ON ra.attrelid = c.confrelid AND ra.attnum = c.confkey[1]"
                 " WHERE c.contype = 'f' AND c.confrelid = 'events'::regclass"
                 " ORDER BY r.relname, a.attname"
             )
         )
-        return [(row[0], row[1], row[2]) for row in result.all()]
+        return [(row[0], row[1], row[2], row[3]) for row in result.all()]
 
     async def reference_counts(self, event_id: str) -> dict[str, int]:
         """Rows referencing the event, per table, leaving out tables with none."""
+        event = await self.session.get(Event, event_id)
+        if event is None:
+            return {}
         quote = self.session.get_bind().dialect.identifier_preparer.quote
         counts: dict[str, int] = {}
-        for schema, table, column in await self._event_reference_columns():
+        for schema, table, column, events_column in await self._event_reference_columns():
             count = (
                 await self.session.execute(
                     text(
                         f"SELECT count(*) FROM {quote(schema)}.{quote(table)}"
-                        f" WHERE {quote(column)} = :event_id"
+                        f" WHERE {quote(column)} = :key"
                     ),
-                    {"event_id": event_id},
+                    {"key": getattr(event, events_column)},
                 )
             ).scalar_one()
             if count:
                 counts[table] = counts.get(table, 0) + count
         return counts
 
-    async def _repoint_event_references(self, from_id: str, to_id: str) -> dict[str, int]:
+    async def _repoint_event_references(self, duplicate: Event, keep: Event) -> dict[str, int]:
         quote = self.session.get_bind().dialect.identifier_preparer.quote
         moved: dict[str, int] = {}
-        for schema, table, column in await self._event_reference_columns():
+        for schema, table, column, events_column in await self._event_reference_columns():
             result = await self.session.execute(
                 text(
-                    f"UPDATE {quote(schema)}.{quote(table)} SET {quote(column)} = :to_id"
-                    f" WHERE {quote(column)} = :from_id"
+                    f"UPDATE {quote(schema)}.{quote(table)} SET {quote(column)} = :to_key"
+                    f" WHERE {quote(column)} = :from_key"
                 ),
-                {"to_id": to_id, "from_id": from_id},
+                {
+                    "to_key": getattr(keep, events_column),
+                    "from_key": getattr(duplicate, events_column),
+                },
             )
             if result.rowcount:
                 moved[table] = moved.get(table, 0) + result.rowcount

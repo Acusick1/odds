@@ -178,11 +178,18 @@ class ProductionDataCopier:
             await local_session.execute(
                 delete(OddsSnapshot).where(OddsSnapshot.event_id == event.id)
             )
-            await local_session.merge(Event(**event.model_dump()))
+            # Surrogate ids are numbered per database, so a copied event keeps the local one.
+            copied = Event(**event.model_dump(exclude={"surrogate_id"}))
+            local_event = await local_session.get(Event, event.id)
+            if local_event is not None:
+                copied.surrogate_id = local_event.surrogate_id
+            await local_session.merge(copied)
             await local_session.flush()
 
+            # Payloads are not copied, so a local snapshot points at none.
             local_snapshots = [
-                OddsSnapshot(**snapshot.model_dump(exclude={"id"})) for snapshot in prod_snapshots
+                OddsSnapshot(**snapshot.model_dump(exclude={"id", "payload_id"}))
+                for snapshot in prod_snapshots
             ]
             local_session.add_all(local_snapshots)
             await local_session.flush()

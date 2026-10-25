@@ -134,7 +134,7 @@ class TestAdoptTwins:
         self, live_twin_with_rows
     ) -> None:
         columns = await EventMerger(live_twin_with_rows)._event_reference_columns()
-        tables = {table for _, table, _ in columns}
+        tables = {table for _, table, _, _ in columns}
         assert {m.__tablename__ for m in CHILD_MODELS} <= tables
 
     @pytest.mark.asyncio

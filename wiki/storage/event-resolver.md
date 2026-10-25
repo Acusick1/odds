@@ -1,0 +1,60 @@
+---
+type: reference
+title: Event resolver
+description: How resolve_event finds or creates the one event of a listed game (lock, lookup order, ±2 h match, creation) and records the source's id, and which ids it refuses.
+sources:
+  - odds_lambda.storage.event_resolver
+  - odds_core.models.EventExternalId
+mentions:
+  - odds_lambda.mlb_game_resolver.ResolvedGame
+  - odds_lambda.storage.event_merge.find_match_candidates
+status: stable
+---
+
+# Event resolver
+
+`odds_lambda.storage.event_resolver.resolve_event(session, game)` returns the one [event](events.md) of a game a source lists, creating it only when none matches, and records the source's id for it in `event_external_ids` ([Events table](events.md#external-ids)). No writer calls it yet: the live jobs still find events through `odds_lambda.storage.writers.OddsWriter.find_or_create_event` ([Event matching across sources](event-matching.md)). The decision behind it is [ADR-0018](../../docs/adr/0018-surrogate-event-key-with-external-ids.md).
+
+## Input
+
+`odds_lambda.storage.event_resolver.ListedGame` is the game as one source lists it:
+
+- `source` (`odds_core.vocabulary.Source`), `sport_key`, `sport_title`, both teams and `commence_time`.
+- `external_id`: the id the source issued for the game. Constructing a game with one from a source outside `odds_core.vocabulary.EXTERNAL_ID_SOURCES` (football-data.co.uk) raises `ValueError`.
+- `mlb_game`: an MLB game's `odds_lambda.mlb_game_resolver.ResolvedGame`, required for `baseball_mlb` (`ValueError` without it).
+- `legacy_id`: the string id a created event takes while `events.id` is a string.
+
+The result is an `odds_lambda.storage.event_resolver.ResolvedEvent`: the event and an `odds_lambda.storage.event_resolver.Resolution` saying how it was found (`by_external_id`, `by_game_pk`, `matched` or `created`).
+
+## Steps
+
+Team names are normalized with `odds_core.team.normalize_team_name` first.
+
+1. **Lock.** A transaction advisory lock (`pg_advisory_xact_lock`) on `odds_lambda.storage.event_resolver.event_lock_key` of (sport, home, away), held until the caller's transaction ends. Writers resolving the same fixture therefore run one after the other, and the second sees the event the first created. The key leaves out the date, so two sources placing one game on different UTC dates take the same lock.
+2. **MLB by `gamePk`.** The event holding the `gamePk` as an `mlb_stats_api` external id, else the one holding it in `events.mlb_game_pk`.
+3. **By source id.** The event holding (`source`, `external_id`). For MLB an event found this way counts only when it holds no `gamePk`, since the `gamePk` is the game's identity.
+4. **Match.** The nearest event of the same sport and teams within ±2 h (`odds_lambda.storage.event_merge.find_match_candidates`) of the game's kick-off: for MLB the schedule's start when it has one, else the listed start. Ties go to `odds_core.event_source.canonical_event_id`. For MLB only events holding no `gamePk` count, and none matches when another game of the pair that day (`sibling_starts`) is scheduled nearer to the nearest event, so a doubleheader's second game never takes the first game's event.
+5. **Create.** A SCHEDULED event at that kick-off with id `legacy_id`. When that id belongs to another event, the `gamePk` (MLB) or the source id is appended after `_` and `event_id_collision` is logged; with neither, `odds_lambda.storage.event_resolver.EventIdTaken` is raised.
+
+Then it records the ids and moves the kick-off:
+
+- The source's id, when the game has one.
+- For MLB, the `gamePk` as an `mlb_stats_api` id; an event recording it that has no `mlb_game_pk` also takes it there (`odds_core.models.Event.assign_game_pk`).
+- `odds_lambda.storage.event_kickoff.move_kickoff` with the MLB schedule's start, then with the source's listed start; only a sport's schedule authority moves the event ([Kick-off authority](kickoff-authority.md)).
+
+It flushes and never commits ([Commit contract](storage-layer.md#commit-contract)).
+
+## Refused ids
+
+An id is recorded only when neither the event nor the id is already taken. The resolver refuses it, logs `external_id_refused` and adds an `odds_core.models.DataQualityLog` row (issue type `external_id_refused`) when:
+
+- the event already holds a different id from that source, or
+- another event holds the id.
+
+The resolved event is returned either way. The table's unique keys enforce the same rules for any other writer ([Events table](events.md#external-ids)).
+
+## Related
+
+- [Events table](events.md)
+- [Event matching across sources](event-matching.md)
+- [Kick-off authority](kickoff-authority.md)

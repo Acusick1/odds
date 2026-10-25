@@ -1,7 +1,7 @@
 ---
 type: explanation
 title: Event status lifecycle
-description: The five statuses, which job or command sets each, and what each status gates downstream.
+description: The six statuses, which job or command sets each, and what each status gates downstream.
 sources:
   - odds_core.models.EventStatus
   - odds_lambda.storage.writers.OddsWriter.update_event_status
@@ -21,7 +21,7 @@ status: stable
 
 # Event status lifecycle
 
-`odds_core.models.EventStatus` has five values: `scheduled`, `live`, `final`, `cancelled`, `postponed`. New [events](../storage/events.md) default to SCHEDULED. Every transition but one goes through `odds_lambda.storage.writers.OddsWriter.update_event_status` (the FDUK loader sets FINAL on the event directly), which stamps `updated_at`, refuses FINAL without both scores, refuses a move that `odds_core.models.EventStatus.can_become` does not allow, and for FINAL sets `home_score`, `away_score` and `completed_at` ([odds-writer](../storage/odds-writer.md)). Five jobs, the FDUK loader and two commands write status. The jobs themselves are described on [results-jobs](results-jobs.md).
+`odds_core.models.EventStatus` has six values: `scheduled`, `live`, `final`, `cancelled`, `postponed`, `unmatched`. Unmatched marks an MLB event with no game in MLB's schedule, and nothing sets it yet. New [events](../storage/events.md) default to SCHEDULED. Every transition but one goes through `odds_lambda.storage.writers.OddsWriter.update_event_status` (the FDUK loader sets FINAL on the event directly), which stamps `updated_at`, refuses FINAL without both scores, refuses a move that `odds_core.models.EventStatus.can_become` does not allow, and for FINAL sets `home_score`, `away_score` and `completed_at` ([odds-writer](../storage/odds-writer.md)). Five jobs, the FDUK loader and two commands write status. The jobs themselves are described on [results-jobs](results-jobs.md).
 
 ## Allowed moves
 
@@ -29,13 +29,14 @@ status: stable
 
 | From | May become |
 |---|---|
-| SCHEDULED | LIVE, FINAL, CANCELLED, POSTPONED |
-| LIVE | SCHEDULED, FINAL, CANCELLED, POSTPONED |
-| POSTPONED | SCHEDULED, FINAL, CANCELLED |
+| SCHEDULED | LIVE, FINAL, CANCELLED, POSTPONED, UNMATCHED |
+| LIVE | SCHEDULED, FINAL, CANCELLED, POSTPONED, UNMATCHED |
+| POSTPONED | SCHEDULED, FINAL, CANCELLED, UNMATCHED |
 | CANCELLED | FINAL |
 | FINAL | nothing else |
+| UNMATCHED | SCHEDULED |
 
-A result is the strongest evidence, so every status but FINAL can reach FINAL, and FINAL never leaves it.
+A result is the strongest evidence, so every status but FINAL and UNMATCHED can reach FINAL, and FINAL never leaves it. An UNMATCHED event has no game to take a result from, and leaves only for SCHEDULED.
 
 ## Who sets what
 
@@ -49,7 +50,7 @@ A result is the strongest evidence, so every status but FINAL can reach FINAL, a
 | → FINAL, CANCELLED, POSTPONED | `odds_lambda.jobs.fetch_mlb_results.process_results` | MLB: the state of the game a pending event's `gamePk` names in the MLB Stats API schedule; a run that settles nothing alerts ([results-jobs](results-jobs.md#fetch-mlb-results)) |
 | → POSTPONED | `odds_lambda.jobs.fetch_espn_fixtures._mark_postponed_events` | a Premier League `espn_fixtures` row with status "Postponed" at the event's kick-off (within the event-matching window), for a SCHEDULED or LIVE event ([EPL context data](epl-context-data.md#espn-fixtures)) |
 | POSTPONED → SCHEDULED | `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` | the re-discovered event's `commence_time` differs from the stored one |
-| POSTPONED → SCHEDULED | `odds_lambda.storage.event_merge.follow_schedule`, from the live OddsPortal and Betfair jobs, `fetch-mlb-results` and `odds events assign-game-pks` / `set-game-pk` | an MLB event moves to its game's scheduled start ([Event matching](../storage/event-matching.md#live-mlb-events)) |
+| POSTPONED → SCHEDULED | `odds_lambda.storage.event_kickoff.move_kickoff` ([Kick-off authority](../storage/kickoff-authority.md)), from the live OddsPortal and Betfair jobs, `fetch-mlb-results` and `odds events assign-game-pks` / `set-game-pk` | an MLB event moves to its game's scheduled start ([Event matching](../storage/event-matching.md#live-mlb-events)) |
 | LIVE → SCHEDULED | `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` | the re-discovered event's `commence_time` is after the clock passed to the call (a delayed kick-off) |
 | → FINAL | `scripts/ingest_football_data_uk.py` | an existing event with no scores, whatever its status, gets FDUK's full-time score and FINAL ([historical-ingest-scripts](historical-ingest-scripts.md)) |
 | → FINAL | `odds fetch scores` (`odds_cli.commands.fetch.fetch_scores`), `odds backfill scores` | manual; `backfill scores` sets FINAL from NBA game logs ([odds-api-backfill](odds-api-backfill.md)) |

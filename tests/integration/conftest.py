@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.odds_math import american_to_decimal
+from odds_core.vocabulary import Market, Source, TimeBasis
 
 from tests.test_helpers import TWIN_EVENT_ID, TWIN_KICKOFF, make_epl_event
 
@@ -269,3 +270,29 @@ async def live_twin_with_rows(pglite_async_session):
     )
     await session.flush()
     return session
+
+
+@pytest.fixture
+async def stored_epl_event(pglite_async_session) -> Event:
+    """One stored EPL event (Arsenal v Chelsea at ``TWIN_KICKOFF``) with no external ids."""
+    event = make_epl_event("odds_api_hex_1")
+    pglite_async_session.add(event)
+    await pglite_async_session.flush()
+    return event
+
+
+@pytest.fixture
+async def epl_snapshot(pglite_async_session, stored_epl_event) -> OddsSnapshot:
+    """A stored Betfair 1x2 snapshot of ``stored_epl_event``, in the new shape, without prices."""
+    snapshot = OddsSnapshot(
+        event_id=stored_epl_event.id,
+        snapshot_time=TWIN_KICKOFF - timedelta(hours=1),
+        raw_data={"bookmakers": []},
+        bookmaker_count=1,
+        source=Source.BETFAIR,
+        market=Market.ONE_X_TWO,
+        time_basis=TimeBasis.OBSERVED,
+    )
+    pglite_async_session.add(snapshot)
+    await pglite_async_session.flush()
+    return snapshot
